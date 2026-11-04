@@ -1,9 +1,9 @@
 // The words and rules of the nodes views (docs/cluster.md): roles, the connection state of a
 // node in one word, the certificate with its days left and whether a renewal is due, token
-// states and lifetimes, and the command that enrols a node.
+// states and lifetimes, and the command that enrolls a node.
 import type { IconName } from "../components/Icon";
 import { formatDuration, t, tDynamic } from "../i18n";
-import type { CertificateRef, CreatedEnrolment, EnrolmentView, NodeView } from "../api/nodes";
+import type { CertificateRef, CreatedEnrollment, EnrollmentView, NodeView } from "../api/nodes";
 
 const DAY_MS = 86_400_000;
 
@@ -49,7 +49,7 @@ export function certificateState(cert: Pick<CertificateRef, "not_before" | "not_
   };
 }
 
-export function tokenStateWord(state: EnrolmentView["state"]): string {
+export function tokenStateWord(state: EnrollmentView["state"]): string {
   return t(`nodes.token.state.${state}`);
 }
 
@@ -66,10 +66,10 @@ export function lifetimeWord(secs: number): string {
  * the address it was reached at, the command names a placeholder controller; this page knows
  * the address the browser uses, so it fills it in.
  */
-export function enrolCommand(created: Pick<CreatedEnrolment, "command" | "token" | "ca_fingerprint">, origin: string): string {
+export function enrollCommand(created: Pick<CreatedEnrollment, "command" | "token" | "ca_fingerprint">, origin: string): string {
   const command = created.command?.trim();
   if (command) return command.replace(/https:\/\/<controller>:\d+/, origin);
-  return `tenko node enrol --controller ${origin} --token ${created.token} --ca-fingerprint ${created.ca_fingerprint}`;
+  return `tenko node enroll --controller ${origin} --token ${created.token} --ca-fingerprint ${created.ca_fingerprint}`;
 }
 
 /** A SHA-256 fingerprint in pairs of hexadecimal digits, for reading it aloud. */

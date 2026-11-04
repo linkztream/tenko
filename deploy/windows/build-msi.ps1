@@ -76,7 +76,7 @@ $msi = Join-Path $Out "tenko-$Version-windows-x86_64.msi"
 $obj = Join-Path $Out "obj-msi-$MsiVersion"
 New-Item -ItemType Directory -Force -Path $obj | Out-Null
 
-# --- The licence page: the repository's LICENSE.md as RTF -----------------------------------
+# --- The license page: the repository's LICENSE.md as RTF -----------------------------------
 $rtfLines = foreach ($line in Get-Content -LiteralPath (Join-Path $repo 'LICENSE.md') -Encoding utf8) {
     $escaped = $line.Replace('\', '\\').Replace('{', '\{').Replace('}', '\}')
     $sb = [System.Text.StringBuilder]::new()

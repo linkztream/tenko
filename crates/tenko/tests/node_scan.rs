@@ -187,7 +187,7 @@ fn a_dry_run_reports_open_ports_with_the_tls_hint() {
 }
 
 #[test]
-fn runs_are_refused_outside_the_scope_without_enrolment_and_for_unknown_methods() {
+fn runs_are_refused_outside_the_scope_without_enrollment_and_for_unknown_methods() {
     let site = Site::new(&scan_config(9));
     site.scan(&["run", "ping"])
         .assert_code(2)
@@ -267,7 +267,7 @@ impl Controller {
     fn token(&self) -> String {
         let created = self
             .node
-            .client(&["node", "enrol-token", "--roles", "probe", "--json"]);
+            .client(&["node", "enroll-token", "--roles", "probe", "--json"]);
         created.assert_code(0);
         created.json()["token"].as_str().expect("token").to_owned()
     }
@@ -312,7 +312,7 @@ fn the_probe_process_runs_the_scanner_and_an_on_demand_batch_reaches_the_control
     run(
         site.command(&[
             "node",
-            "enrol",
+            "enroll",
             "--controller",
             &url,
             "--token",

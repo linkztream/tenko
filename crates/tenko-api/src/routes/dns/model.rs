@@ -292,7 +292,7 @@ pub struct RecordBatchResult {
 /// `POST /dns/zones/{id}/records/import`: a zone file (RFC 1035 master format).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ZoneFileImport {
-    /// The zone file text; `$ORIGIN` and `$TTL` are honoured, `$INCLUDE` is refused.
+    /// The zone file text; `$ORIGIN` and `$TTL` are honored, `$INCLUDE` is refused.
     pub zone_file: String,
     /// The scope to import into; `default` when absent.
     #[serde(default)]
@@ -863,7 +863,7 @@ pub struct DnsNodeStatus {
     #[serde(default)]
     pub cache_stale: u64,
     /// What keeps the resolver side from working as configured: stub zones whose name
-    /// servers could not be learnt, views whose recursion access list does not exist.
+    /// servers could not be learned, views whose recursion access list does not exist.
     #[serde(default)]
     pub problems: Vec<String>,
     /// When the role started.
@@ -1641,7 +1641,7 @@ pub struct InfraAddressItem {
     pub tcp_only: bool,
     /// The server is lame for the zone.
     pub lame: bool,
-    /// The server is asked in lower case because it broke the 0x20 case randomisation.
+    /// The server is asked in lower case because it broke the 0x20 case randomization.
     pub lower_case: bool,
     /// Unwanted answers from the server in the current hour.
     pub unwanted: u32,

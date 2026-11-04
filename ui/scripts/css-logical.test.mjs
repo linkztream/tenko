@@ -112,16 +112,16 @@ describe("findPhysical", () => {
 
   it("accepts a declaration marked physical on its line, and only that one", () => {
     const css = [
-      ".a { position: absolute; left: 50%; /* physical: centred */ top: 0; right: 0; }",
+      ".a { position: absolute; left: 50%; /* physical: centered */ top: 0; right: 0; }",
       ".b {",
-      "  left: 50%; /* physical: centred */",
+      "  left: 50%; /* physical: centered */",
       "  margin-left: 1px;",
       "  /* physical: this comment is on its own line */",
       "  margin-right: 1px;",
       "}",
     ].join("\n");
     const findings = findPhysical(css);
-    expect(findings.map((f) => `${f.line}:${f.column} ${f.property}`)).toEqual(["1:69 right", "4:3 margin-left", "6:3 margin-right"]);
+    expect(findings.map((f) => `${f.line}:${f.column} ${f.property}`)).toEqual(["1:70 right", "4:3 margin-left", "6:3 margin-right"]);
   });
 
   it("needs a reason in the exemption", () => {
@@ -165,8 +165,8 @@ describe("fixPhysical", () => {
   });
 
   it("leaves exempted declarations, comments and line endings alone", () => {
-    const css = ".a {\r\n  left: 50%; /* physical: centred */\r\n  margin-left: 1px; /* a note */\r\n}\r\n";
-    expect(fixed(css)).toBe(".a {\r\n  left: 50%; /* physical: centred */\r\n  margin-inline-start: 1px; /* a note */\r\n}\r\n");
+    const css = ".a {\r\n  left: 50%; /* physical: centered */\r\n  margin-left: 1px; /* a note */\r\n}\r\n";
+    expect(fixed(css)).toBe(".a {\r\n  left: 50%; /* physical: centered */\r\n  margin-inline-start: 1px; /* a note */\r\n}\r\n");
     expect(findPhysical(fixed(css))).toEqual([]);
   });
 

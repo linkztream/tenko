@@ -4,14 +4,14 @@
 //! - **Allocation.** A SOLICIT gets an ADVERTISE with an aligned prefix of the pool's
 //!   length inside the pool and writes nothing; a REQUEST commits a binding of kind `pd`
 //!   before its REPLY; RENEW and REBIND keep the prefix.
-//! - **Hints.** A hinted free prefix of a pool is honoured, a hint of a length only picks
+//! - **Hints.** A hinted free prefix of a pool is honored, a hint of a length only picks
 //!   the pool of that length, a prefix outside every pool, unaligned, of another length or
 //!   held by another client is not given (lifetimes of zero on RENEW).
 //! - **No prefix.** An exhausted pool gives `NoPrefixAvail` inside the `IA_PD`, in the
 //!   ADVERTISE as well as in the REPLY; a RENEW of nothing the client holds gives
 //!   `NoBinding`.
 //! - **Giving back.** RELEASE releases prefixes, DECLINE leaves them alone.
-//! - **Neighbours.** An `IA_NA` and an `IA_PD` of one IAID make two bindings of one commit,
+//! - **Neighbors.** An `IA_NA` and an `IA_PD` of one IAID make two bindings of one commit,
 //!   an exclusion inside a prefix keeps it out, rapid commit commits, a refusing store
 //!   answers a bound prefix for its time left and drops new requests, and a delegation
 //!   pool of a sibling scope of a shared network is used.
@@ -301,7 +301,7 @@ fn renew_keeps_the_prefix_and_rebind_too() {
 }
 
 #[test]
-fn a_hinted_free_prefix_of_the_pool_is_honoured() {
+fn a_hinted_free_prefix_of_the_pool_is_honored() {
     let mut world = pd_world();
     for (client, hint) in [
         (6, "2001:db8:180:1a0::"),
@@ -368,7 +368,7 @@ fn with_two_pools_the_pool_of_the_hinted_length_is_chosen() {
 }
 
 #[test]
-fn a_hinted_prefix_of_the_second_pool_is_honoured_with_its_length() {
+fn a_hinted_prefix_of_the_second_pool_is_honored_with_its_length() {
     let mut world = World6::with(|first, _, _| {
         first.pd_pools = vec![pd_pool_60(), pd_pool(POOL56_FIRST, POOL56_LAST, 56)];
     });

@@ -108,7 +108,7 @@ export function invalidQuery(name: string, value: string, detail?: string): Prob
 export function planUnacknowledged(codes: readonly string[]): Problem {
   return new Problem("ipam.plan.unacknowledged", {
     status: 409,
-    detail: `the plan has warnings that need an acknowledgement: ${codes.join(", ")}`,
+    detail: `the plan has warnings that need an acknowledgment: ${codes.join(", ")}`,
     params: { codes: codes.join(",") },
   });
 }

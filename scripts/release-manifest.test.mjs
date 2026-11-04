@@ -451,7 +451,7 @@ describe("mergeManifest", () => {
 // WP6.7: installer packages ------------------------------------------------------------
 
 describe("installerOf", () => {
-  test("recognises the installer packages of the version", () => {
+  test("recognizes the installer packages of the version", () => {
     assert.deepEqual(installerOf("tenko-0.2.0-windows-x86_64.msi", "0.2.0"), { kind: "msi", platform: "windows-x86_64" });
     assert.deepEqual(installerOf("tenko-0.2.0-rc.1-windows-x86_64.msi", "0.2.0-rc.1"), { kind: "msi", platform: "windows-x86_64" });
   });

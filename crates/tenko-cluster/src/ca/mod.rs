@@ -5,7 +5,7 @@
 //!   vault; server certificates for the configured host name and addresses with renewal
 //!   before expiry ([`InternalCa::server_material`]); the root as PEM for installation on
 //!   admin clients; node certificates carrying `urn:tenko:node:<id>` for Slice 2
-//!   enrolment.
+//!   enrollment.
 //! - [`TlsMode`]: (a) internal CA, (b) imported certificate and key with hot reload, (c)
 //!   termination in a reverse proxy with [`TrustedProxies`].
 //! - [`TlsMaterial`]: a chain and key loaded for rustls, with [`CertInfo`] and

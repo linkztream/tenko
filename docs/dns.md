@@ -152,7 +152,7 @@ POST /api/v1/dns/zones/{id}/records/batch?dry_run=true
 - the TTL and the class come in either order and are optional; a record without a TTL takes `$TTL`, else the last TTL given, else 3600 s. A TTL (also `$TTL`, the four SOA timers and the RRSIG original TTL) is a number of seconds or a duration with BIND's units `w`, `d`, `h`, `m` and `s`, combined (`1h30m`);
 - the class is IN (another class is a loss); the type is its mnemonic in any case or `TYPEnnn`;
 - the data of every type the model serves is read in its presentation form: SVCB and HTTPS with the parameters of RFC 9460 (`mandatory`, `alpn`, `no-default-alpn`, `port`, `ipv4hint`, `ech`, `ipv6hint`, `dohpath`, `ohttp` and `keyNNNNN`, values quoted or not), RRSIG times as `YYYYMMDDHHmmSS` or seconds, base64 and hex split across tokens; so is the data of CDS, CDNSKEY, HINFO, MB, MD, MF, MG, MINFO, MR, NAPTR, OPENPGPKEY, RP, SSHFP and ZONEMD. Every type also reads the generic form of RFC 3597 (`\# 4 c0000201`); a record of another type written in its own form is a loss. A TXT string longer than 255 octets is split into strings of at most 255 octets (DNS-24);
-- `$ORIGIN` and `$TTL` are honoured; the zone apex is the first origin, so relative names work without a `$ORIGIN` line;
+- `$ORIGIN` and `$TTL` are honored; the zone apex is the first origin, so relative names work without a `$ORIGIN` line;
 - `$INCLUDE` is refused with 422 `dns.zonefile.invalid` and its line: the import reads one uploaded file;
 - `$GENERATE range lhs [ttl] [class] type rhs` (the BIND extension) is expanded one record at a time, with `$`, `${offset,width,base}` (bases `d`, `o`, `x`, `X`, `n`, `N`, a width of at most 255), `\$` and `$$`, at most 65,536 records per directive; the records carry the directive's line;
 - a syntax error stops the import with 422 `dns.zonefile.invalid`, parameters `line` (the line of the token where the error was found, also inside a record that spans lines) and `reason`; a quote or a parenthesis still open at the end of the file is refused with the line that opened it.
@@ -431,7 +431,7 @@ The `[dns]` section of `tenko.toml` ([`deploy/tenko.example.toml`](../deploy/ten
 | `log.format` | `jsonl` | JSON lines; `dnstap` is refused until it is written (WP5.4) |
 | `log.days`, `log.size_mb` | 7, 256 | Retention by age (1 to 365 days) and by size (1 to 102,400 MiB) |
 | `log.sample` | 1 | Log one query in N |
-| `log.pseudonymise` | `true` | Replace client addresses with a keyed hash whose key changes every day |
+| `log.pseudonymize` | `true` | Replace client addresses with a keyed hash whose key changes every day |
 
 The settings are read at start; a change needs a restart of the node.
 
@@ -447,7 +447,7 @@ The settings are read at start; a change needs a restart of the node.
 | `listeners` | Each address with its transport and, for UDP, its workers |
 | `socket_mode`, `udp_workers`, `tcp_open`, `tcp_refused` | The worker layout of section 12.8: per UDP worker its address, socket and counters (received, sent, dropped, forwarded, receive and send errors) |
 | `cache_entries`, `cache_bytes`, `cache_hits`, `cache_misses`, `cache_hit_ratio`, `cache_stale` | The cache ([dns-resolver.md](dns-resolver.md) section 3.6) |
-| `problems` | Stub zones whose name servers could not be learnt, views whose recursion access list does not exist |
+| `problems` | Stub zones whose name servers could not be learned, views whose recursion access list does not exist |
 | `started` | When the role started |
 
 In Phase 2 only the controller that runs the role answers; another node answers 409 `dns.node.not_dns`, an unknown one 404 `cluster.node.not_found`. `GET /api/v1/system/status` lists `dns` among the node's `roles` while the role runs, and carries the warning `dns.role.not_serving` when the role has stopped answering or `dns.role.lagging` when its index is more than 1,000 revisions behind the store; the cluster page shows these warnings with the others.
@@ -471,7 +471,7 @@ Per node and off by default (plan section 2.9, TGL-15), never written through th
 {"at":"2026-10-17T12:00:00.123456Z","client":"p:3f2a9c0d81b7e645","transport":"udp","qname":"www.example.test","type":"A","rcode":0,"cached":false,"duration_micros":38}
 ```
 
-`client` is the address, or with `log.pseudonymise` (the default) `p:` and 16 hexadecimal digits of an HMAC-SHA-256 of the address under a random key that is replaced at midnight UTC and never written down: one client keeps its pseudonym for a day only. `log.sample` keeps one query in N. A segment holds at most a sixteenth of `log.size_mb` (1 to 8 MiB); segments older than `log.days` go first, then the oldest while the directory holds more than `log.size_mb`; the newest segment always stays. Queries answered by the forwarder are logged when their answer is sent. Setting `log.enabled = false` and restarting the node is the kill switch. dnstap frame streams are WP5.4.
+`client` is the address, or with `log.pseudonymize` (the default) `p:` and 16 hexadecimal digits of an HMAC-SHA-256 of the address under a random key that is replaced at midnight UTC and never written down: one client keeps its pseudonym for a day only. `log.sample` keeps one query in N. A segment holds at most a sixteenth of `log.size_mb` (1 to 8 MiB); segments older than `log.days` go first, then the oldest while the directory holds more than `log.size_mb`; the newest segment always stays. Queries answered by the forwarder are logged when their answer is sent. Setting `log.enabled = false` and restarting the node is the kill switch. dnstap frame streams are WP5.4.
 
 ### Port 53 and the platforms
 
@@ -841,7 +841,7 @@ Every transport calls the same `Responder`, so UDP and TCP answer alike; a query
 | Linux | One blocking thread per worker, each with its own UDP socket bound with `SO_REUSEPORT` to the listen address | The kernel spreads clients over the sockets by flow hash; Spike B measured this layout scaling to 32 workers where a shared socket stopped at 16 |
 | Windows | One blocking thread per worker, the workers of an address sharing one UDP socket | Windows has no load-balancing `SO_REUSEPORT`; threads and tokio tasks measured the same, threads idle more cheaply |
 
-Each worker has its own receive buffer (65,535 octets, so a query is never cut), its own query buffers and its own counters; it reads the wall clock once a second, not per query. Workers wake every 200 ms to see a stop. `recvmmsg`, UDP GSO and a BPF steering program are not used (ADR 0009 keeps them as later optimisations).
+Each worker has its own receive buffer (65,535 octets, so a query is never cut), its own query buffers and its own counters; it reads the wall clock once a second, not per query. Workers wake every 200 ms to see a stop. `recvmmsg`, UDP GSO and a BPF steering program are not used (ADR 0009 keeps them as later optimizations).
 
 Because `SO_REUSEPORT` balances by flow hash and not by load, a few clients can leave workers idle: the worker layout (section 12.8) shows the datagrams per worker so that this is visible. `[dns.udp] socket = "shared"` (`--mode shared` of the example server) switches Linux to the shared socket.
 
@@ -1029,7 +1029,7 @@ In a zone signed online (WP6.3, [dnssec.md](dnssec.md)) the types the signer wri
 
 ### 13.5 The answer path
 
-The updates of one zone are serialised: one task per zone takes what waits for the zone, up to 256 updates, plans them in order against one view of the store (each sees the changes of those before it, and each is all or nothing) and commits them as one change set through the zone service: the changes, one serial step per scope by the zone's serial policy, one journal entry per scope (so IXFR and NOTIFY carry the change, section 10), and one `dns.update.apply` audit record per update that changed something. A burst therefore costs one commit, not one per update (risk R52). Then:
+The updates of one zone are serialized: one task per zone takes what waits for the zone, up to 256 updates, plans them in order against one view of the store (each sees the changes of those before it, and each is all or nothing) and commits them as one change set through the zone service: the changes, one serial step per scope by the zone's serial policy, one journal entry per scope (so IXFR and NOTIFY carry the change, section 10), and one `dns.update.apply` audit record per update that changed something. A burst therefore costs one commit, not one per update (risk R52). Then:
 
 - **NOERROR** only once the index the node answers from holds the commit, so that a client's next query, or the prerequisites of its next update, see the change. The wait is at most 2 seconds; an update still not served then is answered SERVFAIL with the extended error 14 (Not Ready), and the node logs it. The change is committed and is served shortly after.
 - **SERVFAIL** when the store refuses the write: no quorum (OPS-26), a refused batch. The extended error names the store's code (`the store refused the write (sys.store.no_quorum)`), nothing is written, and the client retries as RFC 2136 clients do. The health view says why the store refuses. More than 4,096 updates waiting for one zone are answered SERVFAIL as well.

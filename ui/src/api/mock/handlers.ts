@@ -71,7 +71,7 @@ export const happyPaths: HttpHandler[] = [
   ...eventRoutes,
   ...reconcileRoutes,
   ...ipamReconcileRoutes, // WP8.2
-  // Cluster nodes and enrolment tokens (WP2.2 routes, WP2.9 mock).
+  // Cluster nodes and enrollment tokens (WP2.2 routes, WP2.9 mock).
   ...nodeRoutes,
   ...connectorRoutes,
   // The topology map, the VLAN provision and the prefixes of a VLAN (WP2.7).

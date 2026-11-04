@@ -184,7 +184,7 @@ mod arp {
             ethernet::{self, Protocol},
         },
         methods::{
-            neighbours::usable_mac,
+            neighbors::usable_mac,
             raw::link::{HostLinkFactory, LinkFactory, RawLink},
         },
     };

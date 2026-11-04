@@ -50,10 +50,10 @@ fn cuts_names_and_servers_keep_the_contract() {
             until: now + Duration::from_secs(5),
         },
     );
-    infra.set_minimise_fallback(&name("test"), now + Duration::from_secs(5));
+    infra.set_minimize_fallback(&name("test"), now + Duration::from_secs(5));
     let cut = infra.cut(&name("test"), now).expect("cut");
     assert_eq!(cut.ds.as_str(), "insecure");
-    assert!(cut.minimise_fallback.is_some());
+    assert!(cut.minimize_fallback.is_some());
 
     let host = name("ns.test");
     infra.put_addresses(&host, &[(v4(20), 60)], AddressOrigin::SiblingGlue, now);
@@ -95,7 +95,7 @@ fn cuts_names_and_servers_keep_the_contract() {
     );
     assert_eq!(infra.list(None, Some(&DnsName::root()), 10, now).len(), 1);
     assert_eq!(infra.flush(Some(&name("test"))), 2, "the cut and the name");
-    // The learnt capability holds for the infrastructure TTL, then the server is probed
+    // The learned capability holds for the infrastructure TTL, then the server is probed
     // again.
     assert_eq!(
         infra.server(v4(21), now + Duration::from_secs(899)).edns,

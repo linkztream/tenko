@@ -8,9 +8,9 @@
 // Credential columns are stored as operator secrets, which needs a session of password
 // strength or more (IAM-07): the main test raises the PIN session of `signedIn` with an
 // authenticator app first. A second test shows the blocker of the PIN session and the
-// choice to skip credentials; a third one the acknowledgement of a plan warning.
+// choice to skip credentials; a third one the acknowledgment of a plan warning.
 //
-// What the fixture does not exercise: no warning of the workbook needs an acknowledgement,
+// What the fixture does not exercise: no warning of the workbook needs an acknowledgment,
 // so `import-ack` appears in the third test only (a network on a nibble boundary).
 
 import type { Download, Locator, Page } from "@playwright/test";
@@ -132,8 +132,8 @@ async function expectSuggestedMapping(page: Page, expected: Expected, view: View
 
     // A sheet without columns (the empty one) shows no column table.
     const columns = sheet.getByTestId("import-column");
-    const analysed = view.sheets.find((s) => s.sheet === want.sheet)?.columns.length ?? 0;
-    await expect(columns, `columns of ${want.sheet}`).toHaveCount(analysed);
+    const analyzed = view.sheets.find((s) => s.sheet === want.sheet)?.columns.length ?? 0;
+    await expect(columns, `columns of ${want.sheet}`).toHaveCount(analyzed);
     if (want.columns.length === 0) {
       await expect(columns, `columns of ${want.sheet}`).toHaveCount(0);
       continue;
@@ -389,7 +389,7 @@ test("imports the IP plan workbook: mapping, preview, loss report, apply, job, e
   expect(sorted(await changeLabels(changes, "host"))).toEqual(sorted(expected.model.hosts.map((h) => h.name)));
   expect(sorted(await changeLabels(changes, "address"))).toEqual(sorted(expected.model.addresses.map((a) => `${a.ip} (default)`)));
 
-  // Nothing needs an acknowledgement and nothing blocks the apply; the credentials are allowed.
+  // Nothing needs an acknowledgment and nothing blocks the apply; the credentials are allowed.
   await expect(page.getByTestId("import-ack")).toHaveCount(0);
   await expect(page.getByTestId("import-blockers")).toHaveCount(0);
   await expect(page.getByTestId("import-credentials")).toBeVisible();
@@ -525,7 +525,7 @@ test("a PIN session cannot store credentials; skipping them lets the import thro
   expect(held.addresses).toEqual(sorted(expected.model.addresses.map((a) => a.ip)));
 });
 
-test("a plan warning needs an acknowledgement before the import can be applied", async ({ page, api, signedIn }) => {
+test("a plan warning needs an acknowledgment before the import can be applied", async ({ page, api, signedIn }) => {
   expect(signedIn.session.strength).toBe("pin");
   // A network that does not end on a nibble boundary (documentation range, RFC 3849).
   const csv = "network,description\r\n2001:db8:4::/46,Documentation site\r\n";

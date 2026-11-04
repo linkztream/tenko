@@ -1,7 +1,7 @@
 import { createSignal, Show } from "solid-js";
 import { api } from "../../api/client";
 import { isApiError } from "../../api/problem";
-import type { FactorEnrolled, TotpEnrolment } from "../../api/types";
+import type { FactorEnrolled, TotpEnrollment } from "../../api/types";
 import { ConfirmDialog } from "../../components/Dialog";
 import { Icon } from "../../components/Icon";
 import { Notice } from "../../components/Notice";
@@ -27,7 +27,7 @@ export function TotpSection(props: {
   onCodes: (codes: string[]) => void;
   onReauthenticate: () => void;
 }) {
-  const [enrolment, setEnrolment] = createSignal<TotpEnrolment | null>(null);
+  const [enrollment, setEnrollment] = createSignal<TotpEnrollment | null>(null);
   const [code, setCode] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -40,7 +40,7 @@ export function TotpSection(props: {
     setError(null);
     setBusy(true);
     try {
-      setEnrolment(await api.post("/api/v1/auth/totp/enroll/start"));
+      setEnrollment(await api.post("/api/v1/auth/totp/enroll/start"));
       setCode("");
     } catch (err) {
       if (isApiError(err, "auth.totp.already_enrolled")) props.data.setTotp(true);
@@ -51,7 +51,7 @@ export function TotpSection(props: {
   };
 
   const cancel = () => {
-    setEnrolment(null);
+    setEnrollment(null);
     setError(null);
     setCode("");
     queueMicrotask(() => startButton?.focus());
@@ -59,7 +59,7 @@ export function TotpSection(props: {
 
   const verify = async (e: Event) => {
     e.preventDefault();
-    const current = enrolment();
+    const current = enrollment();
     if (!current) return;
     const digits = code().replace(/\s+/g, "");
     if (!digits) {
@@ -70,9 +70,9 @@ export function TotpSection(props: {
     setBusy(true);
     try {
       const res: FactorEnrolled = await api.post("/api/v1/auth/totp/enroll/finish", {
-        body: { enrolment_id: current.enrolment_id, code: digits },
+        body: { enrollment_id: current.enrollment_id, code: digits },
       });
-      setEnrolment(null);
+      setEnrollment(null);
       setCode("");
       props.data.setTotp(true);
       toast({ title: t("account.totp.enabled"), kind: "ok" });
@@ -80,7 +80,7 @@ export function TotpSection(props: {
       if (res.reauthenticate) props.onReauthenticate();
     } catch (err) {
       if (isApiError(err, "auth.challenge_invalid")) {
-        setEnrolment(null);
+        setEnrollment(null);
         setError(t("account.totp.expired"));
       } else {
         setError(describeError(err));
@@ -131,7 +131,7 @@ export function TotpSection(props: {
           <Show
             when={props.data.totp() === true}
             fallback={
-              <Show when={enrolment() === null}>
+              <Show when={enrollment() === null}>
                 <button
                   ref={startButton}
                   data-testid="account-totp-setup"
@@ -152,19 +152,19 @@ export function TotpSection(props: {
         </div>
       </div>
 
-      <Show when={error() && enrolment() === null}>
+      <Show when={error() && enrollment() === null}>
         <Notice kind="bad" role="alert">
           {error()}
         </Notice>
       </Show>
 
-      <Show when={enrolment()}>
-        {(enrol) => (
+      <Show when={enrollment()}>
+        {(enroll) => (
           <div class="acct-panel" role="group" aria-labelledby="acct-totp-setup">
             <h3 id="acct-totp-setup">{t("account.totp.setup_title")}</h3>
             <p>{t("account.totp.scan_or_key")}</p>
             <div class="acct-qr">
-              <QrCode text={enrol().otpauth_uri} label={t("account.totp.qr_label")} />
+              <QrCode text={enroll().otpauth_uri} label={t("account.totp.qr_label")} />
             </div>
 
             <div class="field">
@@ -173,23 +173,23 @@ export function TotpSection(props: {
               </span>
               <div class="form-row" role="group" aria-labelledby="acct-totp-key-label">
                 <code class="secret acct-secret" data-testid="account-totp-secret">
-                  {groupSecret(enrol().secret)}
+                  {groupSecret(enroll().secret)}
                 </code>
-                <button type="button" class="btn sm" onClick={() => void copyText(enrol().secret)}>
+                <button type="button" class="btn sm" onClick={() => void copyText(enroll().secret)}>
                   <Icon name="copy" size="sm" />
                   {t("common.action.copy")}
                 </button>
               </div>
               <span class="help">
                 {t("account.totp.params", {
-                  digits: formatNumber(enrol().params.digits),
-                  period: formatNumber(enrol().params.period),
-                  algorithm: enrol().params.algorithm.toUpperCase(),
+                  digits: formatNumber(enroll().params.digits),
+                  period: formatNumber(enroll().params.period),
+                  algorithm: enroll().params.algorithm.toUpperCase(),
                 })}
               </span>
             </div>
 
-            <Show when={provisioningLink(enrol().otpauth_uri)}>
+            <Show when={provisioningLink(enroll().otpauth_uri)}>
               {(link) => (
                 <p>
                   <a class="acct-link" href={link()}>

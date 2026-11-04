@@ -188,7 +188,7 @@ describe("decommissioning from the list", () => {
     expect(stored("pve1")?.decommissioned?.kept_dns).toBe(false);
   });
 
-  it("refuses a reason over 1,024 bytes and leaves the host alone when cancelled", async () => {
+  it("refuses a reason over 1,024 bytes and leaves the host alone when canceled", async () => {
     const writes = recordWrites();
     renderList();
     await listed();

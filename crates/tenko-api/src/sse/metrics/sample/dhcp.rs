@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use tenko_core::metrics::{Snapshot, Value};
 
-use super::{as_count, as_f64, delta, gauge, label, labelled_gauge, max_of, quantile_ms};
+use super::{as_count, as_f64, delta, gauge, label, labeled_gauge, max_of, quantile_ms};
 use crate::dto::events::{MetricsDhcp, MetricsDhcpDdns, MetricsDhcpPool};
 
 /// `tenko_dhcp_packets_total{family,type,outcome}`: its presence says the `dhcp` role runs.
@@ -171,8 +171,8 @@ pub(super) fn dhcp_sample(
 ) -> MetricsDhcp {
     let all = pools(snapshot);
     let mut dhcp = MetricsDhcp {
-        active_leases: labelled_gauge(snapshot, DHCP_LEASES, "state", "active").unwrap_or_default(),
-        abandoned_leases: labelled_gauge(snapshot, DHCP_LEASES, "state", "abandoned")
+        active_leases: labeled_gauge(snapshot, DHCP_LEASES, "state", "active").unwrap_or_default(),
+        abandoned_leases: labeled_gauge(snapshot, DHCP_LEASES, "state", "abandoned")
             .unwrap_or_default(),
         scopes: u64::try_from(all.len()).unwrap_or(u64::MAX),
         fullest: fullest(all),

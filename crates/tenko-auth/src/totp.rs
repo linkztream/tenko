@@ -66,7 +66,7 @@ impl TotpAlgorithm {
     }
 }
 
-/// The parameters of a TOTP enrolment.
+/// The parameters of a TOTP enrollment.
 ///
 /// The secret is not part of the parameters. Stored parameters can be checked with
 /// [`TotpParams::validate`]; [`verify`] refuses parameters that fail the check.
@@ -212,7 +212,7 @@ pub fn verify(
     matched
 }
 
-/// The `otpauth://totp/` URI for the enrolment QR code or manual entry:
+/// The `otpauth://totp/` URI for the enrollment QR code or manual entry:
 /// `otpauth://totp/{issuer}:{account}?secret={BASE32}&issuer={issuer}&algorithm=SHA1&digits=6&period=30`.
 ///
 /// Issuer and account are percent-encoded (RFC 3986: letters, digits and `-._~` stay, every

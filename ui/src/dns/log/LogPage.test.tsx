@@ -80,7 +80,7 @@ describe("the query log page", () => {
     expect(screen.getAllByTestId("dns-log-cached").length).toBeGreaterThan(0);
     const figures = screen.getByTestId("dns-log-figures");
     expect(figures.dataset).toMatchObject({ state: "on", client: "pseudonym", written: "60", dropped: "0" });
-    expect(figures.textContent).toContain("pseudonymised");
+    expect(figures.textContent).toContain("pseudonymized");
     expect((screen.getByTestId("field-node") as HTMLSelectElement).value).toBe("1");
     expect(await axeViolations(view.container)).toEqual([]);
   });

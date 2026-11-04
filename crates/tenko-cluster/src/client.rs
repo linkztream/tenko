@@ -15,8 +15,8 @@
 //! node's configuration (`node.config.behind`) makes the agent try the next endpoint at
 //! once, keeping every batch; only after a full round over the endpoints does it pause. The
 //! endpoint list follows what the controllers announce in `HelloResponse.endpoints`. In the
-//! first minutes after enrolment, a controller that does not know the node yet (it has not
-//! applied the enrolment) is retried like a broken connection, not after the long pause.
+//! first minutes after enrollment, a controller that does not know the node yet (it has not
+//! applied the enrollment) is retried like a broken connection, not after the long pause.
 //!
 //! While connected the agent also follows the node's configuration (`Config.Watch`),
 //! applying it atomically to `<data_dir>/node/config/` ([`crate::node_sync::local`]) and
@@ -89,9 +89,9 @@ pub const REFUSED_PAUSE: Duration = Duration::from_secs(300);
 /// Pause before the next endpoint when a controller cannot serve the node now
 /// (`cluster.no_quorum`, `node.config.behind`).
 pub const ROTATE_PAUSE: Duration = Duration::from_millis(200);
-/// How long after enrolment a controller that does not know the node is retried like a
+/// How long after enrollment a controller that does not know the node is retried like a
 /// broken connection.
-pub const ENROLMENT_GRACE: Duration = Duration::from_secs(600);
+pub const ENROLLMENT_GRACE: Duration = Duration::from_secs(600);
 /// Pause before a configuration or command stream is opened again on the same connection.
 pub const STREAM_RETRY: Duration = Duration::from_secs(5);
 /// How often a connected node rewrites its status file when nothing else changed.
@@ -258,7 +258,7 @@ fn classify_tls(error: &rustls::Error) -> (AgentState, StatusError) {
             status_error(
                 "cluster.tls.foreign_ca",
                 "the controller's certificate does not come from this node's CA; it belongs to \
-                 another installation, or the CA was created again (enrol the node again)",
+                 another installation, or the CA was created again (enroll the node again)",
             ),
         ),
         Error::InvalidCertificate(CertificateError::ApplicationVerificationFailure) => (
@@ -272,7 +272,7 @@ fn classify_tls(error: &rustls::Error) -> (AgentState, StatusError) {
             AgentState::Revoked,
             status_error(
                 "cluster.node.revoked",
-                "the controller refused this node's certificate as revoked; enrol the node again",
+                "the controller refused this node's certificate as revoked; enroll the node again",
             ),
         ),
         Error::AlertReceived(
@@ -819,7 +819,7 @@ impl Agent {
                     status.state = AgentState::Refused;
                     status.last_error = Some(status_error(
                         "cluster.node.endpoint",
-                        "the node knows no cluster endpoint; enrol it again",
+                        "the node knows no cluster endpoint; enroll it again",
                     ));
                 });
                 break;
@@ -877,14 +877,14 @@ impl Agent {
         tracing::info!("node process stopped");
     }
 
-    /// A refusal as an unknown node shortly after enrolment is a broken connection: the
-    /// controller has not applied the enrolment yet.
+    /// A refusal as an unknown node shortly after enrollment is a broken connection: the
+    /// controller has not applied the enrollment yet.
     fn soften(end: SessionEnd, credentials: &Credentials) -> SessionEnd {
         match end {
             SessionEnd::Refused(AgentState::Refused, error)
                 if error.code == "cluster.node.unknown"
                     && Timestamp::now().saturating_since(credentials.identity.enrolled_at)
-                        < ENROLMENT_GRACE =>
+                        < ENROLLMENT_GRACE =>
             {
                 SessionEnd::Broken(error)
             }
@@ -1079,7 +1079,7 @@ impl Agent {
                                 break SessionEnd::Refused(
                                     AgentState::Revoked,
                                     status_error("cluster.node.revoked", if directive.detail.is_empty() {
-                                        "this node was revoked; enrol it again".to_owned()
+                                        "this node was revoked; enroll it again".to_owned()
                                     } else {
                                         directive.detail
                                     }),

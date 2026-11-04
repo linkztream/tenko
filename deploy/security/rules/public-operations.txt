@@ -40,9 +40,11 @@ POST /api/v1/auth/webauthn/login/finish
 GET /api/v1/i18n/languages
 GET /api/v1/i18n/packs/{tag}
 
-# Node enrolment: a joining node authenticates with the enrolment token in the body, a
+# Node enrollment: a joining node authenticates with the enrollment token in the body, a
 # single-use, time-limited secret an administrator created (docs/cluster.md section 1).
-POST /api/v1/nodes/enrol
+# The 0.0.11 path `POST /api/v1/nodes/enrol` answers the same until 0.0.13; it is no operation of # spelling: alias until 0.0.13
+# the document, so the list does not name it (the walk would call it a stale entry).
+POST /api/v1/nodes/enroll
 
 # The internal CA's root certificate: public by nature, so a client can fetch it and pin it
 # by the fingerprint shown at install (OPS-22).

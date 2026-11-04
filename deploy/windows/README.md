@@ -57,7 +57,7 @@ switch's address, and a DNS listener on every address may not start: set
 
 ### The wizard
 
-Double-click the MSI. After the licence page, one dialog asks the same questions as the
+Double-click the MSI. After the license page, one dialog asks the same questions as the
 properties: the roles (two buttons), the security profile, the host name, the data
 directory, the DNS address (only with the dns role), whether to start the service and
 whether to open the firewall. When a `tenko.toml` exists already, a box offers to replace it
@@ -196,7 +196,7 @@ data directory: a purged installation cannot be recovered without a backup.
 
 The MSI and `tenko.exe` are not signed today. That was a decision (2026-10-19): an
 Authenticode certificate costs a yearly fee plus a hardware token, and Azure Artifact Signing
-is offered to organisations only, which a single-maintainer project is not yet. The release
+is offered to organizations only, which a single-maintainer project is not yet. The release
 workflow signs both as soon as a certificate is configured (below), so a certificate later is a
 configuration change, not a code change.
 
@@ -252,7 +252,7 @@ pwsh -File deploy\windows\build-msi.ps1 -Binary target\release\tenko.exe -Versio
 ```
 
 The sources are in `deploy/windows/wix/`: `Package.wxs` (the files, the properties, the
-custom actions and their order) and `TenkoUI.wxs` (the wizard). The licence page is the
+custom actions and their order) and `TenkoUI.wxs` (the wizard). The license page is the
 repository's `LICENSE.md`, converted at build time. The `UpgradeCode` in `Package.wxs` must never
 change: it is what makes a newer MSI an upgrade of an older one.
 
@@ -517,7 +517,7 @@ The service runs `<data_dir>\updates\current\tenko.exe`. `current` is a director
 The web UI does this itself when the security profile allows it (Home and Lab; Standard after
 a fresh sign-in; Hardened only for a release file that you upload) and switches back when the
 new version does not become ready. The service account can write the binaries it runs, which
-is what lets it install. `--no-update-layout` keeps the old behaviour: a service that runs the
+is what lets it install. `--no-update-layout` keeps the old behavior: a service that runs the
 executable it was registered with, and no installs from the UI. With the layout the file
 that ran `service install` is copied, so it can be moved or deleted afterwards; the note
 about moving the executable under "Before you install" applies to `--no-update-layout` only.
@@ -571,7 +571,7 @@ version that crash-loops are in [../../docs/upgrades.md](../../docs/upgrades.md)
 
 `deploy/windows/smoke.ps1` tests the whole service life on a real Windows host. The owner
 runs it once, in an elevated PowerShell 7, before a release; the weekly CI job runs it on a
-hosted runner. It needs a debug build, because only debug builds honour
+hosted runner. It needs a debug build, because only debug builds honor
 `TENKO_TEST_VERSION_FROM_LAYOUT`, which lets one binary install itself as version 0.0.2.
 
 ```

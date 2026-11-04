@@ -59,8 +59,8 @@ export const MOCK_JOB_IDS = {
   applySucceeded: "0190d1c2-0000-7000-8000-0000000c0004",
   /** A move job that failed on `l2.move` and was rolled back. */
   moveRolledBack: "0190d1c2-0000-7000-8000-0000000c0005",
-  /** An `ipam.apply` job that was cancelled while queued. */
-  applyCancelled: "0190d1c2-0000-7000-8000-0000000c0006",
+  /** An `ipam.apply` job that was canceled while queued. */
+  applyCanceled: "0190d1c2-0000-7000-8000-0000000c0006",
 } as const;
 
 /**
@@ -170,23 +170,23 @@ interface Ctx {
 }
 
 const NEXT_STATE: Record<JobState, Partial<Record<JobAction, JobState>>> = {
-  queued: { start: "running", cancel: "cancelled" },
+  queued: { start: "running", cancel: "canceled" },
   running: { wait: "waiting", complete: "succeeded", roll_back: "rolling_back", cancel: "rolling_back" },
   waiting: { resume: "running", roll_back: "rolling_back", cancel: "rolling_back" },
-  rolling_back: { finish_rollback: "rolled_back", finish_cancel: "cancelled", fail: "failed" },
+  rolling_back: { finish_rollback: "rolled_back", finish_cancel: "canceled", fail: "failed" },
   succeeded: {},
   failed: {},
   rolled_back: {},
-  cancelled: {},
+  canceled: {},
 };
 
-const TERMINAL: readonly JobState[] = ["succeeded", "failed", "rolled_back", "cancelled"];
+const TERMINAL: readonly JobState[] = ["succeeded", "failed", "rolled_back", "canceled"];
 /** States in which a job holds a slot of its group. */
 const HOLDING: readonly JobState[] = ["running", "waiting", "rolling_back"];
 
 /** Errors the engine puts on a step whose work may have had effects: such steps are undone. */
 const ABORT_CODES: readonly string[] = [
-  "jobs.cancelled",
+  "jobs.canceled",
   "jobs.step.interrupted",
   "jobs.step.deadline_passed",
   "jobs.step.timeout",
@@ -226,8 +226,8 @@ function invalidTransition(from: JobState, action: string): Problem {
   });
 }
 
-function cancelledError(): CodedError {
-  return { code: "jobs.cancelled", status: 409, title: "Job cancelled", detail: "the job was cancelled" };
+function canceledError(): CodedError {
+  return { code: "jobs.canceled", status: 409, title: "Job canceled", detail: "the job was canceled" };
 }
 
 function timeoutError(): CodedError {
@@ -391,7 +391,7 @@ function rollback(rec: MockJobRecord, ctx: Ctx): void {
     }
   }
   if (job.steps.some((s) => s.state.state === "waiting_for_manual")) return;
-  jobAction(rec, ctx, job.error?.code === "jobs.cancelled" ? "finish_cancel" : "finish_rollback");
+  jobAction(rec, ctx, job.error?.code === "jobs.canceled" ? "finish_cancel" : "finish_rollback");
 }
 
 /** Aborts the current step if it was running or waiting. */
@@ -433,13 +433,13 @@ function completeStep(rec: MockJobRecord, ctx: Ctx, index: number, note: string 
   advance(rec, engine);
 }
 
-/** Asks to cancel: a queued job is cancelled at once, a running or waiting one rolls back. */
+/** Asks to cancel: a queued job is canceled at once, a running or waiting one rolls back. */
 function cancelRecord(rec: MockJobRecord, ctx: Ctx): void {
   const job = rec.job;
   const stamp = { at: iso(ctx.now), by: ctx.by };
   if (job.state === "queued") {
     job.cancel_requested = stamp;
-    job.error = cancelledError();
+    job.error = canceledError();
     jobAction(rec, ctx, "cancel");
     return;
   }
@@ -449,8 +449,8 @@ function cancelRecord(rec: MockJobRecord, ctx: Ctx): void {
   log(rec, ctx, { event: "cancel_requested" });
   // The runner acts on it at once in the mock.
   const engine: Ctx = { now: ctx.now, by: SYSTEM_JOBS };
-  abortCurrent(rec, engine, cancelledError());
-  job.error = cancelledError();
+  abortCurrent(rec, engine, canceledError());
+  job.error = canceledError();
   jobAction(rec, engine, "cancel");
   rollback(rec, engine);
 }
@@ -1004,9 +1004,9 @@ export function completeJobStep(id: string, index: number, note: string | null):
 }
 
 /**
- * Cancels a job as the signed-in user. A queued job is cancelled at once; a running or
+ * Cancels a job as the signed-in user. A queued job is canceled at once; a running or
  * waiting one rolls back (manual undo tasks keep it `rolling_back` until a person completes
- * them) and ends `cancelled`. Fails with `jobs.not_found` (404) or `jobs.invalid_transition`
+ * them) and ends `canceled`. Fails with `jobs.not_found` (404) or `jobs.invalid_transition`
  * (409) for a job that is rolling back or finished.
  */
 export function cancelJob(id: string): MockJobRecord {
@@ -1194,8 +1194,8 @@ function seedJobs(): void {
   completeStep(failed, at(26 * 60 - 27, sam), 2, SEED_ROLLBACK_NOTES.dns);
   records.push(failed);
 
-  // An apply that was cancelled before it started.
-  const cancelled = submit(
+  // An apply that was canceled before it started.
+  const canceled = submit(
     {
       kind: "ipam.apply",
       title: "jobs.title.ipam_apply",
@@ -1205,10 +1205,10 @@ function seedJobs(): void {
       steps: [{ kind: "ipam.apply", automatic: true }],
     },
     at(180, sam),
-    { id: MOCK_JOB_IDS.applyCancelled },
+    { id: MOCK_JOB_IDS.applyCanceled },
   );
-  cancelRecord(cancelled, at(179, alex));
-  records.push(cancelled);
+  cancelRecord(canceled, at(179, alex));
+  records.push(canceled);
 
   for (const rec of records) rec.job.revision = db.revision;
   records.sort((a, b) => Date.parse(b.job.created.at) - Date.parse(a.job.created.at));

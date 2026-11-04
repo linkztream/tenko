@@ -47,7 +47,7 @@ import { failPolicy, invalid, isRecord, optBool, optInt, optString, reqString } 
 
 const CHALLENGE_TTL_MS = 5 * MINUTE;
 const CEREMONY_TTL_MS = 60_000;
-const ENROLMENT_TTL_MS = 10 * MINUTE;
+const ENROLLMENT_TTL_MS = 10 * MINUTE;
 const KEY_AAGUID = "0123456789abcdef0123456789abcdef";
 const PASSKEY_AAGUID = "00000000000000000000000000000000";
 const ISSUER = "Tenko DDI";
@@ -442,16 +442,16 @@ const totpEnrollStart = route("post", "/api/v1/auth/totp/enroll/start", () => {
   const { user } = requireSession();
   if (user.totp) return fail("auth.totp.already_enrolled");
   const secret = base32(randomBytes(20));
-  const enrolmentId = randomId();
-  db.enrolments.set(enrolmentId, {
-    id: enrolmentId,
+  const enrollmentId = randomId();
+  db.enrollments.set(enrollmentId, {
+    id: enrollmentId,
     user_id: user.id,
     secret,
-    expires_at: Date.now() + ENROLMENT_TTL_MS,
+    expires_at: Date.now() + ENROLLMENT_TTL_MS,
   });
   const issuer = encodeURIComponent(ISSUER);
   return ok({
-    enrolment_id: enrolmentId,
+    enrollment_id: enrollmentId,
     secret,
     otpauth_uri: `otpauth://totp/${issuer}:${encodeURIComponent(user.name)}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`,
     params: { algorithm: "sha1", digits: 6, period: 30, skew: 1 },
@@ -461,15 +461,15 @@ const totpEnrollStart = route("post", "/api/v1/auth/totp/enroll/start", () => {
 const totpEnrollFinish = route("post", "/api/v1/auth/totp/enroll/finish", async (ctx) => {
   const { user } = requireSession();
   const body = await ctx.body();
-  const [enrolmentId, code] = stringsOf(body, "enrolment_id", "code") as [string, string];
-  const enrolment = db.enrolments.get(enrolmentId);
-  if (!enrolment || enrolment.user_id !== user.id || enrolment.expires_at <= Date.now()) {
-    db.enrolments.delete(enrolmentId);
+  const [enrollmentId, code] = stringsOf(body, "enrollment_id", "code") as [string, string];
+  const enrollment = db.enrollments.get(enrollmentId);
+  if (!enrollment || enrollment.user_id !== user.id || enrollment.expires_at <= Date.now()) {
+    db.enrollments.delete(enrollmentId);
     return fail("auth.challenge_invalid");
   }
   if (user.totp) return fail("auth.totp.already_enrolled");
   if (code.trim() !== MOCK_TOTP_CODE) return fail("auth.totp.code_mismatch", { status: 400 });
-  db.enrolments.delete(enrolmentId);
+  db.enrollments.delete(enrollmentId);
   user.totp = true;
   const codes = user.recovery_codes.length > 0 ? null : newRecoveryCodes(user);
   commit("admin", userChange(user), [user]);
@@ -491,7 +491,7 @@ const removeTotp = route("delete", "/api/v1/auth/totp", () => {
 const regenerateRecoveryCodes = route("post", "/api/v1/auth/recovery-codes", () => {
   const { user } = requireSession();
   if (!user.totp && user.credentials.length === 0) {
-    return invalid("recovery_codes", "enrol TOTP or a passkey first");
+    return invalid("recovery_codes", "enroll TOTP or a passkey first");
   }
   const codes = newRecoveryCodes(user);
   commit("admin", userChange(user), [user]);

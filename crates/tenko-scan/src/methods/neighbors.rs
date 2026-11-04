@@ -1,4 +1,4 @@
-//! `arp` and `nd`: the neighbour tables of the probe host, read from the operating system
+//! `arp` and `nd`: the neighbor tables of the probe host, read from the operating system
 //! without sending a frame (SCAN-02).
 //!
 //! | Platform | IPv4 (`arp`) | IPv6 (`nd`) |
@@ -26,9 +26,9 @@ use crate::{
 /// Longest a table read may take.
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// One neighbour table entry.
+/// One neighbor table entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Neighbour {
+pub struct Neighbor {
     /// The address.
     pub ip: IpAddr,
     /// The MAC address behind it.
@@ -50,7 +50,7 @@ fn parse_mac(text: &str) -> Option<MacAddr> {
 
 /// Parses `/proc/net/arp`: a header, then `IP address  HW type  Flags  HW address  Mask
 /// Device` per line. Only complete entries (flag `0x2`) count.
-pub fn parse_proc_net_arp(text: &str) -> Vec<Neighbour> {
+pub fn parse_proc_net_arp(text: &str) -> Vec<Neighbor> {
     let mut out = Vec::new();
     for line in text.lines().skip(1) {
         let fields: Vec<&str> = line.split_whitespace().collect();
@@ -63,7 +63,7 @@ pub fn parse_proc_net_arp(text: &str) -> Vec<Neighbour> {
             continue;
         }
         if let (Ok(ip), Some(mac)) = (ip.parse::<IpAddr>(), parse_mac(mac)) {
-            out.push(Neighbour {
+            out.push(Neighbor {
                 ip: canonical(ip),
                 mac,
             });
@@ -75,7 +75,7 @@ pub fn parse_proc_net_arp(text: &str) -> Vec<Neighbour> {
 /// Parses the output of `ip neigh show`: `<address> dev <if> lladdr <mac> [router]
 /// <STATE>`. Entries in the states `FAILED`, `INCOMPLETE` and `NONE`, or without `lladdr`,
 /// do not count.
-pub fn parse_ip_neigh(text: &str) -> Vec<Neighbour> {
+pub fn parse_ip_neigh(text: &str) -> Vec<Neighbor> {
     let mut out = Vec::new();
     for line in text.lines() {
         let fields: Vec<&str> = line.split_whitespace().collect();
@@ -94,7 +94,7 @@ pub fn parse_ip_neigh(text: &str) -> Vec<Neighbour> {
         if matches!(state, "FAILED" | "INCOMPLETE" | "NONE") {
             continue;
         }
-        out.push(Neighbour {
+        out.push(Neighbor {
             ip: canonical(ip),
             mac,
         });
@@ -126,7 +126,7 @@ fn csv_fields(line: &str) -> Vec<String> {
 /// Parses the CSV of `Get-NetNeighbor | Select-Object IPAddress,LinkLayerAddress,State |
 /// ConvertTo-Csv -NoTypeInformation`. The columns are found by their header; the states
 /// `Incomplete` and `Unreachable` do not count.
-pub fn parse_get_net_neighbor_csv(text: &str) -> Vec<Neighbour> {
+pub fn parse_get_net_neighbor_csv(text: &str) -> Vec<Neighbor> {
     let mut lines = text
         .lines()
         .map(|line| line.trim_start_matches('\u{feff}').trim())
@@ -156,7 +156,7 @@ pub fn parse_get_net_neighbor_csv(text: &str) -> Vec<Neighbour> {
             .and_then(|text| text.parse::<IpAddr>().ok());
         let mac = fields.get(mac_at).and_then(|text| parse_mac(text));
         if let (Some(ip), Some(mac)) = (ip, mac) {
-            out.push(Neighbour {
+            out.push(Neighbor {
                 ip: canonical(ip),
                 mac,
             });
@@ -165,12 +165,12 @@ pub fn parse_get_net_neighbor_csv(text: &str) -> Vec<Neighbour> {
     out
 }
 
-/// Reads one neighbour table of this host.
+/// Reads one neighbor table of this host.
 ///
 /// # Errors
 ///
 /// `scan.io` when the table cannot be read.
-pub async fn read_table(system: &dyn System, ipv6: bool) -> Result<Vec<Neighbour>, ScanError> {
+pub async fn read_table(system: &dyn System, ipv6: bool) -> Result<Vec<Neighbor>, ScanError> {
     if cfg!(windows) {
         let family = if ipv6 { "IPv6" } else { "IPv4" };
         let script = format!(
@@ -211,22 +211,22 @@ pub async fn read_table(system: &dyn System, ipv6: bool) -> Result<Vec<Neighbour
 
 /// The findings of a table: an address sighting per entry inside the scope and a vendor
 /// per MAC address the OUI table knows.
-pub fn findings(entries: &[Neighbour], contains: impl Fn(IpAddr) -> bool) -> Vec<Found> {
+pub fn findings(entries: &[Neighbor], contains: impl Fn(IpAddr) -> bool) -> Vec<Found> {
     let mut found = Vec::new();
-    let mut entries: Vec<Neighbour> = entries.iter().copied().filter(|n| contains(n.ip)).collect();
+    let mut entries: Vec<Neighbor> = entries.iter().copied().filter(|n| contains(n.ip)).collect();
     entries.sort();
     entries.dedup();
     let mut vendors = BTreeSet::new();
-    for neighbour in &entries {
+    for neighbor in &entries {
         found.push(Found::now(SightingSubject::Address {
-            ip: neighbour.ip,
-            mac: Some(neighbour.mac),
+            ip: neighbor.ip,
+            mac: Some(neighbor.mac),
         }));
-        if vendors.insert(neighbour.mac)
-            && let Some(vendor) = oui::vendor(neighbour.mac)
+        if vendors.insert(neighbor.mac)
+            && let Some(vendor) = oui::vendor(neighbor.mac)
         {
             found.push(Found::now(SightingSubject::Vendor {
-                mac: neighbour.mac,
+                mac: neighbor.mac,
                 vendor: vendor.to_owned(),
             }));
         }
@@ -236,12 +236,12 @@ pub fn findings(entries: &[Neighbour], contains: impl Fn(IpAddr) -> bool) -> Vec
 
 /// The `arp` or `nd` method.
 #[derive(Debug, Clone)]
-pub struct NeighbourTable {
+pub struct NeighborTable {
     ipv6: bool,
     system: Arc<dyn System>,
 }
 
-impl NeighbourTable {
+impl NeighborTable {
     /// The method over the IPv4 (`arp`) or the IPv6 (`nd`) table.
     pub fn new(ipv6: bool, system: Arc<dyn System>) -> Self {
         Self { ipv6, system }
@@ -249,7 +249,7 @@ impl NeighbourTable {
 }
 
 #[async_trait]
-impl Method for NeighbourTable {
+impl Method for NeighborTable {
     fn kind(&self) -> MethodKind {
         if self.ipv6 {
             MethodKind::Nd
@@ -328,15 +328,15 @@ fe80::1 dev eth0 lladdr 00:00:5e:00:53:01 router DELAY
         assert_eq!(
             entries,
             [
-                Neighbour {
+                Neighbor {
                     ip: "192.0.2.1".parse().expect("ip"),
                     mac: mac("00:00:5e:00:53:01")
                 },
-                Neighbour {
+                Neighbor {
                     ip: "192.0.2.21".parse().expect("ip"),
                     mac: mac("00:00:5e:00:53:21")
                 },
-                Neighbour {
+                Neighbor {
                     ip: "192.0.2.22".parse().expect("ip"),
                     mac: mac("00:00:5e:00:53:22")
                 },

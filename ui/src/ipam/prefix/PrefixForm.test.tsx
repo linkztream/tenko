@@ -17,7 +17,7 @@ beforeEach(async () => {
 });
 
 describe("prefix form: create", () => {
-  it("creates a prefix through the form and the plan, with the nibble acknowledgement", async () => {
+  it("creates a prefix through the form and the plan, with the nibble acknowledgment", async () => {
     const done = vi.fn();
     renderRoute(() => <PrefixForm vrf={vrf()} onDone={done} onClose={() => {}} />);
     const form = await screen.findByTestId("dialog-prefix-form");

@@ -221,18 +221,19 @@ pub const DEFAULT_CLUSTER_LISTEN: &str = "0.0.0.0:8444";
 #[serde(default, deny_unknown_fields)]
 pub struct ClusterSection {
     /// Controller: socket addresses of the cluster port. Not set: `0.0.0.0:8444`, opened
-    /// once a node is enrolled or an enrolment token is waiting. An empty list keeps the
+    /// once a node is enrolled or an enrollment token is waiting. An empty list keeps the
     /// port closed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub listen: Option<Vec<String>>,
-    /// Controller: `host:port` endpoints nodes are told at enrolment. Empty: the host name
-    /// a node enrols through, with the port of the cluster port.
+    /// Controller: `host:port` endpoints nodes are told at enrollment. Empty: the host name
+    /// a node enrolls through, with the port of the cluster port.
     pub advertise: Vec<String>,
     /// Controller: seconds between two heartbeats of a node (default 10).
     pub heartbeat_secs: u32,
-    /// Controller: lifetime in seconds of an enrolment token whose request names none
+    /// Controller: lifetime in seconds of an enrollment token whose request names none
     /// (default 3600, at most 604800).
-    pub enrolment_ttl_secs: u64,
+    #[serde(alias = "enrolment_ttl_secs")] // spelling: alias until 0.0.13
+    pub enrollment_ttl_secs: u64,
     /// Data-plane node: mebibytes the observation buffer keeps on disk while no controller
     /// is reachable; the oldest batches go first when it is full (default 64).
     pub buffer_mib: u64,
@@ -254,7 +255,7 @@ pub struct ClusterSection {
     pub sync_kbps: u64,
     /// Controller in a cluster: the address this controller dials instead of the cluster
     /// port a peer advertises, from the advertised `host:port` to the `host:port` to use
-    /// (split-horizon setups and labs). Empty: every peer is dialled at the address of its
+    /// (split-horizon setups and labs). Empty: every peer is dialed at the address of its
     /// member record.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub peer_address_map: BTreeMap<String, String>,
@@ -266,7 +267,7 @@ impl Default for ClusterSection {
             listen: None,
             advertise: Vec::new(),
             heartbeat_secs: 10,
-            enrolment_ttl_secs: 3600,
+            enrollment_ttl_secs: 3600,
             buffer_mib: 64,
             isolation_after_ms: 3_000,
             catch_up_timeout_secs: 120,
@@ -330,9 +331,9 @@ impl ClusterSection {
                 "cluster.heartbeat_secs must be between 1 and 300",
             ));
         }
-        if !(60..=604_800).contains(&self.enrolment_ttl_secs) {
+        if !(60..=604_800).contains(&self.enrollment_ttl_secs) {
             return Err(ConfigError::invalid(
-                "cluster.enrolment_ttl_secs must be between 60 and 604800",
+                "cluster.enrollment_ttl_secs must be between 60 and 604800",
             ));
         }
         if !(1..=4096).contains(&self.buffer_mib) {
@@ -360,15 +361,15 @@ impl ClusterSection {
                 "cluster.sync_kbps must be at most 10000000 (0 is no cap)",
             ));
         }
-        for (advertised, dialled) in &self.peer_address_map {
-            for endpoint in [advertised, dialled] {
+        for (advertised, dialed) in &self.peer_address_map {
+            for endpoint in [advertised, dialed] {
                 if !is_host_port(endpoint) {
                     return Err(ConfigError::invalid(format!(
                         "cluster.peer_address_map: `{endpoint}` is not a host and port, such as ddi.example.net:8444"
                     )));
                 }
             }
-            if advertised == dialled {
+            if advertised == dialed {
                 return Err(ConfigError::invalid(format!(
                     "cluster.peer_address_map: `{advertised}` maps to itself"
                 )));
@@ -971,11 +972,11 @@ pub enum RecursionOutbound {
 /// How much of the query name the resolver tells each authority server (RFC 9156, REC-Q8).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum QnameMinimisation {
-    /// Minimise, and send the full name when a server breaks on it (default).
+pub enum QnameMinimization {
+    /// Minimize, and send the full name when a server breaks on it (default).
     #[default]
     Relaxed,
-    /// Minimise, and fail the query when a server breaks on it.
+    /// Minimize, and fail the query when a server breaks on it.
     Strict,
     /// Send the full name to every server.
     Off,
@@ -984,7 +985,7 @@ pub enum QnameMinimisation {
 /// `[dns.recursion]`: the iterative resolver of this node (DNS-03, recursion plan section
 /// 3.4). Read and validated at start; the `dns` role maps the keys onto the engine's
 /// settings (the infrastructure and denial bounds, the budgets, the transport policy) and
-/// the validator's (`validate`, the signalling, the hold-down). The keys that are not set
+/// the validator's (`validate`, the signaling, the hold-down). The keys that are not set
 /// follow the security profile in force when the role starts. Every bound is checked by
 /// `tenko config check`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1021,8 +1022,9 @@ pub struct DnsRecursionSection {
     pub infra_entries: Option<usize>,
     /// The longest an infrastructure entry lives in seconds, 10 to 86,400 (default 900).
     pub infra_ttl_secs: u32,
-    /// Query name minimisation (RFC 9156): `relaxed` (default), `strict` or `off`.
-    pub qname_minimisation: QnameMinimisation,
+    /// Query name minimization (RFC 9156): `relaxed` (default), `strict` or `off`.
+    #[serde(alias = "qname_minimisation")] // spelling: alias until 0.0.13
+    pub qname_minimization: QnameMinimization,
     /// Synthesize negative answers from validated NSEC and NSEC3 records (RFC 8198;
     /// default true).
     pub aggressive_nsec: bool,
@@ -1036,7 +1038,8 @@ pub struct DnsRecursionSection {
     /// Tell the root servers which trust anchor keys the resolver holds (RFC 8145; default
     /// on, off under the Hardened profile).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub trust_anchor_signalling: Option<bool>,
+    #[serde(alias = "trust_anchor_signalling")] // spelling: alias until 0.0.13
+    pub trust_anchor_signaling: Option<bool>,
     /// Answer the root key sentinel queries (RFC 8509; default true).
     pub key_sentinel: bool,
     /// A fresh random source port for every query to an authority server (default true).
@@ -1071,11 +1074,11 @@ impl Default for DnsRecursionSection {
             budget_ms: 10_000,
             infra_entries: None,
             infra_ttl_secs: 900,
-            qname_minimisation: QnameMinimisation::Relaxed,
+            qname_minimization: QnameMinimization::Relaxed,
             aggressive_nsec: true,
             denial_entries: None,
             failure_cache_max_secs: 300,
-            trust_anchor_signalling: None,
+            trust_anchor_signaling: None,
             key_sentinel: true,
             fresh_port_per_query: true,
             local_zones_except: Vec::new(),
@@ -1112,8 +1115,8 @@ impl DnsRecursionSection {
 
     /// Whether the resolver signals its trust anchors (RFC 8145) under `profile`: on except
     /// under Hardened.
-    pub fn trust_anchor_signalling_for(&self, profile: Profile) -> bool {
-        self.trust_anchor_signalling
+    pub fn trust_anchor_signaling_for(&self, profile: Profile) -> bool {
+        self.trust_anchor_signaling
             .unwrap_or(profile != Profile::Hardened)
     }
 
@@ -1256,7 +1259,7 @@ mod recursion_tests {
         let section = recursion("");
         assert_eq!(section, DnsRecursionSection::default());
         assert_eq!(section.outbound, RecursionOutbound::Auto);
-        assert_eq!(section.qname_minimisation, QnameMinimisation::Relaxed);
+        assert_eq!(section.qname_minimization, QnameMinimization::Relaxed);
         assert_eq!(
             (
                 section.timeout_ms,
@@ -1273,7 +1276,7 @@ mod recursion_tests {
         );
         assert!(section.aggressive_nsec && section.key_sentinel && section.fresh_port_per_query);
         assert_eq!(section.local_zones_except, Vec::<String>::new());
-        for (profile, infra, denial, signalling) in [
+        for (profile, infra, denial, signaling) in [
             (Profile::Home, 1_000, 2_000, true),
             (Profile::Standard, 10_000, 20_000, true),
             (Profile::Hardened, 10_000, 20_000, false),
@@ -1283,8 +1286,8 @@ mod recursion_tests {
             assert_eq!(section.infra_entries_for(profile), infra, "{profile:?}");
             assert_eq!(section.denial_entries_for(profile), denial, "{profile:?}");
             assert_eq!(
-                section.trust_anchor_signalling_for(profile),
-                signalling,
+                section.trust_anchor_signaling_for(profile),
+                signaling,
                 "{profile:?}"
             );
         }
@@ -1294,12 +1297,12 @@ mod recursion_tests {
     fn a_key_that_is_set_wins_over_the_profile() {
         let section = recursion(
             "[dns.recursion]\nenabled = false\ninfra_entries = 50\ndenial_entries = 1000\n\
-             trust_anchor_signalling = true\n[profile]\nname = \"hardened\"\n",
+             trust_anchor_signaling = true\n[profile]\nname = \"hardened\"\n",
         );
         assert!(!section.enabled_for(Profile::Hardened));
         assert_eq!(section.infra_entries_for(Profile::Hardened), 50);
         assert_eq!(section.denial_entries_for(Profile::Home), 1_000);
-        assert!(section.trust_anchor_signalling_for(Profile::Hardened));
+        assert!(section.trust_anchor_signaling_for(Profile::Hardened));
     }
 
     #[test]
@@ -1345,17 +1348,17 @@ mod recursion_tests {
             assert_eq!(section.outbound, outbound, "{text}");
         }
         for (text, mode) in [
-            ("relaxed", QnameMinimisation::Relaxed),
-            ("strict", QnameMinimisation::Strict),
-            ("off", QnameMinimisation::Off),
+            ("relaxed", QnameMinimization::Relaxed),
+            ("strict", QnameMinimization::Strict),
+            ("off", QnameMinimization::Off),
         ] {
             let section = recursion(&format!(
-                "[dns.recursion]\nqname_minimisation = \"{text}\"\n"
+                "[dns.recursion]\nqname_minimization = \"{text}\"\n"
             ));
-            assert_eq!(section.qname_minimisation, mode, "{text}");
+            assert_eq!(section.qname_minimization, mode, "{text}");
         }
         assert!(resolve("[dns.recursion]\noutbound = \"ipv5\"\n").is_err());
-        assert!(resolve("[dns.recursion]\nqname_minimisation = \"loose\"\n").is_err());
+        assert!(resolve("[dns.recursion]\nqname_minimization = \"loose\"\n").is_err());
         // The alias is read only; the file written back by `config check` says `v4`.
         let written = recursion("[dns.recursion]\noutbound = \"ipv4\"\n");
         assert!(
@@ -1434,9 +1437,9 @@ mod recursion_tests {
             "[profile]\nname = \"lab\"\n[dns.recursion]\nenabled = true\n\
              hints = \"/etc/tenko/root.hints\"\noutbound = \"both\"\ntimeout_ms = 1500\n\
              budget_queries = 64\nbudget_restarts = 4\nbudget_depth = 5\nbudget_ms = 5000\n\
-             infra_entries = 20000\ninfra_ttl_secs = 600\nqname_minimisation = \"strict\"\n\
+             infra_entries = 20000\ninfra_ttl_secs = 600\nqname_minimization = \"strict\"\n\
              aggressive_nsec = false\ndenial_entries = 5000\nfailure_cache_max_secs = 60\n\
-             trust_anchor_signalling = false\nkey_sentinel = false\n\
+             trust_anchor_signaling = false\nkey_sentinel = false\n\
              fresh_port_per_query = false\nlocal_zones_except = \"10.in-addr.arpa\"\n\
              rfc5011_hold_down_secs = 120\n",
         );
@@ -1455,11 +1458,11 @@ mod recursion_tests {
         );
         assert_eq!(section.infra_entries, Some(20_000));
         assert_eq!(section.infra_ttl_secs, 600);
-        assert_eq!(section.qname_minimisation, QnameMinimisation::Strict);
+        assert_eq!(section.qname_minimization, QnameMinimization::Strict);
         assert!(!section.aggressive_nsec && !section.key_sentinel && !section.fresh_port_per_query);
         assert_eq!(section.denial_entries, Some(5_000));
         assert_eq!(section.failure_cache_max_secs, 60);
-        assert_eq!(section.trust_anchor_signalling, Some(false));
+        assert_eq!(section.trust_anchor_signaling, Some(false));
         assert_eq!(section.local_zones_except, ["10.in-addr.arpa"]);
         assert_eq!(section.rfc5011_hold_down_secs, Some(120));
     }
@@ -1913,7 +1916,7 @@ pub enum DnsLogFormat {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DnsLogClient {
-    /// The client is logged: as a pseudonym, or as its address with `pseudonymise = false`.
+    /// The client is logged: as a pseudonym, or as its address with `pseudonymize = false`.
     #[default]
     Logged,
     /// No client field at all.
@@ -1924,7 +1927,7 @@ pub enum DnsLogClient {
 ///
 /// `enabled` and `days` follow the security profile when they are not set (TGL-15, see
 /// [`DnsLogSection::effective`]): Home off and 7 days, Standard and Hardened on and 30
-/// days, Lab on and 7 days. Pseudonymisation is on in every profile.
+/// days, Lab on and 7 days. Pseudonymization is on in every profile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DnsLogSection {
@@ -1947,7 +1950,8 @@ pub struct DnsLogSection {
     pub sample: u32,
     /// Replace client addresses with a keyed hash whose key changes every day (default
     /// true in every profile).
-    pub pseudonymise: bool,
+    #[serde(alias = "pseudonymise")] // spelling: alias until 0.0.13
+    pub pseudonymize: bool,
     /// `logged` (default) or `hidden`: no client field at all.
     pub client: DnsLogClient,
 }
@@ -1961,7 +1965,7 @@ impl Default for DnsLogSection {
             days: None,
             size_mb: 256,
             sample: 1,
-            pseudonymise: true,
+            pseudonymize: true,
             client: DnsLogClient::Logged,
         }
     }
@@ -3713,6 +3717,34 @@ mod tests {
     }
 
     #[test]
+    fn the_british_keys_of_0_0_11_still_load() {
+        let file = concat!(
+            "data_dir = \"/d\"\n",
+            "[cluster]\n",
+            "enrolment_ttl_secs = 600\n", // spelling: alias until 0.0.13
+            "[dns.recursion]\n",
+            "qname_minimisation = \"strict\"\n", // spelling: alias until 0.0.13
+            "trust_anchor_signalling = false\n", // spelling: alias until 0.0.13
+            "[dns.log]\n",
+            "pseudonymise = false\n", // spelling: alias until 0.0.13
+        );
+        let loaded = from_text(file, &[]).expect("loads");
+        assert_eq!(loaded.config.cluster.enrollment_ttl_secs, 600);
+        let dns = &loaded.config.dns;
+        assert_eq!(dns.recursion.qname_minimization, QnameMinimization::Strict);
+        assert_eq!(dns.recursion.trust_anchor_signaling, Some(false));
+        assert!(!dns.log.pseudonymize);
+
+        // The environment form follows from the key.
+        let loaded = from_text(
+            "data_dir = \"/d\"\n",
+            &[("TENKO_CLUSTER__ENROLMENT_TTL_SECS", "900")], // spelling: alias until 0.0.13
+        )
+        .expect("loads");
+        assert_eq!(loaded.config.cluster.enrollment_ttl_secs, 900);
+    }
+
+    #[test]
     fn environment_overrides_the_file() {
         let loaded = from_text(
             "data_dir = \"/from/file\"\n[log]\nlevel = \"warn\"\n",
@@ -3955,7 +3987,7 @@ name = \"{profile}\"
                 "{profile:?}"
             );
         }
-        assert!(defaults.pseudonymise, "pseudonymised in every profile");
+        assert!(defaults.pseudonymize, "pseudonymized in every profile");
         let loaded = from_text(
             "data_dir = \"/d\"
 [dns.log]
@@ -4126,7 +4158,7 @@ days = 400
             "heartbeat_secs = 0",
             "advertise = [\"ddi.example.net\"]",
             "buffer_mib = 0",
-            "enrolment_ttl_secs = 10",
+            "enrollment_ttl_secs = 10",
             "isolation_after_ms = 100",
             "catch_up_timeout_secs = 0",
             "promote_lag_entries = 0",

@@ -4,7 +4,7 @@
 //! The query path hands each entry to a [`QueryLogSink`], which must not block: a full
 //! buffer drops the entry and counts it (`tenko_dns_log_dropped_total`).
 //! [`crate::querylog::FileLog`] is the sink of the role: the ring, JSON lines and dnstap,
-//! rotation, retention and pseudonymisation; [`NullLog`] discards.
+//! rotation, retention and pseudonymization; [`NullLog`] discards.
 
 use std::net::IpAddr;
 
@@ -59,7 +59,7 @@ impl Resolution {
 pub struct QueryLogEntry<'a> {
     /// Microseconds since 1970 when the query arrived.
     pub at_micros: u64,
-    /// The client; the sink pseudonymises it per the settings.
+    /// The client; the sink pseudonymizes it per the settings.
     pub client: IpAddr,
     /// The transport.
     pub transport: QueryTransport,

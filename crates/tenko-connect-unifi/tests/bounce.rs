@@ -277,7 +277,7 @@ async fn the_host_guardrails_refuse_the_recorded_shared_ports_and_uplinks() {
     // Port 7 leads to another switch (29 learned MAC addresses): a link, refused as such.
     assert_eq!(refuse(SWITCH, 7), guardrail::UPLINK);
     // Port 4 of the third switch: one listed client, two learned MAC addresses and an LLDP
-    // neighbour the controller does not manage behind it.
+    // neighbor the controller does not manage behind it.
     assert_eq!(refuse("00:00:5e:00:53:38", 4), guardrail::UPLINK);
     assert_eq!(refuse(SWITCH, 8), guardrail::UPLINK);
     assert_eq!(refuse(SWITCH, 99), guardrail::PORT_UNKNOWN);

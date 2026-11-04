@@ -127,7 +127,7 @@ describe("import wizard", () => {
     expect([...ipamState().data.host.values()].some((h) => h.name === "app01")).toBe(true);
   });
 
-  it("lists the warning that needs an acknowledgement and keeps apply off until it is given", async () => {
+  it("lists the warning that needs an acknowledgment and keeps apply off until it is given", async () => {
     open();
     await upload("networks.csv", NETWORKS_CSV);
     await preview();
@@ -142,7 +142,7 @@ describe("import wizard", () => {
   });
 
   // The preview says can_apply: false with the blocker ipam.plan.unacknowledged, as the server
-  // does; the acknowledgement given here clears it, and apply sends it.
+  // does; the acknowledgment given here clears it, and apply sends it.
   it("applies a warning once it is acknowledged", async () => {
     open();
     await upload("networks.csv", NETWORKS_CSV);

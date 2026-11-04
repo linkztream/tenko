@@ -1142,8 +1142,8 @@ impl OperatorSecrets {
             let mut batch = WriteBatch::for_request(ctx);
             // A new envelope never replays under an idempotency key (random DEK and nonce).
             batch.idempotency = None;
-            let spec = SecretSpec::new(SecretPurpose::from_static(OPERATOR_PURPOSE))
-                .labelled(name.clone());
+            let spec =
+                SecretSpec::new(SecretPurpose::from_static(OPERATOR_PURPOSE)).labeled(name.clone());
             let secret =
                 self.vault
                     .stage_put(&mut batch, ctx, SecretClass::Operator, spec, &new.value)?;

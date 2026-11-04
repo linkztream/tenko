@@ -13,9 +13,9 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
 unmaintained = "all"
 
-# The project licence is the Business Source License 1.1 with AGPL-3.0-or-later as the
+# The project license is the Business Source License 1.1 with AGPL-3.0-or-later as the
 # Change License (ADR 0022). A copyleft dependency would bind the converted versions, so
-# the allow list below stays permissive and excludes every GPL-* and AGPL-* licence.
+# the allow list below stays permissive and excludes every GPL-* and AGPL-* license.
 [licenses]
 allow = [
   "MIT",
@@ -27,7 +27,7 @@ allow = [
   "Zlib",
   "Unicode-3.0",
   # Weak copyleft (file-level). Allowed, but every new MPL-2.0 dependency must be
-  # reviewed in its pull request. cargo-deny has no per-licence "warn" level.
+  # reviewed in its pull request. cargo-deny has no per-license "warn" level.
   "MPL-2.0",
   "CC0-1.0",
   "OpenSSL",
@@ -36,7 +36,7 @@ confidence-threshold = 0.9
 exceptions = []
 unused-allowed-license = "allow"
 
-# Workspace crates are `publish = false`; their own licence (BUSL-1.1) is not checked here.
+# Workspace crates are `publish = false`; their own license (BUSL-1.1) is not checked here.
 [licenses.private]
 ignore = true
 

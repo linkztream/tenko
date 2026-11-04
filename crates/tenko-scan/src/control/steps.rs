@@ -331,7 +331,7 @@ impl StepHandler for DispatchStep {
     async fn execute(&self, params: &[u8], cx: &StepContext) -> Result<StepOutcome, StepError> {
         let params = params_of(params)?;
         let (view, mut run, revision) = read_run(cx, params.run).await?;
-        if !run.parts.is_empty() || matches!(run.state, ScanState::Cancelled) {
+        if !run.parts.is_empty() || matches!(run.state, ScanState::Canceled) {
             return Ok(StepOutcome::Done { output: None });
         }
         let now = Timestamp::now();
@@ -399,7 +399,7 @@ impl StepHandler for DispatchStep {
 }
 
 /// Withdraws the commands of a run that are not over, asks the probes that work on one to
-/// cancel it, and marks the run cancelled.
+/// cancel it, and marks the run canceled.
 async fn cancel_run(cx: &StepContext, run: Uuid) -> Result<(), StepError> {
     let (view, mut record, revision) = read_run(cx, run).await?;
     let now = Timestamp::now();
@@ -430,13 +430,13 @@ async fn cancel_run(cx: &StepContext, run: Uuid) -> Result<(), StepError> {
             &mut batch,
             &command,
             command_revision,
-            CommandState::Cancelled,
+            CommandState::Canceled,
             now,
         )?;
     }
     drop(view);
     if record.finished_at.is_none() {
-        record.state = ScanState::Cancelled;
+        record.state = ScanState::Canceled;
         record.finished_at = Some(now);
         batch.expect_typed(&RUNS, &run, Some(revision));
         batch.put_typed(&RUNS, &run, &record)?;
@@ -576,7 +576,7 @@ impl StepHandler for DiffStep {
     async fn execute(&self, params: &[u8], cx: &StepContext) -> Result<StepOutcome, StepError> {
         let params = params_of(params)?;
         let (view, mut run, revision) = read_run(cx, params.run).await?;
-        if run.diff.is_some() || matches!(run.state, ScanState::Cancelled | ScanState::Failed) {
+        if run.diff.is_some() || matches!(run.state, ScanState::Canceled | ScanState::Failed) {
             return Ok(StepOutcome::Done { output: None });
         }
         let now = Timestamp::now();

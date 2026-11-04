@@ -45,7 +45,7 @@ disclosure window of `SECURITY.md` ends.
 - **Fingerprint.** `<tool>:<rule>:<location>`, for example `row:net.cluster_port`,
   `nmap:tcp/8444`, `testssl:cipher_negotiated:8443`,
   `zap:10038:/api/v1/dns/zones/{id}`, `codeql:rust/cleartext-logging:crates/tenko-auth/src/session.rs#create`.
-  A path with an identifier is normalised to its OpenAPI-style template (a resource id in a
+  A path with an identifier is normalized to its OpenAPI-style template (a resource id in a
   URL path becomes `{id}`; a port keeps its number), and a line number is never part of a
   fingerprint. The triage matches a new run's findings to the open ones by fingerprint; one
   that matches nothing gets the next ID.
@@ -94,7 +94,7 @@ report means, so they change only as described below.
 **`public-operations.txt`** lists the API operations that answer without a session or a
 token, one `METHOD /path` per line as the OpenAPI document writes it, each with its reason in
 a comment: liveness and readiness, the setup flow, the sign-in steps, the languages of the
-sign-in page, node enrolment, the internal CA's root, the OpenAPI document, and the web
+sign-in page, node enrollment, the internal CA's root, the OpenAPI document, and the web
 interface's static files. The row `web.unauth` sends every other operation without
 credentials and blocks the release on any answer but 401 or 403, and also when the operations
 the document declares public are not exactly this list, so a route that loses its

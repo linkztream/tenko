@@ -70,7 +70,7 @@ export function sessionInfo(session: MockSession, user: MockUser): SessionInfo {
     absolute_expires_at: iso(session.absolute_expires_at),
     flags: {
       password_change_required: user.password_change_required,
-      mfa_enrolment_required: STRENGTH_RANK[session.strength] < STRENGTH_RANK[required],
+      mfa_enrollment_required: STRENGTH_RANK[session.strength] < STRENGTH_RANK[required],
       break_glass: user.break_glass,
     },
     profile: settings.profile,

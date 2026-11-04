@@ -292,18 +292,18 @@ image = "ghcr.io/linkztream/tenko"
 [cluster]
 # The node transport between controllers and data-plane nodes (probe, dns, dhcp): gRPC
 # over mutual TLS with certificates from the internal CA (OPS-04). docs/cluster.md
-# describes enrolment, renewal, revocation and the firewall rules.
+# describes enrollment, renewal, revocation and the firewall rules.
 # Controller: socket addresses of the cluster port. Not set: 0.0.0.0:8444, opened once a
-# node is enrolled or an enrolment token is waiting. An empty list keeps the port closed.
+# node is enrolled or an enrollment token is waiting. An empty list keeps the port closed.
 # listen = ["0.0.0.0:8444"]
-# Controller: host:port endpoints nodes are told at enrolment. Empty: the host name a node
-# enrols through, with the port of the cluster port.
+# Controller: host:port endpoints nodes are told at enrollment. Empty: the host name a node
+# enrolls through, with the port of the cluster port.
 advertise = []
 # Controller: seconds between two heartbeats of a node.
 heartbeat_secs = 10
-# Controller: lifetime in seconds of an enrolment token whose request names none (at most
+# Controller: lifetime in seconds of an enrollment token whose request names none (at most
 # 604800, seven days).
-enrolment_ttl_secs = 3600
+enrollment_ttl_secs = 3600
 # Data-plane node: mebibytes the observation buffer keeps on disk while no controller is
 # reachable; the oldest batches go first when it is full.
 buffer_mib = 64
@@ -464,7 +464,7 @@ size_mb = 256
 # Log one query in N (1 to 1000000; 1 logs every query).
 sample = 1
 # Replace client addresses with a keyed hash whose key changes every day (GDPR, TGL-15).
-pseudonymise = true
+pseudonymize = true
 # "logged" or "hidden": with "hidden" no client field is written at all.
 client = "logged"
 
@@ -571,9 +571,9 @@ max_upload = 64
 # infra_entries = 10000
 # The longest an infrastructure entry lives, in seconds (10 to 86400).
 # infra_ttl_secs = 900
-# Query name minimisation (RFC 9156): "relaxed" (full name when a server breaks on it),
+# Query name minimization (RFC 9156): "relaxed" (full name when a server breaks on it),
 # "strict" or "off".
-# qname_minimisation = "relaxed"
+# qname_minimization = "relaxed"
 # Synthesize negative answers from validated NSEC and NSEC3 records (RFC 8198).
 # aggressive_nsec = true
 # Denial-of-existence proofs the cache holds (1000 to 10000000). Not set: 2000 under the
@@ -583,7 +583,7 @@ max_upload = 64
 # failure_cache_max_secs = 300
 # Tell the root servers which trust anchor keys the resolver holds (RFC 8145). Not set: on,
 # except under the Hardened profile.
-# trust_anchor_signalling = true
+# trust_anchor_signaling = true
 # Answer the root key sentinel queries (RFC 8509).
 # key_sentinel = true
 # A fresh random source port for every query to an authority server.
@@ -723,11 +723,11 @@ prefixes = []
 # prefixes = ["192.0.2.0/24", "2001:db8:10::/64"]
 # Prefixes and addresses inside `prefixes` that are never probed or reported.
 exclude = []
-# The VRF of the addresses (a VRF id); not set: the VRF of the enrolment token, else the
+# The VRF of the addresses (a VRF id); not set: the VRF of the enrollment token, else the
 # default VRF.
 # vrf = "..."
 # Active probing (TGL-18): ICMP sweeps and TCP connect scans. false keeps the probe passive
-# (neighbour tables, mDNS, LLMNR, reverse DNS, SNMP).
+# (neighbor tables, mDNS, LLMNR, reverse DNS, SNMP).
 active = true
 # Rate profile (TGL-19): normal (100 probes/s), slow (50), slowest (10) or unlimited.
 rate = "normal"
@@ -747,14 +747,14 @@ blackout = []
 # timezone = "Europe/Stockholm"
 
 [scan.arp]
-# IPv4 neighbours from the operating system's ARP table; sends nothing.
+# IPv4 neighbors from the operating system's ARP table; sends nothing.
 enabled = true
 interval_secs = 300
 # Seconds a sighting stays current; default three intervals, at least 15 minutes.
 # ttl_secs = 900
 
 [scan.nd]
-# IPv6 neighbours from the operating system's neighbour table; sends nothing.
+# IPv6 neighbors from the operating system's neighbor table; sends nothing.
 enabled = true
 interval_secs = 300
 
@@ -804,7 +804,7 @@ enabled = true
 interval_secs = 900
 timeout_ms = 2000
 retries = 2
-# Also report clients behind ports with an LLDP neighbour (access points, other switches).
+# Also report clients behind ports with an LLDP neighbor (access points, other switches).
 attach_on_lldp_ports = false
 # The credentials are read from this file until the controller delivers them from the
 # vault: keep the passwords in files only tenko can read.

@@ -1,16 +1,16 @@
 # shellcheck shell=bash
 # The rows of E35 in the round `recursion` (WP10.3, dns-recursion-plan.md sections 2.2 and
-# 2.6): QNAME minimisation on the wire (RFC 9156) and the denial cache (RFC 8198, RFC 8020).
+# 2.6): QNAME minimization on the wire (RFC 9156) and the denial cache (RFC 8198, RFC 8020).
 # smoke.sh sources this file; recursion.sh runs `denial_rows` with the node's default
-# settings (relaxed minimisation, the denial cache on) and `denial_mode_rows` at the end of
-# the round, which restarts the node with `qname_minimisation = "strict"` and
-# `aggressive_nsec = false`, then with `qname_minimisation = "off"`. With M42=1 the round
+# settings (relaxed minimization, the denial cache on) and `denial_mode_rows` at the end of
+# the round, which restarts the node with `qname_minimization = "strict"` and
+# `aggressive_nsec = false`, then with `qname_minimization = "off"`. With M42=1 the round
 # also runs the measurement M42 (`denial_m42`; bench/phase2-dns/scripts/run-m42-denial.sh).
 #
 # Witnesses: the authority's query log (GET /nodes/{id}/dns/log on the lab root's node:
 # every query that reached the zones of the lab), the lines `asked NAME TYPE` of the quirk
 # responder `quirk-ent` (a server that answers NXDOMAIN for its empty non-terminals, the
-# kind RFC 9156 falls back for), delv for the synthesised answers, and dig's RCODE and AD.
+# kind RFC 9156 falls back for), delv for the synthesized answers, and dig's RCODE and AD.
 
 ent_zone=ent.quirk.example.test
 m42=()
@@ -32,7 +32,7 @@ print(sum(1 for item in items if item['qname'].rstrip('.').lower() == name))"
 }
 
 # auth_asked_a <name>: the type-A queries for exactly that name in the authority's log (only
-# minimisation asks a zone's apex for A here; the validator asks DS and DNSKEY).
+# minimization asks a zone's apex for A here; the validator asks DS and DNSKEY).
 auth_asked_a() {
   sleep 1
   on authority
@@ -85,10 +85,10 @@ rcode_ad() {
   printf '%s%s\n' "$(rcode_of <<<"$out")" "$(grep -q '^;; flags:.* ad[ ;]' <<<"$out" && echo ' ad')"
 }
 
-# synthesised <first> <type> <second> <type> <want>: asks <first> (the authority answers
+# synthesized <first> <type> <second> <type> <want>: asks <first> (the authority answers
 # and the node keeps the proof), then <second>, which must answer <want> (the RCODE and ad,
 # as rcode_ad prints them) with no query for it at the authority.
-synthesised() {
+synthesized() {
   local first="$1" first_type="$2" second="$3" type="$4" want="$5" before after got
   rcode_ad "$first" "$first_type" >/dev/null
   before="$(auth_asked "$second")"
@@ -113,9 +113,9 @@ for i in json.load(open('$work/api.out'))['items']:
   done
 }
 
-# not_synthesised <first> <second> <type>: as synthesised, but the second name must reach
+# not_synthesized <first> <second> <type>: as synthesized, but the second name must reach
 # the authority (the denial cache off).
-not_synthesised() {
+not_synthesized() {
   local before after
   rcode_ad "$1" "$3" >/dev/null
   before="$(auth_asked "$2")"
@@ -125,17 +125,17 @@ not_synthesised() {
   ((after > before))
 }
 
-# minimised <name> <minimised|full>: with the node's caches flushed, asks the name (three
+# minimized <name> <minimized|full>: with the node's caches flushed, asks the name (three
 # labels below the TLD, www.nsec3.example.test). The lab's authority serves the root, the TLD
 # and the zones under it from one address and answers from the deepest zone it holds, so
-# the walk never leaves the root's cut: minimised, the root's servers are asked
-# `example.test` and `nsec3.example.test` (type A, which only minimisation asks of those
-# names) before the full name, and the full name once; full (QNAME minimisation off), the
+# the walk never leaves the root's cut: minimized, the root's servers are asked
+# `example.test` and `nsec3.example.test` (type A, which only minimization asks of those
+# names) before the full name, and the full name once; full (QNAME minimization off), the
 # full name and none of the shorter questions.
-minimised() {
+minimized() {
   local name="$1" mode="$2" full_before full_after tld_before tld_after zone_before zone_after
   on tenko
-  if [[ "$mode" == minimised ]]; then
+  if [[ "$mode" == minimized ]]; then
     api POST "/nodes/$node_id/dns/cache/flush" >/dev/null &&
       api POST "/nodes/$node_id/dns/infra/flush" >/dev/null || return 1
   fi
@@ -147,7 +147,7 @@ minimised() {
   tld_after="$(auth_asked_a example.test)"
   zone_after="$(auth_asked_a "${name#*.}")"
   echo "$name asked $((full_after - full_before)) time(s); example.test A $((tld_after - tld_before)) time(s), ${name#*.} A $((zone_after - zone_before)) time(s)"
-  if [[ "$mode" == minimised ]]; then
+  if [[ "$mode" == minimized ]]; then
     ((full_after - full_before == 1 && tld_after > tld_before && zone_after > zone_before))
   else
     ((full_after > full_before && tld_after == tld_before && zone_after == zone_before))
@@ -179,7 +179,7 @@ ent_case() {
   esac
 }
 
-# delv_secure <name> <type>: delv validates the node's (synthesised) answer, and the
+# delv_secure <name> <type>: delv validates the node's (synthesized) answer, and the
 # authority was not asked for the name meanwhile.
 delv_secure() {
   local before after verdict
@@ -192,26 +192,26 @@ delv_secure() {
 
 # denial_rows: the rows with the node's default settings.
 denial_rows() {
-  printf '\n==> E35: QNAME minimisation and the denial cache\n'
+  printf '\n==> E35: QNAME minimization and the denial cache\n'
   row den.qmin "www.nsec3.example.test: example.test and nsec3.example.test asked first, the full name once" \
-    minimised www.nsec3.example.test minimised
+    minimized www.nsec3.example.test minimized
   row den.qmin.fallback "relaxed: the NXDOMAIN of an empty non-terminal asked again whole, remembered" \
     ent_case relaxed
   row den.nsec "after nothing.example.test, nope.example.test is NXDOMAIN from the NSEC, no query" \
-    synthesised nothing.example.test A nope.example.test A "NXDOMAIN ad"
+    synthesized nothing.example.test A nope.example.test A "NXDOMAIN ad"
   row den.nsec.nodata "after api.example.test AAAA, MX is NODATA from the NSEC, no query" \
-    synthesised api.example.test AAAA api.example.test MX "NOERROR ad"
+    synthesized api.example.test AAAA api.example.test MX "NOERROR ad"
   row den.nsec3 "after a.nsec3.example.test, b.nsec3.example.test is NXDOMAIN from the NSEC3, no query" \
-    synthesised a.nsec3.example.test A b.nsec3.example.test A "NXDOMAIN ad"
+    synthesized a.nsec3.example.test A b.nsec3.example.test A "NXDOMAIN ad"
   row den.nsec3.nodata "after www.nsec3.example.test AAAA, TXT is NODATA from the NSEC3, no query" \
-    synthesised www.nsec3.example.test AAAA www.nsec3.example.test TXT "NOERROR ad"
+    synthesized www.nsec3.example.test AAAA www.nsec3.example.test TXT "NOERROR ad"
   row den.wildcard "after one.wild.example.test, two.wild.example.test from the wildcard, no query" \
-    synthesised one.wild.example.test A two.wild.example.test A "NOERROR ad"
+    synthesized one.wild.example.test A two.wild.example.test A "NOERROR ad"
   row den.rfc8020 "after gone.insecure.example.test, x.gone.insecure.example.test is NXDOMAIN, no query" \
-    synthesised gone.insecure.example.test A x.gone.insecure.example.test A NXDOMAIN
-  row den.delv.nxdomain "delv validates the synthesised NXDOMAIN of nope.example.test" \
+    synthesized gone.insecure.example.test A x.gone.insecure.example.test A NXDOMAIN
+  row den.delv.nxdomain "delv validates the synthesized NXDOMAIN of nope.example.test" \
     delv_secure nope.example.test A
-  row den.delv.nodata "delv validates the synthesised NODATA of api.example.test MX" \
+  row den.delv.nodata "delv validates the synthesized NODATA of api.example.test MX" \
     delv_secure api.example.test MX
 }
 
@@ -229,13 +229,13 @@ restart_node() {
 # denial_mode_rows: the rows of the other settings; the node runs the defaults again after.
 denial_mode_rows() {
   printf '\n==> E35: strict and off, and the denial cache off\n'
-  restart_node $'qname_minimisation = "strict"\naggressive_nsec = false'
+  restart_node $'qname_minimization = "strict"\naggressive_nsec = false'
   row den.strict "strict: the NXDOMAIN of the empty non-terminal stands, no fallback" ent_case strict
   row den.off.aggressive "aggressive_nsec = false: nope.example.test reaches the authority" \
-    not_synthesised nothing.example.test nope2.example.test A
-  restart_node 'qname_minimisation = "off"'
+    not_synthesized nothing.example.test nope2.example.test A
+  restart_node 'qname_minimization = "off"'
   row den.off "off: www.nsec3.example.test asked whole, no shorter question" \
-    minimised www.nsec3.example.test full
+    minimized www.nsec3.example.test full
   row den.off.ent "off: quirk-ent asked the full name only" ent_case off
   [[ "${M42:-0}" == 1 ]] && denial_m42
   restart_node ""
@@ -264,7 +264,7 @@ denial_m42() {
   printf '\n==> M42: authority queries per 1,000 random names under a covered range\n'
   for aggressive in true false; do
     for mode in relaxed strict off; do
-      restart_node "qname_minimisation = \"$mode\""$'\n'"aggressive_nsec = $aggressive"
+      restart_node "qname_minimization = \"$mode\""$'\n'"aggressive_nsec = $aggressive"
       m42_run "nsec  $mode denial=$aggressive" example.test nothing.example.test
       m42_run "nsec3 $mode denial=$aggressive" nsec3.example.test a.nsec3.example.test
     done

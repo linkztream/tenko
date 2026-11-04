@@ -185,7 +185,7 @@ impl Method for TcpConnect {
         let mut done = 0usize;
         let mut output = MethodOutput::default();
         loop {
-            while pending.len() < limit && !ctx.cancel.is_cancelled() {
+            while pending.len() < limit && !ctx.cancel.is_canceled() {
                 let Some(addr) = queue.next() else { break };
                 let pacer = Arc::clone(&ctx.pacer);
                 let (timeout, tls_hint) = (self.timeout, self.tls_hint);
@@ -196,7 +196,7 @@ impl Method for TcpConnect {
             }
             let next = tokio::select! {
                 next = pending.next() => next,
-                () = ctx.cancel.cancelled() => break,
+                () = ctx.cancel.canceled() => break,
             };
             let Some((addr, state)) = next else { break };
             done += 1;
@@ -219,7 +219,7 @@ impl Method for TcpConnect {
                 })
             })
             .collect();
-        output.covered_all = done == total && !ctx.cancel.is_cancelled();
+        output.covered_all = done == total && !ctx.cancel.is_canceled();
         Ok(output)
     }
 }
@@ -255,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn tls_records_are_recognised() {
+    fn tls_records_are_recognized() {
         assert!(looks_like_tls(&[0x16, 0x03, 0x03, 0x00, 0x5a]));
         assert!(looks_like_tls(&[0x15, 0x03, 0x01, 0x00, 0x02]));
         assert!(!looks_like_tls(b"HTTP/1.1 400 Bad Request"));

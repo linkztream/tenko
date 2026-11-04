@@ -385,7 +385,7 @@ describe("unbinding a credential", () => {
     expect(await sent[0]?.body).toEqual({ credentials: [{ secret: NAS, role: "admin" }] });
   });
 
-  it("keeps the credential when the question is cancelled", async () => {
+  it("keeps the credential when the question is canceled", async () => {
     const sent = writes();
     await openNas();
     fireEvent.click(screen.getByTestId("credential-unbind"));

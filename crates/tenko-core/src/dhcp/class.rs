@@ -4,7 +4,7 @@
 //! holds. A [`Policy`] is an ordered rule of one scope or of the server: its [`Condition`]
 //! joins terms (a class, a negated class, a single field match) with AND or OR, as Windows
 //! DHCP policies do, and its [`PolicyAction`] restricts the address range, sets the lease
-//! time and the DDNS behaviour; the policy's options are the option set it owns
+//! time and the DDNS behavior; the policy's options are the option set it owns
 //! (`OptionOwner::Policy`). The condition is a tree of depth two (the policy's AND or OR
 //! over its terms, a class's OR over its matches), which is what the Windows export of
 //! Phase 4 holds and what Kea's `test` expressions of the WP9.3 export express.
@@ -342,7 +342,7 @@ pub struct PolicyAction {
     /// The lease times for the clients.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease: Option<LeaseTimes>,
-    /// The DDNS behaviour for the clients.
+    /// The DDNS behavior for the clients.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ddns: Option<DdnsPolicy>,
 }

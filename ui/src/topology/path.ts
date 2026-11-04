@@ -9,10 +9,10 @@ function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** Every node that appears in an edge, with its distinct neighbours. A self-loop adds the node only. */
+/** Every node that appears in an edge, with its distinct neighbors. A self-loop adds the node only. */
 function adjacency(edges: readonly LayoutEdge[]): Map<string, Set<string>> {
   const adj = new Map<string, Set<string>>();
-  const neighbours = (id: string): Set<string> => {
+  const neighbors = (id: string): Set<string> => {
     let set = adj.get(id);
     if (!set) {
       set = new Set();
@@ -21,8 +21,8 @@ function adjacency(edges: readonly LayoutEdge[]): Map<string, Set<string>> {
     return set;
   };
   for (const edge of edges) {
-    const a = neighbours(edge.a);
-    const b = neighbours(edge.b);
+    const a = neighbors(edge.a);
+    const b = neighbors(edge.b);
     if (edge.a === edge.b) continue;
     a.add(edge.b);
     b.add(edge.a);
@@ -41,7 +41,7 @@ function unwind(parent: ReadonlyMap<string, string | null>, end: string): string
  * The shortest path from `from` to `to` over edges in either direction, as node ids including
  * both ends; null when there is none or an id is unknown (it appears in no edge). Among equally
  * short paths the one whose ids are smallest from the start on wins: the search visits the
- * neighbours of a node by ascending id.
+ * neighbors of a node by ascending id.
  */
 export function shortestPath(edges: readonly LayoutEdge[], from: string, to: string): string[] | null {
   const adj = adjacency(edges);

@@ -1,7 +1,7 @@
 //! The zone file reader and writer of Tenko 0.0.10, on `domain`'s zone file scanner (the
 //! dev-dependency feature `zonefile`): the reference of the differential test and of the
 //! timing comparison. It is the code the import used until Tenko read zone files with its
-//! own code, kept here unchanged in behaviour: `$GENERATE` expanded and `$INCLUDE` refused
+//! own code, kept here unchanged in behavior: `$GENERATE` expanded and `$INCLUDE` refused
 //! before the scan, the lines mapped back to the file's lines, the records checked by the
 //! model.
 

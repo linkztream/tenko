@@ -9,7 +9,7 @@
 # A dynamically linked --server-binary is refused with a warning (--allow-dynamic overrides;
 # the run is then marked not publishable). Windows runs (Git Bash) use the release build.
 # Every figure is a single-node figure (plan section 2.10) and, with the load generator on the
-# same host, a loopback figure: an upper bound, labelled so.
+# same host, a loopback figure: an upper bound, labeled so.
 #
 # 1. A new node: `tenko serve --roles controller,dns` with an empty data directory, the API
 #    on loopback (reverse-proxy mode, plain HTTP from the trusted loopback), the DNS role on

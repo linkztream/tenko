@@ -85,7 +85,7 @@ describe("assignVlanStyles", () => {
     });
   });
 
-  it("gives neighbouring ids hues that are far apart", () => {
+  it("gives neighboring ids hues that are far apart", () => {
     const vids = Array.from({ length: 12 }, (_, i) => 10 * (i + 1));
     const hues = vids.map((vid) => assignVlanStyles(vids, LIGHT).get(vid)?.hue as number);
     for (let i = 1; i < hues.length; i++) {

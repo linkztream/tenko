@@ -57,7 +57,8 @@ pub enum CommandState {
     /// Not finished before its deadline.
     Expired,
     /// Withdrawn by the issuer.
-    Cancelled,
+    #[serde(alias = "cancelled")] // spelling: alias permanently (stored commands carry it)
+    Canceled,
 }
 
 impl CommandState {
@@ -71,7 +72,7 @@ impl CommandState {
             Self::Failed => "failed",
             Self::Rejected => "rejected",
             Self::Expired => "expired",
-            Self::Cancelled => "cancelled",
+            Self::Canceled => "canceled",
         }
     }
 
@@ -79,7 +80,7 @@ impl CommandState {
     pub const fn is_final(self) -> bool {
         matches!(
             self,
-            Self::Done | Self::Failed | Self::Rejected | Self::Expired | Self::Cancelled
+            Self::Done | Self::Failed | Self::Rejected | Self::Expired | Self::Canceled
         )
     }
 
@@ -112,7 +113,7 @@ impl FromStr for CommandState {
             "failed" => Self::Failed,
             "rejected" => Self::Rejected,
             "expired" => Self::Expired,
-            "cancelled" => Self::Cancelled,
+            "canceled" | "cancelled" => Self::Canceled, // spelling: alias permanently
             other => {
                 return Err(ClusterError::new(
                     codes::COMMAND_INVALID,
@@ -309,7 +310,7 @@ pub fn results_of(view: &dyn ReadView, command: Uuid) -> Result<Vec<RunResult>, 
 pub struct Report {
     /// The command.
     pub command: Uuid,
-    /// The state reached; never `pending`, `expired` or `cancelled`.
+    /// The state reached; never `pending`, `expired` or `canceled`.
     pub state: CommandState,
     /// Progress in percent.
     pub progress: u8,
@@ -339,7 +340,7 @@ impl Report {
         let state: CommandState = event.state.parse()?;
         if matches!(
             state,
-            CommandState::Pending | CommandState::Expired | CommandState::Cancelled
+            CommandState::Pending | CommandState::Expired | CommandState::Canceled
         ) {
             return Err(ClusterError::new(
                 codes::COMMAND_INVALID,
@@ -383,7 +384,7 @@ pub fn stage_issue(batch: &mut WriteBatch, record: &CommandRecord) -> Result<(),
     Ok(())
 }
 
-/// Marks a command that is not final as `state` (`expired` or `cancelled`) in `batch`,
+/// Marks a command that is not final as `state` (`expired` or `canceled`) in `batch`,
 /// guarded by its revision; returns whether anything was staged.
 ///
 /// # Errors
@@ -774,6 +775,19 @@ pub async fn serve_subscribe(
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_command_state_stored_by_0_0_11_still_reads() {
+        let old = "cancelled"; // spelling: alias permanently (the value of 0.0.11)
+        let bytes = tenko_core::codec::cbor::to_cbor(old).expect("cbor");
+        let state: CommandState = tenko_core::codec::cbor::from_cbor(&bytes).expect("old state");
+        assert_eq!(state, CommandState::Canceled);
+        assert_eq!(
+            old.parse::<CommandState>().expect("text"),
+            CommandState::Canceled
+        );
+        assert_eq!(CommandState::Canceled.as_str(), "canceled");
+    }
+
     fn report(state: CommandState, progress: u8) -> Report {
         Report {
             command: Uuid::nil(),
@@ -838,7 +852,7 @@ mod tests {
             Report::from_proto(&parsed.to_proto()).expect("again"),
             parsed
         );
-        for state in ["pending", "expired", "cancelled", "bogus"] {
+        for state in ["pending", "expired", "canceled", "bogus"] {
             let event = v1::CommandEvent {
                 state: state.to_owned(),
                 ..event.clone()

@@ -1392,7 +1392,7 @@ describe("accessibility", () => {
     await screen.findByTestId("node-label");
     const open = within(await screen.findByTestId("node-ports")).getAllByTestId("node-port-open")[2] as HTMLElement;
     fireEvent.click(open);
-    await screen.findByTestId("port-neighbours");
+    await screen.findByTestId("port-neighbors");
     expect(await axeViolations(screen.getByTestId("page-topology"))).toEqual([]);
   });
 

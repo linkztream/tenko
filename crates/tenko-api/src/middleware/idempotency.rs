@@ -994,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn credential_routes_are_recognised() {
+    fn credential_routes_are_recognized() {
         for path in [
             "/api/v1/setup",
             "/api/v1/auth/login/password",

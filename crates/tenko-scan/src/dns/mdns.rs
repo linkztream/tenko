@@ -29,7 +29,7 @@ pub const SERVICES_QUERY: &str = "_services._dns-sd._udp.local";
 /// The most service types [`service_types`] returns.
 const MAX_SERVICE_TYPES: usize = 64;
 
-/// The confidence of an operating system name from a HINFO record that is recognised.
+/// The confidence of an operating system name from a HINFO record that is recognized.
 const HINFO_KNOWN: u8 = 60;
 /// The confidence of a HINFO text that is passed on as it is.
 const HINFO_RAW: u8 = 40;

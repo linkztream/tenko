@@ -31,7 +31,7 @@ The latest release is on the [releases page](https://github.com/linkztream/tenko
 Packages that stand on their own and are free to take, with where their specification lives:
 
 - **DHCPv6**: WP9.1 (the codec and the server: IA_NA, relay, RFC 6939, RFC 4704), then WP9.2 (IA_PD and the RA check) and WP9.4 (the UI): [phase-3-plan.md](plans/phase-3-plan.md) section 4, `docs/dhcp.md`, `docs/dhcp-contracts.md`.
-- **Recursion after WP10.2**: WP10.3 (QNAME minimisation, the denial cache, RFC 8020 and RFC 9520) and WP10.4 (the API, the CLI and the UI): [dns-recursion-plan.md](plans/dns-recursion-plan.md) section 4. RFC 5011 key revocation in Tenko's own signer is a small package of its own once WP10.2 lands.
+- **Recursion after WP10.2**: WP10.3 (QNAME minimization, the denial cache, RFC 8020 and RFC 9520) and WP10.4 (the API, the CLI and the UI): [dns-recursion-plan.md](plans/dns-recursion-plan.md) section 4. RFC 5011 key revocation in Tenko's own signer is a small package of its own once WP10.2 lands.
 - **Migration connectors** that need no AD: BIND (MIG-09), OPNsense (MIG-10), dnsmasq and Pi-hole (MIG-11), Kea and ISC dhcpd (MIG-12), NetBox and phpIPAM (MIG-13): [MIGRATION.md](MIGRATION.md) and the IR in `docs/dhcp-contracts.md` section 11; the Kea export in `crates/tenko-dhcp/src/export/` is the mirror image of MIG-12.
 - **Measurements that fail their threshold**: M23, idle memory of the musl binary with the home zones and a full cache, 100.05 MiB against 100 MB ([phase-2-exit.md](plans/phase-2-exit.md), deviation 145); M31, the DDNS answer latency from DHCP, p99 699 ms against 250 ms (`bench/phase3-dhcp/results/2026-10-22-m31-ddns.md`). Each needs a profile first and a measured fix second.
 - **Sign-in with OIDC** (IAM-11, Phase 4, Slice 13, self-contained): planned in [identity-plan.md](plans/identity-plan.md) with ADR 0026 Accepted; the provider flow, the group claim mapping onto the roles and the UI are WP13.5.
@@ -160,7 +160,7 @@ Replaces the existing IPAM spreadsheet.
 - **Connectors**: the plugin SDK and host runner first (ADR 0012: process plugins over gRPC, manifest, supervision, secret injection, conformance test), then the bundled reference plugins: UniFi (read topology and SSIDs, write VLANs, port profiles and per-client VLAN with guardrails), Proxmox inventory, Home Assistant inventory (CONN-01 to CONN-09).
 - **VLAN objects, topology map and move job** with preview and rollback (IPAM-03, IPAM-19, IPAM-20).
 - **Releases and upgrades**: a data-directory format version with migrations and `tenko upgrade check`, release builds with checksums per tag, a compatibility test against the previous release, and in-app update notices with release notes and single-node installation from the UI (OPS-23, OPS-24).
-- **Partition behaviour**: isolated controllers refuse writes visibly, serve reads with a staleness indicator, queue changes as proposals and catch up without merging (OPS-26).
+- **Partition behavior**: isolated controllers refuse writes visibly, serve reads with a staleness indicator, queue changes as proposals and catch up without merging (OPS-26).
 
 In Phase 1 the move job performs the IPAM intent change, the UniFi L2 move and the observation. The reservation and DNS steps are manual tasks until Tenko's own engines exist (Phase 2 to 3), at which point the same job becomes fully automatic.
 
@@ -276,7 +276,7 @@ Verification is by query replay (MIG-05): live queries are sampled from dnstap o
 - **Remote access gateway**: HTML5 RDP/SSH gateway as an opt-in module with credential injection, session recording and just-in-time access (API-12).
 - **Actuators and inventory**: hypervisor actuators (Proxmox `pct set` and cloud-init) that move `static` hosts automatically, more network controllers, and inventory from Docker, Kubernetes and Incus (CONN-14 to CONN-16).
 - **Plugin hub**: signed plugin packages, `tenko plugin install`, the WebAssembly component transport beside the process transport, and the public plugin SDK repository (CONN-21).
-- **Release and licensing**: DoQ, signed releases, SBOM and the possible publication under the licence decided on 2026-10-22 (the Business Source License 1.1 with AGPL-3.0-or-later as the Change License, ADR 0022; DNS-16, API-19, API-20).
+- **Release and licensing**: DoQ, signed releases, SBOM and the possible publication under the license decided on 2026-10-22 (the Business Source License 1.1 with AGPL-3.0-or-later as the Change License, ADR 0022; DNS-16, API-19, API-20).
 
 ### Done when
 

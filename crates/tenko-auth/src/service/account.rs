@@ -15,8 +15,8 @@ use super::{
     types::{
         BreachStatus, CreatedToken, CredentialInfo, FactorEnrolled, PasswordChange,
         PasswordChanged, PasswordCheck, PasswordCheckResult, RecoveryCodes, SecretString,
-        SessionInfo, SessionSummary, TokenCreate, TokenInfo, TokenRequest, TotpEnrolFinish,
-        TotpEnrolment, WebAuthnRegisterFinish, WebAuthnRegisterOptions, WebAuthnRegisterStart,
+        SessionInfo, SessionSummary, TokenCreate, TokenInfo, TokenRequest, TotpEnrollFinish,
+        TotpEnrollment, WebAuthnRegisterFinish, WebAuthnRegisterOptions, WebAuthnRegisterStart,
     },
 };
 use crate::{
@@ -431,7 +431,7 @@ impl AuthService {
     /// # Errors
     ///
     /// [`AuthError::TotpAlreadyEnrolled`] or [`AuthError::Unauthenticated`].
-    pub async fn totp_enrol_start(&self, ctx: &RequestCtx) -> Result<TotpEnrolment, AuthError> {
+    pub async fn totp_enroll_start(&self, ctx: &RequestCtx) -> Result<TotpEnrollment, AuthError> {
         let (user, _, _, session) = self.current(ctx).await?;
         if user.totp.is_some() {
             return Err(AuthError::TotpAlreadyEnrolled);
@@ -445,16 +445,16 @@ impl AuthService {
         };
         let uri = totp::otpauth_uri(&secret, &params, "Tenko DDI", &account);
         let encoded = Zeroizing::new(base32_encode(&secret));
-        let enrolment_id = self.ceremonies.open(
-            Pending::TotpEnrolment {
+        let enrollment_id = self.ceremonies.open(
+            Pending::TotpEnrollment {
                 user: user.id,
                 session: session.id,
                 secret,
             },
             ctx.now,
         )?;
-        Ok(TotpEnrolment {
-            enrolment_id,
+        Ok(TotpEnrollment {
+            enrollment_id,
             secret: SecretString::new(encoded.as_str()),
             otpauth_uri: SecretString::new(uri.as_str()),
             params,
@@ -467,17 +467,17 @@ impl AuthService {
     /// # Errors
     ///
     /// [`AuthError::ChallengeInvalid`], [`AuthError::TotpCodeMismatch`].
-    pub async fn totp_enrol_finish(
+    pub async fn totp_enroll_finish(
         &self,
         ctx: &RequestCtx,
-        request: &TotpEnrolFinish,
+        request: &TotpEnrollFinish,
     ) -> Result<FactorEnrolled, AuthError> {
         let (user, revision, _, session) = self.current(ctx).await?;
-        let Pending::TotpEnrolment {
+        let Pending::TotpEnrollment {
             user: owner,
             session: started_in,
             secret,
-        } = self.ceremonies.take(&request.enrolment_id, ctx.now)?
+        } = self.ceremonies.take(&request.enrollment_id, ctx.now)?
         else {
             return Err(AuthError::ChallengeInvalid);
         };
@@ -505,7 +505,7 @@ impl AuthService {
                 SecretClass::System,
                 SecretSpec::new(SecretPurpose::from_static("auth.totp"))
                     .owned_by(ObjectRef::from(user.id))
-                    .labelled(format!("TOTP seed of {}", user.name)),
+                    .labeled(format!("TOTP seed of {}", user.name)),
                 &SecretBytes::from(secret),
             )
             .map_err(|error| AuthError::internal(format!("vault: {error}")))?;
@@ -519,7 +519,7 @@ impl AuthService {
         batch.expect_typed(&USERS, &user.id, Some(revision));
         batch.put_typed(&USERS, &user.id, &updated)?;
         batch.audit(Self::audit(
-            actions::TOTP_ENROL,
+            actions::TOTP_ENROLL,
             vec![ObjectRef::from(user.id)],
             ctx,
         ));
@@ -824,7 +824,7 @@ impl AuthService {
         if !user.has_strong_factor(credentials) {
             return Err(AuthError::invalid(
                 "recovery_codes",
-                "enrol TOTP or a passkey before recovery codes",
+                "enroll TOTP or a passkey before recovery codes",
             ));
         }
         let generated = recovery::generate()?;

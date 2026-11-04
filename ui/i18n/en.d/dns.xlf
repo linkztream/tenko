@@ -954,7 +954,7 @@
         <segment><source>Clients: {client}. {sample, plural, one {Every query is logged} other {One query in # is logged}} and kept {days, plural, one {# day} other {# days}}; {written, number} written and {dropped, number} dropped since the node started.</source></segment>
       </unit>
       <unit id="dns.log.client_mode.pseudonym">
-        <segment><source>pseudonymised, a new pseudonym every day</source></segment>
+        <segment><source>pseudonymized, a new pseudonym every day</source></segment>
       </unit>
       <unit id="dns.log.client_mode.address">
         <segment><source>logged with their address</source></segment>

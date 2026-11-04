@@ -19,7 +19,7 @@
 # docs/cluster.md section 1.2):
 # - in the controller's process: `--roles controller,probe`, as below. The scanner starts
 #   with the controller and files its sightings under the node id of the controller. No
-#   enrolment, no second container. This is the simplest way to scan the segments of the
+#   enrollment, no second container. This is the simplest way to scan the segments of the
 #   host that runs the controller.
 # - as a separate node: a second service with `--roles probe`, enrolled with a token like
 #   the probe of macvlan.example.yml. Use it for a probe on another host, or to give the
@@ -53,7 +53,7 @@
 #
 # First-run setup as in controller.example.yml, with the host's address, for example
 #   docker compose -f host.example.yml exec tenko tenko setup token
-# and open https://192.0.2.10:8443/. Nodes (probes of other hosts) enrol against
+# and open https://192.0.2.10:8443/. Nodes (probes of other hosts) enroll against
 # https://192.0.2.10:8443 and then connect to 192.0.2.10:8444. Allow 8444/tcp in the host's
 # firewall from the node and controller networks only: Docker does not manage the rules for
 # a host-network container, so the host firewall (nftables, ufw, firewalld) is the only

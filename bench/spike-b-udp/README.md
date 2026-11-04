@@ -190,7 +190,7 @@ cargo bench --bench codec
 In that distro traffic to 127.0.0.1 never reaches local sockets, so the runs use 127.0.0.2 (still
 the `lo` device) and the tests take it from `SPIKE_B_LOOPBACK`. The default
 `net.core.rmem_max`/`wmem_max` of 4 MiB was left unchanged, so the 8 MiB buffer requests are capped
-to it. WSL2 numbers are VM numbers and are labelled as such.
+to it. WSL2 numbers are VM numbers and are labeled as such.
 
 ### Bare-metal Linux (not measured yet)
 
@@ -213,7 +213,7 @@ load generator does not compete with the server for CPU.
 ## Caveats
 
 - Loopback only: client and server share the machine and its network stack, so these numbers say
-  nothing about NIC, driver or switch behaviour.
+  nothing about NIC, driver or switch behavior.
 - The load generator runs on the same machine and competes with the server for CPU.
 - No CPU pinning; the CPU is a hybrid design (P-cores and E-cores).
 - Other jobs were building on the same machine during the measurements; see the results files.

@@ -1,5 +1,5 @@
 // The only module of the topology area that talks to the API (docs/topology.md, section 4):
-// the graph with its filters, one node with its ports and neighbours, and the sites and VLANs
+// the graph with its filters, one node with its ports and neighbors, and the sites and VLANs
 // of IPAM that the filter bar offers.
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
@@ -14,7 +14,7 @@ export type TopologyEdge = S["TopologyEdge"];
 export type TopologySummary = S["TopologySummary"];
 export type TopologyNodeView = S["TopologyNodeView"];
 export type TopologyPort = S["TopologyPort"];
-export type Neighbour = S["Neighbour"];
+export type Neighbor = S["Neighbor"];
 export type NodeIntent = S["NodeIntent"];
 export type IntentAddress = S["IntentAddress"];
 export type VlanInView = S["VlanInView"];
@@ -50,7 +50,7 @@ export function getTopology(filter: TopologyFilter, signal?: AbortSignal): Promi
   });
 }
 
-/** One node with its ports and neighbours; with `port`, only that port and what hangs on it. */
+/** One node with its ports and neighbors; with `port`, only that port and what hangs on it. */
 export function getNode(id: string, port?: string, signal?: AbortSignal): Promise<TopologyNodeView> {
   return api.get("/api/v1/topology/nodes/{id}", { path: { id }, query: { port }, signal });
 }

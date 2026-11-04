@@ -10,7 +10,7 @@ Every operation states what it needs to be called, so a reader or a client gener
 |---|---|---|
 | takes `Ctx`, and a personal token passes its authorization | none | a session or a token |
 | takes `Ctx`, and a token is always refused: it authorizes an action that `tenko_auth::roles::interactive_only` keeps from tokens (administering, revealing, changing users, settings, the system, tokens, sessions, secrets or DNS keys), or it needs the caller's own session (`AuthService::current`, a fresh sign-in) | `security(("session" = []))` | a session only |
-| takes no `Ctx` (setup, the sign-in ceremonies, node enrolment, liveness and readiness, the CA root, the language list and packs, this document) | `security()` | public |
+| takes no `Ctx` (setup, the sign-in ceremonies, node enrollment, liveness and readiness, the CA root, the language list and packs, this document) | `security()` | public |
 
 `POST /auth/password/check` is the one operation that is public before setup and needs a session or a token after it; it declares `security((), ("session" = []), ("token" = []))`.
 

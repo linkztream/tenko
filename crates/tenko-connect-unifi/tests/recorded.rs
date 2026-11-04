@@ -1,4 +1,4 @@
-//! The plugin against the anonymised recordings of a real controller
+//! The plugin against the anonymized recordings of a real controller
 //! (`tests/fixtures/recorded/`, see the README there), served by the fake controller: the
 //! shapes a real Network Application answers with, next to the documented ones of
 //! `tests/fixtures/classic/`. The assertions are the counts the live smoke printed on the
@@ -52,7 +52,7 @@ async fn the_recorded_controller_reads_like_the_live_one() {
     assert_eq!(count(&ports, |p| p.management), 0);
 
     // Six uplinks (one of them to the site's router, which the controller does not manage)
-    // and one LLDP neighbour the uplinks do not cover.
+    // and one LLDP neighbor the uplinks do not cover.
     let mut links: BTreeMap<LinkKind, usize> = BTreeMap::new();
     for link in &snapshot.links {
         *links.entry(link.kind).or_default() += 1;

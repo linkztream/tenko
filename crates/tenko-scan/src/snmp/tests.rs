@@ -10,7 +10,7 @@ use tenko_core::MacAddr;
 use tokio::{net::UdpSocket, sync::watch};
 
 use super::{
-    ArpEntry, AuthProtocol, Client, Credentials, DeviceTables, FdbEntry, Interface, LldpNeighbour,
+    ArpEntry, AuthProtocol, Client, Credentials, DeviceTables, FdbEntry, Interface, LldpNeighbor,
     Oid, PollOptions, PrivProtocol, Value, poll,
     testing::{
         AUTH_PASSWORD, AgentConfig, FakeAgent, PRIV_PASSWORD, TimeWindow, credentials_for,
@@ -106,14 +106,14 @@ fn fdb_entry(last: u8, vlan: Option<u16>, bridge_port: u32, if_index: Option<u32
     }
 }
 
-fn neighbour(
+fn neighbor(
     local_port: &str,
     chassis: &str,
     port: &str,
     port_desc: &str,
     sys_name: &str,
-) -> LldpNeighbour {
-    LldpNeighbour {
+) -> LldpNeighbor {
+    LldpNeighbor {
         local_port: Some(local_port.to_owned()),
         remote_chassis: Some(chassis.to_owned()),
         remote_port: Some(port.to_owned()),
@@ -163,14 +163,14 @@ fn expected_tables() -> DeviceTables {
             fdb_entry(0x44, None, 6, Some(6)),
         ],
         lldp: vec![
-            neighbour(
+            neighbor(
                 "Gi0/2",
                 "00:00:5e:00:53:a0",
                 "00:00:5e:00:53:a1",
                 "eth0",
                 "ap-b.example.net",
             ),
-            neighbour(
+            neighbor(
                 "Gi0/1",
                 "00:00:5e:00:53:b0",
                 "Te1/0/48",
@@ -764,7 +764,7 @@ async fn cancellation_stops_the_poll_between_datagrams() {
         retries: 3,
         ..options()
     };
-    let canceller = tokio::spawn(async move {
+    let canceler = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(150)).await;
         let _ = sender.send(true);
     });
@@ -777,9 +777,9 @@ async fn cancellation_stops_the_poll_between_datagrams() {
         &cancel,
     )
     .await
-    .expect_err("cancelled");
-    canceller.await.expect("canceller");
-    assert_eq!(error.code(), "scan.cancelled", "{error}");
+    .expect_err("canceled");
+    canceler.await.expect("canceler");
+    assert_eq!(error.code(), "scan.canceled", "{error}");
     assert!(
         started.elapsed() < Duration::from_secs(5),
         "{:?}",
@@ -788,7 +788,7 @@ async fn cancellation_stops_the_poll_between_datagrams() {
 }
 
 #[tokio::test]
-async fn a_poll_that_is_cancelled_beforehand_sends_nothing() {
+async fn a_poll_that_is_canceled_beforehand_sends_nothing() {
     let agent = agent().await;
     let (sender, receiver) = watch::channel(true);
     let error = poll(
@@ -799,9 +799,9 @@ async fn a_poll_that_is_cancelled_beforehand_sends_nothing() {
         &Cancel::new(receiver),
     )
     .await
-    .expect_err("cancelled");
+    .expect_err("canceled");
     drop(sender);
-    assert_eq!(error.code(), "scan.cancelled");
+    assert_eq!(error.code(), "scan.canceled");
     assert_eq!(agent.datagrams(), 0);
 }
 

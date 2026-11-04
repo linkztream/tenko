@@ -2,13 +2,13 @@
 //! and its test oracle [`MemAuthority`], scripted from zone data so that the engine is
 //! tested without sockets.
 //!
-//! An [`Authority`] owns the defences of DNS-08 and the fallback ladder of one exchange:
+//! An [`Authority`] owns the defenses of DNS-08 and the fallback ladder of one exchange:
 //! a random id, 0x20 over the question (the exact case checked on the answer), a fresh
 //! source port when asked, EDNS with [`AUTHORITY_UDP_SIZE`] octets and DO, the client
 //! cookie and the server cookie it knows (RFC 7873, RFC 9018); TCP when the UDP answer is
 //! truncated (RFC 7766); one retry without EDNS when the server answers FORMERR or NOTIMP
 //! to it (RFC 6891 section 6.2.2, never on a timeout); one retry with the new server
-//! cookie on BADCOOKIE. What it learnt goes back in the [`Exchange`], and the engine
+//! cookie on BADCOOKIE. What it learned goes back in the [`Exchange`], and the engine
 //! writes it into the infrastructure cache.
 
 use std::{
@@ -102,7 +102,7 @@ pub struct AuthorityQuery<'a> {
     /// Ask over TCP from the start (a server that truncates everything, or one flooded
     /// with unwanted answers).
     pub tcp: bool,
-    /// Randomise the case of the question (`false` after the server's 0x20 strikes).
+    /// Randomize the case of the question (`false` after the server's 0x20 strikes).
     pub mix_case: bool,
     /// The client cookie for this server (8 octets from the node's secret over the
     /// server's address).
@@ -115,7 +115,7 @@ pub struct AuthorityQuery<'a> {
     pub deadline: Instant,
 }
 
-/// What an exchange learnt about the server.
+/// What an exchange learned about the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Exchange {
     /// The transport of the answer.
@@ -229,7 +229,7 @@ impl MemZone {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "independent misbehaviours, each a case of E36"
+    reason = "independent misbehaviors, each a case of E36"
 )]
 pub struct Quirks {
     /// Never answers: every exchange times out.
@@ -259,11 +259,11 @@ pub struct Quirks {
 pub struct MemServer {
     /// The zones.
     pub zones: Vec<MemZone>,
-    /// The misbehaviours.
+    /// The misbehaviors.
     pub quirks: Quirks,
 }
 
-/// A query a scripted server saw, the witness of the minimisation and denial checks.
+/// A query a scripted server saw, the witness of the minimization and denial checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asked {
     /// The server.

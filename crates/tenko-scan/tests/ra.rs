@@ -376,7 +376,7 @@ fn an_empty_message_and_a_lone_type_octet_are_short() {
 
 #[test]
 fn the_type_is_checked_before_the_code() {
-    // A neighbour advertisement (136) with code 1 is not an advertisement of routers.
+    // A neighbor advertisement (136) with code 1 is not an advertisement of routers.
     let mut bytes = fixture("ra_flags_off.hex");
     bytes[0] = 136;
     bytes[1] = 1;

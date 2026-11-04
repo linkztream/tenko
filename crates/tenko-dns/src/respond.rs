@@ -316,9 +316,9 @@ pub enum Intake {
         /// WP10.2: the entry's security state, for the query log (none when unvalidated).
         validation: Option<tenko_core::dns::SecurityState>,
     },
-    // WP10.3: an answer the denial cache synthesised (RFC 8198, RFC 8020).
-    /// The answer is in the output buffer, synthesised from the denial cache.
-    Synthesised {
+    // WP10.3: an answer the denial cache synthesized (RFC 8198, RFC 8020).
+    /// The answer is in the output buffer, synthesized from the denial cache.
+    Synthesized {
         /// Its RCODE.
         rcode: u16,
         /// The security state of the records it came from.
@@ -620,7 +620,7 @@ impl<R: Resolver> Responder<R> {
                             return Reply::Send;
                         }
                         // WP10.3: logged with the resolution `denial`.
-                        Intake::Synthesised { rcode, validation } => {
+                        Intake::Synthesized { rcode, validation } => {
                             self.finish(
                                 batch,
                                 conn,
@@ -779,7 +779,7 @@ impl<R: Resolver> Responder<R> {
         cached: bool,
         // WP10.2: a cache hit's security state.
         validation: Option<tenko_core::dns::SecurityState>,
-        // WP10.3: the denial cache synthesised the answer.
+        // WP10.3: the denial cache synthesized the answer.
         denial: bool,
         clock: &Clock,
         now: Instant,

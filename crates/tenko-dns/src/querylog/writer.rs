@@ -1,5 +1,5 @@
 //! The writer thread of the query log: drains the ring, writes segments, rotates them,
-//! applies the retention and keeps the pseudonymisation keys.
+//! applies the retention and keeps the pseudonymization keys.
 
 use std::{
     fs, io,
@@ -186,7 +186,7 @@ fn client_text(
         ClientField::Pseudonym => {
             let key = keys.key_for(day, &mut |error| {
                 errors.report(
-                    "cannot store its pseudonymisation key",
+                    "cannot store its pseudonymization key",
                     &error,
                     &settings.dir,
                 );
@@ -213,7 +213,7 @@ fn client_octets(
         ClientField::Pseudonym => {
             let key = keys.key_for(day, &mut |error| {
                 errors.report(
-                    "cannot store its pseudonymisation key",
+                    "cannot store its pseudonymization key",
                     &error,
                     &settings.dir,
                 );
@@ -322,7 +322,7 @@ impl Writer {
         match self.settings.format {
             LogFormat::Jsonl => {
                 let line = self.line_of(slot);
-                // Serialising these fields cannot fail.
+                // Serializing these fields cannot fail.
                 let _ = serde_json::to_writer(&mut self.entry, &line);
                 self.entry.push(b'\n');
             }
@@ -560,7 +560,7 @@ impl Writer {
             });
         if let Err(error) = self.keys.retain_from(oldest) {
             self.errors
-                .report("cannot store its pseudonymisation keys", &error, dir);
+                .report("cannot store its pseudonymization keys", &error, dir);
         }
     }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""heapsym.py DUMP BINARY [TOP]: symbolise a heapshim dump and group its bytes.
+"""heapsym.py DUMP BINARY [TOP]: symbolize a heapshim dump and group its bytes.
 
 Prints (1) the top stacks by live bytes with their first frames inside the binary,
 (2) live bytes grouped by the first 'interesting' frame (skipping allocator and std

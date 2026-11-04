@@ -129,7 +129,7 @@ pub struct NodeIdentity {
     /// The cluster port of the controller.
     #[serde(default)]
     pub cluster_port: Option<u16>,
-    /// Seconds between two heartbeats, as the controller said at enrolment.
+    /// Seconds between two heartbeats, as the controller said at enrollment.
     pub heartbeat_secs: u32,
     /// When it enrolled.
     pub enrolled_at: Timestamp,
@@ -234,7 +234,7 @@ fn not_enrolled() -> ClusterError {
     ClusterError::new(
         "cluster.node.not_enrolled",
         409,
-        "this node is not enrolled; run `tenko node enrol --controller <url> --token <token>` first",
+        "this node is not enrolled; run `tenko node enroll --controller <url> --token <token>` first",
     )
 }
 
@@ -394,12 +394,12 @@ impl Credentials {
         Ok(credentials)
     }
 
-    /// The credentials an enrolment produced: the identity, the certificate chain and
+    /// The credentials an enrollment produced: the identity, the certificate chain and
     /// CA root as PEM, and the key the node generated.
     ///
     /// # Errors
     ///
-    /// `cluster.node.enrol_answer` (502) when the PEM is unreadable, the certificate names
+    /// `cluster.node.enroll_answer` (502) when the PEM is unreadable, the certificate names
     /// another node or the key does not fit.
     pub fn from_pem(
         identity: NodeIdentity,
@@ -407,7 +407,7 @@ impl Credentials {
         key: SecretBytes,
         ca_root_pem: &str,
     ) -> Result<Self, ClusterError> {
-        let bad = |detail: String| ClusterError::new("cluster.node.enrol_answer", 502, detail);
+        let bad = |detail: String| ClusterError::new("cluster.node.enroll_answer", 502, detail);
         let chain = CertificateDer::pem_slice_iter(certificate_pem.as_bytes())
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| bad(format!("the certificate is unreadable: {error}")))?;
@@ -433,7 +433,7 @@ impl Credentials {
         Ok(credentials)
     }
 
-    /// Writes everything (at enrolment).
+    /// Writes everything (at enrollment).
     ///
     /// # Errors
     ///
@@ -592,7 +592,7 @@ pub struct AgentStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {
-    /// Dialling a controller.
+    /// Dialing a controller.
     Connecting,
     /// Connected and sending heartbeats.
     Connected,
@@ -603,7 +603,7 @@ pub enum AgentState {
     /// The controller refused the node (unknown node, unknown certificate), or the
     /// controller's certificate is not from this node's CA.
     Refused,
-    /// The node was revoked; enrol it again.
+    /// The node was revoked; enroll it again.
     Revoked,
     /// The node process stopped.
     Stopped,

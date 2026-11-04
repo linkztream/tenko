@@ -245,7 +245,7 @@ async fn the_counts_equal_the_open_proposals_of_the_discovery_list() {
     assert_eq!(by_text["items"].as_array().expect("items").len(), 1);
     let (status, bad) = lab.get("/findings?severity=urgent").await;
     assert_eq!(status, 400, "{bad}");
-    let (status, bad) = lab.get("/findings?colour=red").await;
+    let (status, bad) = lab.get("/findings?color=red").await;
     assert_eq!(status, 400, "{bad}");
 }
 

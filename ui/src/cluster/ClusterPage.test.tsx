@@ -519,11 +519,11 @@ describe("adding a controller", () => {
   /** A token as the server answers it for a controller: the mock does not issue those yet. */
   async function answerWithControllerToken() {
     const bodies: unknown[] = [];
-    const real = await api.post("/api/v1/nodes/enrolments", { body: { roles: ["probe"] }, idempotencyKey: null });
+    const real = await api.post("/api/v1/nodes/enrollments", { body: { roles: ["probe"] }, idempotencyKey: null });
     server.use(
-      http.post("/api/v1/nodes/enrolments", async ({ request }) => {
+      http.post("/api/v1/nodes/enrollments", async ({ request }) => {
         bodies.push(await request.json());
-        return HttpResponse.json({ ...real, enrolment: { ...real.enrolment, roles: ["controller"] } }, { status: 201 });
+        return HttpResponse.json({ ...real, enrollment: { ...real.enrollment, roles: ["controller"] } }, { status: 201 });
       }),
     );
     return bodies;
@@ -533,9 +533,9 @@ describe("adding a controller", () => {
     const bodies = await answerWithControllerToken();
     await openLoaded();
     fireEvent.click(screen.getByTestId("cluster-add-controller"));
-    const form = await screen.findByTestId("dialog-enrol");
+    const form = await screen.findByTestId("dialog-enroll");
     expect(form.textContent).toContain("Add a controller");
-    expect(form.textContent).toContain("A join token lets one new controller enrol once.");
+    expect(form.textContent).toContain("A join token lets one new controller enroll once.");
     expect(within(form).queryByTestId("field-role-probe")).toBeNull();
     expect(within(form).queryByTestId("field-role-dns")).toBeNull();
     expect(within(form).queryByRole("group")).toBeNull();
@@ -545,31 +545,31 @@ describe("adding a controller", () => {
     expect(await axeViolations(form)).toEqual([]);
 
     fireEvent.click(within(form).getByTestId("form-submit"));
-    const shown = await screen.findByTestId("dialog-enrol-token");
+    const shown = await screen.findByTestId("dialog-enroll-token");
     expect(bodies).toEqual([{ roles: ["controller"], name: null, vrf: null, expires_in_secs: 3600 }]);
-    expect(within(shown).getByTestId("enrol-once")).toBeTruthy();
-    expect(within(shown).getByTestId("enrol-token").textContent).toMatch(/^tnk1\./);
+    expect(within(shown).getByTestId("enroll-once")).toBeTruthy();
+    expect(within(shown).getByTestId("enroll-token").textContent).toMatch(/^tnk1\./);
     expect(shown.textContent).toContain("The new controller joins as a learner.");
     expect(await axeViolations(shown)).toEqual([]);
 
     // The token is shown once: closing the dialog forgets it.
-    fireEvent.click(within(shown).getByTestId("enrol-done"));
-    await waitFor(() => expect(screen.queryByTestId("dialog-enrol-token")).toBeNull());
-    expect(screen.queryByTestId("enrol-token")).toBeNull();
+    fireEvent.click(within(shown).getByTestId("enroll-done"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-enroll-token")).toBeNull());
+    expect(screen.queryByTestId("enroll-token")).toBeNull();
   });
 
   it("shows the refusal of the server in the dialog", async () => {
     server.use(
-      http.post("/api/v1/nodes/enrolments", () =>
+      http.post("/api/v1/nodes/enrollments", () =>
         HttpResponse.json(
-          { status: 422, code: "cluster.enrolment.roles", title: "Unprocessable", detail: "", params: { role: "controller" } },
+          { status: 422, code: "cluster.enrollment.roles", title: "Unprocessable", detail: "", params: { role: "controller" } },
           { status: 422 },
         ),
       ),
     );
     await openLoaded();
     fireEvent.click(screen.getByTestId("cluster-add-controller"));
-    const form = await screen.findByTestId("dialog-enrol");
+    const form = await screen.findByTestId("dialog-enroll");
     fireEvent.click(within(form).getByTestId("form-submit"));
     const alert = await within(form).findByRole("alert");
     expect(alert.textContent).toBe("A token cannot grant this role.");
@@ -578,9 +578,9 @@ describe("adding a controller", () => {
   it("gets the join command of a controller token from the mock", async () => {
     await openLoaded();
     fireEvent.click(screen.getByTestId("cluster-add-controller"));
-    const form = await screen.findByTestId("dialog-enrol");
+    const form = await screen.findByTestId("dialog-enroll");
     fireEvent.click(within(form).getByTestId("form-submit"));
-    const token = await screen.findByTestId("dialog-enrol-token");
+    const token = await screen.findByTestId("dialog-enroll-token");
     expect(token.textContent).toContain("tenko cluster join");
   });
 });
@@ -634,9 +634,9 @@ describe("the keyboard", () => {
     expect(document.activeElement).toBe(step);
 
     pressWithKeyboard(screen.getByTestId("cluster-add-controller"));
-    dialog = await screen.findByTestId("dialog-enrol");
+    dialog = await screen.findByTestId("dialog-enroll");
     fireEvent.keyDown(dialog, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByTestId("dialog-enrol")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId("dialog-enroll")).toBeNull());
 
     pressWithKeyboard(screen.getByTestId("cluster-check-digests"));
     await screen.findByTestId("digests-result");

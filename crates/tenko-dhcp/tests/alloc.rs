@@ -48,7 +48,7 @@ fn measure(rounds: usize, mut f: impl FnMut()) -> (usize, usize, usize) {
     )
 }
 
-/// Every read a server makes of a request, folded into a number so nothing is optimised
+/// Every read a server makes of a request, folded into a number so nothing is optimized
 /// away.
 fn read_all(bytes: &[u8]) -> usize {
     let Ok(message) = Message::parse(bytes) else {

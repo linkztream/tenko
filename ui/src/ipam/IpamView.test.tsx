@@ -224,7 +224,7 @@ describe("the networks page", () => {
     const cameras = within(grid).getAllByTestId("row").find((r) => r.dataset.key === "203.0.113.192/28") as HTMLElement;
     expect(within(cameras).getAllByText("Critical").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("prefix-pane")).toBeNull();
-    // The supernet's meter and its allocation are two figures, labelled apart: 5.2 % in use,
+    // The supernet's meter and its allocation are two figures, labeled apart: 5.2 % in use,
     // while 208 of its 256 addresses are allocated to networks. A network has no allocation.
     const documentation = within(grid).getAllByTestId("row").find((r) => r.dataset.key === "203.0.113.0/24") as HTMLElement;
     expect(documentation.querySelector(".meter .val")?.textContent).toBe("5.2%");
@@ -1005,7 +1005,7 @@ describe("editing an address in the grid", () => {
     expect(await screen.findByText("192.0.2.42 is now –")).toBeTruthy();
   });
 
-  it("writes nothing when the edit is cancelled with Escape", async () => {
+  it("writes nothing when the edit is canceled with Escape", async () => {
     const writes = recordWrites();
     await openNetwork("192.0.2.0/24");
     fireEvent.dblClick(dnsCell("192.0.2.43"));

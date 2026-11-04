@@ -141,7 +141,7 @@ async fn create(
                     &ctx,
                     spec("connect.proxmox_token")
                         .owned_by(owner)
-                        .labelled(format!("label-{index}")),
+                        .labeled(format!("label-{index}")),
                     value,
                 )
                 .await
@@ -263,7 +263,7 @@ async fn stage_secrets(vault: &StoreVault, marker: &str, live: &mut Vec<Entry>) 
             &mut batch,
             &ctx,
             SecretClass::Operator,
-            spec("connect.proxmox_token").labelled("staged"),
+            spec("connect.proxmox_token").labeled("staged"),
             &SecretBytes::from(text.clone()),
         )
         .expect("stage_put");

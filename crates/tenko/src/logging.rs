@@ -120,7 +120,7 @@ pub fn log_tail() -> Option<Arc<LogTail>> {
 }
 
 /// The text layer that keeps the last warnings and errors in `tail`: the same text format
-/// as the console, without colour, at warn level or above.
+/// as the console, without color, at warn level or above.
 pub fn tail_layer(tail: Arc<LogTail>) -> BoxedLayer {
     tracing_subscriber::fmt::layer()
         .with_writer(tail)

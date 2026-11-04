@@ -57,7 +57,7 @@ services:
       # for a stand-alone controller, so the port is not reachable at all. Allow it in the
       # firewall from the node and controller networks only (docs/cluster.md section 7).
       # Bridge networking is fine for it. The server opens the port once a node is enrolled
-      # or an enrolment token is waiting, so it is closed (connection refused) until then.
+      # or an enrollment token is waiting, so it is closed (connection refused) until then.
       - "8444:8444/tcp"
     environment:
       # The key-encryption key comes from the Docker secret below, not from the data volume.

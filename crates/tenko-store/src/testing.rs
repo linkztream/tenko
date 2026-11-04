@@ -56,7 +56,7 @@ use crate::{
     mem::MemStoreConfig,
 };
 
-/// Settings a store under test should honour. Each test states which ones it relies on.
+/// Settings a store under test should honor. Each test states which ones it relies on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConformanceConfig {
     /// Change sets the journal retains, at least. Compaction tests use small values.
@@ -99,7 +99,7 @@ pub trait StoreFactory: Send + Sync {
     /// The store type.
     type Store: Store;
 
-    /// Builds an empty store honouring `config`.
+    /// Builds an empty store honoring `config`.
     fn create(&self, config: ConformanceConfig) -> BoxFuture<'_, Self::Store>;
 }
 
@@ -207,7 +207,7 @@ pub trait ClusterFactory: Send + Sync {
     /// The fixture type.
     type Fixture: ClusterFixture;
 
-    /// Builds an empty replicated store honouring `config`.
+    /// Builds an empty replicated store honoring `config`.
     fn create(&self, config: ConformanceConfig) -> BoxFuture<'_, Self::Fixture>;
 }
 
@@ -1070,7 +1070,7 @@ pub mod conformance {
         );
     }
 
-    /// Scans honour ranges, prefixes, limits, direction and pagination, and skip deleted
+    /// Scans honor ranges, prefixes, limits, direction and pagination, and skip deleted
     /// keys.
     pub async fn scan_ranges_and_order<F: StoreFactory>(factory: &F) {
         let store = fresh(factory).await;

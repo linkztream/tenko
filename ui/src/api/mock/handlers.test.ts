@@ -16,7 +16,7 @@ import type {
   SetupState,
   SystemStatus,
   TokenInfo,
-  TotpEnrolment,
+  TotpEnrollment,
   UserInfo,
   WebAuthnLoginOptions,
   WebAuthnRegisterOptions,
@@ -230,12 +230,12 @@ describe("operations", () => {
     expect(problem.params).toEqual({ method: "GET", path: "/api/v1/metrics" });
   });
 
-  it("tries a static path before a parameterised one", async () => {
+  it("tries a static path before a parameterized one", async () => {
     resetMockDb("signed-in");
     const tree = await get<{ nodes: unknown[] }>("/api/v1/prefixes/tree");
     expect(tree.status).toBe(200);
     expect(Array.isArray(tree.body.nodes)).toBe(true);
-    // "abc" reaches the parameterised route, which refuses an id that is not a UUID.
+    // "abc" reaches the parameterized route, which refuses an id that is not a UUID.
     expect((await get("/api/v1/prefixes/abc")).status).toBe(400);
     resetMockDb();
     // A static path that no mock answers yet still reaches its stub.
@@ -280,7 +280,7 @@ describe("session", () => {
     expect(session.strength).toBe("password");
     expect(session.required_strength).toBe("password");
     expect(session.profile).toBe("standard");
-    expect(session.flags).toEqual({ password_change_required: false, mfa_enrolment_required: false, break_glass: false });
+    expect(session.flags).toEqual({ password_change_required: false, mfa_enrollment_required: false, break_glass: false });
     expect(session.banner).toEqual({ lab: false, weaker_than_home: false, deviations: [] });
     expect(session.default_language).toBeNull();
     expect(Date.parse(session.expires_at)).toBeLessThanOrEqual(Date.parse(session.absolute_expires_at));
@@ -671,9 +671,9 @@ function attestation(id: string) {
 // TOTP, recovery codes, password
 
 describe("factors", () => {
-  it("enrols TOTP and hands out recovery codes", async () => {
+  it("enrolls TOTP and hands out recovery codes", async () => {
     await loginAs("sam");
-    const start = await post<TotpEnrolment>("/api/v1/auth/totp/enroll/start");
+    const start = await post<TotpEnrollment>("/api/v1/auth/totp/enroll/start");
     expect(start.status).toBe(200);
     expect(start.body.secret).toMatch(/^[A-Z2-7]{32}$/);
     expect(start.body.otpauth_uri).toBe(
@@ -682,17 +682,17 @@ describe("factors", () => {
     expect(start.body.params).toEqual({ algorithm: "sha1", digits: 6, period: 30, skew: 1 });
 
     expectProblem(
-      await post("/api/v1/auth/totp/enroll/finish", { enrolment_id: start.body.enrolment_id, code: "999999" }),
+      await post("/api/v1/auth/totp/enroll/finish", { enrollment_id: start.body.enrollment_id, code: "999999" }),
       400,
       "auth.totp.code_mismatch",
     );
     expectProblem(
-      await post("/api/v1/auth/totp/enroll/finish", { enrolment_id: "unknown", code: MOCK_TOTP_CODE }),
+      await post("/api/v1/auth/totp/enroll/finish", { enrollment_id: "unknown", code: MOCK_TOTP_CODE }),
       401,
       "auth.challenge_invalid",
     );
     const finish = await post<{ recovery_codes?: string[]; reauthenticate: boolean }>("/api/v1/auth/totp/enroll/finish", {
-      enrolment_id: start.body.enrolment_id,
+      enrollment_id: start.body.enrollment_id,
       code: MOCK_TOTP_CODE,
     });
     expect(finish.status).toBe(200);
@@ -1010,7 +1010,7 @@ describe("setup", () => {
     expect(session.profile).toBe("standard");
     // Standard asks administrators for a second factor.
     expect(session.required_strength).toBe("password_totp");
-    expect(session.flags.mfa_enrolment_required).toBe(true);
+    expect(session.flags.mfa_enrollment_required).toBe(true);
     expect(session.default_language).toBe("sv");
 
     expect((await get<SetupState>("/api/v1/setup")).body).toEqual({ open: false });
@@ -1579,7 +1579,7 @@ describe("system", () => {
     const jobs = await get<Page<Row>>("/api/v1/jobs");
     expect(jobs.status).toBe(200);
     expect(jobs.body.items.map((j) => j.state).sort()).toEqual([
-      "cancelled",
+      "canceled",
       "queued",
       "rolled_back",
       "running",
@@ -1597,7 +1597,7 @@ describe("system", () => {
     expect((await get<Page<unknown>>("/api/v1/jobs?state=failed")).body.items).toEqual([]);
     const bad = expectProblem(await get("/api/v1/jobs?state=sleeping"), 400, "jobs.query.invalid");
     expect(bad.params).toEqual({ param: "state", value: "sleeping" });
-    expectProblem(await get("/api/v1/jobs?colour=red"), 400, "sys.invalid_query");
+    expectProblem(await get("/api/v1/jobs?color=red"), 400, "sys.invalid_query");
   });
 
   it("advances the running import with the job ticker and starts the next one", async () => {

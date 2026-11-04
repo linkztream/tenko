@@ -2,7 +2,7 @@
 //! from the probe's interface and collects the replies for a bounded time. It emits the
 //! same facts the passive `arp` method emits (address with MAC, vendor), so the host view
 //! and the IPAM observation path see no difference. IPv6 is left to the passive `nd`
-//! method: a neighbour-solicitation sweep is a follow-up, and the method says so in a note.
+//! method: a neighbor-solicitation sweep is a follow-up, and the method says so in a note.
 
 use std::{
     collections::BTreeMap,
@@ -24,7 +24,7 @@ use crate::{
         ethernet::{self, Protocol},
     },
     method::{Availability, Found, Method, MethodKind, MethodOutput, RunContext},
-    methods::neighbours::usable_mac,
+    methods::neighbors::usable_mac,
     oui,
 };
 
@@ -40,7 +40,7 @@ fn reply_in(frame: &[u8]) -> Option<(Ipv4Addr, MacAddr)> {
 
 /// Sends an ARP request to every address in `targets` from `source`, then listens for
 /// `timeout` after the last request, returning the sender IPv4/MAC pairs seen whose
-/// address is a target. Honours the pacer (one permit per request) and the kill switch.
+/// address is a target. Honors the pacer (one permit per request) and the kill switch.
 /// Returns the map and how many requests were sent.
 pub(super) async fn resolve_macs(
     link: &dyn RawLink,
@@ -61,7 +61,7 @@ pub(super) async fn resolve_macs(
     let rounds = 3u32;
     let slice = (timeout / rounds).max(Duration::from_millis(200));
     for round in 0..rounds {
-        if ctx.cancel.is_cancelled() || found.len() == wanted.len() || Instant::now() >= deadline {
+        if ctx.cancel.is_canceled() || found.len() == wanted.len() || Instant::now() >= deadline {
             break;
         }
         let pending: Vec<Ipv4Addr> = targets
@@ -70,7 +70,7 @@ pub(super) async fn resolve_macs(
             .filter(|ip| !found.contains_key(ip))
             .collect();
         for target in pending {
-            if ctx.cancel.is_cancelled() {
+            if ctx.cancel.is_canceled() {
                 break;
             }
             let _permit = ctx.pacer.acquire(IpAddr::V4(target)).await;
@@ -87,7 +87,7 @@ pub(super) async fn resolve_macs(
         } else {
             (Instant::now() + slice).min(deadline)
         };
-        while Instant::now() < until && !ctx.cancel.is_cancelled() && found.len() < wanted.len() {
+        while Instant::now() < until && !ctx.cancel.is_canceled() && found.len() < wanted.len() {
             drain_replies(link, &wanted, &mut found, Duration::from_millis(100)).await;
         }
     }
@@ -190,7 +190,7 @@ impl Method for ArpSweep {
                 }));
             }
         }
-        output.covered_all = sent == total as u64 && !ctx.cancel.is_cancelled();
+        output.covered_all = sent == total as u64 && !ctx.cancel.is_canceled();
         let has_ipv6 = ctx
             .scope
             .prefixes()
@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_cancelled_sweep_is_not_complete() {
+    async fn a_canceled_sweep_is_not_complete() {
         let scope = Scope::parse(&["192.0.2.0/29".to_owned()], &[], 4096).expect("scope");
         let link = Arc::new(MockLink::new(Vec::new()));
         let factory = Arc::new(MockLinkFactory::new(link));

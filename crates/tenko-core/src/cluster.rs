@@ -31,7 +31,7 @@ pub const LEADER_EPOCH: CounterKey = CounterKey::new("sys.leader_epoch");
 /// A loop that runs on the leader only.
 ///
 /// `run` is started by the supervisor after this controller has taken office, with the
-/// epoch of that term, and runs until `stop` is cancelled (leadership lost or shutdown). It
+/// epoch of that term, and runs until `stop` is canceled (leadership lost or shutdown). It
 /// returns `Ok(())` after a stop and an error text when it gave up on its own; the
 /// supervisor logs the error and restarts the service with a backoff while this controller
 /// stays the leader. A service keeps no state across terms that the store does not hold:

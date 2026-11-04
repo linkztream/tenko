@@ -472,7 +472,7 @@
         <segment><source>TCP only</source></segment>
       </unit>
       <unit id="dns.infra.capability.lower_case">
-        <notes><note category="description">The server breaks the 0x20 case randomisation, so it is asked in lower case.</note></notes>
+        <notes><note category="description">The server breaks the 0x20 case randomization, so it is asked in lower case.</note></notes>
         <segment><source>Lower case only</source></segment>
       </unit>
       <unit id="dns.infra.capability.lame">

@@ -3688,13 +3688,13 @@
         "tags": [
           "auth"
         ],
-        "summary": "Finish TOTP enrolment with a first code",
+        "summary": "Finish TOTP enrollment with a first code",
         "operationId": "totp_enroll_finish",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TotpEnrolFinish"
+                "$ref": "#/components/schemas/TotpEnrollFinish"
               }
             }
           },
@@ -3712,7 +3712,7 @@
             }
           },
           "400": {
-            "description": "The body is malformed (`sys.invalid_request`) or the enrolment is unknown or expired (`auth.challenge_invalid`)",
+            "description": "The body is malformed (`sys.invalid_request`) or the enrollment is unknown or expired (`auth.challenge_invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3764,15 +3764,15 @@
         "tags": [
           "auth"
         ],
-        "summary": "Start TOTP enrolment and return the provisioning data",
+        "summary": "Start TOTP enrollment and return the provisioning data",
         "operationId": "totp_enroll_start",
         "responses": {
           "200": {
-            "description": "The seed, the `otpauth://` URI and the enrolment id for the finish step; shown once",
+            "description": "The seed, the `otpauth://` URI and the enrollment id for the finish step; shown once",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TotpEnrolment"
+                  "$ref": "#/components/schemas/TotpEnrollment"
                 }
               }
             }
@@ -15061,7 +15061,7 @@
           "dns"
         ],
         "summary": "Import a zone file into a zone",
-        "description": "Scope: `dns.write`. `$ORIGIN` and `$TTL` are honoured, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).",
+        "description": "Scope: `dns.write`. `$ORIGIN` and `$TTL` are honored, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).",
         "operationId": "import_dns_zone_file",
         "parameters": [
           {
@@ -18863,7 +18863,7 @@
           }
         ],
         "requestBody": {
-          "description": "Optional; an empty body means no extra acknowledgements",
+          "description": "Optional; an empty body means no extra acknowledgments",
           "content": {
             "application/json": {
               "schema": {
@@ -18929,7 +18929,7 @@
             }
           },
           "409": {
-            "description": "The plan has warnings that need an acknowledgement or conflicts, or the import is busy (`import.plan.blocked`, `import.state.conflict`, or the plan's own error)",
+            "description": "The plan has warnings that need an acknowledgment or conflicts, or the import is busy (`import.plan.blocked`, `import.state.conflict`, or the plan's own error)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20322,7 +20322,7 @@
           "jobs"
         ],
         "summary": "Cancel a job",
-        "description": "A queued job is cancelled at once. A running or waiting job is marked: the runner stops\nit at the next step boundary, rolls back what ran and ends it as `cancelled`; the answer\nshows `cancel_requested: true` until then. Cancelling twice is harmless. A job that is\nrolling back or finished cannot be cancelled.",
+        "description": "A queued job is canceled at once. A running or waiting job is marked: the runner stops\nit at the next step boundary, rolls back what ran and ends it as `canceled`; the answer\nshows `cancel_requested: true` until then. Canceling twice is harmless. A job that is\nrolling back or finished cannot be canceled.",
         "operationId": "cancel_job",
         "parameters": [
           {
@@ -20654,7 +20654,7 @@
             }
           },
           "409": {
-            "description": "A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the plan differs from the confirmed preview (`ipam.move.plan_changed`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`)",
+            "description": "A warning needs an acknowledgment (`ipam.plan.unacknowledged`), the plan differs from the confirmed preview (`ipam.move.plan_changed`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20770,18 +20770,18 @@
         }
       }
     },
-    "/api/v1/nodes/enrol": {
+    "/api/v1/nodes/enroll": {
       "post": {
         "tags": [
           "nodes"
         ],
-        "summary": "Enrol a node with a token",
-        "operationId": "enrol_node",
+        "summary": "Enroll a node with a token",
+        "operationId": "enroll_node",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EnrolRequest"
+                "$ref": "#/components/schemas/EnrollRequest"
               }
             }
           },
@@ -20793,7 +20793,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnrolResponse"
+                  "$ref": "#/components/schemas/EnrollResponse"
                 }
               }
             }
@@ -20809,7 +20809,7 @@
             }
           },
           "401": {
-            "description": "The token is not valid (`cluster.enrolment.invalid_token`), was used (`cluster.enrolment.used`) or expired (`cluster.enrolment.expired`)",
+            "description": "The token is not valid (`cluster.enrollment.invalid_token`), was used (`cluster.enrollment.used`) or expired (`cluster.enrollment.expired`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20819,7 +20819,7 @@
             }
           },
           "403": {
-            "description": "The token does not allow a requested role (`cluster.enrolment.roles`)",
+            "description": "The token does not allow a requested role (`cluster.enrollment.roles`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20852,20 +20852,20 @@
         "security": []
       }
     },
-    "/api/v1/nodes/enrolments": {
+    "/api/v1/nodes/enrollments": {
       "get": {
         "tags": [
           "nodes"
         ],
-        "summary": "List enrolment tokens",
-        "operationId": "list_enrolments",
+        "summary": "List enrollment tokens",
+        "operationId": "list_enrollments",
         "responses": {
           "200": {
             "description": "Every token, newest first",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnrolmentList"
+                  "$ref": "#/components/schemas/EnrollmentList"
                 }
               }
             }
@@ -20881,7 +20881,7 @@
             }
           },
           "403": {
-            "description": "Not allowed to enrol nodes",
+            "description": "Not allowed to enroll nodes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20896,13 +20896,13 @@
         "tags": [
           "nodes"
         ],
-        "summary": "Create an enrolment token",
-        "operationId": "create_enrolment",
+        "summary": "Create an enrollment token",
+        "operationId": "create_enrollment",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NewEnrolment"
+                "$ref": "#/components/schemas/NewEnrollment"
               }
             }
           },
@@ -20914,7 +20914,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreatedEnrolment"
+                  "$ref": "#/components/schemas/CreatedEnrollment"
                 }
               }
             }
@@ -20940,7 +20940,7 @@
             }
           },
           "403": {
-            "description": "Not allowed to enrol nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`)",
+            "description": "Not allowed to enroll nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20960,7 +20960,7 @@
             }
           },
           "422": {
-            "description": "The role controller beside another role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrolment.lifetime`), or a bad name (`cluster.node.name`)",
+            "description": "The role controller beside another role (`cluster.enrollment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrollment.lifetime`), or a bad name (`cluster.node.name`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20977,13 +20977,13 @@
         ]
       }
     },
-    "/api/v1/nodes/enrolments/{id}": {
+    "/api/v1/nodes/enrollments/{id}": {
       "delete": {
         "tags": [
           "nodes"
         ],
-        "summary": "Delete an enrolment token",
-        "operationId": "delete_enrolment",
+        "summary": "Delete an enrollment token",
+        "operationId": "delete_enrollment",
         "parameters": [
           {
             "name": "id",
@@ -21020,7 +21020,7 @@
             }
           },
           "403": {
-            "description": "Not allowed to enrol nodes",
+            "description": "Not allowed to enroll nodes",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -21030,7 +21030,7 @@
             }
           },
           "404": {
-            "description": "No such token (`cluster.enrolment.not_found`)",
+            "description": "No such token (`cluster.enrollment.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -26289,7 +26289,7 @@
             }
           },
           "409": {
-            "description": "The proposal is decided already (`ipam.proposal.not_open`), suggests no change (`ipam.proposal.nothing_to_apply`), a warning needs an acknowledgement (`ipam.plan.unacknowledged`), or the change conflicts with intent (`ipam.name_taken`, `ipam.address.duplicate`, `ipam.reference_missing`)",
+            "description": "The proposal is decided already (`ipam.proposal.not_open`), suggests no change (`ipam.proposal.nothing_to_apply`), a warning needs an acknowledgment (`ipam.plan.unacknowledged`), or the change conflicts with intent (`ipam.name_taken`, `ipam.address.duplicate`, `ipam.reference_missing`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -28371,7 +28371,7 @@
             }
           },
           "409": {
-            "description": "An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameters `accounts`, `next`: `passkey`, and `route`: the passkey enrolment route)",
+            "description": "An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameters `accounts`, `next`: `passkey`, and `route`: the passkey enrollment route)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -33701,7 +33701,7 @@
         "tags": [
           "topology"
         ],
-        "summary": "Get one topology node with its ports and neighbours",
+        "summary": "Get one topology node with its ports and neighbors",
         "operationId": "get_topology_node",
         "parameters": [
           {
@@ -33736,7 +33736,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The node, its ports with what hangs on each, its neighbours and its intent",
+            "description": "The node, its ports with what hangs on each, its neighbors and its intent",
             "content": {
               "application/json": {
                 "schema": {
@@ -35704,7 +35704,7 @@
             }
           },
           "409": {
-            "description": "A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the VLAN id exists at the site (`ipam.vlan.duplicate`), the network overlaps (`ipam.prefix.overlap`), the connector is disabled (`ipam.vlan.controller_disabled`) or a guardrail refuses (`connect.guardrail.protected_vlan`)",
+            "description": "A warning needs an acknowledgment (`ipam.plan.unacknowledged`), the VLAN id exists at the site (`ipam.vlan.duplicate`), the network overlaps (`ipam.prefix.overlap`), the connector is disabled (`ipam.vlan.controller_disabled`) or a guardrail refuses (`connect.guardrail.protected_vlan`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -38282,7 +38282,7 @@
           },
           {
             "type": "object",
-            "description": "Learnt by RFC 5011 from the zone's DNSKEY set.",
+            "description": "Learned by RFC 5011 from the zone's DNSKEY set.",
             "required": [
               "kind"
             ],
@@ -41674,11 +41674,11 @@
           }
         }
       },
-      "CreatedEnrolment": {
+      "CreatedEnrollment": {
         "type": "object",
-        "description": "Answer of `POST /nodes/enrolments`: the token, shown once.",
+        "description": "Answer of `POST /nodes/enrollments`: the token, shown once.",
         "required": [
-          "enrolment",
+          "enrollment",
           "token",
           "ca_fingerprint",
           "command"
@@ -41692,8 +41692,8 @@
             "type": "string",
             "description": "The command to run on the node, with the token and the fingerprint filled in."
           },
-          "enrolment": {
-            "$ref": "#/components/schemas/EnrolmentView",
+          "enrollment": {
+            "$ref": "#/components/schemas/EnrollmentView",
             "description": "The stored token."
           },
           "token": {
@@ -45066,7 +45066,7 @@
             "items": {
               "type": "string"
             },
-            "description": "What keeps the resolver side from working as configured: stub zones whose name\nservers could not be learnt, views whose recursion access list does not exist."
+            "description": "What keeps the resolver side from working as configured: stub zones whose name\nservers could not be learned, views whose recursion access list does not exist."
           },
           "query_log": {
             "oneOf": [
@@ -45576,9 +45576,9 @@
           }
         }
       },
-      "EnrolRequest": {
+      "EnrollRequest": {
         "type": "object",
-        "description": "Body of `POST /nodes/enrol`: a node presents its token and its certificate request.",
+        "description": "Body of `POST /nodes/enroll`: a node presents its token and its certificate request.",
         "required": [
           "token",
           "csr"
@@ -45620,7 +45620,7 @@
           },
           "token": {
             "type": "string",
-            "description": "The enrolment token."
+            "description": "The enrollment token."
           },
           "version": {
             "type": "string",
@@ -45629,9 +45629,9 @@
         },
         "additionalProperties": false
       },
-      "EnrolResponse": {
+      "EnrollResponse": {
         "type": "object",
-        "description": "Answer of `POST /nodes/enrol`.",
+        "description": "Answer of `POST /nodes/enroll`.",
         "required": [
           "node",
           "certificate",
@@ -45686,9 +45686,9 @@
           }
         }
       },
-      "EnrolmentList": {
+      "EnrollmentList": {
         "type": "object",
-        "description": "Body of `GET /nodes/enrolments`.",
+        "description": "Body of `GET /nodes/enrollments`.",
         "required": [
           "items"
         ],
@@ -45696,24 +45696,24 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/EnrolmentView"
+              "$ref": "#/components/schemas/EnrollmentView"
             },
             "description": "Every token, newest first."
           }
         }
       },
-      "EnrolmentState": {
+      "EnrollmentState": {
         "type": "string",
-        "description": "The state of an enrolment token.",
+        "description": "The state of an enrollment token.",
         "enum": [
           "pending",
           "used",
           "expired"
         ]
       },
-      "EnrolmentView": {
+      "EnrollmentView": {
         "type": "object",
-        "description": "An enrolment token as `GET /nodes/enrolments` shows it (never the secret).",
+        "description": "An enrollment token as `GET /nodes/enrollments` shows it (never the secret).",
         "required": [
           "id",
           "roles",
@@ -45765,14 +45765,14 @@
             "description": "The roles the node may take."
           },
           "state": {
-            "$ref": "#/components/schemas/EnrolmentState",
+            "$ref": "#/components/schemas/EnrollmentState",
             "description": "`pending`, `used` or `expired`."
           },
           "used": {
             "oneOf": [
               {
                 "$ref": "#/components/schemas/TokenUse",
-                "description": "The enrolment it was used for."
+                "description": "The enrollment it was used for."
               },
               {
                 "type": "null"
@@ -46369,7 +46369,7 @@
       },
       "FactorEnrolled": {
         "type": "object",
-        "description": "The answer of a factor enrolment. Enrolling a factor does not raise the strength of the\nsession that enrolled it: when the session is below what the profile requires, the UI\nlogs in again with the new factor.",
+        "description": "The answer of a factor enrollment. Enrolling a factor does not raise the strength of the\nsession that enrolled it: when the session is below what the profile requires, the UI\nlogs in again with the new factor.",
         "required": [
           "reauthenticate"
         ],
@@ -48492,7 +48492,7 @@
           },
           "lower_case": {
             "type": "boolean",
-            "description": "The server is asked in lower case because it broke the 0x20 case randomisation."
+            "description": "The server is asked in lower case because it broke the 0x20 case randomization."
           },
           "origin": {
             "type": "string",
@@ -50571,7 +50571,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/CodedError",
-                "description": "Why the job is rolling back, failed or was cancelled."
+                "description": "Why the job is rolling back, failed or was canceled."
               },
               {
                 "type": "null"
@@ -50798,7 +50798,7 @@
           "succeeded",
           "failed",
           "rolled_back",
-          "cancelled"
+          "canceled"
         ]
       },
       "JobSummary": {
@@ -50860,7 +50860,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/CodedError",
-                "description": "Why the job is rolling back, failed or was cancelled."
+                "description": "Why the job is rolling back, failed or was canceled."
               },
               {
                 "type": "null"
@@ -52884,7 +52884,7 @@
               "string",
               "null"
             ],
-            "description": "SPDX licence expression of the plugin."
+            "description": "SPDX license expression of the plugin."
           },
           "manifest_version": {
             "type": "integer",
@@ -55266,7 +55266,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Warning codes that need an acknowledgement before a submit."
+            "description": "Warning codes that need an acknowledgment before a submit."
           },
           "warnings": {
             "type": "array",
@@ -55749,9 +55749,9 @@
           }
         }
       },
-      "Neighbour": {
+      "Neighbor": {
         "type": "object",
-        "description": "A neighbour of a node across one edge.",
+        "description": "A neighbor of a node across one edge.",
         "required": [
           "node",
           "label",
@@ -55782,7 +55782,7 @@
           },
           "node": {
             "type": "string",
-            "description": "The neighbour."
+            "description": "The neighbor."
           },
           "port": {
             "type": [
@@ -55796,7 +55796,7 @@
               "string",
               "null"
             ],
-            "description": "The port on the neighbour's side."
+            "description": "The port on the neighbor's side."
           },
           "ssid": {
             "type": [
@@ -55973,9 +55973,9 @@
         },
         "additionalProperties": false
       },
-      "NewEnrolment": {
+      "NewEnrollment": {
         "type": "object",
-        "description": "Body of `POST /nodes/enrolments`.",
+        "description": "Body of `POST /nodes/enrollments`.",
         "properties": {
           "expires_in_secs": {
             "type": [
@@ -56467,7 +56467,7 @@
       "NodeId": {
         "type": "integer",
         "format": "int64",
-        "description": "Raft node identifier, assigned at enrolment.",
+        "description": "Raft node identifier, assigned at enrollment.",
         "minimum": 0
       },
       "NodeIntent": {
@@ -56695,7 +56695,7 @@
               "string",
               "null"
             ],
-            "description": "The address the node gave at enrolment, else the address it enrolled from."
+            "description": "The address the node gave at enrollment, else the address it enrolled from."
           },
           "certificate": {
             "$ref": "#/components/schemas/CertificateRef",
@@ -56726,7 +56726,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "The user who created the enrolment token."
+            "description": "The user who created the enrollment token."
           },
           "id": {
             "type": "integer",
@@ -57459,7 +57459,7 @@
           },
           {
             "type": "object",
-            "description": "The organisation a MAC address is registered to (its OUI), or the manufacturer a\ndevice reports.",
+            "description": "The organization a MAC address is registered to (its OUI), or the manufacturer a\ndevice reports.",
             "required": [
               "data",
               "type"
@@ -57467,7 +57467,7 @@
             "properties": {
               "data": {
                 "type": "object",
-                "description": "The organisation a MAC address is registered to (its OUI), or the manufacturer a\ndevice reports.",
+                "description": "The organization a MAC address is registered to (its OUI), or the manufacturer a\ndevice reports.",
                 "required": [
                   "mac",
                   "vendor"
@@ -61440,7 +61440,7 @@
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/CodedError",
-                      "description": "Why the job is rolling back, failed or was cancelled."
+                      "description": "Why the job is rolling back, failed or was canceled."
                     },
                     {
                       "type": "null"
@@ -61794,7 +61794,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "The address the node gave at enrolment, else the address it enrolled from."
+                  "description": "The address the node gave at enrollment, else the address it enrolled from."
                 },
                 "certificate": {
                   "$ref": "#/components/schemas/CertificateRef",
@@ -61825,7 +61825,7 @@
                     "null"
                   ],
                   "format": "uuid",
-                  "description": "The user who created the enrolment token."
+                  "description": "The user who created the enrollment token."
                 },
                 "id": {
                   "type": "integer",
@@ -64128,7 +64128,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Warning codes the caller acknowledges (IPAM-06): a plan with a warning that needs\nan acknowledgement applies only when its code is listed here.",
+            "description": "Warning codes the caller acknowledges (IPAM-06): a plan with a warning that needs\nan acknowledgment applies only when its code is listed here.",
             "uniqueItems": true
           }
         }
@@ -64209,7 +64209,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Warning codes that still need an acknowledgement."
+            "description": "Warning codes that still need an acknowledgment."
           },
           "warnings": {
             "type": "object",
@@ -64505,7 +64505,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/DdnsPolicy",
-                "description": "The DDNS behaviour for the clients."
+                "description": "The DDNS behavior for the clients."
               },
               {
                 "type": "null"
@@ -65825,7 +65825,7 @@
           },
           "state": {
             "type": "string",
-            "description": "The command's state: `pending`, `accepted`, `running`, `done`, `failed`,\n`rejected`, `expired`, `cancelled`."
+            "description": "The command's state: `pending`, `accepted`, `running`, `done`, `failed`,\n`rejected`, `expired`, `canceled`."
           },
           "target": {
             "type": "string",
@@ -70488,12 +70488,12 @@
         "properties": {
           "active": {
             "type": "boolean",
-            "description": "Active probing (TGL-18): ICMP sweeps and TCP connect scans. `false` keeps the probe\npassive: neighbour tables, mDNS, LLMNR, reverse DNS and SNMP only.",
+            "description": "Active probing (TGL-18): ICMP sweeps and TCP connect scans. `false` keeps the probe\npassive: neighbor tables, mDNS, LLMNR, reverse DNS and SNMP only.",
             "default": true
           },
           "arp": {
             "$ref": "#/components/schemas/ScanBasicMethod",
-            "description": "IPv4 neighbours from the operating system's ARP table.",
+            "description": "IPv4 neighbors from the operating system's ARP table.",
             "default": {
               "enabled": true,
               "interval_secs": 300
@@ -70594,7 +70594,7 @@
           },
           "nd": {
             "$ref": "#/components/schemas/ScanBasicMethod",
-            "description": "IPv6 neighbours from the operating system's neighbour table.",
+            "description": "IPv6 neighbors from the operating system's neighbor table.",
             "default": {
               "enabled": true,
               "interval_secs": 300
@@ -70764,7 +70764,7 @@
               "string",
               "null"
             ],
-            "description": "The VRF of the addresses (a VRF id); not set: the VRF of the probe's enrolment\ntoken, else the default VRF.",
+            "description": "The VRF of the addresses (a VRF id); not set: the VRF of the probe's enrollment\ntoken, else the default VRF.",
             "default": null
           }
         },
@@ -71037,7 +71037,7 @@
           "done",
           "partial",
           "failed",
-          "cancelled"
+          "canceled"
         ]
       },
       "ScanTarget": {
@@ -71963,7 +71963,7 @@
         "description": "Flags of a session that the UI acts on.",
         "required": [
           "password_change_required",
-          "mfa_enrolment_required",
+          "mfa_enrollment_required",
           "break_glass"
         ],
         "properties": {
@@ -71971,9 +71971,9 @@
             "type": "boolean",
             "description": "The break-glass account is in use."
           },
-          "mfa_enrolment_required": {
+          "mfa_enrollment_required": {
             "type": "boolean",
-            "description": "The profile requires a stronger factor than this session used; enrol one."
+            "description": "The profile requires a stronger factor than this session used; enroll one."
           },
           "password_change_required": {
             "type": "boolean",
@@ -73333,7 +73333,7 @@
         "properties": {
           "attach_on_lldp_ports": {
             "type": "boolean",
-            "description": "Reports clients on ports where an LLDP neighbour is seen (default false: those\nports lead to other network devices, which report their own clients).",
+            "description": "Reports clients on ports where an LLDP neighbor is seen (default false: those\nports lead to other network devices, which report their own clients).",
             "default": false
           },
           "devices": {
@@ -75974,7 +75974,7 @@
       },
       "TokenUse": {
         "type": "object",
-        "description": "The enrolment a token was used for.",
+        "description": "The enrollment a token was used for.",
         "required": [
           "node",
           "at"
@@ -76247,11 +76247,11 @@
       },
       "TopologyNodeView": {
         "type": "object",
-        "description": "One node with its ports, neighbours and intent (`GET /topology/nodes/{id}`).",
+        "description": "One node with its ports, neighbors and intent (`GET /topology/nodes/{id}`).",
         "required": [
           "node",
           "ports",
-          "neighbours",
+          "neighbors",
           "revision"
         ],
         "properties": {
@@ -76266,12 +76266,12 @@
               }
             ]
           },
-          "neighbours": {
+          "neighbors": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Neighbour"
+              "$ref": "#/components/schemas/Neighbor"
             },
-            "description": "Every neighbour, also those across edges without a port on this side."
+            "description": "Every neighbor, also those across edges without a port on this side."
           },
           "node": {
             "$ref": "#/components/schemas/TopologyNode",
@@ -76297,7 +76297,7 @@
         "description": "A port of a node and what hangs on it.",
         "required": [
           "port",
-          "neighbours"
+          "neighbors"
         ],
         "properties": {
           "name": {
@@ -76316,10 +76316,10 @@
             "description": "The untagged VLAN the controller reports.",
             "minimum": 0
           },
-          "neighbours": {
+          "neighbors": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Neighbour"
+              "$ref": "#/components/schemas/Neighbor"
             },
             "description": "Everything seen behind the port."
           },
@@ -76463,11 +76463,11 @@
           "sha512"
         ]
       },
-      "TotpEnrolFinish": {
+      "TotpEnrollFinish": {
         "type": "object",
         "description": "`POST /auth/totp/enroll/finish`.",
         "required": [
-          "enrolment_id",
+          "enrollment_id",
           "code"
         ],
         "properties": {
@@ -76475,23 +76475,23 @@
             "$ref": "#/components/schemas/SecretString",
             "description": "A current code from the authenticator app."
           },
-          "enrolment_id": {
+          "enrollment_id": {
             "type": "string",
             "description": "From the start step."
           }
         }
       },
-      "TotpEnrolment": {
+      "TotpEnrollment": {
         "type": "object",
         "description": "The answer of `POST /auth/totp/enroll/start`. The secret is shown once.",
         "required": [
-          "enrolment_id",
+          "enrollment_id",
           "secret",
           "otpauth_uri",
           "params"
         ],
         "properties": {
-          "enrolment_id": {
+          "enrollment_id": {
             "type": "string",
             "description": "Pass this to the finish step."
           },
@@ -76511,7 +76511,7 @@
       },
       "TotpParams": {
         "type": "object",
-        "description": "The parameters of a TOTP enrolment.\n\nThe secret is not part of the parameters. Stored parameters can be checked with\n[`TotpParams::validate`]; [`verify`] refuses parameters that fail the check.",
+        "description": "The parameters of a TOTP enrollment.\n\nThe secret is not part of the parameters. Stored parameters can be checked with\n[`TotpParams::validate`]; [`verify`] refuses parameters that fail the check.",
         "required": [
           "algorithm",
           "digits",
@@ -78750,7 +78750,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Warning codes that need an acknowledgement before a submit."
+            "description": "Warning codes that need an acknowledgment before a submit."
           },
           "vlan": {
             "$ref": "#/components/schemas/VlanTarget",
@@ -80664,7 +80664,7 @@
           },
           "zone_file": {
             "type": "string",
-            "description": "The zone file text; `$ORIGIN` and `$TTL` are honoured, `$INCLUDE` is refused."
+            "description": "The zone file text; `$ORIGIN` and `$TTL` are honored, `$INCLUDE` is refused."
           }
         }
       },
@@ -81031,7 +81031,7 @@
     },
     {
       "name": "nodes",
-      "description": "Cluster nodes: enrolment tokens, enrolment, the node registry and revocation"
+      "description": "Cluster nodes: enrollment tokens, enrollment, the node registry and revocation"
     },
     {
       "name": "secrets",
@@ -81039,7 +81039,7 @@
     },
     {
       "name": "topology",
-      "description": "The topology map: nodes, edges, ports and neighbours"
+      "description": "The topology map: nodes, edges, ports and neighbors"
     },
     {
       "name": "cluster",

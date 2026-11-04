@@ -215,7 +215,7 @@ fn invalid(code: &'static str, status: u16, detail: impl Into<String>) -> JobErr
 /// replayed request gets the same answer as the first one.
 fn inline_outcome(job: Job) -> Result<Job, JobError> {
     match job.state {
-        JobState::RolledBack | JobState::Failed | JobState::RollingBack | JobState::Cancelled => {
+        JobState::RolledBack | JobState::Failed | JobState::RollingBack | JobState::Canceled => {
             let error = job
                 .error
                 .unwrap_or_else(|| CodedError::internal("the inline job failed"));
@@ -662,9 +662,9 @@ impl JobEngine {
         Err(JobError::Store(StoreError::Timeout))
     }
 
-    /// Cancels a job. A queued job is cancelled at once. A running or waiting job is
+    /// Cancels a job. A queued job is canceled at once. A running or waiting job is
     /// marked: the runner aborts the current step at its next boundary, rolls the job back
-    /// and ends it in `cancelled`. Cancelling twice is harmless.
+    /// and ends it in `canceled`. Canceling twice is harmless.
     ///
     /// # Errors
     ///
@@ -675,7 +675,7 @@ impl JobEngine {
         self.change_job(id, &self.author(cx), |machine| match machine.job.state {
             JobState::Queued => {
                 machine.job.cancel_requested = Some(stamp.clone());
-                machine.job.error = Some(crate::machine::cancelled());
+                machine.job.error = Some(crate::machine::canceled());
                 machine.job_action(crate::JobAction::Cancel)?;
                 Ok(true)
             }

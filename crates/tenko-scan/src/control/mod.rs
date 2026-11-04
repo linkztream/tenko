@@ -144,7 +144,7 @@ pub mod kinds {
     pub const DIFF_STEP: &str = "scan.diff";
 }
 
-/// Translatable texts of the jobs (keys of the UI's message catalogue).
+/// Translatable texts of the jobs (keys of the UI's message catalog).
 pub mod messages {
     /// Title of an edit job.
     pub const EDIT_TITLE: &str = "scan.job.edit";

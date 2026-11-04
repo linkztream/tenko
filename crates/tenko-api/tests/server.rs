@@ -374,7 +374,7 @@ async fn forwarded_headers_count_only_from_trusted_proxies() {
     assert_eq!(limited.json()["code"], "sys.rate_limited");
     assert_eq!(limited.json()["params"]["scope"], "ip");
     assert!(limited.header("retry-after").is_some());
-    // Another forwarded client has its own bucket: the header was honoured.
+    // Another forwarded client has its own bucket: the header was honored.
     assert_eq!(get(addr, "/api/v1/health", &client_b).await.status, 200);
     // The left-most entry is the client's own claim and does not count.
     let spoofed = [("X-Forwarded-For", "192.0.2.200, 198.51.100.8")];

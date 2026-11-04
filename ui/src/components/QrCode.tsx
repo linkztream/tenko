@@ -1,6 +1,6 @@
 // A QR code drawn in the browser, without any network request: the encoder (uqr, MIT
-// licence, recorded in public/licenses/uqr.txt) is loaded on first use, so it is not part of
-// the first page load. Used for the otpauth URI of the TOTP enrolment; the text stays
+// license, recorded in public/licenses/uqr.txt) is loaded on first use, so it is not part of
+// the first page load. Used for the otpauth URI of the TOTP enrollment; the text stays
 // visible next to it for devices without a camera.
 import { createResource, Show } from "solid-js";
 

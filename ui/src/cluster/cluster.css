@@ -17,7 +17,7 @@
 
 .cluster-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .cluster-actions.end { justify-content: flex-end; }
-/* The buttons under the token of the enrolment dialog, which this page shares with the nodes page. */
+/* The buttons under the token of the enrollment dialog, which this page shares with the nodes page. */
 .nodes-form .row-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 
 /* The members. */

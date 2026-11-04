@@ -19,7 +19,7 @@
 //! - Failure: the API offers no way to fail a manual step, and the observation timeout has
 //!   a floor of 300 seconds, so the failure path is a cancellation of the waiting job: the
 //!   engine compensates in reverse (the DNS records point to the old address again, the new
-//!   address is removed, the old one stays) and ends the job `cancelled`, and the host
+//!   address is removed, the old one stays) and ends the job `canceled`, and the host
 //!   carries the tag `move-failed`.
 //! - E25 (Phase 3, WP8.1): the five-device lab with the `dhcp` role serving both networks
 //!   in relay mode on loopback (the test is the relay agent and selects the scope with
@@ -572,7 +572,7 @@ fn e17_a_deleted_ipam_record_is_restored_and_a_taken_over_one_is_proposed() {
 }
 
 #[test]
-fn a_cancelled_move_rolls_back_and_marks_the_host() {
+fn a_canceled_move_rolls_back_and_marks_the_host() {
     let world = World::new(true);
     world.reconcile();
     assert_eq!(world.a_records(DNS_NAME), [OLD_IP]);
@@ -591,7 +591,7 @@ fn a_cancelled_move_rolls_back_and_marks_the_host() {
         .post_unkeyed(&format!("/jobs/{job}/cancel"), &json!({}))
         .expect(202);
     let detail = world.api.wait_for_job(&job, JOB_TIMEOUT);
-    assert_eq!(detail["job"]["state"], "cancelled", "{detail}");
+    assert_eq!(detail["job"]["state"], "canceled", "{detail}");
     assert!(
         !detail["job"]["error"].is_null(),
         "the reason is on the job"
@@ -1153,7 +1153,7 @@ fn e25_the_dhcp_step_is_automatic_for_reserved_devices_and_a_lease_confirms_the_
     let (_, kind) = lab.waiting_kind(&sensor);
     assert_eq!(kind, "ipam.move.device");
 
-    // cam1 is moved and cancelled while it waits for the L2 change: the rollback removes
+    // cam1 is moved and canceled while it waits for the L2 change: the rollback removes
     // the new reservation and keeps the old one.
     let cam1 = lab.submit(&[1]).remove(0);
     let (_, kind) = lab.waiting_kind(&cam1);
@@ -1163,7 +1163,7 @@ fn e25_the_dhcp_step_is_automatic_for_reserved_devices_and_a_lease_confirms_the_
         .post_unkeyed(&format!("/jobs/{cam1}/cancel"), &json!({}))
         .expect(202);
     let detail = world.api.wait_for_job(&cam1, JOB_TIMEOUT);
-    assert_eq!(detail["job"]["state"], "cancelled", "{detail}");
+    assert_eq!(detail["job"]["state"], "canceled", "{detail}");
     assert!(world.address("198.51.100.21").is_none());
     let offered = relay.offer_until(0x21, TARGET_NET, |offered| offered != addr("198.51.100.21"));
     assert!(in_pool(offered, TARGET_NET), "{offered}");

@@ -9,7 +9,7 @@ use tenko_auth::{
     model::{ALARMS, AlarmKind},
     service::{
         BreakGlassChange, CodeLogin, PasswordLogin, SecondFactorMethod, SetupAdmin, SetupRequest,
-        TotpEnrolFinish, UserCreate, WebAuthnLoginFinish, WebAuthnLoginStart,
+        TotpEnrollFinish, UserCreate, WebAuthnLoginFinish, WebAuthnLoginStart,
         WebAuthnRegisterFinish, WebAuthnRegisterStart, types::SecretString,
     },
     settings::{Profile, SessionLifetime, SettingsPatch},
@@ -126,10 +126,10 @@ async fn setup_runs_once_and_logs_the_administrator_in() {
     assert_eq!(session.info.user.name, ADMIN);
     assert_eq!(session.info.profile, Profile::Standard);
     assert_eq!(session.info.default_language.as_deref(), Some("sv"));
-    // Standard requires MFA for administrators: the password session must enrol a factor.
+    // Standard requires MFA for administrators: the password session must enroll a factor.
     assert_eq!(session.info.strength, AuthStrength::Password);
     assert_eq!(session.info.required_strength, AuthStrength::PasswordTotp);
-    assert!(session.info.flags.mfa_enrolment_required);
+    assert!(session.info.flags.mfa_enrollment_required);
     assert!(session.set_cookie.contains("HttpOnly"));
     assert!(session.set_cookie.contains("SameSite=Strict"));
     assert!(session.set_cookie.contains("Secure"));
@@ -325,52 +325,52 @@ async fn failed_logins_are_throttled_then_locked() {
 }
 
 #[tokio::test]
-#[allow(clippy::too_many_lines)] // One flow from enrolment to recovery.
-async fn totp_enrolment_then_two_step_login_and_recovery() {
+#[allow(clippy::too_many_lines)] // One flow from enrollment to recovery.
+async fn totp_enrollment_then_two_step_login_and_recovery() {
     let (env, session) = TestEnv::installed(Profile::Standard).await;
     let ctx = env.session_ctx(&session).await.expect("ctx");
-    let enrolment = env.service.totp_enrol_start(&ctx).await.expect("start");
+    let enrollment = env.service.totp_enroll_start(&ctx).await.expect("start");
     assert!(
-        enrolment
+        enrollment
             .otpauth_uri
             .expose()
             .starts_with("otpauth://totp/")
     );
     let seconds = |env: &TestEnv| u64::try_from(env.now().0.unix_timestamp()).expect("time");
-    // A wrong code does not enrol.
+    // A wrong code does not enroll.
     assert!(matches!(
         env.service
-            .totp_enrol_finish(
+            .totp_enroll_finish(
                 &ctx,
-                &TotpEnrolFinish {
-                    enrolment_id: enrolment.enrolment_id.clone(),
+                &TotpEnrollFinish {
+                    enrollment_id: enrollment.enrollment_id.clone(),
                     code: SecretString::new("000000"),
                 },
             )
             .await,
         Err(AuthError::TotpCodeMismatch)
     ));
-    let enrolment = env.service.totp_enrol_start(&ctx).await.expect("start");
-    let seed = base32_decode(enrolment.secret.expose()).expect("seed");
+    let enrollment = env.service.totp_enroll_start(&ctx).await.expect("start");
+    let seed = base32_decode(enrollment.secret.expose()).expect("seed");
     let code = totp::code_at(&seed, &TotpParams::default(), seconds(&env));
     let enrolled = env
         .service
-        .totp_enrol_finish(
+        .totp_enroll_finish(
             &ctx,
-            &TotpEnrolFinish {
-                enrolment_id: enrolment.enrolment_id.clone(),
+            &TotpEnrollFinish {
+                enrollment_id: enrollment.enrollment_id.clone(),
                 code: SecretString::new(code.as_str()),
             },
         )
         .await
-        .expect("enrol");
+        .expect("enroll");
     let recovery = enrolled
         .recovery_codes
         .expect("first factor brings recovery codes");
     assert_eq!(recovery.len(), 10);
     assert!(
         enrolled.reauthenticate,
-        "enrolment does not raise the session"
+        "enrollment does not raise the session"
     );
 
     // The seed is in the vault, not in the user record.
@@ -408,7 +408,7 @@ async fn totp_enrolment_then_two_step_login_and_recovery() {
             .expect("totp"),
     );
     assert_eq!(session.info.strength, AuthStrength::PasswordTotp);
-    assert!(!session.info.flags.mfa_enrolment_required);
+    assert!(!session.info.flags.mfa_enrollment_required);
     // The challenge is single use, and the same code cannot be replayed.
     assert!(
         env.service
@@ -480,7 +480,7 @@ async fn totp_enrolment_then_two_step_login_and_recovery() {
             .is_err()
     );
     let actions = audit_actions(&env).await;
-    for action in ["auth.totp.enrol", "auth.login.totp", "auth.login.recovery"] {
+    for action in ["auth.totp.enroll", "auth.login.totp", "auth.login.recovery"] {
         assert!(actions.contains(&action.to_owned()), "{action}");
     }
 }
@@ -547,8 +547,8 @@ async fn passkey_login(
 async fn passkeys_register_and_log_in_without_a_user_name() {
     let (env, session) = TestEnv::installed(Profile::Hardened).await;
     let ctx = env.session_ctx(&session).await.expect("ctx");
-    // Hardened: the password session must enrol a passkey and log in with it.
-    assert!(session.info.flags.mfa_enrolment_required);
+    // Hardened: the password session must enroll a passkey and log in with it.
+    assert!(session.info.flags.mfa_enrollment_required);
     assert_eq!(session.info.required_strength, AuthStrength::Passkey);
     let mut authenticator = register(
         &env,
@@ -566,7 +566,7 @@ async fn passkeys_register_and_log_in_without_a_user_name() {
         .await
         .expect("login");
     assert_eq!(passkey.info.strength, AuthStrength::Passkey);
-    assert!(!passkey.info.flags.mfa_enrolment_required);
+    assert!(!passkey.info.flags.mfa_enrollment_required);
     // The counter moved: a replayed assertion with the same counter is refused.
     let named = passkey_login(&env, &mut authenticator, Some(ADMIN))
         .await

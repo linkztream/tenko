@@ -539,7 +539,7 @@ impl ReleaseManifest {
     /// [`ManifestError::TooLarge`] before any parsing when the document exceeds
     /// [`MAX_MANIFEST_BYTES`]; [`ManifestError::Json`] when it is not JSON of the manifest
     /// shape (a document that declares another schema number reports
-    /// [`ManifestError::Schema`] instead, so a manifest of a newer format is recognised even
+    /// [`ManifestError::Schema`] instead, so a manifest of a newer format is recognized even
     /// when its shape changed); otherwise the errors of [`ReleaseManifest::validate`].
     pub fn parse(bytes: &[u8]) -> Result<Self, ManifestError> {
         if bytes.len() > MAX_MANIFEST_BYTES {
@@ -855,7 +855,7 @@ pub fn current_platform() -> String {
 /// An absolute `http` or `https` URL is returned as it is. A URL that starts with `/`
 /// replaces the path of `base`; any other relative URL replaces the last path segment of
 /// `base`. The query and the fragment of `base` are dropped. Dot segments are not
-/// normalised. Returns `None` when `url` is empty, contains whitespace or control
+/// normalized. Returns `None` when `url` is empty, contains whitespace or control
 /// characters, names another scheme or a network path (`//host/...`), or when it is
 /// relative and `base` is not an absolute `http` or `https` URL.
 pub fn resolve_url(base: &str, url: &str) -> Option<String> {
@@ -1073,7 +1073,7 @@ fn parse_heading(heading: &str, line: usize) -> Result<Heading, ChangelogError> 
         changelog_error(
             line,
             format!(
-                "unrecognised section heading `{}`; {EXPECTED}",
+                "unrecognized section heading `{}`; {EXPECTED}",
                 printable(heading)
             ),
         )
@@ -1612,7 +1612,7 @@ mod tests {
         assert_eq!(newer.code(), "update.manifest.schema");
         assert!(newer.to_string().contains("newer Tenko"), "{newer}");
 
-        // A newer schema may change the shape; it is still recognised as newer.
+        // A newer schema may change the shape; it is still recognized as newer.
         let reshaped = ReleaseManifest::parse(br#"{"schema":3,"channels":{"stable":[]}}"#)
             .expect_err("reshaped");
         assert_eq!(reshaped, ManifestError::Schema { found: 3 });

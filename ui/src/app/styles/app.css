@@ -72,7 +72,7 @@
 .dialog {
   --dialog-top: 16dvh;
   --dialog-gutter: var(--sp-6);
-  position: absolute; left: 50%; /* physical: centred with translateX(-50%) */ inset-block-start: var(--dialog-top); transform: translateX(-50%);
+  position: absolute; left: 50%; /* physical: centered with translateX(-50%) */ inset-block-start: var(--dialog-top); transform: translateX(-50%);
   width: min(480px, calc(100vw - 2 * var(--dialog-gutter)));
   max-height: calc(100dvh - var(--dialog-top) - var(--dialog-gutter));
   overflow: auto; overscroll-behavior: contain;

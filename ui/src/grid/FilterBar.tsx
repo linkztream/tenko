@@ -54,7 +54,7 @@ export interface FilterBarProps<T> {
   columns?: ColumnState<T>;
   /** Whether "/" focuses this field (the first filter bar of a page). Default true. */
   slashFocus?: boolean;
-  /** `toolbar` (default) or `group` for a bar of labelled fields. */
+  /** `toolbar` (default) or `group` for a bar of labeled fields. */
   role?: "toolbar" | "group";
   testid?: string;
   class?: string;

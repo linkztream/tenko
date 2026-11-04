@@ -283,10 +283,10 @@ describe("create", () => {
     expect(notice.getAttribute("role")).toBe("alert");
     expect(notice.textContent).toContain("Accounts with a PIN alone: sam.");
     expect(notice.textContent).toContain("(the PIN coupling rule)");
-    expect(notice.textContent).toContain("Enrol a passkey for them first; a second factor, a password or other roles also lift the rule.");
-    const enrol = within(notice).getByTestId("secret-pin-coupling-enrol");
-    expect(enrol.textContent).toBe("Enrol a passkey");
-    expect(enrol.getAttribute("href")).toBe("/account/security");
+    expect(notice.textContent).toContain("Enroll a passkey for them first; a second factor, a password or other roles also lift the rule.");
+    const enroll = within(notice).getByTestId("secret-pin-coupling-enroll");
+    expect(enroll.textContent).toBe("Enroll a passkey");
+    expect(enroll.getAttribute("href")).toBe("/account/security");
     expect(screen.getByTestId("dialog-secret-form")).toBeTruthy();
     expect((screen.getByTestId("field-value") as HTMLInputElement).value).toBe("");
     expect(secretList()).toHaveLength(2);
@@ -535,7 +535,7 @@ describe("delete", () => {
     await waitFor(() => expect(names()).toEqual(["nas admin"]));
   });
 
-  it("keeps the secret when the confirmation is cancelled", async () => {
+  it("keeps the secret when the confirmation is canceled", async () => {
     await releaseUnifi();
     await openPage();
     fireEvent.click(within(rowOf("unifi api")).getByTestId("secret-delete"));

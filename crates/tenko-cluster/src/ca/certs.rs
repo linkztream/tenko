@@ -24,8 +24,8 @@ use zeroize::Zeroizing;
 
 use super::{CaError, ServerIdentity};
 
-/// Organisation in the subject of the root.
-const ORGANISATION: &str = "Tenko DDI";
+/// Organization in the subject of the root.
+const ORGANIZATION: &str = "Tenko DDI";
 /// Tolerated clock skew: certificates are valid from this long before issuance.
 const CLOCK_SKEW: Duration = Duration::hours(1);
 /// Longest common name X.520 allows (`ub-common-name`).
@@ -66,7 +66,7 @@ pub(crate) fn generate_root(
     let key = generate_key()?;
     let (not_before, not_after) = validity(now, validity_days)?;
     let mut params = CertificateParams::default();
-    params.distinguished_name = distinguished_name(common_name, Some(ORGANISATION));
+    params.distinguished_name = distinguished_name(common_name, Some(ORGANIZATION));
     params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
     params.key_usages = vec![
         KeyUsagePurpose::KeyCertSign,
@@ -205,7 +205,7 @@ pub(crate) fn issue_node(
 }
 
 /// Issues a node certificate for the public key of a CSR, with the node's roles as
-/// `urn:tenko:role:<role>` URIs next to `urn:tenko:node:<id>` (enrolment, WP2.2). The
+/// `urn:tenko:role:<role>` URIs next to `urn:tenko:node:<id>` (enrollment, WP2.2). The
 /// request is checked as in [`issue_node_from_csr`].
 pub(crate) fn issue_node_with_roles_from_csr(
     signer: &Signer,
@@ -235,7 +235,7 @@ pub(crate) fn issue_node_with_roles(
     Ok((cert, pkcs8_of(&key)))
 }
 
-/// A fresh ECDSA P-256 key and a PKCS#10 request over it, DER, for enrolment and renewal
+/// A fresh ECDSA P-256 key and a PKCS#10 request over it, DER, for enrollment and renewal
 /// on the node. The request names nothing: the CA takes only the key.
 ///
 /// # Errors
@@ -324,10 +324,10 @@ fn validity(
     Ok((not_before, not_after))
 }
 
-fn distinguished_name(common_name: &str, organisation: Option<&str>) -> DistinguishedName {
+fn distinguished_name(common_name: &str, organization: Option<&str>) -> DistinguishedName {
     let mut name = DistinguishedName::new();
-    if let Some(organisation) = organisation {
-        name.push(DnType::OrganizationName, organisation);
+    if let Some(organization) = organization {
+        name.push(DnType::OrganizationName, organization);
     }
     name.push(DnType::CommonName, common_name);
     name
@@ -607,8 +607,8 @@ mod tests {
         assert_eq!(cert.subject(), cert.issuer());
         let common_name = cert.subject().iter_common_name().next().expect("CN");
         assert_eq!(common_name.as_str().expect("text"), "Tenko DDI test CA");
-        let organisation = cert.subject().iter_organization().next().expect("O");
-        assert_eq!(organisation.as_str().expect("text"), "Tenko DDI");
+        let organization = cert.subject().iter_organization().next().expect("O");
+        assert_eq!(organization.as_str().expect("text"), "Tenko DDI");
     }
 
     #[test]

@@ -86,7 +86,7 @@ async function problemOf(response: Response): Promise<Problem> {
  * section 2). The browser shares the cookie; load a page afterwards.
  */
 async function strongSession(api: Api): Promise<Authenticator> {
-  const { authenticator } = await api.enrolTotp();
+  const { authenticator } = await api.enrollTotp();
   const session = await api.signIn(authenticator);
   expect(session.strength).toBe("password_totp");
   return authenticator;
@@ -544,11 +544,11 @@ test.describe("the hand-off from the host page", () => {
     probe = undefined;
   });
 
-  /** Enrols a probe node and has it report the open TCP ports of addresses (the `services` facts). */
+  /** Enrolls a probe node and has it report the open TCP ports of addresses (the `services` facts). */
   async function probeSaw(api: Api, server: TenkoServer, seen: Record<string, { open: number[]; tls?: number[] }>): Promise<void> {
-    const token = await api.post<Schemas["CreatedEnrolment"]>("/nodes/enrolments", { roles: ["probe"], name: "probe-lab" }, { idempotencyKey: null });
+    const token = await api.post<Schemas["CreatedEnrollment"]>("/nodes/enrollments", { roles: ["probe"], name: "probe-lab" }, { idempotencyKey: null });
     probe = await ProbeNode.create();
-    const enrolled = await probe.enrol(server, token.token, { name: "probe-lab", address: "192.0.2.20" });
+    const enrolled = await probe.enroll(server, token.token, { name: "probe-lab", address: "192.0.2.20" });
     expect(enrolled.code, enrolled.stderr).toBe(0);
     await probe.serve();
     const now = new Date().toISOString();

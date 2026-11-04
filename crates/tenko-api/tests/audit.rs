@@ -528,7 +528,7 @@ async fn malformed_queries_are_problem_details_naming_the_parameter() {
         ("action=nope.".to_owned(), "action"),
         ("action=ipam".to_owned(), "action"),
         ("principal=a&principal=b".to_owned(), "principal"),
-        ("colour=blue".to_owned(), "colour"),
+        ("color=blue".to_owned(), "color"),
     ];
     for (query, parameter) in cases {
         let reply = get(&router, &format!("/audit?{query}")).await;

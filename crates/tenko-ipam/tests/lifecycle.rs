@@ -1,6 +1,6 @@
 //! End-to-end rules of the IPAM domain over `MemStore`: defaults, overlap, most specific
 //! prefix, next free, soft delete and restore with history, locks, alarms and
-//! acknowledgements.
+//! acknowledgments.
 
 mod common;
 
@@ -301,7 +301,7 @@ async fn reserved_host_without_mac_warns() {
 }
 
 #[tokio::test]
-async fn nibble_boundary_needs_acknowledgement() {
+async fn nibble_boundary_needs_acknowledgment() {
     let (service, _) = service();
     let command = vec![IpamCommand::CreatePrefix(prefix(None, "2001:db8::/62"))];
     let error = service

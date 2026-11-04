@@ -571,7 +571,7 @@ test("a secret reference reaches the plugin, which reports it by a tag and never
   expect(signedIn.session.user.name).toBe(ADMIN.name);
   // Operator secrets need a session of password strength or more (IAM-07): the PIN of the
   // test administrator is raised with an authenticator app first.
-  const { authenticator } = await api.enrolTotp();
+  const { authenticator } = await api.enrollTotp();
   await api.logout();
   const raised = await api.signIn(authenticator);
   expect(raised.strength).toBe("password_totp");

@@ -7,7 +7,7 @@
 //! delegation), the quirk servers at .11, .13 and .14, `elsewhere.test` at .41 and a silent
 //! server at .250 for the TLD `unreachable`. The addresses are 203.0.113.0/24.
 //!
-//! Every case starts from a primed engine with nothing else learnt and records the queries
+//! Every case starts from a primed engine with nothing else learned and records the queries
 //! sent ([`CASES`]): the figures of M40, documented in `docs/dns-resolver.md` section 10.
 
 use std::{
@@ -375,15 +375,15 @@ struct Case {
     qname: &'static str,
     qtype: u16,
     expect: Expect,
-    /// WP10.3: the queries sent with QNAME minimisation relaxed, strict and off (M40).
+    /// WP10.3: the queries sent with QNAME minimization relaxed, strict and off (M40).
     queries: [usize; 3],
 }
 
 // WP10.3: the modes of the case table, in the order of `Case::queries`.
-const MODES: [Minimisation; 3] = [
-    Minimisation::Relaxed,
-    Minimisation::Strict,
-    Minimisation::Off,
+const MODES: [Minimization; 3] = [
+    Minimization::Relaxed,
+    Minimization::Strict,
+    Minimization::Off,
 ];
 
 /// The cases and their query counts (M40).
@@ -506,12 +506,12 @@ const CASES: &[Case] = &[
 async fn every_case_of_e36_ends_within_the_budget_with_its_query_count() {
     let mut report = Vec::new();
     let mut wrong = Vec::new();
-    // WP10.3: every case under each minimisation mode.
+    // WP10.3: every case under each minimization mode.
     for (mode_index, mode) in MODES.into_iter().enumerate() {
         for case in CASES {
             let lab = Arc::new(lab());
             let mut settings = settings();
-            settings.recursion.minimisation = mode;
+            settings.recursion.minimization = mode;
             let engine = engine_with(&lab, &settings);
             engine.prime().await.expect("primed");
             lab.clear_log();
@@ -700,7 +700,7 @@ async fn the_ladder_and_the_bailiwick_leave_their_marks_in_the_caches() {
     let elsewhere = engine
         .infra()
         .name_server(&name("ns.elsewhere.test"), Instant::now())
-        .expect("learnt");
+        .expect("learned");
     assert!(
         elsewhere
             .addresses
@@ -756,7 +756,7 @@ async fn a_warm_cache_asks_only_the_zone_and_the_budget_bounds_the_rest() {
     lab.clear_log();
     let other = wire_name("any.wild.example.test");
     let resolved = engine.resolve(question(&other, types::A)).await;
-    // WP10.3: the cut is known; minimised, its server is asked for `wild.example.test`
+    // WP10.3: the cut is known; minimized, its server is asked for `wild.example.test`
     // first and then the name.
     assert_eq!(
         (resolved.rcode, lab.asked().len()),
@@ -963,7 +963,7 @@ fn cookies_are_per_server_and_the_extended_error_goes_into_the_opt_record() {
     assert!(name.eq_ignore_ascii_case(&wire_name("www.example.test")));
 }
 
-// WP10.3: QNAME minimisation (E35, M40).
+// WP10.3: QNAME minimization (E35, M40).
 fn asked_of(lab: &MemAuthority, server: u8) -> Vec<String> {
     lab.asked()
         .iter()
@@ -972,9 +972,9 @@ fn asked_of(lab: &MemAuthority, server: u8) -> Vec<String> {
         .collect()
 }
 
-async fn engine_in(lab: &Arc<MemAuthority>, mode: Minimisation) -> Lab {
+async fn engine_in(lab: &Arc<MemAuthority>, mode: Minimization) -> Lab {
     let mut settings = settings();
-    settings.recursion.minimisation = mode;
+    settings.recursion.minimization = mode;
     let engine = engine_with(lab, &settings);
     engine.prime().await.expect("primed");
     lab.clear_log();
@@ -982,24 +982,24 @@ async fn engine_in(lab: &Arc<MemAuthority>, mode: Minimisation) -> Lab {
 }
 
 #[tokio::test]
-async fn the_tld_sees_only_the_labels_minimisation_sends() {
+async fn the_tld_sees_only_the_labels_minimization_sends() {
     // Three labels below the TLD.
     let qname = wire_name("any.wild.example.test");
     for (mode, root, tld, zone) in [
         (
-            Minimisation::Relaxed,
+            Minimization::Relaxed,
             vec!["test"],
             vec!["example.test"],
             vec!["wild.example.test", "any.wild.example.test"],
         ),
         (
-            Minimisation::Strict,
+            Minimization::Strict,
             vec!["test"],
             vec!["example.test"],
             vec!["wild.example.test", "any.wild.example.test"],
         ),
         (
-            Minimisation::Off,
+            Minimization::Off,
             vec!["any.wild.example.test"],
             vec!["any.wild.example.test"],
             vec!["any.wild.example.test"],
@@ -1012,22 +1012,22 @@ async fn the_tld_sees_only_the_labels_minimisation_sends() {
         assert_eq!(asked_of(&lab, ROOT), root, "{mode:?}");
         assert_eq!(asked_of(&lab, TLD), tld, "{mode:?}");
         assert_eq!(asked_of(&lab, ZONE), zone, "{mode:?}");
-        // The original type, A here, on every minimised question.
+        // The original type, A here, on every minimized question.
         assert!(lab.asked().iter().all(|asked| asked.qtype == types::A));
-        let expected = if mode == Minimisation::Off { 0 } else { 3 };
-        assert_eq!(engine.minimisation_counters(), [expected, 0, 0], "{mode:?}");
+        let expected = if mode == Minimization::Off { 0 } else { 3 };
+        assert_eq!(engine.minimization_counters(), [expected, 0, 0], "{mode:?}");
     }
 }
 
 #[tokio::test]
-async fn relaxed_minimisation_falls_back_for_a_server_that_denies_its_empty_non_terminals() {
+async fn relaxed_minimization_falls_back_for_a_server_that_denies_its_empty_non_terminals() {
     let qname = wire_name("www.a.b.broken.example.test");
     let broken = name("broken.example.test");
 
     // Relaxed: the NXDOMAIN for `b.broken.example.test` is asked again with the full name,
     // which exists: the zone is asked with full names from now on.
     let lab = Arc::new(lab());
-    let engine = engine_in(&lab, Minimisation::Relaxed).await;
+    let engine = engine_in(&lab, Minimization::Relaxed).await;
     let resolved = engine.resolve(question(&qname, types::A)).await;
     assert_eq!(resolved.outcome, Outcome::Answered);
     assert_eq!(
@@ -1035,12 +1035,12 @@ async fn relaxed_minimisation_falls_back_for_a_server_that_denies_its_empty_non_
         vec!["b.broken.example.test", "www.a.b.broken.example.test"]
     );
     assert_eq!(lab.asked().len(), 5);
-    assert_eq!(engine.minimisation_counters()[1..], [1, 1]);
+    assert_eq!(engine.minimization_counters()[1..], [1, 1]);
     let cut = engine
         .infra()
         .cut(&broken, Instant::now())
         .expect("the cut");
-    assert!(cut.minimise_fallback.is_some(), "remembered");
+    assert!(cut.minimize_fallback.is_some(), "remembered");
     lab.clear_log();
     let other = wire_name("www.c.broken.example.test");
     let resolved = engine.resolve(question(&other, types::A)).await;
@@ -1050,22 +1050,22 @@ async fn relaxed_minimisation_falls_back_for_a_server_that_denies_its_empty_non_
 
     // Strict: the NXDOMAIN stands (RFC 8020) and nothing falls back.
     let lab = Arc::new(self::lab());
-    let engine = engine_in(&lab, Minimisation::Strict).await;
+    let engine = engine_in(&lab, Minimization::Strict).await;
     let resolved = engine.resolve(question(&qname, types::A)).await;
     let header = wire::parse_header(&resolved.message).expect("header");
     assert_eq!(header.rcode, 3);
     assert_eq!(asked_of(&lab, BROKEN), vec!["b.broken.example.test"]);
     assert_eq!(lab.asked().len(), 4);
-    assert_eq!(engine.minimisation_counters()[1..], [0, 0]);
+    assert_eq!(engine.minimization_counters()[1..], [0, 0]);
     let cut = engine
         .infra()
         .cut(&broken, Instant::now())
         .expect("the cut");
-    assert!(cut.minimise_fallback.is_none());
+    assert!(cut.minimize_fallback.is_none());
 
     // Off: the full name everywhere.
     let lab = Arc::new(self::lab());
-    let engine = engine_in(&lab, Minimisation::Off).await;
+    let engine = engine_in(&lab, Minimization::Off).await;
     let resolved = engine.resolve(question(&qname, types::A)).await;
     assert_eq!(resolved.outcome, Outcome::Answered);
     assert!(
@@ -1077,10 +1077,10 @@ async fn relaxed_minimisation_falls_back_for_a_server_that_denies_its_empty_non_
 }
 
 #[tokio::test]
-async fn a_clean_nxdomain_under_relaxed_minimisation_costs_one_query_and_no_fallback() {
+async fn a_clean_nxdomain_under_relaxed_minimization_costs_one_query_and_no_fallback() {
     let qname = wire_name("x.nothing.example.test");
     let lab = Arc::new(lab());
-    let engine = engine_in(&lab, Minimisation::Relaxed).await;
+    let engine = engine_in(&lab, Minimization::Relaxed).await;
     let resolved = engine.resolve(question(&qname, types::A)).await;
     let header = wire::parse_header(&resolved.message).expect("header");
     assert_eq!(header.rcode, 3);
@@ -1088,15 +1088,15 @@ async fn a_clean_nxdomain_under_relaxed_minimisation_costs_one_query_and_no_fall
         asked_of(&lab, ZONE),
         vec!["nothing.example.test", "x.nothing.example.test"]
     );
-    assert_eq!(engine.minimisation_counters()[1..], [1, 0]);
+    assert_eq!(engine.minimization_counters()[1..], [1, 0]);
     let cut = engine
         .infra()
         .cut(&name("example.test"), Instant::now())
         .expect("the cut");
-    assert!(cut.minimise_fallback.is_none(), "the server is clean");
+    assert!(cut.minimize_fallback.is_none(), "the server is clean");
 
     let lab = Arc::new(self::lab());
-    let engine = engine_in(&lab, Minimisation::Strict).await;
+    let engine = engine_in(&lab, Minimization::Strict).await;
     let resolved = engine.resolve(question(&qname, types::A)).await;
     let header = wire::parse_header(&resolved.message).expect("header");
     assert_eq!(header.rcode, 3);
@@ -1104,15 +1104,15 @@ async fn a_clean_nxdomain_under_relaxed_minimisation_costs_one_query_and_no_fall
 }
 
 #[test]
-fn the_minimiser_adds_one_label_four_times_then_more_and_stops_at_ten() {
+fn the_minimizer_adds_one_label_four_times_then_more_and_stops_at_ten() {
     let mut labels: Vec<String> = (0..20).map(|index| format!("l{index}")).collect();
     labels.push("test".to_owned());
     let qname = wire_name(&labels.join("."));
-    let mut minimiser = Minimiser::new(Minimisation::Relaxed, &qname, types::AAAA);
+    let mut minimizer = Minimizer::new(Minimization::Relaxed, &qname, types::AAAA);
     let root = DnsName::root().to_wire();
     let mut steps = Vec::new();
     loop {
-        let (asked, qtype) = minimiser.next(&root, false, &|_| false);
+        let (asked, qtype) = minimizer.next(&root, false, &|_| false);
         steps.push(name::label_count(asked));
         assert_eq!(qtype, types::AAAA, "the original type");
         if asked.len() == qname.len() {
@@ -1120,28 +1120,28 @@ fn the_minimiser_adds_one_label_four_times_then_more_and_stops_at_ten() {
         }
     }
     assert_eq!(steps, vec![1, 2, 3, 4, 7, 10, 13, 16, 19, 21]);
-    assert!(steps.len() - 1 <= usize::from(MAX_MINIMISE));
+    assert!(steps.len() - 1 <= usize::from(MAX_MINIMIZE));
 
     // A referral starts again from the delegated zone; the names known to exist are
     // skipped; a fallback (relaxed) and the mode off ask the full name.
     let qname = wire_name("a.b.c.example.test");
-    let mut minimiser = Minimiser::new(Minimisation::Relaxed, &qname, types::DS);
+    let mut minimizer = Minimizer::new(Minimization::Relaxed, &qname, types::DS);
     assert_eq!(
-        minimiser.next(&root, false, &|_| false),
+        minimizer.next(&root, false, &|_| false),
         (&wire_name("test")[..], types::A)
     );
-    minimiser.referred(&wire_name("example.test"));
+    minimizer.referred(&wire_name("example.test"));
     let known_name = wire_name("c.example.test");
     let known = |name: &[u8]| name == known_name.as_slice();
-    let (asked, _) = minimiser.next(&wire_name("example.test"), false, &known);
+    let (asked, _) = minimizer.next(&wire_name("example.test"), false, &known);
     assert_eq!(asked, wire_name("b.c.example.test"));
-    let mut minimiser = Minimiser::new(Minimisation::Relaxed, &qname, types::A);
-    assert_eq!(minimiser.next(&root, true, &|_| false).0, &qname[..]);
-    let mut minimiser = Minimiser::new(Minimisation::Strict, &qname, types::A);
-    assert_eq!(minimiser.next(&root, true, &|_| false).0, wire_name("test"));
-    let mut minimiser = Minimiser::new(Minimisation::Off, &qname, types::A);
-    assert_eq!(minimiser.next(&root, false, &|_| false).0, &qname[..]);
-    assert_eq!(minimised_type(types::ANY), types::A);
-    assert_eq!(minimised_type(types::AAAA), types::AAAA);
+    let mut minimizer = Minimizer::new(Minimization::Relaxed, &qname, types::A);
+    assert_eq!(minimizer.next(&root, true, &|_| false).0, &qname[..]);
+    let mut minimizer = Minimizer::new(Minimization::Strict, &qname, types::A);
+    assert_eq!(minimizer.next(&root, true, &|_| false).0, wire_name("test"));
+    let mut minimizer = Minimizer::new(Minimization::Off, &qname, types::A);
+    assert_eq!(minimizer.next(&root, false, &|_| false).0, &qname[..]);
+    assert_eq!(minimized_type(types::ANY), types::A);
+    assert_eq!(minimized_type(types::AAAA), types::AAAA);
 }
 // WP10.3: end.

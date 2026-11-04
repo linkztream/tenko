@@ -39,7 +39,7 @@ x-controller-environment: &controller-environment
   TENKO_UPDATES__AIR_GAPPED: "true"
   # One load generator behind HAProxy is one client address; the limiter would throttle it.
   TENKO_RATE_LIMIT__ENABLED: "false"
-  # `tenko cluster join` and `tenko node enrol` reach the API through HAProxy, whose
+  # `tenko cluster join` and `tenko node enroll` reach the API through HAProxy, whose
   # certificate the lab CA signed.
   SSL_CERT_FILE: /lab/ca.pem
 

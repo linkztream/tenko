@@ -11,7 +11,7 @@
 # (`cargo build -p tenko --release --locked` and the same with `-p tenko-dhcp --example
 # ddns_load`). Every figure is a single-node figure and, with the load generator on the same
 # host, a loopback figure from an own client (the stand-in for perfdhcp): an upper bound,
-# labelled so.
+# labeled so.
 #
 # 1. A new node: `tenko serve` with roles controller,dns,dhcp and modules ipam, dns, dhcp, an
 #    empty data directory, the API on loopback (reverse-proxy mode, plain HTTP from the

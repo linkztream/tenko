@@ -30,7 +30,7 @@ export function clampScale(scale: number): number {
 /**
  * Fits a drawing of `width` x `height` into a screen of `screenWidth` x `screenHeight`, leaving
  * a margin of 5 percent (the drawing fills at most 95 percent of the tighter screen side),
- * centred, never above scale 1.5 and never outside the scale limits. An empty or zero-size
+ * centered, never above scale 1.5 and never outside the scale limits. An empty or zero-size
  * screen returns { x: 0, y: 0, scale: 1 }.
  */
 export function fit(width: number, height: number, screenWidth: number, screenHeight: number): View {
@@ -42,7 +42,7 @@ export function fit(width: number, height: number, screenWidth: number, screenHe
   const byWidth = w > 0 ? (screenWidth * FIT_FILL) / w : Infinity;
   const byHeight = h > 0 ? (screenHeight * FIT_FILL) / h : Infinity;
   const scale = clampScale(Math.min(byWidth, byHeight, MAX_FIT_SCALE));
-  return centreOn({ x: 0, y: 0, scale }, w / 2, h / 2, screenWidth, screenHeight);
+  return centerOn({ x: 0, y: 0, scale }, w / 2, h / 2, screenWidth, screenHeight);
 }
 
 /**
@@ -64,8 +64,8 @@ export function pan(view: View, dx: number, dy: number): View {
   return { x: view.x - dx / view.scale, y: view.y - dy / view.scale, scale: view.scale };
 }
 
-/** The view that puts the drawing point (px, py) at the centre of the screen, keeping the scale. */
-export function centreOn(view: View, px: number, py: number, screenWidth: number, screenHeight: number): View {
+/** The view that puts the drawing point (px, py) at the center of the screen, keeping the scale. */
+export function centerOn(view: View, px: number, py: number, screenWidth: number, screenHeight: number): View {
   return {
     x: px - screenWidth / (2 * view.scale),
     y: py - screenHeight / (2 * view.scale),

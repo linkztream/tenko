@@ -215,12 +215,12 @@ fn format_fixture(value: &serde_json::Value, indent: usize) -> String {
     }
 }
 
-/// Records the answers of the real Home Assistant as the anonymised fixture
+/// Records the answers of the real Home Assistant as the anonymized fixture
 /// `tests/fixtures/recorded.json`, in the layout of `documented.json`. It runs only with
 /// `TENKO_LIVE_HASS=1` and `TENKO_RECORD=1`; it never prints an answer, only counts.
 #[tokio::test]
 async fn live_record_fixture() {
-    use tenko_connect::sdk::anonymise::Anonymiser;
+    use tenko_connect::sdk::anonymize::Anonymizer;
     use tenko_connect_hass::{Settings, api::Api};
 
     if std::env::var("TENKO_LIVE_HASS").as_deref() != Ok("1")
@@ -263,9 +263,9 @@ async fn live_record_fixture() {
     }
     session.close().await;
 
-    let mut anonymiser = Anonymiser::new();
+    let mut anonymizer = Anonymizer::new();
     let raw = serde_json::json!({ "ws": ws, "rest": rest });
-    let mut output = anonymiser.anonymise(&raw);
+    let mut output = anonymizer.anonymize(&raw);
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for (name, list) in output["rest"]
         .as_object()
@@ -276,7 +276,7 @@ async fn live_record_fixture() {
         counts.insert(name.clone(), list.as_array().map_or(0, Vec::len));
     }
     let description = format!(
-        "The answers of a real Home Assistant, recorded through the plugin's own client and anonymised with tenko_connect::sdk::anonymise (see README.md). Counts: {}.",
+        "The answers of a real Home Assistant, recorded through the plugin's own client and anonymized with tenko_connect::sdk::anonymize (see README.md). Counts: {}.",
         counts
             .iter()
             .map(|(name, count)| format!("{name} {count}"))
@@ -289,5 +289,5 @@ async fn live_record_fixture() {
     text.push('\n');
     std::fs::write(&path, text).expect("write the fixture");
     eprintln!("recorded: {counts:?}");
-    eprintln!("replaced: {:?}", anonymiser.counts());
+    eprintln!("replaced: {:?}", anonymizer.counts());
 }

@@ -51,7 +51,7 @@ async fn a_scan_without_kinds_refreshes_the_passive_methods() {
 async fn a_target_no_probe_covers_is_refused() {
     let rig = Rig::new();
     rig.probe(1001, &["192.0.2.0/24"], &["192.0.2.64/26"]).await;
-    rig.enrol(1002, &[Role::Dns]).await;
+    rig.enroll(1002, &[Role::Dns]).await;
     for network in ["203.0.113.0/24", "192.0.2.64/26", "192.0.2.77/32"] {
         let error = rig
             .control
@@ -69,7 +69,7 @@ async fn a_target_no_probe_covers_is_refused() {
 #[tokio::test]
 async fn a_node_without_the_probe_role_does_not_cover_anything() {
     let rig = Rig::new();
-    rig.enrol(1002, &[Role::Dns]).await;
+    rig.enroll(1002, &[Role::Dns]).await;
     rig.report_scope(1002, &["192.0.2.0/24"], &[], false).await;
     let error = rig
         .control

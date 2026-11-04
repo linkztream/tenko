@@ -241,7 +241,7 @@ describe("the plugins", () => {
     expect(sampleFacts).toContain("Capabilitiesinventory");
     expect(sampleFacts).toContain("Platformsany");
     expect(sampleFacts).toContain("Secretsapi_key");
-    expect(sampleFacts).toContain("LicenceLicenseRef-Proprietary");
+    expect(sampleFacts).toContain("LicenseLicenseRef-Proprietary");
     expect(within(sample).queryByTestId("plugin-unusable")).toBeNull();
     expect(within(sample).queryByRole("link")).toBeNull();
 
@@ -253,7 +253,7 @@ describe("the plugins", () => {
     expect(facts).toContain("Capabilitiesnetwork controller");
     expect(facts).toContain("Platformsany");
     expect(facts).toContain("Secretsapi_key, password");
-    expect(facts).toContain("LicenceApache-2.0");
+    expect(facts).toContain("LicenseApache-2.0");
     const home = within(controller).getByRole("link", { name: "https://example.org/tenko-lab-controller" });
     expect(home.getAttribute("href")).toBe("https://example.org/tenko-lab-controller");
     expect(home.getAttribute("target")).toBe("_blank");

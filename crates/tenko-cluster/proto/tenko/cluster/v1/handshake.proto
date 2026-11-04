@@ -3,7 +3,7 @@
 // A data-plane node (roles `probe`, `dns`, `dhcp`) talks to a controller over gRPC on the
 // controller's cluster port. The connection is TLS 1.3 with certificates on both sides
 // (mutual TLS): the controller presents a node certificate of its own with the role
-// `controller`, the node presents the certificate it received at enrolment. Both chain to
+// `controller`, the node presents the certificate it received at enrollment. Both chain to
 // the installation's internal CA. Certificates identify nodes by the URI subject
 // alternative name `urn:tenko:node:<id>` and carry their roles as `urn:tenko:role:<role>`;
 // host names play no part. See docs/cluster.md.

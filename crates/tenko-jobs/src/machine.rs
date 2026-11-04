@@ -18,7 +18,7 @@
 //!   step timeout from the step's first start, whichever of these and the job deadline is
 //!   earlier.
 //! - A cancel request takes effect at the next boundary: the current step is aborted with
-//!   `jobs.cancelled` and the job rolls back, ending in `cancelled` (`FinishCancel`).
+//!   `jobs.canceled` and the job rolls back, ending in `canceled` (`FinishCancel`).
 //! - A step found `running` with no result to apply was interrupted by a crash: an
 //!   idempotent step runs again, any other step fails with `jobs.step.interrupted` and the
 //!   job rolls back.
@@ -42,7 +42,7 @@ use crate::{
 };
 
 /// Error code of a step or job aborted by a cancel.
-pub const CANCELLED: &str = "jobs.cancelled";
+pub const CANCELED: &str = "jobs.canceled";
 /// Error code of a step that was running when its runner stopped and cannot run again.
 pub const INTERRUPTED: &str = "jobs.step.interrupted";
 /// Error code of a waiting step whose deadline passed.
@@ -57,7 +57,7 @@ pub const UNDO_STEP: MessageKey = MessageKey::from_static("jobs.undo.step");
 /// Codes of errors the engine imposes on a step whose `execute` may have had effects;
 /// such steps are compensated.
 const ABORT_CODES: [&str; 5] = [
-    CANCELLED,
+    CANCELED,
     INTERRUPTED,
     DEADLINE_PASSED,
     STEP_TIMEOUT,
@@ -65,8 +65,8 @@ const ABORT_CODES: [&str; 5] = [
 ];
 
 /// The error stored when a cancel aborts a job.
-pub fn cancelled() -> CodedError {
-    CodedError::new(CANCELLED, 409, "the job was cancelled")
+pub fn canceled() -> CodedError {
+    CodedError::new(CANCELED, 409, "the job was canceled")
 }
 
 /// The error stored when a crash interrupted a step that cannot run again.
@@ -601,7 +601,7 @@ impl<'a> Machine<'a> {
                 JobState::Succeeded
                 | JobState::Failed
                 | JobState::RolledBack
-                | JobState::Cancelled => {
+                | JobState::Canceled => {
                     return Boundary::Terminal;
                 }
             }
@@ -610,8 +610,8 @@ impl<'a> Machine<'a> {
 
     fn advance_running(&mut self) -> Option<Boundary> {
         if self.job.cancel_requested.is_some() {
-            self.abort_current(&cancelled());
-            self.roll_back(cancelled(), JobAction::Cancel);
+            self.abort_current(&canceled());
+            self.roll_back(canceled(), JobAction::Cancel);
             return None;
         }
         if self
@@ -693,8 +693,8 @@ impl<'a> Machine<'a> {
 
     fn advance_waiting(&mut self) -> Option<Boundary> {
         if self.job.cancel_requested.is_some() {
-            self.abort_current(&cancelled());
-            self.roll_back(cancelled(), JobAction::Cancel);
+            self.abort_current(&canceled());
+            self.roll_back(canceled(), JobAction::Cancel);
             return None;
         }
         let Some(step) = self.current_step() else {
@@ -785,7 +785,7 @@ impl<'a> Machine<'a> {
             .job
             .error
             .as_ref()
-            .is_some_and(|error| error.code == CANCELLED)
+            .is_some_and(|error| error.code == CANCELED)
         {
             JobAction::FinishCancel
         } else {

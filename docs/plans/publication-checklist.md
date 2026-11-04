@@ -24,14 +24,14 @@ Merged on `main` before the visibility changes; each item names its file.
 
 | # | Item | Where |
 |---|---|---|
-| 1 | The licence texts: BSL 1.1 with the internal-use grant, the Change License, the CLA, the licensing section of the contributing guide and the "Commercial Use & Royalties" section of the README | `LICENSE.md`, `CLA.md`, `CONTRIBUTING.md`, `README.md`, ADR 0022 |
+| 1 | The license texts: BSL 1.1 with the internal-use grant, the Change License, the CLA, the licensing section of the contributing guide and the "Commercial Use & Royalties" section of the README | `LICENSE.md`, `CLA.md`, `CONTRIBUTING.md`, `README.md`, ADR 0022 |
 | 2 | The security policy: private reporting, what to include, the response commitment, the supported versions, the scope and the hardening pointers; linked from the README and the contributing guide | `SECURITY.md` |
 | 3 | The code of conduct (Contributor Covenant 2.1) with the contact of `LICENSE.md` as the enforcement contact; linked from the contributing guide | `CODE_OF_CONDUCT.md` |
 | 4 | The pull request template: the CLA sentence for a first contribution, `Signed-off-by`, the checks, English only, no attribution trailers, placeholders in fixtures | `.github/PULL_REQUEST_TEMPLATE.md` |
 | 5 | The issue forms (bug report, feature request) and `config.yml`, which disables blank issues and points security reports to the policy | `.github/ISSUE_TEMPLATE/` |
 | 6 | The Developer Certificate of Origin check: a CI job on every pull request that fails when a commit lacks a `Signed-off-by` trailer matching its author (a shell step, no third-party action, no secret) | `.github/workflows/ci.yml`, job `dco` |
 | 7 | Pull requests never run on a self-hosted runner: the Linux jobs' `runs-on` is `ubuntu-latest` for a `pull_request` event and the repository variable `LINUX_RUNNER` applies only to `push`, `schedule` and `workflow_dispatch` | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
-| 8 | The npm licence check: every production dependency of the web UI carries a licence on the allow list; the copyleft family is refused; development-only packages are listed apart; run in the CI UI job | `ui/scripts/licenses.mjs`, `npm run licenses` |
+| 8 | The npm license check: every production dependency of the web UI carries a license on the allow list; the copyleft family is refused; development-only packages are listed apart; run in the CI UI job | `ui/scripts/licenses.mjs`, `npm run licenses` |
 | 9 | The pre-release notice at the head of the README: no tagged release, unsigned binaries until a certificate exists, production use at the reader's own risk | `README.md` |
 | 10 | This checklist | `docs/plans/publication-checklist.md` |
 
@@ -45,14 +45,14 @@ Merged on `main` before the visibility changes; each item names its file.
   `main`. It found test fixtures with documentation addresses and the secrets that tests
   and smokes generate for themselves, and nothing else. The scan is repeated on the day
   (section 3, step 2) because commits land between the scan and the publication.
-- **The npm licences, on 2026-10-22:** ten production packages, nine under MIT and one
+- **The npm licenses, on 2026-10-22:** ten production packages, nine under MIT and one
   under BSD-3-Clause; nothing outside the allow list. Of the development-only packages,
   three are MPL-2.0 (a CSS tool and an accessibility test library, used at build and
   test time only), two are MIT-0 and one is CC-BY-4.0 (a browser-support data table);
   none of them ships in the UI bundle.
 - **The Rust dependencies** are checked by `cargo deny check` on every push and pull
   request against the allow list in `deny.toml`, which excludes every GPL and AGPL
-  licence.
+  license.
 
 ## 3. The owner's steps, in order
 
@@ -66,7 +66,7 @@ after, and steps 14 to 16 in the days around it.
    `CONTRIBUTING.md` and the "Commercial Use & Royalties" section of `README.md`. ADR 0022
    lists the questions to put to the lawyer, among them whether AGPL-3.0-or-later
    satisfies the compatibility covenant of the BSL. Change the texts on `main` first;
-   the licence that a mirror copies on the first day is the one that counts.
+   the license that a mirror copies on the first day is the one that counts.
 2. **Repeat the history scan** on the final `main` with the patterns of section 2, and
    archive the result (the command, the date, the commit and the summary) outside the
    repository, so that a later question "what was checked before publication" has an
@@ -87,8 +87,8 @@ after, and steps 14 to 16 in the days around it.
 
 5. **Branch protection on `main`** (Settings, Branches, or a ruleset): require a pull
    request before merging; require the status checks `Rust (Linux)`, `cargo-deny`, `UI`,
-   `Rust with the built UI`, `Cluster smoke (Linux)`, `Deploy scripts`, `Changelog` and
-   `Signed-off-by on every commit` to pass; require branches to be up to date; no force
+   `Rust with the built UI`, `Cluster smoke (Linux)`, `Deploy scripts`, `Changelog`, `Spelling`
+   and `Signed-off-by on every commit` to pass; require branches to be up to date; no force
    pushes; no deletion; the rules apply to administrators too. The merge method keeps
    `Signed-off-by` trailers: merge commits or rebase, never squash.
 6. **Actions: "Require approval for all outside collaborators"** (Settings, Actions,

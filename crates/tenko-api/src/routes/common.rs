@@ -21,7 +21,7 @@
 //! - **Writes** take `Idempotency-Key` on POST (API-04), `If-Match: "<revision>"` on PATCH,
 //!   DELETE and restore (412 `ipam.revision_mismatch` when stale), `?dry_run=true` for the
 //!   plan without writing (API-09) and `?acknowledge=<code>,...` for warnings that need an
-//!   acknowledgement. The answer is a [`WriteResponse`]: the object after the change, the
+//!   acknowledgment. The answer is a [`WriteResponse`]: the object after the change, the
 //!   committed `revision`, the inline `job_id` (Q4), warnings, and on a dry run the plan.
 //! - **Errors** are problem details with stable `ipam.*` codes.
 //! - **Authorization.** With an [`Authorizer`](tenko_core::Authorizer) in the state, reads
@@ -2575,7 +2575,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bulk_needs_the_acknowledgement_of_warnings() {
+    async fn bulk_needs_the_acknowledgment_of_warnings() {
         let api = Api::new();
         let warning = "ipam.prefix.nibble_boundary";
         let request = bulk(&[prefix_op("2001:db8::/33")]);
@@ -3531,7 +3531,7 @@ mod tests {
     // ----- read rights and revisions of tags and custom fields ---------------------------
 
     #[tokio::test]
-    async fn custom_field_writes_honour_if_match() {
+    async fn custom_field_writes_honor_if_match() {
         let api = Api::new();
         let field = json!({ "key": "rack", "kind": { "type": "text" }, "applies_to": ["host"] });
         api.post("/custom-fields", &field).await.assert_json(201);

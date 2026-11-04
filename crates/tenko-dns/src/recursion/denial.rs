@@ -11,7 +11,7 @@ use tenko_core::dns::{DnsName, ViewId};
 
 use crate::cache::{Client, Verdict};
 
-/// What a synthesised answer proves: the `kind` label of `tenko_dns_denial_total`.
+/// What a synthesized answer proves: the `kind` label of `tenko_dns_denial_total`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DenialKind {
     /// The name does not exist (a covering record and the wildcard's denial).
@@ -44,7 +44,7 @@ impl DenialKind {
     }
 }
 
-/// A synthesised answer.
+/// A synthesized answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DenialHit {
     /// What it proves.
@@ -55,7 +55,7 @@ pub struct DenialHit {
 
 /// The denial cache; see the module documentation.
 pub trait DenialCache: Send + Sync {
-    /// Synthesises the answer to `qname` (lowercase wire form) and `qtype` in `view` for
+    /// Synthesizes the answer to `qname` (lowercase wire form) and `qtype` in `view` for
     /// `client` into `out` when a validated record proves it (the worker: allocates
     /// nothing when `out` has room for 65,535 octets).
     fn answer(
@@ -94,7 +94,7 @@ pub trait DenialCache: Send + Sync {
     }
 }
 
-/// No denial cache: nothing is synthesised.
+/// No denial cache: nothing is synthesized.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoDenial;
 

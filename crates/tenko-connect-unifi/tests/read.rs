@@ -343,7 +343,7 @@ async fn ports_report_their_name_state_profile_and_native_vlan() {
 }
 
 #[tokio::test]
-async fn links_come_from_uplinks_and_from_lldp_neighbours_nothing_else_covers() {
+async fn links_come_from_uplinks_and_from_lldp_neighbors_nothing_else_covers() {
     for flavor in BOTH {
         let fake = FakeController::start(flavor).await;
         let snapshot = topology(&fake).await;

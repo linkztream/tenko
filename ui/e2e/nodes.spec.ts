@@ -1,20 +1,20 @@
-// Scenario: cluster nodes end to end (OPS-04 enrolment and mutual TLS, OPS-08 the agreed protocol,
+// Scenario: cluster nodes end to end (OPS-04 enrollment and mutual TLS, OPS-08 the agreed protocol,
 // OPS-28 the observation buffer; docs/cluster.md). The controller runs with the internal CA and
 // a cluster port of its own with one-second heartbeats (`serverOptions: { cluster: true }`); a
-// second `tenko` process (support/probe.ts) is the probe node: `tenko node enrol` with the token
+// second `tenko` process (support/probe.ts) is the probe node: `tenko node enroll` with the token
 // the UI showed, then `tenko serve --roles probe`, which connects over mutual TLS. Everything the
 // nodes pages show is checked in the browser and against the public API.
 //
-// - An administrator creates an enrolment token in the dialog of the nodes page. The token, the
+// - An administrator creates an enrollment token in the dialog of the nodes page. The token, the
 //   fingerprint of the CA root and the command to run on the node are shown once; afterwards the
 //   token list shows the waiting token without its text, in the page and in the API. The token
-//   read from the dialog enrols the probe (the registry and the token list follow it live), the
+//   read from the dialog enrolls the probe (the registry and the token list follow it live), the
 //   probe connects and heartbeats, the node panel and the dashboard tile show it, and a batch it
 //   sends reaches the observations. A used token stays in the list, marked used (docs/cluster.md,
-//   section 1.1), and the same token enrols nothing twice.
+//   section 1.1), and the same token enrolls nothing twice.
 // - Revoking the node from its panel removes it from the registry, makes the probe report that it
 //   was revoked, is audited, and leaves the job of the edit on its job page.
-// - A token deleted before use cannot enrol anything and leaves nothing on the node.
+// - A token deleted before use cannot enroll anything and leaves nothing on the node.
 // - The nodes page with a connected node and the token dialog render in Swedish.
 //
 // Arrangement: tokens that a scenario does not test through the dialog are created through the
@@ -39,7 +39,7 @@ import { ProbeNode } from "./support/probe";
 import { cell, gridRow, withId, withKey } from "./support/ui";
 
 type NodeView = Schemas["NodeView"];
-type Created = Schemas["CreatedEnrolment"];
+type Created = Schemas["CreatedEnrollment"];
 
 test.use({ transport: "internal_ca", serverOptions: { cluster: true } });
 
@@ -68,7 +68,7 @@ async function textLines(locator: Locator): Promise<string[]> {
 
 /** A token through the API, for the scenarios that do not test the dialog. */
 async function createToken(api: Api, name: string): Promise<Created> {
-  return api.post<Created>("/nodes/enrolments", { roles: ["probe"], name }, { idempotencyKey: null });
+  return api.post<Created>("/nodes/enrollments", { roles: ["probe"], name }, { idempotencyKey: null });
 }
 
 /** The node as the API shows it. */
@@ -101,7 +101,7 @@ async function failureOf(call: Promise<unknown>): Promise<ApiError> {
   throw new Error("the call succeeded");
 }
 
-test("a token is shown once, enrols a probe that connects, and the node shows in the registry, its panel, the dashboard and the observations", async ({
+test("a token is shown once, enrolls a probe that connects, and the node shows in the registry, its panel, the dashboard and the observations", async ({
   page,
   api,
   server,
@@ -113,7 +113,7 @@ test("a token is shown once, enrols a probe that connects, and the node shows in
   try {
     let token = "";
     let secret = "";
-    let enrolmentId = "";
+    let enrollmentId = "";
 
     await test.step("the dialog shows the token, the fingerprint and the command once", async () => {
       await page.goto("/nodes");
@@ -121,8 +121,8 @@ test("a token is shown once, enrols a probe that connects, and the node shows in
       await expect(page.getByTestId("nodes-empty")).toBeVisible();
       await expect(page.getByTestId("nodes-cluster")).toContainText(`127.0.0.1:${server.clusterPort}`);
 
-      await page.getByTestId("nodes-enrol").click();
-      const form = page.getByTestId("dialog-enrol");
+      await page.getByTestId("nodes-enroll").click();
+      const form = page.getByTestId("dialog-enroll");
       await expect(form).toBeVisible();
       await expect(form.getByTestId("field-role-probe")).toBeChecked();
       await expect(form.getByTestId("field-role-dns")).not.toBeChecked();
@@ -130,37 +130,37 @@ test("a token is shown once, enrols a probe that connects, and the node shows in
       await form.getByTestId("field-name").fill(NODE_NAME);
       await form.getByTestId("form-submit").click();
 
-      const dialog = page.getByTestId("dialog-enrol-token");
+      const dialog = page.getByTestId("dialog-enroll-token");
       await expect(dialog).toBeVisible();
       await expect(form).toHaveCount(0);
-      await expect(dialog.getByTestId("enrol-once")).toBeVisible();
-      token = (await dialog.getByTestId("enrol-token").innerText()).trim();
+      await expect(dialog.getByTestId("enroll-once")).toBeVisible();
+      token = (await dialog.getByTestId("enroll-token").innerText()).trim();
       expect(token).toMatch(/^tnk1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}$/);
       const [, id, tail] = token.split(".");
-      enrolmentId = id!;
+      enrollmentId = id!;
       secret = tail!;
 
       // The fingerprint is the one the controller printed at start; the command names this
       // controller, the token and the fingerprint.
-      expect(digits(await dialog.getByTestId("enrol-fingerprint").innerText())).toBe(digits(server.caFingerprint));
-      const command = (await dialog.getByTestId("enrol-command").innerText()).trim();
-      expect(command).toMatch(/^tenko node enrol --controller /);
+      expect(digits(await dialog.getByTestId("enroll-fingerprint").innerText())).toBe(digits(server.caFingerprint));
+      const command = (await dialog.getByTestId("enroll-command").innerText()).trim();
+      expect(command).toMatch(/^tenko node enroll --controller /);
       expect(command).toContain(`--controller ${server.url}`);
       expect(command).toContain(`--token ${token}`);
       expect(command.toLowerCase()).toContain(digits(server.caFingerprint));
 
-      await dialog.getByTestId("enrol-done").click();
+      await dialog.getByTestId("enroll-done").click();
       await expect(dialog).toHaveCount(0);
     });
 
     await test.step("afterwards the token list shows the waiting token without its text", async () => {
-      const row = page.getByTestId("nodes-tokens").getByTestId("enrolment");
+      const row = page.getByTestId("nodes-tokens").getByTestId("enrollment");
       await expect(row).toHaveCount(1);
       await expect(row).toHaveAttribute("data-state", "pending");
-      const list = await api.get<Schemas["EnrolmentList"]>("/nodes/enrolments");
+      const list = await api.get<Schemas["EnrollmentList"]>("/nodes/enrollments");
       expect(list.items).toHaveLength(1);
       const waiting = list.items[0]!;
-      expect(waiting.id.replaceAll("-", "")).toBe(enrolmentId);
+      expect(waiting.id.replaceAll("-", "")).toBe(enrollmentId);
       expect(waiting).toMatchObject({ name: NODE_NAME, roles: ["probe"], state: "pending" });
       expect(waiting.used ?? null).toBeNull();
       await expect(row).toHaveAttribute("data-id", waiting.id);
@@ -172,15 +172,15 @@ test("a token is shown once, enrols a probe that connects, and the node shows in
       await expect(page.getByTestId("page-nodes")).toBeVisible();
       await expect(row).toHaveCount(1);
       await expect(row).toHaveAttribute("data-state", "pending");
-      await expect(page.getByTestId("dialog-enrol-token")).toHaveCount(0);
+      await expect(page.getByTestId("dialog-enroll-token")).toHaveCount(0);
       expect(await page.content()).not.toContain(secret);
     });
 
     const nodeRow = gridRow(page, "nodes", NODE_NAME);
-    const tokenRow = page.getByTestId("nodes-tokens").getByTestId("enrolment");
+    const tokenRow = page.getByTestId("nodes-tokens").getByTestId("enrollment");
 
-    await test.step("the probe enrols with that token and the registry follows", async () => {
-      const enrolled = await probe.enrol(server, token, { name: NODE_NAME, address: NODE_ADDRESS });
+    await test.step("the probe enrolls with that token and the registry follows", async () => {
+      const enrolled = await probe.enroll(server, token, { name: NODE_NAME, address: NODE_ADDRESS });
       expect(enrolled.code, enrolled.stderr).toBe(0);
       expect(enrolled.stdout).toContain(`enrolled as node ${NODE} (${NODE_NAME}) with role(s) probe`);
       expect(enrolled.stdout).toContain(`localhost:${server.clusterPort}`);
@@ -197,19 +197,19 @@ test("a token is shown once, enrols a probe that connects, and the node shows in
       // The token is used and says which node it enrolled.
       await expect(tokenRow).toHaveCount(1);
       await expect(tokenRow).toHaveAttribute("data-state", "used");
-      const used = (await api.get<Schemas["EnrolmentList"]>("/nodes/enrolments")).items[0]!;
+      const used = (await api.get<Schemas["EnrollmentList"]>("/nodes/enrollments")).items[0]!;
       expect(used.state).toBe("used");
       expect(used.used?.node).toBe(NODE);
-      const enrolledLink = tokenRow.getByTestId("enrolment-node");
+      const enrolledLink = tokenRow.getByTestId("enrollment-node");
       await expect(enrolledLink).toHaveAttribute("data-id", String(NODE));
       await expect(enrolledLink).toHaveAttribute("href", `/nodes/${NODE}`);
 
-      // The same token enrols nothing a second time: another node directory is refused.
+      // The same token enrolls nothing a second time: another node directory is refused.
       const second = await ProbeNode.create();
       try {
-        const again = await second.enrol(server, token, { name: "probe-lab" });
+        const again = await second.enroll(server, token, { name: "probe-lab" });
         expect(again.code).toBe(6);
-        expect(again.stderr).toContain("cluster.enrolment.used");
+        expect(again.stderr).toContain("cluster.enrollment.used");
         expect(existsSync(join(second.dataDir, "node", "identity.json"))).toBe(false);
       } finally {
         await second.stop();
@@ -332,7 +332,7 @@ test("revoking a node from its panel removes it, makes the probe report the revo
   const created = await createToken(api, NODE_NAME);
   const probe = await ProbeNode.create();
   try {
-    const enrolled = await probe.enrol(server, created.token, { name: NODE_NAME, address: NODE_ADDRESS });
+    const enrolled = await probe.enroll(server, created.token, { name: NODE_NAME, address: NODE_ADDRESS });
     expect(enrolled.code, enrolled.stderr).toBe(0);
     await probe.serve();
     await waitForConnected(api);
@@ -375,20 +375,20 @@ test("revoking a node from its panel removes it, makes the probe report the revo
       await expect.poll(() => processState(probe), { message: "the node process to report the revocation", timeout: 30_000 }).toBe("revoked");
     });
 
-    await test.step("the audit log has the creation, the enrolment and the revocation", async () => {
+    await test.step("the audit log has the creation, the enrollment and the revocation", async () => {
       const log = (await api.get<Schemas["Page_AuditRecord"]>("/audit", { order: "asc", limit: 1000 })).items;
       const find = (action: string) => log.filter((record) => record.draft.action === action);
-      expect(find("cluster.enrolment.create")).toHaveLength(1);
-      const enrol = find("cluster.node.enrol");
-      expect(enrol).toHaveLength(1);
-      expect(enrol[0]!.draft.outcome.kind).toBe("success");
+      expect(find("cluster.enrollment.create")).toHaveLength(1);
+      const enroll = find("cluster.node.enroll");
+      expect(enroll).toHaveLength(1);
+      expect(enroll[0]!.draft.outcome.kind).toBe("success");
       const revoke = find("cluster.node.revoke");
       expect(revoke).toHaveLength(1);
       const revocation = revoke[0]!;
       expect(revocation.draft.outcome.kind).toBe("success");
       expect(revocation.principal.kind).toBe("user");
       expect(revocation.draft.objects).toContainEqual({ kind: "node", id: nodeObject(NODE) });
-      expect(revocation.seq).toBeGreaterThan(enrol[0]!.seq);
+      expect(revocation.seq).toBeGreaterThan(enroll[0]!.seq);
 
       await page.goto("/audit");
       await expect(page.getByTestId("page-audit")).toBeVisible();
@@ -428,7 +428,7 @@ test("revoking a node from its panel removes it, makes the probe report the revo
   }
 });
 
-test("a token deleted before use cannot enrol a node and leaves nothing on the node", async ({ page, api, server, signedIn }) => {
+test("a token deleted before use cannot enroll a node and leaves nothing on the node", async ({ page, api, server, signedIn }) => {
   expect(signedIn.session.user.name).toBe(ADMIN.name);
   const withdrawn = await createToken(api, NODE_NAME);
   const kept = await createToken(api, "probe-lab");
@@ -437,29 +437,29 @@ test("a token deleted before use cannot enrol a node and leaves nothing on the n
     await test.step("the administrator deletes the first token from the list", async () => {
       await page.goto("/nodes");
       await expect(page.getByTestId("page-nodes")).toBeVisible();
-      const rows = page.getByTestId("nodes-tokens").getByTestId("enrolment");
+      const rows = page.getByTestId("nodes-tokens").getByTestId("enrollment");
       await expect(rows).toHaveCount(2);
-      const row = withId(page.getByTestId("nodes-tokens"), "enrolment", withdrawn.enrolment.id);
+      const row = withId(page.getByTestId("nodes-tokens"), "enrollment", withdrawn.enrollment.id);
       await expect(row).toHaveAttribute("data-state", "pending");
-      await row.getByTestId("enrolment-delete").click();
+      await row.getByTestId("enrollment-delete").click();
       const confirm = page.getByTestId("dialog-confirm");
       await expect(confirm).toBeVisible();
       // Nothing is deleted before the confirmation.
-      expect((await api.get<Schemas["EnrolmentList"]>("/nodes/enrolments")).items).toHaveLength(2);
+      expect((await api.get<Schemas["EnrollmentList"]>("/nodes/enrollments")).items).toHaveLength(2);
       await confirm.getByTestId("confirm-ok").click();
       await expect(confirm).toHaveCount(0);
       await expect(row).toHaveCount(0);
       await expect(rows).toHaveCount(1);
-      await expect(rows).toHaveAttribute("data-id", kept.enrolment.id);
+      await expect(rows).toHaveAttribute("data-id", kept.enrollment.id);
       await expect(rows).toHaveAttribute("data-state", "pending");
-      const list = (await api.get<Schemas["EnrolmentList"]>("/nodes/enrolments")).items;
-      expect(list.map((token) => token.id)).toEqual([kept.enrolment.id]);
+      const list = (await api.get<Schemas["EnrollmentList"]>("/nodes/enrollments")).items;
+      expect(list.map((token) => token.id)).toEqual([kept.enrollment.id]);
     });
 
     await test.step("the deleted token is refused and nothing is written on the node", async () => {
-      const refused = await probe.enrol(server, withdrawn.token, { name: NODE_NAME, address: NODE_ADDRESS });
+      const refused = await probe.enroll(server, withdrawn.token, { name: NODE_NAME, address: NODE_ADDRESS });
       expect(refused.code).toBe(6);
-      expect(refused.stderr).toContain("cluster.enrolment.invalid_token");
+      expect(refused.stderr).toContain("cluster.enrollment.invalid_token");
       expect(refused.stdout).not.toContain("enrolled as node");
       for (const file of ["identity.json", "ca-root.pem", "node-cert.pem", "node-key.pem", "node-key.dpapi"]) {
         expect(existsSync(join(probe.dataDir, "node", file)), file).toBe(false);
@@ -469,24 +469,24 @@ test("a token deleted before use cannot enrol a node and leaves nothing on the n
 
       // The refusal is audited with its code, and the deletion with the user who did it.
       const log = (await api.get<Schemas["Page_AuditRecord"]>("/audit", { order: "asc", limit: 1000 })).items;
-      const refusal = log.filter((record) => record.draft.action === "cluster.node.enrol");
+      const refusal = log.filter((record) => record.draft.action === "cluster.node.enroll");
       expect(refusal).toHaveLength(1);
-      expect(refusal[0]!.draft.outcome).toEqual({ kind: "failed", code: "cluster.enrolment.invalid_token" });
-      const deletion = log.filter((record) => record.draft.action === "cluster.enrolment.delete");
+      expect(refusal[0]!.draft.outcome).toEqual({ kind: "failed", code: "cluster.enrollment.invalid_token" });
+      const deletion = log.filter((record) => record.draft.action === "cluster.enrollment.delete");
       expect(deletion).toHaveLength(1);
       expect(deletion[0]!.principal.kind).toBe("user");
       expect(deletion[0]!.draft.outcome.kind).toBe("success");
     });
 
-    await test.step("the refusal left no mark: the other token still enrols this node directory", async () => {
-      const enrolled = await probe.enrol(server, kept.token, { address: NODE_ADDRESS });
+    await test.step("the refusal left no mark: the other token still enrolls this node directory", async () => {
+      const enrolled = await probe.enroll(server, kept.token, { address: NODE_ADDRESS });
       expect(enrolled.code, enrolled.stderr).toBe(0);
       expect(enrolled.stdout).toContain(`enrolled as node ${NODE} (probe-lab) with role(s) probe`);
       expect(existsSync(join(probe.dataDir, "node", "identity.json"))).toBe(true);
       const row = gridRow(page, "nodes", "probe-lab");
       await expect(row).toBeVisible();
       await expect(row).toHaveAttribute("data-id", String(NODE));
-      await expect(page.getByTestId("nodes-tokens").getByTestId("enrolment")).toHaveAttribute("data-state", "used");
+      await expect(page.getByTestId("nodes-tokens").getByTestId("enrollment")).toHaveAttribute("data-state", "used");
     });
   } finally {
     await probe.stop();
@@ -501,7 +501,7 @@ test.describe("a Swedish browser", () => {
     const created = await createToken(api, NODE_NAME);
     const probe = await ProbeNode.create();
     try {
-      const enrolled = await probe.enrol(server, created.token, { name: NODE_NAME, address: NODE_ADDRESS });
+      const enrolled = await probe.enroll(server, created.token, { name: NODE_NAME, address: NODE_ADDRESS });
       expect(enrolled.code, enrolled.stderr).toBe(0);
       await probe.serve();
       await waitForConnected(api);
@@ -514,24 +514,24 @@ test.describe("a Swedish browser", () => {
       await expect(panel).toBeVisible();
       await expect(panel.getByTestId("node-link")).toHaveAttribute("data-state", "connected");
       await expect(panel.getByTestId("node-connection")).toContainText((await nodeView(api)).connection!.peer!);
-      await expect(page.getByTestId("nodes-tokens").getByTestId("enrolment")).toHaveAttribute("data-state", "used");
+      await expect(page.getByTestId("nodes-tokens").getByTestId("enrollment")).toHaveAttribute("data-state", "used");
       await expectRendered(page, root, "sv", testInfo, "nodes");
 
       // The form that creates a token, then the token shown once.
-      await page.getByTestId("nodes-enrol").click();
-      const form = page.getByTestId("dialog-enrol");
+      await page.getByTestId("nodes-enroll").click();
+      const form = page.getByTestId("dialog-enroll");
       await expect(form).toBeVisible();
-      await expectRendered(page, form, "sv", testInfo, "enrol");
+      await expectRendered(page, form, "sv", testInfo, "enroll");
       await form.getByTestId("field-name").fill("probe-lab");
       await form.getByTestId("form-submit").click();
-      const dialog = page.getByTestId("dialog-enrol-token");
+      const dialog = page.getByTestId("dialog-enroll-token");
       await expect(dialog).toBeVisible();
-      await expect(dialog.getByTestId("enrol-once")).toBeVisible();
-      expect(digits(await dialog.getByTestId("enrol-fingerprint").innerText())).toBe(digits(server.caFingerprint));
-      await expectRendered(page, dialog, "sv", testInfo, "enrol-token");
-      await dialog.getByTestId("enrol-done").click();
+      await expect(dialog.getByTestId("enroll-once")).toBeVisible();
+      expect(digits(await dialog.getByTestId("enroll-fingerprint").innerText())).toBe(digits(server.caFingerprint));
+      await expectRendered(page, dialog, "sv", testInfo, "enroll-token");
+      await dialog.getByTestId("enroll-done").click();
       await expect(dialog).toHaveCount(0);
-      await expect(page.getByTestId("nodes-tokens").getByTestId("enrolment")).toHaveCount(2);
+      await expect(page.getByTestId("nodes-tokens").getByTestId("enrollment")).toHaveCount(2);
     } finally {
       await probe.stop();
     }
@@ -542,10 +542,10 @@ test.describe("a Swedish browser", () => {
 // cluster has more than one node) and the nodes page
 // (`nodes-cluster`) show comes from `GET /system/status`, which they read again after an event
 // of the `cluster` topic. The controller refreshes that summary when a node's record changes
-// (enrolment, connection, revocation) and then announces it with a `cluster` event of its own,
+// (enrollment, connection, revocation) and then announces it with a `cluster` event of its own,
 // so the open pages never keep the numbers from before the change (found by WP2.11, fixed by
 // WP2.12; it used to refresh every five seconds only, and no event followed).
-test("the dashboard tile and the cluster summary follow a node that enrols, connects and is revoked while they are open", async ({
+test("the dashboard tile and the cluster summary follow a node that enrolls, connects and is revoked while they are open", async ({
   page,
   api,
   server,
@@ -568,7 +568,7 @@ test("the dashboard tile and the cluster summary follow a node that enrols, conn
   const probe = await ProbeNode.create();
   try {
     // Enrolled: counted as a node, not yet as a connected one.
-    const enrolled = await probe.enrol(server, created.token, { name: NODE_NAME, address: NODE_ADDRESS });
+    const enrolled = await probe.enroll(server, created.token, { name: NODE_NAME, address: NODE_ADDRESS });
     expect(enrolled.code, enrolled.stderr).toBe(0);
     await expect(hint).toHaveAttribute("data-total", "1");
     await expect(link).toHaveAttribute("data-value", "0");

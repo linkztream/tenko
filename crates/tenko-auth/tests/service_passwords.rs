@@ -27,7 +27,7 @@ use tenko_auth::{
     roles::RoleName,
     service::{
         BreachStatus, CodeLogin, FRESH_AUTHENTICATION, PasswordChange, PasswordCheck,
-        PasswordLogin, SetupAdmin, SetupRequest, TokenCreate, TotpEnrolFinish, UserCreate,
+        PasswordLogin, SetupAdmin, SetupRequest, TokenCreate, TotpEnrollFinish, UserCreate,
         UserInfo, WebAuthnLoginFinish, WebAuthnLoginStart, WebAuthnRegisterFinish,
         WebAuthnRegisterStart, types::SecretString,
     },
@@ -51,7 +51,7 @@ const FRESH_PASSPHRASE: &str = "amber falcon quill nest seven";
 // ---------------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Behaviour {
+enum Behavior {
     Answer,
     Down,
     Garbled,
@@ -60,7 +60,7 @@ enum Behaviour {
 struct FakeSource {
     /// Prefix, suffix and count of every breached password.
     breached: Vec<(String, String, u64)>,
-    behaviour: AtomicU8,
+    behavior: AtomicU8,
     seen: Mutex<Vec<String>>,
 }
 
@@ -74,13 +74,13 @@ impl FakeSource {
                     (hash[..5].to_owned(), hash[5..].to_owned(), *count)
                 })
                 .collect(),
-            behaviour: AtomicU8::new(Behaviour::Answer as u8),
+            behavior: AtomicU8::new(Behavior::Answer as u8),
             seen: Mutex::new(Vec::new()),
         })
     }
 
-    fn set(&self, behaviour: Behaviour) {
-        self.behaviour.store(behaviour as u8, Ordering::SeqCst);
+    fn set(&self, behavior: Behavior) {
+        self.behavior.store(behavior as u8, Ordering::SeqCst);
     }
 
     fn seen(&self) -> Vec<String> {
@@ -92,11 +92,11 @@ impl FakeSource {
 impl HibpRangeSource for FakeSource {
     async fn range(&self, prefix: &str) -> Result<String, HibpError> {
         self.seen.lock().expect("lock").push(prefix.to_owned());
-        let behaviour = self.behaviour.load(Ordering::SeqCst);
-        if behaviour == Behaviour::Down as u8 {
+        let behavior = self.behavior.load(Ordering::SeqCst);
+        if behavior == Behavior::Down as u8 {
             return Err(HibpError::Unavailable("simulated outage".to_owned()));
         }
-        if behaviour == Behaviour::Garbled as u8 {
+        if behavior == Behavior::Garbled as u8 {
             return Ok("this is not a range response".to_owned());
         }
         // A padding entry (count 0) as the API sends with `Add-Padding`, then the matches.
@@ -199,25 +199,25 @@ fn check(password: &str) -> PasswordCheck {
     }
 }
 
-async fn enrol_totp(env: &TestEnv, ctx: &RequestCtx) -> (Vec<u8>, Vec<String>) {
+async fn enroll_totp(env: &TestEnv, ctx: &RequestCtx) -> (Vec<u8>, Vec<String>) {
     let start = env
         .service
-        .totp_enrol_start(ctx)
+        .totp_enroll_start(ctx)
         .await
-        .expect("enrolment starts");
+        .expect("enrollment starts");
     let seed = base32_decode(start.secret.expose()).expect("a base32 seed");
     let code = totp::code_at(&seed, &TotpParams::default(), unix_seconds(env));
     let enrolled = env
         .service
-        .totp_enrol_finish(
+        .totp_enroll_finish(
             ctx,
-            &TotpEnrolFinish {
-                enrolment_id: start.enrolment_id,
+            &TotpEnrollFinish {
+                enrollment_id: start.enrollment_id,
                 code: SecretString::new(code.as_str()),
             },
         )
         .await
-        .expect("enrolment finishes");
+        .expect("enrollment finishes");
     let codes = enrolled
         .recovery_codes
         .expect("the first factor brings recovery codes")
@@ -629,8 +629,8 @@ async fn an_unavailable_source_fails_open_and_says_so() {
     let source = FakeSource::new(&[(BREACHED, 42)]);
     let (env, session) = env_with(&source, Profile::Standard).await;
     let ctx = ctx(&env, &session).await;
-    for behaviour in [Behaviour::Down, Behaviour::Garbled] {
-        source.set(behaviour);
+    for behavior in [Behavior::Down, Behavior::Garbled] {
+        source.set(behavior);
         let result = env
             .service
             .check_password(Some(&ctx), &check(BREACHED))
@@ -648,7 +648,7 @@ async fn an_unavailable_source_fails_open_and_says_so() {
     assert_eq!(changed.breach_check, BreachStatus::Unavailable);
 
     // Once the source answers again, the same password is refused.
-    source.set(Behaviour::Answer);
+    source.set(Behavior::Answer);
     let ctx = self::ctx(&env, &session).await;
     assert_eq!(
         violations_of(
@@ -894,7 +894,7 @@ async fn the_online_check_falls_back_to_the_offline_corpus() {
     let corpus = corpus_of(&[BREACHED]);
     let (env, session) = env_with_corpus(&source, &corpus, Profile::Standard).await;
     let ctx = ctx(&env, &session).await;
-    source.set(Behaviour::Down);
+    source.set(Behavior::Down);
     let result = env
         .service
         .check_password(Some(&ctx), &check(BREACHED))
@@ -1085,7 +1085,7 @@ async fn factor_changes_need_a_fresh_authentication() {
     add_user(&env, "vera", RoleName::Viewer, PASSPHRASE).await;
     let first = login(&env, "vera", PASSPHRASE).await;
     let ctx = ctx(&env, &first).await;
-    let (seed, _) = enrol_totp(&env, &ctx).await;
+    let (seed, _) = enroll_totp(&env, &ctx).await;
     register_passkey(&env, &ctx).await;
     register_passkey(&env, &ctx).await;
     let session = totp_login(&env, "vera", PASSPHRASE, &seed).await;
@@ -1183,7 +1183,7 @@ async fn recovery_codes_are_replaced_and_the_old_ones_stop_working() {
         env.service.remove_totp(&ctx).await.expect_err("no TOTP"),
         AuthError::TotpNotEnrolled
     );
-    let (seed, old_codes) = enrol_totp(&env, &ctx).await;
+    let (seed, old_codes) = enroll_totp(&env, &ctx).await;
     assert_eq!(old_codes.len(), 10);
 
     let session = totp_login(&env, "vera", PASSPHRASE, &seed).await;
@@ -1224,7 +1224,7 @@ async fn recovery_codes_are_replaced_and_the_old_ones_stop_working() {
 #[tokio::test]
 async fn a_standard_administrator_keeps_a_second_factor() {
     let (env, setup) = TestEnv::installed(Profile::Standard).await;
-    let (seed, _) = enrol_totp(&env, &ctx(&env, &setup).await).await;
+    let (seed, _) = enroll_totp(&env, &ctx(&env, &setup).await).await;
     let strong = totp_login(&env, ADMIN, ADMIN_PASSWORD, &seed).await;
     let ctx = ctx(&env, &strong).await;
     // TOTP is the only way to reach the strength the profile asks of an administrator.
@@ -1285,8 +1285,8 @@ async fn hardened_keeps_a_passkey_for_administrators_and_two_factors_for_everyon
     // Every account needs two factors under Hardened, so a viewer keeps their TOTP.
     add_user(&env, "vera", RoleName::Viewer, PASSPHRASE).await;
     let viewer = login(&env, "vera", PASSPHRASE).await;
-    assert!(viewer.info.flags.mfa_enrolment_required);
-    let (seed, _) = enrol_totp(&env, &self::ctx(&env, &viewer).await).await;
+    assert!(viewer.info.flags.mfa_enrollment_required);
+    let (seed, _) = enroll_totp(&env, &self::ctx(&env, &viewer).await).await;
     let strong = totp_login(&env, "vera", PASSPHRASE, &seed).await;
     assert_eq!(
         env.service
@@ -1301,7 +1301,7 @@ async fn hardened_keeps_a_passkey_for_administrators_and_two_factors_for_everyon
 async fn an_operator_secret_makes_the_totp_of_a_pin_administrator_indispensable() {
     let (env, setup) = TestEnv::installed(Profile::Home).await;
     let ctx = ctx(&env, &setup).await;
-    let (seed, _) = enrol_totp(&env, &ctx).await;
+    let (seed, _) = enroll_totp(&env, &ctx).await;
     let fresh = totp_login(&env, ADMIN, ADMIN_PIN, &seed).await;
     assert_eq!(fresh.info.strength, AuthStrength::PasswordTotp);
     // Once the vault holds an operator secret a PIN alone no longer serves an administrator
@@ -1381,7 +1381,7 @@ async fn a_password_set_under_a_strong_preset_is_not_a_pin() {
 #[tokio::test]
 async fn a_custom_preset_cannot_stand_in_for_the_pin_preset() {
     let (env, setup) = TestEnv::installed(Profile::Standard).await;
-    let (seed, _) = enrol_totp(&env, &ctx(&env, &setup).await).await;
+    let (seed, _) = enroll_totp(&env, &ctx(&env, &setup).await).await;
     let strong = totp_login(&env, ADMIN, ADMIN_PASSWORD, &seed).await;
     put_operator_secret(&env).await;
     let admin = ctx(&env, &strong).await;

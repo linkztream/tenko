@@ -20,7 +20,7 @@
 //!   nothing) or the NSEC proof (the covering record, the closest encloser and the wildcard
 //!   at it) makes NXDOMAIN, NODATA (also for an empty non-terminal and a wildcard without the
 //!   type) or the wildcard answer. A record of a delegation or a DNAME above the name proves
-//!   nothing below it. DS, ANY and the DNSSEC and meta types are never synthesised. The
+//!   nothing below it. DS, ANY and the DNSSEC and meta types are never synthesized. The
 //!   answer is written by [`synth`]. A miss falls through to the runtime.
 //! - **`aggressive_nsec = false`** turns the lookup off and keeps filling the records.
 //! - **Flush**: everything, or the zones at or below a suffix and the records of the zones
@@ -89,7 +89,7 @@ pub struct Denials {
     settings: DenialSettings,
     epoch: Instant,
     store: RwLock<Store>,
-    synthesised: [AtomicU64; 4],
+    synthesized: [AtomicU64; 4],
 }
 
 /// The key of a zone in a view, on the stack.
@@ -114,9 +114,9 @@ fn apex_of(key: &[u8]) -> &[u8] {
     key.get(at..).unwrap_or_default()
 }
 
-/// Whether the type is never synthesised: DS (the parent's), ANY, the DNSSEC types and the
+/// Whether the type is never synthesized: DS (the parent's), ANY, the DNSSEC types and the
 /// meta types.
-fn unsynthesised(qtype: u16) -> bool {
+fn unsynthesized(qtype: u16) -> bool {
     matches!(
         qtype,
         0 | types::DS | types::RRSIG | types::NSEC | types::NSEC3 | 41
@@ -179,7 +179,7 @@ fn rrset<'a>(section: &'a [Rr], owner: &[u8], rtype: u16) -> (Vec<&'a Rr>, Vec<&
 
 /// What one answer adds to a zone.
 #[derive(Debug, Default)]
-struct Learnt {
+struct Learned {
     soa: Option<Set>,
     nsec: Vec<Nsec>,
     nsec3: Vec<Nsec3>,
@@ -188,7 +188,7 @@ struct Learnt {
     cut: Option<(Vec<u8>, u32)>,
 }
 
-impl Learnt {
+impl Learned {
     fn is_empty(&self) -> bool {
         self.nsec.is_empty()
             && self.nsec3.is_empty()
@@ -207,7 +207,7 @@ impl Denials {
             },
             epoch: Instant::now(),
             store: RwLock::new(Store::default()),
-            synthesised: Default::default(),
+            synthesized: Default::default(),
         }
     }
 
@@ -220,10 +220,10 @@ impl Denials {
         u32::try_from(now.saturating_duration_since(self.epoch).as_secs()).unwrap_or(u32::MAX)
     }
 
-    /// Answers synthesised since the start, by kind in the order of [`DenialKind::ALL`].
-    pub fn synthesised(&self) -> [u64; 4] {
+    /// Answers synthesized since the start, by kind in the order of [`DenialKind::ALL`].
+    pub fn synthesized(&self) -> [u64; 4] {
         let mut out = [0; 4];
-        for (slot, counter) in out.iter_mut().zip(&self.synthesised) {
+        for (slot, counter) in out.iter_mut().zip(&self.synthesized) {
             *slot = counter.load(Ordering::Relaxed);
         }
         out
@@ -257,15 +257,15 @@ impl Denials {
     }
 
     /// What `answer`, the validated answer of `zone` (`apex`), adds.
-    fn learn(&self, apex: &[u8], answer: &[u8], verdict: &Verdict, now: u32) -> Option<Learnt> {
+    fn learn(&self, apex: &[u8], answer: &[u8], verdict: &Verdict, now: u32) -> Option<Learned> {
         let parsed = message::parse(answer)?;
         let unix = unix_now();
-        let mut learnt = Learnt::default();
+        let mut learned = Learned::default();
         let (soa, sigs) = rrset(&parsed.authority, apex, types::SOA);
-        learnt.soa = Set::build(apex, &soa, &sigs, now, unix);
+        learned.soa = Set::build(apex, &soa, &sigs, now, unix);
         if verdict.state == SecurityState::Secure {
-            self.learn_secure(apex, &parsed, &mut learnt, now, unix);
-        } else if parsed.rcode == 3 && learnt.soa.is_some() {
+            self.learn_secure(apex, &parsed, &mut learned, now, unix);
+        } else if parsed.rcode == 3 && learned.soa.is_some() {
             // RFC 8020: the name the NXDOMAIN denies is the last of the chain.
             let mut denied = parsed.qname.clone();
             for _ in 0..16 {
@@ -280,19 +280,19 @@ impl Denials {
                 denied = target;
             }
             if name::is_within(&denied, apex) && denied != apex {
-                let soa = learnt.soa.as_ref()?;
+                let soa = learned.soa.as_ref()?;
                 let ttl = soa.left(now).min(soa.soa_minimum().unwrap_or(u32::MAX));
-                learnt.cut = Some((denied, now.saturating_add(ttl)));
+                learned.cut = Some((denied, now.saturating_add(ttl)));
             }
         }
-        (!learnt.is_empty()).then_some(learnt)
+        (!learned.is_empty()).then_some(learned)
     }
 
     fn learn_secure(
         &self,
         apex: &[u8],
         parsed: &message::Parsed,
-        learnt: &mut Learnt,
+        learned: &mut Learned,
         now: u32,
         unix: u32,
     ) {
@@ -324,7 +324,7 @@ impl Denials {
                     continue;
                 };
                 if rtype == types::NSEC {
-                    learnt.nsec.extend(Nsec::of(set));
+                    learned.nsec.extend(Nsec::of(set));
                     continue;
                 }
                 // An NSEC3 owner is the hash's label right below the apex.
@@ -340,7 +340,11 @@ impl Denials {
                     continue;
                 }
                 let params = (Box::<[u8]>::from(salt), iterations);
-                if learnt.params.as_ref().is_some_and(|known| *known != params) {
+                if learned
+                    .params
+                    .as_ref()
+                    .is_some_and(|known| *known != params)
+                {
                     continue;
                 }
                 let label = name::Labels::new(owner).next().unwrap_or_default();
@@ -348,8 +352,8 @@ impl Denials {
                     continue;
                 }
                 if let Some(record) = Nsec3::of(set) {
-                    learnt.params = Some(params);
-                    learnt.nsec3.push(record);
+                    learned.params = Some(params);
+                    learned.nsec3.push(record);
                 }
             }
         }
@@ -369,7 +373,7 @@ impl Denials {
                 continue;
             };
             let (records, sigs) = rrset(&parsed.answer, &sig.owner, covered);
-            if learnt
+            if learned
                 .wildcards
                 .iter()
                 .any(|(rtype, set)| *rtype == covered && *set.owner == *wildcard)
@@ -377,7 +381,7 @@ impl Denials {
                 continue;
             }
             if let Some(set) = Set::build(wildcard, &records, &sigs, now, unix) {
-                learnt.wildcards.push((covered, set));
+                learned.wildcards.push((covered, set));
             }
         }
     }
@@ -427,7 +431,7 @@ impl DenialCache for Denials {
         now: Instant,
         out: &mut Vec<u8>,
     ) -> Option<DenialHit> {
-        if !self.settings.aggressive || unsynthesised(qtype) {
+        if !self.settings.aggressive || unsynthesized(qtype) {
             return None;
         }
         let now = self.secs(now);
@@ -448,7 +452,7 @@ impl DenialCache for Denials {
             .iter()
             .position(|kind| *kind == synth.kind)
             .unwrap_or(0);
-        self.synthesised[index].fetch_add(1, Ordering::Relaxed);
+        self.synthesized[index].fetch_add(1, Ordering::Relaxed);
         Some(DenialHit {
             kind: synth.kind,
             rcode,
@@ -468,7 +472,7 @@ impl DenialCache for Denials {
         }
         let now = self.secs(now);
         let apex = zone.to_wire();
-        let Some(learnt) = self.learn(&apex, answer, verdict, now) else {
+        let Some(learned) = self.learn(&apex, answer, verdict, now) else {
             return false;
         };
         let secure = verdict.state == SecurityState::Secure;
@@ -489,15 +493,15 @@ impl DenialCache for Denials {
             store.records = store.records.saturating_sub(count);
             0
         };
-        if learnt.soa.is_some() {
-            entry.soa = learnt.soa;
+        if learned.soa.is_some() {
+            entry.soa = learned.soa;
         }
-        for record in learnt.nsec {
+        for record in learned.nsec {
             if let Some(key) = order::OrderKey::of(&record.set.owner) {
                 entry.nsec.insert(key.as_bytes().into(), record);
             }
         }
-        if let Some((salt, iterations)) = learnt.params {
+        if let Some((salt, iterations)) = learned.params {
             let chain = entry.nsec3.get_or_insert_with(Chain3::default);
             if chain.salt != salt || chain.iterations != iterations {
                 *chain = Chain3 {
@@ -506,7 +510,7 @@ impl DenialCache for Denials {
                     records: std::collections::BTreeMap::new(),
                 };
             }
-            for record in learnt.nsec3 {
+            for record in learned.nsec3 {
                 let label = name::Labels::new(&record.set.owner)
                     .next()
                     .unwrap_or_default();
@@ -515,12 +519,12 @@ impl DenialCache for Denials {
                 }
             }
         }
-        for (rtype, set) in learnt.wildcards {
+        for (rtype, set) in learned.wildcards {
             let mut buf = [0u8; order::NAME_MAX + 2];
             let key: Box<[u8]> = wildcard_key(&set.owner, rtype, &mut buf).into();
             entry.wildcards.insert(key, set);
         }
-        if let Some((denied, expires)) = learnt.cut {
+        if let Some((denied, expires)) = learned.cut {
             entry.cuts.insert(
                 denied.into_boxed_slice(),
                 Cut {

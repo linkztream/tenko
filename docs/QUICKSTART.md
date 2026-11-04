@@ -137,7 +137,7 @@ tenko ipam reconcile --prefix 192.0.2.0/24
 
 | Port | Protocol | Direction | From | To | Why |
 |---|---|---|---|---|---|
-| 8443 | TCP | in | administrators, a node once at enrolment | controller | the web UI and the API |
+| 8443 | TCP | in | administrators, a node once at enrollment | controller | the web UI and the API |
 | 53 | UDP and TCP | in | clients | dns role | DNS queries |
 | 853, 443 | TCP | in | clients | dns role | only with DNS over TLS or DNS over HTTPS on |
 | 67 | UDP | in | clients (broadcast), the router's relay (unicast) | dhcp role | DHCP requests |
@@ -157,7 +157,7 @@ neither is; the Windows MSI adds rules for 8443, 53, 67 and 547 the same way.
 ## 5. Where to go next
 
 - Security profiles, Home to Hardened: [SECURITY-PROFILES.md](SECURITY-PROFILES.md).
-- A second probe, more controllers, enrolment and the cluster port: [cluster.md](cluster.md).
+- A second probe, more controllers, enrollment and the cluster port: [cluster.md](cluster.md).
 - DNS: zones, transfers, views and updates in [dns.md](dns.md); the resolver, blocking and
   DoT/DoH in [dns-resolver.md](dns-resolver.md).
 - DHCP: scopes, options, classes, reservations, DDNS and the cut-over: [dhcp.md](dhcp.md).

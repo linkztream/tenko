@@ -152,7 +152,7 @@ pub struct ProbeSummary {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ScanKind {
-    /// Neighbour tables, mDNS, LLMNR and reverse DNS.
+    /// Neighbor tables, mDNS, LLMNR and reverse DNS.
     PassiveRefresh,
     /// A TCP connect scan of the configured ports.
     PortScan,
@@ -293,8 +293,9 @@ pub enum ScanState {
     Partial,
     /// No probe could run it.
     Failed,
-    /// Cancelled with its job.
-    Cancelled,
+    /// Canceled with its job.
+    #[serde(alias = "cancelled")] // spelling: alias permanently (stored runs carry it)
+    Canceled,
 }
 
 /// One probe's part of a scan run.
@@ -445,7 +446,7 @@ pub struct ProbeProgress {
     /// The address or network it scans.
     pub target: String,
     /// The command's state: `pending`, `accepted`, `running`, `done`, `failed`,
-    /// `rejected`, `expired`, `cancelled`.
+    /// `rejected`, `expired`, `canceled`.
     pub state: String,
     /// Percent done.
     pub progress: u8,
@@ -530,4 +531,21 @@ pub struct StopRequest {
     /// characters).
     #[serde(default)]
     pub reason: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScanState;
+
+    #[test]
+    fn a_scan_state_stored_by_0_0_11_still_reads() {
+        let old = "cancelled"; // spelling: alias permanently (the value of 0.0.11)
+        let bytes = tenko_core::codec::cbor::to_cbor(old).expect("cbor");
+        let state: ScanState = tenko_core::codec::cbor::from_cbor(&bytes).expect("old state");
+        assert_eq!(state, ScanState::Canceled);
+        assert_eq!(
+            serde_json::to_value(ScanState::Canceled).expect("json"),
+            "canceled"
+        );
+    }
 }

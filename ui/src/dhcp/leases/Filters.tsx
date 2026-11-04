@@ -1,4 +1,4 @@
-// The filter fields of the lease and history views (WP7.5): a labelled field whose text is
+// The filter fields of the lease and history views (WP7.5): a labeled field whose text is
 // committed to the URL a moment after the last keystroke (or at once on Enter or when the field
 // loses the focus), a menu, and a `datetime-local` field that keeps RFC 3339 in the URL.
 import { createEffect, createSignal, on, onCleanup, Show, untrack, type JSX } from "solid-js";

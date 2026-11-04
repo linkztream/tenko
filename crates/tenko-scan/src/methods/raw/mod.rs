@@ -3,7 +3,7 @@
 //! safe Ethernet channel ([`link`]); the frame parsers and builders are in
 //! [`crate::frame`]. On Linux they need `CAP_NET_RAW`; on Windows they answer `unsupported`
 //! because raw sockets need Npcap, which Tenko does not bundle (docs/scanning.md section
-//! 9). Every method honours the shared rate limiter and the kill switch, and none blocks
+//! 9). Every method honors the shared rate limiter and the kill switch, and none blocks
 //! the scheduler's other methods.
 
 pub mod arp;
@@ -90,7 +90,7 @@ impl RawSupport {
         }
     }
 
-    /// Opens a channel on the interface chosen for `scope`, honouring the `override_name`.
+    /// Opens a channel on the interface chosen for `scope`, honoring the `override_name`.
     async fn open(
         &self,
         scope: &Scope,

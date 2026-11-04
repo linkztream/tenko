@@ -388,14 +388,14 @@ async fn a_decommission_with_a_bad_body_is_a_400_problem() {
     for body in [
         json!({ "reason": 5 }),
         json!({ "keep_dns": "yes" }),
-        json!({ "colour": "red" }),
+        json!({ "color": "red" }),
     ] {
         lab.decommission(&server.host, &body)
             .await
             .assert_problem(400, "sys.invalid_request");
     }
     lab.post(
-        &format!("/hosts/{}/decommission?colour=red", server.host),
+        &format!("/hosts/{}/decommission?color=red", server.host),
         &json!({}),
     )
     .await

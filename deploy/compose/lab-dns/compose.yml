@@ -164,7 +164,7 @@ services:
 
   # WP10.1: the quirk responders, the engine's example authoritative server
   # (crates/tenko-dns/examples/authoritative.rs in its quirk mode, built for musl into
-  # QUIRK_IMAGE by deploy/compose/lab-dns/quirk.Dockerfile), one misbehaviour of E36 each,
+  # QUIRK_IMAGE by deploy/compose/lab-dns/quirk.Dockerfile), one misbehavior of E36 each,
   # each authoritative for its zone under quirk.example.test and delegated from
   # example.test with glue at its address: no EDNS (FORMERR on OPT), 0x20 broken (answers in
   # lower case), TC on every UDP answer, answers delayed by 2.5 s, answers from the wrong
@@ -236,7 +236,7 @@ services:
   # WP10.1: end.
 
   # WP10.3: a server that answers NXDOMAIN for its empty non-terminals (b and a.b of its
-  # zone, above www.a.b), which QNAME minimisation falls back for; it prints every question,
+  # zone, above www.a.b), which QNAME minimization falls back for; it prints every question,
   # the witness of the rows of E35 (denial.sh).
   quirk-ent:
     <<: *quirk

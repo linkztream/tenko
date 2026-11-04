@@ -65,7 +65,7 @@ export function FormDialog<R extends WriteLike>(props: {
   );
 }
 
-/** A labelled input with its message (`field-<id>` test hook). */
+/** A labeled input with its message (`field-<id>` test hook). */
 export function TextField(props: {
   id: string;
   label: string;

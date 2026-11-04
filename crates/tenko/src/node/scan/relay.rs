@@ -7,7 +7,7 @@
 //!
 //! Each batch is ingested under the controller's node id with the same resend recognition
 //! as a probe node's (`cluster.ingest_cursors`): a batch that was ingested but not removed
-//! from the buffer before a crash is recognised and not ingested twice. A batch that
+//! from the buffer before a crash is recognized and not ingested twice. A batch that
 //! answers a scan on demand is recorded as that command's result in the same write as the
 //! cursor.
 

@@ -91,7 +91,7 @@ function circle(r: number): string {
 }
 
 /**
- * The outline of each kind, centred on (0, 0) and at most 40 x 28 units, so that the shape
+ * The outline of each kind, centered on (0, 0) and at most 40 x 28 units, so that the shape
  * tells the kind apart without color: a hexagon for a router, a wide box for a switch, a ring
  * for an access point, a framed square for a hypervisor, a small square for a virtual machine,
  * a diamond for a container, a disc for a host and a triangle for any other device. A group of

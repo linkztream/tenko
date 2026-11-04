@@ -164,7 +164,7 @@ impl IssuedCert {
     }
 }
 
-/// A node certificate issued for a CSR (enrolment, Slice 2); the node keeps its key.
+/// A node certificate issued for a CSR (enrollment, Slice 2); the node keeps its key.
 #[derive(Debug, Clone)]
 pub struct NodeCert {
     /// The node.
@@ -235,7 +235,7 @@ impl InternalCa {
             &mut batch,
             ctx,
             SecretClass::System,
-            SecretSpec::new(CA_KEY_PURPOSE).labelled(common_name.clone()),
+            SecretSpec::new(CA_KEY_PURPOSE).labeled(common_name.clone()),
             &root.key_pkcs8,
         )?;
         let record = CaRecord {
@@ -378,7 +378,7 @@ impl InternalCa {
 
     /// Issues a node certificate for the key in a PKCS#10 CSR, with
     /// `urn:tenko:node:<id>` as URI subject alternative name and both server and client
-    /// authentication (mTLS, Slice 2 enrolment).
+    /// authentication (mTLS, Slice 2 enrollment).
     ///
     /// # Errors
     ///
@@ -426,7 +426,7 @@ impl InternalCa {
 
     /// Issues a node certificate for the key in a PKCS#10 CSR with the node's roles:
     /// `urn:tenko:node:<id>` and one `urn:tenko:role:<role>` per role as URI subject
-    /// alternative names, server and client authentication (enrolment and renewal, WP2.2).
+    /// alternative names, server and client authentication (enrollment and renewal, WP2.2).
     ///
     /// # Errors
     ///
@@ -521,7 +521,7 @@ impl InternalCa {
             &mut batch,
             ctx,
             SecretClass::System,
-            SecretSpec::new(TLS_KEY_PURPOSE).labelled(identity.host_name.clone()),
+            SecretSpec::new(TLS_KEY_PURPOSE).labeled(identity.host_name.clone()),
             &issued.key,
         )?;
         if let Some((old, _)) = &current {

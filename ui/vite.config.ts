@@ -59,10 +59,10 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   discovery: ["discovery.", "errors.ipam.proposal.", "errors.ipam.reconciler."],
   // Connector plugins and instances, with the error texts of the connector endpoints (WP2.9).
   connectors: ["connectors.", "errors.connect."],
-  // Cluster nodes and enrolment tokens, with the error texts of the node endpoints (WP2.9).
+  // Cluster nodes and enrollment tokens, with the error texts of the node endpoints (WP2.9).
   nodes: [
     "nodes.",
-    "errors.cluster.enrolment.",
+    "errors.cluster.enrollment.",
     "errors.cluster.node.",
     "errors.cluster.member.",
     "errors.cluster.join.",

@@ -46,12 +46,12 @@ export type KillSwitchCommand = S["KillSwitchCommand"];
 export type StopRequest = S["StopRequest"];
 
 export const SCAN_KINDS: readonly ScanKind[] = ["passive_refresh", "port_scan", "snmp_poll", "os_fingerprint"];
-export const SCAN_STATES: readonly ScanState[] = ["queued", "running", "done", "partial", "failed", "cancelled"];
+export const SCAN_STATES: readonly ScanState[] = ["queued", "running", "done", "partial", "failed", "canceled"];
 export const SCAN_TARGET_KINDS: readonly ScanTargetKind[] = ["prefix", "host", "address", "network"];
 
 /** Whether a run has ended: a terminal state never changes again, so polling can stop. */
 export function isTerminal(state: ScanState): boolean {
-  return state === "done" || state === "partial" || state === "failed" || state === "cancelled";
+  return state === "done" || state === "partial" || state === "failed" || state === "canceled";
 }
 
 /** The counts of a diff summed over its fact types. */

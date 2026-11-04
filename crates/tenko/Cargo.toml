@@ -93,7 +93,7 @@ sd-notify = "0.5.0"
 
 [target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
 # The global allocator of the static musl binary that ships (`main.rs`): musl's own malloc
-# serialises the store's write path (M18, M20). MIT or Apache-2.0 (jemalloc itself is
+# serializes the store's write path (M18, M20). MIT or Apache-2.0 (jemalloc itself is
 # BSD-2-Clause); `tikv-jemalloc-sys` builds jemalloc with its `configure` and `make`, the
 # FFI lives inside the crate. Its options are fixed at build time: `JEMALLOC_SYS_WITH_MALLOC_CONF`
 # in `.cargo/config.toml`.

@@ -465,7 +465,7 @@ describe("next free address", () => {
     expect(next.body.item?.ip).toBe("192.0.2.7");
   });
 
-  it("honours the policy and a range", async () => {
+  it("honors the policy and a range", async () => {
     const highest = await post<Write<Address>>(`${V}/prefixes/${P.lan}/next-free-address`, { policy: "highest" });
     expect(highest.body.item?.ip).toBe("192.0.2.254");
     const pool = await post<Write<Address>>(`${V}/prefixes/${P.lan}/next-free-address`, { range: IPAM_IDS.range.pool });
@@ -572,7 +572,7 @@ describe("next free prefix", () => {
 // Creating, changing and deleting prefixes
 
 describe("creating prefixes", () => {
-  it("asks for an acknowledgement of a prefix off a nibble boundary", async () => {
+  it("asks for an acknowledgment of a prefix off a nibble boundary", async () => {
     const cidr = "2001:db8:0:40::/62";
     const before = db.revision;
     const dry = await post<Write<Prefix>>(`${V}/prefixes?dry_run=true`, { cidr });
@@ -666,7 +666,7 @@ describe("creating prefixes", () => {
 });
 
 describe("changing prefixes", () => {
-  it("honours If-Match and bumps the ETag", async () => {
+  it("honors If-Match and bumps the ETag", async () => {
     const read = await get<Prefix>(`${V}/prefixes/${P.lan}`);
     const etag = read.res.headers.get("etag")!;
     const changed = await patch<Write<Prefix>>(
@@ -869,7 +869,7 @@ describe("deleting and restoring prefixes", () => {
     expect(tree.body.nodes.find((n) => n.cidr === "2001:db8::/32")?.children).toBe(4);
   });
 
-  it("checks If-Match on delete and restore and honours dry runs", async () => {
+  it("checks If-Match on delete and restore and honors dry runs", async () => {
     const stale = expectProblem(
       await del(`${V}/prefixes/${P.cameras}`, { headers: { "if-match": '"1"' } }),
       412,

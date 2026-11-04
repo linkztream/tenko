@@ -20,7 +20,7 @@ beforeEach(async () => {
 });
 
 describe("plan dialog", () => {
-  it("previews first, blocks on a warning that needs an acknowledgement, then applies", async () => {
+  it("previews first, blocks on a warning that needs an acknowledgment, then applies", async () => {
     const done = vi.fn();
     renderRoute(() => <PlanDialog title="Create prefix 2001:db8:0:40::/62" confirmLabel="Create prefix" send={create} onDone={done} onClose={() => {}} />);
     const dialog = await screen.findByRole("dialog", { name: "Create prefix 2001:db8:0:40::/62" });

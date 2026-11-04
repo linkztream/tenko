@@ -141,10 +141,10 @@ describe("on this controller", () => {
     await waitFor(() => expect(screen.queryByTestId(`queue-item-${address.id}`)).toBeNull());
     expect(screen.getByTestId(`queue-item-${prefix.id}`)).toBeTruthy();
     expect(clusterState().queue.map((s) => s.item.id)).toEqual([prefix.id]);
-    expect(toastTitles()).toContain("The queued change was cancelled.");
+    expect(toastTitles()).toContain("The queued change was canceled.");
   });
 
-  it("shows why a change could not be cancelled", async () => {
+  it("shows why a change could not be canceled", async () => {
     const { address } = await isolateWithTwoQueued();
     server.use(
       http.delete(`/api/v1/queue/${address.id}`, () =>
@@ -154,7 +154,7 @@ describe("on this controller", () => {
     openQueue();
     fireEvent.click(await screen.findByTestId(`queue-cancel-${address.id}`));
     fireEvent.click(within(await screen.findByTestId("dialog-cancel-queued")).getByTestId("confirm-ok"));
-    await waitFor(() => expect(toastTitles()).toContain("The queued change could not be cancelled"));
+    await waitFor(() => expect(toastTitles()).toContain("The queued change could not be canceled"));
     expect(screen.getByTestId("toast").textContent).toContain("No queued change of yours has this id.");
   });
 });

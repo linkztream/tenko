@@ -1,5 +1,5 @@
 # A relayed DHCPREQUEST in the INIT-REBOOT state (RFC 2131 section 4.3.2): ciaddr 0,
-# requested address 192.0.2.110, no server identifier; not padded. Modelled by hand on the
+# requested address 192.0.2.110, no server identifier; not padded. Modeled by hand on the
 # option order and parameter request list this client sends; documentation addresses (RFC
 # 5737) and MACs (RFC 7042).
 #

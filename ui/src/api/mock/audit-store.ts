@@ -213,7 +213,7 @@ export const AUDIT_SEED_IDS = {
   hostCamDoor: "0190d1c2-0000-7000-8000-0000000b0003",
   address35: "0190d1c2-0000-7000-8000-0000000a0135",
   jobRolledBack: "0190d1c2-0000-7000-8000-0000000c0005",
-  jobCancelled: "0190d1c2-0000-7000-8000-0000000c0006",
+  jobCanceled: "0190d1c2-0000-7000-8000-0000000c0006",
 } as const;
 
 /** The notes a person left on the steps of the rolled back seed job (job-store.ts seeds them too). */
@@ -510,7 +510,7 @@ const SEED_ROWS: readonly SeedRow[] = [
   {
     ago: 3,
     who: ALEX,
-    input: { action: "jobs.job.cancel", objects: job(AUDIT_SEED_IDS.jobCancelled), context: { kind: "ipam.apply" } },
+    input: { action: "jobs.job.cancel", objects: job(AUDIT_SEED_IDS.jobCanceled), context: { kind: "ipam.apply" } },
   },
   {
     ago: 1,

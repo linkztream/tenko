@@ -235,7 +235,7 @@ pub async fn start_with(
         heartbeat_secs: section.heartbeat_secs,
         advertise: section.advertise.clone(),
         default_port,
-        default_token_ttl: Duration::from_secs(section.enrolment_ttl_secs),
+        default_token_ttl: Duration::from_secs(section.enrollment_ttl_secs),
         ..RegistryConfig::new(resolved.node_id)
     };
     let open_port = peers.as_ref().and_then(|peers| peers.port().cloned());
@@ -384,7 +384,7 @@ pub async fn start_with(
                 (
                     None,
                     format!(
-                        "cluster port {} opens with an enrolment token",
+                        "cluster port {} opens with an enrollment token",
                         addresses(&addrs)
                     ),
                 )
@@ -457,7 +457,7 @@ impl Cluster {
     }
 
     /// The leader-only work of the node registry, for the leader supervisor: the hourly
-    /// prune of expired revocations and old enrolment tokens (`cluster.prune`).
+    /// prune of expired revocations and old enrollment tokens (`cluster.prune`).
     pub fn leader_services(&self) -> Vec<Arc<dyn LeaderService>> {
         vec![Arc::new(PruneService::new(Arc::clone(&self.registry)))]
     }
@@ -514,7 +514,7 @@ enum Hold {
     Stop,
 }
 
-/// The cluster port with `[cluster] listen` not set: opens when an enrolment token is
+/// The cluster port with `[cluster] listen` not set: opens when an enrollment token is
 /// created and closes again when no token is waiting (withdrawn, used or expired) and no
 /// node is enrolled. `open` is the port the start step opened already (a token was waiting
 /// or a node enrolled at start).
@@ -544,7 +544,7 @@ async fn on_demand(
             match served {
                 Ok(port) => {
                     tracing::info!(
-                        "cluster port {} opens with an enrolment token",
+                        "cluster port {} opens with an enrollment token",
                         addresses(&addrs)
                     );
                     port
@@ -563,7 +563,7 @@ async fn on_demand(
             return;
         }
         tracing::info!(
-            "cluster port {} closed: no enrolment token waiting and no node enrolled",
+            "cluster port {} closed: no enrollment token waiting and no node enrolled",
             addresses(&addrs)
         );
     }
@@ -651,7 +651,7 @@ async fn maintenance(
 /// warning while nodes share no protocol major with this controller.
 ///
 /// The summary is read again as soon as anything under `cluster.*` is written (a node
-/// enrols, connects or disconnects, is revoked, reports another version or a refused
+/// enrolls, connects or disconnects, is revoked, reports another version or a refused
 /// handshake: each of these writes the node's record), and every [`HEALTH_INTERVAL`] as
 /// the fallback. When the summary or the warning changed, a `cluster` event follows
 /// ([`STATUS_EVENT`]): the store's own event of the change can reach the views before the
@@ -684,7 +684,7 @@ async fn health(
             }
             received = next_change(&mut changes) => {
                 if received {
-                    // A burst of writes (an enrolment writes the node and its token) is one
+                    // A burst of writes (an enrollment writes the node and its token) is one
                     // refresh: take what has arrived already.
                     drain(&mut changes);
                 } else {
@@ -876,7 +876,7 @@ fn drain(changes: &mut Option<ChangeStream>) {
 mod tests {
     use tenko_cluster::{
         ca::pem_block,
-        model::{ClusterHealth, EnrolRequest, MismatchRecord, NewEnrolment, NodeMismatch},
+        model::{ClusterHealth, EnrollRequest, MismatchRecord, NewEnrollment, NodeMismatch},
         version::VersionMismatch,
     };
     use tenko_core::Revision;
@@ -999,7 +999,7 @@ mod tests {
         async fn token(&self) -> (uuid::Uuid, String) {
             let (view, token) = self
                 .registry
-                .create_enrolment(&system(), NewEnrolment::default())
+                .create_enrollment(&system(), NewEnrollment::default())
                 .await
                 .expect("token");
             (view.id, token.to_text().to_string())
@@ -1007,17 +1007,17 @@ mod tests {
 
         async fn withdraw(&self, id: uuid::Uuid) {
             self.registry
-                .delete_enrolment(&system(), id)
+                .delete_enrollment(&system(), id)
                 .await
                 .expect("withdraw the token");
         }
 
-        async fn enrol(&self, token: String) {
+        async fn enroll(&self, token: String) {
             let (_, csr) = generate_csr().expect("csr");
             self.registry
-                .enrol(
+                .enroll(
                     &system(),
-                    EnrolRequest {
+                    EnrollRequest {
                         token,
                         csr: pem_block("CERTIFICATE REQUEST", &csr),
                         name: Some("probe-lab".to_owned()),
@@ -1028,7 +1028,7 @@ mod tests {
                     },
                 )
                 .await
-                .expect("enrol");
+                .expect("enroll");
         }
 
         /// Waits until the port is open: the registry reports it (the health field
@@ -1093,7 +1093,7 @@ mod tests {
         let port = OnDemand::start().await;
         let (id, token) = port.token().await;
         port.wait_open("a token opens the port").await;
-        port.enrol(token).await;
+        port.enroll(token).await;
         // The used token is gone; the node connects to the port.
         port.withdraw(id).await;
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1111,11 +1111,11 @@ mod tests {
             .checked_sub(ttl.saturating_sub(Duration::from_secs(2)))
             .expect("a time");
         port.registry
-            .create_enrolment(
+            .create_enrollment(
                 &cx,
-                NewEnrolment {
+                NewEnrollment {
                     expires_in_secs: Some(ttl.as_secs()),
-                    ..NewEnrolment::default()
+                    ..NewEnrollment::default()
                 },
             )
             .await
@@ -1147,7 +1147,7 @@ mod tests {
             PortDemand::Idle,
             "an expired token is no demand"
         );
-        port.enrol(token).await;
+        port.enroll(token).await;
         assert_eq!(
             port.registry.port_demand(now).await.expect("demand"),
             PortDemand::Enrolled

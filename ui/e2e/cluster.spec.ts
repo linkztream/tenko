@@ -9,13 +9,13 @@
 //   button disabled, so nothing is sent. The digest check asks the one member and its row agrees.
 // - "Add a controller" creates a controller token: the dialog hides the role choice, shows the
 //   command (it starts with `tenko cluster join`) once, and the token list of the nodes page and
-//   `GET /nodes/enrolments` show it pending with the role controller and without its text.
+//   `GET /nodes/enrollments` show it pending with the role controller and without its text.
 // - A viewer reads the page without any action; the page renders in Swedish.
 // - The queue (/cluster/queue) of a server that is not isolated says so calmly.
 // - The partition state and the queue (OPS-26), at the end of the file: THESE SCENARIOS FAKE THE
 //   CLUSTER ROUTES, because the e2e server is one controller and cannot lose a quorum. The faked
 //   routes (support/cluster-mock.ts) refuse the IPAM write with 503 `cluster.no_quorum`, keep the
-//   queue and answer the heal; the real behaviour is proven by the Rust lab tests
+//   queue and answer the heal; the real behavior is proven by the Rust lab tests
 //   `crates/tenko/tests/acceptance_cluster.rs` and `acceptance_partition.rs`. The member actions
 //   (promote, remove, step down) are in cluster-membership.spec.ts.
 //
@@ -32,7 +32,7 @@ import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { withId } from "./support/ui";
 
-type EnrolmentList = Schemas["EnrolmentList"];
+type EnrollmentList = Schemas["EnrollmentList"];
 
 /** The members of the cluster as the API lists them. */
 interface Members {
@@ -150,36 +150,36 @@ test("Add a controller creates a controller token whose command joins a cluster,
   let secret = "";
   await test.step("the dialog has no role choice and shows the token once", async () => {
     await page.getByTestId("cluster-add-controller").click();
-    const form = page.getByTestId("dialog-enrol");
+    const form = page.getByTestId("dialog-enroll");
     await expect(form).toBeVisible();
     await expect(form.locator("[data-testid^='field-role-']")).toHaveCount(0);
     await form.getByTestId("field-name").fill("controller-b");
     await form.getByTestId("form-submit").click();
 
-    const dialog = page.getByTestId("dialog-enrol-token");
+    const dialog = page.getByTestId("dialog-enroll-token");
     await expect(dialog).toBeVisible();
     await expect(form).toHaveCount(0);
-    await expect(dialog.getByTestId("enrol-once")).toBeVisible();
-    const token = (await dialog.getByTestId("enrol-token").innerText()).trim();
+    await expect(dialog.getByTestId("enroll-once")).toBeVisible();
+    const token = (await dialog.getByTestId("enroll-token").innerText()).trim();
     expect(token).toMatch(/^tnk1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}$/);
     secret = token.split(".")[2]!;
-    const command = (await dialog.getByTestId("enrol-command").innerText()).trim();
+    const command = (await dialog.getByTestId("enroll-command").innerText()).trim();
     expect(command).toMatch(/^tenko cluster join /);
     expect(command).toContain(token);
     expect(command).toContain(server.url);
-    await dialog.getByTestId("enrol-done").click();
+    await dialog.getByTestId("enroll-done").click();
     await expect(dialog).toHaveCount(0);
   });
 
   await test.step("the token is pending with the role controller, in the API and on the nodes page, without its text", async () => {
-    const list = await api.get<EnrolmentList>("/nodes/enrolments");
+    const list = await api.get<EnrollmentList>("/nodes/enrollments");
     expect(list.items).toHaveLength(1);
     expect(list.items[0]).toMatchObject({ name: "controller-b", roles: ["controller"], state: "pending" });
     expect(JSON.stringify(list)).not.toContain(secret);
 
     await page.goto("/nodes");
     await expect(page.getByTestId("page-nodes")).toBeVisible();
-    const row = withId(page.getByTestId("nodes-tokens"), "enrolment", list.items[0]!.id);
+    const row = withId(page.getByTestId("nodes-tokens"), "enrollment", list.items[0]!.id);
     await expect(row).toHaveAttribute("data-state", "pending");
     expect(await page.content()).not.toContain(secret);
     // The cluster page is not a place to see the token again.
@@ -231,7 +231,7 @@ test.describe("a Swedish browser", () => {
     await expect(remove).toHaveCount(0);
 
     await page.getByTestId("cluster-add-controller").click();
-    const form = page.getByTestId("dialog-enrol");
+    const form = page.getByTestId("dialog-enroll");
     await expect(form).toBeVisible();
     await expectRendered(page, form, "sv");
     await page.keyboard.press("Escape");
@@ -261,7 +261,7 @@ test("the queue view of a server without a partition says so calmly", async ({ p
 // `/queue*` and the quorum of `/system/status` in the browser, refuses the IPAM write with 503
 // `cluster.no_quorum` while "isolated", and lets everything else (the plan dialog's dry run,
 // events) reach the real server. The heal is announced the way the product learns of it: the
-// shell reads `/system/status` again after an event of the `system` topic. The real behaviour is
+// shell reads `/system/status` again after an event of the `system` topic. The real behavior is
 // proven by the Rust lab tests `acceptance_partition.rs` and `acceptance_cluster.rs`.
 
 /** Opens the prefix form of the IPAM page, fills `cidr`, and submits it to the plan dialog. */
@@ -345,7 +345,7 @@ test("OPS-26: the queue view lists the queued change and cancels it with a DELET
   const id = (await item.getAttribute("data-id"))!;
   expect(id).toBe(fake.queued()[0]!.id);
 
-  // Keeping the change sends nothing; cancelling asks first.
+  // Keeping the change sends nothing; canceling asks first.
   const before = fake.sent.length;
   await page.getByTestId(`queue-cancel-${id}`).click();
   await expect(page.getByTestId("dialog-cancel-queued")).toBeVisible();

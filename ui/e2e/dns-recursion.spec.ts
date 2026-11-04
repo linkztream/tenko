@@ -7,7 +7,7 @@
 // NO FAKES except the infrastructure cache: the forwarder, view, trust anchor and negative trust
 // anchor routes are the real server's (they need no `dns` role). The e2e server has no resolver,
 // so the infrastructure cache routes are faked in the browser (support/dns-infra-mock.ts, with
-// the reasons and the Rust tests that prove the real behaviour); that scenario's title ends in
+// the reasons and the Rust tests that prove the real behavior); that scenario's title ends in
 // "(faked status)".
 
 import type { Locator, Page } from "@playwright/test";

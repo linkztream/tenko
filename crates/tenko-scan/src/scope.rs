@@ -211,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn contains_honours_prefixes_and_exclusions() {
+    fn contains_honors_prefixes_and_exclusions() {
         let scope = scope();
         assert!(scope.contains(ip("192.0.2.1")));
         assert!(!scope.contains(ip("192.0.2.3")), "excluded");

@@ -230,7 +230,7 @@ impl RevealPolicy {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum MfaRequirement {
-    /// Nobody (users may still enrol).
+    /// Nobody (users may still enroll).
     Optional,
     /// Accounts with the `admin` role.
     Administrators,

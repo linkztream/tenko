@@ -93,7 +93,7 @@ const CATALOG = {
   "auth.preference.limit": [409, "Conflict", "a person stores at most 64 preferences"],
   "auth.webauthn.credential_not_found": [404, "Not Found", "credential not found"],
   "auth.webauthn.credential_exists": [409, "Credential exists", "the credential is registered already"],
-  "auth.conflict": [409, "Conflict", "the profile requires this factor; enrol another one first"],
+  "auth.conflict": [409, "Conflict", "the profile requires this factor; enroll another one first"],
   "auth.setup.closed": [409, "Setup is closed", "setup has already been completed"],
   "auth.setup.token_invalid": [401, "Setup token invalid", "the setup token is not valid"],
   "auth.setup.invalid_host_name": [

@@ -108,7 +108,7 @@ The signing state is checked whenever it is read: in `GET /api/v1/system/status`
 
 | Code | When | What to do |
 |---|---|---|
-| `dns.dnssec.clock_skew` | The controller's clock is more than 5 minutes behind the zone's last signing: it went back | Fix the time synchronisation of the controller (OPS-09); signatures made with a clock that is wrong start or end at the wrong time |
+| `dns.dnssec.clock_skew` | The controller's clock is more than 5 minutes behind the zone's last signing: it went back | Fix the time synchronization of the controller (OPS-09); signatures made with a clock that is wrong start or end at the wrong time |
 | `dns.dnssec.expiring` | An imported zone's earliest signature expires within 7 days | Import the zone signed again |
 | `dns.dnssec.resign_overdue` | A zone signed online has a signature with less than half of `resign_before_days` left | The signer does not keep up or does not run: check that a controller leads and the signer's log |
 | `dns.dnssec.expired` | A signature has expired | Validating resolvers answer SERVFAIL for the zone; sign or import it again at once |
@@ -189,7 +189,7 @@ The trust anchors are rows of `dns.trust_anchors`, one per zone, replicated like
 
 The leader service `dns.trust_anchors` runs RFC 5011 through the node's own resolver: at the active refresh interval (half the signature validity, at least an hour, at most 15 days) it asks the zone's DNSKEY set, validated with the current anchors. A new key with the SEP bit enters AddPend and is Valid after the add hold-down of 30 days when still there; a Valid key the set no longer holds is Missing (still trusted) and Valid again when it returns; a key with the REVOKE bit that signed the set is Revoked (no longer trusted), Removed after the remove hold-down, then forgotten. Every change is a row change audited as `dns.trust_anchor.state` and an event `dns.trust_anchor`; `POST /dns/trust-anchors/{zone}/refresh` (`tenko dns trust-anchor refresh`) asks now. `GET /nodes/{id}/dns/recursion` lists the keys with their states, `GET /system/status` warns `dns.trust_anchor.pending` while a key waits and `dns.trust_anchor.stale` when every key of a zone is revoked or pending: the node then fails validation for the zone rather than switching it off, and the operator adds the current anchor (or a release ships it). Under the Lab profile `[dns.recursion] rfc5011_hold_down_secs` makes the hold-downs seconds and the service's pace follows, so that the lab round `rfc5011` rolls the lab root's KSK in minutes. Tenko's own signer has no REVOKE step yet; the lab produces the roll with BIND's tools, and a Tenko-signed zone rolled by RFC 5011 is a follow-up.
 
-RFC 8509's sentinel names (`root-key-sentinel-is-ta-<tag>` and `root-key-sentinel-not-ta-<tag>`) are answered on secure A and AAAA answers, fresh and from the cache: SERVFAIL where the tag is not (or is) a trusted root key. RFC 8145's signalling query `_ta-<tags>.` is sent to the root once a day when `trust_anchor_signalling` is on (the default; off under Hardened).
+RFC 8509's sentinel names (`root-key-sentinel-is-ta-<tag>` and `root-key-sentinel-not-ta-<tag>`) are answered on secure A and AAAA answers, fresh and from the cache: SERVFAIL where the tag is not (or is) a trusted root key. RFC 8145's signaling query `_ta-<tags>.` is sent to the root once a day when `trust_anchor_signaling` is on (the default; off under Hardened).
 
 ### Negative trust anchors
 

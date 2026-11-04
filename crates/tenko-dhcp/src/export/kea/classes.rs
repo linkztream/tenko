@@ -284,7 +284,7 @@ pub(crate) fn policies(cx: &mut Cx<'_>) -> Vec<Value> {
             cx.report.push(
                 at("policy", &label),
                 codes::POLICY_DDNS,
-                "the policy's DDNS settings are left out: Kea 2.6 sets DDNS behaviour per subnet, not per client class",
+                "the policy's DDNS settings are left out: Kea 2.6 sets DDNS behavior per subnet, not per client class",
             );
         }
         let mut context = Map::new();

@@ -510,7 +510,7 @@ The manifest describes what a plugin is, what it implements, which settings it t
 | `version` | yes | Semantic versioning 2.0.0: `MAJOR.MINOR.PATCH` without leading zeros, with an optional `-prerelease` and `+build` suffix, at most 64 characters. |
 | `description` | yes | One or two English sentences for the operator. Not empty, at most 500 characters, no control characters. |
 | `homepage` | no | A URL starting with `https://` or `http://` and a host, no whitespace or control characters, at most 2,048 characters. |
-| `license` | no | An SPDX licence expression. Not empty, at most 100 characters, only letters, digits, spaces and `.+()-`. |
+| `license` | no | An SPDX license expression. Not empty, at most 100 characters, only letters, digits, spaces and `.+()-`. |
 | `protocol` | yes | The protocol major versions the plugin speaks. At least one, each at least 1, no duplicates. |
 | `capabilities` | yes | At least one of `inventory`, `webhook`, `network_controller`, `actuator`, `migration`, `port_bounce`, `client_kick`; no duplicates. `webhook` needs `inventory`; `port_bounce` and `client_kick` need `network_controller`. |
 | `settings` | no | The JSON Schema of an instance's settings, in the subset below. Absent means no settings (an empty object schema that refuses any setting). |
@@ -695,11 +695,11 @@ The sample plugin shows the pattern for testing: when the host injects its optio
 
 ## 8. Logging
 
-A plugin logs to standard error, one event per line. The host forwards standard error, and standard output after the handshake, line by line into its own log, labelled with the plugin's name or the instance.
+A plugin logs to standard error, one event per line. The host forwards standard error, and standard output after the handshake, line by line into its own log, labeled with the plugin's name or the instance.
 
 - **Levels.** A line may start with one of the upper-case words `ERROR`, `WARN`, `INFO`, `DEBUG` or `TRACE`, followed by a space and the message. Without a level word the line is logged at `INFO`. The word must be followed by a space: `ERROR: failed` has no level.
 - **Length.** A line is cut at 4,096 bytes. Blank lines are dropped.
-- **Verbosity.** When the host's own environment has `TENKO_PLUGIN_LOG`, the host passes it on to the plugin unchanged. It carries the operator's wish for the plugin's log verbosity; the host does not interpret the value. A plugin may honour it by suppressing lines below a level.
+- **Verbosity.** When the host's own environment has `TENKO_PLUGIN_LOG`, the host passes it on to the plugin unchanged. It carries the operator's wish for the plugin's log verbosity; the host does not interpret the value. A plugin may honor it by suppressing lines below a level.
 - **Content.** Put the `request_id` of the `CallContext` in lines about a call. Never log settings documents, secrets, tokens or the payloads of the remote system. The last eight lines of standard error are also shown to the operator when the plugin dies during its start, so make the reason for a startup failure the last thing you print.
 
 ## 9. Supervision
@@ -808,7 +808,7 @@ Plugins run with Tenko's identity on the host. A plugin can read the files that 
 - Install and publish plugins from trusted sources only.
 - Contact only the network targets the manifest declares. Add a target to the manifest before you add a connection to the code.
 - Keep nothing on disk but temporary files, and remove them. Persistent state belongs to Tenko; carry it in cursors.
-- Never weaken TLS verification silently. If you offer a setting to turn certificate verification off, make it explicit, default to verifying, and say in the `Check` detail when it is off. Honour the certificate locations the host passes (`SSL_CERT_FILE`, `SSL_CERT_DIR`).
+- Never weaken TLS verification silently. If you offer a setting to turn certificate verification off, make it explicit, default to verifying, and say in the `Check` detail when it is off. Honor the certificate locations the host passes (`SSL_CERT_FILE`, `SSL_CERT_DIR`).
 - Never put secrets in settings, logs, status messages or answers (section 7).
 - Treat everything the remote system returns as untrusted input: bound sizes, tolerate missing and unexpected members, and do not pass it to a shell, a file path or a query unescaped.
 - Do not start background processes that outlive the plugin.

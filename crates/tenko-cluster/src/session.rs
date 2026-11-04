@@ -179,7 +179,7 @@ impl Sessions {
                 server_time: Some(timestamp_to_proto(now)),
                 renew: false,
                 revoked: true,
-                detail: "this node was revoked; enrol it again to reconnect".to_owned(),
+                detail: "this node was revoked; enroll it again to reconnect".to_owned(),
             }));
         }
         let sessions = Arc::clone(self);

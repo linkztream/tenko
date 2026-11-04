@@ -10,7 +10,7 @@
 // - Navigation: the rail still lists every area (the server refuses what is not allowed); the
 //   command palette offers no "Updates" and no "Secrets" to a scoped operator, which a global
 //   operator gets for Secrets and an administrator for both.
-// - Actions: no metrics tiles on the start page, no "Create connector", no enrolment of a node
+// - Actions: no metrics tiles on the start page, no "Create connector", no enrollment of a node
 //   and no token list, no "Add a controller"; the cluster and scans pages show the refusal; the
 //   write actions of IPAM stay on the prefix of the grant.
 // - A viewer's pane in the same server is covered by access.spec.ts (display gating on a prefix
@@ -160,7 +160,7 @@ test("IAM-01: a scoped operator gets no metrics, no connector, node or controlle
   await page.goto("/connectors");
   await expect(page.getByTestId("connectors-create")).toBeVisible();
   await page.goto("/nodes");
-  await expect(page.getByTestId("nodes-enrol")).toBeVisible();
+  await expect(page.getByTestId("nodes-enroll")).toBeVisible();
   await expect(page.getByTestId("nodes-tokens")).toBeVisible();
   await page.goto("/cluster");
   await expect(page.getByTestId("cluster-add-controller")).toBeVisible();
@@ -181,7 +181,7 @@ test("IAM-01: a scoped operator gets no metrics, no connector, node or controlle
 
   await page.goto("/nodes");
   await expect(page.getByTestId("page-nodes")).toBeVisible();
-  await expect(page.getByTestId("nodes-enrol")).toHaveCount(0);
+  await expect(page.getByTestId("nodes-enroll")).toHaveCount(0);
   await expect(page.getByTestId("nodes-tokens")).toHaveCount(0);
 
   // The cluster and scans pages are global-only: the server refuses the reads and the page says so.

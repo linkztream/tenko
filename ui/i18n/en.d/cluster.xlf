@@ -480,7 +480,7 @@
       </unit>
       <unit id="cluster.add.intro">
         <notes><note category="description">Text under the title of the add-a-controller dialog.</note></notes>
-        <segment><source>A join token lets one new controller enrol once. It lives at most an hour and is shown only once.</source></segment>
+        <segment><source>A join token lets one new controller enroll once. It lives at most an hour and is shown only once.</source></segment>
       </unit>
       <unit id="cluster.add.next">
         <notes><note category="description">Text under the join token: what happens after the command ran on the new host.</note></notes>
@@ -618,13 +618,13 @@
         <notes><note category="description">Button that keeps a queued change in the queue.</note></notes>
         <segment><source>Keep it queued</source></segment>
       </unit>
-      <unit id="cluster.queue.cancelled">
-        <notes><note category="description">Toast after a queued change was cancelled.</note></notes>
-        <segment><source>The queued change was cancelled.</source></segment>
+      <unit id="cluster.queue.canceled">
+        <notes><note category="description">Toast after a queued change was canceled.</note></notes>
+        <segment><source>The queued change was canceled.</source></segment>
       </unit>
       <unit id="cluster.queue.cancel_failed">
-        <notes><note category="description">Toast title when a queued change could not be cancelled.</note></notes>
-        <segment><source>The queued change could not be cancelled</source></segment>
+        <notes><note category="description">Toast title when a queued change could not be canceled.</note></notes>
+        <segment><source>The queued change could not be canceled</source></segment>
       </unit>
       <unit id="cluster.queue.reapply">
         <notes><note category="description">Button that applies a queued change that did not fit again.</note></notes>

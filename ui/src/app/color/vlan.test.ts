@@ -184,7 +184,7 @@ describe("vlanPalette", () => {
         hues.forEach((hue, i) => {
           expect(hue, `n = ${n}, VLAN ${i}`).toBe(Math.round((tokens.h0 + (i * 360) / n) % 360));
         });
-        // Neighbours are 360 / n apart, give or take the rounding of both.
+        // Neighbors are 360 / n apart, give or take the rounding of both.
         hues.forEach((hue, i) => {
           const next = hues[(i + 1) % n] as number;
           const gap = (next - hue + 360) % 360 || 360;

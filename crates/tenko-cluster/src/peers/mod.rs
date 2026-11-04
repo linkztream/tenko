@@ -491,7 +491,7 @@ impl Peers {
                 "cluster.join.not_controller",
                 403,
                 format!(
-                    "node {node} was not enrolled as a controller; enrol it with a controller token"
+                    "node {node} was not enrolled as a controller; enroll it with a controller token"
                 ),
             ));
         }
@@ -719,7 +719,7 @@ impl Peers {
                 certificate: certificate.clone(),
                 serials: vec![certificate],
                 enrolled_at: now,
-                enrolment: Uuid::nil(),
+                enrollment: Uuid::nil(),
                 enrolled_by: None,
                 renewed_at: None,
                 last_seen: None,
@@ -1320,7 +1320,7 @@ impl Peers {
     }
 
     /// `Cluster.TransferKek`: seals the KEK generations for the controller `caller`: once
-    /// per enrolment token for a joining controller, or for a member of the Raft group that
+    /// per enrollment token for a joining controller, or for a member of the Raft group that
     /// lacks generations (an empty token id: a fetch).
     pub(crate) async fn transfer_kek(
         &self,
@@ -1337,7 +1337,7 @@ impl Peers {
                 "the join token id is not a UUID",
             )
         })?;
-        if token != caller.enrolment || token.is_nil() {
+        if token != caller.enrollment || token.is_nil() {
             return Err(ClusterError::new(
                 "vault.kek.transfer.token",
                 403,
@@ -1358,7 +1358,7 @@ impl Peers {
             return Err(ClusterError::new(
                 "vault.kek.transfer.used",
                 409,
-                "the keys were transferred with this join token already; enrol again",
+                "the keys were transferred with this join token already; enroll again",
             ));
         }
         drop(view);
@@ -1380,7 +1380,7 @@ impl Peers {
             AuditDraft::success(actions::KEK_TRANSFER, vec![ObjectRef::node(caller.id)])
                 .with_context("generations", sealed.generation_ids.join(","))
                 .with_context("node", caller.id.to_string())
-                .with_context("enrolment", token.to_string())
+                .with_context("enrollment", token.to_string())
                 .with_context("purpose", "join".to_owned()),
         );
         registry
@@ -1396,7 +1396,7 @@ impl Peers {
                     ClusterError::new(
                         "vault.kek.transfer.used",
                         409,
-                        "the keys were transferred with this join token already; enrol again",
+                        "the keys were transferred with this join token already; enroll again",
                     )
                 } else {
                     error

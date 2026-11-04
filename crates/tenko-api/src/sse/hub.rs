@@ -115,7 +115,7 @@ struct Inner {
     subscribers: AtomicUsize,
     /// Open streams by topic, in the order of [`Topic::ALL`].
     topic_subscribers: [AtomicUsize; Topic::ALL.len()],
-    /// Signalled when the count of a topic leaves zero.
+    /// Signaled when the count of a topic leaves zero.
     listened: Notify,
     published: AtomicU64,
 }

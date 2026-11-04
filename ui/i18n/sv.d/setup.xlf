@@ -103,7 +103,7 @@
         <segment><source>Keep a query log</source><target>För en frågelogg</target></segment>
       </unit>
       <unit id="setup.dns.log_description">
-        <segment><source>Which names the clients asked for, with the clients pseudonymised; kept on the node only.</source><target>Vilka namn klienterna frågade efter, med klienterna pseudonymiserade; sparas bara på noden.</target></segment>
+        <segment><source>Which names the clients asked for, with the clients pseudonymized; kept on the node only.</source><target>Vilka namn klienterna frågade efter, med klienterna pseudonymiserade; sparas bara på noden.</target></segment>
       </unit>
       <unit id="setup.dns.checklist">
         <segment><source>Before clients use this node</source><target>Innan klienterna använder noden</target></segment>

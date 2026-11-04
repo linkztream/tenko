@@ -1,7 +1,7 @@
 //! Lab integration test of the raw-socket scan methods (WP3.14), run on a Linux host that
 //! has `CAP_NET_RAW` (as root in the lab). It covers the raw methods of SCAN-02 (LLDP and
 //! CDP), SCAN-03 (DHCP snooping), SCAN-04 (ARP sweep, SYN scan, OS fingerprinting) and
-//! SCAN-05 (LLDP neighbours). It is `#[ignore]`d: it needs a real segment and a target
+//! SCAN-05 (LLDP neighbors). It is `#[ignore]`d: it needs a real segment and a target
 //! host, so it runs only when invoked by name with the environment set. No address is
 //! hard-coded; every address comes from the environment, so the repository names no
 //! infrastructure.
@@ -212,14 +212,14 @@ fn the_raw_methods_find_the_lab_target() {
         "os_fingerprint did not say Linux: {os:?}"
     );
 
-    // LLDP: the frame lldpd sends is seen as a neighbour (a link or an attachment).
+    // LLDP: the frame lldpd sends is seen as a neighbor (a link or an attachment).
     let lldp = sightings(&site, "lldp", None);
     assert!(
         lldp.iter().any(|s| matches!(
             s["subject"]["type"].as_str(),
             Some("link" | "attachment" | "address")
         )),
-        "lldp saw no neighbour frame: {lldp:?}"
+        "lldp saw no neighbor frame: {lldp:?}"
     );
 
     // DHCP snoop: a DISCOVER (or its reply) from the target is seen. A DISCOVER has no

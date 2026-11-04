@@ -19,9 +19,9 @@ use crate::{error::ScanError, limit::Pacer, scope::Scope};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MethodKind {
-    /// IPv4 neighbours from the operating system's ARP table; sends nothing.
+    /// IPv4 neighbors from the operating system's ARP table; sends nothing.
     Arp,
-    /// IPv6 neighbours from the operating system's neighbour table; sends nothing.
+    /// IPv6 neighbors from the operating system's neighbor table; sends nothing.
     Nd,
     /// ICMP echo through the operating system.
     Icmp,
@@ -135,7 +135,7 @@ impl MethodKind {
     }
 
     /// Whether the method sends packets at all; blackout windows hold every method that
-    /// does. The neighbour tables are read from the operating system and send nothing.
+    /// does. The neighbor tables are read from the operating system and send nothing.
     pub const fn sends_packets(self) -> bool {
         !matches!(
             self,
@@ -193,12 +193,12 @@ impl Cancel {
     }
 
     /// Whether the run must stop.
-    pub fn is_cancelled(&self) -> bool {
+    pub fn is_canceled(&self) -> bool {
         *self.0.borrow()
     }
 
     /// Resolves when the run must stop; never, when the sender is gone without firing.
-    pub async fn cancelled(&self) {
+    pub async fn canceled(&self) {
         let mut receiver = self.0.clone();
         if receiver.wait_for(|stop| *stop).await.is_err() {
             std::future::pending::<()>().await;
@@ -334,13 +334,13 @@ mod tests {
     #[tokio::test]
     async fn a_cancel_without_sender_never_fires() {
         let cancel = Cancel::never();
-        assert!(!cancel.is_cancelled());
-        let fired = tokio::time::timeout(Duration::from_millis(20), cancel.cancelled()).await;
+        assert!(!cancel.is_canceled());
+        let fired = tokio::time::timeout(Duration::from_millis(20), cancel.canceled()).await;
         assert!(fired.is_err());
         let (sender, receiver) = watch::channel(false);
         let cancel = Cancel::new(receiver);
         sender.send(true).expect("send");
-        cancel.cancelled().await;
-        assert!(cancel.is_cancelled());
+        cancel.canceled().await;
+        assert!(cancel.is_canceled());
     }
 }

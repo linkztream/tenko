@@ -145,7 +145,7 @@ async fn store_vault_and_mem_vault_debug_never_print_values_or_keys() {
     let operator = vault
         .put_operator(
             &ctx,
-            spec("connect.proxmox_token").labelled("proxmox"),
+            spec("connect.proxmox_token").labeled("proxmox"),
             value(&format!("{marker}-operator")),
         )
         .await

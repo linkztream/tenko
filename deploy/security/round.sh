@@ -312,31 +312,31 @@ row_net_cluster_port() {
   # without a restart once no token is waiting and no node is enrolled, and stays closed
   # after a restart. Closing when the last token is withdrawn is the fix of SF-0001 of the
   # report (fixed: the on-demand listener stayed open until the next restart); a reporting
-  # sub-check records that the open listener refuses enrolment without a valid token.
+  # sub-check records that the open listener refuses enrollment without a valid token.
   row_tool=ss
   local id closed
-  # Closed on a fresh node (no token, no enrolment).
+  # Closed on a fresh node (no token, no enrollment).
   if cluster_port_open; then
-    row_reason="8444 is open on a fresh node with no enrolment token waiting"
+    row_reason="8444 is open on a fresh node with no enrollment token waiting"
     return 1
   fi
   # A token opens it.
-  api post /nodes/enrolments '{"roles": ["probe"], "expires_in_secs": 300}' >"$WORK/enrol.json" 2>>"$EVIDENCE/rows/net.cluster_port.log" ||
-    { row_reason="an enrolment token could not be created"; return 1; }
-  id="$(jq -r '.enrolment.id' "$WORK/enrol.json")"
+  api post /nodes/enrollments '{"roles": ["probe"], "expires_in_secs": 300}' >"$WORK/enroll.json" 2>>"$EVIDENCE/rows/net.cluster_port.log" ||
+    { row_reason="an enrollment token could not be created"; return 1; }
+  id="$(jq -r '.enrollment.id' "$WORK/enroll.json")"
   sleep 2
   if ! cluster_port_open; then
-    row_reason="8444 did not open after an enrolment token was created"
+    row_reason="8444 did not open after an enrollment token was created"
     return 1
   fi
-  # The reporting sub-check: while the port is open, an enrolment attempt without a valid
+  # The reporting sub-check: while the port is open, an enrollment attempt without a valid
   # token is refused (recorded in the log; it does not block, the closing checks below do).
   cluster_refuses_without_token >>"$EVIDENCE/rows/net.cluster_port.log" 2>&1 &&
-    echo "sub-check: the open cluster port refuses enrolment without a valid token (PASS, reporting)" >>"$EVIDENCE/rows/net.cluster_port.log" ||
+    echo "sub-check: the open cluster port refuses enrollment without a valid token (PASS, reporting)" >>"$EVIDENCE/rows/net.cluster_port.log" ||
     echo "sub-check: the open cluster port did NOT refuse an unauthenticated probe (reporting)" >>"$EVIDENCE/rows/net.cluster_port.log"
   # Withdraw the token: 8444 closes without a restart (SF-0001, fixed).
-  api delete "/nodes/enrolments/$id" >/dev/null 2>>"$EVIDENCE/rows/net.cluster_port.log" ||
-    { row_reason="the enrolment token could not be withdrawn"; return 1; }
+  api delete "/nodes/enrollments/$id" >/dev/null 2>>"$EVIDENCE/rows/net.cluster_port.log" ||
+    { row_reason="the enrollment token could not be withdrawn"; return 1; }
   closed=0
   for _ in $(seq 1 10); do
     if ! cluster_port_open; then
@@ -346,7 +346,7 @@ row_net_cluster_port() {
     sleep 1
   done
   if [[ "$closed" != 1 ]]; then
-    row_reason="8444 is still open 10 s after the last enrolment token was withdrawn (docs/cluster.md 7.2 says it closes without a restart); see SF-0001"
+    row_reason="8444 is still open 10 s after the last enrollment token was withdrawn (docs/cluster.md 7.2 says it closes without a restart); see SF-0001"
     return 1
   fi
   echo "8444 closed after the token was withdrawn, without a restart" >>"$EVIDENCE/rows/net.cluster_port.log"
@@ -366,7 +366,7 @@ cluster_port_open() {
 }
 
 cluster_refuses_without_token() {
-  # A gRPC enrolment without a token cannot succeed; a plain TLS probe of 8444 that gets no
+  # A gRPC enrollment without a token cannot succeed; a plain TLS probe of 8444 that gets no
   # certificate it trusts is enough to show the port does not hand anything out. Use openssl
   # to show the handshake needs the internal CA and a client certificate.
   local host="${API_URL#https://}"; host="${host%%:*}"

@@ -251,7 +251,7 @@ fn choice_names(proposal: &IntentProposal) -> Vec<(String, bool, NameSource)> {
 async fn a_placeholder_never_names_a_discovered_host() {
     let lab = lab().await;
     // UniFi's placeholder alone: the device takes Tenko's fallback, not the placeholder,
-    // whether the connector marked it or the rule recognises it.
+    // whether the connector marked it or the rule recognizes it.
     for marked in [true, false] {
         lab.unifi("host-192-0-2-10", marked, at("09:00")).await;
         lab.reconcile(at("09:01")).await;

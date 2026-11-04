@@ -389,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn delay_honours_initial_above_max_and_zero_initial() {
+    fn delay_honors_initial_above_max_and_zero_initial() {
         let capped = BackoffPolicy {
             initial: secs(500),
             ..plain()

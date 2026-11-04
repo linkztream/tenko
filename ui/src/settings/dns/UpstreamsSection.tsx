@@ -1,6 +1,6 @@
 // dns-visibility: the upstreams of the node's resolver (`upstreams` of `GET /nodes/{id}/dns`):
 // per rule (the default forwarder of `[dns] forwarders`, the forwarding rules by suffix, the
-// stub zones whose name servers were learnt) each upstream with its state, the last and the
+// stub zones whose name servers were learned) each upstream with its state, the last and the
 // smoothed round-trip time, the median and the 99th percentile of the last minute, the answered
 // and failed exchanges since the role started and the last error. The upstream the next query
 // goes to is marked. A node that forwards nothing shows a line saying so.

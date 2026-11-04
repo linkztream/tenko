@@ -11,7 +11,7 @@
 #   4. creates two controller tokens and joins controller-2 and controller-3 with
 #      `tenko cluster join` in their own containers before their first start, then waits
 #      until the cluster has three voters;
-#   5. enrols the two probes and starts them;
+#   5. enrolls the two probes and starts them;
 #   6. writes 100 addresses per second through HAProxy, kills the leader with
 #      `docker compose kill` during the load, checks that writes resume within 15 s and that
 #      the surviving controllers' state digests agree, restarts the killed controller and
@@ -250,10 +250,10 @@ join() {
   local service="$1" answer token fingerprint
   # A controller token needs a sign-in within the last five minutes.
   login
-  answer="$(api POST /nodes/enrolments '{"roles":["controller"]}')"
+  answer="$(api POST /nodes/enrollments '{"roles":["controller"]}')"
   token="$(printf '%s' "$answer" | json "j['token']")"
   fingerprint="$(printf '%s' "$answer" | json "j['ca_fingerprint']")"
-  compose run --rm -T --no-deps --use-aliases -e "TENKO_ENROL_TOKEN=$token" \
+  compose run --rm -T --no-deps --use-aliases -e "TENKO_ENROLL_TOKEN=$token" \
     --entrypoint "$tenko_bin" "$service" cluster join --controller "$inner_url" \
     --ca-fingerprint "$fingerprint" --address "$service:8444" --listen 0.0.0.0:8444 \
     --name "$service" --config /var/lib/tenko/tenko.toml --data-dir /var/lib/tenko
@@ -267,13 +267,13 @@ join controller-3
 retry 120 "three voters" three_voters
 ok "join" "three voters, leader $(leader_service)"
 
-step "enrol and start the probes"
+step "enroll and start the probes"
 for n in 1 2; do
-  answer="$(api POST /nodes/enrolments "{\"roles\":[\"probe\"],\"name\":\"probe-$n\"}")"
+  answer="$(api POST /nodes/enrollments "{\"roles\":[\"probe\"],\"name\":\"probe-$n\"}")"
   token="$(printf '%s' "$answer" | json "j['token']")"
   fingerprint="$(printf '%s' "$answer" | json "j['ca_fingerprint']")"
-  compose run --rm -T --no-deps -e "TENKO_ENROL_TOKEN=$token" --entrypoint "$tenko_bin" \
-    "probe-$n" node enrol --controller "$inner_url" --ca-fingerprint "$fingerprint" \
+  compose run --rm -T --no-deps -e "TENKO_ENROLL_TOKEN=$token" --entrypoint "$tenko_bin" \
+    "probe-$n" node enroll --controller "$inner_url" --ca-fingerprint "$fingerprint" \
     --data-dir /var/lib/tenko
 done
 compose up -d --no-build probe-1 probe-2

@@ -29,7 +29,7 @@ impl Hasher for Fnv {
     }
 }
 
-/// The splitmix64 finaliser.
+/// The splitmix64 finalizer.
 pub(crate) fn mix(mut value: u64) -> u64 {
     value ^= value >> 30;
     value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);

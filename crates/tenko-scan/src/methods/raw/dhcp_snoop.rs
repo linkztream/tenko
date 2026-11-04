@@ -26,7 +26,7 @@ use crate::{
         ipv4,
     },
     method::{Availability, Found, Method, MethodKind, MethodOutput, RunContext},
-    methods::neighbours::usable_mac,
+    methods::neighbors::usable_mac,
     oui,
 };
 
@@ -113,7 +113,7 @@ impl Method for DhcpSnoop {
         let mut vendors = BTreeSet::new();
         let mut noted = BTreeSet::new();
         let deadline = Instant::now() + self.window;
-        while Instant::now() < deadline && !ctx.cancel.is_cancelled() {
+        while Instant::now() < deadline && !ctx.cancel.is_canceled() {
             let Ok(Some(frame)) = link.recv(Duration::from_millis(200)).await else {
                 continue;
             };
@@ -129,7 +129,7 @@ impl Method for DhcpSnoop {
                 &mut noted,
             );
         }
-        output.covered_all = !ctx.cancel.is_cancelled();
+        output.covered_all = !ctx.cancel.is_canceled();
         Ok(output)
     }
 }

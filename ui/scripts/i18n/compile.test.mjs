@@ -1603,7 +1603,7 @@ describe("renderMergedXliff", () => {
       meta: meta("English", { author: "Ann &amp; Bo &lt;team&gt;", version: "2.0.1-&quot;rc&quot;" }),
       units:
         unit("app.amp", "Tom &amp; Jerry &lt;3 &gt; &quot;q&quot;", undefined, "Shown with a &lt;b&gt; tag &amp; more.") +
-        unit("app.tag", "Press &lt;b&gt;bold&lt;/b&gt; to emphasise") +
+        unit("app.tag", "Press &lt;b&gt;bold&lt;/b&gt; to emphasize") +
         unit("app.lines", "&#32;first line\n  second line&#10;") +
         unit("app.cdata", '<![CDATA[<raw> & "quoted"]]>') +
         unit("app.cdata_lines", "<![CDATA[\n  keep\n]]>") +
@@ -1619,7 +1619,7 @@ describe("renderMergedXliff", () => {
     ),
     "sv.xlf": sv(
       unit("app.amp", "Tom &amp; Jerry &lt;3 &gt; &quot;q&quot;", "Kalle &amp; Kajsa &lt;3 &gt; &quot;q&quot;", "Shown with a &lt;b&gt; tag &amp; more.") +
-        unit("app.tag", "Press &lt;b&gt;bold&lt;/b&gt; to emphasise", "Tryck &lt;b&gt;fet&lt;/b&gt; f&#xF6;r betoning") +
+        unit("app.tag", "Press &lt;b&gt;bold&lt;/b&gt; to emphasize", "Tryck &lt;b&gt;fet&lt;/b&gt; f&#xF6;r betoning") +
         unit("app.lines", "&#32;first line\n  second line&#10;", "&#32;första raden\n  andra raden&#10;") +
         unit("app.cdata", '<![CDATA[<raw> & "quoted"]]>', '<![CDATA[<rå> & "citerad"]]>') +
         unit("app.cdata_lines", "<![CDATA[\n  keep\n]]>", "<![CDATA[\n  behåll\n]]>") +
@@ -1852,7 +1852,7 @@ describe("renderMergedXliff", () => {
     expect(xml).toContain('<mda:meta type="author">Ann &amp; Bo &lt;team&gt;</mda:meta>');
     expect(xml).toContain('<mda:meta type="version">2.0.1-"rc"</mda:meta>');
     expect(xml).toContain('<note category="description">Shown with a &lt;b&gt; tag &amp; more.</note>');
-    expect(xml).toContain("<source>Press &lt;b&gt;bold&lt;/b&gt; to emphasise</source>");
+    expect(xml).toContain("<source>Press &lt;b&gt;bold&lt;/b&gt; to emphasize</source>");
     expect(xml).toContain("<target>Tryck &lt;b&gt;fet&lt;/b&gt; för betoning</target>");
     expect(xml).toContain('<source>&lt;raw&gt; &amp; "quoted"</source>');
     expect(xml).toContain('<target>&lt;rå&gt; &amp; "citerad"</target>');

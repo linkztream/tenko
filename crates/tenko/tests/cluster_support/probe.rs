@@ -1,4 +1,4 @@
-//! A probe node of the lab, enrolled as in `node_cluster.rs`: `tenko node enrol` against a
+//! A probe node of the lab, enrolled as in `node_cluster.rs`: `tenko node enroll` against a
 //! controller of the lab with a probe token and the CA fingerprint, then
 //! `tenko serve --roles probe` in a data directory of its own. It connects to the
 //! controllers' cluster ports directly (probes are not relayed) and learns every
@@ -34,7 +34,7 @@ pub struct LabProbe {
 }
 
 impl ClusterLab {
-    /// Enrols a probe through controller `via` and starts its node process; returns once
+    /// Enrolls a probe through controller `via` and starts its node process; returns once
     /// the process says it runs.
     #[track_caller]
     pub fn probe(&mut self, via: u64) -> LabProbe {
@@ -45,9 +45,9 @@ impl ClusterLab {
             .tempdir()
             .expect("a temporary directory");
         let data_dir = dir.path().join("data");
-        let mut enrol = tenko();
-        enrol
-            .args(["node", "enrol", "--controller", &self.url(via)])
+        let mut enroll = tenko();
+        enroll
+            .args(["node", "enroll", "--controller", &self.url(via)])
             .args(["--token", &token, "--ca-fingerprint", self.fingerprint()])
             .args([
                 "--name",
@@ -57,11 +57,11 @@ impl ClusterLab {
             ])
             .arg("--data-dir")
             .arg(&data_dir);
-        let enrolled = run(enrol, None);
+        let enrolled = run(enroll, None);
         assert_eq!(
             enrolled.code,
             Some(0),
-            "enrol a probe\n{}",
+            "enroll a probe\n{}",
             enrolled.diagnostics()
         );
         let identity: Value = serde_json::from_slice(

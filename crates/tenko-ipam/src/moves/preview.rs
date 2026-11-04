@@ -497,7 +497,7 @@ pub(super) struct Base {
 }
 
 /// Completes a move with the L2 steps: the steps of every item, the warnings with their
-/// acknowledgements and the fingerprint.
+/// acknowledgments and the fingerprint.
 ///
 /// # Errors
 ///

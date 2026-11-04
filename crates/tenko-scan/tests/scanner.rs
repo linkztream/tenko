@@ -99,7 +99,7 @@ impl Method for Scripted {
                 probes: 1,
                 notes: Vec::new(),
             }),
-            () = ctx.cancel.cancelled() => Ok(MethodOutput {
+            () = ctx.cancel.canceled() => Ok(MethodOutput {
                 found: found.into_iter().take(1).collect(),
                 covered_all: false,
                 probes: 1,
@@ -202,7 +202,7 @@ async fn scheduled_runs_hand_complete_batches_that_live_three_intervals() {
     assert!(batch.complete);
     assert_eq!(
         batch.vrf, None,
-        "the controller chooses the VRF of the enrolment"
+        "the controller chooses the VRF of the enrollment"
     );
     assert_eq!(
         batch.sightings.len(),
@@ -356,7 +356,7 @@ async fn the_kill_switch_stops_a_running_scan_and_holds_the_next() {
         .method(MethodKind::Icmp)
         .and_then(|m| m.last_run.clone())
         .expect("last run");
-    assert_eq!(last.outcome, RunOutcome::Cancelled);
+    assert_eq!(last.outcome, RunOutcome::Canceled);
     let refused = rig
         .scanner
         .run_now(MethodKind::Icmp, &RunRequest::default())
@@ -475,7 +475,7 @@ async fn a_run_that_overstays_its_deadline_is_stopped() {
         .run_now(MethodKind::Mdns, &RunRequest::default())
         .await
         .expect("run");
-    assert_eq!(record.outcome, RunOutcome::Cancelled);
+    assert_eq!(record.outcome, RunOutcome::Canceled);
     assert_eq!(record.error.as_deref(), Some("stopped at its deadline"));
     assert!(!rig.sink.batches()[0].complete);
 }
@@ -586,7 +586,7 @@ async fn the_kill_switch_file_stops_an_on_demand_run_without_a_scheduler() {
     .expect("the run stops")
     .expect("run");
     killer.await.expect("killer");
-    assert_eq!(record.outcome, RunOutcome::Cancelled);
+    assert_eq!(record.outcome, RunOutcome::Canceled);
     assert_eq!(record.error.as_deref(), Some("stopped by the kill switch"));
     assert!(record.queued, "what it saw went out, not complete");
     assert!(!sink.batches()[0].complete);

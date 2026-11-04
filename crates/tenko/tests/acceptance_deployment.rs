@@ -5,7 +5,7 @@
 //!
 //! 1. The version layout. `tenko upgrade layout` creates `<data_dir>/updates/<version>/tenko`
 //!    and the link `current` (OPS-24, section 9.1 of the upgrade document), changes nothing on
-//!    a second run, and recognises a binary that already runs from the layout. A server
+//!    a second run, and recognizes a binary that already runs from the layout. A server
 //!    started from `current/tenko` as the service managers start it is a server that runs from
 //!    the layout: the update status no longer says `layout_missing`.
 //! 2. `tenko upgrade check` against a data directory (OPS-23, section 5): the verdicts
@@ -28,7 +28,7 @@
 //! |---|---|---|---|
 //! | Windows service: install, start, readiness, Event Log, update through the layout with exit status 12, stop, uninstall (OPS-10) | `deploy/windows/smoke.ps1` | `windows-service-smoke` in `ci.yml` | Weekly schedule, and by hand with the `windows` input |
 //! | systemd: credential KEK, start, stop and start, `LogsDirectory=`, update through the layout and the restart on exit status 12, the probe drop-in, `systemd-analyze security` below 2.5 (OPS-13) | `deploy/systemd/smoke.sh` | `systemd-smoke` in `ci.yml` | Weekly schedule, and by hand |
-//! | Docker with macvlan: the controller and a probe on a macvlan network over a dummy parent interface, `HEALTHCHECK`, first-run setup, enrolment (OPS-14) | `deploy/compose/smoke-macvlan.sh` | `systemd-smoke` in `ci.yml` (a step after the systemd smoke) | Weekly schedule, and by hand |
+//! | Docker with macvlan: the controller and a probe on a macvlan network over a dummy parent interface, `HEALTHCHECK`, first-run setup, enrollment (OPS-14) | `deploy/compose/smoke-macvlan.sh` | `systemd-smoke` in `ci.yml` (a step after the systemd smoke) | Weekly schedule, and by hand |
 //! | The Linux release binary in a Debian 12 and a RHEL 9 compatible container (OPS-23) | the inline script of the job | `smoke-linux` in `release.yml` | Every release tag |
 //! | The three-controller lab with `HAProxy`: failover, partition (OPS-03, OPS-08) | `deploy/compose/lab-cluster/smoke.sh` | `cluster-lab` in `ci.yml` | Weekly schedule, and by hand |
 //!

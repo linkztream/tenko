@@ -10,7 +10,7 @@ Measurement M15 of the Slice 3 plan (`docs/plans/slice-3-plan.md`, section 5), c
 `m15-config-sync.mjs` (Node 22, no dependencies) starts two local processes, both on loopback:
 
 - a controller: `tenko serve --config <file> --stop-on-eof` with the internal CA, the API on `127.0.0.1:<port>`, the cluster port on `127.0.0.1:<port>`, `[cluster] sync_kbps` (0 for the latency series, the cap for the cap series), air-gapped updates, no online breach check;
-- a probe: `tenko node enrol` with a token from `POST /api/v1/nodes/enrolments` and the CA fingerprint, then `tenko serve --roles probe --stop-on-eof` with `TENKO_LOG__LEVEL=info`.
+- a probe: `tenko node enroll` with a token from `POST /api/v1/nodes/enrollments` and the CA fingerprint, then `tenko serve --roles probe --stop-on-eof` with `TENKO_LOG__LEVEL=info`.
 
 It bootstraps the administrator through `POST /api/v1/setup` (random PIN, never printed), signs in with a session cookie and keeps one TLS connection to the API open, so a measured request does not include a TLS handshake.
 

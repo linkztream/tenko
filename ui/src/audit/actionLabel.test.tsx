@@ -19,6 +19,19 @@ describe("the label of an audit action", () => {
     expect(auditActionLabel(draft("connect.secret.inject"))).toBe("Pass credentials to a connector");
   });
 
+  it("labels a record written with a former British spelling of its code like the current code", () => {
+    for (const [former, current] of [
+      ["auth.totp.enrol", "auth.totp.enroll"], // spelling: alias
+      ["cluster.enrolment.create", "cluster.enrollment.create"], // spelling: alias
+      ["cluster.enrolment.delete", "cluster.enrollment.delete"], // spelling: alias
+      ["cluster.node.enrol", "cluster.node.enroll"], // spelling: alias
+    ] as const) {
+      const label = auditActionLabel(draft(current));
+      expect(label).toBeDefined();
+      expect(auditActionLabel(draft(former))).toBe(label);
+    }
+  });
+
   it("has none for an unknown action", () => {
     expect(auditActionLabel(draft("vendor.thing.happen"))).toBeUndefined();
   });

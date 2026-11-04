@@ -1,4 +1,4 @@
-//! Behaviour of [`DomainCodec`]: answers are decoded again with `hickory-proto` (an
+//! Behavior of [`DomainCodec`]: answers are decoded again with `hickory-proto` (an
 //! independent decoder) and with the raw header helpers.
 
 use hickory_proto::op::Message as HickoryMessage;

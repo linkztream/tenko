@@ -9,7 +9,7 @@
 #      below (documentation addresses, RFC 5737) and waits until its HEALTHCHECK passes;
 #   4. from a throwaway container on the same macvlan network (the Docker host cannot reach
 #      macvlan children directly) asks GET /api/v1/health/ready with `tenko health`;
-#   5. runs first-run setup, creates an enrolment token, enrols the probe service with it,
+#   5. runs first-run setup, creates an enrollment token, enrolls the probe service with it,
 #      starts it and checks that it runs and that its node status is healthy;
 #   6. tears everything down (containers, volumes, network, temporary files, the dummy link),
 #      also when a step fails. On failure the logs of both containers are printed first.
@@ -173,7 +173,7 @@ client_health() {
 }
 client_health
 
-step "first-run setup and an enrolment token for the probe (commands run inside the controller)"
+step "first-run setup and an enrollment token for the probe (commands run inside the controller)"
 url="https://$TENKO_CONTROLLER_IP:8443"
 # The defaults keep the Home profile, whose password preset is the PIN: digits only, 4 to 64
 # of them. A random PIN of 8 to 12 digits.
@@ -187,22 +187,22 @@ printf '%s\n' "$password" | compose exec -T -e TENKO_CREDENTIALS=/tmp/smoke-cred
   "$tenko_bin" login --url "$url" --ca-file "$ca_in_controller" \
   --user smoke-admin --password-stdin
 # The token is the only line on standard output; the notes (fingerprint) go to standard error.
-enrol_token="$(compose exec -T -e TENKO_CREDENTIALS=/tmp/smoke-credentials.json tenko \
-  "$tenko_bin" node enrol-token --roles probe --name probe-smoke --expires-in 600 \
-  2>"$work/enrol-token.notes" | tr -d '\r\n')"
-cat "$work/enrol-token.notes"
-[[ -n "$enrol_token" ]] || fail "no enrolment token"
-fingerprint="$(grep -Eio '[0-9a-f]{64}' "$work/enrol-token.notes" | head -n 1 || true)"
-enrol_args=(--controller "$url" --name probe-smoke --address "$TENKO_PROBE_IP" --data-dir /var/lib/tenko)
+enroll_token="$(compose exec -T -e TENKO_CREDENTIALS=/tmp/smoke-credentials.json tenko \
+  "$tenko_bin" node enroll-token --roles probe --name probe-smoke --expires-in 600 \
+  2>"$work/enroll-token.notes" | tr -d '\r\n')"
+cat "$work/enroll-token.notes"
+[[ -n "$enroll_token" ]] || fail "no enrollment token"
+fingerprint="$(grep -Eio '[0-9a-f]{64}' "$work/enroll-token.notes" | head -n 1 || true)"
+enroll_args=(--controller "$url" --name probe-smoke --address "$TENKO_PROBE_IP" --data-dir /var/lib/tenko)
 if [[ -n "$fingerprint" ]]; then
-  enrol_args+=(--ca-fingerprint "$fingerprint")
+  enroll_args+=(--ca-fingerprint "$fingerprint")
 else
   printf 'smoke: no CA fingerprint in the notes; enrolling with trust on first use\n' >&2
 fi
 
-step "enrol the probe service into its volume"
-compose --profile probe run --rm -T --no-deps -e "TENKO_ENROL_TOKEN=$enrol_token" \
-  --entrypoint "$tenko_bin" probe node enrol "${enrol_args[@]}"
+step "enroll the probe service into its volume"
+compose --profile probe run --rm -T --no-deps -e "TENKO_ENROLL_TOKEN=$enroll_token" \
+  --entrypoint "$tenko_bin" probe node enroll "${enroll_args[@]}"
 
 step "start the probe and check that it runs"
 compose --profile probe up -d --no-build probe

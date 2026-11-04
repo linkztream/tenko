@@ -1,7 +1,7 @@
 // Step 3: the preview as a full page (API-09): what the import creates, updates and leaves,
 // grouped by kind as a checklist; the loss report by sheet, row and column; proposed
 // prefixes to accept or reject; what happens to credentials, in plain words; the warnings
-// with their acknowledgements; and why apply is blocked, when it is. The outcome of every
+// with their acknowledgments; and why apply is blocked, when it is. The outcome of every
 // sheet comes first; the source rows are listed page by page in a data grid.
 import { A } from "@solidjs/router";
 import { createMemo, For, Show } from "solid-js";
@@ -140,7 +140,7 @@ export function PreviewStep(props: {
     return [...out.values()].sort((a, b) => a.kind.localeCompare(b.kind) || ACTIONS.indexOf(a.action) - ACTIONS.indexOf(b.action));
   });
 
-  /** The acknowledgement of a warning that needs one. */
+  /** The acknowledgment of a warning that needs one. */
   const AckRow = (row: { warning: PlanWarning }) => (
     <Show when={row.warning.requires_ack && !row.warning.acknowledged}>
       <label class="ackrow">
@@ -281,8 +281,8 @@ export function PreviewStep(props: {
                     {tDynamic(`import.credentials.reason.${preview().credentials.reason ?? ""}`) ?? t("import.credentials.not_allowed")}
                     <Show when={preview().credentials.reason === "pin_coupling"}>
                       <div>
-                        <A class="btn sm" href={paths.account("security")} data-testid="import-pin-coupling-enrol">
-                          {t("import.credentials.pin_enrol")}
+                        <A class="btn sm" href={paths.account("security")} data-testid="import-pin-coupling-enroll">
+                          {t("import.credentials.pin_enroll")}
                         </A>
                       </div>
                     </Show>

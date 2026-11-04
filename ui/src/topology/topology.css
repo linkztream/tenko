@@ -99,21 +99,21 @@
 .topology-reason { margin-top: var(--sp-3); font-size: var(--fs-12); }
 .topology-panel .value-list { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
 
-.port-list, .neighbour-list, .intent-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.port-list, .neighbor-list, .intent-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
 .topology-port { border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-3); }
 .port-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
 .port-head .btn { margin-inline-start: auto; }
 .port-name { font-weight: var(--fw-medium); }
 .port-state[data-state="down"] { color: var(--warn-ink); }
-.neighbour {
+.neighbor {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px var(--sp-4);
   width: 100%; padding: var(--sp-3) var(--sp-4); text-align: start;
   border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface); color: var(--ink);
 }
-.neighbour:hover { background: var(--surface-3); }
-.neighbour-name { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); min-width: 0; overflow-wrap: anywhere; }
-.neighbour-link { grid-column: 1; font-size: var(--fs-12); }
-.neighbour .vlan { grid-column: 2; grid-row: 1 / span 2; }
+.neighbor:hover { background: var(--surface-3); }
+.neighbor-name { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); min-width: 0; overflow-wrap: anywhere; }
+.neighbor-link { grid-column: 1; font-size: var(--fs-12); }
+.neighbor .vlan { grid-column: 2; grid-row: 1 / span 2; }
 .intent-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
 
 /* ---------- U7: inferred links, second lines, Not placed, the root, the SSID view ---------- */

@@ -273,7 +273,7 @@ async fn list_secrets(
         (status = 400, description = "The body is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed, or the session is weaker than a password (`auth.forbidden`, `auth.step_up_required` with `required`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameters `accounts`, `next`: `passkey`, and `route`: the passkey enrolment route)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameters `accounts`, `next`: `passkey`, and `route`: the passkey enrollment route)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The value exceeds 64 KiB (`vault.secret.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "A value is invalid (`vault.secret.invalid`, parameter `field`)", body = ProblemDetails, content_type = "application/problem+json")
     ),

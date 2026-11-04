@@ -513,7 +513,7 @@ test.describe("from the version layout", () => {
     await whatsNew.getByTestId("whats-new-close").click();
     await expect(whatsNew).toHaveCount(0);
     await expect
-      .poll(async () => (await api.get<WhatsNew>("/system/updates/whats-new")).show, { message: "the acknowledgement is recorded" })
+      .poll(async () => (await api.get<WhatsNew>("/system/updates/whats-new")).show, { message: "the acknowledgment is recorded" })
       .toBe(false);
     const acknowledged = await api.get<WhatsNew>("/system/updates/whats-new");
     expect(acknowledged.last_seen).toBe(next);

@@ -50,7 +50,7 @@ service Cluster {
 }
 
 message JoinRequest {
-  // The node id of the joining controller, from its enrolment (1001 and up).
+  // The node id of the joining controller, from its enrollment (1001 and up).
   uint64 node_id = 1;
   // The cluster port address of the joining controller as `host:port`.
   string address = 2;
@@ -145,7 +145,7 @@ message TransferKekRequest {
   // A public key the joiner generated for this call; the answer is sealed to it.
   bytes ephemeral_public_key = 1;
   // The id of the join token the joiner enrolled with, so the call can be tied to the
-  // enrolment in the audit log.
+  // enrollment in the audit log.
   string join_token_id = 2;
 }
 

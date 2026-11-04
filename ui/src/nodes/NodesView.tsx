@@ -3,13 +3,13 @@
 // `cluster` topic; the node in the URL docked beside the list. The cluster summary of the
 // system status (the cluster port, the protocol majors, the versions of the connected nodes)
 // and the warning of nodes that share no protocol major with this controller. Administrators
-// manage the enrolment tokens: create one (shown once, with the command to run on the node),
+// manage the enrollment tokens: create one (shown once, with the command to run on the node),
 // see their state, and delete them.
 import { A, useNavigate, useParams } from "@solidjs/router";
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { api } from "../api/client";
 import { createLiveQuery } from "../api/live";
-import { deleteEnrolment, listEnrolments, type EnrolmentView, type NodeRoles, type NodeView } from "../api/nodes";
+import { deleteEnrollment, listEnrollments, type EnrollmentView, type NodeRoles, type NodeView } from "../api/nodes";
 import { errorMessage } from "../api/problem";
 import type { SystemStatus } from "../api/types";
 import { paths } from "../app/paths";
@@ -26,7 +26,7 @@ import { createListSource } from "../grid/source";
 import type { Column } from "../grid/types";
 import { formatList, t } from "../i18n";
 import { useCommands } from "../shell/commands";
-import { EnrolDialog } from "./EnrolDialog";
+import { EnrollDialog } from "./EnrollDialog";
 import { linkState, linkWord, roleWord, tokenStateWord } from "./model";
 import { CertificateText, LinkBadge, NodePanel } from "./NodePanel";
 import { NodeScanPanel } from "./NodeScanPanel";
@@ -99,15 +99,15 @@ export default function NodesView() {
     debounceMs: 500,
     fetch: async (signal) => ({ value: await api.get("/api/v1/system/status", { signal }) }),
   });
-  const tokens = createLiveQuery<EnrolmentView[] | null>({
+  const tokens = createLiveQuery<EnrollmentView[] | null>({
     topics: ["cluster"],
-    fetch: async (signal) => ({ value: admin() ? await listEnrolments(signal) : null }),
+    fetch: async (signal) => ({ value: admin() ? await listEnrollments(signal) : null }),
   });
 
   const columns = nodeColumns();
   const columnState = createColumnState("nodes", () => columns);
   const [enrolling, setEnrolling] = createSignal(false);
-  const [withdrawing, setWithdrawing] = createSignal<EnrolmentView | null>(null);
+  const [withdrawing, setWithdrawing] = createSignal<EnrollmentView | null>(null);
   // node-roles: the roles of this controller as the roles editor reads and saves them.
   const [ownRoles, setOwnRoles] = createSignal<NodeRoles | undefined>();
 
@@ -134,10 +134,10 @@ export default function NodesView() {
 
   useCommands(() => [
     {
-      id: "nodes.enrol",
+      id: "nodes.enroll",
       group: "actions",
       icon: "plus",
-      label: () => t("nodes.action.enrol"),
+      label: () => t("nodes.action.enroll"),
       when: admin,
       run: () => setEnrolling(true),
     },
@@ -150,9 +150,9 @@ export default function NodesView() {
     if (id) navigate(paths.node(id));
   };
 
-  const withdraw = async (token: EnrolmentView) => {
+  const withdraw = async (token: EnrollmentView) => {
     try {
-      await deleteEnrolment(token.id);
+      await deleteEnrollment(token.id);
       toast({ kind: "ok", title: t("nodes.token.deleted") });
       tokens.refetch();
     } catch (err) {
@@ -173,9 +173,9 @@ export default function NodesView() {
         sub={summary()}
         actions={
           <Show when={admin()}>
-            <button type="button" class="btn primary" data-testid="nodes-enrol" onClick={() => setEnrolling(true)}>
+            <button type="button" class="btn primary" data-testid="nodes-enroll" onClick={() => setEnrolling(true)}>
               <Icon name="plus" />
-              {t("nodes.action.enrol")}
+              {t("nodes.action.enroll")}
             </button>
           </Show>
         }
@@ -304,7 +304,7 @@ export default function NodesView() {
                     <tbody>
                       <For each={tokenList() ?? []}>
                         {(token) => (
-                          <tr data-testid="enrolment" data-id={token.id} data-state={token.state}>
+                          <tr data-testid="enrollment" data-id={token.id} data-state={token.state}>
                             <td>
                               <span class={`tag token-state ${token.state}`}>{tokenStateWord(token.state)}</span>
                             </td>
@@ -319,7 +319,7 @@ export default function NodesView() {
                             <td>
                               <Show when={token.used} fallback={<span class="muted">–</span>}>
                                 {(u) => (
-                                  <A href={paths.node(u().node)} class="mono" data-testid="enrolment-node" data-id={u().node}>
+                                  <A href={paths.node(u().node)} class="mono" data-testid="enrollment-node" data-id={u().node}>
                                     {source.rows().find((n) => n.id === u().node)?.name ?? t("nodes.panel.id", { id: u().node })}
                                   </A>
                                 )}
@@ -329,7 +329,7 @@ export default function NodesView() {
                               <button
                                 type="button"
                                 class="btn sm"
-                                data-testid="enrolment-delete"
+                                data-testid="enrollment-delete"
                                 aria-label={t("nodes.token.delete_named", { name: token.name ?? token.id.slice(0, 8) })}
                                 onClick={() => setWithdrawing(token)}
                               >
@@ -362,7 +362,7 @@ export default function NodesView() {
       </div>
 
       <Show when={enrolling()}>
-        <EnrolDialog onClose={() => setEnrolling(false)} onCreated={() => tokens.refetch()} />
+        <EnrollDialog onClose={() => setEnrolling(false)} onCreated={() => tokens.refetch()} />
       </Show>
       <Show when={withdrawing()} keyed>
         {(token) => (

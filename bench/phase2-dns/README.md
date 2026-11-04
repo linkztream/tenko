@@ -26,7 +26,7 @@ engine is measured against.
   warning (`--allow-dynamic` overrides; the run is then marked not publishable in its meta file).
   The harness itself may be built any way; the Linux runs in this directory build it for musl as
   well, so one binary does everything.
-- **Loopback numbers are upper bounds** and are labelled so: client and server share the host
+- **Loopback numbers are upper bounds** and are labeled so: client and server share the host
   and its CPUs. The numbers that may be published are the real-link ones (M17).
 - Raw output goes to `results/raw/` (git-ignored); results are written up as Markdown in
   `results/` with a `Verdict:` line first, as `bench/README.md` describes. The baseline file is a
@@ -59,7 +59,7 @@ engine is measured against.
 | `scripts/run-m20-sign.sh` | M20: DNSSEC signing through `tenko serve`: a 1 M-record zone signed in one full pass with ECDSA P-256 and Ed25519, NSEC and NSEC3, and a 100-record change signed again |
 | `scripts/run-m21-update.sh` | M21: TSIG-signed RFC 2136 updates at a fixed rate against one node (`tenko serve --roles controller,dns`, set up through the API with curl), driven by the example `update_load` of `tenko-dns`; the latency from send to answer, every answer's RCODE and TSIG checked |
 | `scripts/run-m25-lists.sh` | M25: the block list compiler and matcher (the engine's example `lists_bench`) on a generated list of 1 M names: compile time, the size of the version, the time per lookup and per label |
-| `scripts/run-m42-denial.sh` | M42 (recursion plan): the queries the recursive resolver sends the lab root's authority for 1,000 random names under one NSEC and one NSEC3 range, with the denial cache on and off and QNAME minimisation relaxed, strict and off (the compose DNS lab's round `recursion` with `M42=1`) |
+| `scripts/run-m42-denial.sh` | M42 (recursion plan): the queries the recursive resolver sends the lab root's authority for 1,000 random names under one NSEC and one NSEC3 range, with the denial cache on and off and QNAME minimization relaxed, strict and off (the compose DNS lab's round `recursion` with `M42=1`) |
 | `scripts/server-cpu.sh` | CPU seconds and RSS of a server pid on a Linux host, for the runs where the harness cannot sample the server |
 | `scripts/lib.sh` | Shared helpers: machine line, musl linkage check, readiness probe |
 | `data/` | Generated zone and query files (git-ignored) |
@@ -282,7 +282,7 @@ through the zone file import and the feed of the engine (WP4.2), and the load ti
 process (`--server-pid`-style sampling of the RSS, or `server-cpu.sh` on Linux). The generator
 supplies the data and its sizes above.
 
-### M24: cache behaviour (`scripts/run-m24-cache.sh`)
+### M24: cache behavior (`scripts/run-m24-cache.sh`)
 
 A skeleton until the resolver exists (WP5.1): it prints the plan (warm pass, measured pass over a
 1 M-name mixed run, serve-stale under an upstream cut) and the harness gaps to close by then (a
@@ -326,7 +326,7 @@ Write-ups: `results/2026-10-17-m18-zone-load.md` (the procedure by hand, 1 M and
 
 ## Caveats
 
-- Loopback only for `run-loopback.sh`; no NIC, driver or switch behaviour.
+- Loopback only for `run-loopback.sh`; no NIC, driver or switch behavior.
 - The load generator competes with the server for CPU on the same host; read its CPU in the
   record (`client cpu`). No CPU pinning; the workstation CPU is a hybrid design.
 - Other jobs may build on the same machine; the write-ups say what ran.

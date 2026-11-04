@@ -29,7 +29,7 @@
 //! # One node
 //!
 //! `GET /topology/nodes/{id}` answers the node with its ports (the controller's port
-//! table and every port its edges name) and what hangs on each port, every neighbour, and
+//! table and every port its edges name) and what hangs on each port, every neighbor, and
 //! the host of intent with its addresses. `port` keeps one port: "what is connected to
 //! this port"; it matches the port as the sources name it or the controller's port name.
 //!
@@ -324,19 +324,19 @@ impl NodeScope {
     }
 }
 
-/// One node with its ports, neighbours and intent.
+/// One node with its ports, neighbors and intent.
 #[utoipa::path(
     get,
     path = "/topology/nodes/{id}",
     tag = "topology",
     operation_id = "get_topology_node",
-    summary = "Get one topology node with its ports and neighbours",
+    summary = "Get one topology node with its ports and neighbors",
     params(
         ("id" = String, Path, description = "The node identifier, such as `m-00005e005301`."),
         NodeParams
     ),
     responses(
-        (status = 200, description = "The node, its ports with what hangs on each, its neighbours and its intent", body = TopologyNodeView),
+        (status = 200, description = "The node, its ports with what hangs on each, its neighbors and its intent", body = TopologyNodeView),
         (status = 400, description = "Invalid parameter (`sys.invalid_query`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal may not read observations", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No node has this identifier (`ipam.topology.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -367,7 +367,7 @@ async fn get_topology_node(
             }
             .into());
         }
-        // Neighbours and what hangs on a port are shown when they are in scope too.
+        // Neighbors and what hangs on a port are shown when they are in scope too.
         let all = TopologyFilter {
             limit: Some(MAX_LIMIT),
             ..TopologyFilter::default()
@@ -380,11 +380,11 @@ async fn get_topology_node(
             .map(|node| node.id.clone())
             .collect();
         found
-            .neighbours
-            .retain(|neighbour| visible.contains(&neighbour.node));
+            .neighbors
+            .retain(|neighbor| visible.contains(&neighbor.node));
         for port in &mut found.ports {
-            port.neighbours
-                .retain(|neighbour| visible.contains(&neighbour.node));
+            port.neighbors
+                .retain(|neighbor| visible.contains(&neighbor.node));
         }
     }
     Ok(Json(found))
@@ -601,7 +601,7 @@ mod tests {
         api.get("/topology?vlan=0190d1c2-0000-7000-8000-000000000001")
             .await
             .assert_problem(404, "ipam.not_found");
-        api.get("/topology?colour=blue")
+        api.get("/topology?color=blue")
             .await
             .assert_problem(400, "sys.invalid_query");
     }
@@ -622,13 +622,13 @@ mod tests {
         let node = api.get(&format!("/topology/nodes/{switch}")).await;
         node.assert_json(200);
         assert_eq!(node.body["node"]["kind"], "switch");
-        assert_eq!(node.body["neighbours"].as_array().map(Vec::len), Some(2));
+        assert_eq!(node.body["neighbors"].as_array().map(Vec::len), Some(2));
         let port = api.get(&format!("/topology/nodes/{switch}?port=5")).await;
         port.assert_json(200);
         assert_eq!(port.body["ports"].as_array().map(Vec::len), Some(1));
         assert_eq!(port.body["ports"][0]["name"], "Port 5");
         assert_eq!(
-            port.body["ports"][0]["neighbours"][0]["label"],
+            port.body["ports"][0]["neighbors"][0]["label"],
             "00:00:5e:00:53:10"
         );
         api.get("/topology/nodes/m-000000000000")

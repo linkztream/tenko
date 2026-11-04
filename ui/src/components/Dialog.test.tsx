@@ -1,7 +1,7 @@
 // The dialog panel against the viewport: the panel is capped to the viewport's height and
 // scrolls as a whole, the title stays pinned at its top and the actions at its bottom, so
 // the buttons are in reach however tall the content. The styles come from the real
-// stylesheet (jsdom resolves the cascade, not the layout); the focus and aria behaviour of
+// stylesheet (jsdom resolves the cascade, not the layout); the focus and aria behavior of
 // the panel is checked alongside, since the fix must leave it alone.
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";

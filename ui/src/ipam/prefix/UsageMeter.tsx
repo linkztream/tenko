@@ -1,6 +1,6 @@
 // The one utilization meter of a prefix's header (section 5.2 of the UI plan): in use of the
 // usable addresses (docs/ipam.md section 1, `utilization.percent`), never the covered space, with
-// the alarm line at the warning threshold and the scale it names. Colour only for an exception:
+// the alarm line at the warning threshold and the scale it names. Color only for an exception:
 // the bar is neutral until the prefix is at its warning or critical level.
 import { Show } from "solid-js";
 import type { AlarmLevel, UtilizationView } from "../../api/types";

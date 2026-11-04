@@ -184,7 +184,7 @@ function EntryRow(props: { entry: DnsCacheEntry; label: string | null; said: boo
   );
 }
 
-/** A signature of an entry's answer, summarised as the Windows DNS manager does: the type
+/** A signature of an entry's answer, summarized as the Windows DNS manager does: the type
  * covered, the signer and the expiry in UTC. The state, the stale flag and the hits are the
  * entry's and stay on its row. */
 function SignatureRow(props: { entry: DnsCacheEntry; record: Rrsig; label: string | null }) {

@@ -160,11 +160,11 @@ async fn waiting_jobs_keep_their_group_slot_and_other_jobs_run() {
         t.engine.job(grouped[3]).await.expect("job").state,
         JobState::Queued
     );
-    // Cancelling a queued job frees nothing and never starts it.
+    // Canceling a queued job frees nothing and never starts it.
     t.engine.cancel(grouped[4], &t.ctx()).await.expect("cancel");
     assert_eq!(
         t.engine.job(grouped[4]).await.expect("job").state,
-        JobState::Cancelled
+        JobState::Canceled
     );
 }
 

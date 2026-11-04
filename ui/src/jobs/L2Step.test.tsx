@@ -213,7 +213,7 @@ describe("what the step did", () => {
 
 describe("a rollback", () => {
   it("says that the controller has the previous setting again once the step is undone", () => {
-    show(stepOf({ state: "compensated" }, written()), PLANNED, "cancelled");
+    show(stepOf({ state: "compensated" }, written()), PLANNED, "canceled");
     expect(screen.getByTestId("job-l2-reverted").textContent).toBe("Rolled back: the network controller has the previous setting again.");
     // What the step had changed stays visible, so the page tells what was undone.
     expect(screen.getByTestId("job-l2-diff")).toBeTruthy();
@@ -227,7 +227,7 @@ describe("a rollback", () => {
   });
 
   it("counts an interrupted attempt as a write: a person undid it", () => {
-    show(stepOf({ state: "compensated" }, written({ diff: [], unknown_write: true, receipt: null })), undefined, "cancelled");
+    show(stepOf({ state: "compensated" }, written({ diff: [], unknown_write: true, receipt: null })), undefined, "canceled");
     expect(screen.getByTestId("job-l2-reverted")).toBeTruthy();
   });
 
@@ -276,7 +276,7 @@ describe("a rollback", () => {
 describe("in Swedish", () => {
   it("translates every line", async () => {
     await setLocale("sv");
-    show(stepOf({ state: "compensated" }, written({ warnings: ["w"] })), undefined, "cancelled");
+    show(stepOf({ state: "compensated" }, written({ warnings: ["w"] })), undefined, "canceled");
     expect(screen.getByTestId("job-l2").getAttribute("aria-label")).toBe("I nätverkskontrollern");
     expect(within(screen.getByTestId("job-l2-diff")).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Inställning", "Före", "Efter"]);
     expect(screen.getByTestId("job-l2-receipt").textContent).toMatch(/^Skrevs .*, lästes tillbaka och verifierades; 1 ångrasteg sparat för återställningen\.$/);
@@ -305,7 +305,7 @@ describe("accessibility", () => {
     expect(await axeViolations(undo.container)).toEqual([]);
     undo.unmount();
 
-    const reverted = show(stepOf({ state: "compensated" }, written()), PLANNED, "cancelled");
+    const reverted = show(stepOf({ state: "compensated" }, written()), PLANNED, "canceled");
     expect(await axeViolations(reverted.container)).toEqual([]);
   });
 });

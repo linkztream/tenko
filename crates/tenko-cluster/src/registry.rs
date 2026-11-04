@@ -1,12 +1,12 @@
-//! The node registry of a controller: enrolment tokens, enrolment, renewal, revocation,
+//! The node registry of a controller: enrollment tokens, enrollment, renewal, revocation,
 //! the protocol state of each node, and the controller's own certificate on the cluster
 //! port (OPS-04, OPS-08).
 //!
-//! # Enrolment
+//! # Enrollment
 //!
-//! An administrator creates a token ([`NodeRegistry::create_enrolment`]); the controller
+//! An administrator creates a token ([`NodeRegistry::create_enrollment`]); the controller
 //! keeps only its digest and shows the text once. The node presents the token with a
-//! certificate request ([`NodeRegistry::enrol`]); the controller checks the token (it
+//! certificate request ([`NodeRegistry::enroll`]); the controller checks the token (it
 //! exists, its secret matches, it is unused and unexpired), the roles (each allowed by the
 //! token), the protocol majors and the name, issues a certificate for the node's key with
 //! a new node id and the roles, and records the node. Token use and node creation commit
@@ -22,7 +22,7 @@
 //!
 //! # Writes
 //!
-//! Edits by people and nodes (tokens, enrolment, renewal, revocation) are inline jobs with
+//! Edits by people and nodes (tokens, enrollment, renewal, revocation) are inline jobs with
 //! the step `cluster.write`, like every edit in Tenko. Bookkeeping of the controller itself
 //! (`last_seen`, the protocol state, pruning) is written directly.
 
@@ -65,13 +65,13 @@ use crate::{
     error::ClusterError,
     model::{
         CertificateRef, ClusterHealth, ConnectionRecord, ConnectionView, ControllerCertRecord,
-        EnrolRequest, EnrolmentRecord, EnrolmentView, FIRST_ENROLLED_NODE_ID,
-        LAST_SEEN_INTERVAL_SECS, MismatchRecord, NewEnrolment, NodeMismatch, NodeRecord, NodeView,
+        EnrollRequest, EnrollmentRecord, EnrollmentView, FIRST_ENROLLED_NODE_ID,
+        LAST_SEEN_INTERVAL_SECS, MismatchRecord, NewEnrollment, NodeMismatch, NodeRecord, NodeView,
         Revocation, TokenUse, tables, valid_address,
     },
     mtls::RevocationSet,
     session::Sessions,
-    token::EnrolmentToken,
+    token::EnrollmentToken,
     version::{self, VersionMismatch},
 };
 
@@ -79,12 +79,14 @@ use crate::{
 pub mod actions {
     use tenko_core::audit::AuditAction;
 
-    /// An enrolment token was created.
-    pub const ENROLMENT_CREATE: AuditAction = AuditAction::from_static("cluster.enrolment.create");
-    /// An enrolment token was deleted.
-    pub const ENROLMENT_DELETE: AuditAction = AuditAction::from_static("cluster.enrolment.delete");
+    /// An enrollment token was created.
+    pub const ENROLLMENT_CREATE: AuditAction =
+        AuditAction::from_static("cluster.enrollment.create");
+    /// An enrollment token was deleted.
+    pub const ENROLLMENT_DELETE: AuditAction =
+        AuditAction::from_static("cluster.enrollment.delete");
     /// A node enrolled (or failed to).
-    pub const NODE_ENROL: AuditAction = AuditAction::from_static("cluster.node.enrol");
+    pub const NODE_ENROLL: AuditAction = AuditAction::from_static("cluster.node.enroll");
     /// A node renewed its certificate.
     pub const NODE_RENEW: AuditAction = AuditAction::from_static("cluster.node.renew");
     /// A node was revoked.
@@ -109,11 +111,11 @@ pub const EDIT_TITLE: &str = "cluster.job.edit";
 /// Preview key of the step.
 pub const WRITE_PREVIEW: &str = "cluster.job.write_preview";
 
-/// Default lifetime of an enrolment token.
+/// Default lifetime of an enrollment token.
 pub const DEFAULT_TOKEN_TTL: Duration = Duration::from_secs(3600);
-/// Shortest lifetime of an enrolment token.
+/// Shortest lifetime of an enrollment token.
 pub const MIN_TOKEN_TTL: Duration = Duration::from_secs(60);
-/// Longest lifetime of an enrolment token.
+/// Longest lifetime of an enrollment token.
 pub const MAX_TOKEN_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
 /// Longest lifetime of a token for a controller (it lets a host join the cluster and
 /// receive the key encryption keys, R22).
@@ -138,7 +140,7 @@ pub struct RegistryConfig {
     pub local_node: NodeId,
     /// Seconds between two heartbeats of a node.
     pub heartbeat_secs: u32,
-    /// `host:port` endpoints of the cluster port that nodes are told at enrolment.
+    /// `host:port` endpoints of the cluster port that nodes are told at enrollment.
     pub advertise: Vec<String>,
     /// The port nodes connect to when nothing is advertised and the listener is not up
     /// yet.
@@ -163,7 +165,7 @@ impl RegistryConfig {
     }
 }
 
-/// What a successful enrolment hands back to the node.
+/// What a successful enrollment hands back to the node.
 #[derive(Debug, Clone)]
 pub struct Enrolled {
     /// The node as registered.
@@ -206,9 +208,9 @@ fn not_found(id: NodeId) -> ClusterError {
 
 fn invalid_token() -> ClusterError {
     ClusterError::new(
-        "cluster.enrolment.invalid_token",
+        "cluster.enrollment.invalid_token",
         401,
-        "the enrolment token is not valid",
+        "the enrollment token is not valid",
     )
 }
 
@@ -423,7 +425,7 @@ impl NodeRegistry {
             return Ok(PortDemand::Enrolled);
         }
         Ok(view
-            .scan_typed(&tables::ENROLMENTS, KeyRange::all(), usize::MAX, false)?
+            .scan_typed(&tables::ENROLLMENTS, KeyRange::all(), usize::MAX, false)?
             .iter()
             .filter(|(_, record, _)| record.used.is_none() && record.expires_at > now)
             .map(|(_, record, _)| record.expires_at)
@@ -469,7 +471,7 @@ impl NodeRegistry {
             }
         }
         for (id, record, revision) in
-            view.scan_typed(&tables::ENROLMENTS, KeyRange::all(), usize::MAX, false)?
+            view.scan_typed(&tables::ENROLLMENTS, KeyRange::all(), usize::MAX, false)?
         {
             let ended = record
                 .used
@@ -478,8 +480,8 @@ impl NodeRegistry {
             if (record.used.is_some() || record.expires_at <= now)
                 && now.saturating_since(ended) >= TOKEN_RETENTION
             {
-                batch.expect_typed(&tables::ENROLMENTS, &id, Some(revision));
-                batch.delete_typed(&tables::ENROLMENTS, &id);
+                batch.expect_typed(&tables::ENROLLMENTS, &id, Some(revision));
+                batch.delete_typed(&tables::ENROLLMENTS, &id);
                 removed += 1;
             }
         }
@@ -528,7 +530,7 @@ impl NodeRegistry {
             &mut batch,
             ctx,
             SecretClass::System,
-            SecretSpec::new(NODE_KEY_PURPOSE).labelled(format!("cluster port of node {node}")),
+            SecretSpec::new(NODE_KEY_PURPOSE).labeled(format!("cluster port of node {node}")),
             &issued.key,
         )?;
         if let Some((old, _)) = &current {
@@ -612,21 +614,21 @@ impl NodeRegistry {
     }
 
     // -----------------------------------------------------------------------------------
-    // Enrolment tokens.
+    // Enrollment tokens.
 
-    /// Creates an enrolment token; the text is in the returned token and nowhere else.
+    /// Creates an enrollment token; the text is in the returned token and nowhere else.
     ///
     /// # Errors
     ///
-    /// `cluster.enrolment.roles` (422) for the role controller beside another role,
-    /// `cluster.enrolment.lifetime` (422; a controller token lives at most an hour),
+    /// `cluster.enrollment.roles` (422) for the role controller beside another role,
+    /// `cluster.enrollment.lifetime` (422; a controller token lives at most an hour),
     /// `cluster.node.name` (422),
     /// `cluster.node.name_taken` (409), or a store or job error.
-    pub async fn create_enrolment(
+    pub async fn create_enrollment(
         &self,
         cx: &RequestCtx,
-        request: NewEnrolment,
-    ) -> Result<(EnrolmentView, EnrolmentToken), ClusterError> {
+        request: NewEnrollment,
+    ) -> Result<(EnrollmentView, EnrollmentToken), ClusterError> {
         let mut roles = request.roles.clone();
         if roles.is_empty() {
             roles.push(Role::Probe);
@@ -636,7 +638,7 @@ impl NodeRegistry {
         let controller = roles.contains(&Role::Controller);
         if controller && roles.len() > 1 {
             return Err(ClusterError::new(
-                "cluster.enrolment.roles",
+                "cluster.enrollment.roles",
                 422,
                 "a controller token carries the role controller alone",
             )
@@ -649,7 +651,7 @@ impl NodeRegistry {
         };
         if controller && ttl > MAX_CONTROLLER_TOKEN_TTL {
             return Err(ClusterError::new(
-                "cluster.enrolment.lifetime",
+                "cluster.enrollment.lifetime",
                 422,
                 format!(
                     "a controller token lives at most {} seconds",
@@ -660,7 +662,7 @@ impl NodeRegistry {
         }
         if !(MIN_TOKEN_TTL..=MAX_TOKEN_TTL).contains(&ttl) {
             return Err(ClusterError::new(
-                "cluster.enrolment.lifetime",
+                "cluster.enrollment.lifetime",
                 422,
                 format!(
                     "a token lives {} to {} seconds",
@@ -679,12 +681,12 @@ impl NodeRegistry {
             _ => None,
         };
         let id = Uuid::now_v7();
-        let token = EnrolmentToken::generate(id)?;
+        let token = EnrollmentToken::generate(id)?;
         let expires_at = cx
             .now
             .checked_add(ttl)
             .ok_or_else(|| ClusterError::internal("the token expiry is out of range"))?;
-        let record = EnrolmentRecord {
+        let record = EnrollmentRecord {
             id,
             digest: token.digest(),
             name,
@@ -696,44 +698,44 @@ impl NodeRegistry {
             used: None,
         };
         let mut batch = WriteBatch::for_request(cx);
-        batch.expect_typed(&tables::ENROLMENTS, &id, None);
-        batch.put_typed(&tables::ENROLMENTS, &id, &record)?;
+        batch.expect_typed(&tables::ENROLLMENTS, &id, None);
+        batch.put_typed(&tables::ENROLLMENTS, &id, &record)?;
         batch.audit(
             AuditDraft::success(
-                actions::ENROLMENT_CREATE,
+                actions::ENROLLMENT_CREATE,
                 vec![ObjectRef::singleton(ObjectKind::Node)],
             )
             .with_source_ip(cx.source_ip)
-            .with_context("enrolment", id.to_string())
+            .with_context("enrollment", id.to_string())
             .with_context("roles", role_list(&record.roles))
             .with_context("expires_at", expires_at.to_rfc3339()),
         );
         let revision = self
             .commit(
                 cx,
-                format!("create enrolment token {id}"),
+                format!("create enrollment token {id}"),
                 vec![ObjectRef::singleton(ObjectKind::Node)],
                 batch,
             )
             .await?;
         self.want_listener();
-        Ok((EnrolmentView::new(record, revision, cx.now), token))
+        Ok((EnrollmentView::new(record, revision, cx.now), token))
     }
 
-    /// Every enrolment token, newest first.
+    /// Every enrollment token, newest first.
     ///
     /// # Errors
     ///
     /// A store error.
-    pub async fn list_enrolments(
+    pub async fn list_enrollments(
         &self,
         now: Timestamp,
-    ) -> Result<Vec<EnrolmentView>, ClusterError> {
+    ) -> Result<Vec<EnrollmentView>, ClusterError> {
         let view = self.store.read(ReadConsistency::Local).await?;
-        let mut out: Vec<EnrolmentView> = view
-            .scan_typed(&tables::ENROLMENTS, KeyRange::all(), usize::MAX, false)?
+        let mut out: Vec<EnrollmentView> = view
+            .scan_typed(&tables::ENROLLMENTS, KeyRange::all(), usize::MAX, false)?
             .into_iter()
-            .map(|(_, record, revision)| EnrolmentView::new(record, revision, now))
+            .map(|(_, record, revision)| EnrollmentView::new(record, revision, now))
             .collect();
         out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
         Ok(out)
@@ -743,27 +745,27 @@ impl NodeRegistry {
     ///
     /// # Errors
     ///
-    /// `cluster.enrolment.not_found` (404), or a store or job error.
-    pub async fn delete_enrolment(&self, cx: &RequestCtx, id: Uuid) -> Result<(), ClusterError> {
+    /// `cluster.enrollment.not_found` (404), or a store or job error.
+    pub async fn delete_enrollment(&self, cx: &RequestCtx, id: Uuid) -> Result<(), ClusterError> {
         let view = self.store.read(ReadConsistency::Local).await?;
-        let (record, revision) = view.get_typed(&tables::ENROLMENTS, &id)?.ok_or_else(|| {
+        let (record, revision) = view.get_typed(&tables::ENROLLMENTS, &id)?.ok_or_else(|| {
             ClusterError::new(
-                "cluster.enrolment.not_found",
+                "cluster.enrollment.not_found",
                 404,
-                format!("there is no enrolment token {id}"),
+                format!("there is no enrollment token {id}"),
             )
         })?;
         drop(view);
         let mut batch = WriteBatch::for_request(cx);
-        batch.expect_typed(&tables::ENROLMENTS, &id, Some(revision));
-        batch.delete_typed(&tables::ENROLMENTS, &id);
+        batch.expect_typed(&tables::ENROLLMENTS, &id, Some(revision));
+        batch.delete_typed(&tables::ENROLLMENTS, &id);
         batch.audit(
             AuditDraft::success(
-                actions::ENROLMENT_DELETE,
+                actions::ENROLLMENT_DELETE,
                 vec![ObjectRef::singleton(ObjectKind::Node)],
             )
             .with_source_ip(cx.source_ip)
-            .with_context("enrolment", id.to_string())
+            .with_context("enrollment", id.to_string())
             .with_context(
                 "state",
                 format!("{:?}", record.state(cx.now)).to_lowercase(),
@@ -771,7 +773,7 @@ impl NodeRegistry {
         );
         self.commit(
             cx,
-            format!("delete enrolment token {id}"),
+            format!("delete enrollment token {id}"),
             vec![ObjectRef::singleton(ObjectKind::Node)],
             batch,
         )
@@ -780,24 +782,24 @@ impl NodeRegistry {
     }
 
     // -----------------------------------------------------------------------------------
-    // Enrolment.
+    // Enrollment.
 
-    /// Enrols a node: checks the token and the request, issues the certificate and records
+    /// Enrolls a node: checks the token and the request, issues the certificate and records
     /// the node, consuming the token. Refusals are audited with their code.
     ///
     /// # Errors
     ///
-    /// `cluster.enrolment.invalid_token`, `cluster.enrolment.used`,
-    /// `cluster.enrolment.expired` (401), `cluster.enrolment.roles` (403),
+    /// `cluster.enrollment.invalid_token`, `cluster.enrollment.used`,
+    /// `cluster.enrollment.expired` (401), `cluster.enrollment.roles` (403),
     /// `cluster.protocol.unsupported` (409), `cluster.node.name` (422),
     /// `cluster.node.name_taken` (409), `cluster.node.address` (422),
     /// `cluster.ca.invalid_csr` (422), or a store or job error.
-    pub async fn enrol(
+    pub async fn enroll(
         &self,
         cx: &RequestCtx,
-        request: EnrolRequest,
+        request: EnrollRequest,
     ) -> Result<Enrolled, ClusterError> {
-        match self.try_enrol(cx, request).await {
+        match self.try_enroll(cx, request).await {
             Ok(enrolled) => Ok(enrolled),
             Err((error, token)) => {
                 self.audit_refusal(cx, &error, token).await;
@@ -811,41 +813,41 @@ impl NodeRegistry {
             return;
         }
         let code = match error.code() {
-            "cluster.enrolment.invalid_token" => "cluster.enrolment.invalid_token",
-            "cluster.enrolment.used" => "cluster.enrolment.used",
-            "cluster.enrolment.expired" => "cluster.enrolment.expired",
-            "cluster.enrolment.roles" => "cluster.enrolment.roles",
+            "cluster.enrollment.invalid_token" => "cluster.enrollment.invalid_token",
+            "cluster.enrollment.used" => "cluster.enrollment.used",
+            "cluster.enrollment.expired" => "cluster.enrollment.expired",
+            "cluster.enrollment.roles" => "cluster.enrollment.roles",
             "cluster.protocol.unsupported" => "cluster.protocol.unsupported",
             "cluster.node.name_taken" => "cluster.node.name_taken",
             "cluster.ca.invalid_csr" => "cluster.ca.invalid_csr",
-            _ => "cluster.enrolment.refused",
+            _ => "cluster.enrollment.refused",
         };
         let mut draft = AuditDraft::failed(
-            actions::NODE_ENROL,
+            actions::NODE_ENROLL,
             Vec::new(),
             &Refusal(code, error.detail()),
         )
         .with_source_ip(cx.source_ip);
         if let Some(token) = token {
-            draft = draft.with_context("enrolment", token.to_string());
+            draft = draft.with_context("enrollment", token.to_string());
         }
         let mut batch = WriteBatch::for_request(cx);
         batch.audit(draft);
         if let Err(error) = self.store.propose(batch).await {
-            tracing::warn!(%error, "a refused enrolment could not be audited");
+            tracing::warn!(%error, "a refused enrollment could not be audited");
         }
     }
 
     #[allow(
         clippy::too_many_lines,
-        reason = "the enrolment checks read best as one sequence"
+        reason = "the enrollment checks read best as one sequence"
     )]
-    async fn try_enrol(
+    async fn try_enroll(
         &self,
         cx: &RequestCtx,
-        request: EnrolRequest,
+        request: EnrollRequest,
     ) -> Result<Enrolled, (ClusterError, Option<Uuid>)> {
-        let token = EnrolmentToken::parse(&request.token).map_err(|_| (invalid_token(), None))?;
+        let token = EnrollmentToken::parse(&request.token).map_err(|_| (invalid_token(), None))?;
         let token_id = token.id();
         let with_token = |error: ClusterError| (error, Some(token_id));
         let view = self
@@ -854,7 +856,7 @@ impl NodeRegistry {
             .await
             .map_err(|error| with_token(error.into()))?;
         let (mut record, token_revision) = view
-            .get_typed(&tables::ENROLMENTS, &token_id)
+            .get_typed(&tables::ENROLLMENTS, &token_id)
             .map_err(|error| with_token(error.into()))?
             .ok_or_else(|| with_token(invalid_token()))?;
         if !record.digest.matches(&token) {
@@ -863,16 +865,16 @@ impl NodeRegistry {
         drop(token);
         if record.used.is_some() {
             return Err(with_token(ClusterError::new(
-                "cluster.enrolment.used",
+                "cluster.enrollment.used",
                 401,
-                "the enrolment token was used already; create a new one",
+                "the enrollment token was used already; create a new one",
             )));
         }
         if cx.now >= record.expires_at {
             return Err(with_token(ClusterError::new(
-                "cluster.enrolment.expired",
+                "cluster.enrollment.expired",
                 401,
-                "the enrolment token expired; create a new one",
+                "the enrollment token expired; create a new one",
             )));
         }
         let mut roles = if request.roles.is_empty() {
@@ -885,7 +887,7 @@ impl NodeRegistry {
         if let Some(role) = roles.iter().find(|role| !record.roles.contains(role)) {
             return Err(with_token(
                 ClusterError::new(
-                    "cluster.enrolment.roles",
+                    "cluster.enrollment.roles",
                     403,
                     format!(
                         "the token does not allow the role {role}; it allows {}",
@@ -983,7 +985,7 @@ impl NodeRegistry {
             certificate: certificate.clone(),
             serials: vec![certificate],
             enrolled_at: cx.now,
-            enrolment: token_id,
+            enrollment: token_id,
             enrolled_by: record.created_by,
             renewed_at: None,
             last_seen: None,
@@ -1005,18 +1007,18 @@ impl NodeRegistry {
                 seq.as_ref().map(|(_, revision)| *revision),
             );
             batch.put_typed(&tables::NODE_SEQ, &(), &id)?;
-            batch.expect_typed(&tables::ENROLMENTS, &token_id, Some(token_revision));
-            batch.put_typed(&tables::ENROLMENTS, &token_id, &record)?;
+            batch.expect_typed(&tables::ENROLLMENTS, &token_id, Some(token_revision));
+            batch.put_typed(&tables::ENROLLMENTS, &token_id, &record)?;
             batch.expect_typed(&tables::NODE_NAMES, &name_key, None);
             batch.put_typed(&tables::NODE_NAMES, &name_key, &id)?;
             batch.expect_typed(&tables::NODES, &id, None);
             batch.put_typed(&tables::NODES, &id, &node_record)?;
             batch.audit(
-                AuditDraft::success(actions::NODE_ENROL, vec![ObjectRef::node(node)])
+                AuditDraft::success(actions::NODE_ENROLL, vec![ObjectRef::node(node)])
                     .with_source_ip(cx.source_ip)
                     .with_context("name", name.clone())
                     .with_context("roles", role_list(&roles))
-                    .with_context("enrolment", token_id.to_string())
+                    .with_context("enrollment", token_id.to_string())
                     .with_context("serial", issued.info.serial.clone())
                     .with_context("not_after", issued.info.not_after.to_rfc3339()),
             );
@@ -1026,7 +1028,7 @@ impl NodeRegistry {
         let revision = match self
             .commit(
                 &node_cx,
-                format!("enrol node {name}"),
+                format!("enroll node {name}"),
                 vec![ObjectRef::node(node)],
                 batch,
             )
@@ -1034,7 +1036,7 @@ impl NodeRegistry {
         {
             Ok(revision) => revision,
             Err(error) if error.code() == "sys.store.precondition_failed" => {
-                // Another enrolment won the race for the token, the id or the name.
+                // Another enrollment won the race for the token, the id or the name.
                 return Err(with_token(self.race_error(token_id, &name_key).await));
             }
             Err(error) => return Err(with_token(error)),
@@ -1052,27 +1054,27 @@ impl NodeRegistry {
     async fn race_error(&self, token: Uuid, name_key: &str) -> ClusterError {
         let Ok(view) = self.store.read(ReadConsistency::Linearizable).await else {
             return ClusterError::new(
-                "cluster.enrolment.conflict",
+                "cluster.enrollment.conflict",
                 409,
-                "another enrolment happened at the same time; try again",
+                "another enrollment happened at the same time; try again",
             );
         };
-        if let Ok(Some((record, _))) = view.get_typed(&tables::ENROLMENTS, &token)
+        if let Ok(Some((record, _))) = view.get_typed(&tables::ENROLLMENTS, &token)
             && record.used.is_some()
         {
             return ClusterError::new(
-                "cluster.enrolment.used",
+                "cluster.enrollment.used",
                 401,
-                "the enrolment token was used already; create a new one",
+                "the enrollment token was used already; create a new one",
             );
         }
         if let Ok(Some(_)) = view.get_typed(&tables::NODE_NAMES, &name_key.to_owned()) {
             return name_taken(name_key);
         }
         ClusterError::new(
-            "cluster.enrolment.conflict",
+            "cluster.enrollment.conflict",
             409,
-            "another enrolment happened at the same time; try again",
+            "another enrollment happened at the same time; try again",
         )
     }
 
@@ -1797,7 +1799,7 @@ fn remote_connections(
         .collect())
 }
 
-/// The hourly prune of expired revocations and old enrolment tokens as leader-only work
+/// The hourly prune of expired revocations and old enrollment tokens as leader-only work
 /// (`tenko_core::cluster::LeaderService`, name `cluster.prune`): every prune carries the
 /// leader epoch.
 pub struct PruneService {
@@ -1849,7 +1851,7 @@ impl tenko_core::cluster::LeaderService for PruneService {
                 Ok(0) => {}
                 Ok(count) => tracing::info!(
                     count,
-                    "expired revocations and old enrolment tokens removed"
+                    "expired revocations and old enrollment tokens removed"
                 ),
                 Err(error) if error.code() == PRECONDITION_FAILED => {
                     return Err("another controller took office".to_owned());

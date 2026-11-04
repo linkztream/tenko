@@ -4,7 +4,7 @@
 //! | Module | Contents |
 //! |---|---|
 //! | `start` | start step 3, `cluster`: the peer layer, the cluster port of a member, the catch-up gate, missing key generations |
-//! | `join` | `tenko cluster join`: enrolment as a controller, the key transfer, the copy of the cluster's data, the configuration |
+//! | `join` | `tenko cluster join`: enrollment as a controller, the key transfer, the copy of the cluster's data, the configuration |
 //! | [`admin`] | `tenko cluster status|members|promote|remove|step-down|verify` over `/cluster/*` |
 //! | [`upgrade`] | `tenko cluster upgrade-check`: this binary against every member, and the rolling order |
 
@@ -58,7 +58,7 @@ pub enum ClusterCommand {
     Status(admin::StatusArgs),
     /// List the members with their role, replication state and version.
     Members(admin::MembersArgs),
-    /// Join this host to a cluster as a controller with a controller enrolment token.
+    /// Join this host to a cluster as a controller with a controller enrollment token.
     Join(JoinArgs),
     /// Promote a caught-up learner to a voter.
     Promote(admin::PromoteArgs),

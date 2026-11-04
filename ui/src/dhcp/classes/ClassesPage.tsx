@@ -1,4 +1,4 @@
-// The client classes (/dhcp/classes): a class is a name for clients recognised by what they send;
+// The client classes (/dhcp/classes): a class is a name for clients recognized by what they send;
 // it holds when any of its matches holds. A row has the name, the matches in words, the number of
 // scopes, pools and policies that name it, and the description. Create and edit with the match
 // editor, delete; a class that is named is not deleted, and the confirmation shows the server's

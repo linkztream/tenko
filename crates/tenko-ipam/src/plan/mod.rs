@@ -39,12 +39,12 @@ use crate::{command::IpamCommand, error::IpamResult, history::ChangeAction, obje
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PlanOptions {
     /// Warning codes the caller acknowledges (IPAM-06): a plan with a warning that needs
-    /// an acknowledgement applies only when its code is listed here.
+    /// an acknowledgment applies only when its code is listed here.
     #[serde(default)]
     pub acknowledge: BTreeSet<String>,
     /// Whether turning a network into a supernet is a step to review: the import sets it,
     /// and the change then warns with `ipam.prefix.becomes_supernet`, which needs an
-    /// acknowledgement. Not part of the API.
+    /// acknowledgment. Not part of the API.
     #[serde(skip)]
     pub supernet_step: bool,
     /// A DHCP reservation to check over the state after the commands (the reserve route,
@@ -134,7 +134,7 @@ pub struct PlanSummary {
     pub counts: Vec<SummaryCount>,
     /// Warning counts by code.
     pub warnings: BTreeMap<String, usize>,
-    /// Warning codes that still need an acknowledgement.
+    /// Warning codes that still need an acknowledgment.
     pub unacknowledged: Vec<String>,
     /// English lines such as `3 prefixes created`.
     pub lines: Vec<String>,
@@ -206,7 +206,7 @@ impl IpamPlan {
         set.into_iter().collect()
     }
 
-    /// Warning codes that need an acknowledgement and did not get one.
+    /// Warning codes that need an acknowledgment and did not get one.
     pub fn unacknowledged(&self) -> Vec<String> {
         let set: BTreeSet<&str> = self
             .warnings

@@ -217,7 +217,7 @@ async fn promote_cluster_member(
 
 /// Removes a member from the cluster (an inline job `cluster.edit`, audited as
 /// `cluster.member.remove`) and revokes the certificates it was issued, so that it cannot
-/// rejoin without a new enrolment. The last voter cannot be removed.
+/// rejoin without a new enrollment. The last voter cannot be removed.
 #[utoipa::path(
     delete,
     path = "/cluster/members/{id}",

@@ -230,7 +230,7 @@ describe("bulk actions on the selection", () => {
     expect(await screen.findByText("Set 2 hosts to static")).toBeTruthy();
   });
 
-  it("leaves the hosts alone when the dialog is cancelled", async () => {
+  it("leaves the hosts alone when the dialog is canceled", async () => {
     const writes = recordWrites();
     renderList();
     await listed();

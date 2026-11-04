@@ -130,12 +130,12 @@ pub struct ScanConfig {
     pub prefixes: Vec<String>,
     /// Prefixes and addresses inside `prefixes` that are never probed or reported.
     pub exclude: Vec<String>,
-    /// The VRF of the addresses (a VRF id); not set: the VRF of the probe's enrolment
+    /// The VRF of the addresses (a VRF id); not set: the VRF of the probe's enrollment
     /// token, else the default VRF.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vrf: Option<String>,
     /// Active probing (TGL-18): ICMP sweeps and TCP connect scans. `false` keeps the probe
-    /// passive: neighbour tables, mDNS, LLMNR, reverse DNS and SNMP only.
+    /// passive: neighbor tables, mDNS, LLMNR, reverse DNS and SNMP only.
     pub active: bool,
     /// Rate profile (TGL-19): `normal` (100 probes/s), `slow` (50), `slowest` (10) or
     /// `unlimited`.
@@ -157,9 +157,9 @@ pub struct ScanConfig {
     /// Blackout windows such as `mon-fri 08:00-17:00`: no method that sends packets runs in
     /// them, and a run that reaches one stops.
     pub blackout: Vec<String>,
-    /// IPv4 neighbours from the operating system's ARP table.
+    /// IPv4 neighbors from the operating system's ARP table.
     pub arp: BasicMethod,
-    /// IPv6 neighbours from the operating system's neighbour table.
+    /// IPv6 neighbors from the operating system's neighbor table.
     pub nd: BasicMethod,
     /// ICMP echo sweeps.
     pub icmp: IcmpMethod,
@@ -548,7 +548,7 @@ pub struct SnmpMethod {
     pub timeout_ms: u64,
     /// Retries of an unanswered request (default 2).
     pub retries: u32,
-    /// Reports clients on ports where an LLDP neighbour is seen (default false: those
+    /// Reports clients on ports where an LLDP neighbor is seen (default false: those
     /// ports lead to other network devices, which report their own clients).
     pub attach_on_lldp_ports: bool,
     /// The switches.

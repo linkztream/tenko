@@ -169,8 +169,8 @@ fn dns_sample(
         connections: snapshot
             .family(DNS_CONNECTIONS)
             .map(|_| MetricsDnsConnections {
-                dot: labelled_gauge(snapshot, DNS_CONNECTIONS, "proto", "dot").unwrap_or_default(),
-                doh: labelled_gauge(snapshot, DNS_CONNECTIONS, "proto", "doh").unwrap_or_default(),
+                dot: labeled_gauge(snapshot, DNS_CONNECTIONS, "proto", "dot").unwrap_or_default(),
+                doh: labeled_gauge(snapshot, DNS_CONNECTIONS, "proto", "doh").unwrap_or_default(),
             }),
         ..MetricsDns::default()
     };
@@ -319,8 +319,8 @@ impl SampleBuilder {
         sample.store.file_bytes = gauge_sum(snapshot, STORE_FILE_BYTES);
         sample.raft = raft(snapshot);
         sample.jobs = MetricsJobs {
-            running: labelled_gauge(snapshot, JOBS, "state", "running").unwrap_or_default(),
-            waiting: labelled_gauge(snapshot, JOBS, "state", "waiting").unwrap_or_default(),
+            running: labeled_gauge(snapshot, JOBS, "state", "running").unwrap_or_default(),
+            waiting: labeled_gauge(snapshot, JOBS, "state", "waiting").unwrap_or_default(),
         };
         sample.sse = MetricsSse {
             subscribers: gauge(snapshot, SSE_SUBSCRIBERS).unwrap_or_default(),
@@ -621,7 +621,7 @@ fn gauge_sum(snapshot: &Snapshot, name: &str) -> Option<u64> {
 }
 
 /// The value of the series of a gauge family whose label `name` is `value`.
-fn labelled_gauge(snapshot: &Snapshot, family: &str, name: &str, value: &str) -> Option<u64> {
+fn labeled_gauge(snapshot: &Snapshot, family: &str, name: &str, value: &str) -> Option<u64> {
     let family = snapshot.family(family)?;
     family.series.iter().find_map(|series| match series.value {
         Value::Gauge(gauge) if label(family, series, name) == Some(value) => Some(as_count(gauge)),

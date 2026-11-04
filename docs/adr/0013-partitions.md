@@ -19,7 +19,7 @@ ADR 0014 made the controllers one Raft group: a write commits only through a quo
 
 ## Consequences
 
-- An isolated controller is honest: every answer says how old its data is, and no write can half-succeed on it. Clients (UI, CLI, scripts) can recognise the state from one header and one error code.
+- An isolated controller is honest: every answer says how old its data is, and no write can half-succeed on it. Clients (UI, CLI, scripts) can recognize the state from one header and one error code.
 - The queue costs disk on the controller (bounded per item and in count) and a drain after each heal; a controller that never heals keeps its items until they expire, and they are reported as expired after the next heal.
 - A queued change is applied by the system on behalf of its author, so the audit trail names both and the queue context; the author sees every outcome in one list and decides on every conflict.
 - An item is re-planned, not replayed: identifiers chosen at queue time are kept, but allocations and positions are computed against the state after the heal, and anything that changed what the plan would do turns the item into a conflict instead of a surprise.

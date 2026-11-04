@@ -693,7 +693,7 @@ class Builder {
     return { location: row.location(null), status: "imported", items };
   }
 
-  /** A range cell: its addresses, reserved, labelled with the row's name. */
+  /** A range cell: its addresses, reserved, labeled with the row's name. */
   private rangeRow(row: RowView, column: number, first: Ip, last: Ip, length: Cidr | null): RowOutcome {
     const count = last.value - first.value + 1n;
     if (count > MAX_RANGE) {

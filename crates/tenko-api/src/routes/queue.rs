@@ -34,7 +34,7 @@
 //! Every settled change, applied ones included, is a record in `ipam.queued_changes` that
 //! its author lists with `GET /queue/conflicts` (from any controller), re-applies or
 //! discards. A re-apply plans the stored commands now, as the caller, with the
-//! acknowledgements of the original request plus those of `?acknowledge=`; the `If-Match`
+//! acknowledgments of the original request plus those of `?acknowledge=`; the `If-Match`
 //! of the original request is dropped (the caller confirms against the current state),
 //! and an `If-Match` on the re-apply request takes its place for a single-object change.
 //!

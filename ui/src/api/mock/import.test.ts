@@ -144,7 +144,7 @@ describe("shapes and vocabulary", () => {
       ["custom.rack", "custom.rack"],
     ];
     for (const [header, target] of cases) expect(targetForHeader(header), header).toBe(target);
-    expect(targetForHeader("Colour")).toBeNull();
+    expect(targetForHeader("Color")).toBeNull();
     // Accents are folded: the Swedish words are matched without them.
     expect(targetForHeader(`Anv${String.fromCharCode(0xe4)}ndare`)).toBe("login");
     expect(targetForHeader(`L${String.fromCharCode(0xf6)}senord`)).toBe("password");
@@ -453,7 +453,7 @@ describe("GET /imports/{id} and PUT /imports/{id}/mapping", () => {
     ["a column letter that is not one", (m) => { column(m, 0).column = "A1"; }, "sheets[0].columns[0].column"],
     ["a column the sheet does not have", (m) => { column(m, 0).column = "K"; }, "sheets[0].columns[0].column"],
     ["a column mapped twice", (m) => { column(m, 1).column = "A"; }, "sheets[0].columns[1].column"],
-    ["a target nobody knows", (m) => { column(m, 0).target = "colour"; }, "sheets[0].columns[0].target"],
+    ["a target nobody knows", (m) => { column(m, 0).target = "color"; }, "sheets[0].columns[0].target"],
     ["two columns with one single target", (m) => { column(m, 2).target = "host"; }, "sheets[0].columns[2].target"],
     ["a header row outside the sheet", (m) => { first(m).header_row = 9; }, "sheets[0].header_row"],
     ["an unknown conflict policy", (m) => { m.options = { conflict: "merge" as never }; }, "options.conflict"],
@@ -827,7 +827,7 @@ describe("the preview of the canned workbook", () => {
 });
 
 // ---------------------------------------------------------------------------------
-// Warnings that need an acknowledgement
+// Warnings that need an acknowledgment
 
 describe("acknowledging a warning", () => {
   const NETWORKS = "network,description\n2001:db8:4::/46,Test site\n";
@@ -851,7 +851,7 @@ describe("acknowledging a warning", () => {
     expect(prefix).toBeDefined();
   });
 
-  it("takes an acknowledgement from the mapping options too", async () => {
+  it("takes an acknowledgment from the mapping options too", async () => {
     const view = await uploaded("nets.csv", NETWORKS);
     await remap(view, (m) => void (m.options = { ...m.options, acknowledge: ["ipam.prefix.nibble_boundary"] }));
     const p = (await preview(view.id)).body;
@@ -973,7 +973,7 @@ describe("POST /imports/{id}/apply", () => {
     expect((await apply(view.id)).status).toBe(409);
   });
 
-  it("answers 404 for an unknown import and takes a body without acknowledgements", async () => {
+  it("answers 404 for an unknown import and takes a body without acknowledgments", async () => {
     const unknown = await send<Problem>("POST", "/api/v1/imports/0190d1c2-0000-7000-8000-00000000ffff/apply", {});
     expect(unknown.status).toBe(404);
     const view = await uploaded("ip-plan.csv", planCsv());

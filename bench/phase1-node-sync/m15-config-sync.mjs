@@ -9,7 +9,7 @@
 //            from the probe's "connected to the controller" line to the "applied" line).
 //
 // Two local processes on loopback only: a controller (tenko serve, internal CA, cluster port on
-// 127.0.0.1) and a probe (tenko node enrol, tenko serve --roles probe). Every configuration the
+// 127.0.0.1) and a probe (tenko node enroll, tenko serve --roles probe). Every configuration the
 // script stores has the scanner switched off (enabled=false, active=false, every method off), so
 // the probe sends no packet at all. Node 22, no dependencies. See README.md.
 
@@ -304,11 +304,11 @@ async function signIn() {
 // ---------------------------------------------------------------- the probe
 const probe = { proc: new Proc("probe"), root: join(work, "probe"), nodeId: 0 };
 
-async function enrolProbe() {
+async function enrollProbe() {
   mkdirSync(probe.root, { recursive: true });
-  const created = await expectOk("POST", "/nodes/enrolments", { roles: ["probe"], name: "probe-m15.example.test" }, { "idempotency-key": randomBytes(8).toString("hex") });
+  const created = await expectOk("POST", "/nodes/enrollments", { roles: ["probe"], name: "probe-m15.example.test" }, { "idempotency-key": randomBytes(8).toString("hex") });
   tenko([
-    "node", "enrol",
+    "node", "enroll",
     "--controller", `https://localhost:${controller.port}`,
     "--token", created.token,
     "--ca-fingerprint", created.ca_fingerprint ?? controller.fingerprint,
@@ -545,7 +545,7 @@ try {
   controller.clusterPort = await freePort();
   await startController(0);
   await setupAndSignIn();
-  await enrolProbe();
+  await enrollProbe();
   await startProbe();
   console.error(`controller https://localhost:${controller.port}, cluster 127.0.0.1:${controller.clusterPort}, probe node ${probe.nodeId}`);
   // Let the first stream and the heartbeat settle.

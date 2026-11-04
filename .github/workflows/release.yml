@@ -77,7 +77,7 @@ on:
 permissions:
   contents: read
 
-# Two runs for one tag never overlap, and a running release is never cancelled.
+# Two runs for one tag never overlap, and a running release is never canceled.
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
@@ -283,7 +283,7 @@ jobs:
       # The alternative to a PFX certificate is Azure Artifact Signing (formerly Trusted
       # Signing): azure/login with OIDC and the action azure/trusted-signing-action in place of
       # sign.ps1, here and in the msi job. It needs an Azure subscription and, today, an
-      # organisation as the subscriber.
+      # organization as the subscriber.
       - name: Sign the Windows binary
         if: runner.os == 'Windows'
         shell: pwsh
@@ -814,7 +814,7 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ needs.image.outputs.digest }}
           push-to-registry: true
-          # Storage records exist for repositories of an organisation only.
+          # Storage records exist for repositories of an organization only.
           create-storage-record: false
       - name: SBOM of the image
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

@@ -346,7 +346,7 @@
       <ProgressText Action="TenkoServiceStart" Message="Starting the Tenko service" />
     </UI>
 
-    <!-- The wizard (TenkoUI.wxs) and its licence page. -->
+    <!-- The wizard (TenkoUI.wxs) and its license page. -->
     <UIRef Id="TenkoUI" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
   </Package>

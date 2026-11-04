@@ -10,7 +10,7 @@ edition = "2024"
 # The oldest toolchain that builds every declared dependency (redb 4.3 needs 1.90, uuid 1.27
 # needs 1.89, utoipa 6 and time 0.3.55 need 1.88).
 rust-version = "1.90"
-# Placeholder until the project licence is decided (open question in docs/ROADMAP.md).
+# Placeholder until the project license is decided (open question in docs/ROADMAP.md).
 license = "BUSL-1.1"
 
 # Debug information is opt-in. Development and test builds carry line tables for the workspace
@@ -32,7 +32,7 @@ debug = 2
 
 # M23 (OPS-15, deviation 145 of docs/plans/phase-2-exit.md): the code segment is most of a
 # node's idle resident set, since every page of code a node runs once stays mapped. Whole-
-# program optimisation in one unit makes the musl binary a fifth smaller (113.9 against
+# program optimization in one unit makes the musl binary a fifth smaller (113.9 against
 # 143.7 MiB; 77.8 against 82.8 MiB of code, 20.9 against 26.2 MiB of read-only data) and the
 # idle node of the M9 procedure about 6.4 MiB smaller. Its cost
 # is build time: the musl release build takes about 13 minutes instead of 3. The dev profile,

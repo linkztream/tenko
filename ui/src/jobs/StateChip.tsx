@@ -8,7 +8,7 @@ import "./jobs.css";
 
 /**
  * The state of a job. A running job shows its progress in the pie when the step counts are given.
- * A cancelled job that its cancellation rolled back (`rollback="cancel"`, see `cancelRolledBack`)
+ * A canceled job that its cancellation rolled back (`rollback="cancel"`, see `cancelRolledBack`)
  * looks like a rolled back one and says so, with `data-rollback="cancel"`.
  */
 export function JobStateChip(props: {
@@ -21,7 +21,7 @@ export function JobStateChip(props: {
     props.state === "running" && props.total !== undefined
       ? { "--p": `${progressPercent(props.done ?? 0, props.total)}%` }
       : undefined;
-  const byCancel = () => props.rollback === "cancel" && props.state === "cancelled";
+  const byCancel = () => props.rollback === "cancel" && props.state === "canceled";
   return (
     <span
       class={`jstate ${byCancel() ? "rolledback" : jobStateClass(props.state)}`}

@@ -322,7 +322,7 @@ describe("a controller that does not allow writes", () => {
     mockVlanController.writes_enabled = false;
   });
 
-  it("shows the reason and the planned diff, and Start waits for the acknowledgement", async () => {
+  it("shows the reason and the planned diff, and Start waits for the acknowledgment", async () => {
     const { done } = open();
     const dlg = await dialog();
     fillNew();
@@ -338,7 +338,7 @@ describe("a controller that does not allow writes", () => {
     expect(warnings.textContent).toContain(`Writes through ${CONTROLLER} are switched off.`);
     expect(ackCodes(prev)).toEqual(["ipam.vlan.controller_read_only"]);
     expect(confirm().disabled).toBe(true);
-    // Start cannot take the keyboard: the acknowledgement does.
+    // Start cannot take the keyboard: the acknowledgment does.
     await waitFor(() => expect(document.activeElement).toBe(within(prev).getByTestId("plan-ack")));
     expect(within(dlg).getByText("Acknowledge the marked warnings to continue.")).toBeTruthy();
     expect(await axeViolations(dlg)).toEqual([]);
@@ -356,7 +356,7 @@ describe("a controller that does not allow writes", () => {
     expect(mockVlanController.networks.some((n) => n.vlan === 60)).toBe(false);
   });
 
-  it("asks for the warnings of the IPAM plan and of the network step, each with its own acknowledgement", async () => {
+  it("asks for the warnings of the IPAM plan and of the network step, each with its own acknowledgment", async () => {
     open();
     await dialog();
     fillNew({ vid: "62", name: "Six", cidr: "2001:db8:0:60::/62" });
@@ -612,7 +612,7 @@ describe("an existing VLAN", () => {
     expect(confirm().disabled).toBe(false);
   });
 
-  it("asks for an acknowledgement when the write changes a network the controller has", async () => {
+  it("asks for an acknowledgment when the write changes a network the controller has", async () => {
     const { done } = open(vlanOf(30));
     const dlg = await dialog();
     type("network-name", "Things");

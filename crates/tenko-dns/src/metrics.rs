@@ -217,11 +217,11 @@ pub const INFRA_ENTRIES: Desc = Desc::gauge(
 )
 .labels(&["kind"]);
 
-/// Answers synthesised from the denial cache, by kind (`nxdomain`, `nodata`,
+/// Answers synthesized from the denial cache, by kind (`nxdomain`, `nodata`,
 /// `wildcard`, `nxdomain_cut`).
 pub const DENIAL: Desc = Desc::counter(
     "tenko_dns_denial",
-    "DNS answers synthesised from validated denial records",
+    "DNS answers synthesized from validated denial records",
 )
 .labels(&["kind"]);
 

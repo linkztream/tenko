@@ -1,4 +1,4 @@
-// Tests of scripts/security-report.mjs: the fingerprint normalisation of paths with
+// Tests of scripts/security-report.mjs: the fingerprint normalization of paths with
 // identifiers, URLs and content-hashed files, the findings from failed rows and from the
 // scanner entries of the web rows, the carry-over of IDs from a previous report and the next
 // free ID, and the shape of the report and the public summary. Run with
@@ -20,9 +20,9 @@ import {
   fingerprint,
   findingsFromRows,
   informationalFromRows,
-  normaliseLocation,
-  normaliseSeverity,
-  normaliseUrl,
+  normalizeLocation,
+  normalizeSeverity,
+  normalizeUrl,
   parseJsonl,
   parsePreviousFindings,
   ReportError,
@@ -92,62 +92,62 @@ const RECORDED_ROWS = [
 /** The rows of the recorded set outside the web group. */
 const NON_WEB_ROWS = RECORDED_ROWS.filter((r) => !r.row.startsWith("web."));
 
-describe("normaliseLocation", () => {
+describe("normalizeLocation", () => {
   test("a UUID path segment becomes a template", () => {
     assert.equal(
-      normaliseLocation("/api/v1/dns/zones/01a1969b-e19f-718b-aecf-31c92b1e75aa/records"),
+      normalizeLocation("/api/v1/dns/zones/01a1969b-e19f-718b-aecf-31c92b1e75aa/records"),
       "/api/v1/dns/zones/{id}/records",
     );
   });
   test("a numeric id and a long hex id become templates", () => {
-    assert.equal(normaliseLocation("/nodes/42/roles"), "/nodes/{id}/roles");
-    assert.equal(normaliseLocation("tcp/8444"), "tcp/8444"); // a port is not an id segment
-    assert.equal(normaliseLocation("/x/0123456789abcdef0123/y"), "/x/{id}/y");
+    assert.equal(normalizeLocation("/nodes/42/roles"), "/nodes/{id}/roles");
+    assert.equal(normalizeLocation("tcp/8444"), "tcp/8444"); // a port is not an id segment
+    assert.equal(normalizeLocation("/x/0123456789abcdef0123/y"), "/x/{id}/y");
   });
   test("line numbers are stripped", () => {
     assert.equal(
-      normaliseLocation("crates/tenko-api/src/routes/backup.rs#restore:120"),
+      normalizeLocation("crates/tenko-api/src/routes/backup.rs#restore:120"),
       "crates/tenko-api/src/routes/backup.rs#restore",
     );
-    assert.equal(normaliseLocation("file.rs#L10-L20"), "file.rs");
+    assert.equal(normalizeLocation("file.rs#L10-L20"), "file.rs");
   });
   test("an already-templated path is left alone", () => {
-    assert.equal(normaliseLocation("/dns/zones/{id}"), "/dns/zones/{id}");
+    assert.equal(normalizeLocation("/dns/zones/{id}"), "/dns/zones/{id}");
   });
   test("a content-hashed file of the web interface keeps one location across builds", () => {
-    assert.equal(normaliseLocation("/assets/index-B3xY_9aQ.js"), "/assets/index-{hash}.js");
-    assert.equal(normaliseLocation("/assets/index-Cq81mZt0.css"), "/assets/index-{hash}.css");
+    assert.equal(normalizeLocation("/assets/index-B3xY_9aQ.js"), "/assets/index-{hash}.js");
+    assert.equal(normalizeLocation("/assets/index-Cq81mZt0.css"), "/assets/index-{hash}.css");
     // A plain word of eight letters is a name, not a hash.
-    assert.equal(normaliseLocation("/assets/lazy-settings.js"), "/assets/lazy-settings.js");
+    assert.equal(normalizeLocation("/assets/lazy-settings.js"), "/assets/lazy-settings.js");
   });
   test("a method in front of the path is kept", () => {
-    assert.equal(normaliseLocation("GET /api/v1/nodes/42"), "GET /api/v1/nodes/{id}");
-    assert.equal(normaliseLocation("DELETE /api/v1/auth/tokens/{id}"), "DELETE /api/v1/auth/tokens/{id}");
+    assert.equal(normalizeLocation("GET /api/v1/nodes/42"), "GET /api/v1/nodes/{id}");
+    assert.equal(normalizeLocation("DELETE /api/v1/auth/tokens/{id}"), "DELETE /api/v1/auth/tokens/{id}");
   });
 });
 
-describe("normaliseUrl", () => {
+describe("normalizeUrl", () => {
   test("scheme, host, port, query and fragment are dropped", () => {
     assert.equal(
-      normaliseUrl("https://tenko.example.test:8443/api/v1/dns/zones/01a1969b-e19f-718b-aecf-31c92b1e75aa?limit=5#x"),
+      normalizeUrl("https://tenko.example.test:8443/api/v1/dns/zones/01a1969b-e19f-718b-aecf-31c92b1e75aa?limit=5#x"),
       "/api/v1/dns/zones/{id}",
     );
-    assert.equal(normaliseUrl("https://tenko.example.test:8443"), "/");
-    assert.equal(normaliseUrl("/assets/app-Zx9_QwE1.js?v=1"), "/assets/app-{hash}.js");
+    assert.equal(normalizeUrl("https://tenko.example.test:8443"), "/");
+    assert.equal(normalizeUrl("/assets/app-Zx9_QwE1.js?v=1"), "/assets/app-{hash}.js");
   });
 });
 
-describe("normaliseSeverity", () => {
+describe("normalizeSeverity", () => {
   test("a scanner's names map to the report's", () => {
-    assert.equal(normaliseSeverity("Informational"), "Info");
-    assert.equal(normaliseSeverity("medium"), "Medium");
-    assert.equal(normaliseSeverity("High"), "High");
-    assert.equal(normaliseSeverity(undefined), "Info");
+    assert.equal(normalizeSeverity("Informational"), "Info");
+    assert.equal(normalizeSeverity("medium"), "Medium");
+    assert.equal(normalizeSeverity("High"), "High");
+    assert.equal(normalizeSeverity(undefined), "Info");
   });
 });
 
 describe("fingerprint", () => {
-  test("tool:rule:location with the location normalised", () => {
+  test("tool:rule:location with the location normalized", () => {
     assert.equal(
       fingerprint({ tool: "zap", rule: "10038", location: "/api/v1/dns/zones/7/records" }),
       "zap:10038:/api/v1/dns/zones/{id}/records",
@@ -163,7 +163,7 @@ describe("findingsFromRows", () => {
     assert.equal(findings[0].severity, "Medium");
     assert.deepEqual(findings[0].evidence, ["rows/net.cluster_port.log", "node/ss-all.txt"]);
   });
-  test("the entries of the web rows become findings by tool, rule and normalised location", () => {
+  test("the entries of the web rows become findings by tool, rule and normalized location", () => {
     const findings = findingsFromRows(RECORDED_ROWS);
     const fingerprints = findings.map((f) => f.fingerprint).sort();
     assert.deepEqual(fingerprints, [

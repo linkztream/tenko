@@ -1,6 +1,6 @@
 //! Scoped access: grants and their delegation (IAM-01), service accounts and their scoped
 //! tokens (IAM-10), and the MFA policy per role (IAM-06). `docs/access.md` describes the
-//! behaviour; ADR 0015 the decisions.
+//! behavior; ADR 0015 the decisions.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},

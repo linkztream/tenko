@@ -1,6 +1,6 @@
 # Phase 3 DHCP measurements
 
-The measurements of the DHCP role in [phase-3-plan.md](../../docs/plans/phase-3-plan.md) section 6 (M26 to M35), with their scripts and results. WP7.3 wrote the loopback procedure for M26 to M28; WP7.6 adds perfdhcp on Linux (loopback and from the load VM, `scripts/run-perfdhcp.sh`) and the lab. Every figure is a single-node figure (plan section 2.12): one Tenko process, the load generator on the same host (loopback, an upper bound, labelled so) or on the load VM. Linux figures come from the static musl build, the target that ships; Windows figures from the release build.
+The measurements of the DHCP role in [phase-3-plan.md](../../docs/plans/phase-3-plan.md) section 6 (M26 to M35), with their scripts and results. WP7.3 wrote the loopback procedure for M26 to M28; WP7.6 adds perfdhcp on Linux (loopback and from the load VM, `scripts/run-perfdhcp.sh`) and the lab. Every figure is a single-node figure (plan section 2.12): one Tenko process, the load generator on the same host (loopback, an upper bound, labeled so) or on the load VM. Linux figures come from the static musl build, the target that ships; Windows figures from the release build.
 
 ## The server
 
@@ -55,7 +55,7 @@ The server is `--kind tenko`, the binary with the roles controller and dhcp (`sc
 
 ### Loopback
 
-Server and perfdhcp on one Linux host, `127.0.0.1`: an upper bound, labelled so. On the node VM (from a host that reaches it by ssh, or with `--node local --load local` on the host itself):
+Server and perfdhcp on one Linux host, `127.0.0.1`: an upper bound, labeled so. On the node VM (from a host that reaches it by ssh, or with `--node local --load local` on the host itself):
 
 ```sh
 cargo build -p tenko --release --locked --target x86_64-unknown-linux-musl

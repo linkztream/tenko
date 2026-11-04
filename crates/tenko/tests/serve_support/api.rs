@@ -88,11 +88,11 @@ pub struct Totp {
 }
 
 impl Totp {
-    /// An authenticator for a base32 secret as the enrolment shows it.
+    /// An authenticator for a base32 secret as the enrollment shows it.
     #[track_caller]
     pub fn new(secret_base32: &str) -> Self {
         let secret = tenko_auth::encoding::base32_decode(secret_base32.trim())
-            .expect("the enrolment secret is base32");
+            .expect("the enrollment secret is base32");
         Self {
             secret,
             params: TotpParams::default(),
@@ -369,16 +369,16 @@ impl Api {
         self.cookie = None;
     }
 
-    /// Enrols an authenticator app for the signed-in user; its first code is spent.
+    /// Enrolls an authenticator app for the signed-in user; its first code is spent.
     #[track_caller]
-    pub fn enrol_totp(&self) -> Totp {
+    pub fn enroll_totp(&self) -> Totp {
         let start = self
             .post_unkeyed("/auth/totp/enroll/start", &json!({}))
             .expect(200);
         let mut totp = Totp::new(start["secret"].as_str().expect("a secret"));
         self.post_unkeyed(
             "/auth/totp/enroll/finish",
-            &json!({ "enrolment_id": start["enrolment_id"], "code": totp.code() }),
+            &json!({ "enrollment_id": start["enrollment_id"], "code": totp.code() }),
         )
         .expect(200);
         totp
@@ -389,7 +389,7 @@ impl Api {
     #[track_caller]
     pub fn setup_strong(&mut self, token: &str) -> Totp {
         self.setup(token);
-        let mut totp = self.enrol_totp();
+        let mut totp = self.enroll_totp();
         self.logout();
         let session = self.login(Some(&mut totp));
         assert_eq!(session["strength"], "password_totp", "{session}");
@@ -428,7 +428,7 @@ impl Api {
                 .to_owned();
             let done = matches!(
                 state.as_str(),
-                "succeeded" | "failed" | "rolled_back" | "cancelled"
+                "succeeded" | "failed" | "rolled_back" | "canceled"
             );
             if done || Instant::now() > deadline {
                 return detail;

@@ -6,7 +6,7 @@ runs against the binary being released and leaves evidence with stable finding I
 at the node from outside (the ports it answers on, its TLS, malformed traffic on the wire, what
 its API answers without credentials, a passive web scan of the interface and the API) and
 from the host (the systemd unit and the service account), the way the weekly lab smokes under
-`deploy/compose/lab-*/` check behaviour. It is development and measurement tooling and is out
+`deploy/compose/lab-*/` check behavior. It is development and measurement tooling and is out
 of scope for security reports (`SECURITY.md`), like the other lab directories.
 
 The round installs a **throwaway** node from the binary under test, as a user installs it
@@ -55,7 +55,7 @@ disclosed through the report (section 4.6 of the plan).
 | `net.tcp` | nmap | yes | Only 53, 853 and 8443 (and 443 with `PLANT=listener`) are added on TCP by the install. |
 | `net.udp` | nmap | yes | Only 53 is added on UDP; a port that turns `open\|filtered` fails. |
 | `net.listeners` | ss (host) | yes | Every listening socket of a `tenko` process is on an expected address and port; a metrics listener, if any, only on loopback. |
-| `net.cluster_port` | ss (host) | yes | 8444 is closed on a fresh node, opens when an enrolment token is created, and is closed again after the token is withdrawn and the node restarts ([`docs/cluster.md`](../../docs/cluster.md) section 7.2). A reporting sub-check: while the port is open it refuses an enrolment without a valid token. |
+| `net.cluster_port` | ss (host) | yes | 8444 is closed on a fresh node, opens when an enrollment token is created, and is closed again after the token is withdrawn and the node restarts ([`docs/cluster.md`](../../docs/cluster.md) section 7.2). A reporting sub-check: while the port is open it refuses an enrollment without a valid token. |
 | `net.ipv6` | nmap | yes | The IPv6 surface is the IPv4 one: against a baseline scan of the host's IPv6 address before the install, as for `net.tcp`, the install adds on IPv6 no TCP port it did not add on IPv4 (`SKIP` without IPv6 on the scan network or when the baseline scan did not complete). |
 | `tls.api` | testssl.sh | yes | The API's TLS is current: TLS 1.2/1.3 only, no weak cipher, the chain verifies against the internal CA, no finding of severity Medium or above except those in `rules/testssl-allow.txt`. |
 | `tls.dot` | testssl.sh | yes | The same for DoT on 853 (its certificate is the round's lab CA). |
@@ -137,7 +137,7 @@ with a reason in the file, as narrow as the tool allows.
   readiness, the setup flow (`GET` and `POST /setup`; the password check of the wizard is
   marked `setup-only`, since it is public only while setup is open), the sign-in steps
   (password, TOTP, recovery code, passkey), the languages of the sign-in page, node
-  enrolment (the token in the body is the credential), the internal CA's root and the
+  enrollment (the token in the body is the credential), the internal CA's root and the
   OpenAPI document; and, outside the API, the web interface's static files. `web.unauth`
   fails when the document's public operations and this list differ in either direction.
 - `rules/zap-baseline.tsv`: ZAP's rule file (rule id, action, name, separated by tabs). `FAIL`
@@ -158,7 +158,7 @@ stable fingerprint, a finding per entry of a row's `findings` (the web rows: an 
 answers without credentials, `unauth:answers:GET /api/v1/...`; a ZAP alert per plugin and path
 template, `zap:10038:/api/v1/dns/zones/{id}`, with a content-hashed file of the web interface
 as `index-{hash}.js`), the finding IDs carried over from the previous report, and the public
-summary of SA-Q3 (b). The triage writes the judgement around it.
+summary of SA-Q3 (b). The triage writes the judgment around it.
 
 ## The scanner images
 

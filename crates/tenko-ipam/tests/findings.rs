@@ -1,7 +1,7 @@
 //! The findings model over a real reconciler (IPAM-21, IPAM-23): the guard rail (a sighting of a network's
 //! edge address is a scan artifact, never a conflict) for IPv4 and IPv6, an open conflict on
 //! such an address closed by the next run with its reason in the audit record, the
-//! findings of the view (ghost ageing), and the index kept current from change sets.
+//! findings of the view (ghost aging), and the index kept current from change sets.
 
 mod common;
 mod reconcile_support;

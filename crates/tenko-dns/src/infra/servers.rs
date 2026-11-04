@@ -157,7 +157,7 @@ pub struct ServerTable {
 }
 
 impl ServerTable {
-    /// A table of at most `bound` addresses whose learnt behaviour (0x20) holds for `ttl`.
+    /// A table of at most `bound` addresses whose learned behavior (0x20) holds for `ttl`.
     pub fn new(bound: usize, ttl: Duration) -> Self {
         Self {
             bound: bound.max(1),

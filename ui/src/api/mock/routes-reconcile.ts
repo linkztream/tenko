@@ -853,7 +853,7 @@ const clearAdoption = route("delete", "/api/v1/prefixes/{id}/adoption", (ctx) =>
 export const reconcileRoutes: HttpHandler[] = [
   observations,
   observation,
-  // The static path before the parameterised one.
+  // The static path before the parameterized one.
   reconcileNow,
   proposals,
   proposal,

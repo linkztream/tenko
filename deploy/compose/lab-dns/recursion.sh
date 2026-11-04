@@ -9,8 +9,8 @@
 # cases) and E41 (the RPZ triggers NSDNAME and NSIP on the delegation the resolver
 # followed), then the validation rows of E33 (validation.sh, WP10.2: every state with delv
 # agreeing, the KeyTrap zone, the forwarded answers), E35's rows (denial.sh, WP10.3: QNAME
-# minimisation and the denial cache) and, at the end, the rows that restart the node with
-# other minimisation and denial settings. E34's roll is the round rfc5011 (validation.sh).
+# minimization and the denial cache) and, at the end, the rows that restart the node with
+# other minimization and denial settings. E34's roll is the round rfc5011 (validation.sh).
 #
 # Witnesses: the node's own counters (GET /nodes/{id}/dns/recursion: the queries sent to
 # authorities before and after each case, M40), the answers as dig prints them (RCODE and
@@ -90,7 +90,7 @@ enabled = false
 
 [dns.log]
 enabled = true
-pseudonymise = false
+pseudonymize = false
 TOML
   chmod 0755 "$work/authority"
   chmod 0444 "$work/authority/authority.toml"
@@ -376,7 +376,7 @@ recursion() {
   row rec.rpz.nsip "NSIP 203.0.113.14/32 blocks a name of the zone it serves" within 30 blocked_by other.tc.quirk.example.test
   row rec.rpz.pass "a name whose delegation no trigger names still resolves" not_blocked www.wild.example.test
 
-  # WP10.3: QNAME minimisation and the denial cache (E35).
+  # WP10.3: QNAME minimization and the denial cache (E35).
   denial_rows
 
   # WP10.2: the validation rows (E33).

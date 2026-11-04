@@ -27,7 +27,7 @@
 //! | [`connectors`] | connector plugins and instances | WP2.0 |
 //! | [`observations`] | observations of connectors and probes, per source and across sources | WP2.4 |
 //! | [`proposals`] | proposals, decisions, reconcile runs, adoption policies | WP2.4 |
-//! | [`nodes`] | cluster nodes: enrolment tokens, enrolment, registry, revocation | WP2.2 |
+//! | [`nodes`] | cluster nodes: enrollment tokens, enrollment, registry, revocation | WP2.2 |
 //! | [`node_roles`] | the roles of a node, stored and applied by a restart (node-roles) | node-roles |
 //! | [`secrets`] | operator secrets, reveal, host credentials | WP2.1 |
 //! | [`remote`] | RDP file and SSH URI of a host (API-11) | WP2.1 |
@@ -156,9 +156,9 @@ pub mod vlans;
         (name = "findings", description = "Findings: everything that may need a person, from every source, with severity, subject, evidence and action"),
         (name = "proposals", description = "Proposals of the reconciler, their decisions and adoption policies"),
         (name = "reconciler", description = "Settings of the reconciler: intervals, retention and adoption"),
-        (name = "nodes", description = "Cluster nodes: enrolment tokens, enrolment, the node registry and revocation"),
+        (name = "nodes", description = "Cluster nodes: enrollment tokens, enrollment, the node registry and revocation"),
         (name = "secrets", description = "Operator secrets, their reveal, host credentials and the remote access hand-off"),
-        (name = "topology", description = "The topology map: nodes, edges, ports and neighbours"),
+        (name = "topology", description = "The topology map: nodes, edges, ports and neighbors"),
         (name = "cluster", description = "The controller cluster: members, their replication state, promotion, removal and step-down"),
         (name = "access", description = "Scoped grants over VRFs, sites and prefixes, delegation and service accounts"),
         (name = "audit_export", description = "Audit export sinks (syslog, CEF, JSON lines), their status and test records"),

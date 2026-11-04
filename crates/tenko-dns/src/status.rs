@@ -283,7 +283,7 @@ pub struct DnsStatus {
     /// Stale answers since the role started.
     pub cache_stale: u64,
     /// What keeps the resolver side from working as configured: stub zones whose name
-    /// servers could not be learnt, views whose recursion access list does not exist.
+    /// servers could not be learned, views whose recursion access list does not exist.
     pub problems: Vec<String>,
     /// When the role started.
     pub started: Timestamp,
@@ -468,35 +468,35 @@ pub trait DnsNode: Send + Sync {
     /// files). `args` is the CBOR of the kind's arguments.
     fn execute(&self, kind: &str, args: &[u8]) -> CommandResult;
 
-    // WP10.3: the counters of minimisation and the denial and failure caches.
-    /// The counters of QNAME minimisation and the denial and failure caches since the role
+    // WP10.3: the counters of minimization and the denial and failure caches.
+    /// The counters of QNAME minimization and the denial and failure caches since the role
     /// started; `None` without a forwarder.
     fn resolver_counters(&self) -> Option<ResolverCounters> {
         None
     }
 }
 
-// WP10.3: the counters of minimisation and the denial and failure caches.
-/// The counters of QNAME minimisation (RFC 9156), the denial cache (RFC 8198, RFC 8020)
+// WP10.3: the counters of minimization and the denial and failure caches.
+/// The counters of QNAME minimization (RFC 9156), the denial cache (RFC 8198, RFC 8020)
 /// and the failure cache (RFC 9520) since the role started, for the recursion status.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolverCounters {
-    /// Queries sent to authorities with a minimised name.
+    /// Queries sent to authorities with a minimized name.
     #[serde(default)]
-    pub minimised: u64,
-    /// Minimised questions asked again with the full name (relaxed mode).
+    pub minimized: u64,
+    /// Minimized questions asked again with the full name (relaxed mode).
     #[serde(default)]
-    pub minimise_retries: u64,
+    pub minimize_retries: u64,
     /// Zones remembered as asked with the full name for the infrastructure TTL.
     #[serde(default)]
-    pub minimise_fallbacks: u64,
-    /// NXDOMAIN answers synthesised from NSEC or NSEC3 records.
+    pub minimize_fallbacks: u64,
+    /// NXDOMAIN answers synthesized from NSEC or NSEC3 records.
     #[serde(default)]
     pub denial_nxdomain: u64,
-    /// NODATA answers synthesised.
+    /// NODATA answers synthesized.
     #[serde(default)]
     pub denial_nodata: u64,
-    /// Wildcard answers synthesised.
+    /// Wildcard answers synthesized.
     #[serde(default)]
     pub denial_wildcard: u64,
     /// NXDOMAIN answers for names below a cached NXDOMAIN (RFC 8020).
@@ -943,24 +943,24 @@ impl DnsNode for LocalNode {
         self.node
     }
 
-    // WP10.3: the counters of minimisation and the denial and failure caches.
+    // WP10.3: the counters of minimization and the denial and failure caches.
     fn resolver_counters(&self) -> Option<ResolverCounters> {
         use crate::recursion::{DenialCache as _, FailureCache as _};
         let forwarder = self.forwarder.as_ref()?;
         let stats = forwarder.stats();
         let mut counters = ResolverCounters {
-            denial_nxdomain: stats.synthesised[0],
-            denial_nodata: stats.synthesised[1],
-            denial_wildcard: stats.synthesised[2],
-            denial_nxdomain_cut: stats.synthesised[3],
+            denial_nxdomain: stats.synthesized[0],
+            denial_nodata: stats.synthesized[1],
+            denial_wildcard: stats.synthesized[2],
+            denial_nxdomain_cut: stats.synthesized[3],
             failure_cache_hits: stats.failure_hits,
             ..ResolverCounters::default()
         };
         if let Some(engine) = forwarder.engine() {
-            let [minimised, retries, fallbacks] = engine.minimisation_counters();
-            counters.minimised = minimised;
-            counters.minimise_retries = retries;
-            counters.minimise_fallbacks = fallbacks;
+            let [minimized, retries, fallbacks] = engine.minimization_counters();
+            counters.minimized = minimized;
+            counters.minimize_retries = retries;
+            counters.minimize_fallbacks = fallbacks;
             counters.failure_cache_hits += engine.counters().failure_hits;
         }
         if let Some(denials) = forwarder.denials() {

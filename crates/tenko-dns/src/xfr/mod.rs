@@ -12,7 +12,7 @@
 //! before the resolver sees it when [`classify`] says it is one: an AXFR or IXFR query or a
 //! NOTIFY. Over TCP and DoT the path answers with a stream of messages the connection
 //! writes in order; over UDP it answers an IXFR with the SOA only (RFC 1995 section 2) and
-//! a NOTIFY with its acknowledgement. The path reads the zone rows and the TSIG keys from a
+//! a NOTIFY with its acknowledgment. The path reads the zone rows and the TSIG keys from a
 //! [`Directory`] kept current from the store, the records from the index, and the IXFR
 //! deltas from the journal through [`JournalSource`]; it writes nothing but its audit
 //! records ([`TransferAudit`]). A NOTIFY for a secondary zone reaches the leader's

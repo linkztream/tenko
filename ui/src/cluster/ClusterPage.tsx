@@ -15,7 +15,7 @@ import { PageHead } from "../components/PageHead";
 import { toast } from "../components/toast";
 import { TimeAgo } from "../grid/cells";
 import { formatDateTime, formatNumber, t, withPacks } from "../i18n";
-import { EnrolDialog } from "../nodes/EnrolDialog";
+import { EnrollDialog } from "../nodes/EnrollDialog";
 import { trackLazyPart } from "../shell/lazyParts";
 import { listMembers, systemStatus } from "./api";
 import { DigestPanel } from "./DigestPanel";
@@ -293,7 +293,7 @@ export default function ClusterPage() {
         </Show>
       </div>
       <Show when={adding()}>
-        <EnrolDialog
+        <EnrollDialog
           roles={["controller"]}
           title={t("cluster.add.title")}
           intro={t("cluster.add.intro")}

@@ -1604,7 +1604,7 @@ async fn a_passkey_policy_on_operator_forces_step_up_for_that_role_only() {
         .current_session(&olga_ctx)
         .await
         .expect("the session");
-    assert!(!before.flags.mfa_enrolment_required);
+    assert!(!before.flags.mfa_enrollment_required);
     assert_eq!(lab.code(&olga_ctx.principal, Action::Update, HOST_P2), "ok");
 
     let set = lab
@@ -1656,7 +1656,7 @@ async fn a_passkey_policy_on_operator_forces_step_up_for_that_role_only() {
         .await
         .expect("the session");
     assert_eq!(after.required_strength, AuthStrength::Passkey);
-    assert!(after.flags.mfa_enrolment_required);
+    assert!(after.flags.mfa_enrollment_required);
     // Changing policies is a settings update, which a scoped operator does not hold.
     let result = lab
         .env

@@ -31,7 +31,7 @@ use crate::{
 
 /// What a fake upstream does with a query.
 #[derive(Clone, Copy)]
-enum Behaviour {
+enum Behavior {
     /// Answers NOERROR with one A record of this TTL.
     Answer(u32),
     /// Answers with a wrong id first, then correctly.
@@ -137,7 +137,7 @@ fn plain(address: SocketAddr, tcp_only: bool) -> UpstreamSpec {
 }
 
 /// A UDP upstream on loopback.
-fn udp_upstream(behaviour: Behaviour) -> Upstream {
+fn udp_upstream(behavior: Behavior) -> Upstream {
     let socket = UdpSocket::bind("127.0.0.1:0").expect("bind");
     let address = socket.local_addr().expect("address");
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -153,18 +153,18 @@ fn udp_upstream(behaviour: Behaviour) -> Upstream {
             if quiet.load(Ordering::Relaxed) {
                 continue;
             }
-            let reply = match behaviour {
-                Behaviour::Answer(ttl) => answer_to(&query, 1, ttl, false),
-                Behaviour::WrongIdFirst => {
+            let reply = match behavior {
+                Behavior::Answer(ttl) => answer_to(&query, 1, ttl, false),
+                Behavior::WrongIdFirst => {
                     let mut wrong = answer_to(&query, 1, 60, false);
                     wrong[0] ^= 0xff;
                     let _ = socket.send_to(&wrong, from);
                     answer_to(&query, 1, 60, false)
                 }
-                Behaviour::Truncate => answer_to(&query, 0, 60, true),
-                Behaviour::Large(records) => answer_to(&query, records, 60, false),
-                Behaviour::Silent => continue,
-                Behaviour::Stub => stub_answer(&query),
+                Behavior::Truncate => answer_to(&query, 0, 60, true),
+                Behavior::Large(records) => answer_to(&query, records, 60, false),
+                Behavior::Silent => continue,
+                Behavior::Stub => stub_answer(&query),
             };
             let _ = socket.send_to(&reply, from);
         }
@@ -335,7 +335,7 @@ fn intake(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_answer_is_relayed_with_the_client_id_case_and_ra() {
-    let upstream = udp_upstream(Behaviour::Answer(60));
+    let upstream = udp_upstream(Behavior::Answer(60));
     let (forwarder, stop) = start(vec![upstream.spec()]);
     let peer = Arc::new(Peer::new());
     let answer = peer.ask(&forwarder, query(0x1234, Some(4096))).await;
@@ -361,7 +361,7 @@ async fn an_answer_is_relayed_with_the_client_id_case_and_ra() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_answer_with_another_id_is_ignored() {
-    let upstream = udp_upstream(Behaviour::WrongIdFirst);
+    let upstream = udp_upstream(Behavior::WrongIdFirst);
     let (forwarder, stop) = start(vec![upstream.spec()]);
     let peer = Arc::new(Peer::new());
     let answer = peer.ask(&forwarder, query(7, None)).await;
@@ -371,7 +371,7 @@ async fn an_answer_with_another_id_is_ignored() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_truncated_answer_is_asked_again_over_tcp() {
-    let upstream = udp_upstream(Behaviour::Truncate);
+    let upstream = udp_upstream(Behavior::Truncate);
     let tcp = tcp_upstream(upstream.address, 3);
     let (forwarder, stop) = start(vec![upstream.spec()]);
     let peer = Arc::new(Peer::new());
@@ -398,7 +398,7 @@ async fn a_tcp_only_upstream_is_asked_over_tcp() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_answer_too_long_for_the_client_is_cut_with_tc() {
-    let upstream = udp_upstream(Behaviour::Large(60));
+    let upstream = udp_upstream(Behavior::Large(60));
     let (forwarder, stop) = start(vec![upstream.spec()]);
     let peer = Arc::new(Peer::new());
     let answer = peer.ask(&forwarder, query(13, None)).await;
@@ -411,8 +411,8 @@ async fn an_answer_too_long_for_the_client_is_cut_with_tc() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_silent_upstream_is_skipped_for_the_next_one() {
-    let silent = udp_upstream(Behaviour::Silent);
-    let good = udp_upstream(Behaviour::Answer(60));
+    let silent = udp_upstream(Behavior::Silent);
+    let good = udp_upstream(Behavior::Answer(60));
     let (forwarder, stop) = start(vec![silent.spec(), good.spec()]);
     let peer = Arc::new(Peer::new());
     for id in 0..4 {
@@ -426,7 +426,7 @@ async fn a_silent_upstream_is_skipped_for_the_next_one() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn servfail_when_every_attempt_fails() {
-    let silent = udp_upstream(Behaviour::Silent);
+    let silent = udp_upstream(Behavior::Silent);
     let (forwarder, stop) = start(vec![silent.spec()]);
     let peer = Arc::new(Peer::new());
     let answer = peer.ask(&forwarder, query(15, None)).await;
@@ -438,7 +438,7 @@ async fn servfail_when_every_attempt_fails() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_tcp_client_gets_the_answer_through_its_connection() {
-    let upstream = udp_upstream(Behaviour::Answer(60));
+    let upstream = udp_upstream(Behavior::Answer(60));
     let (forwarder, stop) = start(vec![upstream.spec()]);
     let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
     forwarder.submit(ForwardQuery {
@@ -460,7 +460,7 @@ async fn a_tcp_client_gets_the_answer_through_its_connection() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_second_query_is_answered_from_the_cache_on_the_query_path() {
-    let upstream = udp_upstream(Behaviour::Answer(300));
+    let upstream = udp_upstream(Behavior::Answer(300));
     let (forwarder, stop) = start(vec![upstream.spec()]);
     let peer = Arc::new(Peer::new());
     let message = query(19, None);
@@ -501,7 +501,7 @@ async fn the_second_query_is_answered_from_the_cache_on_the_query_path() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stale_answer_comes_while_the_upstream_is_silent_then_a_fresh_one() {
-    let upstream = udp_upstream(Behaviour::Answer(1));
+    let upstream = udp_upstream(Behavior::Answer(1));
     let mut settings = settings(vec![upstream.spec()]);
     settings.retries = 0;
     let (forwarder, stop) = start_with(
@@ -573,7 +573,7 @@ fn view(recursion: Option<AclId>) -> View {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[allow(clippy::too_many_lines, reason = "one policy, every case in turn")]
 async fn the_recursion_policy_decides_who_may_recurse() {
-    let upstream = udp_upstream(Behaviour::Answer(60));
+    let upstream = udp_upstream(Behavior::Answer(60));
     let acl = Acl {
         id: AclId::generate(),
         name: "lab".to_owned(),
@@ -721,8 +721,8 @@ fn stub_zone(apex: &str, source: SocketAddr) -> Zone {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stub_zone_learns_its_name_servers_and_a_dead_one_is_reported() {
-    let source = udp_upstream(Behaviour::Stub);
-    let dead = udp_upstream(Behaviour::Silent);
+    let source = udp_upstream(Behavior::Stub);
+    let dead = udp_upstream(Behavior::Silent);
     let good = stub_zone("stub.example.test", source.address);
     let broken = stub_zone("dead.example.test", dead.address);
     let mut data = DnsData::at(Revision(1));
@@ -751,12 +751,12 @@ async fn a_stub_zone_learns_its_name_servers_and_a_dead_one_is_reported() {
     assert_eq!(wire::parse_header(&failed).expect("header").rcode, 2);
     let reports = forwarder.stubs();
     assert_eq!(reports.len(), 2);
-    let learnt = reports
+    let learned = reports
         .iter()
         .find(|report| report.zone.as_str() == "stub.example.test")
         .expect("report");
-    assert_eq!(learnt.servers, vec![source.address.to_string()]);
-    assert_eq!(learnt.error, None);
+    assert_eq!(learned.servers, vec![source.address.to_string()]);
+    assert_eq!(learned.error, None);
     let failing = reports
         .iter()
         .find(|report| report.zone.as_str() == "dead.example.test")

@@ -352,7 +352,7 @@ pub struct ControllerProfile {
     pub tagged: Vec<String>,
 }
 
-/// A link between two managed devices: an uplink or an LLDP neighbour.
+/// A link between two managed devices: an uplink or an LLDP neighbor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerLink {
     /// One end (device by controller reference, port index as text).

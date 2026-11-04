@@ -1,5 +1,5 @@
 // Small form pieces shared by the settings dialogs: help or error text tied to its input,
-// and a labelled select.
+// and a labeled select.
 import { For, Show, type JSX } from "solid-js";
 import { ApiError, fieldErrorMessage, isApiError } from "../api/problem";
 import { Icon } from "../components/Icon";

@@ -1036,7 +1036,7 @@ fn the_denial_synthesis_does_not_allocate() {
     let measured = measure(500, |t| {
         for (query, rcode, answers) in &cases {
             let reply = responder.respond(query, &conn, &clock, Instant::now(), &mut scratch);
-            assert_eq!(reply, Reply::Send, "synthesised");
+            assert_eq!(reply, Reply::Send, "synthesized");
             let header = wire::parse_header(&scratch.out).expect("header");
             assert_eq!((header.rcode, header.ancount), (*rcode, *answers));
             black_box(&scratch.out);
@@ -1044,7 +1044,7 @@ fn the_denial_synthesis_does_not_allocate() {
         }
     });
     measured.assert_none("the denial synthesis allocated");
-    assert!(forwarder.stats().synthesised.iter().sum::<u64>() >= 6_000);
+    assert!(forwarder.stats().synthesized.iter().sum::<u64>() >= 6_000);
     let _ = denial_data::A;
     let _ = denial_data::wire("example.org");
     stop.cancel();
@@ -1282,7 +1282,7 @@ fn the_query_path_allocates_nothing() {
     index_lookups_do_not_allocate();
     the_full_query_path_does_not_allocate();
     the_cache_hit_path_does_not_allocate();
-    // WP10.3 (E40): a synthesised NXDOMAIN, NODATA and wildcard answer and RFC 8020.
+    // WP10.3 (E40): a synthesized NXDOMAIN, NODATA and wildcard answer and RFC 8020.
     the_denial_synthesis_does_not_allocate();
     the_policy_and_the_limiter_do_not_allocate();
     tsig_verify_and_sign_do_not_allocate();

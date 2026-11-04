@@ -62,7 +62,7 @@
 #   7  the service did not start or did not become ready
 #   8  the upgrade was refused (tenko upgrade check), nothing was changed
 #   9  first-run setup failed (the node runs; complete setup in the browser)
-#  10  cancelled at a question
+#  10  canceled at a question
 #  11  --check: something the prepared roles need is missing
 #
 # License: Business Source License 1.1; see LICENSE.md at the repository root.
@@ -159,7 +159,7 @@ The binary:
   --release-url <url>                 a directory URL with SHA256SUMS and the binary, instead of
                                       GitHub (a mirror)
 
-Behaviour:
+Behavior:
   -y, --yes                           unattended: no questions, defaults for what is not given
   --kek auto|sealed|file              the key-encryption key: sealed with systemd-creds, a plain
                                       file, or sealed where that works [auto]
@@ -188,7 +188,7 @@ Behaviour:
   -h, --help                          this text
 
 Exit statuses: 0 done, 1 failure, 2 usage, 3 unsupported host, 4 port taken, 5 download or
-checksum, 6 configuration, 7 start, 8 upgrade refused, 9 setup failed, 10 cancelled,
+checksum, 6 configuration, 7 start, 8 upgrade refused, 9 setup failed, 10 canceled,
 11 something missing (--check).
 EOF
 }
@@ -268,16 +268,16 @@ as_tenko() {
 # ── Questions ───────────────────────────────────────────────────────────────────────────────
 TTY=""
 use_whiptail() { [[ -n "$TTY" ]] && have whiptail && [[ -n "${TERM:-}" && "$TERM" != "dumb" ]]; }
-cancelled() { die "$E_CANCEL" "Cancelled; nothing was changed"; }
+canceled() { die "$E_CANCEL" "Canceled; nothing was changed"; }
 
 # ask <var> <question> <default>: one line of text.
 ask() {
   local var="$1" q="$2" def="$3" ans=""
   if use_whiptail; then
-    ans="$(whiptail --title "Tenko DDI" --inputbox "$q" 12 76 "$def" 3>&1 1>&2 2>&3 <"$TTY")" || cancelled
+    ans="$(whiptail --title "Tenko DDI" --inputbox "$q" 12 76 "$def" 3>&1 1>&2 2>&3 <"$TTY")" || canceled
   else
     printf '%s\n  [%s]: ' "$q" "$def" >"$TTY"
-    IFS= read -r ans <"$TTY" || cancelled
+    IFS= read -r ans <"$TTY" || canceled
     [[ -z "$ans" ]] && ans="$def"
   fi
   printf -v "$var" '%s' "$ans"
@@ -290,14 +290,14 @@ ask_menu() {
   items=("$@")
   if use_whiptail; then
     ans="$(whiptail --title "Tenko DDI" --default-item "$def" --menu "$q" 18 76 8 "${items[@]}" \
-      3>&1 1>&2 2>&3 <"$TTY")" || cancelled
+      3>&1 1>&2 2>&3 <"$TTY")" || canceled
   else
     printf '%s\n' "$q" >"$TTY"
     for ((i = 0; i < ${#items[@]}; i += 2)); do
       printf '    %-20s %s\n' "${items[i]}" "${items[i + 1]}" >"$TTY"
     done
     printf '  [%s]: ' "$def" >"$TTY"
-    IFS= read -r ans <"$TTY" || cancelled
+    IFS= read -r ans <"$TTY" || canceled
     [[ -z "$ans" ]] && ans="$def"
   fi
   printf -v "$var" '%s' "$ans"
@@ -316,7 +316,7 @@ ask_yes_no() {
     return
   fi
   printf '%s\n  [%s]: ' "$q" "$def" >"$TTY"
-  IFS= read -r ans <"$TTY" || cancelled
+  IFS= read -r ans <"$TTY" || canceled
   ans="${ans:-$def}"
   [[ "${ans,,}" == y || "${ans,,}" == yes ]]
 }
@@ -326,13 +326,13 @@ ask_secret() {
   local var="$1" q="$2" a="" b=""
   while true; do
     if use_whiptail; then
-      a="$(whiptail --title "Tenko DDI" --passwordbox "$q" 10 76 3>&1 1>&2 2>&3 <"$TTY")" || cancelled
-      b="$(whiptail --title "Tenko DDI" --passwordbox "Again, to confirm" 10 76 3>&1 1>&2 2>&3 <"$TTY")" || cancelled
+      a="$(whiptail --title "Tenko DDI" --passwordbox "$q" 10 76 3>&1 1>&2 2>&3 <"$TTY")" || canceled
+      b="$(whiptail --title "Tenko DDI" --passwordbox "Again, to confirm" 10 76 3>&1 1>&2 2>&3 <"$TTY")" || canceled
     else
       printf '%s: ' "$q" >"$TTY"
-      IFS= read -rs a <"$TTY" || cancelled
+      IFS= read -rs a <"$TTY" || canceled
       printf '\nAgain, to confirm: ' >"$TTY"
-      IFS= read -rs b <"$TTY" || cancelled
+      IFS= read -rs b <"$TTY" || canceled
       printf '\n' >"$TTY"
     fi
     if [[ -n "$a" && "$a" == "$b" ]]; then
@@ -991,7 +991,7 @@ answers() {
     while true; do
       [[ -n "$OPT_PROFILE" ]] || ask_menu PROFILE "Security profile (docs/SECURITY-PROFILES.md)" "$PROFILE" \
         home "One box runs all roles, sane defaults" \
-        standard "A business network, the default for organisations" \
+        standard "A business network, the default for organizations" \
         hardened "Regulated environments; prepares only the roles you choose" \
         lab "Permissive, for testing and training"
       valid_profile "$PROFILE" && break
@@ -2738,8 +2738,8 @@ uninstall() {
     [[ -n "$TTY" ]] || die "$E_USAGE" "--purge without --yes needs a terminal to confirm"
     printf 'This deletes %s, %s (the key and the configuration), %s and the account tenko.\nType purge to go on: ' \
       "$DATA_DIR" "$ETC" "$LOG_DIR" >"$TTY"
-    IFS= read -r answer <"$TTY" || cancelled
-    [[ "$answer" == purge ]] || cancelled
+    IFS= read -r answer <"$TTY" || canceled
+    [[ "$answer" == purge ]] || canceled
   fi
   restore_host_resolver
   if ((SYSTEMD)) && [[ -f "$UNIT" ]]; then

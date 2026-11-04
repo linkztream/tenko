@@ -111,7 +111,7 @@ pub enum ProxyError {
     Timeout,
     /// Reading from the connection failed.
     Io(io::Error),
-    /// The peer closed the connection before a header (or the lack of one) was recognised.
+    /// The peer closed the connection before a header (or the lack of one) was recognized.
     Closed,
 }
 
@@ -165,7 +165,7 @@ fn match_signature(buf: &[u8], signature: &[u8]) -> SignatureMatch {
 ///
 /// The bytes are compared incrementally against the version 1 prefix (`PROXY `) and the
 /// 12-byte version 2 signature. [`Detection::NotProxy`] is returned as soon as neither
-/// signature can match any more, so a TLS `ClientHello` is recognised after one byte and an
+/// signature can match any more, so a TLS `ClientHello` is recognized after one byte and an
 /// HTTP request line after at most three. An empty buffer yields [`Detection::NeedMore`].
 pub fn detect(buf: &[u8]) -> Detection {
     match (
@@ -419,7 +419,7 @@ impl<'a> Reader<'a> {
 
 /// Reads an optional PROXY protocol header from the start of `io`.
 ///
-/// Bytes are read in chunks until the data is recognised as a version 1 or version 2 header
+/// Bytes are read in chunks until the data is recognized as a version 1 or version 2 header
 /// and parsed completely, or until it is known not to be a header at all. The whole loop is
 /// bounded by `timeout`. Returns the header, or `None` when the connection does not start
 /// with one, together with every byte that was read beyond the header (or all bytes read, for
@@ -759,7 +759,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_recognises_other_protocols() {
+    fn detect_recognizes_other_protocols() {
         let samples: [&[u8]; 17] = [
             b"GET ",
             b"GET / HTTP/1.1\r\n",

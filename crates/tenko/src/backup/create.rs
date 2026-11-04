@@ -560,7 +560,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn file_names_sort_by_time_and_are_recognised() {
+    fn file_names_sort_by_time_and_are_recognized() {
         let at = Timestamp(time::macros::datetime!(2026-10-11 08:05:09 UTC));
         let name = file_name(at, NodeId(1));
         assert_eq!(name, "tenko-backup-20261011T080509Z-n1.tkbk");

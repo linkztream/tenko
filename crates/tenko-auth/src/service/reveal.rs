@@ -30,8 +30,8 @@ pub const VAULT_PIN_COUPLING: &str = "vault.pin_coupling";
 /// The `next` parameter of that refusal: the step that lifts it.
 pub const PIN_COUPLING_NEXT: &str = "passkey";
 
-/// The route that starts the next step, passkey enrolment (the `route` parameter).
-pub const PASSKEY_ENROLMENT_ROUTE: &str = "/api/v1/auth/webauthn/register/start";
+/// The route that starts the next step, passkey enrollment (the `route` parameter).
+pub const PASSKEY_ENROLLMENT_ROUTE: &str = "/api/v1/auth/webauthn/register/start";
 
 /// The PIN coupling rule in words, the accounts that break it and the next step, for the
 /// refusal of `POST /secrets` and for the import's credential columns.
@@ -42,20 +42,20 @@ pub fn pin_coupling_detail(accounts: &[String]) -> String {
         ("these accounts sign", "them")
     };
     format!(
-        "a secret cannot be stored while an account that may reveal secrets signs in with a PIN alone (the PIN coupling rule, IAM-07); {who} in with a PIN alone: {}. Next step: enrol a passkey for {them} (POST {PASSKEY_ENROLMENT_ROUTE}, in the UI under Account, Security); adding TOTP, a password or other roles also lifts the rule",
+        "a secret cannot be stored while an account that may reveal secrets signs in with a PIN alone (the PIN coupling rule, IAM-07); {who} in with a PIN alone: {}. Next step: enroll a passkey for {them} (POST {PASSKEY_ENROLLMENT_ROUTE}, in the UI under Account, Security); adding TOTP, a password or other roles also lifts the rule",
         accounts.join(", ")
     )
 }
 
 /// The refusal of `POST /secrets` under the PIN coupling rule: 409 `vault.pin_coupling`
 /// with the parameters `accounts` (comma-separated), `next` (`passkey`) and `route` (the
-/// passkey enrolment route).
+/// passkey enrollment route).
 pub fn pin_coupling_refusal(accounts: &[String]) -> CodedError {
     CodedError::new(VAULT_PIN_COUPLING, 409, pin_coupling_detail(accounts))
-        .with_title("PIN coupling rule: enrol a passkey first")
+        .with_title("PIN coupling rule: enroll a passkey first")
         .with_param("accounts", accounts.join(","))
         .with_param("next", PIN_COUPLING_NEXT)
-        .with_param("route", PASSKEY_ENROLMENT_ROUTE)
+        .with_param("route", PASSKEY_ENROLLMENT_ROUTE)
 }
 
 /// What a granted reveal check found out: who reveals and under which policy.
@@ -203,15 +203,15 @@ mod tests {
             one.detail
                 .contains("this account signs in with a PIN alone: olga")
         );
-        assert!(one.detail.contains("enrol a passkey for it"));
-        assert!(one.detail.contains(PASSKEY_ENROLMENT_ROUTE));
+        assert!(one.detail.contains("enroll a passkey for it"));
+        assert!(one.detail.contains(PASSKEY_ENROLLMENT_ROUTE));
         let params = &one.params;
         assert_eq!(params["accounts"], "olga");
         assert_eq!(params["next"], "passkey");
-        assert_eq!(params["route"], PASSKEY_ENROLMENT_ROUTE);
+        assert_eq!(params["route"], PASSKEY_ENROLLMENT_ROUTE);
         let two = pin_coupling_detail(&["olga".to_owned(), "per".to_owned()]);
         assert!(two.contains("these accounts sign in with a PIN alone: olga, per"));
-        assert!(two.contains("enrol a passkey for them"));
+        assert!(two.contains("enroll a passkey for them"));
     }
 
     fn at(secs: u64) -> Timestamp {

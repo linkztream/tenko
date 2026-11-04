@@ -312,8 +312,8 @@ async fn addresses_stay_on_the_node_for_a_principal_that_may_not_update_it() {
     let (status, body) = call(&lab.router, "GET", "/nodes/1/dns/log?client=192.0.2.10").await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 
-    let pseudonymised = lab_pseudonyms_for_viewer().await;
-    assert!(pseudonymised.starts_with("p:"), "{pseudonymised}");
+    let pseudonymized = lab_pseudonyms_for_viewer().await;
+    assert!(pseudonymized.starts_with("p:"), "{pseudonymized}");
 }
 
 async fn lab_pseudonyms_for_viewer() -> String {

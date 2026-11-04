@@ -57,7 +57,7 @@ pub fn run(args: &InjectArgs) -> Result<Output, Failure> {
     if !paths.is_enrolled() {
         return Err(Failure::new(
             exit::USAGE,
-            "this node is not enrolled; run `tenko node enrol` first",
+            "this node is not enrolled; run `tenko node enroll` first",
         ));
     }
     let text = std::fs::read(&args.file).map_err(|error| {

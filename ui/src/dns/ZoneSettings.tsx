@@ -212,7 +212,7 @@ const TRANSFER_ERRORS: Readonly<Record<string, MessageKey>> = {
   "dns.transfer.refused": "dns.transfer.error.refused",
 };
 
-/** One labelled text input of a row (a NOTIFY target, a primary). */
+/** One labeled text input of a row (a NOTIFY target, a primary). */
 function RowInput(props: {
   id: string;
   label: string;

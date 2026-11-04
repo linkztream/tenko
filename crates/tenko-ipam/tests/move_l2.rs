@@ -1105,11 +1105,11 @@ async fn a_device_on_an_uplink_port_is_refused_and_a_person_moves_it() {
         ["ipam.intent", "l2.move", "observe", "cleanup"]
     );
 
-    // Without the acknowledgement nothing starts.
+    // Without the acknowledgment nothing starts.
     let error = world
         .try_submit(&request)
         .await
-        .expect_err("needs an acknowledgement");
+        .expect_err("needs an acknowledgment");
     assert_eq!(error.code_str(), codes::PLAN_UNACKNOWLEDGED);
     assert_eq!(error.coded().status, 409);
     assert_eq!(world.move_jobs().await, 0);
@@ -1391,12 +1391,12 @@ async fn an_unreadable_controller_leaves_every_device_to_a_person_with_a_warning
         [moves::codes::CONTROLLER_UNAVAILABLE]
     );
 
-    // The submit reads the controller again and needs the acknowledgement as well.
+    // The submit reads the controller again and needs the acknowledgment as well.
     world.memory.fail_next(CallKind::Attachments, unreachable());
     let error = world
         .try_submit(&request)
         .await
-        .expect_err("needs an acknowledgement");
+        .expect_err("needs an acknowledgment");
     assert_eq!(error.code_str(), codes::PLAN_UNACKNOWLEDGED);
     assert_eq!(error.coded().status, 409);
     assert_eq!(world.move_jobs().await, 0);
@@ -1634,7 +1634,7 @@ async fn the_preview_says_why_there_is_no_nudge() {
     );
     assert!(
         refused.unacknowledged.is_empty(),
-        "a refused nudge needs no acknowledgement"
+        "a refused nudge needs no acknowledgment"
     );
 }
 

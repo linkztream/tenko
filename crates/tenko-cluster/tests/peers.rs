@@ -23,7 +23,7 @@ use tenko_cluster::{
     ca::{CaPolicy, CertSource, InternalCa, TlsMaterial, TlsResolver, generate_csr, pem_block},
     error::ClusterError,
     kek::{KekSource, SealedKeks},
-    model::{EnrolRequest, NewEnrolment},
+    model::{EnrollRequest, NewEnrollment},
     mtls::RevocationSet,
     peers::{ControllerIdentity, PeerConfig, PeerNetwork, PeerTimings, Peers, certificate_ref},
     proto::v1,
@@ -230,8 +230,8 @@ impl Lab {
             .clone()
     }
 
-    /// Enrols a controller through the first member's registry: its certificate and key.
-    async fn enrol_controller(
+    /// Enrolls a controller through the first member's registry: its certificate and key.
+    async fn enroll_controller(
         &self,
         name: &str,
     ) -> (
@@ -240,15 +240,15 @@ impl Lab {
         SecretBytes,
         uuid::Uuid,
     ) {
-        let (enrolment, token) = self
+        let (enrollment, token) = self
             .first
             .registry
-            .create_enrolment(
+            .create_enrollment(
                 &system(),
-                NewEnrolment {
+                NewEnrollment {
                     roles: vec![Role::Controller],
                     name: Some(name.to_owned()),
-                    ..NewEnrolment::default()
+                    ..NewEnrollment::default()
                 },
             )
             .await
@@ -257,9 +257,9 @@ impl Lab {
         let enrolled = self
             .first
             .registry
-            .enrol(
+            .enroll(
                 &system(),
-                EnrolRequest {
+                EnrollRequest {
                     token: token.to_text().to_string(),
                     csr: pem_block("CERTIFICATE REQUEST", &csr),
                     name: Some(name.to_owned()),
@@ -270,21 +270,21 @@ impl Lab {
                 },
             )
             .await
-            .expect("enrol a controller");
+            .expect("enroll a controller");
         let chain =
             rustls::pki_types::CertificateDer::pem_slice_iter(enrolled.certificate_pem.as_bytes())
                 .collect::<Result<Vec<_>, _>>()
                 .expect("chain");
-        (enrolled.node.id, chain, key, enrolment.id)
+        (enrolled.node.id, chain, key, enrollment.id)
     }
 
-    /// Enrols, starts and joins another controller.
+    /// Enrolls, starts and joins another controller.
     async fn join(
         &self,
         name: &str,
         configure: &(dyn Fn(&mut RaftStoreConfig) + Sync),
     ) -> Arc<Member> {
-        let (node, chain, key, _) = self.enrol_controller(name).await;
+        let (node, chain, key, _) = self.enroll_controller(name).await;
         let store = RaftStore::open_temp(store_config(node.0, configure))
             .await
             .expect("store");
@@ -467,7 +467,7 @@ impl Lab {
                         certificate: certificate.clone(),
                         serials: vec![certificate.clone()],
                         enrolled_at: tenko_core::Timestamp::now(),
-                        enrolment: uuid::Uuid::nil(),
+                        enrollment: uuid::Uuid::nil(),
                         enrolled_by: None,
                         renewed_at: None,
                         last_seen: None,
@@ -596,16 +596,16 @@ async fn the_raft_service_refuses_probes_and_foreign_controllers() {
     let (_, token) = lab
         .first
         .registry
-        .create_enrolment(&system(), NewEnrolment::default())
+        .create_enrollment(&system(), NewEnrollment::default())
         .await
         .expect("probe token");
     let (key, csr) = generate_csr().expect("csr");
     let probe = lab
         .first
         .registry
-        .enrol(
+        .enroll(
             &system(),
-            EnrolRequest {
+            EnrollRequest {
                 token: token.to_text().to_string(),
                 csr: pem_block("CERTIFICATE REQUEST", &csr),
                 name: Some("probe-lab".to_owned()),
@@ -616,7 +616,7 @@ async fn the_raft_service_refuses_probes_and_foreign_controllers() {
             },
         )
         .await
-        .expect("enrol a probe");
+        .expect("enroll a probe");
     let chain = rustls::pki_types::CertificateDer::pem_slice_iter(probe.certificate_pem.as_bytes())
         .collect::<Result<Vec<_>, _>>()
         .expect("chain");
@@ -716,12 +716,12 @@ async fn a_learner_catches_up_by_a_snapshot_over_the_cluster_port() {
     lab.stop().await;
 }
 
-/// The keys go to a joining controller once per enrolment token, audited; a member change
+/// The keys go to a joining controller once per enrollment token, audited; a member change
 /// asked of a follower runs on the leader; step-down moves leadership.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn key_transfer_forwarded_changes_and_step_down() {
     let lab = Lab::three(&no_change).await;
-    let (node, chain, key, token) = lab.enrol_controller("controller-four").await;
+    let (node, chain, key, token) = lab.enroll_controller("controller-four").await;
     let network = PeerNetwork::new(node, PeerTimings::default());
     network.set_tls(
         tenko_cluster::mtls::client_config(lab.ca.root_der(), chain, &key).expect("config"),
@@ -794,21 +794,21 @@ async fn key_transfer_forwarded_changes_and_step_down() {
     lab.stop().await;
 }
 
-/// Enrols a probe through the first controller's registry: its id and client credentials.
-async fn enrol_probe(lab: &Lab, name: &str) -> (NodeId, Arc<rustls::ClientConfig>, String) {
+/// Enrolls a probe through the first controller's registry: its id and client credentials.
+async fn enroll_probe(lab: &Lab, name: &str) -> (NodeId, Arc<rustls::ClientConfig>, String) {
     let (_, token) = lab
         .first
         .registry
-        .create_enrolment(&system(), NewEnrolment::default())
+        .create_enrollment(&system(), NewEnrollment::default())
         .await
         .expect("probe token");
     let (key, csr) = generate_csr().expect("csr");
     let probe = lab
         .first
         .registry
-        .enrol(
+        .enroll(
             &system(),
-            EnrolRequest {
+            EnrollRequest {
                 token: token.to_text().to_string(),
                 csr: pem_block("CERTIFICATE REQUEST", &csr),
                 name: Some(name.to_owned()),
@@ -819,7 +819,7 @@ async fn enrol_probe(lab: &Lab, name: &str) -> (NodeId, Arc<rustls::ClientConfig
             },
         )
         .await
-        .expect("enrol a probe");
+        .expect("enroll a probe");
     let chain = rustls::pki_types::CertificateDer::pem_slice_iter(probe.certificate_pem.as_bytes())
         .collect::<Result<Vec<_>, _>>()
         .expect("chain");
@@ -834,7 +834,7 @@ async fn enrol_probe(lab: &Lab, name: &str) -> (NodeId, Arc<rustls::ClientConfig
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn revocations_and_endpoints_reach_every_member() {
     let lab = Lab::three(&no_change).await;
-    let (probe, config, serial) = enrol_probe(&lab, "probe-everywhere").await;
+    let (probe, config, serial) = enroll_probe(&lab, "probe-everywhere").await;
     let second = lab
         .members()
         .into_iter()
@@ -911,7 +911,7 @@ async fn revocations_and_endpoints_reach_every_member() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn connections_through_other_controllers_are_shown() {
     let lab = Lab::three(&no_change).await;
-    let (probe, _, _) = enrol_probe(&lab, "probe-elsewhere").await;
+    let (probe, _, _) = enroll_probe(&lab, "probe-elsewhere").await;
     let second = lab
         .members()
         .into_iter()

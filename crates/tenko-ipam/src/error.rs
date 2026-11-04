@@ -82,7 +82,7 @@ pub mod codes {
     /// The host is not decommissioned, so there is nothing to reinstate (409). Params:
     /// `host`.
     pub const HOST_NOT_DECOMMISSIONED: &str = "ipam.host.not_decommissioned";
-    /// The plan has warnings that need an acknowledgement (409). Params: `codes`.
+    /// The plan has warnings that need an acknowledgment (409). Params: `codes`.
     pub const PLAN_UNACKNOWLEDGED: &str = "ipam.plan.unacknowledged";
     /// The store changed since the plan was made (409); preview again.
     pub const PLAN_STALE: &str = "ipam.plan.stale";
@@ -103,7 +103,7 @@ pub mod codes {
     /// The IPAM service is not configured in this server (503).
     pub const UNAVAILABLE: &str = "ipam.unavailable";
 
-    /// Warning (needs acknowledgement): an IPv6 prefix off a nibble boundary (IPAM-06).
+    /// Warning (needs acknowledgment): an IPv6 prefix off a nibble boundary (IPAM-06).
     pub const WARN_NIBBLE: &str = "ipam.prefix.nibble_boundary";
     /// Warning: a `reserved` host without MAC (IPv4) or DUID (IPv6) (IPAM-18).
     pub const WARN_RESERVATION_IDENTIFIER: &str = "ipam.host.reservation_identifier";
@@ -120,7 +120,7 @@ pub mod codes {
     /// `ip`, `cause` (`deleted`, `assigned`, `interface_gone`).
     pub const WARN_REINSTATE_SKIPPED: &str = "ipam.host.reinstate_skipped";
     // Backlog: the import's supernet step.
-    /// Warning (needs acknowledgement): an import turns an existing network into a
+    /// Warning (needs acknowledgment): an import turns an existing network into a
     /// supernet so that the networks it imports inside it can be created. Params: `cidr`,
     /// in the import preview also `networks` (how many imported networks lie inside).
     pub const WARN_BECOMES_SUPERNET: &str = "ipam.prefix.becomes_supernet";

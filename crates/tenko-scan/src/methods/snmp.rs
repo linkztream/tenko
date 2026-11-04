@@ -4,9 +4,9 @@
 //! - the name (`sysName`) and an OS hint (`sysDescr`) of its management address,
 //! - address sightings with MAC addresses from its ARP tables, inside the scope,
 //! - attachments: the switch port and VLAN behind which each client MAC address was learned
-//!   (Q-BRIDGE or BRIDGE forwarding tables), except on ports with an LLDP neighbour, which
+//!   (Q-BRIDGE or BRIDGE forwarding tables), except on ports with an LLDP neighbor, which
 //!   lead to other network devices that report their own clients,
-//! - LLDP links between its ports and its neighbours,
+//! - LLDP links between its ports and its neighbors,
 //! - vendors of the MAC addresses from the OUI table.
 //!
 //! The device addresses are configured explicitly and may lie outside the scan prefixes
@@ -38,7 +38,7 @@ use crate::{
     config::{SecretText, SnmpAuth, SnmpDevice, SnmpPrivacy},
     error::ScanError,
     method::{Availability, Found, Method, MethodKind, MethodOutput, RunContext},
-    methods::neighbours::usable_mac,
+    methods::neighbors::usable_mac,
     oui,
     scope::Scope,
     secrets::{SecretSource, VaultSecrets},
@@ -214,7 +214,7 @@ pub fn device_findings(
     let lldp_ports: BTreeSet<String> = tables
         .lldp
         .iter()
-        .filter_map(|neighbour| neighbour.local_port.clone())
+        .filter_map(|neighbor| neighbor.local_port.clone())
         .collect();
     let own: BTreeSet<MacAddr> = tables
         .interfaces
@@ -243,25 +243,25 @@ pub fn device_findings(
             vlan,
         }));
     }
-    for neighbour in &tables.lldp {
-        let Some(remote) = neighbour
+    for neighbor in &tables.lldp {
+        let Some(remote) = neighbor
             .remote_sys_name
             .clone()
-            .or_else(|| neighbour.remote_chassis.clone())
+            .or_else(|| neighbor.remote_chassis.clone())
         else {
             continue;
         };
         found.push(Found::now(SightingSubject::Link {
             a: Endpoint {
                 device: name.clone(),
-                port: neighbour.local_port.clone(),
+                port: neighbor.local_port.clone(),
             },
             b: Endpoint {
                 device: remote,
-                port: neighbour
+                port: neighbor
                     .remote_port
                     .clone()
-                    .or_else(|| neighbour.remote_port_desc.clone()),
+                    .or_else(|| neighbor.remote_port_desc.clone()),
             },
             kind: LinkKind::Lldp,
         }));
@@ -363,7 +363,7 @@ impl Method for SnmpPoll {
         };
         let vault = self.vault_values(&mut output.notes).await;
         for device in &self.devices {
-            if ctx.cancel.is_cancelled() {
+            if ctx.cancel.is_canceled() {
                 output.covered_all = false;
                 break;
             }
@@ -416,7 +416,7 @@ impl Method for SnmpPoll {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snmp::{ArpEntry, FdbEntry, Interface, LldpNeighbour};
+    use crate::snmp::{ArpEntry, FdbEntry, Interface, LldpNeighbor};
 
     fn mac(text: &str) -> MacAddr {
         text.parse().expect("mac")
@@ -497,7 +497,7 @@ mod tests {
                     if_index: Some(1),
                 },
             ],
-            lldp: vec![LldpNeighbour {
+            lldp: vec![LldpNeighbor {
                 local_port: Some("ge-0/0/2".to_owned()),
                 remote_chassis: None,
                 remote_port: Some("eth0".to_owned()),
@@ -575,7 +575,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_poll_of_the_recorded_switch_reports_its_clients_and_neighbours() {
+    async fn a_poll_of_the_recorded_switch_reports_its_clients_and_neighbors() {
         use crate::{
             limit::{PaceLimits, Pacer},
             method::Cancel,

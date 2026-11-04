@@ -122,7 +122,7 @@ pub const STATE_CONFLICT: &str = "import.state.conflict";
 /// Credential columns need the vault and an account strong enough for operator secrets
 /// (IAM-07, IAM-15).
 pub const CREDENTIALS_VAULT_REQUIRED: &str = "import.credentials.vault_required";
-/// The plan has warnings that need an acknowledgement, or errors.
+/// The plan has warnings that need an acknowledgment, or errors.
 pub const PLAN_BLOCKED: &str = "import.plan.blocked";
 /// No preview was computed for the current mapping, or the mapping changed since the
 /// cursor was made (409): preview again.

@@ -19,7 +19,7 @@ export const MOCK_PASSWORDS = {
 
 export type MockUserName = keyof typeof MOCK_PASSWORDS;
 
-/** The TOTP code every enrolled authenticator accepts, and the enrolment of a new one. */
+/** The TOTP code every enrolled authenticator accepts, and the enrollment of a new one. */
 export const MOCK_TOTP_CODE = "123456";
 
 /** The unused recovery codes of alex at the start of every scenario. */

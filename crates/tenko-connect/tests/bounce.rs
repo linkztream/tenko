@@ -210,7 +210,7 @@ async fn the_port_comes_up_although_the_caller_went_away() {
     let call = fx
         .host
         .bounce_port(id, &switch_ref, 8, 2, &none, None, None);
-    // The caller (a job that is cancelled or times out) stops waiting while the port is
+    // The caller (a job that is canceled or times out) stops waiting while the port is
     // down.
     assert!(
         tokio::time::timeout(Duration::from_millis(700), call)

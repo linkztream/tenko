@@ -15,7 +15,7 @@
 //! audited as `dns.log.read` with the principal, the cursor range and the filters, in the
 //! same write as the command row. A client address leaves the node only for a principal
 //! that may update the node: for any other principal the lines that carry an address (a
-//! log with `pseudonymise = false`) come without a client, and a filter by address is
+//! log with `pseudonymize = false`) come without a client, and a filter by address is
 //! refused with 403; pseudonyms are shown to every reader of the log.
 //!
 //! The cache holds the names the clients asked, so a page of it read through the API

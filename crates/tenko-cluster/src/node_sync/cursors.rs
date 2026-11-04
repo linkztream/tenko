@@ -62,7 +62,7 @@ pub fn seen(
 
 /// Whether the batch was ingested before; reads the local copy first and, when that says
 /// no, asks for a linearizable view, so a batch another controller ingested a moment ago
-/// is recognised too.
+/// is recognized too.
 ///
 /// # Errors
 ///

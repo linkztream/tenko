@@ -1,7 +1,7 @@
 # A relayed DHCPREQUEST of a Windows 11 client in the SELECTING state: requested address,
 # server identifier, host name, client FQDN (RFC 4702, flags 0, name WS-11 in ASCII),
 # vendor class MSFT 5.0 and the Windows parameter request list; already 308 octets, so not
-# padded. Modelled by hand on the option order and parameter request list this client
+# padded. Modeled by hand on the option order and parameter request list this client
 # sends; documentation addresses (RFC 5737) and MACs (RFC 7042).
 #
 # op 1, htype 1, hlen 6, hops 1

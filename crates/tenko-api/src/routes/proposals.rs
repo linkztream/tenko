@@ -50,7 +50,7 @@
 //! and marks the proposal accepted in one batch inside an inline job, so the intent change,
 //! the new state and their audit records commit together or not at all (IPAM-17). It takes
 //! `dry_run=true` for the plan without writing and `acknowledge=<code>,...` for warnings
-//! that need an acknowledgement, exactly like any other change. A proposal without commands
+//! that need an acknowledgment, exactly like any other change. A proposal without commands
 //! (a conflict, which a person resolves by hand) answers 409
 //! `ipam.proposal.nothing_to_apply`; reject it once it is resolved.
 //!
@@ -83,7 +83,7 @@
 //! to apply or is refused by any other check of the single route is `skipped` with the code
 //! and message the single route answers with, and the rest are applied. The answer lists
 //! every identifier with its outcome (`approved`, `rejected` or `skipped`) and the counts.
-//! There is no `If-Match`, no dry run and no acknowledgement: a warning that needs one
+//! There is no `If-Match`, no dry run and no acknowledgment: a warning that needs one
 //! skips the proposal (`ipam.plan.unacknowledged`). Authorization is the single route's,
 //! evaluated for each proposal, after a first check that the principal may approve
 //! proposals at all (403). Each decision writes the audit records of the single route and
@@ -455,7 +455,7 @@ async fn get_proposal(
         (status = 400, description = "A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal may not approve proposals, or not make one of the changes", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such proposal (`ipam.proposal.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The proposal is decided already (`ipam.proposal.not_open`), suggests no change (`ipam.proposal.nothing_to_apply`), a warning needs an acknowledgement (`ipam.plan.unacknowledged`), or the change conflicts with intent (`ipam.name_taken`, `ipam.address.duplicate`, `ipam.reference_missing`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The proposal is decided already (`ipam.proposal.not_open`), suggests no change (`ipam.proposal.nothing_to_apply`), a warning needs an acknowledgment (`ipam.plan.unacknowledged`), or the change conflicts with intent (`ipam.name_taken`, `ipam.address.duplicate`, `ipam.reference_missing`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "If-Match is stale (`ipam.proposal.revision_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The choice is not one of the proposal's `choices`, or the proposal offers none (`ipam.proposal.choice_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 423, description = "A host of the change is locked (`ipam.host.locked`)", body = ProblemDetails, content_type = "application/problem+json"),

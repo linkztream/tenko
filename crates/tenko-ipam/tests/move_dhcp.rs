@@ -470,7 +470,7 @@ async fn a_cancel_releases_a_lease_the_device_took_in_the_target() {
         .await;
     moving.engine.cancel(job, &person()).await.expect("cancel");
     let state = moving.drive(job).await;
-    assert_eq!(state.state, JobState::Cancelled, "{state:?}");
+    assert_eq!(state.state, JobState::Canceled, "{state:?}");
     assert_eq!(
         moving.role.released(),
         [(new.vrf, Ipv4Addr::new(198, 51, 100, 15))]

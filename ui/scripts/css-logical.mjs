@@ -23,16 +23,16 @@
 //     distance by the custom property --inline-sign, 1 left to right and -1 right to left
 //     (src/i18n/bidi.css; unset means 1):
 //     `box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--accent)`.
-//     A shift by -50% (centring together with `left: 50%`) is direction-neutral and accepted.
+//     A shift by -50% (centering together with `left: 50%`) is direction-neutral and accepted.
 // Not refused: the block axis (margin-top, top, height and the like) and the sizes width and
 // height, which are the same in every horizontal writing direction (the UI has no vertical
 // writing mode), drop shadows, and background positions.
 //
 // Exemption: a declaration that must stay physical carries a comment that starts with
-// `physical:` and a reason, on the line where the declaration ends, for example a box centred
+// `physical:` and a reason, on the line where the declaration ends, for example a box centered
 // with `left: 50%` and `translateX(-50%)`, or a check mark drawn by two borders:
 //
-//   left: 50%; /* physical: centred with translateX(-50%) */
+//   left: 50%; /* physical: centered with translateX(-50%) */
 
 import fs from "node:fs";
 import path from "node:path";
@@ -129,7 +129,7 @@ const ZERO = /^[-+]?(?:0+\.?0*|\.0+)(?:[a-z]+|%)?$/i;
 
 /**
  * A horizontal distance in its direction-aware form, or null when it needs none: zero, the
- * centring shift of -50%, a distance that already follows the direction, or one whose
+ * centering shift of -50%, a distance that already follows the direction, or one whose
  * value is not known (a custom property).
  * @param {string} distance
  */

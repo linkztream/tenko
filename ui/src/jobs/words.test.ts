@@ -76,8 +76,8 @@ describe("state words and glyph classes", () => {
     expect(jobStateClass("failed")).toBe("failed");
     expect(jobStateClass("rolled_back")).toBe("rolledback");
     expect(jobStateClass("rolling_back")).toBe("rolledback");
-    // Cancelled is a queued ring with a struck word.
-    expect(jobStateClass("cancelled").split(" ")).toEqual(expect.arrayContaining(["queued", "cancelled"]));
+    // Canceled is a queued ring with a struck word.
+    expect(jobStateClass("canceled").split(" ")).toEqual(expect.arrayContaining(["queued", "canceled"]));
   });
 
   it("maps every step state to a glyph class", () => {
@@ -475,9 +475,9 @@ describe("errors", () => {
   });
 
   it("does not repeat a server detail that only says what the translation says", () => {
-    const cancelled = { code: "jobs.cancelled", status: 409, title: "Job cancelled", detail: "the job was cancelled" };
-    expect(codedErrorText(cancelled)).toBe("The job was cancelled.");
-    expect(codedErrorDetail(cancelled)).toBeUndefined();
+    const canceled = { code: "jobs.canceled", status: 409, title: "Job canceled", detail: "the job was canceled" };
+    expect(codedErrorText(canceled)).toBe("The job was canceled.");
+    expect(codedErrorDetail(canceled)).toBeUndefined();
     expect(codedErrorDetail({ code: "jobs.step.deadline_passed", status: 504, title: "t", detail: "step 2 was still waiting" })).toBeUndefined();
   });
 
@@ -511,14 +511,14 @@ describe("rules of the views", () => {
     expect(leadsWithActive("all")).toBe(true);
     expect(leadsWithActive("failed")).toBe(false);
     expect(leadsWithActive("finished")).toBe(false);
-    expect(matchesView("all", job("cancelled"))).toBe(true);
+    expect(matchesView("all", job("canceled"))).toBe(true);
     expect(matchesView("active", job("running"))).toBe(true);
     expect(matchesView("active", job("succeeded"))).toBe(true);
     expect(matchesView("failed", job("rolled_back"))).toBe(true);
     expect(matchesView("failed", job("failed"))).toBe(true);
-    expect(matchesView("failed", job("cancelled"))).toBe(false);
+    expect(matchesView("failed", job("canceled"))).toBe(false);
     expect(matchesView("failed", job("waiting", [1]))).toBe(false);
-    expect(matchesView("finished", job("cancelled"))).toBe(true);
+    expect(matchesView("finished", job("canceled"))).toBe(true);
     expect(matchesView("finished", job("waiting"))).toBe(false);
     expect(needsPerson(job("waiting", []))).toBe(false);
     expect(needsPerson(job("waiting", [1]))).toBe(true);
@@ -538,7 +538,7 @@ describe("rules of the views", () => {
     expect(canCancel("waiting", false)).toBe(true);
     expect(canCancel("waiting", true)).toBe(false);
     expect(canCancel("rolling_back", false)).toBe(false);
-    for (const state of ["succeeded", "failed", "rolled_back", "cancelled"] as const) expect(canCancel(state, false)).toBe(false);
+    for (const state of ["succeeded", "failed", "rolled_back", "canceled"] as const) expect(canCancel(state, false)).toBe(false);
   });
 
   it("shortens a group key to the start of its id", () => {
@@ -600,21 +600,21 @@ describe("rules of the views", () => {
   });
 });
 
-describe("a cancelled job that its cancellation rolled back", () => {
+describe("a canceled job that its cancellation rolled back", () => {
   const step = (state: StepStateKind): StepRecord => ({ index: 0, kind: "ipam.move.intent", state: { state } }) as unknown as StepRecord;
 
   it("is told from the current step of a summary or the steps of a job", () => {
-    expect(cancelRolledBack({ state: "cancelled", current_step_state: "compensated" })).toBe(true);
-    expect(cancelRolledBack({ state: "cancelled", current_step_state: "pending" })).toBe(false);
-    expect(cancelRolledBack({ state: "cancelled" })).toBe(false);
+    expect(cancelRolledBack({ state: "canceled", current_step_state: "compensated" })).toBe(true);
+    expect(cancelRolledBack({ state: "canceled", current_step_state: "pending" })).toBe(false);
+    expect(cancelRolledBack({ state: "canceled" })).toBe(false);
     expect(cancelRolledBack({ state: "rolled_back", current_step_state: "compensated" })).toBe(false);
-    expect(cancelRolledBack({ state: "cancelled", steps: [step("compensated"), step("pending")] })).toBe(true);
-    expect(cancelRolledBack({ state: "cancelled", steps: [step("pending")] })).toBe(false);
+    expect(cancelRolledBack({ state: "canceled", steps: [step("compensated"), step("pending")] })).toBe(true);
+    expect(cancelRolledBack({ state: "canceled", steps: [step("pending")] })).toBe(false);
   });
 
-  it("says so in words, and only for a cancelled job", () => {
-    expect(jobStateText("cancelled", "cancel")).toBe("Rolled back (cancelled)");
-    expect(jobStateText("cancelled")).toBe("Cancelled");
+  it("says so in words, and only for a canceled job", () => {
+    expect(jobStateText("canceled", "cancel")).toBe("Rolled back (canceled)");
+    expect(jobStateText("canceled")).toBe("Canceled");
     expect(jobStateText("failed", "cancel")).toBe("Failed");
   });
 });

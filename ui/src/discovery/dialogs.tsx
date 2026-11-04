@@ -1,5 +1,5 @@
 // The dialogs of the proposal inbox: approve (the plan dialog of IPAM writes, with a dry run
-// first and the acknowledgements it asks for), reject or dismiss with an optional reason, and
+// first and the acknowledgments it asks for), reject or dismiss with an optional reason, and
 // the report of a reconciler run. The same decisions for many proposals at once: one confirmation
 // for the approvals, the same reason dialog for the rejections, and the panel of the proposals
 // the batch skipped.

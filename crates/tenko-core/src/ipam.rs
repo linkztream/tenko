@@ -2,7 +2,7 @@
 //! addresses, hosts and interfaces, with their shared metadata.
 //!
 //! These are plain data. The rules (overlap only across VRFs per IPAM-23, the nibble-boundary
-//! acknowledgement for IPv6 per IPAM-06, the warning for a `reserved` host without MAC or
+//! acknowledgment for IPv6 per IPAM-06, the warning for a `reserved` host without MAC or
 //! DUID per IPAM-18) live in `tenko-ipam`, which owns the `ipam.*` tables.
 //!
 //! The IPAM-12 intent sentence "host X has IP Y in network Z, with an assignment mode, a DNS

@@ -38,7 +38,7 @@ ROADMAP "Done when" and its Phase 1 verification rows, as checks:
 | Slice | Content | Closes |
 |---|---|---|
 | 1. Thin vertical slice | Single-node store (openraft, one voter); first-run wizard; local login with presets, TOTP and passkeys; vault core; TLS; IPAM model; Excel/CSV import and CSV export; prefix tree, grid, host panel; chained audit; jobs; SSE; OpenAPI; CLI | E1 to E3 |
-| 2. Discovery and connectors | Operator secrets; enrolment and mTLS; probes; Proxmox and HASS inventory; UniFi read and guarded write; VLAN sync; topology; reconciler; move job; RDP/SSH handoff | E4 to E8 |
+| 2. Discovery and connectors | Operator secrets; enrollment and mTLS; probes; Proxmox and HASS inventory; UniFi read and guarded write; VLAN sync; topology; reconciler; move job; RDP/SSH handoff | E4 to E8 |
 | 3. Platform hardening | 3-node Raft; RBAC scopes; audit export; vault hardening and backup; metrics, dashboard, cost budget; deployment; language packs | E9 to E12 |
 
 The owner's split stands, with four moves the documents force:
@@ -46,7 +46,7 @@ The owner's split stands, with four moves the documents force:
 1. **Vault core into Slice 1.** Slice 1 already holds secrets (TOTP seeds, CA and TLS keys); NEVER-01 forbids plaintext, which the Raft log and snapshots would replicate. Slice 1 builds envelope encryption and KEK providers (IAM-15); operator secrets, reveal audit and rotation (IAM-16) follow in Slice 2.
 2. **Audit chain in Slice 1, export in Slice 3.** NEVER-02 makes the chain never-off; added later, it would leave early records unchained.
 3. **First-run wizard and TLS into Slice 1.** TGL-01, -02, -04, -06 and -07 default from the chosen profile (API-10); passkeys need a secure context and a host-name relying-party ID, so E2 fails on plain HTTP to an IP address (TGL-08).
-4. **Enrolment and mTLS into Slice 2.** E4 needs a probe per segment and a DMZ probe in its own trust zone (SCAN-01), so remote probes must reach the controller before Slice 3, which reuses the channel for Raft (OPS-04).
+4. **Enrollment and mTLS into Slice 2.** E4 needs a probe per segment and a DMZ probe in its own trust zone (SCAN-01), so remote probes must reach the controller before Slice 3, which reuses the channel for Raft (OPS-04).
 
 ### 1.4 Requirement coverage
 
@@ -67,7 +67,7 @@ WP1.0 writes these as compiling code and merges them first. Derives and `pub` ar
 id_type!(TenantId, VrfId, SiteId, VlanId, PrefixId, RangeId, AddressId, HostId, InterfaceId,
          UserId, SessionId, ApiTokenId, JobId, ObservationId, ProposalId, ImportId,
          ConnectorId, SecretId, RequestId);
-pub struct NodeId(pub u64);       // Raft node id, assigned at enrolment
+pub struct NodeId(pub u64);       // Raft node id, assigned at enrollment
 pub struct Revision(pub u64);     // +1 per applied WriteBatch; also the SSE event id
 pub struct AuditSeq(pub u64);     // gap-free
 pub struct Timestamp(pub time::OffsetDateTime);          // UTC, RFC 3339 on the wire
@@ -119,7 +119,7 @@ pub struct UtilizationAlarm { warn_pct: u8, crit_pct: u8 }         // IPAM-10
 pub struct CustomFieldDef { key: FieldKey, kind: CustomKind, applies_to: Vec<ObjectKind>, required: bool }
 ```
 
-Anchors: VRFs IPAM-01, sites IPAM-04, VLANs IPAM-03, soft delete IPAM-09, tags and custom fields IPAM-08, `lock` IPAM-16. Rules: overlap only across VRFs (IPAM-23); a v6 prefix off a nibble boundary needs acknowledgement (IPAM-06); a `reserved` host without MAC or DUID warns (IPAM-18). The IPAM-12 intent sentence maps to Host (mode), Interface (MAC), Address (IP, DNS name), Prefix (network, VLAN). `tenko-core::ir` holds the IPAM part of the migration IR (`IrNetwork`, `IrVlan`, `IrHost`, `IrAddress`) and `LossReport { entries: Vec<LossEntry { location, code, detail }> }`, so the spreadsheet import has the adapter shape of ADR 0006 and MIG-01 from the start (proposed).
+Anchors: VRFs IPAM-01, sites IPAM-04, VLANs IPAM-03, soft delete IPAM-09, tags and custom fields IPAM-08, `lock` IPAM-16. Rules: overlap only across VRFs (IPAM-23); a v6 prefix off a nibble boundary needs acknowledgment (IPAM-06); a `reserved` host without MAC or DUID warns (IPAM-18). The IPAM-12 intent sentence maps to Host (mode), Interface (MAC), Address (IP, DNS name), Prefix (network, VLAN). `tenko-core::ir` holds the IPAM part of the migration IR (`IrNetwork`, `IrVlan`, `IrHost`, `IrAddress`) and `LossReport { entries: Vec<LossEntry { location, code, detail }> }`, so the spreadsheet import has the adapter shape of ADR 0006 and MIG-01 from the start (proposed).
 
 ### 2.3 Observations and proposals (tenko-core::observe)
 
@@ -228,7 +228,7 @@ pub struct JobSpec { kind: JobKind, title: MessageKey, targets: Vec<ObjectRef>, 
 pub struct StepSpec { kind: StepKind, params: Bytes /* CBOR */, timeout: Option<Duration> }
 pub struct Job { id: JobId, spec: JobSpec, state: JobState, steps: Vec<StepRecord>,
                  created: Stamp, runner: Option<NodeId>, revision: Revision }
-pub enum JobState { Queued, Running, Waiting, RollingBack, Succeeded, Failed, RolledBack, Cancelled }
+pub enum JobState { Queued, Running, Waiting, RollingBack, Succeeded, Failed, RolledBack, Canceled }
 pub enum StepState { Pending, Running, Done, Skipped,
     WaitingForObservation { condition: ObservationCondition, deadline: Timestamp },
     WaitingForManual { task: ManualTask },
@@ -261,7 +261,7 @@ pub enum JobError { NotFound(JobId), InvalidTransition { from: JobState, action:
                     UnknownStepKind(StepKind), Step(StepError), Store(StoreError), Timeout }
 ```
 
-`Wait` or `Manual` holds the job in `Waiting` until the observation matches, the task is done or the deadline passes; failure or deadline triggers `RollingBack`, compensating finished steps in reverse and turning non-compensable ones into manual undo tasks. End states: `Succeeded`, `RolledBack` ("move failed", IPAM-19), `Failed` (operator needed), `Cancelled`. Each transition is an audited store write and a `jobs` SSE event (IPAM-17); after a restart only `idempotent()` steps re-run. A single edit is an inline one-step job (proposed, Q4).
+`Wait` or `Manual` holds the job in `Waiting` until the observation matches, the task is done or the deadline passes; failure or deadline triggers `RollingBack`, compensating finished steps in reverse and turning non-compensable ones into manual undo tasks. End states: `Succeeded`, `RolledBack` ("move failed", IPAM-19), `Failed` (operator needed), `Canceled`. Each transition is an audited store write and a `jobs` SSE event (IPAM-17); after a restart only `idempotent()` steps re-run. A single edit is an inline one-step job (proposed, Q4).
 
 ### 2.7 Connectors (tenko-connect)
 
@@ -380,7 +380,7 @@ Shared files: only WP1.0 edits the root `Cargo.toml`. It pre-declares every Slic
 
 ### WP1.9 UI shell, auth and setup (L)
 
-- Adopts `design/` first; then shell, routing, i18n (XLIFF 2.0 sources for `en` and `sv` compiled at build time, ICU MessageFormat, language defaults per API-08 and API-21), dark mode, types from the OpenAPI document via `openapi-typescript` (proposed), SSE client with jittered reconnect, login, enrolment, first-run wizard, settings, user administration.
+- Adopts `design/` first; then shell, routing, i18n (XLIFF 2.0 sources for `en` and `sv` compiled at build time, ICU MessageFormat, language defaults per API-08 and API-21), dark mode, types from the OpenAPI document via `openapi-typescript` (proposed), SSE client with jittered reconnect, login, enrollment, first-run wizard, settings, user administration.
 - Acceptance: axe checks per view (WCAG); lints against literal UI strings and against paths missing from the OpenAPI document (API-02).
 
 ### WP1.10 UI IPAM, import and audit (L)
@@ -435,7 +435,7 @@ The visual design comes from the concurrent design spike in `design/`; WP1.9 ado
 | View | Content | Requirements |
 |---|---|---|
 | Shell | Navigation, search, shortcuts, language, dark mode, SSE status, job panel, banner while Lab or a weaker-than-Home toggle is active | API-08, API-09 |
-| Login and account | Passkey first; password then second factor; passkey and TOTP enrolment, recovery codes, sessions, tokens | IAM-03 to IAM-10 |
+| Login and account | Passkey first; password then second factor; passkey and TOTP enrollment, recovery codes, sessions, tokens | IAM-03 to IAM-10 |
 | First-run wizard | Setup token, profile and its toggles, administrator, host name, CA root download, disk check | API-10, OPS-19 |
 | Prefix tree | VRF selector, utilization, status, VLAN, alarms, next free, edit with preview | IPAM-01 to IPAM-07, IPAM-10 |
 | Address grid | Free gaps, inline edit, multiselect, bulk changes with preview, history | IPAM-05, IPAM-09, API-09 |
@@ -485,7 +485,7 @@ Slice 2: discovery and connectors
 | WP | Owns | Depends on | Content | Acceptance | Size, risk |
 |---|---|---|---|---|---|
 | WP2.1 Operator secrets | `tenko-vault`, `tenko-auth` IAM-07 check, vault and remote routes | Slice 1 | Revealable secrets with rotation and reveal audit (IAM-16), IAM-07 gate, RDP/SSH handoff (API-11) | PIN-only account blocks a secret; reveals audited | M, Q3 |
-| WP2.2 Enrolment, mTLS | `tenko-cluster` | WP1.3 | Enrolment tokens, node certificates, gRPC over mTLS, version negotiation (OPS-04, OPS-08); probe buffering | Probe enrols, reconnects, rejects a foreign CA | M, `protoc` on Windows |
+| WP2.2 Enrollment, mTLS | `tenko-cluster` | WP1.3 | Enrollment tokens, node certificates, gRPC over mTLS, version negotiation (OPS-04, OPS-08); probe buffering | Probe enrolls, reconnects, rejects a foreign CA | M, `protoc` on Windows |
 | WP2.3 Probe | `tenko-scan`, its `fuzz/` targets | WP2.2 | Passive (SCAN-02), active (SCAN-04), SNMPv3 (SCAN-05), schedules and limits with TGL-18, TGL-19 (SCAN-06), IDS guide (SCAN-07), on-demand scan jobs (SCAN-09) | E4; fuzz target per parser (API-15) | L, R12 |
 | WP2.4 Reconciler | `tenko-ipam/src/{observe,reconcile,proposals}/` | Slice 1 | Ingest, proposals and auto-adopt (IPAM-15), lock (IPAM-16), observed conflicts (IPAM-23), jobs from drift (IPAM-13) | Unknown MAC becomes a proposal; locked host untouched | L, R9 |
 | WP2.0 Plugin SDK and host | `tenko-connect` (protocol, host runner, helper library, manifest, conformance test), `tenko plugin` subcommands | Slice 1 | ADR 0012: process plugins over gRPC with handshake, supervision, secret injection, settings schema (CONN-19); the scheduler for inventory polling lives in the host | A sample plugin passes the conformance test; a crashing plugin is restarted and never affects the API | L, protocol design |
@@ -508,7 +508,7 @@ Slice 3: platform hardening (detailed in [slice-3-plan.md](slice-3-plan.md), wri
 | WP3.6 Deployment | `deploy/**`, `tenko-server` platform modules | Windows service (OPS-10), systemd hardening (OPS-13), Docker macvlan (OPS-14), upgrades (OPS-08) | E10 | M |
 | WP3.7 Language packs | `ui/src/i18n/`, i18n route | Runtime XLIFF 2.0 packs (API-21) | Fallback to English | M |
 | WP3.8 Phase exit | `tenko-server/tests/**`, `bench/phase1-*` | E1 to E12 with results | ROADMAP "Done when" | M |
-| WP3.9 Partition behaviour | `tenko-store` quorum state, `tenko-api` isolated mode, `tenko-ipam` proposal queue, UI banner and staleness indicator | WP3.1 | OPS-26: isolated state surfaced by the store, writes refused with `cluster.no_quorum`, reads served with a staleness indicator, changes queued as proposals and re-planned on reconnection with conflicts shown, observations buffered on `dns`, `dhcp` and `probe` nodes and merged as per-source facts; ADR 0013 (partitions and multi-site ownership) | A three-controller cluster split 2 against 1: the minority refuses writes and serves reads, the data plane on its side keeps answering, a queued proposal on the minority applies after the split heals or is shown with its conflict, and no object differs between the nodes afterwards | M, R18 |
+| WP3.9 Partition behavior | `tenko-store` quorum state, `tenko-api` isolated mode, `tenko-ipam` proposal queue, UI banner and staleness indicator | WP3.1 | OPS-26: isolated state surfaced by the store, writes refused with `cluster.no_quorum`, reads served with a staleness indicator, changes queued as proposals and re-planned on reconnection with conflicts shown, observations buffered on `dns`, `dhcp` and `probe` nodes and merged as per-source facts; ADR 0013 (partitions and multi-site ownership) | A three-controller cluster split 2 against 1: the minority refuses writes and serves reads, the data plane on its side keeps answering, a queued proposal on the minority applies after the split heals or is shown with its conflict, and no object differs between the nodes afterwards | M, R18 |
 
 ## 8. Phase 1 measurements
 
@@ -536,7 +536,7 @@ Results go to `bench/phase1-*/results/` with scripts, machine and versions, as i
 |---|---|---|
 | Q1 | Accept the slice moves in 1.3? | Yes; they follow from NEVER-01, NEVER-02, API-10, TGL-08 and SCAN-01 |
 | Q2 | WebAuthn under the OpenSSL ban | An OpenSSL-free relying-party crate or a minimal in-house verifier (ES256, EdDSA, RS256; attestation `none`, `packed`), as ADR 0010 |
-| Q3 | Do system keys (TOTP seeds, CA key) count as "the vault holds secrets" (IAM-07)? | No, only revealable operator secrets; otherwise the first TOTP enrolment ends PIN-only login |
+| Q3 | Do system keys (TOTP seeds, CA key) count as "the vault holds secrets" (IAM-07)? | No, only revealable operator secrets; otherwise the first TOTP enrollment ends PIN-only login |
 | Q4 | Is every single edit a job (IPAM-17)? | Yes, an inline one-step job committed with the change |
 | Q5 | Host name and trust for passkeys | The wizard requires a host name (an RP ID cannot be an IP address); the owner adds it to AD DNS and installs the local CA root on admin clients, or imports a certificate |
 | Q6 | Store write model of 2.4 | Accept, as ADR 0011 (proposed) |
@@ -546,7 +546,7 @@ Results go to `bench/phase1-*/results/` with scripts, machine and versions, as i
 
 | # | Risk | Proposed resolution |
 |---|---|---|
-| R1 | Licence undecided (API-20) | `deny.toml` stays permissive-only; nothing to decide before publication |
+| R1 | License undecided (API-20) | `deny.toml` stays permissive-only; nothing to decide before publication |
 | R2 | Windows Server version of the lab | Phase 4 only; decide by the end of Phase 3 |
 | R3 | No IPv6 at home | Dual-stack model from Slice 1 (IPAM-06); v6 scanning tested in the compose lab |
 | R4 | openraft 0.9 caps single-entry writes near 120/s | All writes through the coalescer, never a direct `client_write`; M5 nightly and on upgrades |

@@ -91,7 +91,7 @@ impl Default for SignerConfig {
 /// What starts a pass.
 #[derive(Debug, Clone, Default)]
 pub struct Trigger {
-    /// Sign every owner; otherwise only the changed RRsets and their neighbours.
+    /// Sign every owner; otherwise only the changed RRsets and their neighbors.
     pub full: bool,
     /// A full pass verifies every signature it keeps.
     pub verify: bool,

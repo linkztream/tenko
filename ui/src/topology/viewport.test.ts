@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_SCALE,
   MIN_SCALE,
-  centreOn,
+  centerOn,
   clampScale,
   fit,
   nearestInDirection,
@@ -53,10 +53,10 @@ describe("clampScale", () => {
 });
 
 describe("fit", () => {
-  it("fits a wide drawing by its width, centred, with a 5 percent margin", () => {
+  it("fits a wide drawing by its width, centered, with a 5 percent margin", () => {
     const view = fit(2000, 500, 1000, 800);
     expect(view.scale).toBeCloseTo(0.475, 12);
-    // The drawing fills 95 percent of the screen width, centred on both axes.
+    // The drawing fills 95 percent of the screen width, centered on both axes.
     expectClose(toScreen(view, 0, 0), [25, (800 - 500 * 0.475) / 2]);
     expectClose(toScreen(view, 2000, 500), [975, (800 + 500 * 0.475) / 2]);
     expectClose(toScreen(view, 1000, 250), [500, 400]);
@@ -76,7 +76,7 @@ describe("fit", () => {
     expectClose(toScreen(view, 50, 40), [500, 400]);
   });
 
-  it("caps an empty drawing at 1.5 and centres its origin", () => {
+  it("caps an empty drawing at 1.5 and centers its origin", () => {
     const view = fit(0, 0, 1000, 800);
     expect(view.scale).toBe(1.5);
     expectClose(toScreen(view, 0, 0), [500, 400]);
@@ -162,16 +162,16 @@ describe("pan", () => {
   });
 });
 
-describe("centreOn", () => {
-  it("puts the drawing point at the centre of the screen and keeps the scale", () => {
-    const view = centreOn({ x: 5, y: 5, scale: 0.5 }, 300, 200, 800, 600);
+describe("centerOn", () => {
+  it("puts the drawing point at the center of the screen and keeps the scale", () => {
+    const view = centerOn({ x: 5, y: 5, scale: 0.5 }, 300, 200, 800, 600);
     expect(view.scale).toBe(0.5);
     expectClose(toScreen(view, 300, 200), [400, 300]);
     expect(view).toEqual({ x: 300 - 800, y: 200 - 600, scale: 0.5 });
   });
 
   it("works at scale 1", () => {
-    expect(centreOn({ x: 0, y: 0, scale: 1 }, 0, 0, 1000, 800)).toEqual({ x: -500, y: -400, scale: 1 });
+    expect(centerOn({ x: 0, y: 0, scale: 1 }, 0, 0, 1000, 800)).toEqual({ x: -500, y: -400, scale: 1 });
   });
 });
 
@@ -199,7 +199,7 @@ describe("transformOf", () => {
 
 describe("nearestInDirection", () => {
   const points = [
-    { id: "centre", x: 100, y: 100 },
+    { id: "center", x: 100, y: 100 },
     { id: "up", x: 100, y: 40 },
     { id: "down", x: 100, y: 170 },
     { id: "left", x: 30, y: 100 },
@@ -207,15 +207,15 @@ describe("nearestInDirection", () => {
   ];
 
   it("finds the nearest point in each direction", () => {
-    expect(nearestInDirection(points, "centre", "up")).toBe("up");
-    expect(nearestInDirection(points, "centre", "down")).toBe("down");
-    expect(nearestInDirection(points, "centre", "left")).toBe("left");
-    expect(nearestInDirection(points, "centre", "right")).toBe("right");
+    expect(nearestInDirection(points, "center", "up")).toBe("up");
+    expect(nearestInDirection(points, "center", "down")).toBe("down");
+    expect(nearestInDirection(points, "center", "left")).toBe("left");
+    expect(nearestInDirection(points, "center", "right")).toBe("right");
   });
 
   it("goes back where it came from", () => {
-    expect(nearestInDirection(points, "up", "down")).toBe("centre");
-    expect(nearestInDirection(points, "right", "left")).toBe("centre");
+    expect(nearestInDirection(points, "up", "down")).toBe("center");
+    expect(nearestInDirection(points, "right", "left")).toBe("center");
   });
 
   it("returns null when nothing is in the direction", () => {
@@ -282,6 +282,6 @@ describe("nearestInDirection", () => {
 
   it("returns null for an unknown id and for no points", () => {
     expect(nearestInDirection(points, "nope", "up")).toBeNull();
-    expect(nearestInDirection([], "centre", "up")).toBeNull();
+    expect(nearestInDirection([], "center", "up")).toBeNull();
   });
 });

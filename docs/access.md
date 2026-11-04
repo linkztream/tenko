@@ -1,6 +1,6 @@
 # Access: roles, scoped grants, service accounts and scoped tokens
 
-This page describes who may do what in Tenko DDI: the four roles, scoped grants over VRFs, sites and prefixes, delegation, service accounts, scoped API tokens, the multi-factor policy per role, and what a scoped person sees in lists, the prefix tree, search, exports, the audit log and the event stream. It is for an administrator who gives people and automation limited access, and for a developer who adds a route and has to decide how it is scoped. It describes the behaviour of `tenko-auth` (`authz`, `roles`, `grants`, `service/access`), of the anchors index in `tenko-ipam` (`scope`), and of the `/access` routes and the scoped filters in `tenko-api`; where this page and the code differ, the code is right. The requirements are IAM-01, IAM-06 and IAM-10 in [REQUIREMENTS.md](REQUIREMENTS.md); the profile values are TGL-02, TGL-03 and TGL-05 in [SECURITY-PROFILES.md](SECURITY-PROFILES.md). The decisions are recorded in [ADR 0015](adr/0015-scoped-authorization.md).
+This page describes who may do what in Tenko DDI: the four roles, scoped grants over VRFs, sites and prefixes, delegation, service accounts, scoped API tokens, the multi-factor policy per role, and what a scoped person sees in lists, the prefix tree, search, exports, the audit log and the event stream. It is for an administrator who gives people and automation limited access, and for a developer who adds a route and has to decide how it is scoped. It describes the behavior of `tenko-auth` (`authz`, `roles`, `grants`, `service/access`), of the anchors index in `tenko-ipam` (`scope`), and of the `/access` routes and the scoped filters in `tenko-api`; where this page and the code differ, the code is right. The requirements are IAM-01, IAM-06 and IAM-10 in [REQUIREMENTS.md](REQUIREMENTS.md); the profile values are TGL-02, TGL-03 and TGL-05 in [SECURITY-PROFILES.md](SECURITY-PROFILES.md). The decisions are recorded in [ADR 0015](adr/0015-scoped-authorization.md).
 
 Terms used below: a **subject** is a person or a service account. A **global role** is a role in the roles of the user record; it applies to the whole installation. A **grant** gives a subject a role over one **scope**. An **anchor** is a place where an object sits among VRFs, sites and prefixes; scopes are matched against anchors.
 
@@ -232,7 +232,7 @@ The auditor reads `GET /audit`, `GET /audit/{seq}` and `GET /audit/verify`. A to
 
 A principal whose reach is scoped receives only what its rules cover. Lists filter before paging, so a page is full whenever more matching objects exist, and the cursor and the revision behave as for anybody.
 
-| Route | Behaviour |
+| Route | Behavior |
 |---|---|
 | Lists (tenants, VRFs, sites, VLANs, prefixes, ranges, addresses, hosts, interfaces, custom fields, observations, proposals, jobs, topology) | Only objects in scope; tenants, VRFs, sites and custom fields as context |
 | Lists of a kind the principal reaches nothing of | `200` with no items, never 403 (section 1) |
@@ -242,7 +242,7 @@ A principal whose reach is scoped receives only what its rules cover. Lists filt
 | Exports (`/exports/*.csv`) | Only objects in scope |
 | Audit log | See below |
 | Proposals | Listed by the prefix of the subject address; an approval is planned and checked against the scope before it applies |
-| Jobs | Listed and read when one of the targets is in scope; cancelled or completed when all targets are |
+| Jobs | Listed and read when one of the targets is in scope; canceled or completed when all targets are |
 | Moves | Update on every moved object and on the target prefix; a preview needs Read on them |
 | VLAN provisioning | Refused, because it writes through a network controller, which is global-only in Phase 1 |
 | Secrets | An empty list and 403 on single reads |

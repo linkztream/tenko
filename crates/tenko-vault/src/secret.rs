@@ -116,7 +116,7 @@ impl SecretSpec {
 
     /// Sets the label.
     #[must_use]
-    pub fn labelled(mut self, label: impl Into<String>) -> Self {
+    pub fn labeled(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }

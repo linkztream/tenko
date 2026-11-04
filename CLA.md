@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Tenko DDI ("the Project"). The Pr
 published under the Business Source License 1.1 (see `LICENSE.md`) and is also licensed
 commercially under separate agreements. To keep both possible, the Licensor needs
 enough rights in every contribution to distribute it under the Business Source License,
-under the Change License named in `LICENSE.md`, and under commercial licence terms. This
+under the Change License named in `LICENSE.md`, and under commercial license terms. This
 Contributor License Agreement ("the Agreement") grants those rights. You keep the
 copyright in your contribution and remain free to use it for any other purpose.
 
@@ -26,25 +26,25 @@ You have Submitted before accepting the Agreement and every Contribution You Sub
 afterwards, until You notify the Licensor in writing that You withdraw from it. A
 withdrawal does not affect Contributions Submitted before the notice.
 
-### A.1 Copyright licence
+### A.1 Copyright license
 
 Subject to the terms of this Agreement, You grant the Licensor and recipients of
 software distributed by the Licensor a perpetual, worldwide, non-exclusive, no-charge,
-royalty-free, irrevocable copyright licence to reproduce, prepare derivative works of,
+royalty-free, irrevocable copyright license to reproduce, prepare derivative works of,
 publicly display, publicly perform, sublicense (through multiple tiers), and distribute
-Your Contributions and such derivative works, in source and object form, under any licence
+Your Contributions and such derivative works, in source and object form, under any license
 terms the Licensor chooses. Those terms expressly include the Business Source License 1.1
 with the parameters chosen by the Licensor, any Change License named in `LICENSE.md`, and
-commercial and proprietary licence terms, with or without payment to the Licensor, and
+commercial and proprietary license terms, with or without payment to the Licensor, and
 they include the right to sell the Project, or products and services built from it, with
 Your Contributions inside.
 
-### A.2 Patent licence
+### A.2 Patent license
 
 Subject to the terms of this Agreement, You grant the Licensor and recipients of
 software distributed by the Licensor a perpetual, worldwide, non-exclusive, no-charge,
-royalty-free, irrevocable patent licence to make, have made, use, offer to sell, sell,
-import, and otherwise transfer the Project, where such licence applies only to those
+royalty-free, irrevocable patent license to make, have made, use, offer to sell, sell,
+import, and otherwise transfer the Project, where such license applies only to those
 patent claims licensable by You that are necessarily infringed by Your Contribution alone
 or by the combination of Your Contribution with the Project to which it was Submitted.
 
@@ -63,7 +63,7 @@ compiled form.
 
 You represent that:
 
-1. You are legally entitled to grant the licences above. If Your employer or any other
+1. You are legally entitled to grant the licenses above. If Your employer or any other
    party has rights in intellectual property You create, including Your Contributions,
    You represent that this party has waived such rights for Your Contributions to the
    Project, that You have received its permission to make Contributions on its behalf, or
@@ -80,9 +80,9 @@ You represent that:
 ### A.5 Third-party material
 
 If a Contribution includes work that is not Your original creation, You must identify it
-clearly in the pull request: the source, its author, its licence, and any restriction or
-notice that applies. You may only include third-party material whose licence permits the
-Licensor to distribute it under the terms described in A.1; code under a copyleft licence
+clearly in the pull request: the source, its author, its license, and any restriction or
+notice that applies. You may only include third-party material whose license permits the
+Licensor to distribute it under the terms described in A.1; code under a copyleft license
 (for example the GPL, AGPL or SSPL families) is never accepted. The Licensor decides
 whether such material can be accepted.
 
@@ -98,7 +98,7 @@ Contributions unless You choose to.
 
 You keep the copyright in Your Contributions and all rights not expressly licensed here.
 You remain free to use, license and distribute Your Contributions for any purpose,
-including in other projects and under other licences. Nothing in this Agreement limits
+including in other projects and under other licenses. Nothing in this Agreement limits
 Your rights under the Business Source License for the Project as a whole.
 
 ### A.8 No obligation to include
@@ -131,7 +131,7 @@ keeps Your name, the email address in Your `Signed-off-by` lines, the date and t
 version of the Agreement You accepted, and a reference to the pull request where You
 accepted it. This data is part of the Project's version control history and is published
 with it. It is kept for as long as the Project exists, because it is the Licensor's
-evidence of the licences granted here. Requests about this data go to the contact in
+evidence of the licenses granted here. Requests about this data go to the contact in
 Part D.
 
 ---
@@ -145,10 +145,10 @@ after the Entity's acceptance, until the Entity notifies the Licensor in writing
 withdraws from the Agreement. A withdrawal does not affect Contributions Submitted before
 the notice.
 
-### B.1 Licences and moral rights
+### B.1 Licenses and moral rights
 
 The Entity grants the Licensor and recipients of software distributed by the Licensor the
-copyright licence of Section A.1 and the patent licence of Section A.2, for every
+copyright license of Section A.1 and the patent license of Section A.2, for every
 Contribution Submitted by a Designated Contributor on the Entity's behalf, and makes the
 moral rights commitments of Section A.3 for itself and, to the extent it is able to,
 procures them from its Designated Contributors. Sections A.5 to A.8 and A.10 apply to the
@@ -157,7 +157,7 @@ Entity in the same way as to an individual; "You" and "Your" then refer to the E
 ### B.2 Designated Contributors
 
 The Entity names its Designated Contributors in Schedule 1 and may add or remove names by
-written notice (email is sufficient) from an authorised representative to the contact in
+written notice (email is sufficient) from an authorized representative to the contact in
 Part D. A change takes effect when the Licensor acknowledges it. The Entity is
 responsible for keeping the list current and for the Contributions of anyone on it.
 A Designated Contributor who also contributes in a private capacity, outside the Entity's
@@ -167,7 +167,7 @@ business, accepts Part A for those Contributions.
 
 The Entity represents that:
 
-1. The person accepting this Agreement is authorised to bind the Entity.
+1. The person accepting this Agreement is authorized to bind the Entity.
 2. The Entity owns, or has the right to license as set out in B.1, every Contribution
    Submitted by its Designated Contributors on its behalf, including under its agreements
    with employees and contractors.
@@ -188,7 +188,7 @@ Section A.9 applies.
 Entity name:                   ______________________________________
 Registered address:            ______________________________________
 Registration number (if any):  ______________________________________
-Authorised representative:     ______________________________________  (name, title)
+Authorized representative:     ______________________________________  (name, title)
 Representative's email:        ______________________________________
 Contact for notices:           ______________________________________
 
@@ -255,10 +255,10 @@ so the record is public and travels with the code.
 
 ### D.2 Entities
 
-1. An authorised representative completes Schedule 1 and sends it by email to the
+1. An authorized representative completes Schedule 1 and sends it by email to the
    contact below, from the representative's own address at the Entity.
 2. The Licensor acknowledges the acceptance by email. The Agreement is effective on the
-   date of that acknowledgement, and the Licensor keeps the Schedule and the exchange of
+   date of that acknowledgment, and the Licensor keeps the Schedule and the exchange of
    emails as the record.
 3. Each Designated Contributor includes this sentence in the description of their first
    pull request:

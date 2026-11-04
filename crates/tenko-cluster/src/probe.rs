@@ -3,7 +3,7 @@
 //!
 //! A probe does not know the controller's VRF ids, so a [`ProbeBatch`] carries sightings
 //! without a VRF; the controller assigns one ([`ProbeBatch::into_observations`]): the VRF
-//! the batch names, else the VRF of the node's enrolment token, else the default VRF. The
+//! the batch names, else the VRF of the node's enrollment token, else the default VRF. The
 //! source of every observation is `probe:<node>:<method>`, so a complete batch of one
 //! method expires only what that method of that node reported before.
 //!

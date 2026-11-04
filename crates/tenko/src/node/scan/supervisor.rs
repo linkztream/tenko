@@ -125,8 +125,8 @@ pub struct Supervisor {
     applied: Mutex<Applied>,
     /// The `scan.run` commands in progress, with the scanner that runs each.
     commands: Mutex<HashMap<Uuid, Arc<Scanner>>>,
-    /// The `scan.run` commands the controllers cancelled.
-    cancelled: Mutex<HashSet<Uuid>>,
+    /// The `scan.run` commands the controllers canceled.
+    canceled: Mutex<HashSet<Uuid>>,
 }
 
 impl std::fmt::Debug for Supervisor {
@@ -159,7 +159,7 @@ impl Supervisor {
                 config: None,
             }),
             commands: Mutex::new(HashMap::new()),
-            cancelled: Mutex::new(HashSet::new()),
+            canceled: Mutex::new(HashSet::new()),
         })
     }
 
@@ -366,7 +366,7 @@ impl Supervisor {
             let this = Arc::clone(&self);
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(u64::from(secs))).await;
-                lock(&this.cancelled).insert(id);
+                lock(&this.canceled).insert(id);
                 scanner.cancel_run(id);
             })
         });
@@ -382,8 +382,8 @@ impl Supervisor {
         let mut batches = 0u32;
         let mut ran = 0usize;
         for (index, kind) in methods.iter().enumerate() {
-            if lock(&self.cancelled).contains(&id) {
-                notes.push("cancelled by the controllers".to_owned());
+            if lock(&self.canceled).contains(&id) {
+                notes.push("canceled by the controllers".to_owned());
                 break;
             }
             let percent = u8::try_from(index.saturating_mul(100) / total).unwrap_or(99);
@@ -413,12 +413,12 @@ impl Supervisor {
             deadline.abort();
         }
         lock(&self.commands).remove(&id);
-        let cancelled = lock(&self.cancelled).remove(&id);
+        let canceled = lock(&self.canceled).remove(&id);
         let detail = (!notes.is_empty()).then(|| notes.join("; "));
         if ran == 0 && batches == 0 {
             reporter.failed(detail.unwrap_or_else(|| "no method ran".to_owned()));
-        } else if cancelled && batches == 0 {
-            reporter.failed(detail.unwrap_or_else(|| "cancelled".to_owned()));
+        } else if canceled && batches == 0 {
+            reporter.failed(detail.unwrap_or_else(|| "canceled".to_owned()));
         } else {
             reporter.done(batches, detail);
         }
@@ -469,9 +469,9 @@ impl CommandHandler for ScanCommands {
                 let scanner = lock(&supervisor.commands).get(&args.command).cloned();
                 let detail = match scanner {
                     Some(scanner) => {
-                        lock(&supervisor.cancelled).insert(args.command);
+                        lock(&supervisor.canceled).insert(args.command);
                         scanner.cancel_run(args.command);
-                        "cancelled"
+                        "canceled"
                     }
                     None => "the scan was not running",
                 };

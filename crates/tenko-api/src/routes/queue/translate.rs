@@ -494,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn a_change_carries_its_if_match_and_acknowledgements() {
+    fn a_change_carries_its_if_match_and_acknowledgments() {
         let id = AddressId::generate();
         let mut queued = request(
             "patch",

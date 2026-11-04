@@ -1,7 +1,7 @@
 //! `tenko cluster join`: a host becomes a controller of an existing cluster (OPS-03,
 //! WP3.1a deliverable 3).
 //!
-//! 1. The host enrols like a node (`tenko node enrol`) with a controller token: it checks
+//! 1. The host enrolls like a node (`tenko node enroll`) with a controller token: it checks
 //!    the controller's CA root against `--ca-fingerprint`, generates its key, and receives a
 //!    certificate with the role `controller` and a node id (1001 and up), which is also its
 //!    Raft id. The identity lives in `<data_dir>/node/`, the key sealed like a probe's.
@@ -36,7 +36,7 @@ use tenko_cluster::{
     proto::v1,
     server::{ClusterListener, NodeServices, Port, code_of},
     session::Sessions,
-    token::EnrolmentToken,
+    token::EnrollmentToken,
 };
 use tenko_core::{NodeId, Role};
 use tenko_store::{
@@ -53,7 +53,7 @@ use crate::{
     exit,
     node::{
         NodeDirArgs,
-        enrol::{EnrolArgs, TOKEN_ENV},
+        enroll::{EnrollArgs, TOKEN_ENV, old_env_token},
         failure,
     },
 };
@@ -71,8 +71,8 @@ pub struct JoinArgs {
     #[arg(long, value_name = "URL")]
     pub controller: String,
 
-    /// The controller enrolment token (role `controller`, single use, at most an hour);
-    /// also from `TENKO_ENROL_TOKEN` or `--token-file`.
+    /// The controller enrollment token (role `controller`, single use, at most an hour);
+    /// also from `TENKO_ENROLL_TOKEN` or `--token-file`.
     #[arg(long, value_name = "TOKEN", env = TOKEN_ENV, hide_env_values = true)]
     pub token: Option<String>,
 
@@ -122,14 +122,17 @@ fn read_token(args: &JoinArgs) -> Result<String, Failure> {
             .unwrap_or_default()
             .trim()
             .to_owned(),
-        (None, None) => {
-            return Err(Failure::new(
-                exit::USAGE,
-                format!("no enrolment token: pass --token, --token-file or set {TOKEN_ENV}"),
-            ));
-        }
+        (None, None) => match old_env_token() {
+            Some(token) => token,
+            None => {
+                return Err(Failure::new(
+                    exit::USAGE,
+                    format!("no enrollment token: pass --token, --token-file or set {TOKEN_ENV}"),
+                ));
+            }
+        },
     };
-    EnrolmentToken::parse(&text).map_err(|error| {
+    EnrollmentToken::parse(&text).map_err(|error| {
         Failure::new(
             exit::USAGE,
             format!("{error}; copy the token exactly as the controller showed it"),
@@ -151,7 +154,7 @@ fn resolve(args: &JoinArgs) -> Result<(Resolved, PathBuf), Failure> {
     Ok((resolved, target))
 }
 
-/// The name a controller enrols with when `--name` is absent: its cluster port's host and
+/// The name a controller enrolls with when `--name` is absent: its cluster port's host and
 /// port, so several controllers on one host do not collide.
 fn default_name(host: &str, port: u16) -> String {
     let host: String = host
@@ -274,15 +277,15 @@ pub async fn run(args: &JoinArgs) -> Result<Output, Failure> {
         )
     })?;
     let token = read_token(args)?;
-    let token_id = EnrolmentToken::parse(&token)
+    let token_id = EnrollmentToken::parse(&token)
         .map_err(|error| Failure::new(exit::USAGE, error.to_string()))?
         .id();
 
-    // 1. Enrolment with the role controller.
+    // 1. Enrollment with the role controller.
     let paths = NodePaths::new(&resolved.data_dir);
     let mut notes = Vec::new();
     if !paths.is_enrolled() {
-        let enrolled = crate::node::enrol::run(&EnrolArgs {
+        let enrolled = crate::node::enroll::run(&EnrollArgs {
             node: NodeDirArgs {
                 config: None,
                 data_dir: Some(resolved.data_dir.clone()),
@@ -325,7 +328,7 @@ pub async fn run(args: &JoinArgs) -> Result<Output, Failure> {
     );
     let seeds = credentials.identity.dial_targets();
     let mut seed = None;
-    let mut last = String::from("the enrolment named no cluster endpoint");
+    let mut last = String::from("the enrollment named no cluster endpoint");
     for endpoint in &seeds {
         match network.cluster_client_at(endpoint).await {
             Ok(client) => {

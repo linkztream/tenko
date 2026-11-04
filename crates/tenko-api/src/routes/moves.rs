@@ -15,7 +15,7 @@
 //! and warnings. The network controllers are read once per preview, never written. A
 //! submit computes the preview again (it does not take the client's copy), refuses with
 //! 409 `ipam.move.plan_changed` when `expect_fingerprint` names another plan than the one
-//! it computed, refuses while a warning that needs an acknowledgement is not listed in
+//! it computed, refuses while a warning that needs an acknowledgment is not listed in
 //! `acknowledge`, and starts the jobs; the answer repeats the items so the UI can compare
 //! them with its preview. The jobs then appear in `GET /jobs`, and their manual steps are
 //! completed through `POST /jobs/{id}/steps/{index}/complete`.
@@ -92,7 +92,7 @@ struct MoveParams {
         (status = 400, description = "Invalid request (`ipam.move.invalid_request`, `sys.invalid_request`, `sys.invalid_query`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "An object or the target does not exist (`ipam.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the plan differs from the confirmed preview (`ipam.move.plan_changed`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "A warning needs an acknowledgment (`ipam.plan.unacknowledged`), the plan differs from the confirmed preview (`ipam.move.plan_changed`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "An object cannot move (`ipam.move.unmanaged`, `ipam.move.nothing_to_move`, `ipam.move.already_in_target`, `ipam.move.family_mismatch`, `ipam.move.unsupported_object`, `ipam.move.target_not_network`), or the idempotency key was used for another move (`ipam.idempotency_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 423, description = "A host is locked (`ipam.host.locked`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "IPAM or the job engine is not configured (`ipam.unavailable`, `ipam.move.no_engine`)", body = ProblemDetails, content_type = "application/problem+json")
@@ -729,7 +729,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn warnings_that_need_an_acknowledgement_block_the_submit() {
+    async fn warnings_that_need_an_acknowledgment_block_the_submit() {
         let api = Api::new().await;
         // A target of /62 is off the nibble boundary of reverse DNS.
         let v6 = PrefixId::generate();
@@ -1126,7 +1126,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_client_on_an_uplink_port_is_left_to_a_person_and_needs_an_acknowledgement() {
+    async fn a_client_on_an_uplink_port_is_left_to_a_person_and_needs_an_acknowledgment() {
         let api = Api::with_controllers(AppState::default()).await;
         api.update_controller(|controller| {
             controller.clients[0].port = Some(1);

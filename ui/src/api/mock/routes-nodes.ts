@@ -1,7 +1,7 @@
-// Cluster nodes and enrolment tokens of the mock API (docs/cluster.md, sections 1, 3 and 9):
+// Cluster nodes and enrollment tokens of the mock API (docs/cluster.md, sections 1, 3 and 9):
 // the node list by id with the live connection, one node with its `ETag`, revocation, the
-// enrolment tokens (created once with the token text and the command to run on the node,
-// listed without it, withdrawn whatever their state) and the public enrolment itself.
+// enrollment tokens (created once with the token text and the command to run on the node,
+// listed without it, withdrawn whatever their state) and the public enrollment itself.
 //
 // Simplifications: a certificate request is accepted when it is a PEM block of the right
 // type; certificates are placeholders; the serials of a revoked node are kept until a reset;
@@ -15,11 +15,11 @@ import { MOCK_CA_FINGERPRINT, MOCK_VERSION } from "./fixtures";
 import {
   CONTROLLER_MAJORS,
   certificate,
-  enrolmentList,
-  enrolmentState,
+  enrollmentList,
+  enrollmentState,
   nodeRef,
   nodesState,
-  type EnrolmentView,
+  type EnrollmentView,
   type NodeView,
 } from "./nodes-store";
 import { Problem, created, noContent, ok } from "./reply";
@@ -40,6 +40,8 @@ const DEFAULT_LIFETIME = 3_600;
 const NO_STORE = { "Cache-Control": "no-store" };
 /** The singleton reference of the node registry (token records name no node). */
 const REGISTRY = { kind: "node", id: "00000000-0000-0000-0000-000000000000" } as const;
+/** The table the cluster events name for enrollment tokens: the server's stored table name. */
+const ENROLLMENTS_TABLE = "cluster.enrolments"; // spelling: stored key
 
 function invalidRequest(detail: string, field?: string): Problem {
   return new Problem("sys.invalid_request", { status: 400, detail, params: field ? { field } : {} });
@@ -86,7 +88,7 @@ function readRoles(raw: unknown, fallback: readonly string[], refusal: number, c
   for (const role of roles) {
     if (role === "controller") {
       if (controller && roles.length === 1) return roles;
-      throw new Problem("cluster.enrolment.roles", { status: refusal, detail: "a controller does not enrol with a token yet", params: { role } });
+      throw new Problem("cluster.enrollment.roles", { status: refusal, detail: "a controller does not enroll with a token yet", params: { role } });
     }
     if (!(NODE_ROLES as readonly string[]).includes(role)) throw invalidRequest(`unknown role ${role}`, "roles");
   }
@@ -130,14 +132,14 @@ const revokeNode = route("delete", "/api/v1/nodes/{id}", (ctx) => {
 });
 
 // ---------------------------------------------------------------------------------
-// Enrolment tokens
+// Enrollment tokens
 
-const listEnrolments = route("get", "/api/v1/nodes/enrolments", () => {
+const listEnrollments = route("get", "/api/v1/nodes/enrollments", () => {
   requireAdmin();
-  return ok({ items: enrolmentList() });
+  return ok({ items: enrollmentList() });
 });
 
-const createEnrolment = route("post", "/api/v1/nodes/enrolments", async (ctx) => {
+const createEnrollment = route("post", "/api/v1/nodes/enrollments", async (ctx) => {
   const { user } = requireAdmin();
   const body = await ctx.optionalBody();
   for (const key of Object.keys(body)) {
@@ -165,7 +167,7 @@ const createEnrolment = route("post", "/api/v1/nodes/enrolments", async (ctx) =>
     lifetime = body.expires_in_secs;
     const max = forController ? CONTROLLER_MAX_LIFETIME : MAX_LIFETIME;
     if (lifetime < MIN_LIFETIME || lifetime > max) {
-      throw new Problem("cluster.enrolment.lifetime", {
+      throw new Problem("cluster.enrollment.lifetime", {
         status: 422,
         detail: `a token lives ${MIN_LIFETIME} to ${max} seconds, not ${lifetime}`,
         params: { min: String(MIN_LIFETIME), max: String(max), value: String(lifetime) },
@@ -178,8 +180,8 @@ const createEnrolment = route("post", "/api/v1/nodes/enrolments", async (ctx) =>
   const st = nodesState();
   // Creating a token opens the cluster port when it starts on demand.
   if (st.listening.length === 0) st.listening = ["0.0.0.0:8444"];
-  const revision = clusterEvent({ tables: ["cluster.enrolments"] });
-  const view: Omit<EnrolmentView, "state"> = {
+  const revision = clusterEvent({ tables: [ENROLLMENTS_TABLE] });
+  const view: Omit<EnrollmentView, "state"> = {
     id,
     name,
     roles,
@@ -190,41 +192,41 @@ const createEnrolment = route("post", "/api/v1/nodes/enrolments", async (ctx) =>
     used: null,
     revision,
   };
-  st.enrolments.set(id, { view, secret });
+  st.enrollments.set(id, { view, secret });
   appendAudit({
-    action: "cluster.enrolment.create",
+    action: "cluster.enrollment.create",
     objects: [REGISTRY],
-    context: { enrolment: id, roles: roles.join(","), expires_at: view.expires_at },
+    context: { enrollment: id, roles: roles.join(","), expires_at: view.expires_at },
   });
   const token = `tnk1.${id.replace(/-/g, "")}.${secret}`;
-  const answer: S["CreatedEnrolment"] = {
-    enrolment: { ...view, state: "pending" },
+  const answer: S["CreatedEnrollment"] = {
+    enrollment: { ...view, state: "pending" },
     token,
     ca_fingerprint: MOCK_CA_FINGERPRINT,
     command: forController
       ? `tenko cluster join --controller ${ctx.url.origin} --token ${token} --ca-fingerprint ${MOCK_CA_FINGERPRINT} --address HOST:PORT --data-dir D`
-      : `tenko node enrol --controller ${ctx.url.origin} --token ${token} --ca-fingerprint ${MOCK_CA_FINGERPRINT}`,
+      : `tenko node enroll --controller ${ctx.url.origin} --token ${token} --ca-fingerprint ${MOCK_CA_FINGERPRINT}`,
   };
   return created(answer, NO_STORE);
 });
 
-const deleteEnrolment = route("delete", "/api/v1/nodes/enrolments/{id}", (ctx) => {
+const deleteEnrollment = route("delete", "/api/v1/nodes/enrollments/{id}", (ctx) => {
   requireAdmin();
   const id = ctx.params.id;
-  if (!isUuid(id)) throw invalidRequest("the enrolment identifier is not a UUID", "id");
+  if (!isUuid(id)) throw invalidRequest("the enrollment identifier is not a UUID", "id");
   const st = nodesState();
-  const found = st.enrolments.get(id);
+  const found = st.enrollments.get(id);
   if (!found) {
-    throw new Problem("cluster.enrolment.not_found", { status: 404, detail: `no enrolment token has the id ${id}`, params: { id } });
+    throw new Problem("cluster.enrollment.not_found", { status: 404, detail: `no enrollment token has the id ${id}`, params: { id } });
   }
-  st.enrolments.delete(id);
-  clusterEvent({ tables: ["cluster.enrolments"] });
-  appendAudit({ action: "cluster.enrolment.delete", objects: [REGISTRY], context: { enrolment: id, state: enrolmentState(found.view) } });
+  st.enrollments.delete(id);
+  clusterEvent({ tables: [ENROLLMENTS_TABLE] });
+  appendAudit({ action: "cluster.enrollment.delete", objects: [REGISTRY], context: { enrollment: id, state: enrollmentState(found.view) } });
   return noContent();
 });
 
 // ---------------------------------------------------------------------------------
-// Enrolment (public: the token is the credential)
+// Enrollment (public: the token is the credential)
 
 /** `tnk1.<32 hex>.<43 base64url>` as the id of its record and the secret. */
 function parseToken(text: string): { id: string; secret: string } | null {
@@ -235,22 +237,22 @@ function parseToken(text: string): { id: string; secret: string } | null {
   return { id, secret: match[2] ?? "" };
 }
 
-const enrol = route("post", "/api/v1/nodes/enrol", async (ctx) => {
+const enroll = route("post", "/api/v1/nodes/enroll", async (ctx) => {
   const body = await ctx.body();
   if (typeof body.token !== "string" || typeof body.csr !== "string") throw invalidRequest("token and csr are required");
   const st = nodesState();
   const parsed = parseToken(body.token);
-  const stored = parsed ? st.enrolments.get(parsed.id) : undefined;
+  const stored = parsed ? st.enrollments.get(parsed.id) : undefined;
   if (!parsed || !stored || stored.secret !== parsed.secret) {
-    throw new Problem("cluster.enrolment.invalid_token", { status: 401, detail: "the token is malformed, unknown or has a wrong secret" });
+    throw new Problem("cluster.enrollment.invalid_token", { status: 401, detail: "the token is malformed, unknown or has a wrong secret" });
   }
   const now = Date.now();
-  const tokenState = enrolmentState(stored.view, now);
-  if (tokenState === "used") throw new Problem("cluster.enrolment.used", { status: 401, detail: "the token was used already" });
-  if (tokenState === "expired") throw new Problem("cluster.enrolment.expired", { status: 401, detail: "the token expired" });
+  const tokenState = enrollmentState(stored.view, now);
+  if (tokenState === "used") throw new Problem("cluster.enrollment.used", { status: 401, detail: "the token was used already" });
+  if (tokenState === "expired") throw new Problem("cluster.enrollment.expired", { status: 401, detail: "the token expired" });
   const roles = readRoles(body.roles, stored.view.roles, 403);
   if (roles.some((r) => !stored.view.roles.includes(r))) {
-    throw new Problem("cluster.enrolment.roles", { status: 403, detail: "the token does not allow a requested role" });
+    throw new Problem("cluster.enrollment.roles", { status: 403, detail: "the token does not allow a requested role" });
   }
   const majors = Array.isArray(body.majors) ? (body.majors as unknown[]).filter((m): m is number => typeof m === "number") : [1];
   if (!majors.some((m) => CONTROLLER_MAJORS.includes(m))) {
@@ -268,7 +270,7 @@ const enrol = route("post", "/api/v1/nodes/enrol", async (ctx) => {
   }
   const nodeId = st.lastId + 1;
   st.lastId = nodeId;
-  const revision = clusterEvent({ objects: [nodeRef(nodeId)], tables: ["cluster.nodes", "cluster.node_names", "cluster.enrolments"] });
+  const revision = clusterEvent({ objects: [nodeRef(nodeId)], tables: ["cluster.nodes", "cluster.node_names", ENROLLMENTS_TABLE] });
   const node: NodeView = {
     id: nodeId,
     name,
@@ -289,12 +291,12 @@ const enrol = route("post", "/api/v1/nodes/enrol", async (ctx) => {
   st.nodes.set(nodeId, node);
   stored.view = { ...stored.view, used: { node: nodeId, at: iso(now) }, revision };
   appendAudit({
-    action: "cluster.node.enrol",
+    action: "cluster.node.enroll",
     objects: [nodeRef(nodeId)],
     principal: { kind: "system", component: "cluster" } as S["Principal"],
-    context: { enrolment: parsed.id },
+    context: { enrollment: parsed.id },
   });
-  const answer: S["EnrolResponse"] = {
+  const answer: S["EnrollResponse"] = {
     node,
     certificate: MOCK_CA_ROOT_PEM,
     ca_root: MOCK_CA_ROOT_PEM,
@@ -418,4 +420,4 @@ const putNodeRoles = route("put", "/api/v1/nodes/{id}/roles", async (ctx) => {
 });
 // node-roles: end.
 
-export const nodeRoutes: HttpHandler[] = [listNodes, listEnrolments, createEnrolment, deleteEnrolment, enrol, getNode, revokeNode, getNodeRoles, putNodeRoles];
+export const nodeRoutes: HttpHandler[] = [listNodes, listEnrollments, createEnrollment, deleteEnrollment, enroll, getNode, revokeNode, getNodeRoles, putNodeRoles];

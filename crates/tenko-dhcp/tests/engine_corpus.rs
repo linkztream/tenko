@@ -7,7 +7,7 @@
 //! first, the client identifier echoed (RFC 6842), option 82 echoed and last (RFC 3046),
 //! the size within the client's limit.
 //!
-//! The requests are modelled by hand on the option order and the parameter request lists
+//! The requests are modeled by hand on the option order and the parameter request lists
 //! the clients send (Windows, ISC dhclient, systemd-networkd, Android, macOS, PXE
 //! firmware, relays with option 82), with documentation addresses and MACs; the lab capture
 //! of WP7.6 adds captured requests to the same directory. `TENKO_BLESS=1` rewrites the

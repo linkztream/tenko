@@ -2,7 +2,7 @@
 // the MFA policy per role, service accounts and scoped tokens. It lives beside `db` (db.ts
 // keeps users, sessions and tokens; the kind and owner of a service account, the grants and
 // the policies are kept here). The HTTP side is routes-access.ts; docs/access.md describes
-// the behaviour.
+// the behavior.
 //
 // The seed after every reset (none for the first-run setup scenarios, which have no users):
 //

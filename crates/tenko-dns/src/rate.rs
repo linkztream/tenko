@@ -9,7 +9,7 @@
 //!   second's worth and may fall `window` seconds into debt; a response without a token is
 //!   limited, and a limited response is debited too, so a client that keeps asking above
 //!   the rate is answered only by slips until it slows down for the window (BIND's
-//!   behaviour). Every `slip`-th limited response (default 2) is sent as an empty truncated
+//!   behavior). Every `slip`-th limited response (default 2) is sent as an empty truncated
 //!   answer, so that a real client behind a spoofed flood retries over TCP; the others are
 //!   dropped. TCP, DoT and DoH queries are not limited by RRL: their source cannot be
 //!   spoofed.

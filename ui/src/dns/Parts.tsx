@@ -46,7 +46,7 @@ export function DnsProblem(props: { error: unknown }) {
   );
 }
 
-/** A labelled control with its error line (`field-error` with `data-field`) or its help. */
+/** A labeled control with its error line (`field-error` with `data-field`) or its help. */
 export function Field(props: { id: string; label: string; error?: string | undefined; help?: string | undefined; children: JSX.Element }) {
   return (
     <div class="field">

@@ -338,7 +338,7 @@ describe("edit and delete", () => {
     expect(ifMatchOfWrites()).toEqual([`"${revision}"`]);
   });
 
-  it("keeps the list when the deletion is cancelled", async () => {
+  it("keeps the list when the deletion is canceled", async () => {
     open();
     await waitFor(() => expect(keys()).toHaveLength(2));
     await rowAction(row("dns-lists", "Local"), "delete");

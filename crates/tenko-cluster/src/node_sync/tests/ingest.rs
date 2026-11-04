@@ -67,7 +67,7 @@ async fn a_batch_sent_again_to_another_controller_is_a_duplicate_that_its_sink_n
     let first = Controller::start().await;
     let second = first.join(2).await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = first.enrol(dir.path(), "probe-resend").await;
+    let credentials = first.enroll(dir.path(), "probe-resend").await;
 
     // The node delivers a batch to the first controller.
     let running = Running::start(dir.path());
@@ -122,7 +122,7 @@ async fn a_batch_sent_again_to_another_controller_is_a_duplicate_that_its_sink_n
 async fn a_batch_tagged_with_a_run_is_counted_on_its_command_and_kept_once() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-run").await;
+    let credentials = controller.enroll(dir.path(), "probe-run").await;
     let record = CommandRecord::new(FIRST_NODE, SCAN_RUN, Vec::new(), Timestamp::now());
     let id = record.id;
     let mut write = WriteBatch::for_request(&system());
@@ -217,7 +217,7 @@ async fn an_agent_moves_to_the_next_controller_when_one_has_no_quorum_and_keeps_
     let second = first.join(2).await;
     let dir = tempfile::tempdir().expect("dir");
     first
-        .enrol_at(dir.path(), "probe-failover", &[first.addr, second.addr])
+        .enroll_at(dir.path(), "probe-failover", &[first.addr, second.addr])
         .await;
     first.gate.cut_off(true);
 

@@ -26,7 +26,7 @@ keytrap              NS bind.example.test.
 ; Each the other's name server, no glue.
 loop                 NS ns.loop2.example.test.
 loop2                NS ns.loop.example.test.
-; The quirk responders, one misbehaviour each, delegated with glue.
+; The quirk responders, one misbehavior each, delegated with glue.
 noedns.quirk           NS ns.noedns.quirk.example.test.
 ns.noedns.quirk        A  203.0.113.11
 case.quirk           NS ns.case.quirk.example.test.
@@ -39,6 +39,6 @@ spoof.quirk           NS ns.spoof.quirk.example.test.
 ns.spoof.quirk        A  203.0.113.16
 oob.quirk           NS ns.oob.quirk.example.test.
 ns.oob.quirk        A  203.0.113.17
-; WP10.3: a server that denies its empty non-terminals (QNAME minimisation falls back).
+; WP10.3: a server that denies its empty non-terminals (QNAME minimization falls back).
 ent.quirk           NS ns.ent.quirk.example.test.
 ns.ent.quirk        A  203.0.113.21

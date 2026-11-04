@@ -1,7 +1,7 @@
 //! Black-box tests of the node transport with the real binary: a controller (`tenko serve`
 //! with the internal CA and a cluster port on the loopback) and a probe node (`tenko node
-//! enrol`, then `tenko serve --roles probe`) as separate processes, each with its own data
-//! directory. They cover enrolment end to end, a wrong CA fingerprint, single-use tokens,
+//! enroll`, then `tenko serve --roles probe`) as separate processes, each with its own data
+//! directory. They cover enrollment end to end, a wrong CA fingerprint, single-use tokens,
 //! the node process heartbeating and delivering a batch to the reconciler, the buffer
 //! replaying after the controller restarts, revocation closing the connection, and a
 //! controller of another installation being refused. Version negotiation and expiry are
@@ -68,18 +68,18 @@ impl Controller {
         self.node.url()
     }
 
-    /// A new enrolment token for a probe, through `tenko node enrol-token`.
+    /// A new enrollment token for a probe, through `tenko node enroll-token`.
     fn token(&self) -> String {
         let created = self
             .node
-            .client(&["node", "enrol-token", "--roles", "probe", "--json"]);
+            .client(&["node", "enroll-token", "--roles", "probe", "--json"]);
         created.assert_code(0);
         let body = created.json();
         assert_eq!(body["ca_fingerprint"], self.fingerprint.as_str());
         assert!(
             body["command"]
                 .as_str()
-                .is_some_and(|command| command.starts_with("tenko node enrol --controller")),
+                .is_some_and(|command| command.starts_with("tenko node enroll --controller")),
             "{body}"
         );
         body["token"].as_str().expect("a token").to_owned()
@@ -148,13 +148,13 @@ impl Probe {
         command
     }
 
-    /// `tenko node enrol` with the token, the fingerprint and further arguments.
-    fn enrol(&self, controller: &Controller, token: &str, fingerprint: &str) -> Outcome {
+    /// `tenko node enroll` with the token, the fingerprint and further arguments.
+    fn enroll(&self, controller: &Controller, token: &str, fingerprint: &str) -> Outcome {
         let url = controller.url();
         run(
             self.command(&[
                 "node",
-                "enrol",
+                "enroll",
                 "--controller",
                 &url,
                 "--token",
@@ -243,11 +243,11 @@ fn exists(path: &Path) -> bool {
 }
 
 #[test]
-fn a_probe_enrols_connects_and_delivers_observations() {
+fn a_probe_enrolls_connects_and_delivers_observations() {
     let mut controller = Controller::start();
     let probe = Probe::new();
     let token = controller.token();
-    let enrolled = probe.enrol(&controller, &token, &controller.fingerprint);
+    let enrolled = probe.enroll(&controller, &token, &controller.fingerprint);
     enrolled
         .assert_code(0)
         .assert_stdout_contains("enrolled as node 1001 (probe-dmz) with role(s) probe")
@@ -301,7 +301,7 @@ fn a_probe_enrols_connects_and_delivers_observations() {
         || facts(&api, 1001).len() == 2,
         || node.diagnostics(),
     );
-    for action in ["cluster.enrolment.create", "cluster.node.enrol"] {
+    for action in ["cluster.enrollment.create", "cluster.node.enroll"] {
         let audit = api.get(&format!("/audit?action={action}")).expect(200);
         assert!(
             audit["items"]
@@ -325,30 +325,52 @@ fn a_wrong_fingerprint_is_refused_and_a_token_works_once() {
     let probe = Probe::new();
     let token = controller.token();
     let wrong = "ab".repeat(32);
-    let refused = probe.enrol(&controller, &token, &wrong);
+    let refused = probe.enroll(&controller, &token, &wrong);
     refused
         .assert_code(9)
         .assert_stderr_contains("do not trust it");
     assert!(
         !exists(&probe.identity_path()),
-        "a refused enrolment wrote files"
+        "a refused enrollment wrote files"
     );
 
     // The token was not presented, so it still works once.
     probe
-        .enrol(&controller, &token, &controller.fingerprint)
+        .enroll(&controller, &token, &controller.fingerprint)
         .assert_code(0);
     let second = Probe::new();
-    let again = second.enrol(&controller, &token, &controller.fingerprint);
+    let again = second.enroll(&controller, &token, &controller.fingerprint);
     again
         .assert_code(6)
-        .assert_stderr_contains("cluster.enrolment.used");
+        .assert_stderr_contains("cluster.enrollment.used");
     assert!(!exists(&second.identity_path()));
 
-    // An enrolled node does not enrol again by accident.
-    let twice = probe.enrol(&controller, &controller.token(), &controller.fingerprint);
+    // An enrolled node does not enroll again by accident.
+    let twice = probe.enroll(&controller, &controller.token(), &controller.fingerprint);
     twice.assert_code(2).assert_stderr_contains("--force");
     controller.stop();
+}
+
+#[test]
+fn the_token_variable_of_0_0_11_is_still_read() {
+    let probe = Probe::new();
+    let enroll = |old: Option<&str>| {
+        let mut command = probe.command(&["node", "enroll", "--controller", "https://127.0.0.1:9"]);
+        command.env_remove("TENKO_ENROLL_TOKEN");
+        command.env_remove("TENKO_ENROL_TOKEN"); // spelling: alias until 0.0.13
+        if let Some(token) = old {
+            command.env("TENKO_ENROL_TOKEN", token); // spelling: alias until 0.0.13
+        }
+        run(command, None)
+    };
+    enroll(None)
+        .assert_code(2)
+        .assert_stderr_contains("no enrollment token");
+    // The old name is read: the token it carries is parsed (and refused for its form).
+    enroll(Some("not-a-token"))
+        .assert_code(2)
+        .assert_stderr_contains("copy the token exactly");
+    assert!(!exists(&probe.identity_path()));
 }
 
 #[test]
@@ -366,7 +388,7 @@ fn the_buffer_replays_after_the_controller_restarts() {
     let mut controller = Controller::start();
     let probe = Probe::new();
     probe
-        .enrol(&controller, &controller.token(), &controller.fingerprint)
+        .enroll(&controller, &controller.token(), &controller.fingerprint)
         .assert_code(0);
     let mut node = probe.serve();
     node.wait_stderr_line(WAIT, |line| line.contains("connected to the controller"))
@@ -406,7 +428,7 @@ fn revocation_closes_the_connection() {
     let mut controller = Controller::start();
     let probe = Probe::new();
     probe
-        .enrol(&controller, &controller.token(), &controller.fingerprint)
+        .enroll(&controller, &controller.token(), &controller.fingerprint)
         .assert_code(0);
     let mut node = probe.serve();
     let api = controller.api();
@@ -445,7 +467,7 @@ fn a_controller_of_another_installation_is_refused() {
     assert_ne!(home.fingerprint, foreign.fingerprint);
     let probe = Probe::new();
     probe
-        .enrol(&home, &home.token(), &home.fingerprint)
+        .enroll(&home, &home.token(), &home.fingerprint)
         .assert_code(0);
 
     // Point the node at the other controller's cluster port.
@@ -463,7 +485,7 @@ fn a_controller_of_another_installation_is_refused() {
     // before the token is presented.
     let other = Probe::new();
     other
-        .enrol(&foreign, &foreign.token(), &home.fingerprint)
+        .enroll(&foreign, &foreign.token(), &home.fingerprint)
         .assert_code(9);
     home.stop();
     foreign.stop();

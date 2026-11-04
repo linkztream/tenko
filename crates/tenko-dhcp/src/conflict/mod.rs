@@ -478,7 +478,7 @@ impl Conflicts {
     }
 }
 
-/// A 64-bit hash of octets (FNV-1a, then a finaliser), for the fixed tables.
+/// A 64-bit hash of octets (FNV-1a, then a finalizer), for the fixed tables.
 pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in bytes {
@@ -488,7 +488,7 @@ pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
     mix(hash)
 }
 
-/// The finaliser of splitmix64.
+/// The finalizer of splitmix64.
 pub(crate) fn mix(mut value: u64) -> u64 {
     value ^= value >> 30;
     value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);

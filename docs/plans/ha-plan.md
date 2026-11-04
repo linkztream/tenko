@@ -29,13 +29,13 @@ Contents:
 
 A network served by Tenko keeps getting addresses and names when one Tenko node dies, with no address given to two clients and no acknowledged lease lost, and an operator can set it up without knowing the failover draft. Concretely:
 
-- **DHCP.** Two nodes with the `dhcp` role form a pair for a set of scopes, in load balance or hot standby (DHCP-12). Either one alone keeps every client of those scopes served: renewals at once, new clients within seconds, from its own share of each pool, with lease times bounded by the maximum client lead time (MCLT). Neither needs the controllers, the other partner or a quorum to grant a new lease. When the dead partner is shown to be gone the survivor takes over its share; when it comes back the two resynchronise and return to normal without an operator. The chaos test of DHCP-18 kills, partitions and wipes partners under load and finds no duplicate and no lost acknowledged lease.
-- **DNS.** A node with the `dns` role and no controller in its process serves the zones and runs the resolver from its own copy, so a second `dns` node is one enrolment away and the loss of the controllers does not stop name service. Clients reach a surviving `dns` node through the two addresses of option 6 (CON-04), or through a floating address or anycast that the operator's own VRRP or routing daemon moves, driven by a health check Tenko provides (OPS-17).
+- **DHCP.** Two nodes with the `dhcp` role form a pair for a set of scopes, in load balance or hot standby (DHCP-12). Either one alone keeps every client of those scopes served: renewals at once, new clients within seconds, from its own share of each pool, with lease times bounded by the maximum client lead time (MCLT). Neither needs the controllers, the other partner or a quorum to grant a new lease. When the dead partner is shown to be gone the survivor takes over its share; when it comes back the two resynchronize and return to normal without an operator. The chaos test of DHCP-18 kills, partitions and wipes partners under load and finds no duplicate and no lost acknowledged lease.
+- **DNS.** A node with the `dns` role and no controller in its process serves the zones and runs the resolver from its own copy, so a second `dns` node is one enrollment away and the loss of the controllers does not stop name service. Clients reach a surviving `dns` node through the two addresses of option 6 (CON-04), or through a floating address or anycast that the operator's own VRRP or routing daemon moves, driven by a health check Tenko provides (OPS-17).
 - **Two boxes are enough.** A home with two machines gets all of this: one runs every role as today, the other runs `dns` and `dhcp`. An enterprise with three to five controllers runs a pair per site, or one central standby for many branches, and any number of `dns` nodes.
 
 ### 1.2 The gap
 
-The comparison (`docs/comparison.md`, untracked, rows "Failover and HA" and "HA of the DNS and DHCP data plane") rates Tenko 0.0.5 as planned for DHCP failover and partial for data-plane HA, against documented DHCPv4 failover pairs in Infoblox and BlueCat and one-to-one, one-to-many and Microsoft failover in EfficientIP. None of the three documents DHCPv6 failover with lease synchronisation; BlueCat offers a static DHCPv6 split without sync. Tenko's DNS already keeps answering while every controller is down on a node that runs a controller (OPS-02), but a `dns` node without a controller does not exist yet: `tenko serve --roles dns` without `controller` is refused ([dns.md](../dns.md), section 8), and so is `dhcp` alone.
+The comparison (`docs/comparison.md`, untracked, rows "Failover and HA" and "HA of the DNS and DHCP data plane") rates Tenko 0.0.5 as planned for DHCP failover and partial for data-plane HA, against documented DHCPv4 failover pairs in Infoblox and BlueCat and one-to-one, one-to-many and Microsoft failover in EfficientIP. None of the three documents DHCPv6 failover with lease synchronization; BlueCat offers a static DHCPv6 split without sync. Tenko's DNS already keeps answering while every controller is down on a node that runs a controller (OPS-02), but a `dns` node without a controller does not exist yet: `tenko serve --roles dns` without `controller` is refused ([dns.md](../dns.md), section 8), and so is `dhcp` alone.
 
 ### 1.3 Exit criteria
 
@@ -70,7 +70,7 @@ Every check runs on the shipped binary (the musl build on Linux) in the lab of W
 | DHCP-18 Failover chaos test | E60 to E62, E65, E68 | 3, Must (as above) |
 | DHCP-07 Durable lease store | The lease store becomes the serving node's (section 3.1), which is what the row said before P3-Q1; the published copy keeps the backup and the history | 3, delivered |
 | OPS-02 The data plane never depends on the control plane | A `dhcp` node grants new leases with every controller down (E63); a `dns` node without a controller (E66) | 1, delivered for nodes that run a controller |
-| OPS-26 Partition behaviour | "Lease state merges through the DHCP failover protocol (MCLT)" becomes true; the store's refusal path of P3-Q14 is left for a failing disk | 1 (Slice 3), delivered for controllers |
+| OPS-26 Partition behavior | "Lease state merges through the DHCP failover protocol (MCLT)" becomes true; the store's refusal path of P3-Q14 is left for a failing disk | 1 (Slice 3), delivered for controllers |
 | OPS-28 Sites over slow links | The `dns` and `dhcp` subsets consumed, paged snapshots, the node store | 1 (Slice 3), delivered for probes |
 | OPS-17 Health hooks for anycast | `tenko node health` and the readiness route the operator's VRRP or routing daemon reads; examples for keepalived and BIRD | 5, Should |
 | OPS-08 Rolling upgrades with version negotiation | The pair protocol's versioning and the planned pause (E69) | 1, Should, delivered for the cluster protocol |
@@ -140,7 +140,7 @@ The same finding applies to the code as built: P3-Q1's commit before the ACK is 
 
 ### 2.4 (c) Hybrid: the store while it has a quorum, the draft when it has not
 
-The pair serves through the store while the store accepts writes, as (b), and switches to draft-style behaviour with a hash split and a local log when it does not, merging the local log into the store at the heal.
+The pair serves through the store while the store accepts writes, as (b), and switches to draft-style behavior with a hash split and a local log when it does not, merging the local log into the store at the heal.
 
 - For: leases are in the store at once in the common case; no partner channel is needed while healthy, because the store's feed carries each partner's rows to the other.
 - Against: it builds both (b) and (a) and the switch between them, and the switch happens at the worst moment: the path that guards against duplicates is the one that runs only during failures, so it is the least exercised. At home (I5) the second machine is not a voter, so it either commits across the network to the first while healthy (against I3) or is isolated whenever the first is gone, which makes the rare path the only path that matters. Enterprise sites cut off from the controllers are isolated though both partners can still reach each other, so the hybrid needs the direct channel anyway to keep them in step. And it keeps I3 broken in the healthy case on a cluster.
@@ -201,7 +201,7 @@ A pair is configuration in the controllers' store, a row of `dhcp.pairs`, synced
 | `mclt_secs` | 3,600 | 300 to 86,400 (HA-Q7) |
 | `max_response_delay_secs` | 15 | No message from the partner for this long is communications-interrupted |
 | `max_ack_delay_secs` | 10 | A client waiting this long unanswered counts as unacknowledged (section 3.7) |
-| `ack_wait_ms` | 50 | How long a new binding waits for the partner's acknowledgement before its ACK (HA-Q3); 0 turns it off |
+| `ack_wait_ms` | 50 | How long a new binding waits for the partner's acknowledgment before its ACK (HA-Q3); 0 turns it off |
 | `partner_down` | automatic with evidence after 600 s | `manual`, or `automatic` with `after_secs` and `unacked_clients` (10); the profile's values are in section 3.7 |
 
 A node may be in several pairs: one central standby for many branch actives in hot standby is the enterprise's one-to-many case. A change of a pair's split while bindings exist moves only free addresses; while the two nodes run different revisions of the pair's row, each allocates only addresses it owns under both the old and the new split, so a change never needs both to switch at the same instant.
@@ -226,7 +226,7 @@ The pair state is persisted in the node store with its start time, so a restart 
 |---|---|---|---|---|
 | Startup (until contact, at most `max_response_delay_secs`) | None | None | None | |
 | Normal | Its bucket (load balance), all (hot standby, active), none (standby); unicast renewals | Its share | Bindings it is asked for | Acknowledged end plus MCLT |
-| Communications-interrupted | All; a client of the partner's bucket only once it has waited `max_ack_delay_secs` | Its share | Every binding it holds | Acknowledged end plus MCLT, the acknowledgement frozen |
+| Communications-interrupted | All; a client of the partner's bucket only once it has waited `max_ack_delay_secs` | Its share | Every binding it holds | Acknowledged end plus MCLT, the acknowledgment frozen |
 | Partner-down | All | Its share at once; the partner's free share once the MCLT has passed since entering the state; an address the partner had leased once the MCLT has passed since the later of that lease's end and entering the state | Every binding it holds | Acknowledged end plus MCLT |
 | Recover (the sync from the partner) | None | None | None | |
 | Recover-wait (only after a data loss) | None | None | None, until the MCLT has passed since entering recover | |
@@ -243,7 +243,7 @@ The pair state is persisted in the node store with its start time, so a restart 
 
 - A node that tells its partner about a binding sends the potential end it intends to grant at the next renewal (`tstp`: the time of the update plus the scope's lease time); the partner commits it and acknowledges; the node records the acknowledged end (`atsfp`). A binding learned from the partner carries the potential end the partner sent (`tsfp`).
 - Every grant at time `t` ends no later than `max(atsfp, tsfp, t) + MCLT`, in every state; `grant_time` already computes this from `PartnerLimit`. A new client therefore gets the MCLT or the scope's time, whichever is shorter, unless the partner acknowledged within `ack_wait_ms`; its first renewal then gets the full time. DHCPv6 applies the bound to the valid lifetime and keeps the preferred lifetime at most the valid one.
-- The acknowledged ends are written to the node store in batches, not one write per acknowledgement. After a restart a lost record makes the next grant shorter, never longer.
+- The acknowledged ends are written to the node store in batches, not one write per acknowledgment. After a restart a lost record makes the next grant shorter, never longer.
 - With the partner gone, clients renew every half MCLT at most. At the default of an hour that is one renewal per client per half hour, well within what one node handles (M27: about 10,000 renewals per second).
 - The MCLT's safety assumes the partners' clocks agree to well within it (section 3.16).
 
@@ -263,13 +263,13 @@ At home the evidence works in both directions: when the second box dies, the fir
 
 - **The channel.** A `Failover` service of `tenko.cluster.v1` on the cluster port, one bidirectional stream per pair, opened by the primary and accepted only from the node the pair names (section 3.14). A data-plane node with the `dhcp` role in a pair opens the cluster port for it (new: today only controllers listen; 8444/TCP between the partners). The messages, in the draft's terms: `Connect` and `ConnectAck` (versions, the pair row's revision and digest, clocks, states), `State`, `Contact` (the heartbeat, every third of `max_response_delay_secs`), `BindingUpdate` (one or more full rows with their versions and the sender's node-store revision), `BindingAck` (cumulative up to a revision, with per-row refusals: outside the pair's scopes, a conflict, a stale version), `UpdateRequest` (from a cursor), `UpdateRequestAll`, `UpdateDone`, `Paused` and `Shutdown`.
 - **Ordering.** A node sends its binding changes in the order of its node store's revisions; the receiver applies them in that order and commits them to its own node store before it acknowledges, so an acknowledged update is on two disks. Per binding the version decides (section 3.3); a duplicate or an older update changes nothing, so a resend is harmless.
-- **Flow.** A node keeps at most 10,000 unacknowledged updates (proposed); past that it treats the partner as unreachable (communications-interrupted) and resynchronises at the next contact, as Kea's delayed-updates limit does. A slow partner shortens lease times by itself, because the acknowledged ends lag.
+- **Flow.** A node keeps at most 10,000 unacknowledged updates (proposed); past that it treats the partner as unreachable (communications-interrupted) and resynchronizes at the next contact, as Kea's delayed-updates limit does. A slow partner shortens lease times by itself, because the acknowledged ends lag.
 - **Resync.** Each node keeps the partner's last applied revision as a cursor. At contact it asks for the changes since; the partner reads them from its node store's journal as node sync reads `sys.journal`, and when the journal no longer covers the cursor it sends every binding of the pair's scopes, paged. `UpdateDone` ends the resync.
 - **Pairing a node that served alone.** When a scope moves from a node to a pair, the node's bindings of the scope are sent to the new partner before the pair leaves startup.
 
 ### 3.9 Publication to the controllers
 
-- A task on each `dhcp` node reads its node store's journal from its publication cursor and publishes the changed lease rows and history rows in batches (every 100 ms or 1,000 rows, proposed): on a controller node into the controllers' store in the same process, on a data-plane node through a new call `Leases.Publish` to any controller, with the node's store epoch and the revision range. The controllers merge each row by its binding version, keep their own fields, write the IPAM observation fact of WP8.1 in the same batch (the hook moves here from the committer), and store the cursor in `dhcp.publish_cursors` in the same write, so a resend is recognised as `Observations.Ingest` recognises one.
+- A task on each `dhcp` node reads its node store's journal from its publication cursor and publishes the changed lease rows and history rows in batches (every 100 ms or 1,000 rows, proposed): on a controller node into the controllers' store in the same process, on a data-plane node through a new call `Leases.Publish` to any controller, with the node's store epoch and the revision range. The controllers merge each row by its binding version, keep their own fields, write the IPAM observation fact of WP8.1 in the same batch (the hook moves here from the committer), and store the cursor in `dhcp.publish_cursors` in the same write, so a resend is recognized as `Observations.Ingest` recognizes one.
 - While no controller can write, the publications wait in the node store; the node's history rows are removed only after their publication, so nothing is lost (E63). `tenko_dhcp_publish_lag_seconds` and the finding `dhcp.leases.unpublished` (more than 5 minutes behind while a controller is reachable) show it.
 - The API's lease reads keep reading the published copy; `dhcp.leases.list` on a node reads the node's own table, for the newest view.
 - If M64 shows the publication load too high on a large installation, renewals that only move `ends` are published at most every 15 minutes per binding, the rule WP8.1 already applies to observation refreshes.
@@ -314,7 +314,7 @@ A pair with Windows is not possible (CON-05), so during a migration Tenko and Wi
 | Gauge | `tenko_dhcp_pair_state{pair,state}` | 1 for the node's current state |
 | Counter | `tenko_dhcp_pair_updates_total{pair,direction,outcome}` | Binding updates sent and received, acknowledged, refused |
 | Gauge | `tenko_dhcp_pair_unacked_updates{pair}` | Updates sent and not yet acknowledged |
-| Histogram | `tenko_dhcp_pair_update_lag_seconds{pair}` | From the local commit to the partner's acknowledgement |
+| Histogram | `tenko_dhcp_pair_update_lag_seconds{pair}` | From the local commit to the partner's acknowledgment |
 | Counter | `tenko_dhcp_pair_mclt_capped_total{pair}` | Grants shortened by the MCLT |
 | Counter | `tenko_dhcp_pair_unacked_clients_total{pair}` | Clients of the partner's share that waited past `max_ack_delay_secs` |
 | Counter | `tenko_dhcp_pair_conflicts_total{pair}` | Bindings resolved in potential-conflict |
@@ -333,7 +333,7 @@ The UI: a **Pairs** page under DHCP with one card per pair showing both nodes si
 
 ### 3.17 The operator's story
 
-**Two boxes at home.** Box A runs every role, as today. Box B is installed with the same installer and enrolled with one token as a node with `dns` and `dhcp`, with the command the UI shows. On DHCP, Pairs, "Pair with a node": choose B, keep load balance 50/50 and the MCLT of an hour, choose "every scope of this node". The page then lists the two changes outside Tenko: on the gateway, add B's address as a second DHCP relay target for each network; in the scopes' option 6, add B's address (one click). When B dies, A serves everyone from its half at once and takes B's half after ten minutes, on its own witness. When A dies, B serves DNS from its copy and DHCP from its half at once, takes A's half after ten minutes on the evidence of A's waiting clients, and has no UI and accepts no changes until A is back; `tenko node status` on B shows the state. When either returns, the pair resynchronises and the publications drain into A's store without an operator. A third box that runs a controller turns this into a cluster of controllers (OPS-03), and the pair is unchanged.
+**Two boxes at home.** Box A runs every role, as today. Box B is installed with the same installer and enrolled with one token as a node with `dns` and `dhcp`, with the command the UI shows. On DHCP, Pairs, "Pair with a node": choose B, keep load balance 50/50 and the MCLT of an hour, choose "every scope of this node". The page then lists the two changes outside Tenko: on the gateway, add B's address as a second DHCP relay target for each network; in the scopes' option 6, add B's address (one click). When B dies, A serves everyone from its half at once and takes B's half after ten minutes, on its own witness. When A dies, B serves DNS from its copy and DHCP from its half at once, takes A's half after ten minutes on the evidence of A's waiting clients, and has no UI and accepts no changes until A is back; `tenko node status` on B shows the state. When either returns, the pair resynchronizes and the publications drain into A's store without an operator. A third box that runs a controller turns this into a cluster of controllers (OPS-03), and the pair is unchanged.
 
 **N nodes in an enterprise.** Three to five controllers in one place; at each site a pair of `dhcp` nodes in load balance, or one local active per branch with a central standby in hot standby (one node in many pairs); `dns` nodes per site in option 6 or behind anycast with the health hook. A site cut off from the controllers keeps every DHCP and DNS function except changes, DDNS and the refresh of signatures, which have 14 days of headroom by default. A dead node is replaced by enrolling a new one and naming it in the pair; it recovers every binding from the survivor.
 
@@ -364,7 +364,7 @@ The DHCP builders of Phase 3 own `crates/tenko-dhcp/**` until WP9.5 merges; this
 #### WP12.3 The pair protocol, DHCPv4 (10 builder-days)
 
 - **Requirements:** DHCP-12, DHCP-18, DHCP-06, OPS-08, OPS-09.
-- **Owns:** `tenko_dhcp::pair`: the `Failover` service and its stream, the partner check, the state machine of section 3.5 persisted in the node store, binding updates and acknowledgements with the ordering and flow rules of section 3.8, the resync from the journal and in full, `ack_wait_ms`, `grant_time` fed from the row, ownership by state, the evidence rules and partner-down, potential-conflict and its resolution, paused and shutdown, the clock check, the conflict probe in partner-down; the simulator completed with the invariants of section 2.1 (E68); the fuzz target `dhcp_pair_messages`.
+- **Owns:** `tenko_dhcp::pair`: the `Failover` service and its stream, the partner check, the state machine of section 3.5 persisted in the node store, binding updates and acknowledgments with the ordering and flow rules of section 3.8, the resync from the journal and in full, `ack_wait_ms`, `grant_time` fed from the row, ownership by state, the evidence rules and partner-down, potential-conflict and its resolution, paused and shutdown, the clock check, the conflict probe in partner-down; the simulator completed with the invariants of section 2.1 (E68); the fuzz target `dhcp_pair_messages`.
 - **Acceptance:** E67, E68, E69; the cluster harness's relays between two `dhcp` nodes cut, delay and drop the pair link in one test per state transition; M60, M61 and M63 on loopback as stand-ins.
 
 #### WP12.4 DHCPv6 in the pair (4 builder-days)
@@ -465,7 +465,7 @@ Each question lists its options, the trade-offs and the recommendation. The docu
 - **Decided (2026-10-25): (a), the serving node's store, with (b) as the fallback if M62 misses its threshold.**
 
 **HA-Q3. When does the partner hear of a binding?**
-- Options: (a) after the ACK (the draft's lazy update), bounded by the MCLT; (b) before every ACK (Kea): the partner's acknowledgement is part of the answer, and an unreachable partner stops answers until partner-down; (c) lazy, but a new binding waits up to `ack_wait_ms` (50 ms) for the partner's acknowledgement in normal, so new clients get the full lease time and their binding is on two disks; renewals never wait.
+- Options: (a) after the ACK (the draft's lazy update), bounded by the MCLT; (b) before every ACK (Kea): the partner's acknowledgment is part of the answer, and an unreachable partner stops answers until partner-down; (c) lazy, but a new binding waits up to `ack_wait_ms` (50 ms) for the partner's acknowledgment in normal, so new clients get the full lease time and their binding is on two disks; renewals never wait.
 - Trade-offs: (a) keeps the ACK's latency independent of the partner and the link, and its first leases are short (the MCLT). (b) is the strongest durability, but doubles latency on every renewal, makes partner-down detection the only guard of availability, and stops new and renewing clients during the detection window. (c) costs a LAN round trip on new bindings only, falls back to (a) by itself when the partner is slow or gone, and gives I2 against disk loss for every binding the partner acknowledged.
 - **Recommendation: (c).**
 - **Decided (2026-10-25): (c), lazy with a bounded wait for new bindings.**
@@ -496,13 +496,13 @@ Each question lists its options, the trade-offs and the recommendation. The docu
 
 **HA-Q8. How is the pair channel secured?**
 - Options: (a) the cluster port's mutual TLS between enrolled nodes, accepted only from the named partner, with no shared secret; (b) the draft's TCP 647 with an HMAC shared secret from the vault (purpose `dhcp.failover`); (c) both.
-- Trade-offs: (a) reuses the transport, enrolment, revocation and version negotiation every node has, and adds no secret to distribute and rotate; a compromised node can lie only to its partner about the pair's scopes, which a secret would not prevent, because the compromised node holds it. (b) is a second transport and a secret with its own distribution, needed only for a peer that does not exist. (c) costs (b) and adds nothing (a) lacks.
+- Trade-offs: (a) reuses the transport, enrollment, revocation and version negotiation every node has, and adds no secret to distribute and rotate; a compromised node can lie only to its partner about the pair's scopes, which a secret would not prevent, because the compromised node holds it. (b) is a second transport and a secret with its own distribution, needed only for a peer that does not exist. (c) costs (b) and adds nothing (a) lacks.
 - **Recommendation: (a)**; the purpose `dhcp.failover` is withdrawn and IAM-16 and NEVER-01 are edited.
 - **Decided (2026-10-25): (a), the cluster port's mutual TLS with no shared secret.**
 
 **HA-Q9. DHCPv6: RFC 8156 or not?**
 - Options: (a) RFC 8156 on the wire (TCP 647, its framing over bulk leasequery); (b) RFC 8156's model (states, MCLT, independent allocation for addresses, a fixed split for prefixes) on Tenko's pair channel; (c) a static split with no lease sync (RFC 6853), as BlueCat does.
-- Trade-offs: (a) interoperates with no existing server (Kea, ISC dhcpd and Windows do not implement it) and adds a second protocol beside DHCPv4's. (b) gives RFC 8156's behaviour over one channel. (c) is simple, but every client of a dead server renumbers at its rebind.
+- Trade-offs: (a) interoperates with no existing server (Kea, ISC dhcpd and Windows do not implement it) and adds a second protocol beside DHCPv4's. (b) gives RFC 8156's behavior over one channel. (c) is simple, but every client of a dead server renumbers at its rebind.
 - **Recommendation: (b).** CONFORMANCE.md's RFC 8156 row becomes "Partial: the model, not the wire protocol, deliberately".
 - **Decided (2026-10-25): (b), RFC 8156's model on Tenko's pair channel.**
 
@@ -570,7 +570,7 @@ Changes to the lead's files, applied on 2026-10-25 after the decisions; no new r
 |---|---|---|
 | R100 | The state machine's rare paths (recover after a wipe, conflict resolution, a partition during resync) hold bugs that only show in production | The simulator with 10,000 random schedules per CI run and a growing seed corpus (E68) before any lab run; the lead reads WP12.3 against section 3.5; every transition has a harness test with real processes |
 | R101 | A partner declared down while it still serves gives addresses twice after the MCLT | Automatic partner-down only on evidence (section 3.7, E61); the probe of the partner's share in partner-down; potential-conflict finds and shows what slips through (I6) |
-| R102 | Clock skew between partners breaks the MCLT's arithmetic | Times in every message, the warning at 5 s, no normal state above 60 s (E67); time synchronisation is already a stated dependency (OPS-09) |
+| R102 | Clock skew between partners breaks the MCLT's arithmetic | Times in every message, the warning at 5 s, no normal state above 60 s (E67); time synchronization is already a stated dependency (OPS-09) |
 | R103 | The second write per lease (the publication) costs the single node its measured rate | Batched publication; M62's threshold; HA-Q2's fallback |
 | R104 | The format step that moves leases into the node store fails half-way on a production node | One migration step inside OPS-23's procedure after its snapshot; `tenko upgrade check` runs it against a copy; the published copy stays as the source of a second attempt |
 | R105 | Two nodes serve one scope outside a pair through a placement mistake | The configuration service refuses it (`dhcp.scope.placement`); a node refuses to serve a scope not placed on it or on its pair |
@@ -579,7 +579,7 @@ Changes to the lead's files, applied on 2026-10-25 after the decisions; no new r
 | R108 | Short first leases (the MCLT) when the partner acknowledges slowly surprise operators | `ack_wait_ms` gives full leases on a quick link (HA-Q3); `tenko_dhcp_pair_mclt_capped_total` and the lease view show the reason |
 | R109 | Paged snapshots and the node store change node sync, which probes depend on | The probe's subset stays in `state.cbor`; the change is per role; the cluster lab's probe scenarios run in WP12.1's gate |
 | R110 | DNS updates and DDNS stop while no controller has a quorum, which a branch notices | Documented (HA-Q13); the records of existing leases stay; OPS-27 is the later answer for sites that must keep writing |
-| R111 | A data-plane node holds TSIG secrets in memory only and cannot fetch them after a restart without a controller | The behaviour of the probe's SNMP secrets (no copy at rest); transfers and updates that need the key wait for a controller; serving needs no key |
+| R111 | A data-plane node holds TSIG secrets in memory only and cannot fetch them after a restart without a controller | The behavior of the probe's SNMP secrets (no copy at rest); transfers and updates that need the key wait for a controller; serving needs no key |
 | R112 | WP12.1 and a recursion builder both touch the DNS serve wiring | The lead orders the queue; WP12.1 starts when no recursion package holds `crates/tenko-dns/src/serve` or `crates/tenko/src/serve/dns.rs` |
 | R113 | The evidence rule's delayed answer to the partner's clients (`max_ack_delay_secs`) slows the take-over for new clients | It applies only in communications-interrupted and only to the partner's bucket; M60 measures it; the controllers' witness makes it unnecessary where a controller is reachable (proposed refinement: no delay once the witness has spoken) |
 | R114 | Clients that send `secs` as zero or reset it make the unacknowledged count wrong | The retransmission count as the second signal; the controllers' witness as the first |
@@ -593,7 +593,7 @@ Changes to the lead's files, applied on 2026-10-25 after the decisions; no new r
 | Before WP12.0 | Read the plan; answer HA-Q1 to HA-Q15 (done on 2026-10-25) |
 | Before WP12.7 | A second node VM on the lab host (a clone of the node VM: 4 vCPU, 4 GiB, its own disk on SSD), on the same bridge; the lead gives the commands. perfdhcp is already on the load VM |
 | Before E64 | Check whether the reference gateway can relay each network to two DHCP servers (two relay targets per network); if it cannot, the lab uses the floating-address fallback and the home stays on hot standby |
-| E64 at home (optional, owner-run) | Enrol the second box as in section 3.17, pair the scopes, add the second relay target and the second option 6 address, then pull each box's power once on a quiet evening and watch the Pairs page and a client |
+| E64 at home (optional, owner-run) | Enroll the second box as in section 3.17, pair the scopes, add the second relay target and the second option 6 address, then pull each box's power once on a quiet evening and watch the Pairs page and a client |
 | During the slice | Nothing else: no external account or service is needed |
 
 ## 11. Documents this slice writes

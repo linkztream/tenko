@@ -1,4 +1,4 @@
-//! Behavioural tests of both codecs through the shared hot path. Responses
+//! Behavioral tests of both codecs through the shared hot path. Responses
 //! are decoded with an independent decoder (hickory's full `Message`
 //! decoder, or `domain` when hickory is not compiled in) and with the raw
 //! header helpers.
@@ -153,14 +153,14 @@ fn check_truncation<C: Codec>() {
 
 #[cfg(feature = "backend-domain")]
 #[test]
-fn domain_behaviour() {
+fn domain_behavior() {
     check_all::<DomainCodec>();
     check_truncation::<DomainCodec>();
 }
 
 #[cfg(feature = "backend-hickory")]
 #[test]
-fn hickory_behaviour() {
+fn hickory_behavior() {
     check_all::<HickoryCodec>();
     check_truncation::<HickoryCodec>();
 }

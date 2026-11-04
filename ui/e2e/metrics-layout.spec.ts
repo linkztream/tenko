@@ -109,7 +109,7 @@ async function checkLayout(page: Page, testInfo: TestInfo, width: number): Promi
   for (const [i, a] of tiles.entries()) for (const b of tiles.slice(i + 1)) expect(overlaps(a, b), `${a.name} overlaps ${b.name}`).toBe(false);
 
   // Each group fills its rows: the same number of tiles in every row, equally wide, from the left
-  // edge of the grid to its right edge with one gap between neighbours, and one gap between rows.
+  // edge of the grid to its right edge with one gap between neighbors, and one gap between rows.
   const gap = await page.locator(".metrics-grid").evaluate((el) => parseFloat(getComputedStyle(el).columnGap));
   const groups = [
     { names: CONTROLLER, columns: 4 },

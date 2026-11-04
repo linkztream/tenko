@@ -524,7 +524,7 @@ fn behind_the_proxy_plain_dns_and_http_answer_with_the_client_address() {
         .with_args(&["--roles", "controller,dns"])
         .with_config(&ports.config(
             "behind_proxy = true\nproxy_protocol = true\n[dns.log]\nenabled = true\n\
-             pseudonymise = false\n",
+             pseudonymize = false\n",
         ));
     let mut server = start(&mut node, &ports);
     let api = zone(&node, &server);

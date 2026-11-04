@@ -8,7 +8,7 @@
 # overrides; such a run is marked not publishable). Windows runs use the release build.
 #
 # Every figure is a single-node figure (plan section 2.10): one server process, the load
-# generator on the same host. Loopback numbers are upper bounds and are labelled so.
+# generator on the same host. Loopback numbers are upper bounds and are labeled so.
 #
 # For every combination of transport, metrics switch and worker count the script starts the
 # server, waits until it answers, runs the load generator for one measured window while it

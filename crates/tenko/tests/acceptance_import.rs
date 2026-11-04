@@ -13,7 +13,7 @@
 //!    CSVs imported once more preview zero changes.
 //!
 //! The credential columns become operator secrets, which needs a session of password
-//! strength or more (IAM-07): the administrator enrols an authenticator app and signs in
+//! strength or more (IAM-07): the administrator enrolls an authenticator app and signs in
 //! with PIN and TOTP before the import.
 
 mod serve_support;
@@ -90,8 +90,8 @@ fn upload_and_preview(api: &Api, files: &[(&str, &[u8])]) -> (String, Value) {
     (id, preview)
 }
 
-/// The warning codes of a preview that need an acknowledgement.
-fn acknowledgements(preview: &Value) -> Vec<Value> {
+/// The warning codes of a preview that need an acknowledgment.
+fn acknowledgments(preview: &Value) -> Vec<Value> {
     preview["warnings"]
         .as_array()
         .into_iter()
@@ -104,7 +104,7 @@ fn acknowledgements(preview: &Value) -> Vec<Value> {
         .collect()
 }
 
-/// Applies an import with the acknowledgements its preview asks for and waits for the job.
+/// Applies an import with the acknowledgments its preview asks for and waits for the job.
 #[track_caller]
 fn apply(api: &Api, id: &str, preview: &Value) -> Value {
     assert_eq!(
@@ -115,7 +115,7 @@ fn apply(api: &Api, id: &str, preview: &Value) -> Value {
     let accepted = api
         .post(
             &format!("/imports/{id}/apply"),
-            &json!({ "acknowledge": acknowledgements(preview) }),
+            &json!({ "acknowledge": acknowledgments(preview) }),
         )
         .expect(202);
     let job = accepted["job_id"].as_str().expect("a job id").to_owned();

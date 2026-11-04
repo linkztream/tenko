@@ -278,13 +278,13 @@ fn the_dnstap_segment_decodes_with_independent_readers() {
 }
 
 #[test]
-fn pseudonymised_and_hidden_clients_never_reach_the_file() {
+fn pseudonymized_and_hidden_clients_never_reach_the_file() {
     let dir = TempDir::new();
     let bytes = write(dir.path(), ClientField::Pseudonym);
     for frame in read_stream(&bytes).frames {
         let tap = Dnstap::decode(frame.as_slice()).expect("protobuf");
         let message = tap.message.expect("message");
-        let address = message.query_address.expect("a pseudonymised address");
+        let address = message.query_address.expect("a pseudonymized address");
         assert!(address.len() == 4 || address.len() == 16);
         for query in &QUERIES {
             let octets = match query.client {

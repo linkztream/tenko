@@ -114,7 +114,7 @@ function parseIndex(raw: string): number {
   return index;
 }
 
-/** Cancelling and completing steps needs the `execute` right on jobs: admin or operator. */
+/** Canceling and completing steps needs the `execute` right on jobs: admin or operator. */
 function requireExecute(roles: readonly string[]): void {
   if (!roles.includes("admin") && !roles.includes("operator")) {
     fail("auth.forbidden", { detail: "this needs the admin or operator role" });

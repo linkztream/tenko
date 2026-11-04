@@ -1,6 +1,6 @@
 //! SNMPv3 polling of switches (SCAN-05).
 //!
-//! A switch knows which MAC address sits behind which port, which neighbours it has and
+//! A switch knows which MAC address sits behind which port, which neighbors it has and
 //! which addresses it has resolved. [`poll`] reads those tables over SNMPv3 with the
 //! user-based security model and returns them as one [`DeviceTables`]; nothing is scanned.
 //!
@@ -310,7 +310,7 @@ pub struct Interface {
     pub mac: Option<MacAddr>,
 }
 
-/// An entry of the ARP or neighbour table of the device.
+/// An entry of the ARP or neighbor table of the device.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ArpEntry {
     /// The interface the entry was learned on.
@@ -335,19 +335,19 @@ pub struct FdbEntry {
     pub if_index: Option<u32>,
 }
 
-/// A neighbour announced through LLDP.
+/// A neighbor announced through LLDP.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LldpNeighbour {
+pub struct LldpNeighbor {
     /// The local port: the port id of `lldpLocPortTable`, or its description when the
     /// id is a MAC or network address.
     pub local_port: Option<String>,
-    /// The chassis id of the neighbour, formatted by its subtype.
+    /// The chassis id of the neighbor, formatted by its subtype.
     pub remote_chassis: Option<String>,
-    /// The port id of the neighbour, formatted by its subtype.
+    /// The port id of the neighbor, formatted by its subtype.
     pub remote_port: Option<String>,
-    /// The port description of the neighbour.
+    /// The port description of the neighbor.
     pub remote_port_desc: Option<String>,
-    /// The system name of the neighbour.
+    /// The system name of the neighbor.
     pub remote_sys_name: Option<String>,
 }
 
@@ -362,12 +362,12 @@ pub struct DeviceTables {
     pub sys_object_id: Option<String>,
     /// The interfaces by `ifIndex`.
     pub interfaces: BTreeMap<u32, Interface>,
-    /// The ARP and neighbour entries, sorted, without duplicates.
+    /// The ARP and neighbor entries, sorted, without duplicates.
     pub arp: Vec<ArpEntry>,
     /// The forwarding database, sorted, without duplicates.
     pub fdb: Vec<FdbEntry>,
-    /// The LLDP neighbours, in table order.
-    pub lldp: Vec<LldpNeighbour>,
+    /// The LLDP neighbors, in table order.
+    pub lldp: Vec<LldpNeighbor>,
     /// A walk hit [`PollOptions::max_rows`] and some table is cut.
     pub truncated: bool,
     /// One line for every table that could not be read completely.
@@ -384,7 +384,7 @@ pub struct DeviceTables {
 /// `scan.config` for unusable credentials; `scan.snmp.timeout` when the device does not
 /// answer discovery; `scan.snmp.auth` when it refuses the user (also later, mid-poll);
 /// `scan.snmp.protocol` for answers that break the protocol; `scan.io` for socket errors;
-/// `scan.cancelled` when `cancel` fires.
+/// `scan.canceled` when `cancel` fires.
 pub async fn poll(
     target: SocketAddr,
     credentials: &Credentials,

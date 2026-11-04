@@ -349,10 +349,10 @@ impl DnssecValidator {
         )
     }
 
-    /// The state of a CNAME a DNAME synthesised (RFC 6672 section 3.4): it carries no
+    /// The state of a CNAME a DNAME synthesized (RFC 6672 section 3.4): it carries no
     /// signature of its own and takes the DNAME's state, when a DNAME at a strict
     /// ancestor of its owner substitutes to its target.
-    fn synthesised(
+    fn synthesized(
         cname: &RrSet<'_>,
         judged: &[(usize, Judged)],
         sets: &[RrSet<'_>],
@@ -448,7 +448,7 @@ impl DnssecValidator {
         }
     }
 
-    /// The whole judgement of one answer.
+    /// The whole judgment of one answer.
     async fn run(&self, answer: &[u8], ctx: &ChainContext<'_>) -> Validation {
         let Some(parsed) = message::parse(answer) else {
             return Validation::UNVALIDATED;
@@ -517,7 +517,7 @@ impl DnssecValidator {
         }
         for index in deferred_cnames {
             let set = &sets[index];
-            let state = match Self::synthesised(set, &judged, &sets) {
+            let state = match Self::synthesized(set, &judged, &sets) {
                 Some(state) => state,
                 None => self.judge(walker, set).await?,
             };
@@ -790,10 +790,10 @@ pub fn sentinel_answers(sentinel: Sentinel, tags: &[u16]) -> bool {
     }
 }
 
-/// The name of RFC 8145's trust anchor signalling query (section 4.1): `_ta-<tag>[-<tag>]`
+/// The name of RFC 8145's trust anchor signaling query (section 4.1): `_ta-<tag>[-<tag>]`
 /// with the tags in ascending order as four hexadecimal digits each, at the root; `None`
 /// without a tag.
-pub fn signalling_name(tags: &[u16]) -> Option<DnsName> {
+pub fn signaling_name(tags: &[u16]) -> Option<DnsName> {
     if tags.is_empty() {
         return None;
     }
@@ -804,8 +804,8 @@ pub fn signalling_name(tags: &[u16]) -> Option<DnsName> {
     DnsName::new(&format!("_ta-{}", label.join("-"))).ok()
 }
 
-/// The age at which the signalling query is sent again: once a day.
-pub const SIGNALLING_PERIOD: Duration = Duration::from_secs(86_400);
+/// The age at which the signaling query is sent again: once a day.
+pub const SIGNALING_PERIOD: Duration = Duration::from_secs(86_400);
 
 /// The current time as the validator's context wants it.
 pub fn now() -> SystemTime {

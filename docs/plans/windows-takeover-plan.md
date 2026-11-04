@@ -148,7 +148,7 @@ The mapping lives in the script because the exporter is the adapter (WT-Q2): the
 
 Every 60 s (WT-Q2): the scopes with their pools, exclusions, lease time, state (active or inactive) and DNS settings; the options at server, scope and reservation level with the custom definitions; the reservations; the leases in the states active, active reservation and declined. Expired leases are left out. Policies, filters and superscopes go to the loss report, as do failover relationships; the server's DNS credential is never read (`Get-DhcpServerDnsCredential` is not called).
 
-The loss report of the latest snapshot is shown on the mirror card. An entry is acknowledged per scope (`POST /migrate/mirrors/{id}/losses/ack` with the entries' keys, by an administrator's interactive session); an acknowledgement holds while the entry recurs unchanged and lapses when it changes. The prepare and the takeover refuse a scope with an unacknowledged entry (MIGRATION.md: nothing is dropped silently).
+The loss report of the latest snapshot is shown on the mirror card. An entry is acknowledged per scope (`POST /migrate/mirrors/{id}/losses/ack` with the entries' keys, by an administrator's interactive session); an acknowledgment holds while the entry recurs unchanged and lapses when it changes. The prepare and the takeover refuse a scope with an unacknowledged entry (MIGRATION.md: nothing is dropped silently).
 
 ### 2.4 Storage and freshness
 
@@ -280,7 +280,7 @@ One node with the `controller`, `dns` and `dhcp` roles. Cluster-aware now: the m
 
 - `ir`: `MirrorSnapshot { format: u16 (1), sequence: u64, taken_at: Timestamp, source: MirrorOrigin { kind: SourceKindLabel, server: String, adapter: String, adapter_version: String }, dhcp: DhcpIr, losses: LossReport }` with `deny_unknown_fields` on the envelope and the bounds of section 2.1; `SourceLocation` used as `{sheet: <cmdlet>, column: <object key>}` by the exporter. `IrLease`, `IrScope` and `IrReservation` stay as they are; WP14.0 checks that every field the exporter fills validates (a Windows host name with uppercase letters, an option value's text form) and adds a field only by the rule of additive serde defaults.
 - `migrate` (new module): `Mirror { id, name, kind, enabled, token: ApiTokenId, account: UserId, interval_secs, last_sequence, last_hash, last_push, last_change, created, updated }`; `Takeover { id, mirror, scope, sequence, state { Done, RolledBack, Reverted }, counts, adopted_leases, adopted_names, frozen_names, skipped: Vec<(Item, Code)>, before: Vec<RrSetImage>, job, at, by }`; `LossAck { mirror, key, entry_hash, by, at }`.
-- `auth`: `TokenScope::Mirror(MirrorId)`, serialised `mirror:<id>`; `TokenScope` loses `Copy` or the mirror id moves to a field of its own (WP14.0 chooses; the wire form `mirror:<id>` is the contract).
+- `auth`: `TokenScope::Mirror(MirrorId)`, serialized `mirror:<id>`; `TokenScope` loses `Copy` or the mirror id moves to a field of its own (WP14.0 chooses; the wire form `mirror:<id>` is the contract).
 - `dhcp`: `Lease.adopted: Option<Adopted { mirror: MirrorId, sequence: u64, guessed: bool }>`, a cold field with a serde default and a presence bit (no data format change, as `granted` in ADR 0031); `PendingChange` gains the rekey kind of section 2.8.
 - `dns`: the flip and release request types; no new `Origin` value (`Transfer` and `Ad` exist).
 - Tables: `migrate.mirrors`, `migrate.snapshots`, `migrate.takeovers`, `migrate.loss_acks`. WP14.0 decides whether the namespace, the object kinds and the audit actions are values an older binary cannot decode and therefore need data format 6, as Phase 3's namespace needed 4 ([dhcp-contracts.md](../dhcp-contracts.md) section 13); the upgrade path is then an empty migration with its fixture.
@@ -296,7 +296,7 @@ One node with the `controller`, `dns` and `dhcp` roles. Cluster-aware now: the m
 
 ### 3.3 The UI (the routes stubbed by WP14.0)
 
-The connectors page lists mirrors beside the plugin instances, each with the card of section 2.4. A mirror's page has three tabs: **Scopes** (each mirrored scope with its Tenko counterpart, the diff, and the Prepare, Take over and Revert actions with their states), **Losses** (the entries with their acknowledgement) and **Settings** (name, token, the fingerprint and the two PowerShell commands to copy, deletion). A zone's page gets **Flip** (for a secondary, with the SOA and NS form) and **Release frozen names** (for a primary that has some). The takeover's job page shows the task of step 2 with the command to copy and the wait for the mirror.
+The connectors page lists mirrors beside the plugin instances, each with the card of section 2.4. A mirror's page has three tabs: **Scopes** (each mirrored scope with its Tenko counterpart, the diff, and the Prepare, Take over and Revert actions with their states), **Losses** (the entries with their acknowledgment) and **Settings** (name, token, the fingerprint and the two PowerShell commands to copy, deletion). A zone's page gets **Flip** (for a secondary, with the SOA and NS form) and **Release frozen names** (for a primary that has some). The takeover's job page shows the task of step 2 with the command to copy and the wait for the mirror.
 
 ### 3.4 Shared fixtures
 
@@ -321,16 +321,16 @@ Every package below touches `crates/tenko-core/src/{ir,migrate}*`, `crates/tenko
 - **Requirements:** MIG-01, MIG-04, MIG-08 (the shared types).
 - **Owns:** section 3 in code: the types and their validation with property tests, the tables, the token scope, the lease field, the route stubs answering 501, codes, audit actions, metric families, the UI route stubs; the fixtures of section 3.4 (the PowerShell fixtures with WP14.1's builder); the data format decision; the two ADRs as Proposed (the mirrored source; the flip and the adoption rule).
 - **Depends on:** the owner's decisions (taken for WT-Q1 to WT-Q7; WT-Q8 to WT-Q12 before WP14.2 starts).
-- **Acceptance:** the workspace builds; the fixture `snapshot.json` deserialises into `MirrorSnapshot` and round-trips; a lease row with and without `adopted` decodes in both directions; the trace regenerated.
+- **Acceptance:** the workspace builds; the fixture `snapshot.json` deserializes into `MirrorSnapshot` and round-trips; a lease row with and without `adopted` decodes in both directions; the trace regenerated.
 - **Risk:** R144, R148.
 
 #### WP14.1 The exporter, the mirror API and the UI (13 builder-days, two builders in parallel)
 
 - **Requirements:** MIG-01, MIG-08, IAM-10.
 - **Owns, the script line (5 days):** `deploy/windows/mirror/**` (the exporter, the install script, the README, the Pester suites and fixtures, the PSScriptAnalyzer rule file), the release workflow's lines that ship the two scripts with their digests (with the lead).
-- **Owns, the server line (8 days):** `crates/tenko-migrate/src/mirror/**` (the push, its validation, bounds, sequence and hash, freshness, losses and acknowledgements, the diff), `crates/tenko-api/src/routes/migrate.rs` (the mirror routes), the token scope's check in `tenko-auth`, the CLI's `migrate mirror` and `migrate diff`, `ui/src/migrate/**` (the cards, the mirror page's Losses and Settings tabs and the diff of the Scopes tab), [MIGRATION.md](../MIGRATION.md) section "Windows DHCP" with the WP14.3 builder.
+- **Owns, the server line (8 days):** `crates/tenko-migrate/src/mirror/**` (the push, its validation, bounds, sequence and hash, freshness, losses and acknowledgments, the diff), `crates/tenko-api/src/routes/migrate.rs` (the mirror routes), the token scope's check in `tenko-auth`, the CLI's `migrate mirror` and `migrate diff`, `ui/src/migrate/**` (the cards, the mirror page's Losses and Settings tabs and the diff of the Scopes tab), [MIGRATION.md](../MIGRATION.md) section "Windows DHCP" with the WP14.3 builder.
 - **Depends on:** WP14.0.
-- **Content:** 1. the cmdlet reads and the mapping onto the IR; 2. the loss entries; 3. the account check, DPAPI, the fingerprint pin on both editions; 4. `-Once` and the log; 5. the install and remove script; 6. the push route and its refusals; 7. the snapshot row, the freshness and the findings; 8. the losses and their acknowledgement; 9. the diff; 10. the UI and the CLI.
+- **Content:** 1. the cmdlet reads and the mapping onto the IR; 2. the loss entries; 3. the account check, DPAPI, the fingerprint pin on both editions; 4. `-Once` and the log; 5. the install and remove script; 6. the push route and its refusals; 7. the snapshot row, the freshness and the findings; 8. the losses and their acknowledgment; 9. the diff; 10. the UI and the CLI.
 - **Acceptance:** E72; E73; the diff half of E74; the route tests of [api/README.md](../api/README.md) for the new operations; a Playwright test of the mirror card going stale and fresh again.
 - **Risk:** R139, R140, R141, R145, R146.
 
@@ -366,7 +366,7 @@ Every package below touches `crates/tenko-core/src/{ir,migrate}*`, `crates/tenko
   | `ad.dhcid_takeover` | An adopted name and address stay with their client | A client with another MAC asks for an adopted lease's address (NAK) and sends option 81 with an adopted name (refused by name protection, the lease row says so); the rekey rule does not fire for another MAC |
   | `ad.mirror_token` | The mirror token reaches its push and nothing else | Every operation of the served OpenAPI document with the token: 403 except the push; another mirror's push: 403; a replayed sequence 409, an oversized body 413, an invalid IR 422; plain HTTP refused |
 
-- **Content:** 1. the rows; 2. with the owner, the rehearsal of section 2.13 (the lead gives the commands; the builder records the result, the DHCID identifier type, the times between deactivation and the clients' rebinding, the cmdlet behaviours of R139 and R140); 3. the exit document.
+- **Content:** 1. the rows; 2. with the owner, the rehearsal of section 2.13 (the lead gives the commands; the builder records the result, the DHCID identifier type, the times between deactivation and the clients' rebinding, the cmdlet behaviors of R139 and R140); 3. the exit document.
 - **Acceptance:** E77 (owner-run), E78, the rehearsal row of E79.
 - **Risk:** R137, R138, R139, R140, R142.
 
@@ -376,7 +376,7 @@ Total: 42 builder-days, of which WP14.2 is the critical path (16 days after the 
 
 ### 5.1 Order
 
-WP14.0 first. Then three lines in parallel: the script line of WP14.1, the server line of WP14.1, and WP14.2 (the flip first, so that the record adoption has zones to work on). WP14.3 drafts from WP14.0's names and is finished once WP14.2's behaviour is merged. WP14.4's rows follow WP14.1 and WP14.2; the rehearsal comes last, with the runbook as written. At most two Rust builders at a time beside the other open work; the script line needs no Rust. After the exit: the owner's real cutover, then Slice 13 (WT-Q7).
+WP14.0 first. Then three lines in parallel: the script line of WP14.1, the server line of WP14.1, and WP14.2 (the flip first, so that the record adoption has zones to work on). WP14.3 drafts from WP14.0's names and is finished once WP14.2's behavior is merged. WP14.4's rows follow WP14.1 and WP14.2; the rehearsal comes last, with the runbook as written. At most two Rust builders at a time beside the other open work; the script line needs no Rust. After the exit: the owner's real cutover, then Slice 13 (WT-Q7).
 
 ### 5.2 Measurements
 
@@ -421,7 +421,7 @@ Each question lists its options, the trade-offs and the recommendation. The owne
 
 **WT-Q6. How is the takeover rehearsed?**
 - Options: (a) a throwaway domain controller and one Windows client on the owner's hypervisor, the lab node fed by a zone transfer from the real domain and by a read-only mirror of the real DHCP server, in one afternoon, as step 0 of the runbook; (b) the container lab only (Samba AD, `dhclient`); (c) straight to the real domain with the rollbacks ready.
-- Trade-offs: (b) cannot show Windows DHCP's DHCID records, the cmdlets' behaviour or a Windows client's DHCP sequence; (c) learns those on the real network; (a) learns them on real data without serving it, at the cost of one afternoon and the care of section 2.13.
+- Trade-offs: (b) cannot show Windows DHCP's DHCID records, the cmdlets' behavior or a Windows client's DHCP sequence; (c) learns those on the real network; (a) learns them on real data without serving it, at the cost of one afternoon and the care of section 2.13.
 - **Recommendation: (a).**
 - **Decided (2026-11-01): (a), one afternoon, step 0 of the runbook.**
 
@@ -442,7 +442,7 @@ Each question lists its options, the trade-offs and the recommendation. The owne
 - **Recommendation: (a).**
 
 **WT-Q10. What does "a factory name is kept as it is" mean for a name that is not a valid host name? (open)**
-- Options: (a) a valid label gets the zone like any bare name; an invalid one is kept as the IPAM host's name, with no record derived and a loss entry; (b) an invalid one is tidied (`ESP_3A1F2B` to `esp-3a1f2b`) and gets the zone; (c) a factory name is recognised by its pattern and never gets the zone.
+- Options: (a) a valid label gets the zone like any bare name; an invalid one is kept as the IPAM host's name, with no record derived and a loss entry; (b) an invalid one is tidied (`ESP_3A1F2B` to `esp-3a1f2b`) and gets the zone; (c) a factory name is recognized by its pattern and never gets the zone.
 - Trade-offs: (b) invents a name nobody chose, and the client keeps registering its own under DDNS anyway; (c) guesses at patterns that change by vendor; (a) is decidable by syntax alone and changes nothing the owner typed.
 - **Recommendation: (a), the reading section 2.9 writes.**
 
@@ -481,7 +481,7 @@ ROADMAP: the Phase 4 deliverables gain the line for this slice (written with thi
 | R142 | Converting an AD-integrated zone to a secondary removes it from the directory partition on every controller at once, `_msdcs` from the forest partition | The runbook converts one zone at a time, `_msdcs` last, each controller's secondary added before the next; the rehearsal runs the conversion and its rollback (`ConvertTo-DnsServerPrimaryZone`); the exports of step 1 stay the backup |
 | R143 | The single Tenko node is the AD zones' only primary until Phase 5 | The controllers' secondary copies keep answering (WT-Q12) and are the clients' second server; Tenko's SOA `expire` for the AD zones at 14 days so the copies outlive an outage; updates wait for the node (Netlogon retries hourly) |
 | R144 | A new namespace or object kinds force data format 6 | WP14.0 decides it first; an empty migration with its fixture, as Phase 3 did |
-| R145 | The mirror token leaks from the controller | It writes one mirror and reads nothing; DPAPI for the task account; replacement from the card; a forged snapshot can change only what a person later prepares or takes over, behind the diff and the loss acknowledgement |
+| R145 | The mirror token leaks from the controller | It writes one mirror and reads nothing; DPAPI for the task account; replacement from the card; a forged snapshot can change only what a person later prepares or takes over, behind the diff and the loss acknowledgment |
 | R146 | The exporter's PowerShell mapping drifts from the IR | The fixture IR is shared with the Rust tests; the push validates strictly; a refused push is a finding within three minutes |
 | R147 | The rekey rule lets a client claim an adopted lease with a forged MAC | Only a REQUEST with the row's MAC on the same network, the same exposure as any DHCP client today; `ad.dhcid_takeover` tests another MAC; the rule ends at the first REQUEST |
 | R148 | Quota: this slice beside Slice 12, the UI plan and Phase 3's remainder | At most two Rust builders; the script line needs none; the lab and the rehearsal while builders are idle |
@@ -520,7 +520,7 @@ ROADMAP: the Phase 4 deliverables gain the line for this slice (written with thi
 
 ## 11. Sources
 
-The facts about Tenko come from the code and the documents read on `8e4f4112` (section 1.7 and the two research notes of 2026-11-01, which name their files and lines). The Windows behaviour this plan relies on is marked as a risk where it was not verified (R137, R139, R140, R142); WP14.1 and WP14.3 read the pages below before their text relies on them, and the rehearsal checks them on Windows.
+The facts about Tenko come from the code and the documents read on `8e4f4112` (section 1.7 and the two research notes of 2026-11-01, which name their files and lines). The Windows behavior this plan relies on is marked as a risk where it was not verified (R137, R139, R140, R142); WP14.1 and WP14.3 read the pages below before their text relies on them, and the rehearsal checks them on Windows.
 
 Specifications:
 

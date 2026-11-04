@@ -85,7 +85,7 @@ pub struct JobSummary {
     pub manual_steps: Vec<u16>,
     /// Whether someone asked to cancel.
     pub cancel_requested: bool,
-    /// Why the job is rolling back, failed or was cancelled.
+    /// Why the job is rolling back, failed or was canceled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<CodedError>,
     /// Store revision of the job's last write.

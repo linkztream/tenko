@@ -39,7 +39,7 @@
 //! fields to `--out`.
 //!
 //! The figures are loopback, single-node figures from an own client on the same host, an
-//! upper bound standing in for perfdhcp (and for a DNS client that polls), labelled so.
+//! upper bound standing in for perfdhcp (and for a DNS client that polls), labeled so.
 
 use std::{
     collections::{HashMap, VecDeque},

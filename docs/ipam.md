@@ -49,7 +49,7 @@ The level is computed in tenths of a percent (`permille`) and written as an `ipa
 
 The network and broadcast addresses of a network are neither recorded (IPAM refuses an address object on them, `ipam.address.network_or_broadcast`) nor usable. A DHCP reservation is an address object bound to a host's interface, so it is recorded and has a host; a lease inside a DHCP pool without an address object is held by the pool.
 
-## 5 Findings: alarms and ghost ageing
+## 5 Findings: alarms and ghost aging
 
 The findings model ([reconciliation.md](reconciliation.md) section 12) lists the IPAM conditions that may need a person beside the proposals, and `GET /api/v1/findings/counts` counts them for the rail and the status bar:
 

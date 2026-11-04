@@ -58,8 +58,8 @@ Reading the matrix:
 | TGL-23 | In-app update check and install (OPS-24) | Check daily, install from the UI | Check daily, install from the UI with step-up authentication | Check daily (version string only), install only from an uploaded and verified release file | Check daily, install from the UI | 1 (Slice 2) | OPS-24, API-19 |
 | TGL-24 | Secret reveal (IAM-16, API-11) | A signed-in session of password strength or stronger | Step-up: a sign-in within the last five minutes | Step-up with a passkey or hardware security key within the last five minutes; reveal only secrets bound to the host in view | A signed-in session of password strength or stronger | 1 (Slice 2) | IAM-07, IAM-16, API-11 |
 | TGL-25 | Default resolution outside the zones and rules | Recurse | Recurse | Recurse | Recurse | 3 (Slice 10) | DNS-03 |
-| TGL-26 | QNAME minimisation | Relaxed | Relaxed | Relaxed (strict allowed) | Relaxed | 3 (Slice 10) | DNS-34 |
-| TGL-27 | Trust anchor signalling (RFC 8145) | On | On | Off | On | 3 (Slice 10) | DNS-13 |
+| TGL-26 | QNAME minimization | Relaxed | Relaxed | Relaxed (strict allowed) | Relaxed | 3 (Slice 10) | DNS-34 |
+| TGL-27 | Trust anchor signaling (RFC 8145) | On | On | Off | On | 3 (Slice 10) | DNS-13 |
 | TGL-28 | Negative trust anchor lifetime | At most 7 days | At most 7 days | Expiry required, at most 7 days | At most 7 days | 3 (Slice 10) | DNS-13 |
 | TGL-29 | DDNS from DHCP (`UpdatePolicy.dhcp` unset; the internal path, not TGL-09) | Writes into the scope's zones | Only zones with `dhcp: true` | Only zones with `dhcp: true`; name protection forced | Writes | 3 | DHCP-13 |
 | TGL-30 | Bug report link from the web UI to GitHub ("Report a bug": the new-issue page prefilled with the redacted diagnostics, filed under the person's own account) | On | On | Off: the dialog copies the diagnostics to the clipboard only, no outbound link from the interface | On | 3 | OPS-05 |

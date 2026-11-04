@@ -402,7 +402,7 @@ The counters are per worker, relaxed atomics: `tenko_dhcp_packets_total` by type
 ### 9.7 Tests and measurements
 
 - `tests/engine.rs`: a table of RFC 2131 cases (every message type and REQUEST state, the NAK rules, the server identifier, the broadcast flag, every destination) and the cases around it (lease times and the commit, DECLINE's hold, RELEASE, the NAK's options, the order of option 55 and the split routes, reservation options, option 81, link selection with the server identifier override and option 118, the store refusal, restricted scopes, a full pool).
-- `tests/engine_corpus.rs`: the corpus `fixtures/requests/*.hex` (requests of Windows, ISC dhclient, systemd-networkd, Android, macOS and PXE firmware modelled by hand on the option order and the parameter request lists these clients send, relays with option 82, renewals, INIT-REBOOT, DECLINE, RELEASE, INFORM; documentation addresses and MACs) answered octet for octet as recorded in `fixtures/requests/expected/`, every reply decoded by `dhcproto` and checked for option 53 first, option 61 and option 82 echoed, option 82 last, the size limit and the order of option 55. `TENKO_BLESS=1` rewrites the recorded answers after a deliberate change. WP7.6 adds requests captured in the lab.
+- `tests/engine_corpus.rs`: the corpus `fixtures/requests/*.hex` (requests of Windows, ISC dhclient, systemd-networkd, Android, macOS and PXE firmware modeled by hand on the option order and the parameter request lists these clients send, relays with option 82, renewals, INIT-REBOOT, DECLINE, RELEASE, INFORM; documentation addresses and MACs) answered octet for octet as recorded in `fixtures/requests/expected/`, every reply decoded by `dhcproto` and checked for option 53 first, option 61 and option 82 echoed, option 82 last, the size limit and the order of option 55. `TENKO_BLESS=1` rewrites the recorded answers after a deliberate change. WP7.6 adds requests captured in the lab.
 - `tests/engine_allocator.rs` and `tests/engine_server.rs`: the allocator against the reference, and a relay listener on loopback running DORA, a renewal, a release and a refused commit through `MemLeaseStore`.
 - `crates/tenko-dhcp/examples/dhcp_server.rs` serves the engine on a port for perfdhcp and carries a load client; `bench/phase3-dhcp` runs M26 to M28 with it on loopback.
 
@@ -571,7 +571,7 @@ A move (see [moves.md](moves.md)) writes the new address as `planned` on the int
 
 The step reaches the role through `tenko_ipam::moves::dhcp::DhcpRolePort` (the role's report `dhcp.status` and the node command `dhcp.lease.release`), which `tenko serve` fills once the role runs. A server without the role in its process has nothing to wait for: the step records that the reservation is intent (`image_revision` empty in its output). The step's output (`MoveDhcpOutput`) keeps the revision of the new address and the image revision that held it.
 
-- **Rollback.** The intent step's compensation removes the new address, and with it the new reservation; the DHCP step's compensation releases a lease the device already took at the new address. The old address and its reservation were never touched, so a cancelled move leaves both scopes as they were.
+- **Rollback.** The intent step's compensation removes the new address, and with it the new reservation; the DHCP step's compensation releases a lease the device already took at the new address. The old address and its reservation were never touched, so a canceled move leaves both scopes as they were.
 - **Cleanup.** The cleanup removes the old address, which removes the old reservation, and releases the old lease when the moved interface's MAC address still holds it bound, through `dhcp.lease.release` with its version precondition (history kind `reclaimed`). A release that fails is logged and left to the lease's expiry; the cleanup never rolls a confirmed move back. Its output records `released_old_lease`.
 - **Timeout.** The migration deadline comes from the client's own lease when Tenko serves its old network, and from the target pools' default lease time otherwise ([moves.md](moves.md) section 5.2). With a Tenko scope a pool's lease time is the longest default time a pool's client gets: the pool's settings, else the range's `lease_secs`, else the scope's lease times, else the server's (one day by default); a scope without a pool counts its own.
 
@@ -788,7 +788,7 @@ A fingerprint is what a request shows of the client's DHCP stack (`tenko_core::d
 
 ### 15.2 The rule table
 
-The rule table (`crates/tenko-dhcp/src/fingerprint/table.rs`, `table::ENTRIES`) is written in the project, offline, from captured requests and published descriptions of client behaviour (P3-Q15; p0f's signatures describe TCP/IP stacks, not DHCP requests, and were set aside). An entry says what a fingerprint must show and what it means:
+The rule table (`crates/tenko-dhcp/src/fingerprint/table.rs`, `table::ENTRIES`) is written in the project, offline, from captured requests and published descriptions of client behavior (P3-Q15; p0f's signatures describe TCP/IP stacks, not DHCP requests, and were set aside). An entry says what a fingerprint must show and what it means:
 
 | Field | Meaning |
 |---|---|
@@ -797,7 +797,7 @@ The rule table (`crates/tenko-dhcp/src/fingerprint/table.rs`, `table::ENTRIES`) 
 | `user_class`, `client_fqdn`, `architecture` | the presence of option 77, 81 or 93 required or excluded, or not looked at |
 | `family`, `version` | the guess; a version can take the rest of the vendor class after its prefix (`android-dhcp-13` gives Android 13, `udhcp 1.35.0` gives BusyBox udhcpc 1.35.0) |
 | `confidence` | 0 to 100; below 50 a family guess, not a version |
-| `provenance` | `Captured` in the lab, `Modelled` in the WP7.3 corpus, `Published` |
+| `provenance` | `Captured` in the lab, `Modeled` in the WP7.3 corpus, `Published` |
 
 `RuleTable::builtin` tries the entries with an exact list first, then those with a list prefix, then those without a list, each group in the order of the table, and the first that matches wins: a known release is named exactly, a later release of a known stack falls to its family, and a vendor class alone gives the weakest guess.
 
@@ -805,10 +805,10 @@ The table has 38 entries:
 
 | Family | Entries | Source |
 |---|---|---|
-| Windows | 10 and 11 (and Server 2016 and later), 7 and 8 (and Server 2008 R2 to 2012 R2), XP (and Server 2003), a list prefix for later releases, `MSFT 5.0` alone | the WP7.3 corpus (modelled) and published lists |
+| Windows | 10 and 11 (and Server 2016 and later), 7 and 8 (and Server 2008 R2 to 2012 R2), XP (and Server 2003), a list prefix for later releases, `MSFT 5.0` alone | the WP7.3 corpus (modeled) and published lists |
 | macOS, iOS and iPadOS | macOS 13 and later, 11 and 12, 10.x; iOS 15 and later, 14, 10 to 13; a list prefix for Apple | the corpus (macOS 14) and published lists |
 | Android | Android 13, 11 and 12, 9 and 10 by their lists, a list prefix, the vendor class `android-dhcp-` alone, each with the release from the vendor class | the corpus (Android 13) and published lists |
-| Linux | ISC dhclient (Debian and Ubuntu), systemd-networkd, NetworkManager (Fedora and RHEL), BusyBox udhcpc with and without its vendor class, dhcpcd, a dhcpcd host with a Proxmox VE kernel, a list prefix for dhclient | dhclient and udhcpc captured in the lab, networkd modelled, NetworkManager from its source |
+| Linux | ISC dhclient (Debian and Ubuntu), systemd-networkd, NetworkManager (Fedora and RHEL), BusyBox udhcpc with and without its vendor class, dhcpcd, a dhcpcd host with a Proxmox VE kernel, a list prefix for dhclient | dhclient and udhcpc captured in the lab, networkd modeled, NetworkManager from its source |
 | ChromeOS, PlayStation, Xbox | one entry each, with low confidence for the PlayStation's short list | published |
 | Printers | HP JetDirect by its vendor class | published |
 | Embedded | lwIP (ESP8266, ESP-IDF, Tasmota, ESPHome) with and without DNS and SNTP | lwIP's `dhcp.c` |
@@ -835,7 +835,7 @@ The reconciliation view picks the OS of a device by precedence ([reconciliation.
 
 ### 15.5 Tests
 
-- `crates/tenko-dhcp/src/fingerprint/tests.rs`: the lab's captures and the corpus's modelled requests (Windows, macOS, Android, dhclient, networkd, PXE) classified, requests made up for other purposes not classified, an exact list before a prefix before the vendor class, every entry reachable (none shadowed by an earlier one), the families the plan names present.
+- `crates/tenko-dhcp/src/fingerprint/tests.rs`: the lab's captures and the corpus's modeled requests (Windows, macOS, Android, dhclient, networkd, PXE) classified, requests made up for other purposes not classified, an exact list before a prefix before the vendor class, every entry reachable (none shadowed by an earlier one), the families the plan names present.
 - `crates/tenko-dhcp/tests/contracts.rs`: the contract's first-match rule, also as a property test.
 - `crates/tenko-ipam/src/observe/dhcp/tests.rs`: the OS and vendor facts given by a classifier and by option 60, no OS fact without a classifier.
 - `crates/tenko-ipam/tests/reconcile_view.rs` and E28 in `crates/tenko/tests/acceptance_reconcile.rs`: the view and the OS field (section 11 of reconciliation.md).

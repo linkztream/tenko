@@ -1,5 +1,5 @@
 //! The node transport end to end inside one process, over real TCP on the loopback
-//! interface: enrolment through the registry, mutual TLS, the handshake, heartbeats, the
+//! interface: enrollment through the registry, mutual TLS, the handshake, heartbeats, the
 //! observation buffer and its replay after a controller outage, renewal, revocation, version
 //! negotiation, and the refusal of another installation's CA.
 
@@ -20,7 +20,7 @@ use tenko_cluster::{
     client::{self, Agent, AgentConfig},
     error::ClusterError,
     identity::{AgentState, Credentials, NodeIdentity, NodePaths},
-    model::{self, EnrolRequest, NewEnrolment},
+    model::{self, EnrollRequest, NewEnrollment},
     probe::{IngestCounts, ProbeBatch, ProbeSink, Sighting, SightingSubject},
     registry::{self, NODE_EDIT_ATTEMPTS, NodeRegistry, RegistryConfig},
     server::ClusterListener,
@@ -152,10 +152,10 @@ impl Controller {
         }
     }
 
-    async fn token(&self, request: NewEnrolment) -> String {
+    async fn token(&self, request: NewEnrollment) -> String {
         let (_, token) = self
             .registry
-            .create_enrolment(&system(), request)
+            .create_enrollment(&system(), request)
             .await
             .expect("token");
         token.to_text().to_string()
@@ -171,18 +171,18 @@ impl Controller {
             .collect()
     }
 
-    /// Enrols a node whose files live in `dir`, with this controller's cluster port as
+    /// Enrolls a node whose files live in `dir`, with this controller's cluster port as
     /// its endpoint.
-    async fn enrol(&self, dir: &Path, name: &str) -> Credentials {
-        let token = self.token(NewEnrolment::default()).await;
+    async fn enroll(&self, dir: &Path, name: &str) -> Credentials {
+        let token = self.token(NewEnrollment::default()).await;
         let (credentials, _) = self
-            .enrol_with(dir, name, &token, vec![1])
+            .enroll_with(dir, name, &token, vec![1])
             .await
-            .expect("enrol");
+            .expect("enroll");
         credentials
     }
 
-    async fn enrol_with(
+    async fn enroll_with(
         &self,
         dir: &Path,
         name: &str,
@@ -194,9 +194,9 @@ impl Controller {
         ctx.source_ip = Some("192.0.2.20".parse().expect("ip"));
         let enrolled = self
             .registry
-            .enrol(
+            .enroll(
                 &ctx,
-                EnrolRequest {
+                EnrollRequest {
                     token: token.to_owned(),
                     csr: pem_block("CERTIFICATE REQUEST", &csr),
                     name: Some(name.to_owned()),
@@ -281,10 +281,10 @@ fn address_of(batch: &ProbeBatch) -> String {
 }
 
 #[tokio::test]
-async fn a_node_enrols_connects_and_delivers_a_batch() {
+async fn a_node_enrolls_connects_and_delivers_a_batch() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-dmz").await;
+    let credentials = controller.enroll(dir.path(), "probe-dmz").await;
     assert_eq!(credentials.identity.node, NodeId(1001));
     assert!(credentials.certificate_roles().contains(Role::Probe));
 
@@ -332,11 +332,11 @@ async fn a_node_enrols_connects_and_delivers_a_batch() {
 
     let actions = controller.audit_actions().await;
     assert!(
-        actions.contains(&"cluster.enrolment.create".to_owned()),
+        actions.contains(&"cluster.enrollment.create".to_owned()),
         "{actions:?}"
     );
     assert!(
-        actions.contains(&"cluster.node.enrol".to_owned()),
+        actions.contains(&"cluster.node.enroll".to_owned()),
         "{actions:?}"
     );
 
@@ -349,7 +349,7 @@ async fn a_node_enrols_connects_and_delivers_a_batch() {
 async fn the_buffer_replays_in_order_after_a_controller_outage() {
     let mut controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    controller.enrol(dir.path(), "probe-lan").await;
+    controller.enroll(dir.path(), "probe-lan").await;
     let agent = agent(dir.path());
     let (stop, task) = run(&agent);
     wait_for("the node to connect", || {
@@ -389,7 +389,7 @@ async fn the_buffer_replays_in_order_after_a_controller_outage() {
 async fn revocation_closes_the_connection_and_refuses_the_certificate() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-iot").await;
+    let credentials = controller.enroll(dir.path(), "probe-iot").await;
     let node = credentials.identity.node;
     let agent = agent(dir.path());
     let (stop, task) = run(&agent);
@@ -443,7 +443,7 @@ async fn revocation_closes_the_connection_and_refuses_the_certificate() {
 async fn a_node_offering_only_an_older_major_is_refused_with_a_notice() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-old").await;
+    let credentials = controller.enroll(dir.path(), "probe-old").await;
     let node = credentials.identity.node;
 
     let refused = client::check(&credentials, "0.0.0", &[0])
@@ -501,7 +501,7 @@ async fn a_controller_of_another_installation_is_refused() {
     let home = Controller::start().await;
     let foreign = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let mut credentials = home.enrol(dir.path(), "probe-dmz").await;
+    let mut credentials = home.enroll(dir.path(), "probe-dmz").await;
 
     // The node dials a controller whose certificate comes from another CA.
     credentials.identity.endpoints = vec![foreign.addr.to_string()];
@@ -527,41 +527,41 @@ async fn a_controller_of_another_installation_is_refused() {
 async fn tokens_are_single_use_expire_and_limit_the_roles() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let token = controller.token(NewEnrolment::default()).await;
+    let token = controller.token(NewEnrollment::default()).await;
     controller
-        .enrol_with(dir.path(), "probe-a", &token, vec![1])
+        .enroll_with(dir.path(), "probe-a", &token, vec![1])
         .await
         .expect("first use");
     let again = tempfile::tempdir().expect("dir");
     let used = controller
-        .enrol_with(again.path(), "probe-b", &token, vec![1])
+        .enroll_with(again.path(), "probe-b", &token, vec![1])
         .await
         .expect_err("second use");
-    assert_eq!(used.code(), "cluster.enrolment.used");
+    assert_eq!(used.code(), "cluster.enrollment.used");
 
     // A wrong secret under a real token id is the same answer as an unknown token.
-    let mut forged = controller.token(NewEnrolment::default()).await;
+    let mut forged = controller.token(NewEnrollment::default()).await;
     let last = forged.pop().expect("a character");
     forged.push(if last == 'A' { 'Q' } else { 'A' });
     let invalid = controller
-        .enrol_with(again.path(), "probe-c", &forged, vec![1])
+        .enroll_with(again.path(), "probe-c", &forged, vec![1])
         .await
         .expect_err("forged");
-    assert_eq!(invalid.code(), "cluster.enrolment.invalid_token");
+    assert_eq!(invalid.code(), "cluster.enrollment.invalid_token");
     let garbage = controller
-        .enrol_with(again.path(), "probe-c", "tnk1.nope", vec![1])
+        .enroll_with(again.path(), "probe-c", "tnk1.nope", vec![1])
         .await
         .expect_err("garbage");
-    assert_eq!(garbage.code(), "cluster.enrolment.invalid_token");
+    assert_eq!(garbage.code(), "cluster.enrollment.invalid_token");
 
     // Expiry: a token of 60 seconds presented two minutes later.
     let (_, short) = controller
         .registry
-        .create_enrolment(
+        .create_enrollment(
             &system(),
-            NewEnrolment {
+            NewEnrollment {
                 expires_in_secs: Some(60),
-                ..NewEnrolment::default()
+                ..NewEnrollment::default()
             },
         )
         .await
@@ -574,9 +574,9 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
         .expect("time");
     let expired = controller
         .registry
-        .enrol(
+        .enroll(
             &later,
-            EnrolRequest {
+            EnrollRequest {
                 token: short.to_text().to_string(),
                 csr: pem_block("CERTIFICATE REQUEST", &csr),
                 name: None,
@@ -588,16 +588,16 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
         )
         .await
         .expect_err("expired");
-    assert_eq!(expired.code(), "cluster.enrolment.expired");
+    assert_eq!(expired.code(), "cluster.enrollment.expired");
 
     // Roles: a probe token does not make a DNS node, and no token makes a controller.
-    let probe_only = controller.token(NewEnrolment::default()).await;
+    let probe_only = controller.token(NewEnrollment::default()).await;
     let (_, csr) = generate_csr().expect("csr");
     let refused = controller
         .registry
-        .enrol(
+        .enroll(
             &system(),
-            EnrolRequest {
+            EnrollRequest {
                 token: probe_only,
                 csr: pem_block("CERTIFICATE REQUEST", &csr),
                 name: None,
@@ -609,40 +609,40 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
         )
         .await
         .expect_err("role");
-    assert_eq!(refused.code(), "cluster.enrolment.roles");
+    assert_eq!(refused.code(), "cluster.enrollment.roles");
     // A controller token carries the role alone and lives at most an hour.
     let mixed = controller
         .registry
-        .create_enrolment(
+        .create_enrollment(
             &system(),
-            NewEnrolment {
+            NewEnrollment {
                 roles: vec![Role::Controller, Role::Probe],
-                ..NewEnrolment::default()
+                ..NewEnrollment::default()
             },
         )
         .await
         .expect_err("controller beside another role");
-    assert_eq!(mixed.code(), "cluster.enrolment.roles");
+    assert_eq!(mixed.code(), "cluster.enrollment.roles");
     let long = controller
         .registry
-        .create_enrolment(
+        .create_enrollment(
             &system(),
-            NewEnrolment {
+            NewEnrollment {
                 roles: vec![Role::Controller],
                 expires_in_secs: Some(7_200),
-                ..NewEnrolment::default()
+                ..NewEnrollment::default()
             },
         )
         .await
         .expect_err("a controller token for two hours");
-    assert_eq!(long.code(), "cluster.enrolment.lifetime");
+    assert_eq!(long.code(), "cluster.enrollment.lifetime");
     let (token, _) = controller
         .registry
-        .create_enrolment(
+        .create_enrollment(
             &system(),
-            NewEnrolment {
+            NewEnrollment {
                 roles: vec![Role::Controller],
-                ..NewEnrolment::default()
+                ..NewEnrollment::default()
             },
         )
         .await
@@ -650,17 +650,17 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
     assert_eq!(token.roles, vec![Role::Controller]);
     assert!(token.expires_at.saturating_since(token.created_at) <= Duration::from_secs(3_600));
 
-    // A node offering no common major cannot enrol either.
-    let token = controller.token(NewEnrolment::default()).await;
+    // A node offering no common major cannot enroll either.
+    let token = controller.token(NewEnrollment::default()).await;
     let mismatch = controller
-        .enrol_with(again.path(), "probe-d", &token, vec![0])
+        .enroll_with(again.path(), "probe-d", &token, vec![0])
         .await
         .expect_err("major");
     assert_eq!(mismatch.code(), "cluster.protocol.unsupported");
 
     let tokens = controller
         .registry
-        .list_enrolments(Timestamp::now())
+        .list_enrollments(Timestamp::now())
         .await
         .expect("list");
     assert!(tokens.iter().any(|token| token.used.is_some()));
@@ -668,7 +668,7 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
         .audit_actions()
         .await
         .iter()
-        .filter(|action| *action == "cluster.node.enrol")
+        .filter(|action| *action == "cluster.node.enroll")
         .count();
     // One success and six refusals.
     assert_eq!(refusals, 7);
@@ -678,7 +678,7 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
 async fn renewal_issues_a_new_certificate_that_connects() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-renew").await;
+    let credentials = controller.enroll(dir.path(), "probe-renew").await;
     let paths = NodePaths::new(dir.path());
     let renewed = client::renew_once(&paths, "0.0.1").await.expect("renew");
     assert_ne!(renewed.info.serial, credentials.info.serial);
@@ -837,14 +837,14 @@ async fn racing_registry() -> (Arc<RacingStore>, Arc<NodeRegistry>, NodeId, Stri
     registry.register_steps(&engine);
     let _ = store.registry.set(Arc::downgrade(&registry));
     let (_, token) = registry
-        .create_enrolment(&system(), NewEnrolment::default())
+        .create_enrollment(&system(), NewEnrollment::default())
         .await
         .expect("token");
     let (_, csr) = generate_csr().expect("csr");
     let enrolled = registry
-        .enrol(
+        .enroll(
             &system(),
-            EnrolRequest {
+            EnrollRequest {
                 token: token.to_text().to_string(),
                 csr: pem_block("CERTIFICATE REQUEST", &csr),
                 name: Some("probe-race".to_owned()),
@@ -855,7 +855,7 @@ async fn racing_registry() -> (Arc<RacingStore>, Arc<NodeRegistry>, NodeId, Stri
             },
         )
         .await
-        .expect("enrol");
+        .expect("enroll");
     let serial = enrolled.certificate.info.serial.clone();
     (store, registry, enrolled.node.id, serial, csr)
 }
@@ -891,7 +891,7 @@ async fn a_revocation_that_races_the_heartbeat_is_planned_again() {
     // The lost attempts left nothing behind: one revocation in the audit log.
     assert_eq!(
         registry_actions(&store).await,
-        ["cluster.node.enrol", "cluster.node.revoke"]
+        ["cluster.node.enroll", "cluster.node.revoke"]
     );
 }
 
@@ -910,7 +910,7 @@ async fn a_revocation_that_loses_every_race_is_a_conflict_that_changes_nothing()
     assert_eq!(view.certificate.serial, serial);
     assert!(view.last_seen.is_some(), "the heartbeats were written");
     assert!(!registry.revocations().is_revoked(&serial));
-    assert_eq!(registry_actions(&store).await, ["cluster.node.enrol"]);
+    assert_eq!(registry_actions(&store).await, ["cluster.node.enroll"]);
 }
 
 #[tokio::test]
@@ -927,7 +927,7 @@ async fn a_renewal_that_races_the_heartbeat_is_planned_again_with_the_same_certi
     assert!(view.last_seen.is_some(), "the heartbeat's write is kept");
     assert_eq!(
         registry_actions(&store).await,
-        ["cluster.node.enrol", "cluster.node.renew"]
+        ["cluster.node.enroll", "cluster.node.renew"]
     );
 }
 
@@ -940,7 +940,7 @@ async fn enrolled_channel(
     dir: &Path,
     name: &str,
 ) -> tonic::transport::Channel {
-    let credentials = controller.enrol(dir, name).await;
+    let credentials = controller.enroll(dir, name).await;
     let config = credentials.client_config().expect("client configuration");
     client::connect(&controller.addr.to_string(), config)
         .await
@@ -1005,15 +1005,15 @@ async fn metrics_snapshot_answers_the_newest_sample_to_a_controller() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
     let token = controller
-        .token(NewEnrolment {
+        .token(NewEnrollment {
             roles: vec![Role::Controller],
-            ..NewEnrolment::default()
+            ..NewEnrollment::default()
         })
         .await;
     let (credentials, _) = controller
-        .enrol_with(dir.path(), "controller-2", &token, vec![1])
+        .enroll_with(dir.path(), "controller-2", &token, vec![1])
         .await
-        .expect("a controller enrols");
+        .expect("a controller enrolls");
     let network = PeerNetwork::new(credentials.identity.node, PeerTimings::default());
     network.set_tls(credentials.client_config().expect("client configuration"));
     network.pin(NodeId(1), controller.addr.to_string());

@@ -3,7 +3,7 @@
 //!
 //! 1. The PIN preset of the Home profile end to end (IAM-03): setup with the PIN, sign out,
 //!    sign in with the PIN, and a wrong PIN refused with `auth.invalid_credentials`.
-//! 2. TOTP end to end (IAM-06): enrol an authenticator app, sign out, sign in with the
+//! 2. TOTP end to end (IAM-06): enroll an authenticator app, sign out, sign in with the
 //!    password and a code, and a wrong code and a replayed code refused.
 //! 3. A passkey in each TLS mode the harness can start (IAM-06, OPS-22), with the software
 //!    authenticator of `tenko-auth` playing the browser and the security key: register a
@@ -292,15 +292,15 @@ fn e2_iam_03_the_pin_preset_signs_in_and_a_wrong_pin_is_refused() {
     node.login().assert_code(0);
 }
 
-/// IAM-06, E2: TOTP end to end. After enrolment the password alone is no longer enough:
+/// IAM-06, E2: TOTP end to end. After enrollment the password alone is no longer enough:
 /// the sign-in asks for a code, refuses a wrong one and a replayed one, and a fresh code
 /// gives a session of password-and-TOTP strength.
 #[test]
-fn e2_iam_06_totp_enrols_and_signs_in_and_a_wrong_or_replayed_code_is_refused() {
+fn e2_iam_06_totp_enrolls_and_signs_in_and_a_wrong_or_replayed_code_is_refused() {
     let (_node, _server, api) = installed(Transport::Plain);
     let mut browser = Browser::direct(api);
 
-    let mut totp = browser.api.enrol_totp();
+    let mut totp = browser.api.enroll_totp();
     browser.sign_out();
     browser.assert_signed_out();
 

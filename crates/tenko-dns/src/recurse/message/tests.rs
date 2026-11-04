@@ -837,7 +837,7 @@ fn a_cname_loop_inside_one_answer_stops_at_the_repeat() {
 }
 
 #[test]
-fn a_dname_at_an_ancestor_gives_a_synthesised_cname_with_the_dnames_ttl() {
+fn a_dname_at_an_ancestor_gives_a_synthesized_cname_with_the_dnames_ttl() {
     let qname = "a.b.dn.example.test";
     let dname = dname_rec("dn.example.test", 111, "dest.example.test");
     let sig = rrsig_rec("dn.example.test", 111, DNAME);
@@ -847,7 +847,7 @@ fn a_dname_at_an_ancestor_gives_a_synthesised_cname_with_the_dnames_ttl() {
         answer: vec![dname.clone(), sig.clone(), end.clone()],
         ..Msg::new(qname, A)
     };
-    let synthesised = Rr {
+    let synthesized = Rr {
         owner: wire_name(qname),
         rtype: CNAME,
         class: IN,
@@ -855,7 +855,7 @@ fn a_dname_at_an_ancestor_gives_a_synthesised_cname_with_the_dnames_ttl() {
         data: wire_name("a.b.dest.example.test"),
     };
     let mut records = rrs(&[&dname, &sig]);
-    records.push(synthesised);
+    records.push(synthesized);
     records.push(end.rr());
     assert_eq!(
         classify_as(&msg, ZONE, qname, A),

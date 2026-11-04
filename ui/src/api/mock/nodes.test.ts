@@ -1,4 +1,4 @@
-// Cluster nodes and enrolment tokens of the mock API, through `fetch` against the msw server,
+// Cluster nodes and enrollment tokens of the mock API, through `fetch` against the msw server,
 // with the seed of nodes-store.ts (documentation ranges only).
 import { beforeEach, describe, expect, it } from "vitest";
 import type { components } from "../generated/schema";
@@ -58,15 +58,15 @@ describe("the node operations of the document", () => {
       !/\/dhcp(\/|$)/.test(o.path),
   );
 
-  it("are all answered, each after the session check except the public enrolment", async () => {
+  it("are all answered, each after the session check except the public enrollment", async () => {
     // node-roles: GET and PUT /nodes/{id}/roles.
     expect(OPERATIONS.length).toBe(9);
     for (const operation of OPERATIONS) {
-      const path = operation.path.replace("{id}", operation.path.includes("enrolments") ? NODE_IDS.token : String(NODE_IDS.dmz));
+      const path = operation.path.replace("{id}", operation.path.includes("enrollments") ? NODE_IDS.token : String(NODE_IDS.dmz));
       const json = operation.method === "get" || operation.method === "delete" ? undefined : {};
       resetMockDb("signed-in");
       expect((await call(operation.method.toUpperCase(), path, { json })).status, `${operation.method} ${operation.path}`).not.toBe(501);
-      if (operation.path === "/api/v1/nodes/enrol") continue;
+      if (operation.path === "/api/v1/nodes/enroll") continue;
       resetMockDb("signed-out");
       const answer = await call<Problem>(operation.method.toUpperCase(), path, { json });
       expect(answer.status, `${operation.method} ${operation.path}`).toBe(401);
@@ -109,8 +109,8 @@ describe("GET /nodes", () => {
     signInSamAs("viewer");
     expect((await get<Page<S["NodeView"]>>(`${V}/nodes`)).body.items).toHaveLength(2);
     expect((await del<Problem>(`${V}/nodes/${NODE_IDS.dmz}`)).body.code).toBe("auth.forbidden");
-    expect((await get<Problem>(`${V}/nodes/enrolments`)).body.code).toBe("auth.forbidden");
-    expect((await post<Problem>(`${V}/nodes/enrolments`, {})).body.code).toBe("auth.forbidden");
+    expect((await get<Problem>(`${V}/nodes/enrollments`)).body.code).toBe("auth.forbidden");
+    expect((await post<Problem>(`${V}/nodes/enrollments`, {})).body.code).toBe("auth.forbidden");
   });
 });
 
@@ -124,20 +124,20 @@ describe("DELETE /nodes/{id}", () => {
     const record = audit.records.slice(before).find((r) => r.draft.action === "cluster.node.revoke");
     expect(record?.draft.objects).toEqual([nodeRef(NODE_IDS.lab)]);
     // The name is free again for a new token.
-    expect((await post(`${V}/nodes/enrolments`, { name: "probe-lab" })).status).toBe(201);
+    expect((await post(`${V}/nodes/enrollments`, { name: "probe-lab" })).status).toBe(201);
   });
 });
 
-describe("enrolment tokens", () => {
+describe("enrollment tokens", () => {
   it("lists the seeded pending token without its text", async () => {
-    const list = await get<S["EnrolmentList"]>(`${V}/nodes/enrolments`);
+    const list = await get<S["EnrollmentList"]>(`${V}/nodes/enrollments`);
     expect(list.status).toBe(200);
     expect(list.body.items.map((e) => [e.id, e.state, e.name])).toEqual([[NODE_IDS.token, "pending", "probe-garage"]]);
     expect(JSON.stringify(list.body)).not.toContain("tnk1.");
   });
 
   it("creates a token once, with the fingerprint and the command, and never shows it again", async () => {
-    const made = await post<S["CreatedEnrolment"]>(`${V}/nodes/enrolments`, { roles: ["probe"], name: "probe-attic", expires_in_secs: 600 });
+    const made = await post<S["CreatedEnrollment"]>(`${V}/nodes/enrollments`, { roles: ["probe"], name: "probe-attic", expires_in_secs: 600 });
     expect(made.status).toBe(201);
     expect(made.headers.get("cache-control")).toBe("no-store");
     expect(made.body.token).toMatch(/^tnk1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}$/);
@@ -145,91 +145,91 @@ describe("enrolment tokens", () => {
     expect(made.body.ca_fingerprint).toBe(MOCK_CA_FINGERPRINT);
     expect(made.body.command).toContain(`--token ${made.body.token}`);
     expect(made.body.command).toContain(`--ca-fingerprint ${MOCK_CA_FINGERPRINT}`);
-    expect(made.body.command).toMatch(/^tenko node enrol --controller https?:\/\//);
-    expect(made.body.enrolment).toMatchObject({ state: "pending", roles: ["probe"], name: "probe-attic" });
-    const expires = Date.parse(made.body.enrolment.expires_at) - Date.parse(made.body.enrolment.created_at);
+    expect(made.body.command).toMatch(/^tenko node enroll --controller https?:\/\//);
+    expect(made.body.enrollment).toMatchObject({ state: "pending", roles: ["probe"], name: "probe-attic" });
+    const expires = Date.parse(made.body.enrollment.expires_at) - Date.parse(made.body.enrollment.created_at);
     expect(expires).toBe(600_000);
-    const list = await get<S["EnrolmentList"]>(`${V}/nodes/enrolments`);
-    expect(list.body.items[0]?.id).toBe(made.body.enrolment.id);
+    const list = await get<S["EnrollmentList"]>(`${V}/nodes/enrollments`);
+    expect(list.body.items[0]?.id).toBe(made.body.enrollment.id);
     expect(JSON.stringify(list.body)).not.toContain(made.body.token);
-    expect(audit.records.some((r) => r.draft.action === "cluster.enrolment.create")).toBe(true);
+    expect(audit.records.some((r) => r.draft.action === "cluster.enrollment.create")).toBe(true);
   });
 
   it("makes a controller token for the role alone, for at most an hour, with the join command", async () => {
-    const made = await post<S["CreatedEnrolment"]>(`${V}/nodes/enrolments`, { roles: ["controller"] });
+    const made = await post<S["CreatedEnrollment"]>(`${V}/nodes/enrollments`, { roles: ["controller"] });
     expect(made.status).toBe(201);
-    expect(made.body.enrolment.roles).toEqual(["controller"]);
+    expect(made.body.enrollment.roles).toEqual(["controller"]);
     expect(made.body.command).toMatch(/^tenko cluster join --controller .* --address HOST:PORT --data-dir D$/);
-    const longer = await post<Problem>(`${V}/nodes/enrolments`, { roles: ["controller"], expires_in_secs: 7200 });
-    expect([longer.status, longer.body.code]).toEqual([422, "cluster.enrolment.lifetime"]);
+    const longer = await post<Problem>(`${V}/nodes/enrollments`, { roles: ["controller"], expires_in_secs: 7200 });
+    expect([longer.status, longer.body.code]).toEqual([422, "cluster.enrollment.lifetime"]);
   });
 
   it("defaults to a probe token for an hour and refuses a controller beside other roles, bad lifetimes and names", async () => {
-    const plain = await post<S["CreatedEnrolment"]>(`${V}/nodes/enrolments`);
+    const plain = await post<S["CreatedEnrollment"]>(`${V}/nodes/enrollments`);
     expect(plain.status).toBe(201);
-    expect(plain.body.enrolment.roles).toEqual(["probe"]);
-    expect(Date.parse(plain.body.enrolment.expires_at) - Date.parse(plain.body.enrolment.created_at)).toBe(3_600_000);
+    expect(plain.body.enrollment.roles).toEqual(["probe"]);
+    expect(Date.parse(plain.body.enrollment.expires_at) - Date.parse(plain.body.enrollment.created_at)).toBe(3_600_000);
     const cases: [unknown, number, string][] = [
-      [{ roles: ["controller", "probe"] }, 422, "cluster.enrolment.roles"],
-      [{ expires_in_secs: 5 }, 422, "cluster.enrolment.lifetime"],
-      [{ expires_in_secs: 604_801 }, 422, "cluster.enrolment.lifetime"],
+      [{ roles: ["controller", "probe"] }, 422, "cluster.enrollment.roles"],
+      [{ expires_in_secs: 5 }, 422, "cluster.enrollment.lifetime"],
+      [{ expires_in_secs: 604_801 }, 422, "cluster.enrollment.lifetime"],
       [{ name: "-bad" }, 422, "cluster.node.name"],
       [{ name: "probe-dmz" }, 409, "cluster.node.name_taken"],
       [{ roles: ["router"] }, 400, "sys.invalid_request"],
-      [{ colour: "blue" }, 400, "sys.invalid_request"],
+      [{ color: "blue" }, 400, "sys.invalid_request"],
     ];
     for (const [body, status, code] of cases) {
-      const answer = await post<Problem>(`${V}/nodes/enrolments`, body);
+      const answer = await post<Problem>(`${V}/nodes/enrollments`, body);
       expect([answer.status, answer.body.code], JSON.stringify(body)).toEqual([status, code]);
     }
   });
 
   it("deletes a token whatever its state", async () => {
-    expect((await del(`${V}/nodes/enrolments/${NODE_IDS.token}`)).status).toBe(204);
-    expect((await get<S["EnrolmentList"]>(`${V}/nodes/enrolments`)).body.items).toEqual([]);
-    expect((await del<Problem>(`${V}/nodes/enrolments/${NODE_IDS.token}`)).body.code).toBe("cluster.enrolment.not_found");
-    expect((await del<Problem>(`${V}/nodes/enrolments/not-a-uuid`)).body.code).toBe("sys.invalid_request");
+    expect((await del(`${V}/nodes/enrollments/${NODE_IDS.token}`)).status).toBe(204);
+    expect((await get<S["EnrollmentList"]>(`${V}/nodes/enrollments`)).body.items).toEqual([]);
+    expect((await del<Problem>(`${V}/nodes/enrollments/${NODE_IDS.token}`)).body.code).toBe("cluster.enrollment.not_found");
+    expect((await del<Problem>(`${V}/nodes/enrollments/not-a-uuid`)).body.code).toBe("sys.invalid_request");
   });
 });
 
-describe("POST /nodes/enrol", () => {
-  it("enrols a node once with a token; the token is used up", async () => {
-    const made = await post<S["CreatedEnrolment"]>(`${V}/nodes/enrolments`, { roles: ["probe"] });
+describe("POST /nodes/enroll", () => {
+  it("enrolls a node once with a token; the token is used up", async () => {
+    const made = await post<S["CreatedEnrollment"]>(`${V}/nodes/enrollments`, { roles: ["probe"] });
     const request = { token: made.body.token, csr: CSR, name: "probe-attic", address: "198.51.100.20", version: "0.1.0", majors: [1] };
-    const enrolled = await post<S["EnrolResponse"]>(`${V}/nodes/enrol`, request);
+    const enrolled = await post<S["EnrollResponse"]>(`${V}/nodes/enroll`, request);
     expect(enrolled.status).toBe(201);
     expect(enrolled.headers.get("cache-control")).toBe("no-store");
     expect(enrolled.body.node).toMatchObject({ id: 1003, name: "probe-attic", address: "198.51.100.20", connected: false });
     expect(enrolled.body.cluster_port).toBe(8444);
     expect(enrolled.body.ca_root).toContain("BEGIN CERTIFICATE");
-    const again = await post<Problem>(`${V}/nodes/enrol`, request);
-    expect([again.status, again.body.code]).toEqual([401, "cluster.enrolment.used"]);
-    const list = await get<S["EnrolmentList"]>(`${V}/nodes/enrolments`);
-    expect(list.body.items.find((e) => e.id === made.body.enrolment.id)).toMatchObject({ state: "used", used: { node: 1003 } });
+    const again = await post<Problem>(`${V}/nodes/enroll`, request);
+    expect([again.status, again.body.code]).toEqual([401, "cluster.enrollment.used"]);
+    const list = await get<S["EnrollmentList"]>(`${V}/nodes/enrollments`);
+    expect(list.body.items.find((e) => e.id === made.body.enrollment.id)).toMatchObject({ state: "used", used: { node: 1003 } });
     expect((await get<Page<S["NodeView"]>>(`${V}/nodes`)).body.items.map((n) => n.id)).toEqual([NODE_IDS.dmz, NODE_IDS.lab, 1003]);
   });
 
   it("refuses forged tokens, other roles, unusable requests and protocol mismatches", async () => {
-    const made = await post<S["CreatedEnrolment"]>(`${V}/nodes/enrolments`, { roles: ["probe"] });
+    const made = await post<S["CreatedEnrollment"]>(`${V}/nodes/enrollments`, { roles: ["probe"] });
     const forged = made.body.token.slice(0, -1) + (made.body.token.endsWith("A") ? "B" : "A");
     const cases: [Record<string, unknown>, number, string][] = [
-      [{ token: forged, csr: CSR }, 401, "cluster.enrolment.invalid_token"],
-      [{ token: "x", csr: CSR }, 401, "cluster.enrolment.invalid_token"],
-      [{ token: made.body.token, csr: CSR, roles: ["dns"] }, 403, "cluster.enrolment.roles"],
+      [{ token: forged, csr: CSR }, 401, "cluster.enrollment.invalid_token"],
+      [{ token: "x", csr: CSR }, 401, "cluster.enrollment.invalid_token"],
+      [{ token: made.body.token, csr: CSR, roles: ["dns"] }, 403, "cluster.enrollment.roles"],
       [{ token: made.body.token, csr: "not a request" }, 422, "cluster.ca.invalid_csr"],
       [{ token: made.body.token, csr: CSR, majors: [2] }, 409, "cluster.protocol.unsupported"],
       [{ token: made.body.token }, 400, "sys.invalid_request"],
     ];
     for (const [body, status, code] of cases) {
-      const answer = await post<Problem>(`${V}/nodes/enrol`, body);
+      const answer = await post<Problem>(`${V}/nodes/enroll`, body);
       expect([answer.status, answer.body.code], JSON.stringify(body)).toEqual([status, code]);
     }
   });
 
   it("answers without a session", async () => {
-    const made = await post<S["CreatedEnrolment"]>(`${V}/nodes/enrolments`, {});
+    const made = await post<S["CreatedEnrollment"]>(`${V}/nodes/enrollments`, {});
     await post(`${V}/auth/logout`);
-    const enrolled = await post<S["EnrolResponse"]>(`${V}/nodes/enrol`, { token: made.body.token, csr: CSR, name: "probe-shed" });
+    const enrolled = await post<S["EnrollResponse"]>(`${V}/nodes/enroll`, { token: made.body.token, csr: CSR, name: "probe-shed" });
     expect(enrolled.status).toBe(201);
   });
 });

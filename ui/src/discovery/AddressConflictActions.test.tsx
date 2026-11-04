@@ -169,7 +169,7 @@ describe("keeping both claims", () => {
     expect(stored(conflict.id)?.state).toBe("rejected");
   });
 
-  it("leaves the conflict open when cancelled and shows what the server refuses", async () => {
+  it("leaves the conflict open when canceled and shows what the server refuses", async () => {
     const writes = recordWrites();
     const conflict = putAddressConflict({ rule: SHARED, ip: "192.0.2.77", hosts: [id("ha"), id("tenko1")] });
     await openPanel(conflict.id);

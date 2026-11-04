@@ -49,7 +49,7 @@
 //! | `DELETE /auth/sessions/{id}`, `/auth/tokens/{id}`, `/auth/webauthn/credentials/{id}`, `/auth/totp` | 204 | |
 //! | `POST /auth/password` | 200 `PasswordChanged` | |
 //! | `POST /auth/password/check` | 200 `PasswordCheckResult` | public while setup is open |
-//! | `POST /auth/totp/enroll/start` | 200 `TotpEnrolment` | the seed is shown once |
+//! | `POST /auth/totp/enroll/start` | 200 `TotpEnrollment` | the seed is shown once |
 //! | `POST /auth/totp/enroll/finish`, `/auth/webauthn/register/finish` | 200 `FactorEnrolled` | |
 //! | `POST /auth/webauthn/register/start` | 200 `WebAuthnRegisterOptions` | the body is optional |
 //! | `POST /auth/recovery-codes` | 200 `RecoveryCodes` | shown once |
@@ -86,7 +86,7 @@ use tenko_auth::{
     service::{
         CodeLogin, CreatedToken, CredentialInfo, FactorEnrolled, LoginResponse, PasswordChange,
         PasswordChanged, PasswordCheck, PasswordCheckResult, PasswordLogin, RecoveryCodes,
-        SessionInfo, SessionSummary, TokenInfo, TokenRequest, TotpEnrolFinish, TotpEnrolment,
+        SessionInfo, SessionSummary, TokenInfo, TokenRequest, TotpEnrollFinish, TotpEnrollment,
         WebAuthnLoginFinish, WebAuthnLoginOptions, WebAuthnLoginStart, WebAuthnRegisterFinish,
         WebAuthnRegisterOptions, WebAuthnRegisterStart,
     },
@@ -824,15 +824,15 @@ async fn check_password(
 // TOTP
 // ---------------------------------------------------------------------------------------
 
-/// Starts TOTP enrolment. The seed and the provisioning URI are shown once.
+/// Starts TOTP enrollment. The seed and the provisioning URI are shown once.
 #[utoipa::path(
     post,
     path = "/auth/totp/enroll/start",
     tag = "auth",
     operation_id = "totp_enroll_start",
-    summary = "Start TOTP enrolment and return the provisioning data",
+    summary = "Start TOTP enrollment and return the provisioning data",
     responses(
-        (status = 200, description = "The seed, the `otpauth://` URI and the enrolment id for the finish step; shown once", body = TotpEnrolment),
+        (status = 200, description = "The seed, the `otpauth://` URI and the enrollment id for the finish step; shown once", body = TotpEnrollment),
         (status = 409, description = "TOTP is already enrolled (`auth.totp.already_enrolled`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
@@ -840,21 +840,25 @@ async fn check_password(
     security(("session" = []))
 )]
 async fn totp_enroll_start(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<Response, RouteError> {
-    secret_json(StatusCode::OK, None, &service.totp_enrol_start(&ctx).await?)
+    secret_json(
+        StatusCode::OK,
+        None,
+        &service.totp_enroll_start(&ctx).await?,
+    )
 }
 
-/// Finishes TOTP enrolment with a first code. The first factor of an account brings its
+/// Finishes TOTP enrollment with a first code. The first factor of an account brings its
 /// recovery codes, shown once.
 #[utoipa::path(
     post,
     path = "/auth/totp/enroll/finish",
     tag = "auth",
     operation_id = "totp_enroll_finish",
-    summary = "Finish TOTP enrolment with a first code",
-    request_body = TotpEnrolFinish,
+    summary = "Finish TOTP enrollment with a first code",
+    request_body = TotpEnrollFinish,
     responses(
         (status = 200, description = "TOTP is enrolled; recovery codes when the account had none; `reauthenticate` says whether the session must log in again to reach the required strength", body = FactorEnrolled),
-        (status = 400, description = "The body is malformed (`sys.invalid_request`) or the enrolment is unknown or expired (`auth.challenge_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 400, description = "The body is malformed (`sys.invalid_request`) or the enrollment is unknown or expired (`auth.challenge_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The code does not match the new seed (`auth.totp.code_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
@@ -864,12 +868,12 @@ async fn totp_enroll_start(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<Response,
 async fn totp_enroll_finish(
     Svc(service): Svc,
     Ctx(ctx): Ctx,
-    ApiJson(request): ApiJson<TotpEnrolFinish>,
+    ApiJson(request): ApiJson<TotpEnrollFinish>,
 ) -> Result<Response, RouteError> {
     secret_json(
         StatusCode::OK,
         None,
-        &service.totp_enrol_finish(&ctx, &request).await?,
+        &service.totp_enroll_finish(&ctx, &request).await?,
     )
 }
 
@@ -2314,7 +2318,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::too_many_lines)] // One flow from enrolment to removal.
+    #[allow(clippy::too_many_lines)] // One flow from enrollment to removal.
     async fn totp_is_enrolled_asked_for_at_login_and_removed() {
         let (harness, admin) = Harness::installed().await;
         let start = harness
@@ -2330,25 +2334,25 @@ mod tests {
         );
         let seed = base32_decode(start.body["secret"].as_str().expect("the seed")).expect("base32");
         assert_eq!(start.body["params"]["digits"], 6);
-        let enrolment_id = start.body["enrolment_id"].as_str().expect("id").to_owned();
+        let enrollment_id = start.body["enrollment_id"].as_str().expect("id").to_owned();
 
-        // A wrong code does not enrol.
+        // A wrong code does not enroll.
         harness
             .call(
                 "POST",
                 "/auth/totp/enroll/finish",
                 Cookie(&admin),
-                Some(&json!({ "enrolment_id": enrolment_id, "code": "00000" })),
+                Some(&json!({ "enrollment_id": enrollment_id, "code": "00000" })),
             )
             .await
             .assert_problem(422, "auth.totp.code_mismatch");
-        // An unknown enrolment is refused.
+        // An unknown enrollment is refused.
         harness
             .call(
                 "POST",
                 "/auth/totp/enroll/finish",
                 Cookie(&admin),
-                Some(&json!({ "enrolment_id": "unknown", "code": "123456" })),
+                Some(&json!({ "enrollment_id": "unknown", "code": "123456" })),
             )
             .await
             .assert_problem(400, "auth.challenge_invalid");
@@ -2358,7 +2362,7 @@ mod tests {
             .await;
         let seed_again =
             base32_decode(start.body["secret"].as_str().expect("the seed")).expect("base32");
-        assert_ne!(seed, seed_again, "every enrolment has its own seed");
+        assert_ne!(seed, seed_again, "every enrollment has its own seed");
         let params = TotpParams::default();
         let code = totp::code_at(&seed_again, &params, seconds_now());
         let finish = harness
@@ -2367,7 +2371,7 @@ mod tests {
                 "/auth/totp/enroll/finish",
                 Cookie(&admin),
                 Some(&json!({
-                    "enrolment_id": start.body["enrolment_id"],
+                    "enrollment_id": start.body["enrollment_id"],
                     "code": code.as_str()
                 })),
             )
@@ -2494,7 +2498,7 @@ mod tests {
         assert_eq!(plain.body["status"], "authenticated");
         let actions = harness.audit_actions().await;
         for action in [
-            "auth.totp.enrol",
+            "auth.totp.enroll",
             "auth.login.totp",
             "auth.login.recovery",
             "auth.totp.remove",
@@ -2523,7 +2527,7 @@ mod tests {
                 "/auth/totp/enroll/finish",
                 Cookie(&admin),
                 Some(&json!({
-                    "enrolment_id": start.body["enrolment_id"],
+                    "enrollment_id": start.body["enrollment_id"],
                     "code": code.as_str()
                 })),
             )

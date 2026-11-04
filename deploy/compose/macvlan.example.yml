@@ -45,7 +45,7 @@
 #
 # Start the controller with: docker compose -f macvlan.example.yml up --build -d
 #
-# Adding the probe. A node needs an enrolment token from an administrator, once; its
+# Adding the probe. A node needs an enrollment token from an administrator, once; its
 # identity and certificate then live in its own volume (probe-data), which must survive the
 # container (docs/cluster.md section 1). With the controller up and set up (first-run setup
 # above), from the directory of this file:
@@ -55,16 +55,16 @@
 #        docker compose -f macvlan.example.yml exec tenko \
 #          tenko login --url https://192.0.2.10:8443 --ca-file /var/lib/tenko/tls/ca-root.pem \
 #          --user <admin>
-#        docker compose -f macvlan.example.yml exec tenko tenko node enrol-token \
+#        docker compose -f macvlan.example.yml exec tenko tenko node enroll-token \
 #          --roles probe --name probe-lan --expires-in 3600
 #      (or create the token in the web UI, under Nodes). The token is valid for one use.
-#   2. Enrol the probe into its volume. This runs a one-off container of the probe service
+#   2. Enroll the probe into its volume. This runs a one-off container of the probe service
 #      on the macvlan network, so it reaches the controller at its own address:
 #        docker compose -f macvlan.example.yml --profile probe run --rm --no-deps \
-#          --entrypoint /usr/local/bin/tenko probe node enrol \
+#          --entrypoint /usr/local/bin/tenko probe node enroll \
 #          --controller https://192.0.2.10:8443 --token <token> --ca-fingerprint <sha256> \
 #          --name probe-lan --address 192.0.2.11 --data-dir /var/lib/tenko
-#      (the token can also come from TENKO_ENROL_TOKEN or --token-file, which keeps it out
+#      (the token can also come from TENKO_ENROLL_TOKEN or --token-file, which keeps it out
 #      of the process list).
 #   3. Start the probe: docker compose -f macvlan.example.yml --profile probe up -d probe
 #      and check it: docker compose -f macvlan.example.yml exec probe tenko node status
@@ -92,7 +92,7 @@ services:
       # and for other controllers. The default is 0.0.0.0:8444 already; set here so a
       # configuration file cannot narrow it by accident.
       TENKO_CLUSTER__LISTEN: '["0.0.0.0:8444"]'
-      # Nodes are told this endpoint at enrolment (host:port).
+      # Nodes are told this endpoint at enrollment (host:port).
       TENKO_CLUSTER__ADVERTISE: '["${TENKO_CONTROLLER_IP:-192.0.2.10}:8444"]'
     # Nothing is published on a macvlan network: the container has its own address, and
     # every port it listens on is reachable on it. These lines only document the ports.
@@ -138,7 +138,7 @@ services:
       retries: 3
     volumes:
       # The identity and certificate of the node, and its observation buffer. Losing the
-      # volume loses the node: enrol again and revoke the old one.
+      # volume loses the node: enroll again and revoke the old one.
       - "probe-data:/var/lib/tenko"
     read_only: true
     tmpfs:

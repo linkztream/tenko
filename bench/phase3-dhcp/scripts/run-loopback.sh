@@ -20,7 +20,7 @@
 #     --target x86_64-unknown-linux-musl
 # A dynamically linked binary is refused on Linux (--allow-dynamic overrides and marks the
 # run not publishable). Windows runs use the release build. Every figure is a single-node
-# figure; loopback figures are upper bounds and labelled so.
+# figure; loopback figures are upper bounds and labeled so.
 #
 # Usage:
 #   run-loopback.sh --binary PATH [--workers "1 2 4 8"] [--stores "mem queue"]

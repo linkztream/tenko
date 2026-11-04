@@ -2,16 +2,16 @@
 <xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
   <file id="tenko-ui">
     <group id="jobs">
-      <unit id="jobs.state.cancelled_rolled_back">
-        <notes><note category="description">State of a job that was cancelled after some of its steps had run: the cancellation undid those steps.</note></notes>
-        <segment><source>Rolled back (cancelled)</source><target>Återställt (avbrutet)</target></segment>
+      <unit id="jobs.state.canceled_rolled_back">
+        <notes><note category="description">State of a job that was canceled after some of its steps had run: the cancellation undid those steps.</note></notes>
+        <segment><source>Rolled back (canceled)</source><target>Återställt (avbrutet)</target></segment>
       </unit>
       <unit id="jobs.undo.step_named">
         <notes><note category="description">Manual undo task for a step that cannot be undone automatically. The argument step is the step number, name the short name of the step, such as "Reserve in DHCP".</note></notes>
         <segment><source>Undo step {step} ({name}) by hand, then mark this done.</source><target>Ångra steg {step} ({name}) för hand och markera sedan som klar.</target></segment>
       </unit>
       <unit id="jobs.group.not_moved.heading">
-        <notes><note category="description">Heading of the list of jobs in a job group that ended without their change (rolled back, failed or cancelled).</note></notes>
+        <notes><note category="description">Heading of the list of jobs in a job group that ended without their change (rolled back, failed or canceled).</note></notes>
         <segment><source>Not moved</source><target>Inte flyttade</target></segment>
       </unit>
       <unit id="jobs.group.not_moved.count">
@@ -66,7 +66,7 @@
         <segment><source>Earlier</source><target>Tidigare</target></segment>
       </unit>
       <unit id="jobs.day.note">
-        <notes><note category="description">After the count of a day group of the jobs list, as in "Today · 12 done". outcome is done when every job of the day succeeded, failed when every one failed or was rolled back, mixed when some did, other otherwise (some were cancelled); failed is the number that failed or were rolled back.</note></notes>
+        <notes><note category="description">After the count of a day group of the jobs list, as in "Today · 12 done". outcome is done when every job of the day succeeded, failed when every one failed or was rolled back, mixed when some did, other otherwise (some were canceled); failed is the number that failed or were rolled back.</note></notes>
         <segment><source>{outcome, select, done {done} failed {failed or rolled back} mixed {finished, {failed, number} failed or rolled back} other {finished}}</source><target>{outcome, select, done {klara} failed {misslyckade eller återställda} mixed {avslutade, {failed, number} misslyckade eller återställda} other {avslutade}}</target></segment>
       </unit>
       <unit id="jobs.day.rest.today">

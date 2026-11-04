@@ -60,7 +60,7 @@ pub const MAX_CA_PEM: usize = 65_536;
 #[serde(rename_all = "snake_case")]
 pub enum TlsMode {
     /// The certificate authorities the operating system trusts (`SSL_CERT_FILE` and
-    /// `SSL_CERT_DIR` are honoured), and the host name of the URL.
+    /// `SSL_CERT_DIR` are honored), and the host name of the URL.
     #[default]
     System,
     /// Only the certificate authority (or authorities) of the settings, and the host name of

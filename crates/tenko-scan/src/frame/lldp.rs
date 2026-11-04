@@ -7,7 +7,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use tenko_core::MacAddr;
 
-use super::{Neighbour, NeighbourCapabilities, NeighbourSource};
+use super::{Neighbor, NeighborCapabilities, NeighborSource};
 
 /// The 802.1 organizationally specific OUI (VLAN TLVs).
 const OUI_8021: [u8; 3] = [0x00, 0x80, 0xc2];
@@ -61,8 +61,8 @@ fn as_text(value: &[u8]) -> String {
     super::hex(value)
 }
 
-fn capabilities(enabled: u16) -> NeighbourCapabilities {
-    NeighbourCapabilities {
+fn capabilities(enabled: u16) -> NeighborCapabilities {
+    NeighborCapabilities {
         bridge: enabled & 0x04 != 0,
         router: enabled & 0x10 != 0,
         wlan: enabled & 0x08 != 0,
@@ -71,12 +71,12 @@ fn capabilities(enabled: u16) -> NeighbourCapabilities {
     }
 }
 
-/// Parses an LLDP frame into a [`Neighbour`]. Unknown TLVs are skipped by their length.
+/// Parses an LLDP frame into a [`Neighbor`]. Unknown TLVs are skipped by their length.
 /// Returns `None` only when the TLV stream is malformed before anything useful is read.
-pub fn parse(payload: &[u8]) -> Option<Neighbour> {
-    let mut neighbour = Neighbour {
-        source: Some(NeighbourSource::Lldp),
-        ..Neighbour::default()
+pub fn parse(payload: &[u8]) -> Option<Neighbor> {
+    let mut neighbor = Neighbor {
+        source: Some(NeighborSource::Lldp),
+        ..Neighbor::default()
     };
     let mut at = 0;
     let mut saw_tlv = false;
@@ -95,28 +95,28 @@ pub fn parse(payload: &[u8]) -> Option<Neighbour> {
         saw_tlv = true;
         match tlv_type {
             1 if !value.is_empty() => {
-                neighbour.chassis_id = format_id(value[0], &value[1..], 4, 5);
+                neighbor.chassis_id = format_id(value[0], &value[1..], 4, 5);
             }
             2 if !value.is_empty() => {
-                neighbour.port_id = format_id(value[0], &value[1..], 3, 4);
+                neighbor.port_id = format_id(value[0], &value[1..], 3, 4);
             }
             3 if value.len() >= 2 => {
-                neighbour.ttl = Some(u16::from_be_bytes([value[0], value[1]]));
+                neighbor.ttl = Some(u16::from_be_bytes([value[0], value[1]]));
             }
-            4 => neighbour.port_desc = Some(as_text(value)).filter(|t| !t.is_empty()),
-            5 => neighbour.system_name = Some(as_text(value)).filter(|t| !t.is_empty()),
-            6 => neighbour.system_desc = Some(as_text(value)).filter(|t| !t.is_empty()),
+            4 => neighbor.port_desc = Some(as_text(value)).filter(|t| !t.is_empty()),
+            5 => neighbor.system_name = Some(as_text(value)).filter(|t| !t.is_empty()),
+            6 => neighbor.system_desc = Some(as_text(value)).filter(|t| !t.is_empty()),
             7 if value.len() >= 4 => {
                 let enabled = u16::from_be_bytes([value[2], value[3]]);
-                neighbour.capabilities = capabilities(enabled);
+                neighbor.capabilities = capabilities(enabled);
             }
-            8 => read_management_address(value, &mut neighbour),
-            127 => read_org_specific(value, &mut neighbour),
+            8 => read_management_address(value, &mut neighbor),
+            127 => read_org_specific(value, &mut neighbor),
             _ => {}
         }
     }
-    if saw_tlv && !neighbour.is_empty() {
-        Some(neighbour)
+    if saw_tlv && !neighbor.is_empty() {
+        Some(neighbor)
     } else {
         None
     }
@@ -124,7 +124,7 @@ pub fn parse(payload: &[u8]) -> Option<Neighbour> {
 
 /// Management address TLV: 1-byte address string length (subtype + address), 1-byte
 /// address subtype, the address, then interface numbering and the OID, which are ignored.
-fn read_management_address(value: &[u8], neighbour: &mut Neighbour) {
+fn read_management_address(value: &[u8], neighbor: &mut Neighbor) {
     let Some(&addr_len) = value.first() else {
         return;
     };
@@ -136,15 +136,15 @@ fn read_management_address(value: &[u8], neighbour: &mut Neighbour) {
         return;
     };
     if let Some(ip) = network_address(field)
-        && !neighbour.mgmt_addrs.contains(&ip)
+        && !neighbor.mgmt_addrs.contains(&ip)
     {
-        neighbour.mgmt_addrs.push(ip);
+        neighbor.mgmt_addrs.push(ip);
     }
 }
 
 /// Organizationally specific TLV: 3-byte OUI, 1-byte subtype, then the value. The 802.1
 /// OUI carries the port VLAN id (subtype 1) and VLAN names (subtype 3).
-fn read_org_specific(value: &[u8], neighbour: &mut Neighbour) {
+fn read_org_specific(value: &[u8], neighbor: &mut Neighbor) {
     let (Some(oui), Some(&subtype)) = (value.get(0..3), value.get(3)) else {
         return;
     };
@@ -152,14 +152,14 @@ fn read_org_specific(value: &[u8], neighbour: &mut Neighbour) {
     if oui == OUI_8021 {
         match subtype {
             1 if body.len() >= 2 => {
-                neighbour.vlan = Some(u16::from_be_bytes([body[0], body[1]]));
+                neighbor.vlan = Some(u16::from_be_bytes([body[0], body[1]]));
             }
             3 if body.len() >= 3 => {
                 let name_len = usize::from(body[2]);
                 if let Some(name) = body.get(3..3 + name_len) {
                     let name = as_text(name);
                     if !name.is_empty() {
-                        neighbour.vlan_name = Some(name);
+                        neighbor.vlan_name = Some(name);
                     }
                 }
             }
@@ -214,27 +214,27 @@ mod tests {
 
     #[test]
     fn every_named_tlv_is_read() {
-        let neighbour = parse(&sample()).expect("neighbour");
-        assert_eq!(neighbour.chassis_id.as_deref(), Some("00:00:5e:00:53:02"));
-        assert_eq!(neighbour.port_id.as_deref(), Some("Gi0/1"));
-        assert_eq!(neighbour.ttl, Some(120));
-        assert_eq!(neighbour.port_desc.as_deref(), Some("uplink to probe"));
+        let neighbor = parse(&sample()).expect("neighbor");
+        assert_eq!(neighbor.chassis_id.as_deref(), Some("00:00:5e:00:53:02"));
+        assert_eq!(neighbor.port_id.as_deref(), Some("Gi0/1"));
+        assert_eq!(neighbor.ttl, Some(120));
+        assert_eq!(neighbor.port_desc.as_deref(), Some("uplink to probe"));
         assert_eq!(
-            neighbour.system_name.as_deref(),
+            neighbor.system_name.as_deref(),
             Some("switch-a.example.test")
         );
         assert_eq!(
-            neighbour.system_desc.as_deref(),
+            neighbor.system_desc.as_deref(),
             Some("Example Switch OS 1.0")
         );
-        assert!(neighbour.capabilities.bridge && neighbour.capabilities.router);
+        assert!(neighbor.capabilities.bridge && neighbor.capabilities.router);
         assert_eq!(
-            neighbour.mgmt_addrs,
+            neighbor.mgmt_addrs,
             vec!["192.0.2.2".parse::<IpAddr>().unwrap()]
         );
-        assert_eq!(neighbour.vlan, Some(100));
-        assert_eq!(neighbour.vlan_name.as_deref(), Some("clients"));
-        assert_eq!(neighbour.source, Some(NeighbourSource::Lldp));
+        assert_eq!(neighbor.vlan, Some(100));
+        assert_eq!(neighbor.vlan_name.as_deref(), Some("clients"));
+        assert_eq!(neighbor.source, Some(NeighborSource::Lldp));
     }
 
     #[test]
@@ -242,9 +242,9 @@ mod tests {
         let mut frame = tlv(1, &[4, 0x00, 0x00, 0x5e, 0x00, 0x53, 0x02]);
         // A TLV claiming 20 bytes but with 2 present.
         frame.extend_from_slice(&[5 << 1, 20, 0x01, 0x02]);
-        let neighbour = parse(&frame).expect("neighbour");
-        assert_eq!(neighbour.chassis_id.as_deref(), Some("00:00:5e:00:53:02"));
-        assert!(neighbour.system_name.is_none());
+        let neighbor = parse(&frame).expect("neighbor");
+        assert_eq!(neighbor.chassis_id.as_deref(), Some("00:00:5e:00:53:02"));
+        assert!(neighbor.system_name.is_none());
     }
 
     #[test]

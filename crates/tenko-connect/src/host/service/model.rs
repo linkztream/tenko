@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn requests_refuse_unknown_members() {
-        let body = serde_json::json!({ "plugin": "sample", "name": "x", "colour": 1 });
+        let body = serde_json::json!({ "plugin": "sample", "name": "x", "color": 1 });
         assert!(serde_json::from_value::<NewConnector>(body).is_err());
         let body = serde_json::json!({ "plugin": "sample", "name": "x" });
         let new: NewConnector = serde_json::from_value(body).expect("defaults");

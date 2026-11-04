@@ -229,7 +229,7 @@ impl Method for ReverseDns {
         let mut answered = 0usize;
         let mut done = 0usize;
         loop {
-            while pending.len() < limit && !ctx.cancel.is_cancelled() {
+            while pending.len() < limit && !ctx.cancel.is_canceled() {
                 let Some(ip) = queue.next() else { break };
                 let (servers, pacer, timeout) =
                     (servers.clone(), Arc::clone(&ctx.pacer), self.timeout);
@@ -237,7 +237,7 @@ impl Method for ReverseDns {
             }
             let next = tokio::select! {
                 next = pending.next() => next,
-                () = ctx.cancel.cancelled() => break,
+                () = ctx.cancel.canceled() => break,
             };
             let Some((ip, result)) = next else { break };
             done += 1;
@@ -262,7 +262,7 @@ impl Method for ReverseDns {
                     .join(", ")
             ));
         }
-        output.covered_all = done == total && answered == done && !ctx.cancel.is_cancelled();
+        output.covered_all = done == total && answered == done && !ctx.cancel.is_canceled();
         Ok(output)
     }
 }

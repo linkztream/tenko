@@ -33,9 +33,9 @@ impl ScanError {
         Self::new("scan.unavailable", detail)
     }
 
-    /// `scan.cancelled`: the run was stopped (kill switch, blackout window, shutdown).
-    pub fn cancelled(detail: impl Into<String>) -> Self {
-        Self::new("scan.cancelled", detail)
+    /// `scan.canceled`: the run was stopped (kill switch, blackout window, shutdown).
+    pub fn canceled(detail: impl Into<String>) -> Self {
+        Self::new("scan.canceled", detail)
     }
 
     /// `scan.out_of_scope`: a target outside the configured prefixes.

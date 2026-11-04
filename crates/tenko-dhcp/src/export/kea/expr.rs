@@ -435,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn operators_simplify_and_parenthesise() {
+    fn operators_simplify_and_parenthesize() {
         assert_eq!(
             Expr::and([Expr::True, Expr::member("a")]).render(),
             "member('a')"

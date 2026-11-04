@@ -3,7 +3,7 @@ import type { AppRoute } from "../app/router";
 import { withPacks } from "../i18n";
 
 // The nodes area: the enrolled nodes (with the node in the URL beside the list) and the
-// enrolment tokens. A rail area of its own: nodes are read by every role, tokens by
+// enrollment tokens. A rail area of its own: nodes are read by every role, tokens by
 // administrators.
 const PACKS = ["grid", "nodes"] as const;
 // The scan configuration of a probe, with its kill switch, hangs off the node (WP3.11a): its own

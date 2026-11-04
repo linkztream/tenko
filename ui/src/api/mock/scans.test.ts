@@ -248,8 +248,8 @@ describe("kill switches", () => {
     const stopped = await post(`${V}/nodes/${DMZ}/scan/stop`);
     expect(stopped.status).toBe(202);
     const scan = await scanOf(SCAN_IDS.running);
-    expect(scan.state).toBe("cancelled");
-    expect(scan.probes[0]?.state).toBe("cancelled");
+    expect(scan.state).toBe("canceled");
+    expect(scan.probes[0]?.state).toBe("canceled");
     expect(scan.finished_at).toBeTruthy();
     const again = await scanOf(SCAN_IDS.running);
     expect(again.progress).toBe(scan.progress);

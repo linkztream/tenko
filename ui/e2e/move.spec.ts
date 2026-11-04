@@ -201,7 +201,7 @@ test("an address dragged onto another network moves its host, and the manual ste
   expect(host.meta.tags ?? []).not.toContain(MOVE_FAILED_TAG);
 });
 
-test("cancelling the job of a move rolls it back and tags the host", async ({ page, api, signedIn }) => {
+test("canceling the job of a move rolls it back and tags the host", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe(ADMIN.name);
   const lab = await arrangeMoveLab(api);
   const submitted = await api.post<Schemas["MoveSubmitted"]>("/moves", {
@@ -223,13 +223,13 @@ test("cancelling the job of a move rolls it back and tags the host", async ({ pa
   await confirm.getByTestId("confirm-ok").click();
   await expect(confirm).toHaveCount(0);
 
-  // The job rolls back, then ends cancelled with its reason, and no task is left to do.
-  await expect(page.getByTestId("page-job").getByTestId("job-state")).toHaveAttribute("data-state", "cancelled");
+  // The job rolls back, then ends canceled with its reason, and no task is left to do.
+  await expect(page.getByTestId("page-job").getByTestId("job-state")).toHaveAttribute("data-state", "canceled");
   await expect(page.getByTestId("job-cancel")).toHaveCount(0);
   await expect(page.getByTestId("job-error")).toBeVisible();
   await expect(page.getByTestId("job-step-task")).toHaveCount(0);
   const detail = await api.waitForJob(jobId);
-  expect(detail.job.state).toBe("cancelled");
+  expect(detail.job.state).toBe("canceled");
   expect(detail.job.cancel_requested).toBeTruthy();
   expect(detail.transitions.map((transition) => transition.state)).toContain("rolling_back");
 

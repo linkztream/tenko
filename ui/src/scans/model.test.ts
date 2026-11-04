@@ -26,7 +26,7 @@ describe("scan enumerations", () => {
   });
 
   it("know the terminal states", () => {
-    expect(SCAN_STATES.filter(isTerminal)).toEqual(["done", "partial", "failed", "cancelled"]);
+    expect(SCAN_STATES.filter(isTerminal)).toEqual(["done", "partial", "failed", "canceled"]);
   });
 });
 

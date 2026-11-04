@@ -1,4 +1,4 @@
-//! The rule table against captured and modelled requests: the lab's captures
+//! The rule table against captured and modeled requests: the lab's captures
 //! (`src/fingerprint/captured/`) and the WP7.3 corpus (`fixtures/requests/`, `fixtures/`).
 
 use std::{collections::BTreeSet, path::Path};
@@ -72,7 +72,7 @@ fn the_lab_captures_are_classified() {
 }
 
 #[test]
-fn the_modelled_corpus_is_classified() {
+fn the_modeled_corpus_is_classified() {
     let cases: [(&str, &str, &str); 10] = [
         (
             "fixtures/requests/windows-discover.hex",
@@ -244,13 +244,13 @@ fn every_entry_is_reachable_and_well_formed() {
         .iter()
         .filter(|entry| entry.provenance == Provenance::Captured)
         .count();
-    let modelled = ENTRIES
+    let modeled = ENTRIES
         .iter()
-        .filter(|entry| entry.provenance == Provenance::Modelled)
+        .filter(|entry| entry.provenance == Provenance::Modeled)
         .count();
     assert!(
-        captured >= 4 && modelled >= 4,
-        "{captured} captured, {modelled} modelled"
+        captured >= 4 && modeled >= 4,
+        "{captured} captured, {modeled} modeled"
     );
     // The families the plan names are all there.
     let families: BTreeSet<&str> = ENTRIES.iter().map(|entry| entry.family).collect();

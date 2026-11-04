@@ -743,15 +743,15 @@ mod tests {
         let posts = [
             (
                 "/hosts".to_owned(),
-                json!({ "name": label("host", 3), "colour": "red" }),
+                json!({ "name": label("host", 3), "color": "red" }),
             ),
             (
                 format!("{host_path}/interfaces"),
-                json!({ "name": "eth1", "colour": "red" }),
+                json!({ "name": "eth1", "color": "red" }),
             ),
             (
                 "/hosts".to_owned(),
-                json!({ "name": label("host", 3), "interfaces": [{ "name": "eth0", "colour": "red" }] }),
+                json!({ "name": label("host", 3), "interfaces": [{ "name": "eth0", "color": "red" }] }),
             ),
         ];
         for (path, body) in posts {

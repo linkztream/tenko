@@ -388,7 +388,7 @@ export function PrefixPane(props: PrefixPaneProps) {
                   held: <Count value={use().reserved} />,
                 })}
               </div>
-              {/* A supernet's allocation to child prefixes, labelled apart from the meter. */}
+              {/* A supernet's allocation to child prefixes, labeled apart from the meter. */}
               <Show when={props.node && allocationWords(props.node)}>
                 {(words) => (
                   <div class="allocation muted" data-testid="prefix-allocation" title={t("ipam.allocation.hint")}>

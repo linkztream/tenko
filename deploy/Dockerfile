@@ -136,7 +136,7 @@ VOLUME ["/var/lib/tenko"]
 # 8444/tcp  Cluster port: gRPC over mutual TLS. Other controllers joining this one and
 #           data-plane nodes (probes) connect to it. It is only needed on a controller that
 #           has cluster members or enrolled nodes; the server opens it once a node is
-#           enrolled or an enrolment token is waiting (docs/cluster.md section 7). Publish
+#           enrolled or an enrollment token is waiting (docs/cluster.md section 7). Publish
 #           it with `-p 8444:8444` only then, and only to the node and controller networks.
 # Later roles will add: 53/udp and 53/tcp (DNS), 67/udp (DHCPv4), 547/udp (DHCPv6).
 EXPOSE 8443/tcp 8444/tcp

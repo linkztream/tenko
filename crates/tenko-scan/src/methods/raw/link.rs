@@ -5,7 +5,7 @@
 //! The real channel is Linux only and goes through `pnet_datalink` (`AF_PACKET`), a safe
 //! wrapper: no `unsafe` enters this workspace. It needs `CAP_NET_RAW`. The socket I/O runs
 //! on a dedicated thread that owns the non-`Send` sender and receiver; the methods talk to
-//! it over channels, so they stay async and honour their deadlines. A [`MockLink`] feeds
+//! it over channels, so they stay async and honor their deadlines. A [`MockLink`] feeds
 //! crafted frames to the methods' unit tests, so the sweep, the SYN scan, the rate limit
 //! and the kill switch are tested without a socket.
 

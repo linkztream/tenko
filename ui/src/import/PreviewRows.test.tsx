@@ -314,7 +314,7 @@ describe("steps and notices of the preview", () => {
     acknowledged: false,
   });
 
-  it("words a supernet step with the count of networks inside and passes the acknowledgement on", () => {
+  it("words a supernet step with the count of networks inside and passes the acknowledgment on", () => {
     const given: [string, boolean][] = [];
     show(preview({ warnings: [step("192.0.2.0/24", "1"), step("198.51.100.0/24", "3")] }), (code, on) => given.push([code, on]));
     const rows = screen.getAllByTestId("import-supernet-step");
@@ -343,13 +343,13 @@ describe("steps and notices of the preview", () => {
   it("offers a passkey when the credentials are held back by the PIN coupling rule", () => {
     const credentials = { hosts: 2, new: 2, changed: 0, unchanged: 0, statement: "", allowed: false, reason: "pin_coupling" } as const;
     show(preview({ credentials }));
-    const link = screen.getByTestId("import-pin-coupling-enrol");
-    expect(link.textContent).toBe("Enrol a passkey");
+    const link = screen.getByTestId("import-pin-coupling-enroll");
+    expect(link.textContent).toBe("Enroll a passkey");
     expect(link.getAttribute("href")).toBe("/account/security");
   });
 
   it("offers no passkey for another reason", () => {
     show(preview({ credentials: { hosts: 2, new: 2, changed: 0, unchanged: 0, statement: "", allowed: false, reason: "forbidden" } }));
-    expect(screen.queryByTestId("import-pin-coupling-enrol")).toBeNull();
+    expect(screen.queryByTestId("import-pin-coupling-enroll")).toBeNull();
   });
 });

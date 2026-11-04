@@ -55,7 +55,7 @@
 //! - **Job.** `GET /jobs/{id}` is a `JobDetail` (`tenko-jobs/src/query.rs`, `JobDetail`):
 //!   `job.state` (`JobState` in `tenko-jobs/src/model.rs`: `queued`, `running`, `waiting`,
 //!   `rolling_back` are active, `succeeded` is success, `failed`, `rolled_back` and
-//!   `cancelled` end without success), `job.error` (`CodedError` in
+//!   `canceled` end without success), `job.error` (`CodedError` in
 //!   `tenko-core/src/error.rs`: `code`, `detail`), else the error of the first failed step,
 //!   and `job.steps[].state.state` for progress. A `JobSummary` (`state`, `error`,
 //!   `steps_done`, `step_count`) is read as well.
@@ -271,7 +271,7 @@ impl Import<'_> {
         let pending = unacknowledged(&preview);
         if !pending.is_empty() {
             return Err(usage(format!(
-                "the preview has warnings that need an acknowledgement: {}; run again with \
+                "the preview has warnings that need an acknowledgment: {}; run again with \
                  --acknowledge CODE for each",
                 pending.join(", ")
             )));
@@ -1071,7 +1071,7 @@ fn render_preview(preview: &Value) -> String {
         let list: Vec<String> = pending.iter().map(|code| clean(code)).collect();
         let _ = writeln!(
             out,
-            "needs acknowledgement: {} (run with --acknowledge CODE)",
+            "needs acknowledgment: {} (run with --acknowledge CODE)",
             list.join(", ")
         );
     }
@@ -1129,14 +1129,14 @@ enum JobPhase {
     Active,
     /// `succeeded`.
     Succeeded,
-    /// `failed`, `rolled_back` or `cancelled`.
+    /// `failed`, `rolled_back` or `canceled`.
     Unsuccessful,
 }
 
 fn job_phase(state: &str) -> JobPhase {
     match state {
         "succeeded" => JobPhase::Succeeded,
-        "failed" | "rolled_back" | "cancelled" => JobPhase::Unsuccessful,
+        "failed" | "rolled_back" | "canceled" => JobPhase::Unsuccessful,
         _ => JobPhase::Active,
     }
 }
@@ -1200,7 +1200,7 @@ fn job_error(body: &Value) -> Option<String> {
 fn unsuccessful_line(job_id: &str, state: &str, error: Option<&str>) -> String {
     let what = match state {
         "rolled_back" => "was rolled back, no changes were kept".to_owned(),
-        "cancelled" => "was cancelled, no changes were kept".to_owned(),
+        "canceled" => "was canceled, no changes were kept".to_owned(),
         "failed" => "failed and could not be rolled back; some changes may remain, so an \
                      operator must review them"
             .to_owned(),
@@ -1575,7 +1575,7 @@ mod tests {
         }});
         let text = render_preview(&acknowledge);
         assert!(text.contains(
-            "needs acknowledgement: ipam.prefix.nibble_boundary (run with --acknowledge CODE)"
+            "needs acknowledgment: ipam.prefix.nibble_boundary (run with --acknowledge CODE)"
         ));
         assert_eq!(
             unacknowledged(&acknowledge),
@@ -1693,7 +1693,7 @@ mod tests {
             assert_eq!(job_phase(state), JobPhase::Active, "{state}");
         }
         assert_eq!(job_phase("succeeded"), JobPhase::Succeeded);
-        for state in ["failed", "rolled_back", "cancelled"] {
+        for state in ["failed", "rolled_back", "canceled"] {
             assert_eq!(job_phase(state), JobPhase::Unsuccessful, "{state}");
         }
     }
@@ -1741,7 +1741,7 @@ mod tests {
             line,
             "import job j1 was rolled back, no changes were kept: [ipam.conflict] taken"
         );
-        assert!(unsuccessful_line("j1", "cancelled", None).ends_with("no changes were kept"));
+        assert!(unsuccessful_line("j1", "canceled", None).ends_with("no changes were kept"));
         assert!(unsuccessful_line("j1", "failed", None).contains("operator must review"));
         assert_eq!(
             unsuccessful_line("j1", "weird_state", None),
@@ -2163,7 +2163,7 @@ mod tests {
         let failure = import
             .proceed(&upload(), None)
             .await
-            .expect_err("needs an acknowledgement");
+            .expect_err("needs an acknowledgment");
         assert_eq!(failure.status, exit::USAGE);
         assert!(failure.message.contains("--acknowledge"));
         assert!(!fake.seen().iter().any(|line| line.starts_with("POST")));

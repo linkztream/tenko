@@ -8,7 +8,7 @@ Hand-written records that follow the documented classic API, with documentation 
 
 ## `recorded/`
 
-The answers of a real self-hosted Network Application (version 10.6, four switches and two access points, no UniFi gateway), recorded on 2026-10-16 with the recorder in `tests/live.rs` through the plugin's own session and anonymised by `tenko_connect::sdk::anonymise` before anything was written to disk. `tests/recorded.rs` reads them through the fake controller and asserts the counts the live smoke printed the same day.
+The answers of a real self-hosted Network Application (version 10.6, four switches and two access points, no UniFi gateway), recorded on 2026-10-16 with the recorder in `tests/live.rs` through the plugin's own session and anonymized by `tenko_connect::sdk::anonymize` before anything was written to disk. `tests/recorded.rs` reads them through the fake controller and asserts the counts the live smoke printed the same day.
 
 | File | Endpoint | Records |
 |---|---|---|
@@ -20,7 +20,7 @@ The answers of a real self-hosted Network Application (version 10.6, four switch
 | `user.json` | `rest/user` | the records of the connected clients and three offline ones |
 | `sysinfo.json` | `stat/sysinfo` | 1 |
 
-What the anonymiser did, so that the shapes, counts and relations between records survive while nothing of the recorded environment does:
+What the anonymizer did, so that the shapes, counts and relations between records survive while nothing of the recorded environment does:
 
 - Every MAC address became one of the documentation addresses `00:00:5e:00:53:xx` (EUI-64 identifiers `00:00:5e:ff:fe:00:xx:xx`), the same placeholder wherever the address appears, in the notation it was found in.
 - Every private IPv4 /24 block became a documentation network (`192.0.2.0/24`, `198.51.100.0/24`) or a block of the benchmarking range `198.18.0.0/15`, contiguous for a wider network, with the host part kept; every public IPv4 address landed in `203.0.113.0/24`. IPv6 prefixes became `2001:db8:n::/48` with the subnet id kept and MAC-derived interface identifiers replaced; link-local addresses keep `fe80::`.

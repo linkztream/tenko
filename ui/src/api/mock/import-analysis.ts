@@ -447,8 +447,8 @@ export function inferNetwork(
   dataRows: number,
 ): { net: Cidr; source: MaskSource } {
   const bits = ip.version === 4 ? 32 : 128;
-  const neighbourhood = ip.version === 4 ? 24 : 64;
-  const near = cidrOf(ip, neighbourhood);
+  const neighborhood = ip.version === 4 ? 24 : 64;
+  const near = cidrOf(ip, neighborhood);
   const own: Ip[] = [];
   for (let row = firstRow; row < sheet.rows.length; row += 1) {
     for (const column of addressColumns) {
@@ -472,7 +472,7 @@ export function inferNetwork(
   while (length > 0 && own.some((a) => !containsIp(cidrOf(ip, length), a)) && aligned(length - 1)) length -= 1;
   let source: MaskSource = "row_count";
   if (deviceLayout) {
-    if (length === bits && aligned(neighbourhood)) length = neighbourhood;
+    if (length === bits && aligned(neighborhood)) length = neighborhood;
     source = "addresses";
   }
   return { net: cidrOf(ip, length), source };

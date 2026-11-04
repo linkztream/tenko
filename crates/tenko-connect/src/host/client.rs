@@ -645,7 +645,7 @@ pub(crate) fn map_status(status: &Status, timeout: Duration) -> ConnectorError {
         }
         if status.code() == tonic::Code::Cancelled {
             return ConnectorError::PluginFailed(format!(
-                "the plugin cancelled the call: {}",
+                "the plugin canceled the call: {}",
                 status.message()
             ));
         }

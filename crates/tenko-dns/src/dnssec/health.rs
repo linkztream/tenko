@@ -78,7 +78,7 @@ pub fn findings(zone: &Zone, state: &SignState, now: Timestamp) -> Vec<Finding> 
                 zone,
                 format!(
                     "the clock of this controller is {} s behind the last signing of zone {}; \
-                     check its time synchronisation",
+                     check its time synchronization",
                     behind.as_secs(),
                     zone.name
                 ),

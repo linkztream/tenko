@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 /// jemalloc instead of musl's own malloc in the static Linux binary that ships. musl's
-/// allocator serialises the many small allocations of the replicated store's write path
+/// allocator serializes the many small allocations of the replicated store's write path
 /// across threads, which made zone imports and DNSSEC signing four to seven times slower than
 /// on Windows (M18, M20 in `bench/phase2-dns/results`). Its options, fixed at build time in
 /// `.cargo/config.toml`, return freed memory from a background thread, so the idle memory

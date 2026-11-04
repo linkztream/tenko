@@ -4,9 +4,9 @@
 //! |---|---|
 //! | [`controller`] | the `cluster` start step of `tenko serve` on a controller |
 //! | [`agent`] | `tenko serve` without the controller role: the node process of a data-plane node |
-//! | [`enrol`] | `tenko node enrol`: the enrolment ceremony on the node |
+//! | [`enroll`] | `tenko node enroll`: the enrollment ceremony on the node |
 //! | [`status`] | `tenko node status` and `tenko node renew` |
-//! | [`token`] | `tenko node enrol-token`: a token from a controller, for scripts |
+//! | [`token`] | `tenko node enroll-token`: a token from a controller, for scripts |
 //! | [`inject`] | `tenko node inject`: queue a batch of observations from a file (diagnostics) |
 //! | [`scan`] | the scanner of the probe role and `tenko node scan` |
 //! | [`crate::client::node_roles`] | `tenko node roles show|set`: the roles of a node through the API |
@@ -19,7 +19,7 @@ use clap::{Args, Subcommand};
 
 pub mod agent;
 pub mod controller;
-pub mod enrol;
+pub mod enroll;
 pub mod inject;
 pub mod scan;
 pub mod status;
@@ -34,14 +34,16 @@ use crate::{
 /// Subcommands of `tenko node`.
 #[derive(Debug, Subcommand)]
 pub enum NodeCommand {
-    /// Enrol this node with a controller: get a node certificate with an enrolment token.
-    Enrol(enrol::EnrolArgs),
+    /// Enroll this node with a controller: get a node certificate with an enrollment token.
+    #[command(alias = "enrol")] // spelling: alias until 0.0.13
+    Enroll(enroll::EnrollArgs),
     /// Show this node's identity, certificate and connection.
     Status(status::StatusArgs),
     /// Renew this node's certificate now, over the mutual TLS channel.
     Renew(status::RenewArgs),
-    /// Create a single-use enrolment token on a controller (administrators).
-    EnrolToken(token::EnrolTokenArgs),
+    /// Create a single-use enrollment token on a controller (administrators).
+    #[command(alias = "enrol-token")] // spelling: alias until 0.0.13
+    EnrollToken(token::EnrollTokenArgs),
     /// Queue a batch of observations from a JSON file for the controller (diagnostics).
     #[command(hide = true)]
     Inject(inject::InjectArgs),
@@ -54,13 +56,13 @@ pub enum NodeCommand {
 }
 
 impl NodeCommand {
-    /// The command as typed on the command line, such as `node enrol`.
+    /// The command as typed on the command line, such as `node enroll`.
     pub fn name(&self) -> &'static str {
         match self {
-            NodeCommand::Enrol(_) => "node enrol",
+            NodeCommand::Enroll(_) => "node enroll",
             NodeCommand::Status(_) => "node status",
             NodeCommand::Renew(_) => "node renew",
-            NodeCommand::EnrolToken(_) => "node enrol-token",
+            NodeCommand::EnrollToken(_) => "node enroll-token",
             NodeCommand::Inject(_) => "node inject",
             NodeCommand::Scan(args) => args.action.name(),
             // node-roles: the roles of a node.
@@ -70,10 +72,10 @@ impl NodeCommand {
 
     fn json(&self) -> bool {
         match self {
-            NodeCommand::Enrol(args) => args.node.json,
+            NodeCommand::Enroll(args) => args.node.json,
             NodeCommand::Status(args) => args.node.json,
             NodeCommand::Renew(args) => args.node.json,
-            NodeCommand::EnrolToken(args) => args.client.json,
+            NodeCommand::EnrollToken(args) => args.client.json,
             NodeCommand::Inject(args) => args.node.json,
             NodeCommand::Scan(args) => args.action.json(),
             // node-roles: the roles of a node.
@@ -127,10 +129,10 @@ pub fn command(action: &NodeCommand, out: &mut impl Write, err: &mut impl Write)
     let name = action.name();
     let json = action.json();
     match action {
-        NodeCommand::Enrol(args) => client::block_on(name, json, out, err, enrol::run(args)),
+        NodeCommand::Enroll(args) => client::block_on(name, json, out, err, enroll::run(args)),
         NodeCommand::Status(args) => client::block_on(name, json, out, err, status::status(args)),
         NodeCommand::Renew(args) => client::block_on(name, json, out, err, status::renew(args)),
-        NodeCommand::EnrolToken(args) => client::block_on(name, json, out, err, token::run(args)),
+        NodeCommand::EnrollToken(args) => client::block_on(name, json, out, err, token::run(args)),
         NodeCommand::Inject(args) => {
             client::block_on(name, json, out, err, async { inject::run(args) })
         }
@@ -158,19 +160,19 @@ mod tests {
             (
                 &[
                     "node",
-                    "enrol",
+                    "enroll",
                     "--controller",
                     "https://ddi.example.net:8443",
                     "--token",
                     "tnk1.x.y",
                 ],
-                "node enrol",
+                "node enroll",
             ),
             (&["node", "status", "--check"], "node status"),
             (&["node", "renew"], "node renew"),
             (
-                &["node", "enrol-token", "--roles", "probe"],
-                "node enrol-token",
+                &["node", "enroll-token", "--roles", "probe"],
+                "node enroll-token",
             ),
             (&["node", "inject", "--file", "batch.json"], "node inject"),
             (&["node", "scan", "status", "--json"], "node scan status"),
@@ -202,7 +204,25 @@ mod tests {
     }
 
     #[test]
-    fn enrol_needs_a_controller() {
-        assert!(parse(&["node", "enrol", "--token", "tnk1.x.y"]).is_err());
+    fn enroll_needs_a_controller() {
+        assert!(parse(&["node", "enroll", "--token", "tnk1.x.y"]).is_err());
+    }
+
+    #[test]
+    fn the_command_names_of_0_0_11_still_parse() {
+        let cases: [(&[&str], &str); 2] = [
+            (
+                &["node", "enrol", "--controller", "https://192.0.2.1"], // spelling: alias until 0.0.13
+                "node enroll",
+            ),
+            (
+                &["node", "enrol-token", "--roles", "probe"], // spelling: alias until 0.0.13
+                "node enroll-token",
+            ),
+        ];
+        for (args, name) in cases {
+            let cli = parse(args).expect("valid arguments");
+            assert_eq!(cli.command.name(), name);
+        }
     }
 }

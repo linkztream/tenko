@@ -261,7 +261,7 @@ async fn the_local_offer_is_refused_for_an_invalid_section_and_skipped_without_a
     assert!(stored(&rig, LOCAL).await.is_none());
 
     let rig = Rig::new();
-    rig.enrol(1001, &[Role::Probe]).await;
+    rig.enroll(1001, &[Role::Probe]).await;
     assert!(!rig.control.offer_local(&offered()).await.expect("no role"));
     assert!(stored(&rig, LOCAL).await.is_none());
 }

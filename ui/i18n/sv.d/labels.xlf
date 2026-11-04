@@ -146,8 +146,8 @@
         <notes><note category="description">What the audit action auth.token.revoke is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Revoke an API token</source><target>Återkalla ett API-token</target></segment>
       </unit>
-      <unit id="audit.action.auth.totp.enrol">
-        <notes><note category="description">What the audit action auth.totp.enrol is called in the audit log, on a record page and on the dashboard.</note></notes>
+      <unit id="audit.action.auth.totp.enroll">
+        <notes><note category="description">What the audit action auth.totp.enroll is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Add an authenticator app</source><target>Lägg till en autentiseringsapp</target></segment>
       </unit>
       <unit id="audit.action.auth.totp.remove">
@@ -190,13 +190,13 @@
         <notes><note category="description">What the audit action cluster.ca.create is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Create the cluster certificate authority</source><target>Skapa klustrets certifikatutfärdare</target></segment>
       </unit>
-      <unit id="audit.action.cluster.enrolment.create">
-        <notes><note category="description">What the audit action cluster.enrolment.create is called in the audit log, on a record page and on the dashboard.</note></notes>
-        <segment><source>Create an enrolment token</source><target>Skapa en registreringstoken</target></segment>
+      <unit id="audit.action.cluster.enrollment.create">
+        <notes><note category="description">What the audit action cluster.enrollment.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create an enrollment token</source><target>Skapa en registreringstoken</target></segment>
       </unit>
-      <unit id="audit.action.cluster.enrolment.delete">
-        <notes><note category="description">What the audit action cluster.enrolment.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
-        <segment><source>Delete an enrolment token</source><target>Ta bort en registreringstoken</target></segment>
+      <unit id="audit.action.cluster.enrollment.delete">
+        <notes><note category="description">What the audit action cluster.enrollment.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete an enrollment token</source><target>Ta bort en registreringstoken</target></segment>
       </unit>
       <unit id="audit.action.cluster.member.announce">
         <notes><note category="description">What the audit action cluster.member.announce is called in the audit log, on a record page and on the dashboard.</note></notes>
@@ -222,9 +222,9 @@
         <notes><note category="description">What the audit action cluster.node.controller_cert is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Issue a controller certificate</source><target>Utfärda ett controllercertifikat</target></segment>
       </unit>
-      <unit id="audit.action.cluster.node.enrol">
-        <notes><note category="description">What the audit action cluster.node.enrol is called in the audit log, on a record page and on the dashboard.</note></notes>
-        <segment><source>Enrol a node</source><target>Registrera en nod</target></segment>
+      <unit id="audit.action.cluster.node.enroll">
+        <notes><note category="description">What the audit action cluster.node.enroll is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Enroll a node</source><target>Registrera en nod</target></segment>
       </unit>
       <unit id="audit.action.cluster.node.renew">
         <notes><note category="description">What the audit action cluster.node.renew is called in the audit log, on a record page and on the dashboard.</note></notes>
@@ -936,7 +936,7 @@
       </unit>
       <unit id="audit.action.jobs.job.finish_cancel">
         <notes><note category="description">What the audit action jobs.job.finish_cancel is called in the audit log, on a record page and on the dashboard.</note></notes>
-        <segment><source>Finish cancelling a job</source><target>Slutför avbrytandet av ett jobb</target></segment>
+        <segment><source>Finish canceling a job</source><target>Slutför avbrytandet av ett jobb</target></segment>
       </unit>
       <unit id="audit.action.jobs.job.finish_rollback">
         <notes><note category="description">What the audit action jobs.job.finish_rollback is called in the audit log, on a record page and on the dashboard.</note></notes>

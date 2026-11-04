@@ -126,11 +126,11 @@ pub async fn submit_move(
             codes::PLAN_UNACKNOWLEDGED,
             409,
             format!(
-                "the move needs an acknowledgement of: {}",
+                "the move needs an acknowledgment of: {}",
                 preview.unacknowledged.join(", ")
             ),
         )
-        .titled("Warnings need an acknowledgement")
+        .titled("Warnings need an acknowledgment")
         .param("codes", preview.unacknowledged.join(",")));
     }
     let mut checked = std::collections::BTreeSet::new();

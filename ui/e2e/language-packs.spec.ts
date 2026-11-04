@@ -9,7 +9,7 @@
 // WP3.8a adds: a document that is not a usable pack is refused with its problems and nothing is
 // stored (a wrong source language and a tag in the wrong case together; a DOCTYPE); units with an
 // unknown argument or invalid ICU are listed in the report, left out and counted as missing; a
-// candidate is discarded (after the question, which can be cancelled); a new version of an active
+// candidate is discarded (after the question, which can be canceled); a new version of an active
 // language waits as a candidate and discarding it keeps the active one, whose report opens from
 // its row; an active pack is removed and its language is no longer offered; Swedish.
 
@@ -156,7 +156,7 @@ test.describe("language packs", () => {
     const keys = templateKeys(template);
     // Every tenth key stays English, but the page title is translated and the settings tab of
     // the page is not, so both cases show on one page. When the title falls on a tenth
-    // position its neighbour is omitted instead, so the set stays one tenth of the keys.
+    // position its neighbor is omitted instead, so the set stays one tenth of the keys.
     const omit = new Set(
       keys.flatMap((key, i) => (i % 10 === 9 ? [key === "languages.title" ? (keys[i + 1] ?? keys[i - 1] ?? key) : key] : [])),
     );
@@ -356,7 +356,7 @@ test.describe("language packs", () => {
     const row = withKey(page.getByTestId("grid-languages"), "row", "fr");
     await expect(row).toHaveAttribute("data-status", "uploaded");
 
-    // Asking is not discarding: the dialog can be cancelled.
+    // Asking is not discarding: the dialog can be canceled.
     await row.getByTestId("languages-discard").click();
     const dialog = page.getByTestId("dialog-discard");
     await expect(dialog).toBeVisible();

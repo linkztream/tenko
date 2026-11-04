@@ -92,7 +92,7 @@ resolve() {
 }
 expect "a malformed checksum is refused" "1 given" "$(resolve 2.338.0 nothex)"
 expect "a checksum without a version is refused" "1 " "$(resolve "" "$sha_x64")"
-expect "a given version and checksum are taken, normalised" "0 given" "$(resolve v2.338.0 "${sha_x64^^}")"
+expect "a given version and checksum are taken, normalized" "0 given" "$(resolve v2.338.0 "${sha_x64^^}")"
 
 echo "== jobs for the memory (lib/container.sh)"
 gib=1048576

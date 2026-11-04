@@ -1,6 +1,6 @@
-//! `tenko node enrol`: the enrolment ceremony on a data-plane node (OPS-04).
+//! `tenko node enroll`: the enrollment ceremony on a data-plane node (OPS-04).
 //!
-//! 1. The node reads the token (flag, `TENKO_ENROL_TOKEN` or a file) and checks its form.
+//! 1. The node reads the token (flag, `TENKO_ENROLL_TOKEN` or a file) and checks its form.
 //! 2. It fetches the CA root from `GET /system/ca-root` without trusting the server yet,
 //!    and compares its SHA-256 with `--ca-fingerprint` when given (the fingerprint the
 //!    controller printed at start and shows with every token). From then on the API
@@ -8,7 +8,7 @@
 //!    from the internal CA (an imported certificate, a reverse proxy) answers 404, and the
 //!    system roots verify the API connection instead.
 //! 3. It generates its key pair (the key never leaves the node) and posts a certificate
-//!    request with the token to `POST /nodes/enrol`.
+//!    request with the token to `POST /nodes/enroll`.
 //! 4. It checks the CA root of the answer against the fingerprint and the root of step 2,
 //!    and writes its identity, certificate, key and CA root to `<data_dir>/node/`.
 
@@ -21,8 +21,8 @@ use serde_json::json;
 use tenko_cluster::{
     ca::{CertInfo, generate_csr, pem_block},
     identity::{Credentials, NodeIdentity, NodePaths, url_host},
-    model::{EnrolRequest, EnrolResponse},
-    token::EnrolmentToken,
+    model::{EnrollRequest, EnrollResponse},
+    token::EnrollmentToken,
     version,
 };
 use tenko_core::{Role, Timestamp};
@@ -34,13 +34,24 @@ use crate::{
 };
 
 /// The environment variable that may carry the token instead of `--token`.
-pub const TOKEN_ENV: &str = "TENKO_ENROL_TOKEN";
+pub const TOKEN_ENV: &str = "TENKO_ENROLL_TOKEN";
+
+/// The name of [`TOKEN_ENV`] before 0.0.12, read when neither `--token`, [`TOKEN_ENV`] nor
+/// `--token-file` gives a token.
+pub const OLD_TOKEN_ENV: &str = "TENKO_ENROL_TOKEN"; // spelling: alias until 0.0.13
+
+/// The token in [`OLD_TOKEN_ENV`], when it is set and not empty.
+pub fn old_env_token() -> Option<String> {
+    std::env::var(OLD_TOKEN_ENV)
+        .ok()
+        .filter(|token| !token.trim().is_empty())
+}
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Arguments of `tenko node enrol`.
+/// Arguments of `tenko node enroll`.
 #[derive(Debug, Clone, Args)]
-pub struct EnrolArgs {
+pub struct EnrollArgs {
     /// Where this node keeps its files.
     #[command(flatten)]
     pub node: NodeDirArgs,
@@ -50,12 +61,12 @@ pub struct EnrolArgs {
     #[arg(long, value_name = "URL")]
     pub controller: String,
 
-    /// The enrolment token. It is single-use and expires; it can also come from
-    /// `TENKO_ENROL_TOKEN` or `--token-file`.
+    /// The enrollment token. It is single-use and expires; it can also come from
+    /// `TENKO_ENROLL_TOKEN` or `--token-file`.
     #[arg(long, value_name = "TOKEN", env = TOKEN_ENV, hide_env_values = true)]
     pub token: Option<String>,
 
-    /// A file whose first line is the enrolment token.
+    /// A file whose first line is the enrollment token.
     #[arg(long, value_name = "FILE", conflicts_with = "token")]
     pub token_file: Option<PathBuf>,
 
@@ -78,7 +89,7 @@ pub struct EnrolArgs {
     #[arg(long, value_name = "ADDRESS")]
     pub address: Option<String>,
 
-    /// Enrol again although this node is enrolled: the old identity is replaced.
+    /// Enroll again although this node is enrolled: the old identity is replaced.
     #[arg(long)]
     pub force: bool,
 }
@@ -104,9 +115,9 @@ pub fn normalize_fingerprint(text: &str) -> Result<String, Failure> {
     }
 }
 
-fn read_token(args: &EnrolArgs) -> Result<EnrolmentToken, Failure> {
+fn read_token(args: &EnrollArgs) -> Result<EnrollmentToken, Failure> {
     let parse = |text: &str| {
-        EnrolmentToken::parse(text).map_err(|error| {
+        EnrollmentToken::parse(text).map_err(|error| {
             Failure::new(
                 exit::USAGE,
                 format!("{error}; copy the token exactly as the controller showed it"),
@@ -124,10 +135,13 @@ fn read_token(args: &EnrolArgs) -> Result<EnrolmentToken, Failure> {
             })?;
             parse(content.lines().next().unwrap_or_default())
         }
-        (None, None) => Err(Failure::new(
-            exit::USAGE,
-            format!("no enrolment token: pass --token, --token-file or set {TOKEN_ENV}"),
-        )),
+        (None, None) => match old_env_token() {
+            Some(token) => parse(&token),
+            None => Err(Failure::new(
+                exit::USAGE,
+                format!("no enrollment token: pass --token, --token-file or set {TOKEN_ENV}"),
+            )),
+        },
     }
 }
 
@@ -222,7 +236,7 @@ async fn fetch_root(controller: &str) -> Result<Option<String>, Failure> {
 
 /// The machine's host name as a node registry name: lower case, every character other than a
 /// letter, a digit or a hyphen replaced by a hyphen; `None` when it cannot be read or is not a
-/// valid name. The enrolment proposes it, and the start page shows it (U3).
+/// valid name. The enrollment proposes it, and the start page shows it (U3).
 pub(crate) fn host_name() -> Option<String> {
     let name = std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
@@ -247,7 +261,7 @@ pub(crate) fn host_name() -> Option<String> {
     (!name.is_empty() && tenko_cluster::registry::check_name(&name).is_ok()).then_some(name)
 }
 
-/// Runs `tenko node enrol`.
+/// Runs `tenko node enroll`.
 ///
 /// # Errors
 ///
@@ -256,14 +270,14 @@ pub(crate) fn host_name() -> Option<String> {
     clippy::too_many_lines,
     reason = "the ceremony reads best as one sequence"
 )]
-pub async fn run(args: &EnrolArgs) -> Result<Output, Failure> {
+pub async fn run(args: &EnrollArgs) -> Result<Output, Failure> {
     let resolved = args.node.resolve()?;
     let paths = NodePaths::new(&resolved.data_dir);
     if paths.is_enrolled() && !args.force {
         return Err(Failure::new(
             exit::USAGE,
             format!(
-                "this node is enrolled already ({}); pass --force to enrol it again",
+                "this node is enrolled already ({}); pass --force to enroll it again",
                 paths.identity().display()
             ),
         ));
@@ -327,7 +341,7 @@ pub async fn run(args: &EnrolArgs) -> Result<Output, Failure> {
 
     // Step 3: the key and the request.
     let (key, csr) = generate_csr().map_err(|error| Failure::other(error.to_string()))?;
-    let request = EnrolRequest {
+    let request = EnrollRequest {
         token: token.to_text().to_string(),
         csr: pem_block("CERTIFICATE REQUEST", &csr),
         name: args.name.clone().or_else(host_name),
@@ -338,7 +352,7 @@ pub async fn run(args: &EnrolArgs) -> Result<Output, Failure> {
     };
     drop(token);
     let http = http_client(api_root.as_deref())?;
-    let url = format!("{controller}{}/nodes/enrol", tenko_api::API_BASE);
+    let url = format!("{controller}{}/nodes/enroll", tenko_api::API_BASE);
     let response = http
         .post(&url)
         .json(&request)
@@ -367,7 +381,7 @@ pub async fn run(args: &EnrolArgs) -> Result<Output, Failure> {
             },
         );
     }
-    let answer: EnrolResponse = serde_json::from_slice(&body)
+    let answer: EnrollResponse = serde_json::from_slice(&body)
         .map_err(|error| Failure::other(format!("unexpected answer: {error}")))?;
 
     // Step 4: the CA root of the answer is the one the fingerprint names.

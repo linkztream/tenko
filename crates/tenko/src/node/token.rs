@@ -1,8 +1,8 @@
-//! `tenko node enrol-token`: creates an enrolment token on a controller through the API
-//! (`POST /nodes/enrolments`), with the credentials of `tenko login`.
+//! `tenko node enroll-token`: creates an enrollment token on a controller through the API
+//! (`POST /nodes/enrollments`), with the credentials of `tenko login`.
 
 use clap::Args;
-use tenko_cluster::model::{CreatedEnrolment, NewEnrolment};
+use tenko_cluster::model::{CreatedEnrollment, NewEnrollment};
 use tenko_core::VrfId;
 
 use crate::{
@@ -10,9 +10,9 @@ use crate::{
     exit,
 };
 
-/// Arguments of `tenko node enrol-token`.
+/// Arguments of `tenko node enroll-token`.
 #[derive(Debug, Clone, Args)]
-pub struct EnrolTokenArgs {
+pub struct EnrollTokenArgs {
     /// Connection options.
     #[command(flatten)]
     pub client: ClientOpts,
@@ -36,12 +36,12 @@ pub struct EnrolTokenArgs {
     pub expires_in: Option<u64>,
 }
 
-/// Runs `tenko node enrol-token`.
+/// Runs `tenko node enroll-token`.
 ///
 /// # Errors
 ///
 /// Not signed in, or the controller refuses.
-pub async fn run(args: &EnrolTokenArgs) -> Result<Output, Failure> {
+pub async fn run(args: &EnrollTokenArgs) -> Result<Output, Failure> {
     let target = Target::resolve(&args.client, true)?;
     let roles = match &args.roles {
         Some(text) => text
@@ -51,15 +51,15 @@ pub async fn run(args: &EnrolTokenArgs) -> Result<Output, Failure> {
             .collect(),
         None => Vec::new(),
     };
-    let request = NewEnrolment {
+    let request = NewEnrollment {
         roles,
         name: args.name.clone(),
         vrf: args.vrf,
         expires_in_secs: args.expires_in,
     };
-    let created: CreatedEnrolment = target
+    let created: CreatedEnrollment = target
         .client()?
-        .post("/nodes/enrolments", &request, None)
+        .post("/nodes/enrollments", &request, None)
         .await
         .map_err(|error| Failure::from_client(&error))?;
     if target.json {
@@ -68,7 +68,7 @@ pub async fn run(args: &EnrolTokenArgs) -> Result<Output, Failure> {
     // The token is the one secret this command prints, by design: it is single-use and
     // expires, and the node needs it.
     let roles = created
-        .enrolment
+        .enrollment
         .roles
         .iter()
         .map(|role| role.as_str())
@@ -79,9 +79,9 @@ pub async fn run(args: &EnrolTokenArgs) -> Result<Output, Failure> {
         target.url.trim_end_matches('/'),
     );
     Ok(Output::text(format!("{}\n", created.token)).note(format!(
-        "enrolment token {} for role(s) {roles}, valid until {}; it works once\n\
+        "enrollment token {} for role(s) {roles}, valid until {}; it works once\n\
          CA root SHA-256: {}\n\
          on the node, run:\n  {command}",
-        created.enrolment.id, created.enrolment.expires_at, created.ca_fingerprint
+        created.enrollment.id, created.enrollment.expires_at, created.ca_fingerprint
     )))
 }

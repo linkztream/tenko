@@ -8,7 +8,7 @@
 //! | From | Action | To |
 //! |---|---|---|
 //! | `Queued` | `Start` | `Running` |
-//! | `Queued` | `Cancel` | `Cancelled` |
+//! | `Queued` | `Cancel` | `Canceled` |
 //! | `Running` | `Wait` | `Waiting` |
 //! | `Running` | `Complete` | `Succeeded` |
 //! | `Running` | `RollBack` | `RollingBack` |
@@ -17,16 +17,16 @@
 //! | `Waiting` | `RollBack` | `RollingBack` |
 //! | `Waiting` | `Cancel` | `RollingBack` |
 //! | `RollingBack` | `FinishRollback` | `RolledBack` |
-//! | `RollingBack` | `FinishCancel` | `Cancelled` |
+//! | `RollingBack` | `FinishCancel` | `Canceled` |
 //! | `RollingBack` | `Fail` | `Failed` |
 //!
 //! A step returning `Wait` or `Manual` holds the job in `Waiting` until the observation
 //! matches, the manual task is completed or the deadline passes. A failed step, a passed
 //! deadline or the job timeout starts `RollingBack`: finished steps are compensated in
 //! reverse, and steps that cannot be compensated become manual undo tasks. A rollback
-//! that completes ends in `RolledBack` ("move failed", IPAM-19), or in `Cancelled` when a
+//! that completes ends in `RolledBack` ("move failed", IPAM-19), or in `Canceled` when a
 //! cancel started it; a compensation that fails ends in `Failed` (an operator is needed).
-//! `Succeeded`, `Failed`, `RolledBack` and `Cancelled` are final. Each transition is an
+//! `Succeeded`, `Failed`, `RolledBack` and `Canceled` are final. Each transition is an
 //! audited store write and a `jobs` SSE event; after a restart only
 //! [`StepHandler::idempotent`] steps run again, and a job interrupted in a non-idempotent
 //! step rolls back. A single edit is an inline one-step job (Q4).
@@ -186,7 +186,7 @@ pub struct Job {
     /// Who asked to cancel, and when.
     #[serde(default)]
     pub cancel_requested: Option<Stamp>,
-    /// Why the job is rolling back, failed or was cancelled.
+    /// Why the job is rolling back, failed or was canceled.
     #[serde(default)]
     pub error: Option<CodedError>,
     /// When the job reached a final state.
@@ -237,8 +237,9 @@ pub enum JobState {
     Failed,
     /// Rolled back after a failure or a deadline.
     RolledBack,
-    /// Cancelled, before start or after rolling back.
-    Cancelled,
+    /// Canceled, before start or after rolling back.
+    #[serde(alias = "cancelled")] // spelling: alias permanently (stored jobs carry it)
+    Canceled,
 }
 
 /// Events that move a job between states.
@@ -257,7 +258,7 @@ pub enum JobAction {
     Complete,
     /// A step failed, a deadline passed or the job timed out.
     RollBack,
-    /// An operator cancelled the job.
+    /// An operator canceled the job.
     Cancel,
     /// Every compensation finished after a failure.
     FinishRollback,
@@ -307,7 +308,7 @@ impl JobState {
         JobState::Succeeded,
         JobState::Failed,
         JobState::RolledBack,
-        JobState::Cancelled,
+        JobState::Canceled,
     ];
 
     /// The state an action leads to, or `None` if the action is not allowed (see the
@@ -317,7 +318,7 @@ impl JobState {
         use JobState as S;
         match (self, action) {
             (S::Queued, A::Start) | (S::Waiting, A::Resume) => Some(S::Running),
-            (S::Queued, A::Cancel) | (S::RollingBack, A::FinishCancel) => Some(S::Cancelled),
+            (S::Queued, A::Cancel) | (S::RollingBack, A::FinishCancel) => Some(S::Canceled),
             (S::Running, A::Wait) => Some(S::Waiting),
             (S::Running, A::Complete) => Some(S::Succeeded),
             (S::Running | S::Waiting, A::RollBack | A::Cancel) => Some(S::RollingBack),
@@ -348,7 +349,7 @@ impl JobState {
     pub const fn is_terminal(self) -> bool {
         matches!(
             self,
-            JobState::Succeeded | JobState::Failed | JobState::RolledBack | JobState::Cancelled
+            JobState::Succeeded | JobState::Failed | JobState::RolledBack | JobState::Canceled
         )
     }
 }
@@ -810,13 +811,32 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn a_job_state_stored_by_0_0_11_still_reads() {
+        let old = "cancelled"; // spelling: alias permanently (the value of 0.0.11)
+        let bytes = to_cbor(old).expect("cbor");
+        assert_eq!(
+            from_cbor::<JobState>(&bytes).expect("old state"),
+            JobState::Canceled
+        );
+        let json = format!("\"{old}\"");
+        assert_eq!(
+            serde_json::from_str::<JobState>(&json).expect("old state"),
+            JobState::Canceled
+        );
+        assert_eq!(
+            serde_json::to_value(JobState::Canceled).expect("json"),
+            "canceled"
+        );
+    }
+
     /// The expected table, written out independently of `transition`.
     fn expected() -> BTreeMap<(JobState, JobAction), JobState> {
         use JobAction as A;
         use JobState as S;
         BTreeMap::from([
             ((S::Queued, A::Start), S::Running),
-            ((S::Queued, A::Cancel), S::Cancelled),
+            ((S::Queued, A::Cancel), S::Canceled),
             ((S::Running, A::Wait), S::Waiting),
             ((S::Running, A::Complete), S::Succeeded),
             ((S::Running, A::RollBack), S::RollingBack),
@@ -825,7 +845,7 @@ mod tests {
             ((S::Waiting, A::RollBack), S::RollingBack),
             ((S::Waiting, A::Cancel), S::RollingBack),
             ((S::RollingBack, A::FinishRollback), S::RolledBack),
-            ((S::RollingBack, A::FinishCancel), S::Cancelled),
+            ((S::RollingBack, A::FinishCancel), S::Canceled),
             ((S::RollingBack, A::Fail), S::Failed),
         ])
     }
@@ -864,7 +884,7 @@ mod tests {
                 JobState::Succeeded,
                 JobState::Failed,
                 JobState::RolledBack,
-                JobState::Cancelled
+                JobState::Canceled
             ])
         );
     }

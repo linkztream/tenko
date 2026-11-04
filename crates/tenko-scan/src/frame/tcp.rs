@@ -57,8 +57,8 @@ pub struct Tcp {
     pub destination_port: u16,
     /// The sequence number.
     pub sequence: u32,
-    /// The acknowledgement number.
-    pub acknowledgement: u32,
+    /// The acknowledgment number.
+    pub acknowledgment: u32,
     /// The flag byte.
     pub flags: u8,
     /// The advertised window size.
@@ -136,7 +136,7 @@ pub fn parse(bytes: &[u8]) -> Option<Tcp> {
     let source_port = u16::from_be_bytes(bytes.get(0..2)?.try_into().ok()?);
     let destination_port = u16::from_be_bytes(bytes.get(2..4)?.try_into().ok()?);
     let sequence = u32::from_be_bytes(bytes.get(4..8)?.try_into().ok()?);
-    let acknowledgement = u32::from_be_bytes(bytes.get(8..12)?.try_into().ok()?);
+    let acknowledgment = u32::from_be_bytes(bytes.get(8..12)?.try_into().ok()?);
     let data_offset = usize::from(bytes.get(12)? >> 4) * 4;
     if data_offset < 20 {
         return None;
@@ -151,7 +151,7 @@ pub fn parse(bytes: &[u8]) -> Option<Tcp> {
         source_port,
         destination_port,
         sequence,
-        acknowledgement,
+        acknowledgment,
         flags,
         window,
         options,
@@ -220,7 +220,7 @@ struct Segment<'a> {
     source_port: u16,
     destination_port: u16,
     sequence: u32,
-    acknowledgement: u32,
+    acknowledgment: u32,
     flags: u8,
     window: u16,
     options: &'a [u8],
@@ -233,7 +233,7 @@ fn tcp_segment(segment: &Segment<'_>) -> Vec<u8> {
         source_port,
         destination_port,
         sequence,
-        acknowledgement,
+        acknowledgment,
         flags,
         window,
         options,
@@ -247,7 +247,7 @@ fn tcp_segment(segment: &Segment<'_>) -> Vec<u8> {
     tcp.extend_from_slice(&source_port.to_be_bytes());
     tcp.extend_from_slice(&destination_port.to_be_bytes());
     tcp.extend_from_slice(&sequence.to_be_bytes());
-    tcp.extend_from_slice(&acknowledgement.to_be_bytes());
+    tcp.extend_from_slice(&acknowledgment.to_be_bytes());
     tcp.push(u8::try_from(header_len / 4).expect("a TCP header is at most 60 bytes") << 4);
     tcp.push(flags);
     tcp.extend_from_slice(&window.to_be_bytes());
@@ -296,7 +296,7 @@ pub fn syn_packet(
         source_port,
         destination_port,
         sequence,
-        acknowledgement: 0,
+        acknowledgment: 0,
         flags: FLAG_SYN,
         window: 64240,
         options: &options,
@@ -314,7 +314,7 @@ pub fn rst_packet(
     source_port: u16,
     destination_port: u16,
     sequence: u32,
-    acknowledgement: u32,
+    acknowledgment: u32,
 ) -> Vec<u8> {
     let segment = tcp_segment(&Segment {
         source,
@@ -322,7 +322,7 @@ pub fn rst_packet(
         source_port,
         destination_port,
         sequence,
-        acknowledgement,
+        acknowledgment,
         flags: FLAG_RST | FLAG_ACK,
         window: 0,
         options: &[],
@@ -372,12 +372,12 @@ mod tests {
     }
 
     #[test]
-    fn syn_ack_and_rst_are_recognised() {
+    fn syn_ack_and_rst_are_recognized() {
         let syn_ack = Tcp {
             source_port: 22,
             destination_port: 40000,
             sequence: 1,
-            acknowledgement: 2,
+            acknowledgment: 2,
             flags: FLAG_SYN | FLAG_ACK,
             window: 64240,
             options: vec![

@@ -302,7 +302,7 @@ export function planCommands(commands: readonly RawCommand[], options: PlanOptio
   };
 }
 
-/** The warning codes that need an acknowledgement and did not get one. */
+/** The warning codes that need an acknowledgment and did not get one. */
 export function unacknowledged(plan: Plan): string[] {
   const codes = new Set<string>();
   for (const warning of plan.warnings) if (warning.requires_ack && !warning.acknowledged) codes.add(warning.code);
@@ -416,7 +416,7 @@ function stampRevision(ref: ObjectRef, revision: number): void {
 /**
  * Applies a plan: the new state replaces the old one, the history, the audit log and the
  * jobs record the change, and one `ipam` event announces it. Fails with
- * `ipam.plan.unacknowledged` while a warning still needs its acknowledgement.
+ * `ipam.plan.unacknowledged` while a warning still needs its acknowledgment.
  */
 export function commitPlan(plan: Plan): Applied {
   const missing = unacknowledged(plan);

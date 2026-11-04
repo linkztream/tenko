@@ -60,7 +60,7 @@ function CancelDialog(props: { detail: JobDetailData; onClose: () => void; onDon
       const summary = await cancelJob(props.detail.job.id);
       toast({
         kind: "ok",
-        title: summary.state === "cancelled" ? t("jobs.cancel.done") : t("jobs.cancel.requested"),
+        title: summary.state === "canceled" ? t("jobs.cancel.done") : t("jobs.cancel.requested"),
       });
       props.onDone();
     } catch (err) {
@@ -96,7 +96,7 @@ function CancelDialog(props: { detail: JobDetailData; onClose: () => void; onDon
 }
 
 function JobBody(props: { detail: JobDetailData; onChanged: () => void }) {
-  const [cancelling, setCancelling] = createSignal(false);
+  const [canceling, setCanceling] = createSignal(false);
   const job = () => props.detail.job;
   const spec = () => job().spec;
   const canExecute = () => canExecuteJob({ id: job().id, targets: spec().targets });
@@ -126,7 +126,7 @@ function JobBody(props: { detail: JobDetailData; onChanged: () => void }) {
               data-testid="job-cancel"
               disabled={!canExecute()}
               title={canExecute() ? undefined : t("jobs.no_right")}
-              onClick={() => setCancelling(true)}
+              onClick={() => setCanceling(true)}
             >
               {t("jobs.cancel.button")}
             </button>
@@ -149,8 +149,8 @@ function JobBody(props: { detail: JobDetailData; onChanged: () => void }) {
         <Show when={job().error}>
           {(error) => (
             <Notice
-              kind={error().code === "jobs.cancelled" ? "info" : "bad"}
-              title={error().code === "jobs.cancelled" ? undefined : t("jobs.problem.title")}
+              kind={error().code === "jobs.canceled" ? "info" : "bad"}
+              title={error().code === "jobs.canceled" ? undefined : t("jobs.problem.title")}
             >
               <span data-testid="job-error">
                 {codedErrorText(error())}
@@ -238,12 +238,12 @@ function JobBody(props: { detail: JobDetailData; onChanged: () => void }) {
           <TransitionLog detail={props.detail} />
         </section>
       </div>
-      <Show when={cancelling()}>
+      <Show when={canceling()}>
         <CancelDialog
           detail={props.detail}
-          onClose={() => setCancelling(false)}
+          onClose={() => setCanceling(false)}
           onDone={() => {
-            setCancelling(false);
+            setCanceling(false);
             props.onChanged();
           }}
         />

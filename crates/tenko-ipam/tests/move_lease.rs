@@ -658,6 +658,6 @@ async fn a_marker_whose_job_is_gone_or_ended_is_stale() {
     assert!(lease::is_stale(view.as_ref(), &orphan, now).expect("stale"));
     // A cancel rolls the job back, and the marker goes with it.
     world.engine.cancel(job, &person()).await.expect("cancel");
-    assert_eq!(world.drive(job).await.state, JobState::Cancelled);
+    assert_eq!(world.drive(job).await.state, JobState::Canceled);
     assert!(world.marker(job).await.is_none());
 }

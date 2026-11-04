@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn mode_c_defaults_to_https_and_honours_an_explicit_http() {
+    fn mode_c_defaults_to_https_and_honors_an_explicit_http() {
         let mode = proxy_mode("192.0.2.1", false);
         let without = client_info(
             Some(&conn("192.0.2.1:40000", Arc::clone(&mode), false)),

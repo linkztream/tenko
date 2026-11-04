@@ -119,7 +119,7 @@ source "$here/recursion.sh"
 # WP10.2: the validation rows of the round recursion (E33) and the round rfc5011 (E34).
 # shellcheck source=deploy/compose/lab-dns/validation.sh
 source "$here/validation.sh"
-# WP10.3: the rows of E35 (QNAME minimisation and the denial cache) and M42.
+# WP10.3: the rows of E35 (QNAME minimization and the denial cache) and M42.
 # shellcheck source=deploy/compose/lab-dns/denial.sh
 source "$here/denial.sh"
 

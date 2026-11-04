@@ -141,7 +141,7 @@ pub const START_ORDER: [(&str, &str); 15] = [
     ("connectors", "connector plugins and their supervisor"),
     (
         "nodes",
-        "node transport: enrolment, mutual TLS listener, node registry",
+        "node transport: enrollment, mutual TLS listener, node registry",
     ),
     (
         "scans",
@@ -1708,7 +1708,7 @@ async fn start(
                     node: NodeStatus {
                         id: Some(resolved.node_id),
                         // U3: the machine's name for the start page's subtitle.
-                        name: crate::node::enrol::host_name(),
+                        name: crate::node::enroll::host_name(),
                         roles: status_roles(resolved.roles, dns_on, dhcp_on),
                         // What the installer prepared the machine for (prepared-roles).
                         prepared: crate::prepared::Machine::of(resolved).prepared(),

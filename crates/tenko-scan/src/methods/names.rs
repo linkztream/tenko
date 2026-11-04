@@ -147,7 +147,7 @@ async fn collect(
 ) {
     let mut buffers: Vec<Vec<u8>> = sockets.iter().map(|_| vec![0u8; MAX_DATAGRAM]).collect();
     loop {
-        if ctx.cancel.is_cancelled() {
+        if ctx.cancel.is_canceled() {
             return;
         }
         let received = {
@@ -164,7 +164,7 @@ async fn collect(
             tokio::select! {
                 (received, _, _) = any => received,
                 () = tokio::time::sleep_until(deadline) => return,
-                () = ctx.cancel.cancelled() => return,
+                () = ctx.cancel.canceled() => return,
             }
         };
         let Some((bytes, from)) = received else {
@@ -302,7 +302,7 @@ impl Method for NameQuery {
             findings.merge(browse_findings);
             types.truncate(MAX_SERVICE_TYPES);
             for service in &types {
-                if ctx.cancel.is_cancelled() {
+                if ctx.cancel.is_canceled() {
                     break;
                 }
                 if let Some(ask) = query(service, QueryType::Ptr, 0) {
@@ -323,7 +323,7 @@ impl Method for NameQuery {
             .take(MAX_UNICAST)
             .collect();
         for ip in targets {
-            if ctx.cancel.is_cancelled() {
+            if ctx.cancel.is_canceled() {
                 sent_all = false;
                 break;
             }
@@ -352,7 +352,7 @@ impl Method for NameQuery {
         let deadline = Instant::now() + self.window;
         collect(&sockets, self.protocol, deadline, ctx, &mut findings, None).await;
         output.found = to_found(&findings, &ctx.scope);
-        output.covered_all = sent_all && !ctx.cancel.is_cancelled();
+        output.covered_all = sent_all && !ctx.cancel.is_canceled();
         Ok(output)
     }
 }

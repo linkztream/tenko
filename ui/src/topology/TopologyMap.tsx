@@ -17,7 +17,7 @@ import type { VlanStyle } from "../ipam/vlan/palette";
 import type { TopologyEdge, TopologyNode } from "./api";
 import type { Layout, PlacedEdge } from "./layout";
 import { edgeClass, groupBucket, isGroupId, nodeAriaLabel, nodeSecondLine, SHAPES, shortLabel } from "./model";
-import { centreOn, fit, nearestInDirection, pan, transformOf, zoomAt, type Direction, type View } from "./viewport";
+import { centerOn, fit, nearestInDirection, pan, transformOf, zoomAt, type Direction, type View } from "./viewport";
 
 export interface TopologyMapProps {
   layout: Layout;
@@ -49,7 +49,7 @@ const FALLBACK_SIZE = { w: 1000, h: 640 };
 const ZOOM_STEP = 1.25;
 /** The wheel zooms by this factor per pixel of delta. */
 const WHEEL_RATE = 0.0015;
-/** A focused device nearer than this to the edge of the screen is brought to the centre. */
+/** A focused device nearer than this to the edge of the screen is brought to the center. */
 const EDGE_MARGIN = 48;
 
 const KEY_DIRECTIONS: Readonly<Record<string, Direction>> = {
@@ -182,7 +182,7 @@ export function TopologyMap(props: TopologyMapProps) {
     const sx = (p.x - v.x) * v.scale;
     const sy = (p.y - v.y) * v.scale;
     if (sx < EDGE_MARGIN || sx > w - EDGE_MARGIN || sy < EDGE_MARGIN || sy > h - EDGE_MARGIN) {
-      adjust(() => centreOn(v, p.x, p.y, w, h));
+      adjust(() => centerOn(v, p.x, p.y, w, h));
     }
   };
 

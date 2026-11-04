@@ -1,4 +1,4 @@
-// Shared pieces of the IPAM forms: the dialog frame, labelled fields with their help and
+// Shared pieces of the IPAM forms: the dialog frame, labeled fields with their help and
 // error line, select lists for the enums, the messages of server field errors and the
 // two-step flow every write follows (the form collects and checks the values, then the plan
 // dialog previews and applies; Cancel there comes back to the form with its values intact).

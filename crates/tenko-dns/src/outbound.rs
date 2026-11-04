@@ -2,14 +2,14 @@
 //! the UDP sockets they leave from.
 //!
 //! - **The query** ([`build_query`]) is built anew for every attempt: a random id, the
-//!   question with its letters in a random case (0x20, the case-randomisation draft of
+//!   question with its letters in a random case (0x20, the case-randomization draft of
 //!   Dagon and others) unless the upstream breaks it, RD and CD from the client, and an
 //!   OPT record of [`UPSTREAM_UDP_SIZE`] octets carrying the client's DO bit. The client's
 //!   own options (its cookie among them) stay between the client and this node.
 //! - **The answer** ([`check_answer`]) must carry the id, QR, opcode QUERY and the same
 //!   question; with 0x20 the question must come back in exactly the case it was sent, else
 //!   the answer is [`AnswerCheck::CaseBroken`] and is not used (the pool counts it per
-//!   upstream and stops randomising the case of an upstream that breaks it twice).
+//!   upstream and stops randomizing the case of an upstream that breaks it twice).
 //! - **The sockets** ([`UdpSockets`]): a query leaves from a socket bound to a random port
 //!   that it holds alone for the exchange, taken from a bounded set of idle sockets per
 //!   address family; a socket is retired after [`SOCKET_USES`] queries or

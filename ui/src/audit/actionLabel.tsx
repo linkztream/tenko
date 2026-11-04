@@ -13,9 +13,21 @@ function labelArgs(draft: Pick<AuditDraft, "objects" | "details">): Record<strin
   return { ...draft.details?.context, count: draft.objects?.length ?? 0 };
 }
 
+/**
+ * Action codes that records written before 0.0.12 carry in their British spelling, with the code
+ * they have now. The log is append-only, so these stay readable for good.
+ */
+const FORMER_ACTIONS: Readonly<Record<string, string>> = {
+  "auth.totp.enrol": "auth.totp.enroll", // spelling: alias
+  "cluster.enrolment.create": "cluster.enrollment.create", // spelling: alias
+  "cluster.enrolment.delete": "cluster.enrollment.delete", // spelling: alias
+  "cluster.node.enrol": "cluster.node.enroll", // spelling: alias
+};
+
 /** The label of the action of a record, or `undefined` for a code the catalog does not know. */
 export function auditActionLabel(draft: Pick<AuditDraft, "action" | "objects" | "details">): string | undefined {
-  return tDynamic(`audit.action.${draft.action}`, labelArgs(draft));
+  const action = FORMER_ACTIONS[draft.action] ?? draft.action;
+  return tDynamic(`audit.action.${action}`, labelArgs(draft));
 }
 
 /**

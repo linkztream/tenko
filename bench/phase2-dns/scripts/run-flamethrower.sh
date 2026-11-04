@@ -35,7 +35,7 @@
 # What flame 0.12.0 showed against Tenko (M17, results/2026-10-21-m17-real-link.md): over
 # TCP it opens a connection per burst, so its TCP rate measures connection set-up; over DoT
 # every answer waits about 40 ms (dnsperf over DoT against the same node: 0.1 ms), the
-# pattern of a small write held back until a delayed acknowledgement; over DoH it gets no
+# pattern of a small write held back until a delayed acknowledgment; over DoH it gets no
 # answer at all, while curl and h2load get every answer from the same listener. The DoT
 # and DoH figures of M17 therefore come from dnsperf (DoT) and h2load (DoH).
 #

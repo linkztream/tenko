@@ -15,7 +15,7 @@ import { createSignal, type Accessor } from "solid-js";
 /**
  * Topics of GET /events; `admin` covers users, sessions, tokens and security settings,
  * `secrets` the metadata, reveal stamps and host bindings of operator secrets (never values),
- * `cluster` the enrolled nodes and enrolment tokens (never a token's text), `connectors` the
+ * `cluster` the enrolled nodes and enrollment tokens (never a token's text), `connectors` the
  * connector instances and plugins, `discovery` the observed facts and last sightings (table-level
  * events that name no object), `metrics` one snapshot of the controllers' metrics per second
  * (only for a stream that names it; the start page opens a stream of its own for it), `dns` the

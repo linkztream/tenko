@@ -365,7 +365,7 @@ async fn unmanaged_locked_and_misplaced_objects_are_refused() {
 }
 
 #[tokio::test]
-async fn warnings_need_acknowledgement_before_a_submit() {
+async fn warnings_need_acknowledgment_before_a_submit() {
     let world = World::new().await;
     let nas = world
         .host(
@@ -400,7 +400,7 @@ async fn warnings_need_acknowledgement_before_a_submit() {
         .service
         .move_submit(&request, &person())
         .await
-        .expect_err("needs acknowledgement");
+        .expect_err("needs acknowledgment");
     assert_eq!(error.code_str(), codes::PLAN_UNACKNOWLEDGED);
     let acknowledged = MoveRequest {
         acknowledge: vec![moves::codes::DNS_COLLISION.to_owned()],

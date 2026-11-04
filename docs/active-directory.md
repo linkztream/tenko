@@ -51,7 +51,7 @@ The profile is Home. Home and Standard can host an AD zone this way; the Hardene
 
 ## 2. What Active Directory needs from DNS
 
-Active Directory needs a DNS server that answers the locator records of its controllers and, preferably, accepts the controllers' dynamic updates of them. It does not need that server to run on a controller, to store its zones in the directory, or to be Microsoft DNS. Microsoft states the minimum as support for the SRV record type and, to save work, for dynamic update (RFC 2136); a server without dynamic update works when the records are added by hand from `Netlogon.dns`. The two Microsoft pages that say this are written for Windows 2000 and 2003 and are archived; the Netlogon behaviour they describe is the one the current support articles in the Sources still describe.
+Active Directory needs a DNS server that answers the locator records of its controllers and, preferably, accepts the controllers' dynamic updates of them. It does not need that server to run on a controller, to store its zones in the directory, or to be Microsoft DNS. Microsoft states the minimum as support for the SRV record type and, to save work, for dynamic update (RFC 2136); a server without dynamic update works when the records are added by hand from `Netlogon.dns`. The two Microsoft pages that say this are written for Windows 2000 and 2003 and are archived; the Netlogon behavior they describe is the one the current support articles in the Sources still describe.
 
 The Netlogon service of each controller registers these records. `<site>` is `Default-First-Site-Name` here, `<guid>` is the domain GUID and `<dsa>` the GUID of the controller's directory service agent.
 
@@ -72,7 +72,7 @@ The Netlogon service of each controller registers these records. `<site>` is `De
 
 Rows 1 to 9, the CNAME and the A records come from Microsoft's description of the records Netlogon registers; the partition row from its description of how a client finds the host of an application partition, which says that Netlogon registers `_ldap._tcp.<partition name>` and the site form. If your export holds A records at `DomainDnsZones.corp.example.test` and `ForestDnsZones.corp.example.test`, they came with the import; the pages read do not list them among the records Netlogon registers, so treat them as data of the DNS Server role and delete them in step 9 if nothing uses them. The host records of the controllers themselves (`dc1.corp.example.test`, A and PTR) are registered by the DNS client, not by Netlogon, in the same way as any client's.
 
-What is not needed: a DNS Server role on any controller; zones stored in `DomainDnsZones` or `ForestDnsZones`; secure dynamic update as such; WINS (CON-12). What is needed from the neighbouring DNS: a delegation of `corp.example.test` in its parent zone when a parent exists that is not Tenko, and forwarders or recursion for names outside the domain, which Tenko's resolver provides ([dns-resolver.md](dns-resolver.md)).
+What is not needed: a DNS Server role on any controller; zones stored in `DomainDnsZones` or `ForestDnsZones`; secure dynamic update as such; WINS (CON-12). What is needed from the neighboring DNS: a delegation of `corp.example.test` in its parent zone when a parent exists that is not Tenko, and forwarders or recursion for names outside the domain, which Tenko's resolver provides ([dns-resolver.md](dns-resolver.md)).
 
 ## 3. The `_msdcs` zone
 

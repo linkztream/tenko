@@ -465,7 +465,7 @@ describe("the network change of each device", () => {
     expect(within(cell).getByText("Refused").classList.contains("tag")).toBe(true);
     expect(cell.textContent).toContain("This switch port is an uplink; Tenko never changes it.");
 
-    // The warning is translated with its own message and asks for an acknowledgement.
+    // The warning is translated with its own message and asks for an acknowledgment.
     const warnings = screen.getByTestId("move-warnings");
     expect(warnings.textContent).toContain(
       "A guardrail stops Tenko from changing the network of printer-1 (connect.guardrail.uplink); a person moves it, if that is intended.",
@@ -480,7 +480,7 @@ describe("the network change of each device", () => {
     await waitFor(() => expect(tick.checked).toBe(true));
     await settled(table);
     await waitFor(() => expect(start.disabled).toBe(false));
-    // The preview was read again with the acknowledgement.
+    // The preview was read again with the acknowledgment.
     expect(sent.filter((s) => s.dryRun).at(-1)?.body.acknowledge).toEqual(["ipam.move.l2_refused"]);
 
     fireEvent.click(start);

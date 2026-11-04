@@ -61,7 +61,7 @@
    the window scrolls (the same rule as in src/settings/settings.css). */
 .dialog.wide { width: min(560px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; }
 
-/* The QR code of the TOTP enrolment: dark on light in both themes. */
+/* The QR code of the TOTP enrollment: dark on light in both themes. */
 .acct-qr { margin: var(--sp-3) 0 var(--sp-4); }
 .qr { display: block; border-radius: var(--r-2); }
 .qr .qr-light { fill: var(--qr-light); }

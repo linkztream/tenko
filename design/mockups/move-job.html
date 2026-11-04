@@ -1049,7 +1049,7 @@
 
   function resetRun() {
     var H = {};
-    ORDER.forEach(function (id) { H[id] = { id: id, h: runHost(id), st: 'queued', open: false, cd: null, cancelled: false, seenAt: '', steps: [], note: '', p: 50 }; });
+    ORDER.forEach(function (id) { H[id] = { id: id, h: runHost(id), st: 'queued', open: false, cd: null, canceled: false, seenAt: '', steps: [], note: '', p: 50 }; });
     var x, h;
     var S7 = 'Runs by itself if step 5 times out, after 12 h.';
 
@@ -1141,8 +1141,8 @@
 
   /* ----- Rendering ----- */
   function counts() {
-    var c = { done: 0, running: 0, waiting: 0, queued: 0, failed: 0, rolledback: 0, cancelled: 0 };
-    ORDER.forEach(function (id) { var h = run.hosts[id]; c[h.cancelled ? 'cancelled' : h.st]++; });
+    var c = { done: 0, running: 0, waiting: 0, queued: 0, failed: 0, rolledback: 0, canceled: 0 };
+    ORDER.forEach(function (id) { var h = run.hosts[id]; c[h.canceled ? 'canceled' : h.st]++; });
     return c;
   }
   function inflight() { var n = 0; ORDER.forEach(function (id) { var s = run.hosts[id].st; if (s === 'running' || s === 'waiting') { n++; } }); return n; }
@@ -1157,7 +1157,7 @@
     return 7;
   }
   function progText(h) {
-    if (h.cancelled || h.st === 'queued') { return 'Not started'; }
+    if (h.canceled || h.st === 'queued') { return 'Not started'; }
     if (h.st === 'done') { return 'Seen ' + h.seenAt; }
     if (h.st === 'rolledback') { return h.h.link === 'wifi' ? 'Back on Home' : 'Steps 2 to 4 reverted'; }
     return 'Step ' + curStep(h) + ' of 7';
@@ -1172,7 +1172,7 @@
     return '<span class="ticks" aria-hidden="true">' + out + '</span>';
   }
   function chipHtml(h) {
-    var cls = h.cancelled ? 'queued' : h.st, word = h.cancelled ? 'Cancelled' : SW[h.st];
+    var cls = h.canceled ? 'queued' : h.st, word = h.canceled ? 'Canceled' : SW[h.st];
     var p = h.st === 'running' ? ' style="--p:' + h.p + '%"' : '';
     return '<span class="jstate ' + cls + '"' + p + '>' + word + '</span>' + (h.cd ? '<span class="cdn" data-cd="' + h.id + '">' + fmtHMS(Math.max(0, h.cd.left)) + '</span>' : '');
   }
@@ -1204,7 +1204,7 @@
   }
   function msgHtml(h) {
     var x = h.h, html = '';
-    if (h.cancelled) { return '<p>Cancelled before it started. Nothing was changed in UniFi, DHCP or DNS.</p>'; }
+    if (h.canceled) { return '<p>Canceled before it started. Nothing was changed in UniFi, DHCP or DNS.</p>'; }
     if (h.st === 'done') {
       var ct = findTask('clean-' + h.id);
       return '<p>Observed: ARP from ' + M(x.mac) + ' in ' + P(NET) + ' at ' + h.seenAt + '. ' + (ct && !ct.done ? 'Clean-up is a manual task and stays open in the checklist.' : 'Clean-up is done.') + '</p>';
@@ -1258,7 +1258,7 @@
   function tbodyOf(id) { return $('tbody[data-h="' + id + '"]', $('#rj-table')); }
   function renderHost(id, doFlash, keepFocus) {
     var h = run.hosts[id], tb = tbodyOf(id);
-    tb.className = h.st === 'failed' && !h.cancelled ? 'failed' : '';
+    tb.className = h.st === 'failed' && !h.canceled ? 'failed' : '';
     tb.innerHTML = mainRow(h) + '<tr class="msg"><td></td><td colspan="4"><div class="mg">' + msgHtml(h) + '</div></td></tr>' + (h.open ? sdRow(h) : '');
     if (doFlash) { $$('tr.move-row > td', tb).forEach(flash); }
     if (keepFocus) { $('tr.move-row', tb).focus(); }
@@ -1275,13 +1275,13 @@
     var c = counts(), seg = '';
     ORDER.forEach(function (id) {
       var h = run.hosts[id];
-      seg += '<i class="' + (h.cancelled || h.st === 'queued' ? '' : h.st) + '" title="' + id + ': ' + (h.cancelled ? 'cancelled' : SW[h.st].toLowerCase()) + '"></i>';
+      seg += '<i class="' + (h.canceled || h.st === 'queued' ? '' : h.st) + '" title="' + id + ': ' + (h.canceled ? 'canceled' : SW[h.st].toLowerCase()) + '"></i>';
     });
     setSI($('#rj-done'), c.done);
     $('#rj-seg').innerHTML = seg;
-    var parts = [['waiting', 'waiting for observation'], ['running', 'running'], ['queued', 'queued'], ['failed', 'failed'], ['rolledback', 'rolled back'], ['cancelled', 'cancelled']];
+    var parts = [['waiting', 'waiting for observation'], ['running', 'running'], ['queued', 'queued'], ['failed', 'failed'], ['rolledback', 'rolled back'], ['canceled', 'canceled']];
     setHTML($('#rj-brk'), parts.filter(function (p) { return c[p[0]]; }).map(function (p) {
-      return '<span class="jstate ' + (p[0] === 'cancelled' ? 'queued' : p[0]) + '">' + N(c[p[0]]) + ' ' + p[1] + '</span>';
+      return '<span class="jstate ' + (p[0] === 'canceled' ? 'queued' : p[0]) + '">' + N(c[p[0]]) + ' ' + p[1] + '</span>';
     }).join(''));
     var js = jobState(), chip = $('#rj-chip');
     chip.className = 'jstate ' + js.cls; chip.textContent = js.word; chip.style.setProperty('--p', js.p + '%');
@@ -1330,7 +1330,7 @@
 
   /* ----- Job logic ----- */
   function maybeStart(h) {
-    if (h.st !== 'queued' || h.cancelled || run.paused || gateOpen(h) > 0) { return; }
+    if (h.st !== 'queued' || h.canceled || run.paused || gateOpen(h) > 0) { return; }
     if (inflight() >= run.par) { renderHost(h.id, false); return; }
     startMove(h);
   }
@@ -1481,15 +1481,15 @@
     if (!run.paused) { maybeStartAll(); }
   });
   $('#rj-cancel').addEventListener('click', function () {
-    var q = ORDER.filter(function (id) { var h = run.hosts[id]; return h.st === 'queued' && !h.cancelled; });
+    var q = ORDER.filter(function (id) { var h = run.hosts[id]; return h.st === 'queued' && !h.canceled; });
     if (!q.length) { return; }
-    q.forEach(function (id) { run.hosts[id].cancelled = true; renderHost(id, true); });
-    addLog('Job #221: cancelled ' + pl(q.length, 'remaining move', 'remaining moves') + ' (' + q.join(', ') + ')');
+    q.forEach(function (id) { run.hosts[id].canceled = true; renderHost(id, true); });
+    addLog('Job #221: canceled ' + pl(q.length, 'remaining move', 'remaining moves') + ' (' + q.join(', ') + ')');
     renderSum(); syncJobs();
     toast({
-      title: 'Cancelled ' + pl(q.length, 'remaining move', 'remaining moves'),
+      title: 'Canceled ' + pl(q.length, 'remaining move', 'remaining moves'),
       body: 'Moves in progress continue. Nothing was changed for ' + q.join(', ') + '.', kind: 'ok',
-      actions: [{ label: 'Undo', onClick: function () { q.forEach(function (id) { run.hosts[id].cancelled = false; renderHost(id, true); }); addLog('Job #221: cancel undone for ' + q.join(', ')); renderSum(); syncJobs(); maybeStartAll(); } }]
+      actions: [{ label: 'Undo', onClick: function () { q.forEach(function (id) { run.hosts[id].canceled = false; renderHost(id, true); }); addLog('Job #221: cancel undone for ' + q.join(', ')); renderSum(); syncJobs(); maybeStartAll(); } }]
     });
   });
 
@@ -1554,7 +1554,7 @@
   function syncJobs() {
     if (!run.hosts['thermostat-1']) { return; }
     var c = counts(), js = jobState();
-    var needs = c.failed > 0 || run.tasks.some(function (t) { return !t.done && t.k !== 'clean' && run.hosts[t.hid].st === 'queued' && !run.hosts[t.hid].cancelled; });
+    var needs = c.failed > 0 || run.tasks.some(function (t) { return !t.done && t.k !== 'clean' && run.hosts[t.hid].st === 'queued' && !run.hosts[t.hid].canceled; });
     var flag = needs ? '<span class="flag rsn">' + ico('alert', 'xs') + (c.failed ? c.failed + ' failed, needs you' : 'Tasks waiting for you') + '</span>' : '';
     var cell = '<span class="jstate ' + js.cls + '" style="--p:' + js.p + '%">' + js.word + '</span>' + flag;
     if (cell !== jbCache) {

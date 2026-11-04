@@ -103,7 +103,7 @@
         <segment><source>Keep a query log</source></segment>
       </unit>
       <unit id="setup.dns.log_description">
-        <segment><source>Which names the clients asked for, with the clients pseudonymised; kept on the node only.</source></segment>
+        <segment><source>Which names the clients asked for, with the clients pseudonymized; kept on the node only.</source></segment>
       </unit>
       <unit id="setup.dns.checklist">
         <segment><source>Before clients use this node</source></segment>

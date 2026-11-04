@@ -69,7 +69,7 @@ export function loadExpected(): Expected {
  * strength or more (IAM-07). The cookie is shared with the page, so navigate afterwards.
  */
 export async function raiseSession(api: Api): Promise<Schemas["SessionInfo"]> {
-  const { authenticator } = await api.enrolTotp();
+  const { authenticator } = await api.enrollTotp();
   await api.logout();
   return api.signIn(authenticator);
 }

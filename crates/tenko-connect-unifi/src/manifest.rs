@@ -113,7 +113,7 @@ mod tests {
         assert!(
             manifest
                 .validate_settings(
-                    &serde_json::json!({ "url": "https://unifi.example.test", "colour": 1 })
+                    &serde_json::json!({ "url": "https://unifi.example.test", "color": 1 })
                 )
                 .is_err()
         );

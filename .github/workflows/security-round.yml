@@ -261,6 +261,6 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          # The round exits non-zero when a blocking row failed; honour that here so the
+          # The round exits non-zero when a blocking row failed; honor that here so the
           # release stops (SA-Q1 (b)).
           test "${ROUND_RC:-1}" = 0

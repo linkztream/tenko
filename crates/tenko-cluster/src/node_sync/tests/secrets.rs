@@ -27,7 +27,7 @@ async fn operator_secret(controller: &Controller, label: &str, value: &str) -> S
         .vault
         .put_operator(
             &ctx(),
-            SecretSpec::new(SecretPurpose::from_static(OPERATOR_PURPOSE)).labelled(label),
+            SecretSpec::new(SecretPurpose::from_static(OPERATOR_PURPOSE)).labeled(label),
             SecretBytes::from(value.to_owned()),
         )
         .await
@@ -73,7 +73,7 @@ async fn hand_overs(controller: &Controller) -> usize {
 async fn a_probe_gets_the_secret_its_configuration_names_and_the_hand_over_is_audited() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    controller.enrol(dir.path(), "probe-secrets").await;
+    controller.enroll(dir.path(), "probe-secrets").await;
     let named = operator_secret(&controller, "switches.example.test", COMMUNITY).await;
     let unnamed = operator_secret(&controller, "other.example.test", "not-for-this-node").await;
     controller
@@ -124,9 +124,9 @@ async fn a_secret_the_configuration_does_not_name_or_that_is_not_an_operator_sec
  {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-names").await;
+    let credentials = controller.enroll(dir.path(), "probe-names").await;
     let other_dir = tempfile::tempdir().expect("dir");
-    let other = controller.enrol(other_dir.path(), "probe-bystander").await;
+    let other = controller.enroll(other_dir.path(), "probe-bystander").await;
     let named = operator_secret(&controller, "named.example.test", COMMUNITY).await;
     let system = controller
         .vault
@@ -199,7 +199,7 @@ async fn a_secret_the_configuration_does_not_name_or_that_is_not_an_operator_sec
 async fn a_purpose_the_roles_of_the_node_do_not_use_is_refused() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-purpose").await;
+    let credentials = controller.enroll(dir.path(), "probe-purpose").await;
     let named = operator_secret(&controller, "named.example.test", COMMUNITY).await;
     controller
         .put_config(FIRST_NODE, &Row::naming(1, vec![snmp(named)]))
@@ -223,7 +223,7 @@ async fn a_purpose_the_roles_of_the_node_do_not_use_is_refused() {
 async fn more_than_sixteen_purposes_in_one_request_are_refused() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-many").await;
+    let credentials = controller.enroll(dir.path(), "probe-many").await;
     let named = operator_secret(&controller, "named.example.test", COMMUNITY).await;
     controller
         .put_config(FIRST_NODE, &Row::naming(1, vec![snmp(named)]))
@@ -257,7 +257,7 @@ async fn a_controller_without_a_vault_serves_no_secrets() {
     })
     .await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-novault").await;
+    let credentials = controller.enroll(dir.path(), "probe-novault").await;
 
     // Nothing named: nothing to serve, and nothing to complain about.
     controller.put_config(FIRST_NODE, &Row::plain(1)).await;

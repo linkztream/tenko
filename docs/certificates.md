@@ -205,7 +205,7 @@ With `internal_ca` the node's certificate is signed by a CA that no browser know
    | Firefox | Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import (Firefox keeps its own store) |
    | `tenko` commands | `--ca-file ca-root.pem` (or the saved sign-in) |
 
-4. The root changes only when the CA is created again; the node's own certificate is renewed under it, so there is nothing to redistribute at a renewal. A clustered controller trusts the root through enrolment ([cluster.md](cluster.md)).
+4. The root changes only when the CA is created again; the node's own certificate is renewed under it, so there is nothing to redistribute at a renewal. A clustered controller trusts the root through enrollment ([cluster.md](cluster.md)).
 
 Install the root only on computers you administer from: a computer that trusts it trusts every certificate this CA signs. The CA's key is kept encrypted in the vault like the other secrets.
 

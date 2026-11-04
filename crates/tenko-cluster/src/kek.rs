@@ -2,7 +2,7 @@
 //! R22): `Cluster.TransferKek`.
 //!
 //! A joining controller generates a one-time X25519 key pair and sends its public key with
-//! the id of the enrolment token it joined with; a member seals every KEK generation it
+//! the id of the enrollment token it joined with; a member seals every KEK generation it
 //! holds to that key inside the mutual TLS channel ([`KekSource`]) and answers with the
 //! sealed bundle ([`SealedKeks`]); the joiner opens it and seals the generations again
 //! with its own KEK provider ([`TransferSink`]). A member that lacks generations (it was
@@ -11,7 +11,7 @@
 //! HKDF-SHA-256, AES-256-GCM) is the vault's ([`tenko_vault::transfer`]); this module holds
 //! the traits the cluster calls and their implementations over the vault.
 //!
-//! A join transfer is single use per enrolment token (`cluster.kek_transfers`); every
+//! A join transfer is single use per enrollment token (`cluster.kek_transfers`); every
 //! transfer is audited as `vault.kek.transfer` with the generation ids, never the material.
 
 use std::sync::Arc;
@@ -49,7 +49,7 @@ pub trait KekSource: Send + Sync + 'static {
 }
 
 /// The bytes both sides bind into a join transfer: a label, the joiner's node id and the
-/// id of the enrolment token it joined with.
+/// id of the enrollment token it joined with.
 pub fn join_context(node: NodeId, token: Uuid) -> Vec<u8> {
     transfer::join_context(node, *token.as_bytes())
 }

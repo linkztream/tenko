@@ -84,7 +84,7 @@ ui/
     connectors/         connector plugins and instances (WP2.9): the list, one instance, the
                         instance form with the settings form built from the plugin's settings
                         schema (schema.ts, SchemaForm.tsx); api.ts is its only API module
-    nodes/              cluster nodes and enrolment tokens (WP2.9): the node list with the docked
+    nodes/              cluster nodes and enrollment tokens (WP2.9): the node list with the docked
                         node panel, revocation, the token dialog; the requests are api/nodes.ts
     cluster/, scans/    the cluster area on the rail and the scans of the discovery module, which has
                         no rail entry (WP3.0 placeholders; WP3.11a builds them)
@@ -143,7 +143,7 @@ component is loaded with `lazy()`, so every area is its own chunk. Build every l
 
 Every IPAM write is previewed first: the view sends the request with `dry_run=true`, shows
 the plan (`src/ipam/plan/PlanDialog.tsx`: changes, warnings, the warnings that need an
-acknowledgement), then sends it again with the acknowledged codes. Forms follow the same
+acknowledgment), then sends it again with the acknowledged codes. Forms follow the same
 path through `FormDialog` (`src/ipam/tenancy/FormDialog.tsx`) or `WriteForm`
 (`src/ipam/formKit.tsx`): the form validates locally, then the plan dialog takes over;
 Cancel in the plan returns to the form with its values. After a write, `useWriteToast`
@@ -176,7 +176,7 @@ mirrors through the style sheets alone:
   they are.
 - A horizontal distance in an inset shadow or a translation is multiplied by
   `var(--inline-sign, 1)`, which is -1 right to left (`src/i18n/bidi.css`):
-  `box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--accent)`. A box centred with
+  `box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--accent)`. A box centered with
   `left: 50%` and `translateX(-50%)` is direction-neutral.
 - A declaration that must stay physical (a check mark drawn by two borders) carries the comment
   `/* physical: <reason> */` on its line.
@@ -282,7 +282,7 @@ with its prefix here and in its `routes.ts`.
 - `src/api/mock` holds msw handlers for every endpoint the UI uses, with seeded data in the
   documentation ranges (RFC 5737, RFC 3849, RFC 7042 MACs, `example.test` names). The IPAM
   mock (`mock/ipam`) plans and applies writes like the server: dry runs, warnings that need
-  an acknowledgement, revisions, history, restore and live events.
+  an acknowledgment, revisions, history, restore and live events.
 - `src/app/testing/setup.ts` starts msw in Node, refuses any request no handler answers,
   and resets the mock state and the host cache between tests. `renderRoute(view, { url, path, routes })` renders a view under
   a memory router; `signInAlex()` signs in the seeded administrator; `bridgeMockEvents()`
@@ -368,11 +368,11 @@ The hooks of the WP2.9 views beyond the generic ones:
 | Connectors | `grid-connectors`, `connectors-create`, `connectors-empty`, `connectors-plugins`, `plugin` (`data-key` the name, `data-usable`), `plugin-unusable`, `connector-health` (`data-health`) |
 | Connector | `connector-run`, `connector-check`, `connector-toggle`, `connector-edit`, `connector-delete`, `connector-disabled`, `connector-process`, `connector-restarts`, `connector-failures`, `connector-last-error` (`data-code`), `connector-remote`, `connector-remote-error`, `connector-last-run`, `connector-observations`, `connector-runs`, `connector-run-job` (`data-id`), `connector-settings-view`, `connector-config`, `connector-secret` (`data-key` the purpose), `connector-writes` |
 | Connector form | `dialog-connector-form`, `field-plugin`, `field-name`, `connector-settings` with the settings form (`settings-form`, `settings-empty`, `field-settings-<name>`, `settings-item` and `settings-item-remove` with `data-field` and `data-index`, `settings-item-add`), `connector-secrets` with `field-secret-<purpose>`, `field-poll_interval`, `field-call_timeout`, `connector-guardrails` with `field-writes_enabled` and `field-enabled`, `connector-writes-warning`; error lines are `field-error` with `data-field` the path of the setting (`settings.url`, `settings.auth.user`, for an item `settings.ssids[1]`) |
-| Nodes | `grid-nodes`, `nodes-enrol`, `nodes-version-mismatch`, `nodes-cluster`, `nodes-empty`, `node-link` (`data-state`), `nodes-tokens`, `enrolment` (`data-id`, `data-state`), `enrolment-node` (the link to the node a used token enrolled; `data-id` the node id), `enrolment-delete` |
+| Nodes | `grid-nodes`, `nodes-enroll`, `nodes-version-mismatch`, `nodes-cluster`, `nodes-empty`, `node-link` (`data-state`), `nodes-tokens`, `enrollment` (`data-id`, `data-state`), `enrollment-node` (the link to the node a used token enrolled; `data-id` the node id), `enrollment-delete` |
 | Node panel | `node-panel` (`data-id`), `node-mismatch`, `node-connection`, `node-buffer`, `node-certificate`, `node-revoke` |
-| Enrolment | `dialog-enrol` with `field-role-<role>`, `field-name`, `field-lifetime` and `field-vrf`; then `dialog-enrol-token` with `enrol-once`, `enrol-command`, `enrol-token`, `enrol-fingerprint`, `nodes-copy-command`, `nodes-copy-token` and `enrol-done` |
+| Enrollment | `dialog-enroll` with `field-role-<role>`, `field-name`, `field-lifetime` and `field-vrf`; then `dialog-enroll-token` with `enroll-once`, `enroll-command`, `enroll-token`, `enroll-fingerprint`, `nodes-copy-command`, `nodes-copy-token` and `enroll-done` |
 | Partition (every page; WP3.11a) | `cluster-banner` (`data-state` `isolated`, `electing` or `conflicts`), `status-stale`; `dialog-no-quorum` with `no-quorum-hint`, `no-quorum-queue`, `no-quorum-queued` and `no-quorum-close` |
-| Cluster | `cluster-summary` with `cluster-quorum` (`data-state`), `cluster-term`, `cluster-leader` (`data-node`), `cluster-voters` (`data-count`), `cluster-node` (`data-node`), `cluster-changing`; `cluster-step-down`, `cluster-add-controller` (opens `dialog-enrol` with the role fixed), `cluster-queue-link`; `cluster-members` with `member-row-<node>` (`data-id`, `data-state` the health, `data-role`), `member-health` (`data-state`), `member-leader`, `member-lag`, `member-contact`, `member-promote-<node>`, `member-remove-<node>` |
+| Cluster | `cluster-summary` with `cluster-quorum` (`data-state`), `cluster-term`, `cluster-leader` (`data-node`), `cluster-voters` (`data-count`), `cluster-node` (`data-node`), `cluster-changing`; `cluster-step-down`, `cluster-add-controller` (opens `dialog-enroll` with the role fixed), `cluster-queue-link`; `cluster-members` with `member-row-<node>` (`data-id`, `data-state` the health, `data-role`), `member-health` (`data-state`), `member-leader`, `member-lag`, `member-contact`, `member-promote-<node>`, `member-remove-<node>` |
 | Membership dialogs | `dialog-promote`, `dialog-remove`, `dialog-step-down` with `preview`, `preview-voters` and `preview-tolerated` (`data-before`, `data-after`), `preview-blockers` and `preview-forceable` (items with `data-blocker`), `preview-caveats` (items with `data-caveat`), `field-force`, `field-replace`, `step-down-successor` (`data-node`), `promote-confirm`, `remove-confirm`, `step-down-confirm` |
 | Digest check | `cluster-digests`, `cluster-check-digests`, `digests-result`, `digests-overall` (`data-state` `agree` or `differ`), `digest-row-<node>` (`data-state` `agrees`, `differs` or `missing`), `digest-state`, `digest-value` |
 | Queue | `queue-unavailable`; `queue-local`, `queue-local-empty`, `queue-item-<id>` (`data-state`), `queue-item-summary`, `queue-item-state`, `queue-cancel-<id>`, `dialog-cancel-queued`; `queue-changes`, `queue-changes-empty`, `queued-change-<id>` (`data-state`), `queued-change-summary`, `queued-change-state`, `queued-change-conflict` (`data-code`), `queued-reapply-<id>`, `queued-discard-<id>`, `queued-dismiss-<id>` (an applied change), `dialog-reapply` (the plan dialog), `dialog-discard-queued` |
@@ -400,7 +400,7 @@ The hooks of the WP2.9 views beyond the generic ones:
 | Certificates (`/settings/certificates`, `page-certificates`) | `certificates-refresh`, `certificates-read-at`, notices `certificates-expiring` (`data-code` `sys.tls.certificate_expiry`), `certificates-pending-notice` (`sys.tls.certificate_pending`), `certificates-error`, `certificates-none`, `certificates-plain`; `certificates-mode` (`data-mode`) with `certificates-mode-name`, `certificates-min-version`, `certificates-hsts`; the certificate in use `certificates-served` and a newer one on disk `certificates-pending`, each with facts `cert-` or `pending-` plus `subject`, `names`, `issuer`, `not-before`, `not-after`, `days` (`data-state`), `chain`, `fingerprint`, `loaded`; `certificates-imported` with `imported-cert-path`, `imported-key-path`, `imported-interval`, `imported-accept` (`data-accepted`), `imported-rule`; `certificates-ca` with `ca-subject`, `ca-not-after`, `ca-fingerprint`, `ca-root-download`; `certificates-proxy` with `proxy-host`, `proxy-trusted`, `proxy-protocol` |
 | Guardrails (`/settings/guardrails`, `page-guardrails`) | `guardrails-form` with `field-max_parallel`, `field-error` (`data-field`), `guardrails-paths` with `guardrails-add`, `guardrails-empty`, `guardrails-note`, `guardrail-path` (`data-kind`, `data-key` such as `vlan:30`) holding `guardrail-remove`, `form-submit`, `guardrails-reloaded`; `dialog-guardrail-path` with `field-kind`, `field-device`, `field-port`, `field-network`, `field-vid`, `field-mac`, `guardrails-duplicate`, `form-submit`, `form-cancel` |
 | Cluster compatibility and data format (WP3.11d) | `member-compat-<node>` with `compat-majors`, `compat-wire`, `compat-formats`; `cluster-format` (`data-state` `current` or `pending`) with `format-stored`, `format-binary`, `format-target`, `format-current`, `format-blockers` with `format-blocker` (`data-node`), `format-advice`, and `cluster-warning` (`data-code` `upgrade.migration_blocked`) |
-| Job state and job group | `job-state` (`data-state`; `data-rollback="cancel"` on a cancelled job that its cancellation rolled back); in `job-group`: `job-group-l2-hint` on a layer 2 undo task, `job-group-not-moved` with `job-group-not-moved-item` (`data-job`, `data-state`), `job-group-move-failed`, `job-group-not-moved-reason`, `job-group-not-moved-link` |
+| Job state and job group | `job-state` (`data-state`; `data-rollback="cancel"` on a canceled job that its cancellation rolled back); in `job-group`: `job-group-l2-hint` on a layer 2 undo task, `job-group-not-moved` with `job-group-not-moved-item` (`data-job`, `data-state`), `job-group-move-failed`, `job-group-not-moved-reason`, `job-group-not-moved-link` |
 | Personal tokens (`/account/tokens`) | `account-token-create`, `account-token` (`data-key` the name), `account-token-revoke`; the form with `field-name`, `field-lifetime`, `form-submit`; `dialog-token-created` with `token-secret`, `token-stored`, `token-done` |
 | Partition links | `cluster-banner-link` (the banner's link to the queue), `no-quorum-show-queue` (the same in `dialog-no-quorum`) |
 | Command palette | `dialog-palette`, `palette-item` (`data-key` the command id) |
@@ -452,11 +452,11 @@ support modules and the server options.
 
 ## Third-party code
 
-| Package or asset | Licence | Use |
+| Package or asset | License | Use |
 |---|---|---|
 | solid-js, @solidjs/router | MIT | UI framework and router |
 | intl-messageformat | BSD-3-Clause | ICU messages |
-| uqr | MIT | QR code of the TOTP enrolment, encoded in the browser (`public/licenses/uqr.txt`) |
+| uqr | MIT | QR code of the TOTP enrollment, encoded in the browser (`public/licenses/uqr.txt`) |
 | JetBrains Mono | SIL Open Font License 1.1 | Monospace font (`public/licenses/OFL.txt`; the font is `src/app/fonts/`) |
 
 Development dependencies (Vite, vitest, msw, ESLint, axe-core and others) are listed in

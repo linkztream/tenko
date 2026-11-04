@@ -21,7 +21,7 @@ use tenko_core::dns::{DnsName, ExtendedError};
 use super::{CutId, authority::ServerCookie};
 
 /// The default infrastructure TTL (`[dns.recursion] infra_ttl_secs`, Unbound's 900): how
-/// long a learnt capability, lameness or unreachability holds.
+/// long a learned capability, lameness or unreachability holds.
 pub const INFRA_TTL: Duration = Duration::from_secs(900);
 
 /// How long an IPv6 address that failed at once (no IPv6 route) is skipped before it is
@@ -176,15 +176,15 @@ pub struct ZoneCut {
     pub expires: Instant,
     /// The DNSSEC state.
     pub ds: DsState,
-    /// QNAME minimisation falls back to the full name for this zone until then (RFC 9156
+    /// QNAME minimization falls back to the full name for this zone until then (RFC 9156
     /// relaxed mode, section 2.6).
-    pub minimise_fallback: Option<Instant>,
+    pub minimize_fallback: Option<Instant>,
 }
 
 /// Whether a server takes EDNS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EdnsSupport {
-    /// Not learnt yet: ask with EDNS.
+    /// Not learned yet: ask with EDNS.
     #[default]
     Unknown,
     /// It answered a query with EDNS.
@@ -193,7 +193,7 @@ pub enum EdnsSupport {
     No,
 }
 
-/// What the resolver learnt about one server address.
+/// What the resolver learned about one server address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerState {
     /// The address.
@@ -272,9 +272,9 @@ pub trait InfraCache: Send + Sync {
     /// Sets the DNSSEC state of `zone`'s cut.
     fn set_ds(&self, zone: &DnsName, ds: DsState);
 
-    /// Remembers that QNAME minimisation falls back to the full name for `zone` until
+    /// Remembers that QNAME minimization falls back to the full name for `zone` until
     /// `until`.
-    fn set_minimise_fallback(&self, zone: &DnsName, until: Instant);
+    fn set_minimize_fallback(&self, zone: &DnsName, until: Instant);
 
     /// The addresses of a name server that have not expired.
     fn name_server(&self, name: &DnsName, now: Instant) -> Option<NameServer>;
@@ -398,7 +398,7 @@ impl InfraCache for MemInfra {
         *used = tick;
         let mut cut = cut.clone();
         cut.ds = cut.ds.at(now);
-        cut.minimise_fallback = cut.minimise_fallback.filter(|until| *until > now);
+        cut.minimize_fallback = cut.minimize_fallback.filter(|until| *until > now);
         Some(cut)
     }
 
@@ -423,7 +423,7 @@ impl InfraCache for MemInfra {
                     servers,
                     expires,
                     ds: DsState::Unknown,
-                    minimise_fallback: None,
+                    minimize_fallback: None,
                 },
                 tick,
             ),
@@ -438,9 +438,9 @@ impl InfraCache for MemInfra {
         }
     }
 
-    fn set_minimise_fallback(&self, zone: &DnsName, until: Instant) {
+    fn set_minimize_fallback(&self, zone: &DnsName, until: Instant) {
         if let Some((cut, _)) = self.lock().cuts.get_mut(zone) {
-            cut.minimise_fallback = Some(until);
+            cut.minimize_fallback = Some(until);
         }
     }
 

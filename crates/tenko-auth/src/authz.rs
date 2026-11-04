@@ -759,7 +759,7 @@ impl RbacAuthorizer {
         let kind = object.kind;
         match principal {
             Principal::System { .. } => Ok(Reach::Global),
-            // Probes and peers get their own grants with enrolment (Slice 2).
+            // Probes and peers get their own grants with enrollment (Slice 2).
             Principal::Node { .. } => Err(DenyReason::MissingPermission),
             Principal::User { id, strength, .. } => {
                 let user = image

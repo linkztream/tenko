@@ -39,7 +39,7 @@ describe("shortestPath", () => {
     expect(shortestPath(EDGES, "g", "f")).toEqual(["g", "f"]);
   });
 
-  it("prefers the neighbour with the smaller id on a tie", () => {
+  it("prefers the neighbor with the smaller id on a tie", () => {
     // a-b-d and a-c-d are equally long.
     expect(shortestPath(EDGES, "a", "d")).toEqual(["a", "b", "d"]);
     expect(shortestPath(EDGES, "d", "a")).toEqual(["d", "b", "a"]);

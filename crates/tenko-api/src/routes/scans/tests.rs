@@ -145,8 +145,8 @@ impl Api {
         .await
     }
 
-    /// Enrols a node with `roles` directly in the registry table.
-    async fn enrol(&self, id: u64, roles: &[Role]) {
+    /// Enrolls a node with `roles` directly in the registry table.
+    async fn enroll(&self, id: u64, roles: &[Role]) {
         let now = Timestamp::now();
         let certificate = CertificateRef {
             serial: format!("{id:x}"),
@@ -163,7 +163,7 @@ impl Api {
             certificate: certificate.clone(),
             serials: vec![certificate],
             enrolled_at: now,
-            enrolment: Uuid::now_v7(),
+            enrollment: Uuid::now_v7(),
             enrolled_by: None,
             renewed_at: None,
             last_seen: None,
@@ -180,7 +180,7 @@ impl Api {
             .put_operator(
                 &RequestCtx::system(SystemComponent::Api),
                 SecretSpec::new(SecretPurpose::from_static(OPERATOR_PURPOSE))
-                    .labelled("switch.example.test"),
+                    .labeled("switch.example.test"),
                 SecretBytes::from("correct horse battery".to_owned()),
             )
             .await
@@ -301,7 +301,7 @@ async fn passwords_are_refused_and_secrets_must_be_operator_secrets() {
 #[tokio::test]
 async fn unknown_nodes_and_nodes_without_the_probe_role_are_refused() {
     let api = Api::new();
-    api.enrol(1002, &[Role::Dns]).await;
+    api.enroll(1002, &[Role::Dns]).await;
     api.send("GET", "/nodes/77/scan-config", None)
         .await
         .assert_problem(404, "cluster.node.not_found");
@@ -322,8 +322,8 @@ async fn unknown_nodes_and_nodes_without_the_probe_role_are_refused() {
 #[tokio::test]
 async fn the_kill_switch_issues_one_command_per_probe() {
     let api = Api::new();
-    api.enrol(1001, &[Role::Probe]).await;
-    api.enrol(1002, &[Role::Dns]).await;
+    api.enroll(1001, &[Role::Probe]).await;
+    api.enroll(1002, &[Role::Dns]).await;
     let probes = api.send("GET", "/scans/probes", None).await;
     probes.assert_json(200);
     let nodes: Vec<u64> = probes.body["items"]

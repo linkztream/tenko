@@ -4,12 +4,12 @@
 //! |---|---|---|
 //! | `system` | SNMPv2-MIB | name, description and type of the device |
 //! | `ifTable`, `ifXTable` | IF-MIB | interfaces, their names and MAC addresses |
-//! | `ipNetToPhysicalTable` | IP-MIB | IPv4 and IPv6 neighbours |
+//! | `ipNetToPhysicalTable` | IP-MIB | IPv4 and IPv6 neighbors |
 //! | `ipNetToMediaTable` | RFC1213-MIB | IPv4 ARP entries of older devices |
 //! | `dot1dBasePortTable` | BRIDGE-MIB | bridge port to `ifIndex` |
 //! | `dot1qTpFdbTable` | Q-BRIDGE-MIB | MAC addresses per VLAN and port |
 //! | `dot1dTpFdbTable` | BRIDGE-MIB | MAC addresses per port without VLANs |
-//! | `lldpRemTable`, `lldpLocPortTable` | LLDP-MIB | neighbours and local port names |
+//! | `lldpRemTable`, `lldpLocPortTable` | LLDP-MIB | neighbors and local port names |
 //!
 //! The decoders take the rows of one column each and are tolerant: an entry whose index
 //! or value is malformed is skipped, never an error.
@@ -22,7 +22,7 @@ use std::{
 use tenko_core::MacAddr;
 
 use super::{
-    ArpEntry, DeviceTables, FdbEntry, Interface, LldpNeighbour, PollOptions,
+    ArpEntry, DeviceTables, FdbEntry, Interface, LldpNeighbor, PollOptions,
     ber::{Oid, Value, VarBind},
     client::Client,
 };
@@ -212,7 +212,7 @@ fn invalid_indexes(rows: &[VarBind], column: Column) -> HashSet<&[u32]> {
         .collect()
 }
 
-/// The ARP and neighbour entries from `ipNetToPhysicalTable` and `ipNetToMediaTable`.
+/// The ARP and neighbor entries from `ipNetToPhysicalTable` and `ipNetToMediaTable`.
 ///
 /// Entries whose type is `invalid(2)`, whose MAC address is not six octets or is all
 /// zero, and duplicates are dropped; the result is sorted.
@@ -407,12 +407,12 @@ pub(crate) struct LldpRows<'a> {
     pub local_port_desc: &'a [VarBind],
 }
 
-/// The LLDP neighbours, in the order of the table (`timeMark.localPortNum.remIndex`).
+/// The LLDP neighbors, in the order of the table (`timeMark.localPortNum.remIndex`).
 ///
 /// The local port is the formatted `lldpLocPortId`; when its subtype is a MAC or network
 /// address, which does not name a port to a person, `lldpLocPortDesc` is preferred.
-/// Neighbours that announce nothing are dropped.
-pub(crate) fn decode_lldp(rows: &LldpRows<'_>) -> Vec<LldpNeighbour> {
+/// Neighbors that announce nothing are dropped.
+pub(crate) fn decode_lldp(rows: &LldpRows<'_>) -> Vec<LldpNeighbor> {
     let chassis_subtype = values(rows.chassis_id_subtype, LLDP_REM_CHASSIS_ID_SUBTYPE);
     let chassis_id = values(rows.chassis_id, LLDP_REM_CHASSIS_ID);
     let port_subtype = values(rows.port_id_subtype, LLDP_REM_PORT_ID_SUBTYPE);
@@ -439,7 +439,7 @@ pub(crate) fn decode_lldp(rows: &LldpRows<'_>) -> Vec<LldpNeighbour> {
     let subtype_of = |column: &BTreeMap<&[u32], &Value>, key: &[u32]| {
         column.get(key).and_then(|value| value.as_integer())
     };
-    let mut neighbours = Vec::new();
+    let mut neighbors = Vec::new();
     for key in keys {
         let remote_chassis = chassis_id.get(key).and_then(|value| {
             format_lldp_id(
@@ -487,7 +487,7 @@ pub(crate) fn decode_lldp(rows: &LldpRows<'_>) -> Vec<LldpNeighbour> {
         } else {
             by_id.or(by_desc)
         };
-        neighbours.push(LldpNeighbour {
+        neighbors.push(LldpNeighbor {
             local_port,
             remote_chassis,
             remote_port,
@@ -495,7 +495,7 @@ pub(crate) fn decode_lldp(rows: &LldpRows<'_>) -> Vec<LldpNeighbour> {
             remote_sys_name,
         });
     }
-    neighbours
+    neighbors
 }
 
 /// Reads the tables of the device one column at a time. A failure of one walk is
@@ -514,7 +514,7 @@ struct Collector<'c, 'a> {
 impl Collector<'_, '_> {
     fn record(&mut self, name: &str, error: &ScanError) -> Result<(), ScanError> {
         match error.code() {
-            "scan.cancelled" | "scan.snmp.auth" => return Err(error.clone()),
+            "scan.canceled" | "scan.snmp.auth" => return Err(error.clone()),
             "scan.snmp.timeout" | "scan.io" => {
                 if !self.succeeded {
                     // Discovery worked but nothing else gets through: there is nothing to
@@ -635,7 +635,7 @@ impl Collector<'_, '_> {
         }))
     }
 
-    async fn lldp(&mut self) -> Result<Vec<LldpNeighbour>, ScanError> {
+    async fn lldp(&mut self) -> Result<Vec<LldpNeighbor>, ScanError> {
         let chassis_id_subtype = self
             .walk("lldpRemChassisIdSubtype", LLDP_REM_CHASSIS_ID_SUBTYPE)
             .await?;
@@ -1055,25 +1055,25 @@ mod tests {
             vec![],
             vec![],
         ];
-        let neighbours = decode_lldp(&lldp_rows(&rows));
+        let neighbors = decode_lldp(&lldp_rows(&rows));
         assert_eq!(
-            neighbours,
+            neighbors,
             vec![
-                LldpNeighbour {
+                LldpNeighbor {
                     local_port: None,
                     remote_chassis: Some("00:00:5e:00:53:a0".into()),
                     remote_port: Some("00:00:5e:00:53:a1".into()),
                     remote_port_desc: None,
                     remote_sys_name: Some("ap-b.example.net".into()),
                 },
-                LldpNeighbour {
+                LldpNeighbor {
                     local_port: None,
                     remote_chassis: Some("192.0.2.5".into()),
                     remote_port: Some("Te1/0/48".into()),
                     remote_port_desc: None,
                     remote_sys_name: None,
                 },
-                LldpNeighbour {
+                LldpNeighbor {
                     local_port: None,
                     remote_chassis: Some("2001:db8::5".into()),
                     remote_port: None,
@@ -1109,8 +1109,8 @@ mod tests {
             octets_value(b"GigabitEthernet0/1"),
         ));
         rows[8].push(row(LLDP_LOC_PORT_DESC, &[2], octets_value(b"Port 2")));
-        let neighbours = decode_lldp(&lldp_rows(&rows));
-        let ports: Vec<_> = neighbours.iter().map(|n| n.local_port.clone()).collect();
+        let neighbors = decode_lldp(&lldp_rows(&rows));
+        let ports: Vec<_> = neighbors.iter().map(|n| n.local_port.clone()).collect();
         assert_eq!(
             ports,
             vec![
@@ -1123,7 +1123,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_neighbours_and_wrong_index_lengths_are_dropped() {
+    fn empty_neighbors_and_wrong_index_lengths_are_dropped() {
         let mut rows: [Vec<VarBind>; 9] = Default::default();
         rows[1].push(row(LLDP_REM_CHASSIS_ID, &[1, 1, 1], octets_value(b"")));
         rows[5].push(row(

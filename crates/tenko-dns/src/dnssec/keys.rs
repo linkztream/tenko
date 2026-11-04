@@ -203,7 +203,7 @@ pub fn stage_new_key(
         let id = DnsKeyId::generate();
         let spec = SecretSpec::new(SecretPurpose::from_static(VAULT_PURPOSE))
             .owned_by(ObjectRef::from(id))
-            .labelled(format!("{apex} {} {tag}", role_name(role)));
+            .labeled(format!("{apex} {} {tag}", role_name(role)));
         let secret = vault.stage_put(
             batch,
             cx,

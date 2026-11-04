@@ -1,4 +1,4 @@
-//! A test `DerivedIndex` modelled on the serving index of Spike A.
+//! A test `DerivedIndex` modeled on the serving index of Spike A.
 //!
 //! The image is a set of shards, each a `RwLock<HashMap<Bytes, Bytes>>`, behind an
 //! `ArcSwap`. `apply` updates the live image in place (write-locking only the shards a change

@@ -86,7 +86,7 @@ fn holds(agent: &crate::client::Agent, dir: &std::path::Path, node: NodeId, row:
 async fn a_connected_probe_applies_a_configuration_change_as_it_happens() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    controller.enrol(dir.path(), "probe-live").await;
+    controller.enroll(dir.path(), "probe-live").await;
     let running = Running::start(dir.path());
     let agent = &running.agent;
     wait_for("the first sync", || {
@@ -131,7 +131,7 @@ async fn a_connected_probe_applies_a_configuration_change_as_it_happens() {
 async fn a_node_that_was_away_catches_up_from_its_revision_with_a_delta() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-away").await;
+    let credentials = controller.enroll(dir.path(), "probe-away").await;
     controller.put_config(FIRST_NODE, &Row::plain(1)).await;
 
     let running = Running::start(dir.path());
@@ -183,7 +183,7 @@ async fn a_node_behind_a_compacted_journal_gets_a_snapshot_of_exactly_the_curren
     })
     .await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-compacted").await;
+    let credentials = controller.enroll(dir.path(), "probe-compacted").await;
     controller.put_config(FIRST_NODE, &Row::plain(1)).await;
 
     let running = Running::start(dir.path());
@@ -243,7 +243,7 @@ async fn a_node_behind_a_compacted_journal_gets_a_snapshot_of_exactly_the_curren
 async fn a_node_that_has_never_synced_gets_a_snapshot() {
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = controller.enrol(dir.path(), "probe-new").await;
+    let credentials = controller.enroll(dir.path(), "probe-new").await;
     controller.put_config(FIRST_NODE, &Row::plain(4)).await;
     let seen = first_message(&controller, &credentials, 0).await;
     assert!(seen.received.snapshot);
@@ -264,7 +264,7 @@ async fn the_bandwidth_cap_paces_a_snapshot_to_its_rate() {
     // Without a cap the same snapshot arrives at once.
     let open = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = open.enrol(dir.path(), "probe-fast").await;
+    let credentials = open.enroll(dir.path(), "probe-fast").await;
     open.put_config(FIRST_NODE, &row).await;
     let fast = first_message(&open, &credentials, 0).await;
     assert!(fast.received.snapshot);
@@ -283,7 +283,7 @@ async fn the_bandwidth_cap_paces_a_snapshot_to_its_rate() {
     })
     .await;
     let dir = tempfile::tempdir().expect("dir");
-    let credentials = capped.enrol(dir.path(), "probe-slow").await;
+    let credentials = capped.enroll(dir.path(), "probe-slow").await;
     capped.put_config(FIRST_NODE, &row).await;
     let slow = first_message(&capped, &credentials, 0).await;
     assert!(slow.received.snapshot);

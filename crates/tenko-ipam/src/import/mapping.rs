@@ -826,8 +826,8 @@ pub fn infer_network(
     data_rows: usize,
 ) -> (IpNet, MaskSource) {
     let bits: u8 = if ip.is_ipv4() { 32 } else { 128 };
-    let neighbourhood: u8 = if ip.is_ipv4() { 24 } else { 64 };
-    let near = IpNet::new(ip, neighbourhood).map(|n| n.trunc()).ok();
+    let neighborhood: u8 = if ip.is_ipv4() { 24 } else { 64 };
+    let near = IpNet::new(ip, neighborhood).map(|n| n.trunc()).ok();
     let mut own: Vec<IpAddr> = Vec::new();
     for row in first_row..sheet.rows.len() {
         for &column in address_columns {
@@ -862,8 +862,8 @@ pub fn infer_network(
         length -= 1;
     }
     let source = if device_centric {
-        if length == bits && aligned(neighbourhood) {
-            length = neighbourhood;
+        if length == bits && aligned(neighborhood) {
+            length = neighborhood;
         }
         MaskSource::Addresses
     } else {

@@ -16,7 +16,7 @@
 //! first, the answer holds the matches found so far (possibly none) and a cursor that
 //! continues the scan. `GET /audit/verify` walks the whole chain on a blocking thread.
 
-use std::{str::FromStr, sync::Arc};
+use std::{borrow::Cow, str::FromStr, sync::Arc};
 
 use axum::{
     Extension, Json,
@@ -375,19 +375,46 @@ impl ActionFilter {
             // Some action starts with the prefix exactly when the prefix plus one more
             // character is a valid action: this checks the namespace and the characters.
             AuditAction::new(format!("{value}x")).map_err(|_| invalid(value))?;
-            Ok(Self::Prefix(value.to_owned()))
+            Ok(Self::Prefix(american_action(value).into_owned()))
         } else {
             AuditAction::from_str(value).map_err(|_| invalid(value))?;
-            Ok(Self::Exact(value.to_owned()))
+            Ok(Self::Exact(american_action(value).into_owned()))
         }
     }
 
     fn matches(&self, action: &str) -> bool {
+        let action = american_action(action);
         match self {
-            Self::Exact(wanted) => action == wanted,
+            Self::Exact(wanted) => action == wanted.as_str(),
             Self::Prefix(prefix) => action.starts_with(prefix.as_str()),
         }
     }
+}
+
+/// An action name in the current spelling. Records written before 0.0.12 keep the British
+/// spelling of the enrollment actions they were written with, so a filter in either
+/// spelling matches records in either spelling.
+fn american_action(action: &str) -> Cow<'_, str> {
+    fn american(segment: &str) -> &str {
+        match segment {
+            "enrol" => "enroll",         // spelling: alias permanently
+            "enrolment" => "enrollment", // spelling: alias permanently
+            other => other,
+        }
+    }
+    if action
+        .split('.')
+        .all(|segment| american(segment) == segment)
+    {
+        return Cow::Borrowed(action);
+    }
+    Cow::Owned(
+        action
+            .split('.')
+            .map(american)
+            .collect::<Vec<_>>()
+            .join("."),
+    )
 }
 
 impl ObjectFilter {
@@ -785,6 +812,59 @@ mod tests {
     }
 
     #[test]
+    fn action_filters_match_both_spellings_of_the_enrollment_actions() {
+        let node = PrefixId::generate();
+        let mut prev = Digest::ZERO;
+        let mut records = Vec::new();
+        for (seq, action) in (1..).zip([
+            "cluster.node.enrol", // spelling: alias permanently (written by 0.0.11)
+            "cluster.node.enroll",
+            "cluster.enrolment.create", // spelling: alias permanently (written by 0.0.11)
+            "cluster.enrollment.delete",
+            "auth.totp.enrol", // spelling: alias permanently (written by 0.0.11)
+            "cluster.node.revoke",
+        ]) {
+            let draft = AuditDraft::success(
+                AuditAction::new(action.to_owned()).expect("action"),
+                vec![node.into()],
+            );
+            let record = sealed(
+                seq,
+                prev,
+                Principal::system(SystemComponent::Cluster),
+                draft,
+            );
+            prev = record.hash;
+            records.push(record);
+        }
+
+        let old_enroll = "cluster.node.enrol"; // spelling: alias permanently
+        for wanted in ["cluster.node.enroll", old_enroll] {
+            assert_eq!(
+                selected(&parsed(&[("action", wanted)]), &records),
+                [1, 2],
+                "{wanted}"
+            );
+        }
+        let old_prefix = "cluster.enrolment."; // spelling: alias permanently
+        for prefix in ["cluster.enrollment.", old_prefix] {
+            assert_eq!(
+                selected(&parsed(&[("action", prefix)]), &records),
+                [3, 4],
+                "{prefix}"
+            );
+        }
+        assert_eq!(
+            selected(&parsed(&[("action", "auth.totp.enroll")]), &records),
+            [5]
+        );
+        assert_eq!(
+            selected(&parsed(&[("action", "cluster.node.")]), &records),
+            [1, 2, 6]
+        );
+    }
+
+    #[test]
     fn paths_are_positive_decimal_numbers() {
         assert_eq!(parse_seq("7").expect("seq"), AuditSeq(7));
         assert_eq!(
@@ -831,7 +911,7 @@ mod tests {
                 Principal::system(SystemComponent::Jobs),
                 AuditDraft {
                     outcome: AuditOutcome::Failed {
-                        code: "jobs.cancelled".into(),
+                        code: "jobs.canceled".into(),
                     },
                     ..AuditDraft::success(CANCEL, vec![])
                 },

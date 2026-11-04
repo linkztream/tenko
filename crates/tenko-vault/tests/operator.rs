@@ -656,7 +656,7 @@ async fn secrets_stored_before_the_model_are_adopted_once() {
             &cx,
             spec("import.host_credential")
                 .owned_by(ObjectRef::from(host))
-                .labelled("Login and password of nas01"),
+                .labeled("Login and password of nas01"),
             value(r#"{"login":"admin","password":"example-pass"}"#),
         )
         .await

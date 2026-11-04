@@ -20,7 +20,7 @@
 //!
 //! Before criterion runs, the allocator counters (`stats_alloc`) are read over
 //! 10,000 calls of each operation and printed as a Markdown table. After the
-//! run, criterion's `estimates.json` files are summarised in a second table.
+//! run, criterion's `estimates.json` files are summarized in a second table.
 //! Both tables are also written to `results/raw/codec-bench.md`.
 //!
 //! The counting allocator is installed for the whole process, so the timing

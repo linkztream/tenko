@@ -13,7 +13,7 @@ use tenko_core::ipam::Vlan;
 use super::{
     build::{Computed, within},
     model::{
-        Neighbour, NodeKind, TopologyEdge, TopologyFilter, TopologyGraph, TopologyNode,
+        Neighbor, NodeKind, TopologyEdge, TopologyFilter, TopologyGraph, TopologyNode,
         TopologyPort, VlanInView,
     },
 };
@@ -59,7 +59,7 @@ fn matches(node: &TopologyNode, filter: &TopologyFilter) -> bool {
     true
 }
 
-/// The neighbours of every node, by node identifier: (edge position, other node).
+/// The neighbors of every node, by node identifier: (edge position, other node).
 fn adjacency(edges: &[TopologyEdge]) -> HashMap<&str, Vec<(usize, &str)>> {
     let mut map: HashMap<&str, Vec<(usize, &str)>> = HashMap::new();
     for (position, edge) in edges.iter().enumerate() {
@@ -206,10 +206,10 @@ pub fn summarize(graph: &mut TopologyGraph, vlans: &[Vlan]) {
         .collect();
 }
 
-/// The neighbours of a node across every edge, ordered by port and label.
-pub fn neighbours(computed: &Computed, id: &str) -> Vec<Neighbour> {
+/// The neighbors of a node across every edge, ordered by port and label.
+pub fn neighbors(computed: &Computed, id: &str) -> Vec<Neighbor> {
     let graph = &computed.graph;
-    let mut out: Vec<Neighbour> = graph
+    let mut out: Vec<Neighbor> = graph
         .edges
         .iter()
         .filter_map(|edge| {
@@ -224,7 +224,7 @@ pub fn neighbours(computed: &Computed, id: &str) -> Vec<Neighbour> {
                 .index
                 .get(other.as_str())
                 .and_then(|&position| graph.nodes.get(position))?;
-            Some(Neighbour {
+            Some(Neighbor {
                 node: node.id.clone(),
                 label: node.label.clone(),
                 kind: node.kind,
@@ -274,13 +274,13 @@ pub fn ports(computed: &Computed, id: &str, only: Option<&str>) -> Vec<TopologyP
                     uplink: port.uplink,
                     native_vlan: port.native_vlan,
                     up: Some(port.up),
-                    neighbours: Vec::new(),
+                    neighbors: Vec::new(),
                 },
             );
         }
     }
-    for neighbour in neighbours(computed, id) {
-        let Some(port) = neighbour.port.clone() else {
+    for neighbor in neighbors(computed, id) {
+        let Some(port) = neighbor.port.clone() else {
             continue;
         };
         ports
@@ -291,10 +291,10 @@ pub fn ports(computed: &Computed, id: &str, only: Option<&str>) -> Vec<TopologyP
                 uplink: false,
                 native_vlan: None,
                 up: None,
-                neighbours: Vec::new(),
+                neighbors: Vec::new(),
             })
-            .neighbours
-            .push(neighbour);
+            .neighbors
+            .push(neighbor);
     }
     ports
         .into_values()

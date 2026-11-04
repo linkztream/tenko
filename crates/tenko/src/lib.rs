@@ -14,7 +14,7 @@
 //! | [`backup`] | `tenko backup`: create, verify and restore backups (Slice 3) |
 //! | [`modules`] | the module switch of OPS-25 |
 //! | [`prepared`] | what the installer prepared the machine for, per role (`prepared-roles` beside `tenko.toml`) |
-//! | [`node`] | `tenko node`: enrol, status, renew, enrolment tokens; the cluster step of `tenko serve` and the data-plane node process |
+//! | [`node`] | `tenko node`: enroll, status, renew, enrollment tokens; the cluster step of `tenko serve` and the data-plane node process |
 //! | [`upgrade`] | `tenko upgrade`, the data-directory format and its migrations, in-app updates (OPS-23, OPS-24) |
 //! | [`plugin`] | `tenko plugin`: list, run a bundled plugin, conformance test; the connector service of `tenko serve` |
 //! | [`logging`] | `tracing` to standard error or a file, as text or JSON |
@@ -210,7 +210,7 @@ pub enum Command {
         action: plugin::PluginCommand,
     },
 
-    /// Data-plane nodes: enrol with a controller, show the state, renew the certificate.
+    /// Data-plane nodes: enroll with a controller, show the state, renew the certificate.
     Node {
         /// The `node` subcommand to run.
         #[command(subcommand)]

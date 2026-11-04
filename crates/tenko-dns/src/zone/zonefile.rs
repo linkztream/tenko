@@ -13,7 +13,7 @@
 //! `1w`), and a record without one takes `$TTL`, else the last TTL given, else 3600 s. The
 //! class is IN (another class is a loss); the type is its mnemonic (any case) or `TYPEnnn`.
 //!
-//! `$ORIGIN` and `$TTL` are honoured (the zone apex is the first origin); `$INCLUDE` is
+//! `$ORIGIN` and `$TTL` are honored (the zone apex is the first origin); `$INCLUDE` is
 //! refused, since the import reads one uploaded file; `$GENERATE` (the BIND extension) is
 //! expanded one line at a time, at most
 //! [`ZoneConfig::max_generate`](super::ZoneConfig::max_generate) records per directive,

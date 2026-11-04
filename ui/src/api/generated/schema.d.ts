@@ -613,7 +613,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Finish TOTP enrolment with a first code */
+        /** Finish TOTP enrollment with a first code */
         post: operations["totp_enroll_finish"];
         delete?: never;
         options?: never;
@@ -630,7 +630,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start TOTP enrolment and return the provisioning data */
+        /** Start TOTP enrollment and return the provisioning data */
         post: operations["totp_enroll_start"];
         delete?: never;
         options?: never;
@@ -2315,7 +2315,7 @@ export interface paths {
         put?: never;
         /**
          * Import a zone file into a zone
-         * @description Scope: `dns.write`. `$ORIGIN` and `$TTL` are honoured, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).
+         * @description Scope: `dns.write`. `$ORIGIN` and `$TTL` are honored, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).
          */
         post: operations["import_dns_zone_file"];
         delete?: never;
@@ -3094,10 +3094,10 @@ export interface paths {
         put?: never;
         /**
          * Cancel a job
-         * @description A queued job is cancelled at once. A running or waiting job is marked: the runner stops
-         *     it at the next step boundary, rolls back what ran and ends it as `cancelled`; the answer
-         *     shows `cancel_requested: true` until then. Cancelling twice is harmless. A job that is
-         *     rolling back or finished cannot be cancelled.
+         * @description A queued job is canceled at once. A running or waiting job is marked: the runner stops
+         *     it at the next step boundary, rolls back what ran and ends it as `canceled`; the answer
+         *     shows `cancel_requested: true` until then. Canceling twice is harmless. A job that is
+         *     rolling back or finished cannot be canceled.
          */
         post: operations["cancel_job"];
         delete?: never;
@@ -3178,7 +3178,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/nodes/enrol": {
+    "/api/v1/nodes/enroll": {
         parameters: {
             query?: never;
             header?: never;
@@ -3187,33 +3187,33 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Enrol a node with a token */
-        post: operations["enrol_node"];
+        /** Enroll a node with a token */
+        post: operations["enroll_node"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/nodes/enrolments": {
+    "/api/v1/nodes/enrollments": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List enrolment tokens */
-        get: operations["list_enrolments"];
+        /** List enrollment tokens */
+        get: operations["list_enrollments"];
         put?: never;
-        /** Create an enrolment token */
-        post: operations["create_enrolment"];
+        /** Create an enrollment token */
+        post: operations["create_enrollment"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/nodes/enrolments/{id}": {
+    "/api/v1/nodes/enrollments/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -3223,8 +3223,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Delete an enrolment token */
-        delete: operations["delete_enrolment"];
+        /** Delete an enrollment token */
+        delete: operations["delete_enrollment"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5128,7 +5128,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get one topology node with its ports and neighbours */
+        /** Get one topology node with its ports and neighbors */
         get: operations["get_topology_node"];
         put?: never;
         post?: never;
@@ -7192,14 +7192,14 @@ export interface components {
              */
             writes_enabled?: boolean;
         };
-        /** @description Answer of `POST /nodes/enrolments`: the token, shown once. */
-        CreatedEnrolment: {
+        /** @description Answer of `POST /nodes/enrollments`: the token, shown once. */
+        CreatedEnrollment: {
             /** @description The SHA-256 fingerprint of the internal CA root, for `--ca-fingerprint`. */
             ca_fingerprint: string;
             /** @description The command to run on the node, with the token and the fingerprint filled in. */
             command: string;
             /** @description The stored token. */
-            enrolment: components["schemas"]["EnrolmentView"];
+            enrollment: components["schemas"]["EnrollmentView"];
             /** @description The token text. It is shown only in this answer and cannot be read again. */
             token: string;
         };
@@ -8544,7 +8544,7 @@ export interface components {
             node: components["schemas"]["NodeId"];
             /**
              * @description What keeps the resolver side from working as configured: stub zones whose name
-             *     servers could not be learnt, views whose recursion access list does not exist.
+             *     servers could not be learned, views whose recursion access list does not exist.
              */
             problems?: string[];
             query_log?: components["schemas"]["QueryLogStatus"] | null;
@@ -8746,8 +8746,8 @@ export interface components {
             /** @description The port. */
             port?: string | null;
         };
-        /** @description Body of `POST /nodes/enrol`: a node presents its token and its certificate request. */
-        EnrolRequest: {
+        /** @description Body of `POST /nodes/enroll`: a node presents its token and its certificate request. */
+        EnrollRequest: {
             /**
              * @description The node's address as the controller should show it; default the address the
              *     request came from.
@@ -8764,13 +8764,13 @@ export interface components {
              *     token.
              */
             roles?: string[];
-            /** @description The enrolment token. */
+            /** @description The enrollment token. */
             token: string;
             /** @description The node's software version. */
             version?: string;
         };
-        /** @description Answer of `POST /nodes/enrol`. */
-        EnrolResponse: {
+        /** @description Answer of `POST /nodes/enroll`. */
+        EnrollResponse: {
             /** @description The root of the internal CA, PEM: the node trusts only it on the cluster port. */
             ca_root: string;
             /** @description The node certificate, PEM, leaf first. */
@@ -8795,18 +8795,18 @@ export interface components {
             /** @description The node as registered. */
             node: components["schemas"]["NodeView"];
         };
-        /** @description Body of `GET /nodes/enrolments`. */
-        EnrolmentList: {
+        /** @description Body of `GET /nodes/enrollments`. */
+        EnrollmentList: {
             /** @description Every token, newest first. */
-            items: components["schemas"]["EnrolmentView"][];
+            items: components["schemas"]["EnrollmentView"][];
         };
         /**
-         * @description The state of an enrolment token.
+         * @description The state of an enrollment token.
          * @enum {string}
          */
-        EnrolmentState: "pending" | "used" | "expired";
-        /** @description An enrolment token as `GET /nodes/enrolments` shows it (never the secret). */
-        EnrolmentView: {
+        EnrollmentState: "pending" | "used" | "expired";
+        /** @description An enrollment token as `GET /nodes/enrollments` shows it (never the secret). */
+        EnrollmentView: {
             /** @description When. */
             created_at: components["schemas"]["Timestamp"];
             /**
@@ -8831,7 +8831,7 @@ export interface components {
             /** @description The roles the node may take. */
             roles: string[];
             /** @description `pending`, `used` or `expired`. */
-            state: components["schemas"]["EnrolmentState"];
+            state: components["schemas"]["EnrollmentState"];
             used?: components["schemas"]["TokenUse"] | null;
             /**
              * Format: uuid
@@ -9053,7 +9053,7 @@ export interface components {
             type: "network";
         };
         /**
-         * @description The answer of a factor enrolment. Enrolling a factor does not raise the strength of the
+         * @description The answer of a factor enrollment. Enrolling a factor does not raise the strength of the
          *     session that enrolled it: when the session is below what the profile requires, the UI
          *     logs in again with the new factor.
          */
@@ -9890,7 +9890,7 @@ export interface components {
             failures: number;
             /** @description The server is lame for the zone. */
             lame: boolean;
-            /** @description The server is asked in lower case because it broke the 0x20 case randomisation. */
+            /** @description The server is asked in lower case because it broke the 0x20 case randomization. */
             lower_case: boolean;
             /** @description Where the address was learned: `glue`, `sibling_glue` or `authoritative`. */
             origin: string;
@@ -10639,7 +10639,7 @@ export interface components {
          * @description States of a job.
          * @enum {string}
          */
-        JobState: "queued" | "running" | "waiting" | "rolling_back" | "succeeded" | "failed" | "rolled_back" | "cancelled";
+        JobState: "queued" | "running" | "waiting" | "rolling_back" | "succeeded" | "failed" | "rolled_back" | "canceled";
         /** @description A job in a list: everything a job panel shows per row. */
         JobSummary: {
             /** @description Whether someone asked to cancel. */
@@ -11429,7 +11429,7 @@ export interface components {
             entry?: components["schemas"]["Entry"] | null;
             /** @description Where to read more. */
             homepage?: string | null;
-            /** @description SPDX licence expression of the plugin. */
+            /** @description SPDX license expression of the plugin. */
             license?: string | null;
             /**
              * Format: int32
@@ -12541,7 +12541,7 @@ export interface components {
             timeout_secs: number;
             /** @description How that deadline was chosen. */
             timeout_source: components["schemas"]["MoveTimeoutSource"];
-            /** @description Warning codes that need an acknowledgement before a submit. */
+            /** @description Warning codes that need an acknowledgment before a submit. */
             unacknowledged?: string[];
             /** @description Every warning of the move (also listed per item where it belongs). */
             warnings?: components["schemas"]["PlanWarning"][];
@@ -12747,8 +12747,8 @@ export interface components {
             /** @description The zone; never the root. */
             zone: components["schemas"]["DnsName"];
         };
-        /** @description A neighbour of a node across one edge. */
-        Neighbour: {
+        /** @description A neighbor of a node across one edge. */
+        Neighbor: {
             /** @description The edge. */
             edge: string;
             /** @description The kind of the edge. */
@@ -12759,11 +12759,11 @@ export interface components {
             kind: components["schemas"]["NodeKind"];
             /** @description Its label. */
             label: string;
-            /** @description The neighbour. */
+            /** @description The neighbor. */
             node: string;
             /** @description The port on this node's side. */
             port?: string | null;
-            /** @description The port on the neighbour's side. */
+            /** @description The port on the neighbor's side. */
             remote_port?: string | null;
             /** @description The wireless network of the edge. */
             ssid?: string | null;
@@ -12847,8 +12847,8 @@ export interface components {
             /** @description Whether writes are allowed (TGL-20). */
             writes_enabled?: boolean;
         };
-        /** @description Body of `POST /nodes/enrolments`. */
-        NewEnrolment: {
+        /** @description Body of `POST /nodes/enrollments`. */
+        NewEnrollment: {
             /**
              * Format: int64
              * @description Seconds until the token expires: 60 to 604,800 (seven days); default 3,600.
@@ -13017,7 +13017,7 @@ export interface components {
         };
         /**
          * Format: int64
-         * @description Raft node identifier, assigned at enrolment.
+         * @description Raft node identifier, assigned at enrollment.
          */
         NodeId: number;
         /** @description The intent behind a node. */
@@ -13099,7 +13099,7 @@ export interface components {
         };
         /** @description A node as `GET /nodes` shows it: the stored record and the live connection. */
         NodeView: {
-            /** @description The address the node gave at enrolment, else the address it enrolled from. */
+            /** @description The address the node gave at enrollment, else the address it enrolled from. */
             address?: string | null;
             /** @description The newest certificate. */
             certificate: components["schemas"]["CertificateRef"];
@@ -13113,7 +13113,7 @@ export interface components {
             enrolled_at: components["schemas"]["Timestamp"];
             /**
              * Format: uuid
-             * @description The user who created the enrolment token.
+             * @description The user who created the enrollment token.
              */
             enrolled_by?: string | null;
             /**
@@ -13371,7 +13371,7 @@ export interface components {
             type: "name";
         } | {
             /**
-             * @description The organisation a MAC address is registered to (its OUI), or the manufacturer a
+             * @description The organization a MAC address is registered to (its OUI), or the manufacturer a
              *     device reports.
              */
             data: {
@@ -15043,7 +15043,7 @@ export interface components {
         Page_NodeView: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
-                /** @description The address the node gave at enrolment, else the address it enrolled from. */
+                /** @description The address the node gave at enrollment, else the address it enrolled from. */
                 address?: string | null;
                 /** @description The newest certificate. */
                 certificate: components["schemas"]["CertificateRef"];
@@ -15057,7 +15057,7 @@ export interface components {
                 enrolled_at: components["schemas"]["Timestamp"];
                 /**
                  * Format: uuid
-                 * @description The user who created the enrolment token.
+                 * @description The user who created the enrollment token.
                  */
                 enrolled_by?: string | null;
                 /**
@@ -16016,7 +16016,7 @@ export interface components {
         PlanOptions: {
             /**
              * @description Warning codes the caller acknowledges (IPAM-06): a plan with a warning that needs
-             *     an acknowledgement applies only when its code is listed here.
+             *     an acknowledgment applies only when its code is listed here.
              */
             acknowledge?: string[];
         };
@@ -16046,7 +16046,7 @@ export interface components {
             mutations: number;
             /** @description Preconditions in the batch. */
             preconditions: number;
-            /** @description Warning codes that still need an acknowledgement. */
+            /** @description Warning codes that still need an acknowledgment. */
             unacknowledged: string[];
             /** @description Warning counts by code. */
             warnings: {
@@ -16590,7 +16590,7 @@ export interface components {
             progress: number;
             /**
              * @description The command's state: `pending`, `accepted`, `running`, `done`, `failed`,
-             *     `rejected`, `expired`, `cancelled`.
+             *     `rejected`, `expired`, `canceled`.
              */
             state: string;
             /** @description The address or network it scans. */
@@ -18606,12 +18606,12 @@ export interface components {
         ScanConfig: {
             /**
              * @description Active probing (TGL-18): ICMP sweeps and TCP connect scans. `false` keeps the probe
-             *     passive: neighbour tables, mDNS, LLMNR, reverse DNS and SNMP only.
+             *     passive: neighbor tables, mDNS, LLMNR, reverse DNS and SNMP only.
              * @default true
              */
             active: boolean;
             /**
-             * @description IPv4 neighbours from the operating system's ARP table.
+             * @description IPv4 neighbors from the operating system's ARP table.
              * @default {
              *       "enabled": true,
              *       "interval_secs": 300
@@ -18706,7 +18706,7 @@ export interface components {
              */
             mdns: components["schemas"]["MdnsMethod"];
             /**
-             * @description IPv6 neighbours from the operating system's neighbour table.
+             * @description IPv6 neighbors from the operating system's neighbor table.
              * @default {
              *       "enabled": true,
              *       "interval_secs": 300
@@ -18865,7 +18865,7 @@ export interface components {
              */
             timezone: string | null;
             /**
-             * @description The VRF of the addresses (a VRF id); not set: the VRF of the probe's enrolment
+             * @description The VRF of the addresses (a VRF id); not set: the VRF of the probe's enrollment
              *     token, else the default VRF.
              * @default null
              */
@@ -19040,7 +19040,7 @@ export interface components {
          * @description The state of a scan run.
          * @enum {string}
          */
-        ScanState: "queued" | "running" | "done" | "partial" | "failed" | "cancelled";
+        ScanState: "queued" | "running" | "done" | "partial" | "failed" | "canceled";
         /**
          * @description What a scan covers: `{"kind": "prefix", "value": "<prefix id>"}`, `{"kind": "host",
          *     "value": "<host id>"}`, `{"kind": "address", "value": "192.0.2.10"}` or `{"kind":
@@ -19452,8 +19452,8 @@ export interface components {
         SessionFlags: {
             /** @description The break-glass account is in use. */
             break_glass: boolean;
-            /** @description The profile requires a stronger factor than this session used; enrol one. */
-            mfa_enrolment_required: boolean;
+            /** @description The profile requires a stronger factor than this session used; enroll one. */
+            mfa_enrollment_required: boolean;
             /** @description The password no longer meets the policy and must be changed. */
             password_change_required: boolean;
         };
@@ -19902,7 +19902,7 @@ export interface components {
         /** @description `[scan.snmp]`. */
         SnmpMethod: {
             /**
-             * @description Reports clients on ports where an LLDP neighbour is seen (default false: those
+             * @description Reports clients on ports where an LLDP neighbor is seen (default false: those
              *     ports lead to other network devices, which report their own clients).
              * @default false
              */
@@ -20965,7 +20965,7 @@ export interface components {
          * @enum {string}
          */
         TokenScope: "metrics" | "audit:read";
-        /** @description The enrolment a token was used for. */
+        /** @description The enrollment a token was used for. */
         TokenUse: {
             /** @description When. */
             at: components["schemas"]["Timestamp"];
@@ -21068,11 +21068,11 @@ export interface components {
              */
             vlans?: number[];
         };
-        /** @description One node with its ports, neighbours and intent (`GET /topology/nodes/{id}`). */
+        /** @description One node with its ports, neighbors and intent (`GET /topology/nodes/{id}`). */
         TopologyNodeView: {
             intent?: components["schemas"]["NodeIntent"] | null;
-            /** @description Every neighbour, also those across edges without a port on this side. */
-            neighbours: components["schemas"]["Neighbour"][];
+            /** @description Every neighbor, also those across edges without a port on this side. */
+            neighbors: components["schemas"]["Neighbor"][];
             /** @description The node. */
             node: components["schemas"]["TopologyNode"];
             /** @description Its ports with what hangs on each; with `port`, only that port. */
@@ -21093,7 +21093,7 @@ export interface components {
              */
             native_vlan?: number | null;
             /** @description Everything seen behind the port. */
-            neighbours: components["schemas"]["Neighbour"][];
+            neighbors: components["schemas"]["Neighbor"][];
             /** @description The port as the sources name it. */
             port: string;
             /** @description Link state, when a controller reports it. */
@@ -21138,16 +21138,16 @@ export interface components {
          */
         TotpAlgorithm: "sha1" | "sha256" | "sha512";
         /** @description `POST /auth/totp/enroll/finish`. */
-        TotpEnrolFinish: {
+        TotpEnrollFinish: {
             /** @description A current code from the authenticator app. */
             code: components["schemas"]["SecretString"];
             /** @description From the start step. */
-            enrolment_id: string;
+            enrollment_id: string;
         };
         /** @description The answer of `POST /auth/totp/enroll/start`. The secret is shown once. */
-        TotpEnrolment: {
+        TotpEnrollment: {
             /** @description Pass this to the finish step. */
-            enrolment_id: string;
+            enrollment_id: string;
             /** @description The `otpauth://` URI for a QR code. */
             otpauth_uri: components["schemas"]["SecretString"];
             /** @description The code parameters. */
@@ -21156,7 +21156,7 @@ export interface components {
             secret: components["schemas"]["SecretString"];
         };
         /**
-         * @description The parameters of a TOTP enrolment.
+         * @description The parameters of a TOTP enrollment.
          *
          *     The secret is not part of the parameters. Stored parameters can be checked with
          *     [`TotpParams::validate`]; [`verify`] refuses parameters that fail the check.
@@ -22051,7 +22051,7 @@ export interface components {
             prefix?: components["schemas"]["PrefixTarget"] | null;
             /** @description The steps of the job, in order. */
             steps: components["schemas"]["VlanStepPreview"][];
-            /** @description Warning codes that need an acknowledgement before a submit. */
+            /** @description Warning codes that need an acknowledgment before a submit. */
             unacknowledged?: string[];
             /** @description The VLAN. */
             vlan: components["schemas"]["VlanTarget"];
@@ -22667,7 +22667,7 @@ export interface components {
             /** @description Replace the scope's records (`true`) or merge into them (`false`). */
             replace?: boolean;
             scope?: components["schemas"]["ScopeName"] | null;
-            /** @description The zone file text; `$ORIGIN` and `$TTL` are honoured, `$INCLUDE` is refused. */
+            /** @description The zone file text; `$ORIGIN` and `$TTL` are honored, `$INCLUDE` is refused. */
             zone_file: string;
         };
         /** @description The answer of an import: counts, losses, and after a write the serial and revision. */
@@ -25533,7 +25533,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TotpEnrolFinish"];
+                "application/json": components["schemas"]["TotpEnrollFinish"];
             };
         };
         responses: {
@@ -25546,7 +25546,7 @@ export interface operations {
                     "application/json": components["schemas"]["FactorEnrolled"];
                 };
             };
-            /** @description The body is malformed (`sys.invalid_request`) or the enrolment is unknown or expired (`auth.challenge_invalid`) */
+            /** @description The body is malformed (`sys.invalid_request`) or the enrollment is unknown or expired (`auth.challenge_invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25593,13 +25593,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The seed, the `otpauth://` URI and the enrolment id for the finish step; shown once */
+            /** @description The seed, the `otpauth://` URI and the enrollment id for the finish step; shown once */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TotpEnrolment"];
+                    "application/json": components["schemas"]["TotpEnrollment"];
                 };
             };
             /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
@@ -36858,7 +36858,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        /** @description Optional; an empty body means no extra acknowledgements */
+        /** @description Optional; an empty body means no extra acknowledgments */
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["ApplyRequest"] | null;
@@ -36903,7 +36903,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The plan has warnings that need an acknowledgement or conflicts, or the import is busy (`import.plan.blocked`, `import.state.conflict`, or the plan's own error) */
+            /** @description The plan has warnings that need an acknowledgment or conflicts, or the import is busy (`import.plan.blocked`, `import.state.conflict`, or the plan's own error) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -38132,7 +38132,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the plan differs from the confirmed preview (`ipam.move.plan_changed`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`) */
+            /** @description A warning needs an acknowledgment (`ipam.plan.unacknowledged`), the plan differs from the confirmed preview (`ipam.move.plan_changed`), the target is full (`ipam.address.full`) or an object is deleted (`ipam.object_deleted`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -38215,7 +38215,7 @@ export interface operations {
             };
         };
     };
-    enrol_node: {
+    enroll_node: {
         parameters: {
             query?: never;
             header?: never;
@@ -38224,7 +38224,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["EnrolRequest"];
+                "application/json": components["schemas"]["EnrollRequest"];
             };
         };
         responses: {
@@ -38234,7 +38234,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnrolResponse"];
+                    "application/json": components["schemas"]["EnrollResponse"];
                 };
             };
             /** @description The body is not valid JSON (`sys.invalid_request`) */
@@ -38246,7 +38246,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The token is not valid (`cluster.enrolment.invalid_token`), was used (`cluster.enrolment.used`) or expired (`cluster.enrolment.expired`) */
+            /** @description The token is not valid (`cluster.enrollment.invalid_token`), was used (`cluster.enrollment.used`) or expired (`cluster.enrollment.expired`) */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -38255,7 +38255,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The token does not allow a requested role (`cluster.enrolment.roles`) */
+            /** @description The token does not allow a requested role (`cluster.enrollment.roles`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -38284,7 +38284,7 @@ export interface operations {
             };
         };
     };
-    list_enrolments: {
+    list_enrollments: {
         parameters: {
             query?: never;
             header?: never;
@@ -38299,7 +38299,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnrolmentList"];
+                    "application/json": components["schemas"]["EnrollmentList"];
                 };
             };
             /** @description No valid session or token */
@@ -38311,7 +38311,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not allowed to enrol nodes */
+            /** @description Not allowed to enroll nodes */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -38322,7 +38322,7 @@ export interface operations {
             };
         };
     };
-    create_enrolment: {
+    create_enrollment: {
         parameters: {
             query?: never;
             header?: never;
@@ -38331,7 +38331,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["NewEnrolment"];
+                "application/json": components["schemas"]["NewEnrollment"];
             };
         };
         responses: {
@@ -38341,7 +38341,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CreatedEnrolment"];
+                    "application/json": components["schemas"]["CreatedEnrollment"];
                 };
             };
             /** @description The body is not valid JSON (`sys.invalid_request`) */
@@ -38362,7 +38362,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not allowed to enrol nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`) */
+            /** @description Not allowed to enroll nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -38380,7 +38380,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The role controller beside another role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrolment.lifetime`), or a bad name (`cluster.node.name`) */
+            /** @description The role controller beside another role (`cluster.enrollment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrollment.lifetime`), or a bad name (`cluster.node.name`) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -38391,7 +38391,7 @@ export interface operations {
             };
         };
     };
-    delete_enrolment: {
+    delete_enrollment: {
         parameters: {
             query?: never;
             header?: never;
@@ -38428,7 +38428,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not allowed to enrol nodes */
+            /** @description Not allowed to enroll nodes */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -38437,7 +38437,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such token (`cluster.enrolment.not_found`) */
+            /** @description No such token (`cluster.enrollment.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -42077,7 +42077,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The proposal is decided already (`ipam.proposal.not_open`), suggests no change (`ipam.proposal.nothing_to_apply`), a warning needs an acknowledgement (`ipam.plan.unacknowledged`), or the change conflicts with intent (`ipam.name_taken`, `ipam.address.duplicate`, `ipam.reference_missing`) */
+            /** @description The proposal is decided already (`ipam.proposal.not_open`), suggests no change (`ipam.proposal.nothing_to_apply`), a warning needs an acknowledgment (`ipam.plan.unacknowledged`), or the change conflicts with intent (`ipam.name_taken`, `ipam.address.duplicate`, `ipam.reference_missing`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -43662,7 +43662,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameters `accounts`, `next`: `passkey`, and `route`: the passkey enrolment route) */
+            /** @description An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameters `accounts`, `next`: `passkey`, and `route`: the passkey enrollment route) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -47691,7 +47691,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The node, its ports with what hangs on each, its neighbours and its intent */
+            /** @description The node, its ports with what hangs on each, its neighbors and its intent */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -49175,7 +49175,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the VLAN id exists at the site (`ipam.vlan.duplicate`), the network overlaps (`ipam.prefix.overlap`), the connector is disabled (`ipam.vlan.controller_disabled`) or a guardrail refuses (`connect.guardrail.protected_vlan`) */
+            /** @description A warning needs an acknowledgment (`ipam.plan.unacknowledged`), the VLAN id exists at the site (`ipam.vlan.duplicate`), the network overlaps (`ipam.prefix.overlap`), the connector is disabled (`ipam.vlan.controller_disabled`) or a guardrail refuses (`connect.guardrail.protected_vlan`) */
             409: {
                 headers: {
                     [name: string]: unknown;

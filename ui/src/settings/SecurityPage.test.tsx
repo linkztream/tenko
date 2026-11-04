@@ -250,7 +250,7 @@ describe("the security page", () => {
     expect(db.settings.profile).toBe("standard");
   });
 
-  it("needs an acknowledgement for Lab and shows what Lab turns off", async () => {
+  it("needs an acknowledgment for Lab and shows what Lab turns off", async () => {
     await signInAs();
     await openPage();
     fireEvent.click(screen.getByRole("button", { name: "Change profile" }));

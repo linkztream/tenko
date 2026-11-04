@@ -31,7 +31,7 @@ use super::*;
 
 const NODE: NodeId = NodeId(1);
 
-/// An ARP method that runs until it is cancelled or a minute passed, and reports one
+/// An ARP method that runs until it is canceled or a minute passed, and reports one
 /// address.
 #[derive(Debug)]
 struct Slow;
@@ -53,7 +53,7 @@ impl Method for Slow {
     async fn run(&self, ctx: &RunContext) -> Result<tenko_scan::method::MethodOutput, ScanError> {
         tokio::select! {
             () = tokio::time::sleep(Duration::from_secs(60)) => {}
-            () = ctx.cancel.cancelled() => {}
+            () = ctx.cancel.canceled() => {}
         }
         Ok(MethodOutput {
             found: vec![Found::now(SightingSubject::Address {
@@ -359,7 +359,7 @@ impl Probe {
 }
 
 #[tokio::test]
-async fn a_cancelled_run_stops_and_unknown_commands_are_rejected() {
+async fn a_canceled_run_stops_and_unknown_commands_are_rejected() {
     let probe = Probe::start().await;
     let run = probe.run_arp().await;
     let cancel = probe
@@ -368,17 +368,17 @@ async fn a_cancelled_run_stops_and_unknown_commands_are_rejected() {
             encode_args(&CancelArgs { command: run }).expect("args"),
         )
         .await;
-    let cancelled = probe
+    let canceled = probe
         .wait_for(cancel, |record| record.state.is_final())
         .await;
-    assert_eq!(cancelled.state, CommandState::Done);
-    assert_eq!(cancelled.detail.as_deref(), Some("cancelled"));
+    assert_eq!(canceled.state, CommandState::Done);
+    assert_eq!(canceled.detail.as_deref(), Some("canceled"));
     let finished = probe.wait_for(run, |record| record.state.is_final()).await;
     assert!(
         finished
             .detail
             .as_deref()
-            .is_some_and(|detail| detail.contains("cancelled")),
+            .is_some_and(|detail| detail.contains("canceled")),
         "{finished:?}"
     );
 

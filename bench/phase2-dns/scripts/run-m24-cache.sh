@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M24 (cache behaviour, docs/plans/phase-2-plan.md section 6): the hit ratio, the latency and
+# M24 (cache behavior, docs/plans/phase-2-plan.md section 6): the hit ratio, the latency and
 # the memory of the resolver's cache at its bound in a 1 M-name mixed run, and serve-stale
 # answers while the upstream is cut.
 #

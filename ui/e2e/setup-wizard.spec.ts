@@ -3,7 +3,7 @@
 //
 // - Over HTTPS with the internal CA (Home profile): the wizard completes and the CA root the
 //   UI offers is the file the server wrote to its data directory.
-// - Under the Lab profile over plain HTTP: the Lab warning needs an acknowledgement, a
+// - Under the Lab profile over plain HTTP: the Lab warning needs an acknowledgment, a
 //   passkey added on the result step (virtual platform authenticator) brings the recovery
 //   codes, which must be confirmed before the application opens; there is no CA root.
 // - The DNS step (P2-Q5, WP5.5, WP10.4): it starts on "resolve names yourself" with the privacy

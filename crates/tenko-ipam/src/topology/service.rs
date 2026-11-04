@@ -500,7 +500,7 @@ impl TopologyService {
         stored::forget(self.ipam.store().as_ref(), cx, host, ssid, if_match).await
     }
 
-    /// One node with its ports (only `port` when given), neighbours and intent.
+    /// One node with its ports (only `port` when given), neighbors and intent.
     ///
     /// # Errors
     ///
@@ -536,7 +536,7 @@ impl TopologyService {
         };
         Ok(TopologyNodeView {
             ports: filter::ports(&computed, id, port),
-            neighbours: filter::neighbours(&computed, id),
+            neighbors: filter::neighbors(&computed, id),
             node,
             intent,
             revision: computed.graph.revision,

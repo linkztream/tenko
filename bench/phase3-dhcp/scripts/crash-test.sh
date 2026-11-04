@@ -13,7 +13,7 @@
 # history and every ACK received: no acknowledged lease lost, no address on two clients.
 # Repeated --kills times on one data directory.
 #
-# The test binaries are release builds (cargo's --release profile, the same optimisation as
+# The test binaries are release builds (cargo's --release profile, the same optimization as
 # the shipped binary). On Linux the shipped binary is the static musl build; pass
 # --target x86_64-unknown-linux-musl through --cargo-args to build the tests for it.
 #

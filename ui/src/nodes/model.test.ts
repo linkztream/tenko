@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { CertificateRef, CreatedEnrolment } from "../api/nodes";
+import type { CertificateRef, CreatedEnrollment } from "../api/nodes";
 import { hasMessage, setLocale } from "../i18n";
 import { formatBytes } from "./format";
 import {
@@ -7,7 +7,7 @@ import {
   DEFAULT_LIFETIME,
   LIFETIMES,
   certificateState,
-  enrolCommand,
+  enrollCommand,
   fingerprintPairs,
   lifetimeWord,
   linkIcon,
@@ -108,43 +108,43 @@ describe("certificateState", () => {
   });
 });
 
-describe("enrolCommand", () => {
+describe("enrollCommand", () => {
   const TOKEN = "tnk1.0190d1c2000070008000000f00000001.Zm9vYmFyLWV4YW1wbGUtdG9rZW4tb2YtdGhlLXRlc3RzLTEyMw";
   const FINGERPRINT = "3f1c8a9d5e7b2046a1d3c9e8f7a6b5c4d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7";
   const ORIGIN = "https://tenko.example.test:8443";
-  const created = (command: string | null | undefined): Pick<CreatedEnrolment, "command" | "token" | "ca_fingerprint"> => ({
+  const created = (command: string | null | undefined): Pick<CreatedEnrollment, "command" | "token" | "ca_fingerprint"> => ({
     command: command as string,
     token: TOKEN,
     ca_fingerprint: FINGERPRINT,
   });
 
   it("returns the command of the server as it is", () => {
-    const command = `tenko node enrol --controller https://controller.example.net:8443 --token ${TOKEN} --ca-fingerprint ${FINGERPRINT}`;
-    expect(enrolCommand(created(command), ORIGIN)).toBe(command);
+    const command = `tenko node enroll --controller https://controller.example.net:8443 --token ${TOKEN} --ca-fingerprint ${FINGERPRINT}`;
+    expect(enrollCommand(created(command), ORIGIN)).toBe(command);
   });
 
   it("trims the command of the server", () => {
-    const command = `tenko node enrol --controller ${ORIGIN} --token ${TOKEN}`;
-    expect(enrolCommand(created(`  ${command}\n`), "https://other.example.test")).toBe(command);
+    const command = `tenko node enroll --controller ${ORIGIN} --token ${TOKEN}`;
+    expect(enrollCommand(created(`  ${command}\n`), "https://other.example.test")).toBe(command);
   });
 
   it("fills in the address of the browser where the server named a placeholder", () => {
-    const command = `tenko node enrol --controller https://<controller>:8443 --token ${TOKEN} --ca-fingerprint ${FINGERPRINT}`;
-    expect(enrolCommand(created(command), ORIGIN)).toBe(
-      `tenko node enrol --controller ${ORIGIN} --token ${TOKEN} --ca-fingerprint ${FINGERPRINT}`,
+    const command = `tenko node enroll --controller https://<controller>:8443 --token ${TOKEN} --ca-fingerprint ${FINGERPRINT}`;
+    expect(enrollCommand(created(command), ORIGIN)).toBe(
+      `tenko node enroll --controller ${ORIGIN} --token ${TOKEN} --ca-fingerprint ${FINGERPRINT}`,
     );
     // Whatever port the placeholder has.
-    expect(enrolCommand(created("tenko node enrol --controller https://<controller>:8444 --token t"), "https://tenko.example.test")).toBe(
-      "tenko node enrol --controller https://tenko.example.test --token t",
+    expect(enrollCommand(created("tenko node enroll --controller https://<controller>:8444 --token t"), "https://tenko.example.test")).toBe(
+      "tenko node enroll --controller https://tenko.example.test --token t",
     );
   });
 
   it("composes the command when the server sent none", () => {
-    const expected = `tenko node enrol --controller ${ORIGIN} --token ${TOKEN} --ca-fingerprint ${FINGERPRINT}`;
-    expect(enrolCommand(created(undefined), ORIGIN)).toBe(expected);
-    expect(enrolCommand(created(null), ORIGIN)).toBe(expected);
-    expect(enrolCommand(created(""), ORIGIN)).toBe(expected);
-    expect(enrolCommand(created("   "), ORIGIN)).toBe(expected);
+    const expected = `tenko node enroll --controller ${ORIGIN} --token ${TOKEN} --ca-fingerprint ${FINGERPRINT}`;
+    expect(enrollCommand(created(undefined), ORIGIN)).toBe(expected);
+    expect(enrollCommand(created(null), ORIGIN)).toBe(expected);
+    expect(enrollCommand(created(""), ORIGIN)).toBe(expected);
+    expect(enrollCommand(created("   "), ORIGIN)).toBe(expected);
   });
 });
 

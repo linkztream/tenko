@@ -1,5 +1,5 @@
 //! Pending ceremonies between their start and finish requests: second-factor challenges,
-//! WebAuthn ceremonies and TOTP enrolments.
+//! WebAuthn ceremonies and TOTP enrollments.
 //!
 //! # Sealed challenge ids
 //!
@@ -30,7 +30,7 @@
 //! use is recorded in the replicated store table [`USED_CHALLENGES`]: the finishing handler
 //! calls [`Ceremonies::take_staged`] with a read view, which refuses a ceremony whose row is
 //! already there, and stages the returned [`StagedUse`] into the write batch that completes
-//! the ceremony (the session, the credential, the enrolment). The ceremony is consumed
+//! the ceremony (the session, the credential, the enrollment). The ceremony is consumed
 //! exactly when that batch commits; a replay on another controller is refused by the row, or
 //! by the version precondition of the batch when both race. [`purge_used`] removes the rows
 //! of expired ceremonies; the leader runs it hourly as a leader-only service.
@@ -133,8 +133,8 @@ pub enum Pending {
         /// Whether a hardware security key with attestation was requested.
         hardware_key: bool,
     },
-    /// A TOTP enrolment: the new seed until the user proves it with a code.
-    TotpEnrolment {
+    /// A TOTP enrollment: the new seed until the user proves it with a code.
+    TotpEnrollment {
         /// The user.
         user: UserId,
         /// The session that started it.
@@ -150,7 +150,7 @@ impl fmt::Debug for Pending {
             Self::SecondFactor { .. } => "SecondFactor",
             Self::WebAuthnLogin { .. } => "WebAuthnLogin",
             Self::WebAuthnRegister { .. } => "WebAuthnRegister",
-            Self::TotpEnrolment { .. } => "TotpEnrolment",
+            Self::TotpEnrollment { .. } => "TotpEnrollment",
         };
         write!(f, "Pending::{kind}(<redacted>)")
     }
@@ -300,7 +300,8 @@ enum SealedPending {
         label: String,
         hardware_key: bool,
     },
-    TotpEnrolment {
+    #[serde(alias = "TotpEnrolment")] // spelling: alias until 0.0.13 (challenges sealed by 0.0.11)
+    TotpEnrollment {
         user: UserId,
         session: SessionId,
         #[serde(with = "secret_bytes")]
@@ -314,7 +315,7 @@ impl SealedPending {
         match self {
             Self::SecondFactor { .. } | Self::WebAuthnLogin { .. } => 0,
             Self::WebAuthnRegister { label, .. } => label.len(),
-            Self::TotpEnrolment { secret, .. } => secret.len(),
+            Self::TotpEnrollment { secret, .. } => secret.len(),
         }
     }
 }
@@ -355,11 +356,11 @@ impl From<Pending> for SealedPending {
                 label,
                 hardware_key,
             },
-            Pending::TotpEnrolment {
+            Pending::TotpEnrollment {
                 user,
                 session,
                 secret,
-            } => Self::TotpEnrolment {
+            } => Self::TotpEnrollment {
                 user,
                 session,
                 secret,
@@ -404,11 +405,11 @@ impl From<SealedPending> for Pending {
                 label,
                 hardware_key,
             },
-            SealedPending::TotpEnrolment {
+            SealedPending::TotpEnrollment {
                 user,
                 session,
                 secret,
-            } => Self::TotpEnrolment {
+            } => Self::TotpEnrollment {
                 user,
                 session,
                 secret,
@@ -702,7 +703,7 @@ impl Ceremonies {
     /// `view` already holds.
     ///
     /// The finishing handler stages the returned [`StagedUse`] into the write batch that
-    /// completes the ceremony (the session, the credential, the enrolment), so the
+    /// completes the ceremony (the session, the credential, the enrollment), so the
     /// ceremony is consumed exactly when that batch commits. A replay on another controller
     /// is refused by the row, or by the precondition of its batch when both race; a
     /// ceremony whose finish fails before it commits (a wrong code, an error) is not
@@ -825,6 +826,27 @@ mod tests {
     use super::*;
     use crate::clock::{Clock, MockClock};
 
+    #[test]
+    fn a_totp_challenge_sealed_by_0_0_11_still_opens() {
+        let sealed = SealedPending::from(totp_enrollment(b"seed"));
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&sealed, &mut bytes).expect("cbor");
+        // The same ceremony as 0.0.11 sealed it: the variant under its old name.
+        let mut value: ciborium::Value = ciborium::from_reader(&bytes[..]).expect("value");
+        let ciborium::Value::Map(entries) = &mut value else {
+            panic!("an externally tagged variant");
+        };
+        let old = "TotpEnrolment"; // spelling: alias until 0.0.13 (the variant name of 0.0.11)
+        entries[0].0 = ciborium::Value::Text(old.to_owned());
+        let mut old_bytes = Vec::new();
+        ciborium::into_writer(&value, &mut old_bytes).expect("cbor");
+        let read: SealedPending = ciborium::from_reader(&old_bytes[..]).expect("old variant");
+        let Pending::TotpEnrollment { secret, .. } = Pending::from(read) else {
+            panic!("not a TOTP enrollment");
+        };
+        assert_eq!(&secret[..], b"seed");
+    }
+
     fn second_factor() -> Pending {
         Pending::SecondFactor {
             user: UserId::generate(),
@@ -842,8 +864,8 @@ mod tests {
         }
     }
 
-    fn totp_enrolment(seed: &[u8]) -> Pending {
-        Pending::TotpEnrolment {
+    fn totp_enrollment(seed: &[u8]) -> Pending {
+        Pending::TotpEnrollment {
             user: UserId::generate(),
             session: SessionId::generate(),
             secret: Zeroizing::new(seed.to_vec()),
@@ -930,12 +952,15 @@ mod tests {
 
     #[test]
     fn debug_output_hides_secrets() {
-        let pending = Pending::TotpEnrolment {
+        let pending = Pending::TotpEnrollment {
             user: UserId::generate(),
             session: SessionId::generate(),
             secret: Zeroizing::new(vec![1, 2, 3]),
         };
-        assert_eq!(format!("{pending:?}"), "Pending::TotpEnrolment(<redacted>)");
+        assert_eq!(
+            format!("{pending:?}"),
+            "Pending::TotpEnrollment(<redacted>)"
+        );
         assert_eq!(
             format!("{:?}", webauthn_login()),
             "Pending::WebAuthnLogin(<redacted>)"
@@ -978,7 +1003,7 @@ mod tests {
         let clock = MockClock::fixed();
         let ceremonies = controller(1);
         let seed = b"correct horse battery";
-        let pending = totp_enrolment(seed);
+        let pending = totp_enrollment(seed);
         let id = ceremonies.open(pending.clone(), clock.now()).expect("open");
         let bytes = decode(&id);
         assert_eq!(bytes[0], 1, "version");
@@ -1030,7 +1055,7 @@ mod tests {
         let seed = vec![0, 1, 2, 3, 250, 251, 252, 253, 254, 255];
         let id = a
             .open(
-                Pending::TotpEnrolment {
+                Pending::TotpEnrollment {
                     user,
                     session,
                     secret: Zeroizing::new(seed.clone()),
@@ -1038,7 +1063,7 @@ mod tests {
                 clock.now(),
             )
             .expect("open");
-        let Pending::TotpEnrolment {
+        let Pending::TotpEnrollment {
             user: found,
             session: found_session,
             secret,
@@ -1046,7 +1071,7 @@ mod tests {
             .take(&id, clock.now())
             .expect("take on another controller")
         else {
-            panic!("a TOTP enrolment");
+            panic!("a TOTP enrollment");
         };
         assert_eq!((found, found_session), (user, session));
         assert_eq!(&secret[..], &seed[..]);
@@ -1277,13 +1302,13 @@ mod tests {
         let store = MemStore::default();
         let a = controller(7);
         let b = controller(7);
-        let id = a.open(totp_enrolment(b"seed"), clock.now()).expect("open");
+        let id = a.open(totp_enrollment(b"seed"), clock.now()).expect("open");
 
         let view = store.read(ReadConsistency::Local).await.expect("view");
         let (pending, staged) = a
             .take_staged(&id, clock.now(), view.as_ref())
             .expect("controller A takes it");
-        assert!(matches!(pending, Pending::TotpEnrolment { .. }));
+        assert!(matches!(pending, Pending::TotpEnrollment { .. }));
         assert_eq!(
             staged.expires_at(),
             clock.now().checked_add(CEREMONY_TTL).expect("in range")

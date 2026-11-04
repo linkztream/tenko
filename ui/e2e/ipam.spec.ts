@@ -302,7 +302,7 @@ test("the reverse zones of a network are set to Off and back to the default", as
   await expect.poll(async () => (await api.get<Schemas["Prefix"]>(`/prefixes/${id}`)).dns_reverse ?? null).toBeNull();
 });
 
-test("an IPv6 prefix off a nibble boundary needs an acknowledgement before it applies", async ({ page, api, signedIn }) => {
+test("an IPv6 prefix off a nibble boundary needs an acknowledgment before it applies", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
 
   await page.goto("/ipam");
@@ -334,7 +334,7 @@ test("an IPv6 prefix off a nibble boundary needs an acknowledgement before it ap
   const prefix = await prefixByCidr(api, "2001:db8:0:10::/62");
   expect(prefix?.role).toBe("network");
 
-  // On a nibble boundary the same form needs no acknowledgement.
+  // On a nibble boundary the same form needs no acknowledgment.
   await page.getByTestId("ipam-add-prefix").click();
   await page.getByTestId("dialog-prefix-form").getByTestId("field-cidr").fill("2001:db8:0:20::/60");
   await page.getByTestId("form-submit").click();

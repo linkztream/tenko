@@ -4,7 +4,7 @@
 // transport the product default under Home. It has no imported files (the test server writes
 // no certificate of its own), so the imported-files view with a pending certificate answers
 // `GET /system/tls` in the browser (`fakeImported`); the Rust tests of `routes/system/tls.rs`
-// and `tls_service.rs` prove the real behaviour of the pending state.
+// and `tls_service.rs` prove the real behavior of the pending state.
 //
 // Scenarios:
 // - Plain HTTP under Lab: the mode, the notice and no certificate; the API agrees.

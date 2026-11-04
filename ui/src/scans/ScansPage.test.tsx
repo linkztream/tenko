@@ -131,7 +131,7 @@ describe("stop all and resume all", () => {
     expect(switches.map((s) => s.textContent)).toEqual(["Stopped", "Stopped", "Stopped"]);
     expect(screen.getAllByText("Reason: maintenance window")).toHaveLength(3);
     // The running scan lost its only probe and ended.
-    await waitFor(() => expect(rowOf(SCAN_IDS.running).dataset.state).toBe("cancelled"));
+    await waitFor(() => expect(rowOf(SCAN_IDS.running).dataset.state).toBe("canceled"));
     expect((screen.getByTestId("scans-stop-all") as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(await screen.findByTestId("scans-resume-all"));

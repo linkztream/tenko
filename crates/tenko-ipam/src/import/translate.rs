@@ -1152,7 +1152,7 @@ impl<'m> Builder<'m> {
         }
     }
 
-    /// A range cell: its addresses, reserved, labelled with the row's name.
+    /// A range cell: its addresses, reserved, labeled with the row's name.
     fn range_row(
         &mut self,
         row: &Row<'_>,

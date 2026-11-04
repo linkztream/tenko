@@ -19,7 +19,7 @@ export function noteBytes(note: string): number {
 // States
 
 /** Final states: the job does not change any more. */
-export const FINAL_STATES: readonly JobState[] = ["succeeded", "failed", "rolled_back", "cancelled"];
+export const FINAL_STATES: readonly JobState[] = ["succeeded", "failed", "rolled_back", "canceled"];
 /** Everything that is not final: the job still holds, or waits for, work. */
 export const ACTIVE_STATES: readonly JobState[] = ["queued", "running", "waiting", "rolling_back"];
 
@@ -28,7 +28,7 @@ export function isFinal(state: JobState): boolean {
 }
 
 /**
- * Whether Cancel is offered. A job that already rolls back cannot be cancelled (the server
+ * Whether Cancel is offered. A job that already rolls back cannot be canceled (the server
  * answers `jobs.invalid_transition`), and a job whose cancellation is requested is on its way.
  */
 export function canCancel(state: JobState, cancelRequested: boolean): boolean {

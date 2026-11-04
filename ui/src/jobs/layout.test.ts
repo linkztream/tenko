@@ -69,7 +69,7 @@ describe("the day of a finished job", () => {
       job("succeeded", { finished: new Date(2026, 9, 29, 14, 0) }),
       job("failed", { finished: new Date(2026, 9, 28, 23, 59) }),
       job("succeeded", { finished: new Date(2026, 9, 28, 10, 0) }),
-      job("cancelled", { finished: new Date(2026, 9, 20, 10, 0) }),
+      job("canceled", { finished: new Date(2026, 9, 20, 10, 0) }),
       job("running"),
     ];
     const buckets = dayBuckets(rows, today);

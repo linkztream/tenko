@@ -553,7 +553,7 @@ pub async fn initial<F: ZoneFeed>(feed: &mut F) -> Result<CatalogHandle, FeedErr
 
 /// The writer: applies the feed's deltas in revision order and swaps in each new catalog,
 /// rebuilds and swaps on a reset, and asks the feed for a new image when a delta does not
-/// follow the revision held. Runs until `stop` is cancelled or the feed closes (then the
+/// follow the revision held. Runs until `stop` is canceled or the feed closes (then the
 /// last catalog keeps serving, OPS-02). The work runs on the blocking pool so that a large
 /// rebuild never holds a runtime thread.
 ///

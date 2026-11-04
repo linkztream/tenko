@@ -30,7 +30,7 @@
 //!
 //! The generations are listed oldest first with the sender's active generation last. The
 //! `context` (built by [`join_context`] or [`fetch_context`]) binds the transfer to the
-//! joining node and its enrolment token, or to the fetching member, so a transfer recorded
+//! joining node and its enrollment token, or to the fetching member, so a transfer recorded
 //! for one purpose does not open for another. The sender's ephemeral key is dropped after
 //! sealing and the recipient's [`TransferKey`] is consumed by [`TransferKey::open`]: a
 //! sealed transfer opens once, on one host.
@@ -38,7 +38,7 @@
 //! The material never appears in a log line, an error, an audit record or the store: the
 //! audit record [`TRANSFER_AUDIT`] names the generation identifiers only. The cluster
 //! service that answers `Cluster.TransferKek` (WP3.1a) checks the caller's certificate and
-//! enrolment, refuses a second transfer for the same join token, and writes that audit
+//! enrollment, refuses a second transfer for the same join token, and writes that audit
 //! record.
 
 use std::fmt;
@@ -62,7 +62,7 @@ use crate::{
 pub const FORMAT: &str = "tenko-kek-transfer/x25519-hkdf-sha256-aes256gcm/1";
 
 /// The audit action of a transfer: the record names the generation identifiers, the
-/// recipient node and the enrolment, never the material.
+/// recipient node and the enrollment, never the material.
 pub const TRANSFER_AUDIT: AuditAction = AuditAction::from_static("vault.kek.transfer");
 
 /// Length of an X25519 public key.
@@ -88,7 +88,7 @@ const FETCH_CONTEXT: &[u8] = b"tenko-kek-fetch/1\0";
 
 /// The context of a join: `"tenko-kek-transfer/1\0"`, the joining node's id (u64,
 /// big-endian) and the 16 bytes of the join token's UUID. Both sides build it from what
-/// the enrolment recorded.
+/// the enrollment recorded.
 pub fn join_context(node: NodeId, token: [u8; 16]) -> Vec<u8> {
     let mut context = Vec::with_capacity(JOIN_CONTEXT.len() + 8 + 16);
     context.extend_from_slice(JOIN_CONTEXT);

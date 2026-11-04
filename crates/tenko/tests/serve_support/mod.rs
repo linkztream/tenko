@@ -372,7 +372,7 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    /// Standard output and standard error, labelled, for failure messages.
+    /// Standard output and standard error, labeled, for failure messages.
     pub fn diagnostics(&self) -> String {
         format!(
             "exit status: {:?}\n--- stdout ---\n{}\n--- stderr ---\n{}",
@@ -604,7 +604,7 @@ impl Proc {
         self.stderr.text()
     }
 
-    /// The output so far, labelled, for failure messages.
+    /// The output so far, labeled, for failure messages.
     pub fn diagnostics(&self) -> String {
         format!(
             "--- stdout so far ---\n{}\n--- stderr so far ---\n{}",

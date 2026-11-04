@@ -126,7 +126,7 @@ export interface MockCeremony {
   security_key: boolean;
 }
 
-export interface MockEnrolment {
+export interface MockEnrollment {
   id: string;
   user_id: string;
   secret: string;
@@ -182,7 +182,7 @@ export interface MockDb {
   tokens: MockToken[];
   challenges: Map<string, MockChallenge>;
   ceremonies: Map<string, MockCeremony>;
-  enrolments: Map<string, MockEnrolment>;
+  enrollments: Map<string, MockEnrollment>;
   throttle: Map<string, ThrottleEntry>;
   journal: MockEvent[];
 }
@@ -474,7 +474,7 @@ function createDb(scenario: MockScenario): MockDb {
     tokens: [],
     challenges: new Map(),
     ceremonies: new Map(),
-    enrolments: new Map(),
+    enrollments: new Map(),
     throttle: new Map(),
     journal: [],
   };

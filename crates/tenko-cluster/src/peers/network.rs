@@ -8,7 +8,7 @@
 //! endpoint can be pinned (the seed of a join). An address map (`[cluster]
 //! peer_address_map`) then replaces an advertised endpoint by the one this controller dials
 //! (split-horizon setups and labs); a pinned endpoint is used as it is. Resolved endpoints
-//! are cached for a few seconds; a connection per endpoint is kept and re-dialled by tonic
+//! are cached for a few seconds; a connection per endpoint is kept and re-dialed by tonic
 //! when it breaks.
 //!
 //! **Deadlines** derive from the Raft timers and the store timeouts ([`PeerTimings`]).
@@ -20,7 +20,7 @@
 //!
 //! **Forwarding.** A forwarded write is retried by the store only when the answer proves
 //! that nothing was queued: the callee does not lead, or the connection could not be made
-//! (the dialler marks its own failures). A call that broke after it was sent is
+//! (the dialer marks its own failures). A call that broke after it was sent is
 //! [`ForwardError::NoAnswer`]: the store returns a timeout and the caller's idempotency key
 //! or precondition makes a retry safe.
 
@@ -71,7 +71,7 @@ use crate::{
 pub const MAX_APPEND_BYTES: usize = MAX_MESSAGE_BYTES - 2 * 1024 * 1024;
 /// How long a resolved endpoint is used before the member records are read again.
 const ENDPOINT_TTL: Duration = Duration::from_secs(5);
-/// The marker of the dialler's own failures: the request was never sent.
+/// The marker of the dialer's own failures: the request was never sent.
 const DIAL_FAILED: &str = "peer dial failed";
 
 /// Deadlines of the peer transport.
@@ -190,7 +190,7 @@ impl PeerNetwork {
     }
 
     /// Sets the client TLS configuration (this controller's certificate and the CA root);
-    /// open connections are dropped and dialled again with it.
+    /// open connections are dropped and dialed again with it.
     pub fn set_tls(&self, config: Arc<ClientConfig>) {
         self.inner.tls.store(Some(config));
         lock(&self.inner.channels).clear();
@@ -217,7 +217,7 @@ impl PeerNetwork {
     }
 
     /// Sets the address map (`[cluster] peer_address_map`): an endpoint a peer advertises
-    /// that is a key of the map is dialled at its value instead. Cached endpoints are
+    /// that is a key of the map is dialed at its value instead. Cached endpoints are
     /// resolved again.
     pub fn set_address_map(&self, map: impl IntoIterator<Item = (String, String)>) {
         *self
@@ -310,7 +310,7 @@ impl PeerNetwork {
         Ok(endpoint)
     }
 
-    /// A connection to `endpoint`, dialled when there is none.
+    /// A connection to `endpoint`, dialed when there is none.
     ///
     /// # Errors
     ///
@@ -420,7 +420,7 @@ impl PeerNetwork {
     }
 }
 
-/// Whether a failed call never left this controller: the dialler failed.
+/// Whether a failed call never left this controller: the dialer failed.
 fn never_sent(status: &Status) -> bool {
     if status.code() != tonic::Code::Unavailable || code_of(status).is_some() {
         return false;

@@ -10,7 +10,7 @@
   at the end unless -Keep is given.
 
   It needs PowerShell 7 in an elevated prompt (Run as administrator) and a DEBUG build:
-  only debug builds honour TENKO_TEST_VERSION_FROM_LAYOUT, which lets one binary install
+  only debug builds honor TENKO_TEST_VERSION_FROM_LAYOUT, which lets one binary install
   as two versions. Build with `cargo build -p tenko`, then run
 
     pwsh -File deploy\windows\smoke.ps1 -Binary .\target\debug\tenko.exe
@@ -249,7 +249,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 if (-not (Test-Path -LiteralPath $Binary -PathType Leaf)) { Stop-Smoke "binary not found: $Binary" }
 $Binary = (Resolve-Path -LiteralPath $Binary).ProviderPath
 if ($Binary -match '\\release\\') {
-    Write-Warning 'the path looks like a release build. Only debug builds honour TENKO_TEST_VERSION_FROM_LAYOUT; step 7 fails with a release build. Build with `cargo build -p tenko`.'
+    Write-Warning 'the path looks like a release build. Only debug builds honor TENKO_TEST_VERSION_FROM_LAYOUT; step 7 fails with a release build. Build with `cargo build -p tenko`.'
 }
 if ($Name -ieq 'tenko') { Stop-Smoke "the name `tenko` is the name of the real service. Choose another -Name." }
 if ($Name -notmatch '^[A-Za-z0-9._-]+$') { Stop-Smoke "the service name may contain letters, digits, '.', '_' and '-' only." }

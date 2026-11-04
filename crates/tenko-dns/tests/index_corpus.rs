@@ -530,7 +530,7 @@ fn everything_at_or_below_a_cut_is_a_delegation_except_the_ds() {
         &cut_ns,
         true,
     );
-    // A neighbour of the cut is unaffected.
+    // A neighbor of the cut is unaffected.
     expect_answer(
         pair.lookup("plain.example.test", Rtype::A),
         &zone,

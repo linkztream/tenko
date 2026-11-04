@@ -1,4 +1,4 @@
-# Normalise line endings: LF in the repository and in the working tree.
+# Normalize line endings: LF in the repository and in the working tree.
 * text=auto eol=lf
 
 # TypeScript sources are always text with LF, also where an editor on Windows writes CRLF

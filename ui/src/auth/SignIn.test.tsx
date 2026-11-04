@@ -126,11 +126,11 @@ describe("sign-in", () => {
     expect(options[0].publicKey.challenge).toBeInstanceOf(ArrayBuffer);
   });
 
-  it("explains a cancelled passkey request", async () => {
+  it("explains a canceled passkey request", async () => {
     stubPasskey("cancel");
     show();
     fireEvent.click(screen.getByRole("button", { name: "Sign in with a passkey" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("cancelled or timed out");
+    expect((await screen.findByRole("alert")).textContent).toContain("canceled or timed out");
     expect(authState()).toBe("signed-out");
   });
 

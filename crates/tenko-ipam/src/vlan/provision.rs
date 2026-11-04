@@ -581,7 +581,7 @@ pub async fn preview(
 }
 
 /// Submits a provision: computes the preview again from a fresh view, refuses while a
-/// warning that needs an acknowledgement is not acknowledged, and starts the job. A
+/// warning that needs an acknowledgment is not acknowledged, and starts the job. A
 /// repeated idempotency key returns the first answer with `replayed: true`; another
 /// request under the same key is 422 `ipam.idempotency_mismatch`.
 ///
@@ -613,11 +613,11 @@ pub async fn submit(
             ipam_codes::PLAN_UNACKNOWLEDGED,
             409,
             format!(
-                "the provision needs an acknowledgement of: {}",
+                "the provision needs an acknowledgment of: {}",
                 computed.preview.unacknowledged.join(", ")
             ),
         )
-        .titled("Warnings need an acknowledgement")
+        .titled("Warnings need an acknowledgment")
         .param("codes", computed.preview.unacknowledged.join(",")));
     }
     let spec = job_spec(&computed, cx)?;

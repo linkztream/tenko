@@ -66,7 +66,7 @@ export function listQueuedChanges(signal?: AbortSignal): Promise<QueuedChangeLis
 
 /**
  * Plans a queued change again (`dryRun`), or applies it with the acknowledged warning codes. The
- * server adds the acknowledgements of the original request; the change is confirmed against the
+ * server adds the acknowledgments of the original request; the change is confirmed against the
  * current state, so no `If-Match` is sent.
  */
 export async function reapplyQueued(

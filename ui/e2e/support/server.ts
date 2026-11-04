@@ -55,7 +55,7 @@ export interface ServerOptions {
   profile?: Profile;
   /**
    * A cluster port of its own on the loopback (`[cluster] listen`) with one-second
-   * heartbeats, for enrolling a second process as a node. Enrolment pins the internal CA,
+   * heartbeats, for enrolling a second process as a node. Enrollment pins the internal CA,
    * so this goes with the `internal_ca` transport.
    */
   cluster?: boolean;
@@ -339,7 +339,7 @@ export class TenkoServer {
     }
   }
 
-  /** Standard output and standard error so far, labelled per line. */
+  /** Standard output and standard error so far, labeled per line. */
   output(): string {
     return this.proc.output();
   }

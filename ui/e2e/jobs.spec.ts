@@ -32,7 +32,7 @@ async function axeViolations(page: Page, selector: string): Promise<string[]> {
 }
 
 const OPEN_STATES = "queued,running,waiting,rolling_back";
-const FINAL_STATES = "succeeded,failed,rolled_back,cancelled";
+const FINAL_STATES = "succeeded,failed,rolled_back,canceled";
 
 /** Two networks through the API: two finished IPAM edits by the signed-in administrator. */
 async function twoEdits(api: Api): Promise<Job[]> {

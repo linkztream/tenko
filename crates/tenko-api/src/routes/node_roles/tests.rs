@@ -180,8 +180,8 @@ impl Api {
         self.store.propose(batch).await.expect("written");
     }
 
-    /// Enrols a node with `roles` directly in the registry table.
-    async fn enrol(&self, id: u64, roles: &[Role]) {
+    /// Enrolls a node with `roles` directly in the registry table.
+    async fn enroll(&self, id: u64, roles: &[Role]) {
         let now = Timestamp::now();
         let certificate = CertificateRef {
             serial: format!("{id:x}"),
@@ -198,7 +198,7 @@ impl Api {
             certificate: certificate.clone(),
             serials: vec![certificate],
             enrolled_at: now,
-            enrolment: Uuid::now_v7(),
+            enrollment: Uuid::now_v7(),
             enrolled_by: None,
             renewed_at: None,
             last_seen: None,
@@ -319,7 +319,7 @@ async fn the_refusals() {
         .assert_problem(409, "node.roles.controller");
     api.get(2).await.assert_json(200);
     // An enrolled node runs the probe role only, and never the controller role.
-    api.enrol(PROBE, &[Role::Probe]).await;
+    api.enroll(PROBE, &[Role::Probe]).await;
     let probe = api.get(PROBE).await;
     probe.assert_json(200);
     assert_eq!(probe.body["configured"], json!(["probe"]));

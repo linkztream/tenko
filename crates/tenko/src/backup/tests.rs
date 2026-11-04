@@ -84,7 +84,7 @@ async fn populate(store: Arc<dyn Store>, ring: &KekRing) -> Vec<(SecretRef, Vec<
             .put_operator(
                 &ctx(),
                 SecretSpec::new(SecretPurpose::from_static("connect.backup_test"))
-                    .labelled(format!("secret {index}")),
+                    .labeled(format!("secret {index}")),
                 SecretBytes::new(value.clone()),
             )
             .await

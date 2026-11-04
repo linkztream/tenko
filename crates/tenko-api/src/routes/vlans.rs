@@ -16,7 +16,7 @@
 //! step when no controller is configured, writes are off for it (TGL-20) or the request
 //! says `manual`. The preview shows the IPAM plan, the controller's diff and the steps; a
 //! submit computes it again (it does not take the client's copy), refuses while a warning
-//! that needs an acknowledgement is not listed in `acknowledge`, and starts the job, which
+//! that needs an acknowledgment is not listed in `acknowledge`, and starts the job, which
 //! then appears in `GET /jobs`. The guardrails of the connector host refuse the management
 //! VLAN with 409 `connect.guardrail.protected_vlan`. The rules are documented in
 //! `tenko_ipam::vlan`.
@@ -183,7 +183,7 @@ fn check(
         (status = 400, description = "Invalid request (`ipam.vlan.invalid_request`, `ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed, or writes through the connector are off (`connect.writes_disabled`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "The VLAN does not exist (`ipam.not_found`) or the connector is not a network controller (`ipam.vlan.controller_unknown`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A warning needs an acknowledgement (`ipam.plan.unacknowledged`), the VLAN id exists at the site (`ipam.vlan.duplicate`), the network overlaps (`ipam.prefix.overlap`), the connector is disabled (`ipam.vlan.controller_disabled`) or a guardrail refuses (`connect.guardrail.protected_vlan`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "A warning needs an acknowledgment (`ipam.plan.unacknowledged`), the VLAN id exists at the site (`ipam.vlan.duplicate`), the network overlaps (`ipam.prefix.overlap`), the connector is disabled (`ipam.vlan.controller_disabled`) or a guardrail refuses (`connect.guardrail.protected_vlan`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The idempotency key was used for another provision (`ipam.idempotency_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 502, description = "The network controller did not answer (`connect.unreachable` and other `connect.*` codes)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "IPAM, the job engine or the network controllers are not configured (`ipam.unavailable`, `ipam.move.no_engine`, `ipam.vlan.controllers_unavailable`)", body = ProblemDetails, content_type = "application/problem+json")

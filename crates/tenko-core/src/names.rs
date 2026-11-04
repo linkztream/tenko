@@ -25,7 +25,7 @@ use crate::{
 /// |---|---|
 /// | `auth` | authentication, users, sessions, settings (WP1.2) |
 /// | `backup` | backups: settings, schedule and history (WP3.4b) |
-/// | `cluster` | enrolment, mTLS, internal CA (WP1.3, WP2.2); controller membership (WP3.1a) |
+/// | `cluster` | enrollment, mTLS, internal CA (WP1.3, WP2.2); controller membership (WP3.1a) |
 /// | `connect` | connectors (WP2.5, WP2.6) |
 /// | `dhcp` | the DHCP module: scopes, pools, options, classes, policies, filters, leases (Phase 3, WP7.0) |
 /// | `dns` | the DNS module: zones, records, views, forwarders, keys, lists (Phase 2, WP4.0) |

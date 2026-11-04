@@ -165,7 +165,7 @@ async fn operator_secret(vault: &MemVault, value: &str) -> SecretRef {
     vault
         .put_operator(
             &admin(),
-            SecretSpec::new(SecretPurpose::from_static("connect.api_key")).labelled("sample key"),
+            SecretSpec::new(SecretPurpose::from_static("connect.api_key")).labeled("sample key"),
             SecretBytes::from(value.to_owned()),
         )
         .await
@@ -370,7 +370,7 @@ async fn invalid_requests_are_refused_with_precise_codes() {
     );
 
     let mut bad_settings = new_sample("b");
-    bad_settings.settings = serde_json::json!({ "hosts": 500, "colour": "red" });
+    bad_settings.settings = serde_json::json!({ "hosts": 500, "color": "red" });
     let refused = fx
         .host
         .create(&cx, bad_settings)
@@ -381,7 +381,7 @@ async fn invalid_requests_are_refused_with_precise_codes() {
     assert_eq!(coded.status, 422);
     let fields: Vec<&str> = coded.errors.iter().map(|e| e.field.as_str()).collect();
     assert!(fields.contains(&"settings.hosts"), "{fields:?}");
-    assert!(fields.contains(&"settings.colour"), "{fields:?}");
+    assert!(fields.contains(&"settings.color"), "{fields:?}");
 
     let mut undeclared = new_sample("c");
     undeclared

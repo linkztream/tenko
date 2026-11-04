@@ -173,7 +173,7 @@ impl ZoneService {
             batch.idempotency = None;
             let spec = SecretSpec::new(SecretPurpose::from_static(VAULT_PURPOSE))
                 .owned_by(ObjectRef::from(id))
-                .labelled(new.name.as_str());
+                .labeled(new.name.as_str());
             let secret_ref = vault.stage_put(&mut batch, cx, SecretClass::System, spec, &secret)?;
             let key = KeyMeta {
                 id,

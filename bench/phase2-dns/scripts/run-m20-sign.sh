@@ -25,7 +25,7 @@
 #    runs from the start of the import command until the status shows the serial of the
 #    signer's pass after it (the zone's serial before plus two: the import's step and the
 #    pass's step): the import job and the client's wait for it, the signer's watch, its
-#    incremental pass (the 100 RRsets, their NSEC or NSEC3 neighbours and the apex) and its
+#    incremental pass (the 100 RRsets, their NSEC or NSEC3 neighbors and the apex) and its
 #    write, so the figure is an upper bound of the re-signing alone; the time after the
 #    import command returned is noted beside it. Repeated --repeats times (default 5), each
 #    with new names; the median and the largest are reported. Threshold: 1 s.

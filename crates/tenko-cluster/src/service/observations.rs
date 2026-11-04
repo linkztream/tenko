@@ -1,6 +1,6 @@
 //! The `Observations` service: probe batches into the controller's reconciler.
 //!
-//! A batch is recognised as sent before by its (epoch, sequence) against the node's ingest
+//! A batch is recognized as sent before by its (epoch, sequence) against the node's ingest
 //! cursor in the store (`cluster.ingest_cursors`), which every controller reads and
 //! writes, so a resend after a lost answer is not ingested twice even when it reaches
 //! another controller; a per-process copy answers repeats on the same controller without a

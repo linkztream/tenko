@@ -91,8 +91,8 @@ impl Rig {
             .expect("a view")
     }
 
-    /// Enrols a node with `roles` directly in the registry table.
-    pub(super) async fn enrol(&self, id: u64, roles: &[Role]) {
+    /// Enrolls a node with `roles` directly in the registry table.
+    pub(super) async fn enroll(&self, id: u64, roles: &[Role]) {
         let now = Timestamp::now();
         let certificate = CertificateRef {
             serial: format!("{id:x}"),
@@ -109,7 +109,7 @@ impl Rig {
             certificate: certificate.clone(),
             serials: vec![certificate],
             enrolled_at: now,
-            enrolment: Uuid::now_v7(),
+            enrollment: Uuid::now_v7(),
             enrolled_by: None,
             renewed_at: None,
             last_seen: None,
@@ -132,9 +132,9 @@ impl Rig {
         record
     }
 
-    /// Enrols a probe and records the scope it reports.
+    /// Enrolls a probe and records the scope it reports.
     pub(super) async fn probe(&self, id: u64, prefixes: &[&str], exclude: &[&str]) {
-        self.enrol(id, &[Role::Probe]).await;
+        self.enroll(id, &[Role::Probe]).await;
         self.report_scope(id, prefixes, exclude, false).await;
     }
 
@@ -177,7 +177,7 @@ impl Rig {
             .put_operator(
                 &RequestCtx::system(SystemComponent::Api),
                 SecretSpec::new(SecretPurpose::from_static(OPERATOR_PURPOSE))
-                    .labelled("switch.example.test"),
+                    .labeled("switch.example.test"),
                 SecretBytes::from("correct horse battery".to_owned()),
             )
             .await

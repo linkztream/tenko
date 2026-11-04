@@ -17,7 +17,7 @@ import { dayBefore, startOfDay } from "./layout";
 import JobsView from "./JobsView";
 
 // The list reads the clock for its day groups: the seeds are built at 15:00 on 29 October 2026,
-// so the done and cancelled seeds finished today and the rolled back one yesterday.
+// so the done and canceled seeds finished today and the rolled back one yesterday.
 const NOW = new Date(2026, 9, 29, 15, 0, 0);
 
 beforeEach(async () => {
@@ -116,7 +116,7 @@ describe("the jobs list", () => {
       MOCK_JOB_IDS.importRunning,
       MOCK_JOB_IDS.moveQueued,
       MOCK_JOB_IDS.applySucceeded,
-      MOCK_JOB_IDS.applyCancelled,
+      MOCK_JOB_IDS.applyCanceled,
       MOCK_JOB_IDS.moveRolledBack,
     ]);
   });
@@ -129,7 +129,7 @@ describe("the jobs list", () => {
     expect(within(rowOf(MOCK_JOB_IDS.importRunning)).getByText("Running")).toBeTruthy();
     expect(within(rowOf(MOCK_JOB_IDS.applySucceeded)).getByText("Done")).toBeTruthy();
     expect(within(rowOf(MOCK_JOB_IDS.moveRolledBack)).getByText("Rolled back")).toBeTruthy();
-    expect(within(rowOf(MOCK_JOB_IDS.applyCancelled)).getByText("Cancelled")).toBeTruthy();
+    expect(within(rowOf(MOCK_JOB_IDS.applyCanceled)).getByText("Canceled")).toBeTruthy();
     expect(within(rowOf(MOCK_JOB_IDS.importRunning)).getByText("Apply an import")).toBeTruthy();
     // A move is titled "Move" and names its host; it changes the host and the target network.
     const move = rowOf(MOCK_JOB_IDS.moveWaiting);
@@ -151,7 +151,7 @@ describe("the jobs list", () => {
     expect(within(rowOf(MOCK_JOB_IDS.importRunning)).getByText("2 of 3")).toBeTruthy();
     expect(await within(rowOf(MOCK_JOB_IDS.importRunning)).findByText("Apply the planned changes")).toBeTruthy();
     // A job that is over has no current step.
-    for (const id of [MOCK_JOB_IDS.moveRolledBack, MOCK_JOB_IDS.applySucceeded, MOCK_JOB_IDS.applyCancelled]) {
+    for (const id of [MOCK_JOB_IDS.moveRolledBack, MOCK_JOB_IDS.applySucceeded, MOCK_JOB_IDS.applyCanceled]) {
       expect(rowOf(id).querySelector('[data-col="step"]')?.textContent).toBe("");
     }
     // A done job says how long it took instead of its steps; the seed ran in no time.
@@ -245,7 +245,7 @@ describe("the jobs list", () => {
 
     fireEvent.click(chip("Finished"));
     await listed(3);
-    expect(rows().map((r) => r.dataset.id)).toEqual([MOCK_JOB_IDS.applySucceeded, MOCK_JOB_IDS.applyCancelled, MOCK_JOB_IDS.moveRolledBack]);
+    expect(rows().map((r) => r.dataset.id)).toEqual([MOCK_JOB_IDS.applySucceeded, MOCK_JOB_IDS.applyCanceled, MOCK_JOB_IDS.moveRolledBack]);
     // Nothing that runs is listed, so there is no current step to show.
     expect(header()).not.toContain("Current step");
 

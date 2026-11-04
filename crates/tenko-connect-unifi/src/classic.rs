@@ -473,7 +473,7 @@ pub struct Device {
     pub overrides: Vec<Value>,
     /// The upstream connection.
     pub uplink: Option<Uplink>,
-    /// LLDP neighbours.
+    /// LLDP neighbors.
     pub lldp: Vec<Lldp>,
     /// The wireless networks it broadcasts (access points).
     pub vaps: Vec<Vap>,
@@ -525,12 +525,12 @@ pub struct Uplink {
     pub local_port: Option<u16>,
 }
 
-/// One LLDP neighbour of a device.
+/// One LLDP neighbor of a device.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lldp {
-    /// The neighbour's chassis id (usually a MAC address).
+    /// The neighbor's chassis id (usually a MAC address).
     pub chassis: String,
-    /// The neighbour's port id.
+    /// The neighbor's port id.
     pub port: Option<String>,
     /// The local port.
     pub local_port: Option<u16>,

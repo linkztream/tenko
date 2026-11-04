@@ -270,7 +270,7 @@ impl IpamService {
     ///
     /// # Errors
     ///
-    /// `ipam.plan.unacknowledged` when a warning needs an acknowledgement,
+    /// `ipam.plan.unacknowledged` when a warning needs an acknowledgment,
     /// `ipam.plan.stale` when the store changed since the plan was made, or the error of
     /// the job.
     pub async fn apply(&self, plan: &IpamPlan, cx: &RequestCtx) -> IpamResult<Applied> {
@@ -290,11 +290,11 @@ impl IpamService {
                 codes::PLAN_UNACKNOWLEDGED,
                 409,
                 format!(
-                    "the change needs an acknowledgement of: {}",
+                    "the change needs an acknowledgment of: {}",
                     unacknowledged.join(", ")
                 ),
             )
-            .titled("Warnings need an acknowledgement")
+            .titled("Warnings need an acknowledgment")
             .param("codes", unacknowledged.join(",")));
         }
         if plan.is_empty() {

@@ -8,9 +8,9 @@ A hand-written instance in the shapes of the documented REST and WebSocket API, 
 
 ## `recorded.json`
 
-The answers of a real Home Assistant instance (2026.10, 360 devices, 3346 entities, 2247 states, 17 areas, 89 config entries), recorded on 2026-10-16 with the recorder in `tests/live.rs` through the plugin's own client and anonymised by `tenko_connect::sdk::anonymise` before anything was written to disk. The test `the_recorded_instance_reads_like_the_live_one` in `tests/plugin.rs` reads it through the mock and asserts the counts the live smoke printed the same day: 106 hosts with 115 MAC addresses, no IP address (no entity of that instance shows one), 52 vendor facts, 9 integrations, 34 devices in an area.
+The answers of a real Home Assistant instance (2026.10, 360 devices, 3346 entities, 2247 states, 17 areas, 89 config entries), recorded on 2026-10-16 with the recorder in `tests/live.rs` through the plugin's own client and anonymized by `tenko_connect::sdk::anonymize` before anything was written to disk. The test `the_recorded_instance_reads_like_the_live_one` in `tests/plugin.rs` reads it through the mock and asserts the counts the live smoke printed the same day: 106 hosts with 115 MAC addresses, no IP address (no entity of that instance shows one), 52 vendor facts, 9 integrations, 34 devices in an area.
 
-What the anonymiser did, so that the shapes, counts and relations between records survive while nothing of the recorded environment does:
+What the anonymizer did, so that the shapes, counts and relations between records survive while nothing of the recorded environment does:
 
 - Every MAC address became one of the documentation addresses `00:00:5e:00:53:xx` (Zigbee and other EUI-64 identifiers `00:00:5e:ff:fe:00:xx:xx`), the same placeholder wherever the address appears, in the notation it was found in. Other connection and identifier values became `id-n`.
 - Every private IPv4 /24 block became a documentation network (`192.0.2.0/24`, `198.51.100.0/24`), with the host part kept; every public IPv4 address landed in `203.0.113.0/24`, which the plugin counts as local (the test re-reads the recording with TEST-NET-3 as the public range to check that nothing changes).

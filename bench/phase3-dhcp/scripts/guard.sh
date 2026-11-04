@@ -129,7 +129,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Free loopback ports: a TCP port with its neighbour above (API and metrics), and two UDP
+# Free loopback ports: a TCP port with its neighbor above (API and metrics), and two UDP
 # ports (the dhcp listener and the load client's relay address).
 read -r API_PORT DHCP_PORT RELAY_PORT < <("$PY" - <<'PY' | tr -d '\015'
 import random, socket

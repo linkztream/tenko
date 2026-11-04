@@ -1,6 +1,6 @@
-// Licence check of the web UI's npm dependencies.
+// License check of the web UI's npm dependencies.
 //
-//   node scripts/licenses.mjs            list every licence and fail on a production
+//   node scripts/licenses.mjs            list every license and fail on a production
 //                                        dependency outside the allow list
 //   node scripts/licenses.mjs --json     the same as JSON on stdout
 //
@@ -8,19 +8,19 @@
 // extra dependency) and splits them into the production closure (what `dependencies` of
 // ui/package.json pulls in, resolved the way Node resolves them, nested node_modules
 // included) and the rest, which only development needs. A production package whose
-// licence is not on the allow list fails the check; a copyleft licence is refused even
+// license is not on the allow list fails the check; a copyleft license is refused even
 // when it appears in an OR expression next to an allowed one, so that nobody chooses it by
 // accident. Development-only packages are listed separately and never fail the check:
 // they are not shipped. Node's standard library only.
 //
-// Exit codes: 0 every production licence is allowed, 1 a production package is outside the
-// allow list or has no licence, 2 node_modules is missing or a package cannot be read.
+// Exit codes: 0 every production license is allowed, 1 a production package is outside the
+// allow list or has no license, 2 node_modules is missing or a package cannot be read.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The licences a production dependency may carry (SPDX identifiers). */
+/** The licenses a production dependency may carry (SPDX identifiers). */
 export const ALLOWED = new Set([
   "MIT",
   "ISC",
@@ -34,13 +34,13 @@ export const ALLOWED = new Set([
   "Python-2.0",
 ]);
 
-/** Copyleft licences: refused outright, in any position of a licence expression. */
+/** Copyleft licenses: refused outright, in any position of a license expression. */
 const COPYLEFT = /^(?:A?GPL|LGPL|SSPL|EUPL|OSL|CPAL|CC-BY-SA|MPL|EPL|CDDL|CPL)\b/i;
 
 const UI_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * The licence of a package as its text and as alternatives: one inner list per OR
+ * The license of a package as its text and as alternatives: one inner list per OR
  * alternative, every member of an inner list required (AND). `null` when the package
  * declares none.
  * @param {Record<string, any>} pkg
@@ -69,7 +69,7 @@ export function licenseOf(pkg) {
 }
 
 /**
- * Whether a licence is acceptable for a production dependency: at least one alternative
+ * Whether a license is acceptable for a production dependency: at least one alternative
  * whose every member is allowed, and no copyleft identifier anywhere in the expression.
  * @param {ReturnType<typeof licenseOf>} license
  */
@@ -215,7 +215,7 @@ export function run(uiDir = UI_DIR) {
 }
 
 /** @param {Row[]} rows */
-function summarise(rows) {
+function summarize(rows) {
   const counts = new Map();
   for (const row of rows) {
     const key = row.license ?? "(none)";
@@ -240,23 +240,23 @@ function main(argv) {
   }
   const bad = result.production.filter((r) => !r.allowed);
   console.log(`Production dependencies: ${result.production.length} package(s)`);
-  for (const [license, n] of summarise(result.production)) console.log(`  ${String(n).padStart(4)}  ${license}`);
+  for (const [license, n] of summarize(result.production)) console.log(`  ${String(n).padStart(4)}  ${license}`);
   if (bad.length > 0) {
     console.log("\nOutside the allow list (production):");
-    for (const r of bad) console.log(`  ${r.name}@${r.version}: ${r.license ?? "no licence declared"}`);
+    for (const r of bad) console.log(`  ${r.name}@${r.version}: ${r.license ?? "no license declared"}`);
   }
   console.log(`\nDevelopment-only dependencies: ${result.development.length} package(s)`);
-  for (const [license, n] of summarise(result.development)) console.log(`  ${String(n).padStart(4)}  ${license}`);
+  for (const [license, n] of summarize(result.development)) console.log(`  ${String(n).padStart(4)}  ${license}`);
   const devOutside = result.development.filter((r) => !r.allowed);
   if (devOutside.length > 0) {
     console.log("\nOutside the allow list (development only, not shipped; for information):");
-    for (const r of devOutside) console.log(`  ${r.name}@${r.version}: ${r.license ?? "no licence declared"}`);
+    for (const r of devOutside) console.log(`  ${r.name}@${r.version}: ${r.license ?? "no license declared"}`);
   }
   if (bad.length > 0) {
     console.error(`\nlicenses: ${bad.length} production package(s) outside the allow list (${[...ALLOWED].join(", ")}).`);
     return 1;
   }
-  console.log("\nlicenses: every production licence is on the allow list.");
+  console.log("\nlicenses: every production license is on the allow list.");
   return 0;
 }
 

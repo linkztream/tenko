@@ -1,9 +1,9 @@
-//! An anonymiser for recording the answers of a real system as fixtures.
+//! An anonymizer for recording the answers of a real system as fixtures.
 //!
 //! A plugin's fixtures should follow the real shapes of the system it talks to, but nothing
 //! of the environment they were recorded in may reach the repository: no host name, address,
 //! MAC address, SSID, device, area or person name, no identifier that could be looked up.
-//! [`Anonymiser`] walks JSON answers and replaces every such value with a documentation
+//! [`Anonymizer`] walks JSON answers and replaces every such value with a documentation
 //! value (RFC 5737, RFC 3849, RFC 7042) or a stable generated placeholder, so that shapes,
 //! counts and the relations between records survive: the same input value becomes the same
 //! placeholder wherever it appears, an address stays inside the network it was in, and an
@@ -16,15 +16,15 @@
 //! locations (`geo_info`, `latitude`) are dropped or zeroed. The `attributes` of a Home
 //! Assistant state are reduced to the ones a connector reads. The property strings of a
 //! Proxmox VE guest configuration (`net0`, `ipconfig0`, `agent`:
-//! `virtio=<mac>,bridge=vmbr0,tag=20`) are split and each value is anonymised on its own,
+//! `virtio=<mac>,bridge=vmbr0,tag=20`) are split and each value is anonymized on its own,
 //! so the MAC address, bridge and VLAN stay readable; tag lists (`a;b`) keep their length.
 //! The all-zero and the broadcast MAC address name nothing and are kept. A bare prefix
 //! length next to an address (`netmask`, `netmask6`, `prefix`, as a number, as text or
-//! as a dotted mask) is written as the width of the anonymised network that address is in:
+//! as a dotted mask) is written as the width of the anonymized network that address is in:
 //! the width of a wide network as its CIDR is written, else 24.
 //!
-//! The anonymiser keeps its maps between calls, so several answers of one system can be
-//! anonymised one after the other and still agree with each other.
+//! The anonymizer keeps its maps between calls, so several answers of one system can be
+//! anonymized one after the other and still agree with each other.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -336,7 +336,7 @@ const STATE_ATTRIBUTES: [&str; 17] = [
 
 /// Replaces names, addresses and identifiers in JSON with placeholders, consistently.
 #[derive(Debug, Default)]
-pub struct Anonymiser {
+pub struct Anonymizer {
     /// Private and public IPv4 /24 blocks to their placeholder blocks.
     v4_blocks: HashMap<[u8; 3], [u8; 3]>,
     /// The number of /24 blocks handed out in the benchmarking range.
@@ -375,14 +375,14 @@ struct MacText {
     upper: bool,
 }
 
-impl Anonymiser {
-    /// An anonymiser with empty maps.
+impl Anonymizer {
+    /// An anonymizer with empty maps.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// The anonymised copy of `value`. Keys are matched in lower case.
-    pub fn anonymise(&mut self, value: &Value) -> Value {
+    /// The anonymized copy of `value`. Keys are matched in lower case.
+    pub fn anonymize(&mut self, value: &Value) -> Value {
         self.reserve(value);
         self.walk(value, "")
     }
@@ -522,7 +522,7 @@ impl Anonymiser {
     }
 
     /// Writes the bare prefix lengths of an object (`netmask`, `netmask6`, `prefix`) as
-    /// the width of the anonymised network of the address next to them.
+    /// the width of the anonymized network of the address next to them.
     fn bare_widths(&self, map: &Map<String, Value>, out: &mut Map<String, Value>) {
         for (key, value) in map {
             let lower = key.to_ascii_lowercase();
@@ -648,7 +648,7 @@ impl Anonymiser {
         self.text(trimmed, "text", "text-")
     }
 
-    /// A Proxmox property string, each value anonymised under its own key: the MAC address
+    /// A Proxmox property string, each value anonymized under its own key: the MAC address
     /// of `virtio=<mac>`, the bridge, the VLAN tag and the addresses of `ip=` stay
     /// readable. A key that is not a short lower-case word is not kept either.
     fn properties(&mut self, text: &str) -> String {
@@ -1086,8 +1086,8 @@ mod tests {
 
     #[test]
     fn names_addresses_and_ids_become_placeholders_consistently() {
-        let mut anonymiser = Anonymiser::new();
-        let out = anonymiser.anonymise(&json!({
+        let mut anonymizer = Anonymizer::new();
+        let out = anonymizer.anonymize(&json!({
             "data": [
                 { "_id": "66aa11bb22cc33dd44ee55f1", "name": "Office switch", "mac": "D4:01:C3:00:11:22",
                   "ip": "10.20.30.4", "type": "usw", "x_authkey": "secret", "serial": "SN-1",
@@ -1131,8 +1131,8 @@ mod tests {
 
     #[test]
     fn subnets_keep_their_members_and_public_addresses_land_in_test_net_3() {
-        let mut anonymiser = Anonymiser::new();
-        let out = anonymiser.anonymise(&json!([
+        let mut anonymizer = Anonymizer::new();
+        let out = anonymizer.anonymize(&json!([
             { "ip": "172.16.5.9" },
             { "ip_subnet": "172.16.4.1/22" },
             { "ip": "172.16.7.200", "wan": "93.184.216.34", "dns": ["1.1.1.1", "127.0.0.1"] },
@@ -1154,8 +1154,8 @@ mod tests {
 
     #[test]
     fn wide_networks_are_narrowed_when_the_ranges_run_out() {
-        let mut anonymiser = Anonymiser::new();
-        let out = anonymiser.anonymise(&json!([
+        let mut anonymizer = Anonymizer::new();
+        let out = anonymizer.anonymize(&json!([
             "10.10.0.1/16", "10.10.0.7", "10.10.9.7", "10.10.200.7",
             "172.20.0.1/16", "172.20.5.5",
             "192.168.1.1/24", "192.168.2.1/24", "192.168.3.9", { "ipconfig0": "ip=192.168.4.9/24,gw=192.168.4.1" }
@@ -1171,14 +1171,14 @@ mod tests {
         assert_eq!(out[8], "198.18.6.9");
         assert_eq!(out[9]["ipconfig0"], "ip=198.18.7.9/24,gw=198.18.7.1");
         // Two /16 networks and four more blocks do not fit 2 + 512 blocks.
-        assert_eq!(anonymiser.counts()["ipv4 narrowed networks"], 2);
-        assert_eq!(anonymiser.counts()["ipv4 exhausted"], 0);
+        assert_eq!(anonymizer.counts()["ipv4 narrowed networks"], 2);
+        assert_eq!(anonymizer.counts()["ipv4 exhausted"], 0);
     }
 
     #[test]
-    fn bare_prefix_lengths_follow_the_anonymised_network() {
-        let mut anonymiser = Anonymiser::new();
-        let out = anonymiser.anonymise(&json!({
+    fn bare_prefix_lengths_follow_the_anonymized_network() {
+        let mut anonymizer = Anonymizer::new();
+        let out = anonymizer.anonymize(&json!({
             "wide": ["10.10.0.1/16", "10.10.0.7", "10.10.9.7", "10.10.200.7",
                      "172.20.0.1/16", "172.20.5.5"],
             "fill": ["192.168.1.1/24", "192.168.2.1/24", "192.168.3.9"],
@@ -1211,8 +1211,8 @@ mod tests {
 
     #[test]
     fn home_assistant_records_keep_what_the_connector_reads() {
-        let mut anonymiser = Anonymiser::new();
-        let out = anonymiser.anonymise(&json!({
+        let mut anonymizer = Anonymizer::new();
+        let out = anonymizer.anonymize(&json!({
             "devices": [{ "id": "01HZX3M9Q8K7V6W5T4R3P2N1M0", "name": "Kitchen plug",
                 "identifiers": [["shelly", "shellyplus1pm-aabbccddeeff"]],
                 "connections": [["mac", "aa:bb:cc:dd:ee:ff"], ["zigbee", "00:12:4b:00:1c:aa:bb:cc"]],
@@ -1265,8 +1265,8 @@ mod tests {
 
     #[test]
     fn proxmox_property_strings_keep_their_keys_and_relations() {
-        let mut anonymiser = Anonymiser::new();
-        let out = anonymiser.anonymise(&json!({
+        let mut anonymizer = Anonymizer::new();
+        let out = anonymizer.anonymize(&json!({
             "resources": [{ "type": "qemu", "vmid": 101, "node": "hv-owner", "name": "owner-vm",
                             "status": "running", "tags": "owner;secret project" }],
             "config": { "net0": "virtio=BC:24:11:12:34:56,bridge=vmbr7,tag=30,firewall=1",
@@ -1318,7 +1318,7 @@ mod tests {
 
     #[test]
     fn more_than_256_mac_addresses_become_locally_administered() {
-        let mut anonymiser = Anonymiser::new();
+        let mut anonymizer = Anonymizer::new();
         let macs: Vec<Value> = (0u32..300)
             .map(|n| {
                 json!(format!(
@@ -1329,11 +1329,11 @@ mod tests {
                 ))
             })
             .collect();
-        let out = anonymiser.anonymise(&Value::Array(macs));
+        let out = anonymizer.anonymize(&Value::Array(macs));
         assert_eq!(out[0], "00:00:5e:00:53:00");
         assert_eq!(out[255], "00:00:5e:00:53:ff");
         assert_eq!(out[256], "02:00:5e:00:00:00");
         assert_eq!(out[299], "02:00:5e:00:00:2b");
-        assert_eq!(anonymiser.counts()["macs"], 300);
+        assert_eq!(anonymizer.counts()["macs"], 300);
     }
 }

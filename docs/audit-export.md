@@ -111,8 +111,8 @@ The cursor is written to `sys.audit_export_cursors` every 5 seconds or 500 recor
 
 The guarantee has the limits of the transports:
 
-- **UDP** has no acknowledgement: a lost datagram is lost. A message longer than 65,000 bytes is cut at a character boundary (the structured data with sequence and hash comes first). Use TCP or TLS where completeness matters; the checkpoints still show what is missing.
-- **TCP and TLS** syslog have no application acknowledgement either (RFC 5425 and RFC 6587). A message written into the socket just before the connection breaks may be lost by the network; the rewind to the stored cursor after a reconnect resends the last up to 5 seconds or 500 records and closes that window in practice. A receiver that accepts the connection and then discards data cannot be detected by Tenko, only by the checkpoints.
+- **UDP** has no acknowledgment: a lost datagram is lost. A message longer than 65,000 bytes is cut at a character boundary (the structured data with sequence and hash comes first). Use TCP or TLS where completeness matters; the checkpoints still show what is missing.
+- **TCP and TLS** syslog have no application acknowledgment either (RFC 5425 and RFC 6587). A message written into the socket just before the connection breaks may be lost by the network; the rewind to the stored cursor after a reconnect resends the last up to 5 seconds or 500 records and closes that window in practice. A receiver that accepts the connection and then discards data cannot be detected by Tenko, only by the checkpoints.
 - **Files** are written with `fsync` after every batch.
 
 A change of the settings restarts the workers; each resumes from its cursor.

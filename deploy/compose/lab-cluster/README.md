@@ -38,7 +38,7 @@ binary), generates a lab CA and the HAProxy certificate with `openssl` and three
 temporary directory, starts `controller-1` and HAProxy, runs first-run setup through HAProxy,
 creates two controller tokens and joins `controller-2` and `controller-3` with
 `tenko cluster join` in their own containers before their first start, waits for three
-voters, enrols and starts the probes, writes 100 addresses per second through HAProxy with
+voters, enrolls and starts the probes, writes 100 addresses per second through HAProxy with
 `curl`, kills the leader with `docker compose kill`, checks that writes resume within 15
 seconds and that the survivors' digests agree, restarts the killed controller, partitions a
 follower with `docker network disconnect`, checks through its own port that it lost its

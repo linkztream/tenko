@@ -2,7 +2,7 @@
 //! `[telemetry] otlp_endpoint` pointing at the test collector of
 //! `serve_support::otlp` on loopback.
 //!
-//! - With the endpoint, a setup, a prefix and a read export the spans of the catalogue
+//! - With the endpoint, a setup, a prefix and a read export the spans of the catalog
 //!   (`docs/observability.md` section 8) with the resource of the node; the graceful stop
 //!   flushes them; no attribute carries the setup token, the password, the session cookie
 //!   or the prefix; the health probes produce no span.

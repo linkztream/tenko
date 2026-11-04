@@ -385,7 +385,7 @@ async fn the_deadline_ends_the_run_with_the_silent_probe_timed_out() {
 }
 
 /// Three probes with a scan dispatched to them: one running, one pending, one done.
-struct Cancelled {
+struct Canceled {
     rig: Rig,
     run: Uuid,
     job: tenko_core::JobId,
@@ -394,7 +394,7 @@ struct Cancelled {
     finished: Uuid,
 }
 
-async fn scan_with_three_probes() -> Cancelled {
+async fn scan_with_three_probes() -> Canceled {
     let mut rig = Rig::new();
     rig.probe(1001, &["192.0.2.0/26"], &[]).await;
     rig.probe(1002, &["192.0.2.64/26"], &[]).await;
@@ -411,7 +411,7 @@ async fn scan_with_three_probes() -> Cancelled {
         .await;
     rig.report(1003, finished, CommandState::Done, 100, Some(0))
         .await;
-    Cancelled {
+    Canceled {
         job: view.job_id.expect("job"),
         run: view.id,
         rig,
@@ -421,12 +421,12 @@ async fn scan_with_three_probes() -> Cancelled {
     }
 }
 
-async fn assert_cancelled(scan: &Cancelled) {
+async fn assert_canceled(scan: &Canceled) {
     let rig = &scan.rig;
     let ended = rig
         .wait_run(scan.run, |view| view.finished_at.is_some())
         .await;
-    assert_eq!(ended.state, ScanState::Cancelled);
+    assert_eq!(ended.state, ScanState::Canceled);
     assert!(ended.diff.is_none());
     let state_of = |command: Uuid| {
         ended
@@ -436,8 +436,8 @@ async fn assert_cancelled(scan: &Cancelled) {
             .map(|probe| probe.state.clone())
             .expect("part")
     };
-    assert_eq!(state_of(scan.running), "cancelled");
-    assert_eq!(state_of(scan.pending), "cancelled");
+    assert_eq!(state_of(scan.running), "canceled");
+    assert_eq!(state_of(scan.pending), "canceled");
     assert_eq!(
         state_of(scan.finished),
         "done",
@@ -467,14 +467,14 @@ async fn assert_cancelled(scan: &Cancelled) {
 }
 
 #[tokio::test]
-async fn cancelling_the_job_while_it_waits_for_the_probes_takes_effect_at_once() {
+async fn canceling_the_job_while_it_waits_for_the_probes_takes_effect_at_once() {
     let scan = scan_with_three_probes().await;
     let rig = &scan.rig;
     rig.t
         .engine
         .cancel(scan.job, &rig.cx())
         .await
-        .expect("cancelled");
-    assert_cancelled(&scan).await;
-    rig.t.wait_for_state(scan.job, JobState::Cancelled).await;
+        .expect("canceled");
+    assert_canceled(&scan).await;
+    rig.t.wait_for_state(scan.job, JobState::Canceled).await;
 }

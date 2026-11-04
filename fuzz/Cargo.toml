@@ -47,8 +47,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "scan_neighbour_tables"
-path = "fuzz_targets/scan_neighbour_tables.rs"
+name = "scan_neighbor_tables"
+path = "fuzz_targets/scan_neighbor_tables.rs"
 test = false
 doc = false
 bench = false

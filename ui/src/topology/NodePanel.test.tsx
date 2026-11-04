@@ -173,33 +173,33 @@ describe("ports", () => {
     expect(open.getAttribute("aria-expanded")).toBe("false");
     expect(open.getAttribute("aria-label")).toBe("Show what is connected to port 3");
     expect(open.textContent).toBe("Show what is connected");
-    expect(screen.queryByTestId("port-neighbours")).toBeNull();
+    expect(screen.queryByTestId("port-neighbors")).toBeNull();
 
     fireEvent.click(open);
-    const list = await screen.findByTestId("port-neighbours");
+    const list = await screen.findByTestId("port-neighbors");
     expect(list.dataset.key).toBe("3");
-    await waitFor(() => expect(within(list).getAllByTestId("port-neighbour")).toHaveLength(1));
-    const neighbour = within(list).getByTestId("port-neighbour");
-    expect(neighbour.dataset.id).toBe(T.nas);
-    expect(neighbour.textContent).toContain("nas");
-    expect(neighbour.textContent).toContain("Host");
-    expect(neighbour.textContent).toContain("Wired");
-    expect(neighbour.textContent).toContain("port 3");
-    expect(neighbour.querySelector("[data-vid]")?.getAttribute("data-vid")).toBe("10");
+    await waitFor(() => expect(within(list).getAllByTestId("port-neighbor")).toHaveLength(1));
+    const neighbor = within(list).getByTestId("port-neighbor");
+    expect(neighbor.dataset.id).toBe(T.nas);
+    expect(neighbor.textContent).toContain("nas");
+    expect(neighbor.textContent).toContain("Host");
+    expect(neighbor.textContent).toContain("Wired");
+    expect(neighbor.textContent).toContain("port 3");
+    expect(neighbor.querySelector("[data-vid]")?.getAttribute("data-vid")).toBe("10");
     expect(requests).toContain(`/api/v1/topology/nodes/${T.swCore}?port=3`);
     expect(open.getAttribute("aria-expanded")).toBe("true");
     expect(open.getAttribute("aria-label")).toBe("Hide what is connected to port 3");
     expect(open.getAttribute("aria-controls")).toBe(list.id);
-    // Only the opened port lists its neighbours.
-    expect(screen.getAllByTestId("port-neighbours")).toHaveLength(1);
+    // Only the opened port lists its neighbors.
+    expect(screen.getAllByTestId("port-neighbors")).toHaveLength(1);
 
-    // A neighbour of the port is a button that selects that device.
-    fireEvent.click(neighbour);
+    // A neighbor of the port is a button that selects that device.
+    fireEvent.click(neighbor);
     expect(view.onSelect).toHaveBeenCalledWith(T.nas);
 
     // Pressing the button again hides the list.
     fireEvent.click(open);
-    expect(screen.queryByTestId("port-neighbours")).toBeNull();
+    expect(screen.queryByTestId("port-neighbors")).toBeNull();
     expect(open.getAttribute("aria-expanded")).toBe("false");
   });
 
@@ -207,12 +207,12 @@ describe("ports", () => {
     renderPanel(T.swCore);
     await loaded(T.swCore);
     fireEvent.click(within(port("3")).getByTestId("node-port-open"));
-    await waitFor(() => expect(within(screen.getByTestId("port-neighbours")).getAllByTestId("port-neighbour")[0]?.dataset.id).toBe(T.nas));
+    await waitFor(() => expect(within(screen.getByTestId("port-neighbors")).getAllByTestId("port-neighbor")[0]?.dataset.id).toBe(T.nas));
     fireEvent.click(within(port("6")).getByTestId("node-port-open"));
-    await waitFor(() => expect(screen.getByTestId("port-neighbours").dataset.key).toBe("6"));
-    await waitFor(() => expect(within(screen.getByTestId("port-neighbours")).getAllByTestId("port-neighbour")[0]?.dataset.id).toBe(T.swDesk));
-    expect(screen.getAllByTestId("port-neighbours")).toHaveLength(1);
-    expect(within(screen.getByTestId("port-neighbours")).getAllByTestId("port-neighbour")[0]?.textContent).toContain("LLDP link");
+    await waitFor(() => expect(screen.getByTestId("port-neighbors").dataset.key).toBe("6"));
+    await waitFor(() => expect(within(screen.getByTestId("port-neighbors")).getAllByTestId("port-neighbor")[0]?.dataset.id).toBe(T.swDesk));
+    expect(screen.getAllByTestId("port-neighbors")).toHaveLength(1);
+    expect(within(screen.getByTestId("port-neighbors")).getAllByTestId("port-neighbor")[0]?.textContent).toContain("LLDP link");
   });
 
   it("shows the error when the port cannot be read", async () => {
@@ -225,7 +225,7 @@ describe("ports", () => {
       ),
     );
     fireEvent.click(within(port("3")).getByTestId("node-port-open"));
-    const list = await screen.findByTestId("port-neighbours");
+    const list = await screen.findByTestId("port-neighbors");
     await waitFor(() => expect(list.textContent).toContain("The topology is not available on this server."));
   });
 
@@ -238,20 +238,20 @@ describe("ports", () => {
   });
 });
 
-describe("neighbours", () => {
-  it("lists every neighbour with its edge kind, ports and VLAN, and selects the one that is pressed", async () => {
+describe("neighbors", () => {
+  it("lists every neighbor with its edge kind, ports and VLAN, and selects the one that is pressed", async () => {
     const view = renderPanel(T.swDesk);
     await loaded(T.swDesk);
-    const list = screen.getByTestId("node-neighbours");
-    const neighbours = within(list).getAllByTestId("neighbour");
-    expect(neighbours.map((n) => n.dataset.id).sort()).toEqual([T.swCore, T.apGarage, T.apAttic, T.tenko1, T.tenko2, T.tenko3, T.laptop, T.unknown].sort());
-    const swCore = neighbours.find((n) => n.dataset.id === T.swCore) as HTMLElement;
+    const list = screen.getByTestId("node-neighbors");
+    const neighbors = within(list).getAllByTestId("neighbor");
+    expect(neighbors.map((n) => n.dataset.id).sort()).toEqual([T.swCore, T.apGarage, T.apAttic, T.tenko1, T.tenko2, T.tenko3, T.laptop, T.unknown].sort());
+    const swCore = neighbors.find((n) => n.dataset.id === T.swCore) as HTMLElement;
     expect(swCore.textContent).toContain("sw-core");
     expect(swCore.textContent).toContain("Switch");
     expect(swCore.textContent).toContain("LLDP link");
     expect(swCore.textContent).toContain("port 1");
     expect(swCore.textContent).toContain("remote port 6");
-    const tenko = neighbours.find((n) => n.dataset.id === T.tenko1) as HTMLElement;
+    const tenko = neighbors.find((n) => n.dataset.id === T.tenko1) as HTMLElement;
     expect(tenko.textContent).toContain("Wired");
     expect(tenko.querySelector("[data-vid]")?.getAttribute("data-vid")).toBe("20");
     expect(tenko.dataset.edge).toMatch(/^e-[0-9a-f]{12}$/);
@@ -263,7 +263,7 @@ describe("neighbours", () => {
   it("names the wireless network of a wireless link", async () => {
     renderPanel(T.apHall);
     await loaded(T.apHall);
-    const plug = within(screen.getByTestId("node-neighbours")).getAllByTestId("neighbour").find((n) => n.dataset.id === T.plug) as HTMLElement;
+    const plug = within(screen.getByTestId("node-neighbors")).getAllByTestId("neighbor").find((n) => n.dataset.id === T.plug) as HTMLElement;
     expect(plug.textContent).toContain("Wireless");
     expect(plug.textContent).toContain("network iot.example.test");
     expect(plug.querySelector("[data-vid]")?.getAttribute("data-vid")).toBe("30");
@@ -272,13 +272,13 @@ describe("neighbours", () => {
   it("says that a link only a MAC table names is inferred, and not for a link a controller reports", async () => {
     renderPanel(T.swCore);
     await loaded(T.swCore);
-    const neighbours = within(screen.getByTestId("node-neighbours")).getAllByTestId("neighbour");
-    const printer = neighbours.find((n) => n.dataset.id === T.printer) as HTMLElement;
+    const neighbors = within(screen.getByTestId("node-neighbors")).getAllByTestId("neighbor");
+    const printer = neighbors.find((n) => n.dataset.id === T.printer) as HTMLElement;
     expect(printer.textContent).toContain("port 5");
     expect(printer.textContent).toContain("inferred from the MAC table");
-    const nas = neighbours.find((n) => n.dataset.id === T.nas) as HTMLElement;
+    const nas = neighbors.find((n) => n.dataset.id === T.nas) as HTMLElement;
     expect(nas.textContent).not.toContain("inferred");
-    expect(neighbours.filter((n) => n.textContent?.includes("inferred from the MAC table"))).toEqual([printer]);
+    expect(neighbors.filter((n) => n.textContent?.includes("inferred from the MAC table"))).toEqual([printer]);
   });
 });
 
@@ -437,7 +437,7 @@ describe("accessibility", () => {
     renderPanel(T.swCore);
     await loaded(T.swCore);
     fireEvent.click(within(port("3")).getByTestId("node-port-open"));
-    await waitFor(() => expect(screen.getAllByTestId("port-neighbour")).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByTestId("port-neighbor")).toHaveLength(1));
     expect(await axeViolations(screen.getByTestId("node-panel"))).toEqual([]);
   });
 

@@ -106,7 +106,7 @@ export function settingGroups(s: DnsNodeStatus): SettingGroup[] {
       rows: [
         { id: "log_state", value: log.state, format: "word", key: "[dns.log] enabled" },
         { id: "log_format", value: log.format, format: "word", key: "[dns.log] format" },
-        { id: "log_client", value: log.client, format: "word", key: "[dns.log] pseudonymise" },
+        { id: "log_client", value: log.client, format: "word", key: "[dns.log] pseudonymise" }, // spelling: alias
         { id: "log_sample", value: log.sample, format: "count", key: "[dns.log] sample" },
         { id: "log_days", value: log.days, format: "count", key: "[dns.log] days" },
         { id: "log_size_mb", value: log.size_mb, format: "count", key: "[dns.log] size_mb" },

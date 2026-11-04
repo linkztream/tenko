@@ -103,7 +103,7 @@ function manual(reason: string, extra: Partial<MoveL2> = {}): MoveL2 {
   return { action: "manual", reason, ...extra };
 }
 
-/** What the mock decides for each item, plus the warnings it raises (a refusal needs an acknowledgement). */
+/** What the mock decides for each item, plus the warnings it raises (a refusal needs an acknowledgment). */
 export interface MockL2Decision {
   items: MoveL2[];
   warnings: PlanWarning[];

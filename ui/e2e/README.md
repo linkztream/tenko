@@ -14,7 +14,7 @@ and the `data-testid` convention they rely on, are in the section "End-to-end te
 | `jobs` | The jobs list of U5 against the real server, no fakes: two IPAM edits made through the API as finished jobs of the administrator, the default chip Active and needs you, the calm line while the server has no open job, the Today group with its count, each edit titled from the label catalog with its kind as the code, its duration and a 28 px row, the one starter said once instead of a Started by column, the header's waiting count from the findings counts the rail badge reads, the Finished and Failed or rolled back chips, axe, Swedish (the waiting and running jobs, the other days, the rest of a day and older pages stay with the unit tests) |
 | `discovery` | The findings list of U4 at `/discovery` against the real server, no fakes, from the seeded proposals: the discovered hosts and the outside-prefixes proposal as rows of the Review group beside the server's own health findings (counted from `GET /findings`), each with the default action the server names, the header's facts and the severity and kind chips from the same counts as the status bar, "Adopt" through the approve plan dialog with the finding leaving the list, a row click docking the proposal panel at `/discovery/<id>`, the status bar's review link opening the list with the Review chip pressed (the act-now path stays with the unit tests: no spec seeds a conflict); the Proposals tab at `/discovery/proposals` (the former inbox: approve and reject, rejection memory, the state filter, selection and batch approve); observations and subject pages, adoption policies, the review line of the dashboard's needs-attention strip from the seeded proposals, the rail badge and the status bar count of the findings to review (U2), from the real counts; Swedish |
 | `connectors` | Plugins and the CLI list, the schema-generated form, runs and their jobs, observations, lifecycle, secret injection, the dashboard's Connectors block (with "Show all metrics", since the e2e server runs Lab); the instance page, the list and the tile follow the plugin process without a reload |
-| `nodes` | Enrolment tokens shown once, a second `tenko` process enrolled as a probe, the registry and panel, revocation, the dashboard's nodes block (drawn once the cluster has a node) and the cluster summary following enrolment, connection and revocation while open |
+| `nodes` | Enrollment tokens shown once, a second `tenko` process enrolled as a probe, the registry and panel, revocation, the dashboard's nodes block (drawn once the cluster has a node) and the cluster summary following enrollment, connection and revocation while open |
 | `cluster` | The cluster page of a single controller (one member, leader and voter, quorum single, no promote or step-down, a removal refused with the reasons of a single member, the digest check, the compatibility cell and the data format panel), "Add a controller" (a controller token shown once, pending in the token list), a viewer, Swedish; the queue view of a server that is not isolated. The partition scenarios (OPS-26) fake the cluster routes in the browser, since the e2e server is one controller: a write refused with 503 `cluster.no_quorum`, the refused-change dialog and the queue request, the queue view and a cancel, the heal with an applied and a conflicting change (re-apply after a new preview, discard, dismiss), the banner and the stale status item, an election, Swedish |
 | `cluster-membership` | The member actions of the cluster page against faked cluster routes (`support/cluster-mock.ts`): promote (an empty body, `force`, `replace`), remove (a learner, a voter, the leader), step down (the successor named, no body, the leader moves), what each preview shows and that nothing is sent before the confirmation, a refusal of the server in the dialog, a change in progress, a viewer, a member added elsewhere, a digest that differs, Swedish |
 | `scoped-operator` | What a scoped operator (an operator grant over one prefix, no global role) loses against an administrator and a global operator: every settings page and the updates page ("Administrators only"), the secrets page, the Updates and Secrets commands of the palette, the metrics tiles, the connector, node and controller actions, the refusals of the cluster and scans pages; the IPAM actions that stay on the prefix of the grant; Swedish |
@@ -51,7 +51,7 @@ Some scenarios cannot happen on the one real controller of the e2e server: a lea
 a second voter, a quorum to lose, a backup that is days old, the samples of several controllers.
 They fake the routes concerned in the browser with `page.route` (`support/cluster-mock.ts`,
 `support/metrics-mock.ts`, `fakeHistory` in `backup.spec.ts`; `support/dns-mock.ts` until the DNS service of WP4.2 lands), say so in the header of the spec,
-and name the Rust tests that prove the real behaviour. Everything else still reaches the real
+and name the Rust tests that prove the real behavior. Everything else still reaches the real
 server. `cluster-membership.spec.ts` fakes the cluster routes in every scenario; in the other
 specs the title of such a scenario ends in "(faked cluster routes)", "(faked status)" or
 "(faked stream)".
@@ -87,14 +87,14 @@ a test asks otherwise with `test.use({ serverOptions: { ... } })`:
 - `updates.air_gapped = true`: the server never asks the release source. Without it, every
   server would fetch the project's `releases.json` a minute after it starts.
 - `[cluster] listen = []`: the cluster port stays closed. Without it, a server opens the default
-  `0.0.0.0:8444` as soon as an enrolment token exists, a fixed port on every interface that
+  `0.0.0.0:8444` as soon as an enrollment token exists, a fixed port on every interface that
   parallel tests would fight over.
 
 The options:
 
 | Option | Effect |
 |---|---|
-| `cluster: true` | A cluster port of its own on the loopback with one-second heartbeats (`server.clusterPort`), for `ProbeNode`; use it with `transport: "internal_ca"`, since enrolment pins the internal CA |
+| `cluster: true` | A cluster port of its own on the loopback with one-second heartbeats (`server.clusterPort`), for `ProbeNode`; use it with `transport: "internal_ca"`, since enrollment pins the internal CA |
 | `updates: { sourceUrl, readyTimeoutSecs }` | The release source of the test (`ReleaseSource.manifestUrl`) instead of air-gapped |
 | `layout: true` | Runs from `<data_dir>/updates/current` after `tenko upgrade layout`, supervised, so an install from the UI is possible; the test restarts the server (`server.restart()`) when it exits with status 12 |
 | `versionFromLayout: false` | With `layout`: the version comes from the build, not from the layout directory, so an installed copy of the same build reports the old version |

@@ -352,7 +352,7 @@
       </unit>
       <unit id="nodes.scan.vrf.default">
         <notes><note category="description">Choice of no VRF in the scan configuration.</note></notes>
-        <segment><source>From the enrolment token, else the default VRF</source></segment>
+        <segment><source>From the enrollment token, else the default VRF</source></segment>
       </unit>
       <unit id="nodes.scan.field.timezone">
         <notes><note category="description">Label of the time zone of the blackout windows.</note></notes>
@@ -424,15 +424,15 @@
       </unit>
       <unit id="nodes.scan.method.arp.help">
         <notes><note category="description">One line about the scan method arp.</note></notes>
-        <segment><source>IPv4 neighbours from the ARP table of the probe host. Sends nothing.</source></segment>
+        <segment><source>IPv4 neighbors from the ARP table of the probe host. Sends nothing.</source></segment>
       </unit>
       <unit id="nodes.scan.method.nd.name">
         <notes><note category="description">Name of the scan method nd.</note></notes>
-        <segment><source>Neighbour table (IPv6)</source></segment>
+        <segment><source>Neighbor table (IPv6)</source></segment>
       </unit>
       <unit id="nodes.scan.method.nd.help">
         <notes><note category="description">One line about the scan method nd.</note></notes>
-        <segment><source>IPv6 neighbours from the neighbour table of the probe host. Sends nothing.</source></segment>
+        <segment><source>IPv6 neighbors from the neighbor table of the probe host. Sends nothing.</source></segment>
       </unit>
       <unit id="nodes.scan.method.icmp.name">
         <notes><note category="description">Name of the scan method icmp.</note></notes>
@@ -480,7 +480,7 @@
       </unit>
       <unit id="nodes.scan.method.snmp.help">
         <notes><note category="description">One line about the scan method snmp.</note></notes>
-        <segment><source>Polls switches over SNMPv3 for their address and neighbour tables. Passwords come from the vault.</source></segment>
+        <segment><source>Polls switches over SNMPv3 for their address and neighbor tables. Passwords come from the vault.</source></segment>
       </unit>
       <unit id="nodes.scan.method.arp_sweep.name">
         <notes><note category="description">Name of the scan method arp_sweep.</note></notes>

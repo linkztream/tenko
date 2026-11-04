@@ -30,7 +30,7 @@ Please include what you can of the following:
 
 ## What to expect
 
-- **Acknowledgement within 3 working days** of the report.
+- **Acknowledgment within 3 working days** of the report.
 - **A fix or a mitigation plan within 30 days** for high and critical severity; lower
   severities are scheduled into the next release and you are told when.
 - **Coordinated disclosure.** The details stay private until the fix has shipped. The
@@ -115,7 +115,7 @@ gh attestation verify tenko-<version>-linux-x86_64 --repo linkztream/tenko \
 
 It lists two for each binary, the crates and the web UI. The SBOM files are plain JSON;
 `jq -r '.components[] | "\(.name) \(.version)"' tenko-<version>-linux-x86_64.cdx.json` lists
-the components, and any tool that reads CycloneDX (a vulnerability scanner, a licence
+the components, and any tool that reads CycloneDX (a vulnerability scanner, a license
 checker) takes the file as it is.
 
 What this does not prove (section 7.2 of
@@ -137,7 +137,7 @@ What this does not prove (section 7.2 of
   allocator) is listed as that crate, and the musl C library of the static Linux binary,
   which comes from the build runner's `musl-tools`, is not listed. The UI's SBOM lists the
   production dependencies of the lock file, which is more than the bundle includes. The
-  image's SBOM lists the packages of its distroless base and what the scanner recognises;
+  image's SBOM lists the packages of its distroless base and what the scanner recognizes;
   its binary is built from the same source and `Cargo.lock` as the Linux binary, so the
   crates are those of the Linux SBOM.
 - Releases up to 0.0.10 carry neither SBOMs nor attestations.
@@ -168,7 +168,7 @@ In scope:
 - The installers (`deploy/install.sh`, the Windows MSI, the Proxmox script) and the
   deployment templates (`deploy/`: the container image, Compose, systemd, the Windows
   service).
-- The release workflow and the artefacts it publishes.
+- The release workflow and the artifacts it publishes.
 
 Out of scope:
 

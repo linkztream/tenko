@@ -25,7 +25,7 @@ export default function Methods() {
                 {t("account.methods.flag_password")}
               </Notice>
             </Show>
-            <Show when={s().flags.mfa_enrolment_required}>
+            <Show when={s().flags.mfa_enrollment_required}>
               <Notice kind="warn" role="status">
                 {t("account.methods.flag_mfa")}
               </Notice>

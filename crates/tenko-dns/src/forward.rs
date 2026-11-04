@@ -35,9 +35,9 @@
 //! **Stub zones** (zones of kind stub): the zone's `source` servers are asked for the NS
 //! set of the apex; the name servers' addresses come from the glue, else from A and AAAA
 //! queries through the forwarder's own routes; the queries for names in the zone go to
-//! those addresses, which are learnt again when the NS set's TTL (30 seconds to one day)
-//! has passed. A stub zone whose servers cannot be learnt answers SERVFAIL and is listed in
-//! the status with the reason ([`Forwarder::stubs`]); learnt servers that expired keep
+//! those addresses, which are learned again when the NS set's TTL (30 seconds to one day)
+//! has passed. A stub zone whose servers cannot be learned answers SERVFAIL and is listed in
+//! the status with the reason ([`Forwarder::stubs`]); learned servers that expired keep
 //! serving while a new attempt fails. A name server is asked on port 53, or on the port of
 //! the source server with its address.
 //!
@@ -133,10 +133,10 @@ pub const QUEUE: usize = 4_096;
 /// Forwarded queries in flight at once.
 pub const IN_FLIGHT: usize = 1_024;
 
-/// The shortest and longest time a stub zone's learnt name servers are used.
+/// The shortest and longest time a stub zone's learned name servers are used.
 pub const STUB_TTL: (u32, u32) = (30, 86_400);
 
-/// The time before a stub zone whose servers could not be learnt is tried again.
+/// The time before a stub zone whose servers could not be learned is tried again.
 pub const STUB_RETRY: Duration = Duration::from_secs(30);
 
 /// The housekeeping period (the prefetch queue).
@@ -320,7 +320,7 @@ struct ForwardCounters {
     prefetched: AtomicU64,
     // WP10.3: the worker's answers from the failure and denial caches.
     failure_hits: AtomicU64,
-    synthesised: [AtomicU64; 4],
+    synthesized: [AtomicU64; 4],
 }
 
 // dns-visibility: the upstreams of one rule for the status.
@@ -366,9 +366,9 @@ pub struct ForwardStats {
     // WP10.3: the worker's answers from the failure and denial caches.
     /// Queries the worker answered SERVFAIL from the failure cache (RFC 9520).
     pub failure_hits: u64,
-    /// Answers synthesised from the denial cache, by kind in the order of `DenialKind::ALL`
+    /// Answers synthesized from the denial cache, by kind in the order of `DenialKind::ALL`
     /// (`nxdomain`, `nodata`, `wildcard`, `nxdomain_cut`).
-    pub synthesised: [u64; 4],
+    pub synthesized: [u64; 4],
 }
 
 impl ForwardStats {
@@ -385,7 +385,7 @@ impl ForwardStats {
 pub struct StubReport {
     /// The zone's apex.
     pub zone: DnsName,
-    /// The name servers' addresses learnt, `address:port`.
+    /// The name servers' addresses learned, `address:port`.
     pub servers: Vec<String>,
     /// Why the last attempt to learn them failed.
     pub error: Option<String>,
@@ -420,12 +420,12 @@ struct Shared {
     audit: std::sync::OnceLock<Arc<dyn TransferAudit>>,
     // WP10.2: the validator, the anchors it reads, the key sets of forwarded zones when
     // no engine runs, the rules whose upstream strips the DNSSEC records, and the time of
-    // the last RFC 8145 signalling query.
+    // the last RFC 8145 signaling query.
     validator: Option<Arc<DnssecValidator>>,
     anchors: Arc<CatalogAnchors>,
     forward_infra: MemInfra,
     strips: Mutex<BTreeSet<ForwardRuleId>>,
-    signalled: Mutex<Option<Instant>>,
+    signaled: Mutex<Option<Instant>>,
     // WP10.3: the denial cache beside the answer cache, and the failure cache the worker
     // reads and the engine fills.
     denials: Option<Arc<Denials>>,
@@ -536,7 +536,7 @@ fn route(catalog: &Catalog, qname: &[u8], rule: Option<ForwardRuleId>) -> Route 
 
 impl Forwarder {
     /// Starts the dispatcher and the housekeeping on the current tokio runtime; they end
-    /// when `stop` is cancelled. `log` gets one entry per forwarded query; `recursion` is
+    /// when `stop` is canceled. `log` gets one entry per forwarded query; `recursion` is
     /// the default and the prefixes IPAM knows, which the role keeps current.
     pub fn start(
         settings: ForwardSettings,
@@ -607,7 +607,7 @@ impl Forwarder {
             anchors,
             forward_infra,
             strips: Mutex::new(BTreeSet::new()),
-            signalled: Mutex::new(None),
+            signaled: Mutex::new(None),
             denials,
             failures,
         });
@@ -684,7 +684,7 @@ impl Forwarder {
             stale: read(&counters.stale),
             prefetched: read(&counters.prefetched),
             failure_hits: read(&counters.failure_hits),
-            synthesised: [0, 1, 2, 3].map(|kind| read(&counters.synthesised[kind])),
+            synthesized: [0, 1, 2, 3].map(|kind| read(&counters.synthesized[kind])),
         }
     }
 
@@ -731,7 +731,7 @@ impl Forwarder {
 
     // dns-visibility: the upstreams of every rule with their figures.
     /// The upstreams of the default forwarder, of every forwarding rule (by suffix) and of
-    /// the stub zones whose name servers were learnt, each with its state and times; an
+    /// the stub zones whose name servers were learned, each with its state and times; an
     /// upstream not asked yet is `unknown`.
     pub fn upstream_health(&self) -> Vec<UpstreamGroup> {
         let catalog = self.shared.catalog.load();
@@ -1002,7 +1002,7 @@ impl Shared {
         }
     }
 
-    /// Sends the RFC 8145 signalling query (`_ta-<tags>.` NULL to the root) once a day
+    /// Sends the RFC 8145 signaling query (`_ta-<tags>.` NULL to the root) once a day
     /// when it is on and the root has trusted keys.
     fn signal_if_due(self: &Arc<Self>, engine: &Arc<Engine<NetAuthority>>) {
         if self.validator.is_none()
@@ -1010,24 +1010,21 @@ impl Shared {
                 .settings
                 .recursion
                 .as_ref()
-                .is_some_and(|recursion| recursion.recursion.signalling)
+                .is_some_and(|recursion| recursion.recursion.signaling)
         {
             return;
         }
         let now = Instant::now();
-        let Some(name) = validate::signalling_name(&self.anchors.root_tags()) else {
+        let Some(name) = validate::signaling_name(&self.anchors.root_tags()) else {
             // No trusted root key yet: tried again at the next tick.
             return;
         };
         {
-            let mut signalled = self
-                .signalled
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            if signalled.is_some_and(|at| now.duration_since(at) < validate::SIGNALLING_PERIOD) {
+            let mut signaled = self.signaled.lock().unwrap_or_else(PoisonError::into_inner);
+            if signaled.is_some_and(|at| now.duration_since(at) < validate::SIGNALING_PERIOD) {
                 return;
             }
-            *signalled = Some(now);
+            *signaled = Some(now);
         }
         let engine = Arc::clone(engine);
         tokio::spawn(async move {
@@ -1040,7 +1037,7 @@ impl Shared {
                     view: None,
                 })
                 .await;
-            tracing::debug!(name = %name, outcome = ?resolved.outcome, "the trust anchor signalling query was sent (RFC 8145)");
+            tracing::debug!(name = %name, outcome = ?resolved.outcome, "the trust anchor signaling query was sent (RFC 8145)");
         });
     }
     // WP10.2: end.
@@ -1093,7 +1090,7 @@ impl Shared {
         }
     }
 
-    /// The set of a stub zone's name servers, learnt when needed.
+    /// The set of a stub zone's name servers, learned when needed.
     async fn stub_set(self: &Arc<Self>, zone: &Zone) -> Result<Arc<UpstreamSet>, String> {
         let label = format!("stub:{}", zone.name);
         let mut states = self.stubs.lock().await;
@@ -1110,7 +1107,7 @@ impl Shared {
                     state.error = None;
                 }
                 Err(error) => {
-                    tracing::warn!(zone = %zone.name, %error, "the name servers of a stub zone could not be learnt");
+                    tracing::warn!(zone = %zone.name, %error, "the name servers of a stub zone could not be learned");
                     state.retry_at = Some(now + STUB_RETRY);
                     state.error = Some(error);
                 }
@@ -1532,11 +1529,11 @@ impl ForwardSink for Forwarder {
                         .iter()
                         .position(|kind| *kind == hit.kind)
                         .unwrap_or(0);
-                    shared.counters.synthesised[kind].fetch_add(1, Ordering::Relaxed);
+                    shared.counters.synthesized[kind].fetch_add(1, Ordering::Relaxed);
                     if shared.settings.metrics {
                         metrics::DENIAL_COUNTER.inc(u16::try_from(kind).unwrap_or(0));
                     }
-                    // The RFC 8509 sentinel on a synthesised wildcard answer, as on a hit.
+                    // The RFC 8509 sentinel on a synthesized wildcard answer, as on a hit.
                     let rcode = if hit.kind == DenialKind::Wildcard
                         && shared.sentinel_refuses(
                             qname,
@@ -1549,7 +1546,7 @@ impl ForwardSink for Forwarder {
                     } else {
                         hit.rcode
                     };
-                    return Intake::Synthesised {
+                    return Intake::Synthesized {
                         rcode: u16::from(rcode),
                         validation: Some(if hit.kind == DenialKind::NxdomainCut {
                             SecurityState::Insecure
@@ -1611,7 +1608,7 @@ async fn housekeeping(shared: Arc<Shared>, stop: CancellationToken) {
             recursion_housekeeping(&shared, engine, &mut priming);
         }
         // WP10.2: the anchors follow the rows, the key table's gauge is set, and the
-        // signalling query goes once a day.
+        // signaling query goes once a day.
         if let Some(nta_zones) = shared.anchors.refresh(&shared.catalog.load()) {
             // The zone states made under the old anchors (the key table and the DS slots
             // of the infrastructure cache) are forgotten, and so are the answers cached

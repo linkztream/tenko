@@ -154,13 +154,13 @@ describe("the DNS settings page", () => {
   });
 
   it("lists the problems the node reports", async () => {
-    dnsResolverState().problems.push("stub zone lab.example.test: no name server could be learnt");
+    dnsResolverState().problems.push("stub zone lab.example.test: no name server could be learned");
     open();
     await loaded();
     const notice = screen.getByTestId("dns-settings-problems");
     expect(notice.textContent).toContain("The node reports problems:");
     expect(within(notice).getAllByTestId("dns-settings-problem").map((p) => p.textContent)).toEqual([
-      "stub zone lab.example.test: no name server could be learnt",
+      "stub zone lab.example.test: no name server could be learned",
     ]);
   });
 
@@ -257,7 +257,7 @@ describe("the DNS settings page", () => {
   });
 
   it("has no accessibility violations", async () => {
-    dnsResolverState().problems.push("stub zone lab.example.test: no name server could be learnt");
+    dnsResolverState().problems.push("stub zone lab.example.test: no name server could be learned");
     const { container } = open();
     await loaded();
     expect(await axeViolations(container)).toEqual([]);

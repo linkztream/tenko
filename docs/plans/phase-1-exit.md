@@ -21,12 +21,12 @@ Status is one of: met, met with deviation, waiting for the owner, waiting for th
 
 | # | Check | Requirements | Status | Evidence | Left for WP3.8b |
 |---|---|---|---|---|---|
-| E1 | The owner's spreadsheet is imported, loss report empty or acknowledged; its CSV export re-imported into an empty instance previews zero changes | IPAM-11, MIG-14 | Met | `crates/tenko/tests/acceptance_import.rs` (round trip, zero changes); `crates/tenko-ipam/tests/{import_fixture,import_perf}.rs`; `ui/e2e/import.spec.ts`. The real file is never in the repository (API-13); the fixture is its anonymised replica ([import-fixtures.md](import-fixtures.md)) | Optional: import the real file once and acknowledge its loss report (section 6.1) |
+| E1 | The owner's spreadsheet is imported, loss report empty or acknowledged; its CSV export re-imported into an empty instance previews zero changes | IPAM-11, MIG-14 | Met | `crates/tenko/tests/acceptance_import.rs` (round trip, zero changes); `crates/tenko-ipam/tests/{import_fixture,import_perf}.rs`; `ui/e2e/import.spec.ts`. The real file is never in the repository (API-13); the fixture is its anonymized replica ([import-fixtures.md](import-fixtures.md)) | Optional: import the real file once and acknowledge its loss report (section 6.1) |
 | E2 | Passkey login over HTTPS on the configured host name (platform authenticator and hardware key) in each TLS mode of OPS-22; TOTP and PIN preset pass end to end | IAM-03, IAM-06, IAM-09, OPS-22 | Waiting for the owner | Automated: `crates/tenko/tests/acceptance_signin.rs` (PIN, TOTP and a passkey from a software authenticator, in the TLS modes the test can start itself); `ui/e2e/sign-in.spec.ts` (Chromium virtual authenticator); `acceptance_ca_root.rs` (internal CA root and fingerprint) | A hardware key, a platform authenticator, an imported certificate in a browser, and HAProxy in front (section 6.2) |
 | E3 | OpenAPI served and committed under `docs/api/`; CI fails on drift | API-01 | Met | `crates/tenko/tests/acceptance_openapi.rs`; `docs/api/openapi.json`; the drift step of the `ui` and embedded-UI CI jobs | Re-run on the final build (section 7) |
 | E4 | Three LANs and the DMZ scanned, one probe each; compose lab inventory matches its answer key | SCAN-01 to SCAN-09 | Waiting for the owner | `crates/tenko/tests/{node_scan,node_cluster}.rs`; `crates/tenko-scan` (265 tests at WP2.3); `ui/e2e/{scans,nodes}.spec.ts`; [scanning.md](../scanning.md) | Probes in the four segments (section 6.3). The compose topology with an answer key does not exist in the tree (deviation, scanning) |
-| E5 | Proxmox and HASS inventory visible in IPAM | CONN-02 to CONN-04 | Waiting for the owner | `crates/tenko-connect-{proxmox,hass}` (24 and 61 tests, conformance); product run against mocks: 15 host facts, 7 VM-to-host edges, 11 then 21 proposals; `ui/e2e/{connectors,discovery}.spec.ts`. Home Assistant live smoke of 2026-10-16: health Healthy, 106 hosts from 360 devices; its anonymised recording is `crates/tenko-connect-hass/tests/fixtures/recorded.json` (`044cc83`) | The Proxmox ACL, the Proxmox live smoke and recording, both inventories visible in IPAM on the owner's instance (section 6.4) |
-| E6 | Topology shows UniFi switches and APs with clients | IPAM-20, CONN-05 | Waiting for the owner | `crates/tenko-connect-unifi/tests/{read,conformance}.rs`; `crates/tenko-ipam/tests/topology.rs`; stand-in controller run: 32 observations, 13 topology nodes, 12 edges. Live reads of 2026-10-16: first with an Integration API key (6 devices, 5 uplinks, 60 clients, reduced topology without ports, networks, port profiles or SSIDs), then with the local view-only account through the classic API (the full read: 122 ports, 9 uplinks, 7 links, 61 clients, 6 networks, 2 port profiles, 1 WLAN); the anonymised recordings are under `crates/tenko-connect-unifi/tests/fixtures/recorded/` with `tests/recorded.rs` (`044cc83`) | The topology map in the UI against the live controller (section 6.5) |
+| E5 | Proxmox and HASS inventory visible in IPAM | CONN-02 to CONN-04 | Waiting for the owner | `crates/tenko-connect-{proxmox,hass}` (24 and 61 tests, conformance); product run against mocks: 15 host facts, 7 VM-to-host edges, 11 then 21 proposals; `ui/e2e/{connectors,discovery}.spec.ts`. Home Assistant live smoke of 2026-10-16: health Healthy, 106 hosts from 360 devices; its anonymized recording is `crates/tenko-connect-hass/tests/fixtures/recorded.json` (`044cc83`) | The Proxmox ACL, the Proxmox live smoke and recording, both inventories visible in IPAM on the owner's instance (section 6.4) |
+| E6 | Topology shows UniFi switches and APs with clients | IPAM-20, CONN-05 | Waiting for the owner | `crates/tenko-connect-unifi/tests/{read,conformance}.rs`; `crates/tenko-ipam/tests/topology.rs`; stand-in controller run: 32 observations, 13 topology nodes, 12 edges. Live reads of 2026-10-16: first with an Integration API key (6 devices, 5 uplinks, 60 clients, reduced topology without ports, networks, port profiles or SSIDs), then with the local view-only account through the classic API (the full read: 122 ports, 9 uplinks, 7 links, 61 clients, 6 networks, 2 port profiles, 1 WLAN); the anonymized recordings are under `crates/tenko-connect-unifi/tests/fixtures/recorded/` with `tests/recorded.rs` (`044cc83`) | The topology map in the UI against the live controller (section 6.5) |
 | E7 | A VLAN created in IPAM exists in UniFi after dry run and read-back diff | IPAM-03, CONN-06, CONN-08 | Waiting for the owner | `crates/tenko-connect-unifi/tests/write.rs` (fake controller over pinned TLS); `crates/tenko-ipam/tests/vlan_provision.rs`; [topology.md](../topology.md) section 8 | The live write, only on the owner's explicit go (section 6.6); before it, the two shapes the recordings showed (deviation 44) |
 | E8 | IoT device moved by drag and drop with manual DHCP and DNS steps; five-device lab | IPAM-19, CONN-09, CON-10 | Waiting for the owner | `crates/tenko/tests/acceptance_move.rs` (manual steps, cancel and rollback); `crates/tenko-ipam/tests/{moves,move_l2}.rs`; `ui/e2e/move.spec.ts`; [moves.md](../moves.md) | The five-device lab against the live controller, only on the owner's go (section 6.7) |
 | E9 | A 3-node cluster loses a controller: writes resume, no committed write lost, SSE clients and probes reconnect | OPS-03, OPS-04 | Met with deviation | `crates/tenko/tests/acceptance_cluster.rs` (E9 on the one-machine lab: three real processes, an SSE client and a probe; no HAProxy); `crates/tenko/tests/cluster_{smoke_grow,failover,partition,membership,observability}.rs`; compose lab `deploy/compose/lab-cluster/smoke.sh` (HAProxy in front, passes in WSL); M3 one host: 20 of 20 runs, writes resumed after 1.59 to 2.00 s ([results](../../bench/phase1-cluster/results/2026-10-15-cluster-lab.md)) | The same on three VMs (section 6.8). `acceptance_partition.rs` covers OPS-26 |
@@ -88,7 +88,7 @@ Grouped by area. "Status" means a row or follow-up paragraph of [phase-1-status.
 
 12. `password_change_required` is enforced by the UI only; API enforcement was a Slice 2 item and is not recorded as done. Recorded in the Follow-ups list.
 13. M13 passes with a thin margin: 1.36x of the 1.5x limit for a list when the grants cover every host, and 0.88 of one core for 1,000 scoped SSE streams. Recorded in the WP3.2 row and the M13 results file.
-14. `list_where` checks the cursor after the scope check; moving the cursor first is an optimisation left for the lead. Recorded in the WP3.2 row.
+14. `list_where` checks the cursor after the scope check; moving the cursor first is an optimization left for the lead. Recorded in the WP3.2 row.
 15. The import credential gate checks the importing account, requires `Create` and `Reveal` on secrets, and so only an administrator with a password-or-stronger session imports credentials; a dedicated action is considered when the vault has its own API. Recorded in the Follow-ups list (WP1.5, WP2.1) and the WP3.12b row.
 16. Hardened deployments load vendor attestation roots by hand; the FIDO Metadata Service (MDS3) is deferred by S3-Q16. Recorded in the Follow-ups list and slice-3-plan section 7.
 17. Viewers keep reading the audit log through the system kind; an installation that wants the trail read by someone who does not see the inventory gives that person the `auditor` role and no other. Recorded in [access.md](../access.md) section 9 and the follow-ups of the wave-2 merges.
@@ -130,14 +130,14 @@ Grouped by area. "Status" means a row or follow-up paragraph of [phase-1-status.
 38. Some UI tests assert the Swedish rendering of keys; revisit when language packs are the only source. Recorded in the Follow-ups list.
 39. The guardrails page has text fields for device and network identifiers, no picker; a pending data format migration is tested with mocks only. Recorded in the WP3.11d row.
 40. The backup stale and failed states have end-to-end cases on faked routes since WP3.8a (`ui/e2e/backup.spec.ts`); the step-up refusal still has component tests only; `DashboardUpdates.test.tsx` is timing-sensitive under load. Recorded in the WP3.11c row.
-41. A cancelled move job ends `cancelled`, not `rolled_back`, although its compensation ran; the jobs view should present it as rolled back by cancellation. Recorded in the Follow-ups list.
+41. A canceled move job ends `canceled`, not `rolled_back`, although its compensation ran; the jobs view should present it as rolled back by cancellation. Recorded in the Follow-ups list.
 42. `rawRequest` ignores `ifMatch` on POST (the proposal decisions work around it), `ui/src/api/client.ts` should accept a Blob body, and the `.latest` rethrow pattern of older views should become one guard in `api/live.ts`. Recorded in the Follow-ups list (WP2.9, WP2.10, WP3.0).
 43. Several unchanged files under `ui/src/auth/account/` and `ui/src/settings/` are CRLF on disk while the index holds LF; a `.gitattributes` rule for `*.ts` and `*.tsx` would settle it. Recorded in the Follow-ups list (WP2.12).
 
 ### Connectors
 
-44. UniFi, live part: the first read of 2026-10-16 used a local Integration API key only and gave a reduced topology (no ports, networks, port profiles or SSIDs; [connectors-unifi.md](../connectors-unifi.md) section 7.2). The same morning the local view-only account existed and the classic API gave the full read; the anonymised recordings exist since `044cc83`. They showed two shapes of Network Application 10.6 the writes must cope with before E7: ports are configured inline without `portconf_id`, and `rest/user` carries no `virtual_network_override_*` members until an override is set; the recorded site also reports every network with DHCP off, because it has no UniFi gateway. E6 in the UI against the live controller is WP3.8b; E7 and E8 wait for the owner's go. Recorded in the UniFi bullet of the Follow-ups list and connectors-unifi.md sections 3 and 13.
-45. Proxmox and Home Assistant: the Home Assistant live smoke ran on 2026-10-16 and its anonymised recording exists since `044cc83`; the Proxmox token answers but holds no ACL (needs `PVEAuditor` on `/` for the token and its user), so the Proxmox live smoke, its recording and real proposal counts follow. Recorded in the WP2.5 bullet of the Follow-ups list.
+44. UniFi, live part: the first read of 2026-10-16 used a local Integration API key only and gave a reduced topology (no ports, networks, port profiles or SSIDs; [connectors-unifi.md](../connectors-unifi.md) section 7.2). The same morning the local view-only account existed and the classic API gave the full read; the anonymized recordings exist since `044cc83`. They showed two shapes of Network Application 10.6 the writes must cope with before E7: ports are configured inline without `portconf_id`, and `rest/user` carries no `virtual_network_override_*` members until an override is set; the recorded site also reports every network with DHCP off, because it has no UniFi gateway. E6 in the UI against the live controller is WP3.8b; E7 and E8 wait for the owner's go. Recorded in the UniFi bullet of the Follow-ups list and connectors-unifi.md sections 3 and 13.
+45. Proxmox and Home Assistant: the Home Assistant live smoke ran on 2026-10-16 and its anonymized recording exists since `044cc83`; the Proxmox token answers but holds no ACL (needs `PVEAuditor` on `/` for the token and its user), so the Proxmox live smoke, its recording and real proposal counts follow. Recorded in the WP2.5 bullet of the Follow-ups list.
 46. No end-to-end host test of the undo refusal (`check_undo` is unit tested); the once-per-interval poll timing is not timed in a test. Recorded in the WP3.12a row.
 47. A VLAN provision that asks for DHCP relay stops at the plan on UniFi, because the classic API shows no relay targets to verify. SSID writes (CONN-18) come in Phase 2. Recorded in the Follow-ups list and slice-3-plan section 1.5.
 48. The management flag of ports and clients is not shown in the topology port table or the UI. Recorded in the Follow-ups list.
@@ -212,10 +212,10 @@ Counts per group: store and cluster 11, authorization 6, audit 1, vault and back
 
 `- [x]` is met, `- [ ]` is not yet. A line is checked only when its criterion is met or met with deviation.
 
-- [x] The existing IPAM spreadsheet is imported. E1. Proven on the anonymised replica of the file; the real file is imported once in section 6.1 if the owner wants it on record.
-- [ ] All four networks (three LANs plus the DMZ) are scanned, with one probe per segment. E4. Waiting for the owner; the scanner, enrolment and on-demand scans are built and tested.
+- [x] The existing IPAM spreadsheet is imported. E1. Proven on the anonymized replica of the file; the real file is imported once in section 6.1 if the owner wants it on record.
+- [ ] All four networks (three LANs plus the DMZ) are scanned, with one probe per segment. E4. Waiting for the owner; the scanner, enrollment and on-demand scans are built and tested.
 - [ ] Proxmox and Home Assistant inventory is visible in IPAM. E5. Waiting for the owner; proven against mocks.
-- [ ] The topology map shows the UniFi switches and APs with connected clients. E6. Waiting for the owner; the full read through the classic API and the anonymised recordings exist; the map in the UI against the live controller is the WP3.8b step.
+- [ ] The topology map shows the UniFi switches and APs with connected clients. E6. Waiting for the owner; the full read through the classic API and the anonymized recordings exist; the map in the UI against the live controller is the WP3.8b step.
 - [ ] A VLAN created in IPAM exists in UniFi. E7. Waiting for the owner and the explicit go; proven against the fake controller.
 - [ ] An IoT device can be moved to a new VLAN by drag and drop, with manual DHCP and DNS steps. E8. Waiting for the owner and the explicit go; the manual flow is proven in `acceptance_move.rs`.
 - [x] A 3-node cluster survives loss of a controller. E9. Met on the lab (20 of 20 kills, no committed write lost); the run on three VMs moved to Phase 5 (deviation 74).
@@ -224,7 +224,7 @@ Counts per group: store and cluster 11, authorization 6, audit 1, vault and back
 
 ## 6. What the owner runs (WP3.8b)
 
-Placeholders: `<host-name>` is the name clients use for the controller, `<admin>` an administrator login, `<ca-root.pem>` the CA root file, `<token>` an enrolment token, `<sha256>` a CA fingerprint, `<segment-prefix>` a prefix such as `192.0.2.0/24`, `<unifi-url>`, `<proxmox-url>`, `<hass-url>` the base URLs of those systems. Nothing here needs a secret typed into a chat: credentials go into the vault or the owner's `.env`.
+Placeholders: `<host-name>` is the name clients use for the controller, `<admin>` an administrator login, `<ca-root.pem>` the CA root file, `<token>` an enrollment token, `<sha256>` a CA fingerprint, `<segment-prefix>` a prefix such as `192.0.2.0/24`, `<unifi-url>`, `<proxmox-url>`, `<hass-url>` the base URLs of those systems. Nothing here needs a secret typed into a chat: credentials go into the vault or the owner's `.env`.
 
 Where a command does not exist yet, the row says so. Nothing is invented.
 
@@ -254,8 +254,8 @@ Commands, from [cluster.md](../cluster.md) sections 1.1, 1.2 and 1.5 and [scanni
 
 ```
 tenko login --url https://<host-name>:8443 --ca-file <ca-root.pem> --user <admin>
-tenko node enrol-token --roles probe --name <probe-name> --expires-in 3600
-tenko node enrol --controller https://<host-name>:8443 --token <token> --ca-fingerprint <sha256> --address <probe-address> --data-dir /var/lib/tenko
+tenko node enroll-token --roles probe --name <probe-name> --expires-in 3600
+tenko node enroll --controller https://<host-name>:8443 --token <token> --ca-fingerprint <sha256> --address <probe-address> --data-dir /var/lib/tenko
 tenko serve --roles probe --data-dir /var/lib/tenko
 tenko node status --check --data-dir /var/lib/tenko
 tenko node scan run arp --target <segment-prefix> --dry-run
@@ -291,12 +291,12 @@ TENKO_LIVE_UNIFI=1 cargo nextest run -p tenko-connect-unifi --run-ignored all li
 ```
 
 The smoke reads `UNIFI_URL`, `UNIFI_USER` with `UNIFI_PASSWORD` (or `UNIFI_LOCAL_API_KEY`) and optionally `UNIFI_SITE` and `UNIFI_TLS_FINGERPRINT` from `.env`, and writes nothing. Create the instance with `tls = fingerprint`, read the fingerprint from the degraded health detail, compare it with the controller's own display, then set `tls_fingerprint`. The map is `/topology` in the UI and `GET /api/v1/topology`.
-Pass: switches and access points with their clients on the map. The read and the anonymised recordings were made on 2026-10-16 (`044cc83`); the recorder in `tests/live.rs` runs again with `TENKO_RECORD=1` ([connectors-unifi.md](../connectors-unifi.md) section 12).
+Pass: switches and access points with their clients on the map. The read and the anonymized recordings were made on 2026-10-16 (`044cc83`); the recorder in `tests/live.rs` runs again with `TENKO_RECORD=1` ([connectors-unifi.md](../connectors-unifi.md) section 12).
 
 ### 6.6 E7: the VLAN write
 
 Inputs: the explicit go; an account with a role that may manage networks; a free VLAN id and name.
-Commands: there is no CLI. Use the UI, or `POST /api/v1/vlans/provision?dry_run=true`, read the preview and the read-back diff, then submit the same body without `dry_run` (schemas `VlanProvisionRequest` and `NewVlan` in `docs/api/openapi.json`; behaviour in [topology.md](../topology.md) section 8). The instance needs `writes_enabled` ([connectors-unifi.md](../connectors-unifi.md) section 5.4).
+Commands: there is no CLI. Use the UI, or `POST /api/v1/vlans/provision?dry_run=true`, read the preview and the read-back diff, then submit the same body without `dry_run` (schemas `VlanProvisionRequest` and `NewVlan` in `docs/api/openapi.json`; behavior in [topology.md](../topology.md) section 8). The instance needs `writes_enabled` ([connectors-unifi.md](../connectors-unifi.md) section 5.4).
 Pass: the network exists on the controller after the job; the verification step shows an empty diff; the job can be rolled back from its receipt.
 
 ### 6.7 E8: the IoT move
@@ -308,7 +308,7 @@ Pass: the `static` device stops at its manual step; a blocked observation rolls 
 ### 6.8 E9 on three VMs (moved to Phase 5, deviation 74)
 
 Inputs: three Linux VMs (2 vCPU, 4 GB, SSD-backed disks, one network) with the final binary.
-Commands, from [cluster.md](../cluster.md) section 12.1. The controller token is created on the Cluster page of the UI or with `POST /api/v1/nodes/enrolments` and `{"roles": ["controller"]}` in a session signed in within the last five minutes; `tenko node enrol-token` cannot do it, because a personal API token is refused with 403 `auth.step_up_required`.
+Commands, from [cluster.md](../cluster.md) section 12.1. The controller token is created on the Cluster page of the UI or with `POST /api/v1/nodes/enrollments` and `{"roles": ["controller"]}` in a session signed in within the last five minutes; `tenko node enroll-token` cannot do it, because a personal API token is refused with 403 `auth.step_up_required`.
 
 ```
 # on controllers 2 and 3, with an empty data directory

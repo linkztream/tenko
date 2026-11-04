@@ -6,13 +6,13 @@ import { formatNumber, t } from "../i18n";
 import type { Area } from "./areas";
 import { areaCounts, worst, type FindingArea, type FindingCounts } from "./findings";
 
-/** What an item of the rail carries: a count coloured by the worst severity, or a dot. */
+/** What an item of the rail carries: a count colored by the worst severity, or a dot. */
 export type RailBadge = { kind: "count"; count: number; level: "act" | "review"; label: string } | { kind: "dot"; label: string };
 
 type CountBadge = Extract<RailBadge, { kind: "count" }>;
 const countOf = (badge: RailBadge): CountBadge | undefined => (badge.kind === "count" ? badge : undefined);
 
-/** A count in the fill of its severity (99+ above 99), or a dot; labelled with the count and the area. */
+/** A count in the fill of its severity (99+ above 99), or a dot; labeled with the count and the area. */
 export function RailBadgeView(props: { badge: RailBadge }) {
   return (
     <Show when={countOf(props.badge)} fallback={<span class="badge-dot" data-testid="rail-dot" aria-label={props.badge.label} />}>

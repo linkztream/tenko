@@ -63,7 +63,7 @@ const fn state_code(state: JobState) -> u8 {
         JobState::Succeeded => 4,
         JobState::Failed => 5,
         JobState::RolledBack => 6,
-        JobState::Cancelled => 7,
+        JobState::Canceled => 7,
     }
 }
 

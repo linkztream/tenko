@@ -89,7 +89,7 @@ impl CatalogAnchors {
     }
 
     /// The key tags of the root's trusted keys (the RFC 8509 sentinel and the RFC 8145
-    /// signalling).
+    /// signaling).
     pub fn root_tags(&self) -> Vec<u16> {
         self.snapshot
             .read()

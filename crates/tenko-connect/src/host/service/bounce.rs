@@ -15,7 +15,7 @@
 //!    back (the plan's diff and its way back up) and when the port is due up, together with
 //!    the audit record `connect.port.bounce`.
 //! 3. A task of the host, not of the caller, sends the down, waits `down_secs` and sends
-//!    the up, whatever happens to the caller (a job that times out, is cancelled or fails
+//!    the up, whatever happens to the caller (a job that times out, is canceled or fails
 //!    drops only its wait for the report).
 //! 4. The up is planned, written and read back like any write; the record is removed only
 //!    when the read-back shows the port up, with the audit record `connect.port.enable`.

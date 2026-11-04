@@ -163,8 +163,8 @@ export function SecretFormDialog(props: {
           <Show when={pinCoupling()}>
             <Notice kind="warn" role="alert" title={t("secrets.form.pin_title")} testid="secret-pin-coupling">
               <p>{errorMessage(error())}</p>
-              <A class="btn sm" href={paths.account("security")} data-testid="secret-pin-coupling-enrol">
-                {t("secrets.form.pin_enrol")}
+              <A class="btn sm" href={paths.account("security")} data-testid="secret-pin-coupling-enroll">
+                {t("secrets.form.pin_enroll")}
               </A>
             </Notice>
           </Show>

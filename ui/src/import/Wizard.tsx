@@ -19,7 +19,7 @@ import { ResultStep } from "./steps/ResultStep";
 import { UploadStep } from "./steps/UploadStep";
 import "./import.css";
 
-const FINAL = new Set(["succeeded", "failed", "rolled_back", "cancelled"]);
+const FINAL = new Set(["succeeded", "failed", "rolled_back", "canceled"]);
 
 export default function Wizard() {
   const [params, setParams] = useSearchParams();

@@ -80,7 +80,7 @@ export interface PlacedNode {
   kind: NodeKind | "group";
   /** For a group: the empty string (the view renders a translated count). */
   label: string;
-  /** Centre in px. The top left of the whole drawing is (0, 0) plus a margin of colGap/2 and rowGap/2. */
+  /** Center in px. The top left of the whole drawing is (0, 0) plus a margin of colGap/2 and rowGap/2. */
   x: number;
   y: number;
   /** The row of the node in its tree (roots 0). Leaf rows do not change it. */
@@ -164,7 +164,7 @@ interface Slot {
   members?: string[];
   bucket?: string;
   /** Distinct nodes joined to this one by a valid edge. */
-  neighbours: Set<Slot>;
+  neighbors: Set<Slot>;
   /** Tree children in discovery order. */
   children: Slot[];
   /** Whether this is a leaf of its parent (placed in the grid of the parent). */
@@ -190,7 +190,7 @@ function newSlot(id: string, kind: NodeKind | "group", label: string): Slot {
     label,
     depth: 0,
     parent: null,
-    neighbours: new Set(),
+    neighbors: new Set(),
     children: [],
     leaf: false,
     leaves: [],
@@ -216,7 +216,7 @@ function byLabel(a: Slot, b: Slot): number {
 
 /** Descending degree, then label, then id. */
 function byDegree(a: Slot, b: Slot): number {
-  return b.neighbours.size - a.neighbours.size || byLabel(a, b);
+  return b.neighbors.size - a.neighbors.size || byLabel(a, b);
 }
 
 /** Infrastructure first, then hypervisors, then everything else. */
@@ -290,8 +290,8 @@ export function layout(
     const b = slots.get(edge.b);
     if (!a || !b || a === b || edgeIds.has(edge.id)) continue;
     edgeIds.add(edge.id);
-    a.neighbours.add(b);
-    b.neighbours.add(a);
+    a.neighbors.add(b);
+    b.neighbors.add(a);
     kept.push(edge);
     const key = pairKey(edge.a, edge.b);
     const list = between.get(key);
@@ -306,7 +306,7 @@ export function layout(
   const unplaced: string[] = [];
   if (options.gatherUnplaced === true) {
     for (const slot of [...slots.values()]) {
-      if (slot.neighbours.size === 0 && isGatherable(slot.kind)) {
+      if (slot.neighbors.size === 0 && isGatherable(slot.kind)) {
         unplaced.push(slot.id);
         slots.delete(slot.id);
       }
@@ -335,9 +335,9 @@ export function layout(
     while (head < order.length) {
       const slot = order[head++] as Slot;
       // A server is no uplink of a network device unless an lldp or uplink edge says so; such
-      // a neighbour is reached from elsewhere or becomes a root of its own.
+      // a neighbor is reached from elsewhere or becomes a root of its own.
       const server = !isInfrastructure(slot.kind);
-      const fresh = [...slot.neighbours]
+      const fresh = [...slot.neighbors]
         .filter((n) => !visited.has(n))
         .filter((n) => !(server && isInfrastructure(n.kind)) || linked.has(pairKey(slot.id, n.id)))
         .sort(byVisit);

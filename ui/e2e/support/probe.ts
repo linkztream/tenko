@@ -1,5 +1,5 @@
 // A second `tenko` process enrolled as a probe node (docs/cluster.md): a data directory of
-// its own, `tenko node enrol` with a token and the controller's CA fingerprint, then
+// its own, `tenko node enroll` with a token and the controller's CA fingerprint, then
 // `tenko serve --roles probe`, which connects to the cluster port of the controller over
 // mutual TLS and heartbeats. The node has no `[scan]` prefixes, so it scans nothing; a test
 // that needs observations from it queues a batch with `tenko node inject` (the diagnostic
@@ -17,7 +17,7 @@ import type { TenkoServer } from "./server";
 /** How long a node may take to start, to connect or to notice something. */
 const NODE_TIMEOUT_MS = 60_000;
 
-export interface EnrolOptions {
+export interface EnrollOptions {
   /** `--name`; the token's name wins when it has one. */
   name?: string;
   /** `--address`, the address the controller shows (a documentation address). */
@@ -52,11 +52,11 @@ export class ProbeNode {
     return runTenko([...args, "--data-dir", this.dataDir], { cwd: this.root });
   }
 
-  /** `tenko node enrol` against `controller` with `token`; returns the result as it is. */
-  enrol(controller: TenkoServer, token: string, options: EnrolOptions = {}): Promise<RunResult> {
+  /** `tenko node enroll` against `controller` with `token`; returns the result as it is. */
+  enroll(controller: TenkoServer, token: string, options: EnrollOptions = {}): Promise<RunResult> {
     return this.run([
       "node",
-      "enrol",
+      "enroll",
       "--controller",
       controller.url,
       "--token",

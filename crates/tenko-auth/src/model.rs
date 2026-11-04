@@ -441,9 +441,10 @@ pub struct SessionRecord {
     #[serde(default)]
     pub break_glass: bool,
     /// The profile requires a second factor that the user has not enrolled yet; the
-    /// session may only enrol factors.
-    #[serde(default)]
-    pub mfa_enrolment_required: bool,
+    /// session may only enroll factors.
+    // Stored sessions of 0.0.11 carry the old name.
+    #[serde(default, alias = "mfa_enrolment_required")] // spelling: alias permanently
+    pub mfa_enrollment_required: bool,
 }
 
 /// A personal API token (IAM-10). Stored under the SHA-256 of the token.
@@ -545,4 +546,50 @@ pub struct AlarmRecord {
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub source_ip: Option<IpAddr>,
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_core::{AuthStrength, SessionId, Timestamp, UserId};
+
+    use super::{SESSIONS, SessionRecord};
+
+    #[test]
+    fn a_session_stored_by_0_0_11_keeps_its_enrollment_restriction() {
+        let at: Timestamp = "2026-10-10T08:00:00Z".parse().expect("time");
+        let record = SessionRecord {
+            id: SessionId::generate(),
+            user: UserId::generate(),
+            strength: AuthStrength::Password,
+            created_at: at,
+            authenticated_at: at,
+            expires_at: at,
+            idle_expires_at: at,
+            last_seen_at: at,
+            source_ip: None,
+            user_agent: None,
+            break_glass: false,
+            mfa_enrollment_required: true,
+        };
+        let new = SESSIONS.encode(&record).expect("cbor").to_vec();
+        // The bytes 0.0.11 wrote: the same map with the CBOR text key of the old name
+        // (major type 3, the length in the header byte).
+        let text = |key: &str| {
+            let mut out = vec![0x60 | u8::try_from(key.len()).expect("short")];
+            out.extend_from_slice(key.as_bytes());
+            out
+        };
+        let new_key = text("mfa_enrollment_required");
+        let old_key = text("mfa_enrolment_required"); // spelling: alias permanently
+        let at = new
+            .windows(new_key.len())
+            .position(|window| window == new_key)
+            .expect("the key");
+        let mut old = new[..at].to_vec();
+        old.extend_from_slice(&old_key);
+        old.extend_from_slice(&new[at + new_key.len()..]);
+        let read = SESSIONS.decode(&old).expect("an old session decodes");
+        assert!(read.mfa_enrollment_required);
+        assert_eq!(read, record);
+    }
 }

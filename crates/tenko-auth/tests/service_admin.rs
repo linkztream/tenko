@@ -29,7 +29,7 @@ use tenko_auth::{
     roles::RoleName,
     service::{
         BreakGlassChange, CodeLogin, PasswordChange, PasswordLogin, SecuritySettingsView,
-        SetupAdmin, SetupRequest, TokenCreate, TotpEnrolFinish, UserCreate, UserInfo, UserUpdate,
+        SetupAdmin, SetupRequest, TokenCreate, TotpEnrollFinish, UserCreate, UserInfo, UserUpdate,
         WebAuthnLoginFinish, WebAuthnLoginStart, WebAuthnRegisterFinish, WebAuthnRegisterStart,
         types::SecretString,
     },
@@ -159,24 +159,24 @@ async fn audit_of(env: &TestEnv, action: &str) -> Vec<AuditRecord> {
         .collect()
 }
 
-async fn enrol_totp(env: &TestEnv, ctx: &RequestCtx) -> Vec<u8> {
+async fn enroll_totp(env: &TestEnv, ctx: &RequestCtx) -> Vec<u8> {
     let start = env
         .service
-        .totp_enrol_start(ctx)
+        .totp_enroll_start(ctx)
         .await
-        .expect("enrolment starts");
+        .expect("enrollment starts");
     let seed = base32_decode(start.secret.expose()).expect("a base32 seed");
     let code = totp::code_at(&seed, &TotpParams::default(), unix_seconds(env));
     env.service
-        .totp_enrol_finish(
+        .totp_enroll_finish(
             ctx,
-            &TotpEnrolFinish {
-                enrolment_id: start.enrolment_id,
+            &TotpEnrollFinish {
+                enrollment_id: start.enrollment_id,
                 code: SecretString::new(code.as_str()),
             },
         )
         .await
-        .expect("enrolment finishes");
+        .expect("enrollment finishes");
     seed
 }
 
@@ -207,7 +207,7 @@ async fn totp_login(env: &TestEnv, user: &str, password: &str, seed: &[u8]) -> N
 /// A Standard installation and a two-factor session of its administrator.
 async fn standard_with_strong_admin() -> (TestEnv, NewSession) {
     let (env, setup) = TestEnv::installed(Profile::Standard).await;
-    let seed = enrol_totp(&env, &ctx(&env, &setup).await).await;
+    let seed = enroll_totp(&env, &ctx(&env, &setup).await).await;
     let strong = totp_login(&env, ADMIN, ADMIN_PASSWORD, &seed).await;
     assert_eq!(strong.info.strength, AuthStrength::PasswordTotp);
     (env, strong)
@@ -989,7 +989,7 @@ async fn deleting_a_user_removes_their_sessions_tokens_credentials_and_seed() {
         )
         .await
         .expect("token");
-    enrol_totp(&env, &carol_ctx).await;
+    enroll_totp(&env, &carol_ctx).await;
     let mut key = SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::None);
     register_passkey(&env, &carol_ctx, &mut key)
         .await
@@ -1330,7 +1330,7 @@ async fn a_standard_administrator_needs_two_factors_for_administration() {
             required: AuthStrength::PasswordTotp
         }
     );
-    let seed = enrol_totp(&env, &weak).await;
+    let seed = enroll_totp(&env, &weak).await;
     let strong = ctx(&env, &totp_login(&env, ADMIN, ADMIN_PASSWORD, &seed).await).await;
     env.service
         .list_users(&strong)
@@ -2773,23 +2773,23 @@ async fn self_service_changes_are_audited_with_the_acting_user() {
     .await
     .expect("password");
 
-    let start = env.service.totp_enrol_start(&me).await.expect("start");
+    let start = env.service.totp_enroll_start(&me).await.expect("start");
     let seed = base32_decode(start.secret.expose()).expect("seed");
     let code = totp::code_at(&seed, &TotpParams::default(), unix_seconds(&env));
     audited(
         &env,
         &actor,
-        "auth.totp.enrol",
-        env.service.totp_enrol_finish(
+        "auth.totp.enroll",
+        env.service.totp_enroll_finish(
             &me,
-            &TotpEnrolFinish {
-                enrolment_id: start.enrolment_id,
+            &TotpEnrollFinish {
+                enrollment_id: start.enrollment_id,
                 code: SecretString::new(code.as_str()),
             },
         ),
     )
     .await
-    .expect("enrol");
+    .expect("enroll");
     audited(
         &env,
         &actor,

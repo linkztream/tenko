@@ -77,7 +77,7 @@ pub struct AuthFlags {
     /// The user must change the password before doing anything else.
     pub password_change_required: bool,
     /// The profile requires a second factor that the user has not enrolled yet.
-    pub mfa_enrolment_required: bool,
+    pub mfa_enrollment_required: bool,
     /// The request is authenticated through the break-glass account.
     pub break_glass: bool,
 }

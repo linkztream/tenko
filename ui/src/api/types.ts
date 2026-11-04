@@ -65,7 +65,7 @@ export type BreachStatus = S["BreachStatus"];
 export type PasswordCheck = S["PasswordCheck"];
 export type PasswordCheckResult = S["PasswordCheckResult"];
 export type PasswordChange = S["PasswordChange"];
-export type TotpEnrolment = S["TotpEnrolment"];
+export type TotpEnrollment = S["TotpEnrollment"];
 export type FactorEnrolled = S["FactorEnrolled"];
 export type AttestationKind = S["AttestationKind"];
 export type CredentialInfo = S["CredentialInfo"];
@@ -276,7 +276,7 @@ export const JOB_STATES: readonly JobState[] = [
   "succeeded",
   "failed",
   "rolled_back",
-  "cancelled",
+  "canceled",
 ];
 export type AuditRecord = S["AuditRecord"];
 export type AuditDraft = S["AuditDraft"];

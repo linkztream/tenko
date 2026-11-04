@@ -1,6 +1,6 @@
 // The topology map of the mock API through `fetch` against the msw server: the seeded graph
 // and its consistency with the IPAM seed, the filters with the context rule of the server,
-// the limit, the view of one node with its ports, neighbours and intent, the root of the map
+// the limit, the view of one node with its ports, neighbors and intent, the root of the map
 // (UI-Q10), the SSID view with the two WLAN rules and the decisions stored on them.
 import { beforeEach, describe, expect, it } from "vitest";
 import { apiOperations } from "../generated/operations";
@@ -373,8 +373,8 @@ describe("the filters", () => {
 
   it("refuse unknown, repeated and malformed parameters", async () => {
     for (const query of [
-      "colour=blue",
-      "kind=host&colour=blue",
+      "color=blue",
+      "kind=host&color=blue",
       "q=a&q=b",
       "site=" + IPAM_IDS.site.home + "&site=" + IPAM_IDS.site.lab,
       "vlan=10&vlan=20",
@@ -415,8 +415,8 @@ describe("the context of a filter", () => {
     expect(ids(media)).not.toContain(T.buildVm);
   });
 
-  it("keeps the context of a network device whose neighbours are all devices", async () => {
-    // A router has no client: its neighbour is sw-core, and the backbone follows.
+  it("keeps the context of a network device whose neighbors are all devices", async () => {
+    // A router has no client: its neighbor is sw-core, and the backbone follows.
     expect(ids(await graph("?q=udm-pro"))).toEqual(sorted(NETWORK_DEVICES));
   });
 
@@ -485,10 +485,10 @@ describe("GET /topology/nodes/{id}", () => {
     expect(view.revision).toBe(db.revision);
     expect(view.ports.map((p) => p.port)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8"]);
     expect(view.ports[0]).toMatchObject({ port: "1", name: "Port 1", uplink: true, native_vlan: 10, up: true });
-    expect(view.ports[0]?.neighbours).toEqual([
+    expect(view.ports[0]?.neighbors).toEqual([
       { node: T.gateway, label: "gw", kind: "router", edge: expect.stringMatching(/^e-/) as string, edge_kind: "uplink", inferred: false, port: "1", remote_port: "1" },
     ]);
-    const hanging = Object.fromEntries(view.ports.map((p) => [p.port, p.neighbours.map((n) => [n.label, n.edge_kind, n.vlan ?? null])]));
+    const hanging = Object.fromEntries(view.ports.map((p) => [p.port, p.neighbors.map((n) => [n.label, n.edge_kind, n.vlan ?? null])]));
     expect(hanging).toEqual({
       "1": [["gw", "uplink", null]],
       "2": [["pve1", "wired", 10]],
@@ -499,10 +499,10 @@ describe("GET /topology/nodes/{id}", () => {
       "7": [["ap-hall", "uplink", null]],
       "8": [],
     });
-    expect(view.ports[5]?.neighbours[0]).toMatchObject({ port: "6", remote_port: "1" });
-    expect(view.ports[7]).toMatchObject({ port: "8", up: false, uplink: false, neighbours: [] });
-    // The neighbours across every edge, ordered by port.
-    expect(view.neighbours.map((n) => [n.port, n.label])).toEqual([
+    expect(view.ports[5]?.neighbors[0]).toMatchObject({ port: "6", remote_port: "1" });
+    expect(view.ports[7]).toMatchObject({ port: "8", up: false, uplink: false, neighbors: [] });
+    // The neighbors across every edge, ordered by port.
+    expect(view.neighbors.map((n) => [n.port, n.label])).toEqual([
       ["1", "gw"],
       ["2", "pve1"],
       ["3", "nas"],
@@ -518,9 +518,9 @@ describe("GET /topology/nodes/{id}", () => {
       const view = await node(T.swCore, `?port=${port}`);
       expect(view.ports).toHaveLength(1);
       expect(view.ports[0]).toMatchObject({ port: "3", name: "Port 3" });
-      expect(view.ports[0]?.neighbours.map((n) => n.node)).toEqual([T.nas]);
-      // The neighbours of the node stay whole.
-      expect(view.neighbours).toHaveLength(7);
+      expect(view.ports[0]?.neighbors.map((n) => n.node)).toEqual([T.nas]);
+      // The neighbors of the node stay whole.
+      expect(view.neighbors).toHaveLength(7);
     }
     expect((await node(T.swCore, "?port=9")).ports).toEqual([]);
     expect((await node(T.swCore, "?port=")).ports).toHaveLength(8);
@@ -529,10 +529,10 @@ describe("GET /topology/nodes/{id}", () => {
     expect(nas.ports.map((p) => p.port)).toEqual([]);
   });
 
-  it("names the neighbours of an access point across wireless edges and its uplink", async () => {
+  it("names the neighbors of an access point across wireless edges and its uplink", async () => {
     const view = await node(T.apHall);
     expect(view.ports).toEqual([]);
-    expect(view.neighbours.map((n) => [n.label, n.edge_kind, n.ssid ?? null, n.vlan ?? null, n.remote_port ?? null])).toEqual([
+    expect(view.neighbors.map((n) => [n.label, n.edge_kind, n.ssid ?? null, n.vlan ?? null, n.remote_port ?? null])).toEqual([
       ["cam-door", "wireless", TOPOLOGY_SSIDS.iot, 30, null],
       ["plug-kitchen", "wireless", TOPOLOGY_SSIDS.iot, 30, null],
       ["speaker-den", "wireless", TOPOLOGY_SSIDS.iot, 30, null],
@@ -541,7 +541,7 @@ describe("GET /topology/nodes/{id}", () => {
     ]);
     // The ports of the gateway: the table lists both, the second is the uplink to the provider.
     const gw = await node(T.gateway);
-    expect(gw.ports.map((p) => [p.port, p.uplink, p.neighbours.length])).toEqual([
+    expect(gw.ports.map((p) => [p.port, p.uplink, p.neighbors.length])).toEqual([
       ["1", false, 1],
       ["2", true, 0],
     ]);
@@ -550,14 +550,14 @@ describe("GET /topology/nodes/{id}", () => {
   it("names the guests of a hypervisor and the hypervisor of a guest", async () => {
     const pve = await node(T.pve1);
     // No port on this side of any edge: ordered by label.
-    expect(pve.neighbours.map((n) => [n.label, n.edge_kind])).toEqual([
+    expect(pve.neighbors.map((n) => [n.label, n.edge_kind])).toEqual([
       ["build-vm", "vm_host"],
       ["dns-ct", "vm_host"],
       ["media-pc", "vm_host"],
       ["sw-core", "wired"],
     ]);
     expect(pve.ports.map((p) => p.port)).toEqual([]);
-    expect((await node(T.mediaPc)).neighbours).toMatchObject([{ node: T.pve1, edge_kind: "vm_host" }]);
+    expect((await node(T.mediaPc)).neighbors).toMatchObject([{ node: T.pve1, edge_kind: "vm_host" }]);
   });
 
   it("answers the host of intent with its live addresses, network and VLAN", async () => {
@@ -599,7 +599,7 @@ describe("GET /topology/nodes/{id}", () => {
   it("answers 404 for an unknown node and 400 for bad parameters", async () => {
     const missing = expectProblem(await get(`${V}/topology/nodes/m-000000000000`), 404, "ipam.topology.not_found");
     expect(missing.params).toEqual({ id: "m-000000000000" });
-    expectProblem(await get(`${V}/topology/nodes/${T.swCore}?colour=blue`), 400, "sys.invalid_query");
+    expectProblem(await get(`${V}/topology/nodes/${T.swCore}?color=blue`), 400, "sys.invalid_query");
     expectProblem(await get(`${V}/topology/nodes/${T.swCore}?port=1&port=2`), 400, "sys.invalid_query");
     expectProblem(await get(`${V}/topology/nodes/${T.swCore}?at_least=soon`), 400, "sys.invalid_query");
     expect((await get(`${V}/topology/nodes/${T.swCore}?at_least=1`)).status).toBe(200);
@@ -650,9 +650,9 @@ describe("the inferred edges", () => {
     expect(g.edges.find((e) => e.kind === "wired" && e.b === T.nas)).toMatchObject({ inferred: false });
   });
 
-  it("reach the neighbours of the node view", async () => {
+  it("reach the neighbors of the node view", async () => {
     const view = (await get<NodeView>(`${V}/topology/nodes/${T.swCore}`)).body;
-    const byLabel = new Map(view.neighbours.map((n) => [n.label, n.inferred] as const));
+    const byLabel = new Map(view.neighbors.map((n) => [n.label, n.inferred] as const));
     expect(byLabel.get("printer-1")).toBe(true);
     expect(byLabel.get("nas")).toBe(false);
     expect(byLabel.get("gw")).toBe(false);
@@ -799,7 +799,7 @@ describe("the root of the map", () => {
     expectProblem(await send("PUT", `${V}/topology/root`), 400, "sys.invalid_request");
   });
 
-  it("honours If-Match on the stored choice", async () => {
+  it("honors If-Match on the stored choice", async () => {
     topologyState().nextHops = [SW_CORE_IP];
     const first = await chosen("controller");
     const revision = first.body.choice?.revision as number;
@@ -1032,7 +1032,7 @@ describe("the SSID view and the WLAN rules", () => {
     expect((await topology()).map((f) => f.kind)).toEqual(["wlan_class"]);
     tv().ip = "2001:db8:ffff::5";
     expect((await topology()).map((f) => f.kind).sort()).toEqual(["wlan_class", "wlan_prefix"]);
-    // No address, no judgement.
+    // No address, no judgment.
     delete tv().ip;
     expect((await topology()).map((f) => f.kind)).toEqual(["wlan_class"]);
   });
@@ -1161,7 +1161,7 @@ describe("the SSID view and the WLAN rules", () => {
     expect((await send("DELETE", `${V}/topology/ssids/${ssidPath(name)}/policy`)).status).toBe(204);
   });
 
-  it("honours If-Match on a stored policy and exception", async () => {
+  it("honors If-Match on a stored policy and exception", async () => {
     const first = await policy(HOME, "ignore");
     const revision = first.body.revision as number;
     expectProblem(await send("PUT", `${V}/topology/ssids/${ssidPath(HOME)}/policy`, { policy: "track" }, { "if-match": `"${revision + 9}"` }), 412, "ipam.revision_mismatch");

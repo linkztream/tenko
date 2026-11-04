@@ -22,7 +22,7 @@
 //! 3. tests the prerequisites against the index in the scope the client's view chooses;
 //! 4. queues the update for its zone: one task per zone takes what waits, up to
 //!    [`UpdateSettings::max_group`] updates, and plans them as one change set through the
-//!    zone service ([`apply`]), so that updates are serialised per zone and a burst costs
+//!    zone service ([`apply`]), so that updates are serialized per zone and a burst costs
 //!    one commit, not one per update (risk R52);
 //! 5. answers NOERROR only once the index the node answers from holds the commit (waiting
 //!    at most [`UpdateSettings::index_wait`], then SERVFAIL with the extended error "Not

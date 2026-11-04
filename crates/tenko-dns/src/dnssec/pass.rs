@@ -23,7 +23,7 @@
 //! A full pass streams every row of the scope in canonical order (the store keys sort
 //! that way), builds the chain on the way and signs what has no signature it can keep
 //! ([`sign::keeps`]; with `verify`, a kept signature must also verify over the data). An
-//! incremental pass starts from the RRsets that changed: their owners, the chain neighbours
+//! incremental pass starts from the RRsets that changed: their owners, the chain neighbors
 //! whose NSEC must point elsewhere, and for NSEC3 the empty non-terminals above them and the
 //! hashed owners before them in hash order. Both re-sign the changed RRsets and keep the
 //! other signatures. The SOA is not signed here: the pass that writes anything moves the

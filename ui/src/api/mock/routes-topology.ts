@@ -1,6 +1,6 @@
 // The topology map of the mock API (docs/topology.md, WP2.7): `GET /topology` answers the nodes,
 // the edges and a summary with the filters of the server (crates/tenko-ipam/src/topology/
-// filter.rs), `GET /topology/nodes/{id}` one node with its ports, neighbours and intent.
+// filter.rs), `GET /topology/nodes/{id}` one node with its ports, neighbors and intent.
 //
 // The graph is static (topology-store.ts); the filters, the context rule, the truncation, the
 // summary and the node view follow the server. The VLAN and network names and the intent come
@@ -41,7 +41,7 @@ import {
 import { isUuid } from "./util";
 
 type S = components["schemas"];
-type Neighbour = S["Neighbour"];
+type Neighbor = S["Neighbor"];
 type TopologyPort = S["TopologyPort"];
 type TopologyGraph = S["TopologyGraph"];
 type TopologyNodeView = S["TopologyNodeView"];
@@ -156,7 +156,7 @@ function matches(node: TopologyNode, filter: Filter): boolean {
   return true;
 }
 
-/** The neighbours of every node: (edge, other node). */
+/** The neighbors of every node: (edge, other node). */
 function adjacency(edges: readonly TopologyEdge[]): Map<string, string[]> {
   const map = new Map<string, string[]>();
   const push = (from: string, to: string): void => {
@@ -323,10 +323,10 @@ function comparePorts(a: string | null | undefined, b: string | null | undefined
   return ka - kb || na - nb || plainCompare(ta, tb);
 }
 
-/** The neighbours of a node across every edge, ordered by port and label. */
-export function neighboursOf(graph: TopologyState, id: string): Neighbour[] {
+/** The neighbors of a node across every edge, ordered by port and label. */
+export function neighborsOf(graph: TopologyState, id: string): Neighbor[] {
   const nodes = new Map(graph.nodes.map((n) => [n.id, n] as const));
-  const out: Neighbour[] = [];
+  const out: Neighbor[] = [];
   for (const edge of graph.edges) {
     let other: string;
     let port: string | null | undefined;
@@ -336,13 +336,13 @@ export function neighboursOf(graph: TopologyState, id: string): Neighbour[] {
     else continue;
     const node = nodes.get(other);
     if (!node) continue;
-    const neighbour: Neighbour = { node: node.id, label: node.label, kind: node.kind, edge: edge.id, edge_kind: edge.kind };
-    if (port != null) neighbour.port = port;
-    if (remote != null) neighbour.remote_port = remote;
-    if (edge.vlan != null) neighbour.vlan = edge.vlan;
-    if (edge.ssid != null) neighbour.ssid = edge.ssid;
-    if (edge.inferred !== undefined) neighbour.inferred = edge.inferred;
-    out.push(neighbour);
+    const neighbor: Neighbor = { node: node.id, label: node.label, kind: node.kind, edge: edge.id, edge_kind: edge.kind };
+    if (port != null) neighbor.port = port;
+    if (remote != null) neighbor.remote_port = remote;
+    if (edge.vlan != null) neighbor.vlan = edge.vlan;
+    if (edge.ssid != null) neighbor.ssid = edge.ssid;
+    if (edge.inferred !== undefined) neighbor.inferred = edge.inferred;
+    out.push(neighbor);
   }
   return out.sort((a, b) => comparePorts(a.port, b.port) || plainCompare(a.label, b.label) || plainCompare(a.node, b.node));
 }
@@ -355,18 +355,18 @@ function portsOf(graph: TopologyState, id: string, only: string | null): Topolog
   const ports = new Map<string, TopologyPort>();
   for (const entry of graph.ports.get(id) ?? []) {
     const key = String(entry.index);
-    const port: TopologyPort = { port: key, name: entry.name, uplink: entry.uplink, up: entry.up, neighbours: [] };
+    const port: TopologyPort = { port: key, name: entry.name, uplink: entry.uplink, up: entry.up, neighbors: [] };
     if (entry.native_vlan !== null) port.native_vlan = entry.native_vlan;
     ports.set(key, port);
   }
-  for (const neighbour of neighboursOf(graph, id)) {
-    if (neighbour.port == null) continue;
-    let port = ports.get(neighbour.port);
+  for (const neighbor of neighborsOf(graph, id)) {
+    if (neighbor.port == null) continue;
+    let port = ports.get(neighbor.port);
     if (!port) {
-      port = { port: neighbour.port, uplink: false, neighbours: [] };
-      ports.set(neighbour.port, port);
+      port = { port: neighbor.port, uplink: false, neighbors: [] };
+      ports.set(neighbor.port, port);
     }
-    port.neighbours.push(neighbour);
+    port.neighbors.push(neighbor);
   }
   return [...ports.values()]
     .sort((a, b) => comparePorts(a.port, b.port))
@@ -424,7 +424,7 @@ const nodeRoute = route("get", "/api/v1/topology/nodes/{id}", (ctx) => {
   const view: TopologyNodeView = {
     node: structuredClone(node),
     ports: portsOf(graph, id, only),
-    neighbours: neighboursOf(graph, id),
+    neighbors: neighborsOf(graph, id),
     revision: db.revision,
   };
   const intent = node.host ? intentOf(node.host) : null;

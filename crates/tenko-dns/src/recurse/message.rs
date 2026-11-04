@@ -338,7 +338,7 @@ pub enum Step {
         /// their signatures (the proof of a wildcard expansion, RFC 4035 section 3.1.3.3).
         denials: Vec<Rr>,
     },
-    /// A CNAME (or a DNAME's synthesised CNAME) to an alias the server did not answer:
+    /// A CNAME (or a DNAME's synthesized CNAME) to an alias the server did not answer:
     /// the records of the chain so far and the name to go on with.
     Alias {
         /// The chain's records within the zone.
@@ -446,7 +446,7 @@ pub fn classify(parsed: &Parsed, zone: &[u8], qname: &[u8], qtype: u16) -> Step 
             let Some(target) = cname.target() else {
                 return Step::Lame("a CNAME that does not parse");
             };
-            // WP10.2: the DNAME this CNAME was synthesised from, when the server put both
+            // WP10.2: the DNAME this CNAME was synthesized from, when the server put both
             // in the answer (RFC 6672 section 3.3), travels with it for the validator.
             if let Some(dname) = parsed.answer.iter().find(|rr| {
                 rr.rtype == DNAME
@@ -488,7 +488,7 @@ pub fn classify(parsed: &Parsed, zone: &[u8], qname: &[u8], qtype: u16) -> Step 
                 return Step::Lame("a DNAME whose substitution is too long");
             };
             records.extend(rrset_at(&parsed.answer, &dname.owner, DNAME));
-            // The CNAME the DNAME stands for, synthesised here (RFC 6672 section 3.4).
+            // The CNAME the DNAME stands for, synthesized here (RFC 6672 section 3.4).
             records.push(Rr {
                 owner: name.clone(),
                 rtype: CNAME,

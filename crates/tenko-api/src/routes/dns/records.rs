@@ -236,7 +236,7 @@ pub(crate) fn import_report(report: ImportReport) -> ZoneFileImportReport {
     tag = "dns",
     operation_id = "import_dns_zone_file",
     summary = "Import a zone file into a zone",
-    description = "Scope: `dns.write`. `$ORIGIN` and `$TTL` are honoured, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).",
+    description = "Scope: `dns.write`. `$ORIGIN` and `$TTL` are honored, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).",
     params(("id" = String, Path, description = "Zone identifier (UUID)"), DryRunParams),
     request_body(content = ZoneFileImport, content_type = "application/json"),
     responses(

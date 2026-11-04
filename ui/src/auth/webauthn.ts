@@ -111,7 +111,7 @@ export function attestationToJSON(cred: PublicKeyCredential): RegistrationRespon
 }
 
 /** Why a ceremony ended without a credential, in terms the UI can explain. */
-export type CeremonyFailure = "cancelled" | "unsupported" | "insecure" | "exists" | "failed";
+export type CeremonyFailure = "canceled" | "unsupported" | "insecure" | "exists" | "failed";
 
 export class CeremonyError extends Error {
   constructor(readonly reason: CeremonyFailure) {
@@ -122,7 +122,7 @@ export class CeremonyError extends Error {
 
 function classify(err: unknown): CeremonyError {
   if (err instanceof DOMException) {
-    if (err.name === "NotAllowedError" || err.name === "AbortError") return new CeremonyError("cancelled");
+    if (err.name === "NotAllowedError" || err.name === "AbortError") return new CeremonyError("canceled");
     if (err.name === "InvalidStateError") return new CeremonyError("exists");
     if (err.name === "SecurityError") return new CeremonyError("insecure");
     if (err.name === "NotSupportedError") return new CeremonyError("unsupported");
@@ -151,7 +151,7 @@ export async function signInWithPasskey(
   } catch (err) {
     throw classify(err);
   }
-  if (!cred) throw new CeremonyError("cancelled");
+  if (!cred) throw new CeremonyError("canceled");
   return api.post("/api/v1/auth/webauthn/login/finish", {
     body: { ceremony_id: start.ceremony_id, credential: assertionToJSON(cred as PublicKeyCredential) },
   });
@@ -170,7 +170,7 @@ export async function registerPasskey(options: { label?: string; securityKey?: b
   } catch (err) {
     throw classify(err);
   }
-  if (!cred) throw new CeremonyError("cancelled");
+  if (!cred) throw new CeremonyError("canceled");
   return api.post("/api/v1/auth/webauthn/register/finish", {
     body: { ceremony_id: start.ceremony_id, credential: attestationToJSON(cred as PublicKeyCredential) },
   });

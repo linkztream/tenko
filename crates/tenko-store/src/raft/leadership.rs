@@ -9,7 +9,7 @@
 //! # Quorum state
 //!
 //! The sole voter is `Single`. Any other member is `Healthy` while it is in contact with a
-//! quorum: a leader whose last acknowledgement by a quorum (`millis_since_quorum_ack`) is
+//! quorum: a leader whose last acknowledgment by a quorum (`millis_since_quorum_ack`) is
 //! younger than the isolation threshold (`[cluster] isolation_after_ms`), a follower or
 //! learner whose last message from the leader is younger than it. A member without a leader
 //! is `Electing` from the moment it lost the leader. A member that stays out of contact

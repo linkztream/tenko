@@ -386,9 +386,9 @@ impl<'a> Client<'a> {
         id
     }
 
-    fn check_cancelled(&self) -> Result<(), ScanError> {
-        if self.cancel.is_cancelled() {
-            Err(ScanError::cancelled("the SNMP poll was cancelled"))
+    fn check_canceled(&self) -> Result<(), ScanError> {
+        if self.cancel.is_canceled() {
+            Err(ScanError::canceled("the SNMP poll was canceled"))
         } else {
             Ok(())
         }
@@ -413,7 +413,7 @@ impl<'a> Client<'a> {
     async fn acquire(&self) -> Result<Permit, ScanError> {
         tokio::select! {
             biased;
-            () = self.cancel.cancelled() => Err(ScanError::cancelled("the SNMP poll was cancelled")),
+            () = self.cancel.canceled() => Err(ScanError::canceled("the SNMP poll was canceled")),
             permit = self.pacer.acquire(self.target.ip()) => Ok(permit),
         }
     }
@@ -439,8 +439,8 @@ impl<'a> Client<'a> {
         let mut buffer = vec![0u8; 65_535];
         loop {
             let received = tokio::select! {
-                () = self.cancel.cancelled() => {
-                    return Err(ScanError::cancelled("the SNMP poll was cancelled"));
+                () = self.cancel.canceled() => {
+                    return Err(ScanError::canceled("the SNMP poll was canceled"));
                 }
                 result = tokio::time::timeout_at(deadline, self.socket.recv_from(&mut buffer)) => result,
             };
@@ -468,14 +468,14 @@ impl<'a> Client<'a> {
     /// Finds the engine id, boots and time of the device and derives the localized keys.
     ///
     /// # Errors
-    /// `scan.snmp.timeout` when nothing answers, `scan.cancelled`, `scan.io`.
+    /// `scan.snmp.timeout` when nothing answers, `scan.canceled`, `scan.io`.
     pub async fn discover(&mut self) -> Result<(), ScanError> {
         let msg_id = self.next_id();
         let request_id = self.next_id();
         let datagram = discovery_request(msg_id, request_id)?;
         let mut unreachable = false;
         for _ in 0..=self.options.retries {
-            self.check_cancelled()?;
+            self.check_canceled()?;
             let _permit = self.acquire().await?;
             if !self.send(&datagram).await? {
                 unreachable = true;
@@ -664,7 +664,7 @@ impl<'a> Client<'a> {
         let request_id = self.next_id();
         let mut unreachable = false;
         for _ in 0..=self.options.retries {
-            self.check_cancelled()?;
+            self.check_canceled()?;
             let datagram = self.build_request(kind, msg_id, request_id)?;
             let _permit = self.acquire().await?;
             if !self.send(&datagram).await? {
@@ -697,7 +697,7 @@ impl<'a> Client<'a> {
                 "usmStatsUnsupportedSecLevels: the device does not allow the configured security level for user {user:?}"
             )),
             ReportKind::NotInTimeWindows { .. } => auth_error(
-                "usmStatsNotInTimeWindows: the device rejected the engine boots and time again after a resynchronisation",
+                "usmStatsNotInTimeWindows: the device rejected the engine boots and time again after a resynchronization",
             ),
             ReportKind::UnknownUserNames => auth_error(format!(
                 "usmStatsUnknownUserNames: the device does not know user {user:?}"
@@ -716,9 +716,9 @@ impl<'a> Client<'a> {
     }
 
     /// Sends a request and returns the Response PDU, after the time and engine id
-    /// resynchronisations.
+    /// resynchronizations.
     async fn request(&mut self, kind: &RequestKind<'_>) -> Result<Pdu, ScanError> {
-        let mut resynchronised = false;
+        let mut resynchronized = false;
         let mut rediscovered = false;
         loop {
             if self.session.is_none() {
@@ -737,12 +737,12 @@ impl<'a> Client<'a> {
                     return Ok(pdu);
                 }
                 Outcome::Report(ReportKind::NotInTimeWindows { boots, time }) => {
-                    if resynchronised {
+                    if resynchronized {
                         return Err(
                             self.report_error(&ReportKind::NotInTimeWindows { boots, time })
                         );
                     }
-                    resynchronised = true;
+                    resynchronized = true;
                     if let Some(session) = self.session.as_mut() {
                         session.set(boots, time);
                     }
@@ -766,7 +766,7 @@ impl<'a> Client<'a> {
     ///
     /// # Errors
     /// `scan.snmp.timeout`, `scan.snmp.auth`, `scan.snmp.protocol` (including an error
-    /// status in the Response), `scan.io`, `scan.cancelled`.
+    /// status in the Response), `scan.io`, `scan.canceled`.
     pub async fn get(&mut self, oids: &[Oid]) -> Result<Vec<VarBind>, ScanError> {
         let pdu = self.request(&RequestKind::Get(oids)).await?;
         Ok(pdu.varbinds)
@@ -804,7 +804,7 @@ impl<'a> Client<'a> {
         let mut truncated = false;
         let repetitions_limit = usize::try_from(self.options.max_repetitions.max(1)).unwrap_or(1);
         'requests: loop {
-            self.check_cancelled()?;
+            self.check_canceled()?;
             let wanted = max_rows
                 .saturating_sub(rows.len() - first_row)
                 .saturating_add(1)

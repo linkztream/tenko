@@ -1,5 +1,5 @@
 //! The [`Authority`] on the network ([`NetAuthority`]): one exchange with one authority
-//! server over the outbound layer ([`crate::outbound`]), with the defences of DNS-08 and the
+//! server over the outbound layer ([`crate::outbound`]), with the defenses of DNS-08 and the
 //! fallback ladder of recursion plan section 2.1.
 //!
 //! - **The query**: a random id, no RD, the question as the engine gives it (with 0x20

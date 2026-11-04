@@ -63,7 +63,7 @@ async function listed(count: number) {
   await waitFor(() => expect(rows()).toHaveLength(count));
 }
 
-const tokens = () => screen.queryAllByTestId("enrolment");
+const tokens = () => screen.queryAllByTestId("enrollment");
 
 function tokenOf(name: string): HTMLElement {
   const found = tokens().find((r) => r.textContent?.includes(name));
@@ -75,7 +75,7 @@ function tokenOf(name: string): HTMLElement {
 async function openLoaded(url = "/nodes") {
   const view = openNodes(url);
   await listed(2);
-  await screen.findAllByTestId("enrolment");
+  await screen.findAllByTestId("enrollment");
   return view;
 }
 
@@ -190,7 +190,7 @@ describe("the node list", () => {
     nodesState().listening = [];
     openNodes();
     const line = await screen.findByTestId("nodes-cluster");
-    expect(line.textContent).toContain("The cluster port opens when the first enrolment token is created.");
+    expect(line.textContent).toContain("The cluster port opens when the first enrollment token is created.");
   });
 
   it("says so when no node is enrolled", async () => {
@@ -318,7 +318,7 @@ describe("a node in the panel", () => {
     const panel = await screen.findByTestId("node-panel");
     await within(panel).findByTestId("node-mismatch");
     await listed(2);
-    await screen.findAllByTestId("enrolment");
+    await screen.findAllByTestId("enrollment");
     expect(await axeViolations(view.container)).toEqual([]);
   });
 });
@@ -578,7 +578,7 @@ describe("when the server cannot answer", () => {
     );
 
   it("shows the error of the token list instead of an empty one, and keeps the nodes", async () => {
-    failing("/api/v1/nodes/enrolments");
+    failing("/api/v1/nodes/enrollments");
     openNodes();
     await listed(2);
     const section = screen.getByTestId("nodes-tokens");
@@ -586,14 +586,14 @@ describe("when the server cannot answer", () => {
     expect(alert.textContent?.length).toBeGreaterThan(0);
     expect(section.textContent).not.toContain("No token.");
     expect(tokens()).toHaveLength(0);
-    expect(screen.getByTestId("nodes-enrol")).toBeTruthy();
+    expect(screen.getByTestId("nodes-enroll")).toBeTruthy();
   });
 
   it("shows the nodes without the cluster summary when the status cannot be read", async () => {
     failing("/api/v1/system/status");
     openNodes();
     await listed(2);
-    await screen.findAllByTestId("enrolment");
+    await screen.findAllByTestId("enrollment");
     expect(screen.queryByTestId("nodes-cluster")).toBeNull();
     expect(screen.queryByTestId("nodes-version-mismatch")).toBeNull();
     expect(screen.getByTestId("page-nodes").textContent).not.toContain("connected");
@@ -609,10 +609,10 @@ describe("when the server cannot answer", () => {
   });
 });
 
-describe("the enrolment tokens", () => {
+describe("the enrollment tokens", () => {
   it("lists the pending token with its roles and a delete button", async () => {
     openNodes();
-    const token = (await screen.findAllByTestId("enrolment"))[0] as HTMLElement;
+    const token = (await screen.findAllByTestId("enrollment"))[0] as HTMLElement;
     expect(screen.getByTestId("nodes-tokens")).toBeTruthy();
     expect(tokens()).toHaveLength(1);
     expect(token.dataset.id).toBe(PENDING_TOKEN);
@@ -620,26 +620,26 @@ describe("the enrolment tokens", () => {
     expect(token.textContent).toContain("Waiting");
     expect(token.textContent).toContain("probe-garage");
     expect(token.textContent).toContain("Probe");
-    expect(within(token).getByTestId("enrolment-delete").getAttribute("aria-label")).toBe("Delete the token probe-garage");
+    expect(within(token).getByTestId("enrollment-delete").getAttribute("aria-label")).toBe("Delete the token probe-garage");
     // The token text is never part of the list.
     expect(token.textContent).not.toContain("tnk1.");
     expect(document.body.textContent).not.toContain("Z2FyYWdlLXByb2JlLXRva2VuLW9mLXRoZS1tb2NrLTA");
   });
 
   it("shows an expired token as expired", async () => {
-    const stored = nodesState().enrolments.get(PENDING_TOKEN);
+    const stored = nodesState().enrollments.get(PENDING_TOKEN);
     if (!stored) throw new Error("the seed has no pending token");
     stored.view = { ...stored.view, created_at: iso(Date.now() - 3_600_000), expires_at: iso(Date.now() - 1000) };
     openNodes();
-    const token = (await screen.findAllByTestId("enrolment"))[0] as HTMLElement;
+    const token = (await screen.findAllByTestId("enrollment"))[0] as HTMLElement;
     expect(token.dataset.state).toBe("expired");
     expect(token.textContent).toContain("Expired");
   });
 
   it("shows a used token with the node that enrolled with it", async () => {
-    const made = (await (await call("POST", "/api/v1/nodes/enrolments", { name: "probe-annex", roles: ["probe"] })).json()) as { token: string };
+    const made = (await (await call("POST", "/api/v1/nodes/enrollments", { name: "probe-annex", roles: ["probe"] })).json()) as { token: string };
     const csr = "-----BEGIN CERTIFICATE REQUEST-----\nZXhhbXBsZQ==\n-----END CERTIFICATE REQUEST-----\n";
-    const enrolled = await call("POST", "/api/v1/nodes/enrol", { token: made.token, csr, version: "0.1.0-dev", majors: [1] });
+    const enrolled = await call("POST", "/api/v1/nodes/enroll", { token: made.token, csr, version: "0.1.0-dev", majors: [1] });
     expect(enrolled.status).toBe(201);
     const { node } = (await enrolled.json()) as { node: { id: number } };
 
@@ -649,18 +649,18 @@ describe("the enrolment tokens", () => {
     const used = tokenOf("probe-annex");
     expect(used.dataset.state).toBe("used");
     expect(used.textContent).toContain("Used");
-    const link = within(used).getByTestId("enrolment-node");
+    const link = within(used).getByTestId("enrollment-node");
     expect(link.textContent).toBe("probe-annex");
     expect(link.getAttribute("href")).toBe(`/nodes/${node.id}`);
     expect(link.getAttribute("data-id")).toBe(String(node.id));
     expect(within(used).getByRole("link", { name: "probe-annex" })).toBe(link);
     // A token that nobody used has no node.
-    expect(within(tokenOf("probe-garage")).queryByTestId("enrolment-node")).toBeNull();
+    expect(within(tokenOf("probe-garage")).queryByTestId("enrollment-node")).toBeNull();
     expect(tokenOf("probe-garage").dataset.state).toBe("pending");
   });
 
   it("says so when there is no token", async () => {
-    nodesState().enrolments.clear();
+    nodesState().enrollments.clear();
     openNodes();
     await listed(2);
     await waitFor(() => expect(screen.getByTestId("nodes-tokens").textContent).toContain("No token."));
@@ -669,61 +669,61 @@ describe("the enrolment tokens", () => {
 
   it("deletes a token after asking, and says so", async () => {
     openNodes();
-    await screen.findAllByTestId("enrolment");
-    fireEvent.click(within(tokenOf("probe-garage")).getByTestId("enrolment-delete"));
+    await screen.findAllByTestId("enrollment");
+    fireEvent.click(within(tokenOf("probe-garage")).getByTestId("enrollment-delete"));
     const dialog = await screen.findByTestId("dialog-confirm");
-    expect(dialog.getAttribute("aria-label")).toBe("Delete the enrolment token?");
-    expect(dialog.textContent).toContain("Nobody can enrol a node with it any more.");
+    expect(dialog.getAttribute("aria-label")).toBe("Delete the enrollment token?");
+    expect(dialog.textContent).toContain("Nobody can enroll a node with it any more.");
     fireEvent.click(within(dialog).getByTestId("confirm-ok"));
     await waitFor(() => expect(tokens()).toHaveLength(0));
-    expect(toastTitles()).toEqual(["Deleted the enrolment token"]);
+    expect(toastTitles()).toEqual(["Deleted the enrollment token"]);
     expect(screen.getByTestId("nodes-tokens").textContent).toContain("No token.");
-    expect(nodesState().enrolments.size).toBe(0);
+    expect(nodesState().enrollments.size).toBe(0);
   });
 
   it("keeps the token when the question is declined", async () => {
     openNodes();
-    await screen.findAllByTestId("enrolment");
-    fireEvent.click(within(tokenOf("probe-garage")).getByTestId("enrolment-delete"));
+    await screen.findAllByTestId("enrollment");
+    fireEvent.click(within(tokenOf("probe-garage")).getByTestId("enrollment-delete"));
     fireEvent.click(await screen.findByTestId("confirm-cancel"));
     await waitFor(() => expect(screen.queryByTestId("dialog-confirm")).toBeNull());
     expect(tokens()).toHaveLength(1);
-    expect(nodesState().enrolments.size).toBe(1);
+    expect(nodesState().enrollments.size).toBe(1);
   });
 
   it("tells that only the list entry goes when the token is used up", async () => {
-    const stored = nodesState().enrolments.get(PENDING_TOKEN);
+    const stored = nodesState().enrollments.get(PENDING_TOKEN);
     if (!stored) throw new Error("the seed has no pending token");
     stored.view = { ...stored.view, created_at: iso(Date.now() - 3_600_000), expires_at: iso(Date.now() - 1000) };
     openNodes();
-    await screen.findAllByTestId("enrolment");
-    fireEvent.click(within(tokenOf("probe-garage")).getByTestId("enrolment-delete"));
+    await screen.findAllByTestId("enrollment");
+    fireEvent.click(within(tokenOf("probe-garage")).getByTestId("enrollment-delete"));
     expect((await screen.findByTestId("dialog-confirm")).textContent).toContain("It is used or expired; only the list entry goes.");
   });
 
   it("reports a token that is gone already", async () => {
     openNodes();
-    await screen.findAllByTestId("enrolment");
-    expect((await call("DELETE", `/api/v1/nodes/enrolments/${PENDING_TOKEN}`)).status).toBe(204);
-    fireEvent.click(within(tokenOf("probe-garage")).getByTestId("enrolment-delete"));
+    await screen.findAllByTestId("enrollment");
+    expect((await call("DELETE", `/api/v1/nodes/enrollments/${PENDING_TOKEN}`)).status).toBe(204);
+    fireEvent.click(within(tokenOf("probe-garage")).getByTestId("enrollment-delete"));
     fireEvent.click(await screen.findByTestId("confirm-ok"));
     await waitFor(() => expect(toastTitles()).toEqual(["The token was not deleted"]));
     expect(screen.getByTestId("toast").dataset.key).toBe("bad");
-    expect(screen.getByTestId("toast").textContent).toContain("The enrolment token does not exist.");
+    expect(screen.getByTestId("toast").textContent).toContain("The enrollment token does not exist.");
   });
 });
 
 describe("creating a token", () => {
   async function openDialog() {
     const view = await openLoaded();
-    fireEvent.click(screen.getByTestId("nodes-enrol"));
-    const form = await screen.findByTestId("dialog-enrol");
+    fireEvent.click(screen.getByTestId("nodes-enroll"));
+    const form = await screen.findByTestId("dialog-enroll");
     return { view, form };
   }
 
   it("offers the roles, a name, a lifetime of one hour and no VRF choice with a single VRF", async () => {
     const { form } = await openDialog();
-    expect(form.closest("[role='dialog']")?.getAttribute("aria-label")).toBe("New enrolment token");
+    expect(form.closest("[role='dialog']")?.getAttribute("aria-label")).toBe("New enrollment token");
     expect((screen.getByTestId("field-role-probe") as HTMLInputElement).checked).toBe(true);
     expect((screen.getByTestId("field-role-dns") as HTMLInputElement).checked).toBe(false);
     expect((screen.getByTestId("field-role-dhcp") as HTMLInputElement).checked).toBe(false);
@@ -736,33 +736,33 @@ describe("creating a token", () => {
   });
 
   it("creates the token and shows it once with the command, the token and the fingerprint", async () => {
-    const posted = recordPosts("/api/v1/nodes/enrolments");
+    const posted = recordPosts("/api/v1/nodes/enrollments");
     const { form } = await openDialog();
     fireEvent.click(screen.getByTestId("field-role-dns"));
     fill("field-name", "  probe-office ");
     fireEvent.change(screen.getByTestId("field-lifetime"), { target: { value: "86400" } });
     fireEvent.click(within(form).getByTestId("form-submit"));
 
-    const shown = await screen.findByTestId("dialog-enrol-token");
+    const shown = await screen.findByTestId("dialog-enroll-token");
     expect(posted).toEqual([{ roles: ["probe", "dns"], name: "probe-office", vrf: null, expires_in_secs: 86400 }]);
-    expect(screen.queryByTestId("dialog-enrol")).toBeNull();
+    expect(screen.queryByTestId("dialog-enroll")).toBeNull();
 
-    const token = within(shown).getByTestId("enrol-token").textContent ?? "";
+    const token = within(shown).getByTestId("enroll-token").textContent ?? "";
     expect(token).toMatch(/^tnk1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}$/);
-    const command = within(shown).getByTestId("enrol-command").textContent ?? "";
-    expect(command).toContain("tenko node enrol");
+    const command = within(shown).getByTestId("enroll-command").textContent ?? "";
+    expect(command).toContain("tenko node enroll");
     expect(command).toContain(`--controller ${window.location.origin}`);
     expect(command).toContain("--token tnk1.");
     expect(command).toContain(`--token ${token}`);
     expect(command).toContain(`--ca-fingerprint ${MOCK_CA_FINGERPRINT}`);
-    expect(within(shown).getByTestId("enrol-fingerprint").textContent).toBe(fingerprintPairs(MOCK_CA_FINGERPRINT));
-    expect(within(shown).getByTestId("enrol-fingerprint").textContent).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
-    expect(within(shown).getByTestId("enrol-once").textContent).toContain("This is the only time the token is shown");
+    expect(within(shown).getByTestId("enroll-fingerprint").textContent).toBe(fingerprintPairs(MOCK_CA_FINGERPRINT));
+    expect(within(shown).getByTestId("enroll-fingerprint").textContent).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+    expect(within(shown).getByTestId("enroll-once").textContent).toContain("This is the only time the token is shown");
     expect(shown.textContent).toContain("Then start the node process with the roles Probe, DNS");
     expect(await axeViolations(shown)).toEqual([]);
 
     // The server has the token with the roles, the name and the lifetime that were asked for.
-    const stored = (await api.get("/api/v1/nodes/enrolments")).items.find((e) => e.name === "probe-office");
+    const stored = (await api.get("/api/v1/nodes/enrollments")).items.find((e) => e.name === "probe-office");
     expect(stored?.roles).toEqual(["probe", "dns"]);
     expect(stored?.state).toBe("pending");
     expect(Date.parse(stored?.expires_at ?? "") - Date.parse(stored?.created_at ?? "")).toBe(86_400_000);
@@ -773,9 +773,9 @@ describe("creating a token", () => {
     const { form } = await openDialog();
     fill("field-name", "probe-office");
     fireEvent.click(within(form).getByTestId("form-submit"));
-    const shown = await screen.findByTestId("dialog-enrol-token");
-    const command = within(shown).getByTestId("enrol-command").textContent;
-    const token = within(shown).getByTestId("enrol-token").textContent;
+    const shown = await screen.findByTestId("dialog-enroll-token");
+    const command = within(shown).getByTestId("enroll-command").textContent;
+    const token = within(shown).getByTestId("enroll-token").textContent;
 
     fireEvent.click(within(shown).getByTestId("nodes-copy-command"));
     await waitFor(() => expect(toastTitles()).toHaveLength(1));
@@ -793,7 +793,7 @@ describe("creating a token", () => {
     const writeText = fakeClipboard({ writable: false });
     const { form } = await openDialog();
     fireEvent.click(within(form).getByTestId("form-submit"));
-    const shown = await screen.findByTestId("dialog-enrol-token");
+    const shown = await screen.findByTestId("dialog-enroll-token");
     fireEvent.click(within(shown).getByTestId("nodes-copy-token"));
     await waitFor(() => expect(toastTitles()).toEqual(["The browser did not allow copying; select the text and copy it."]));
     expect(writeText).toHaveBeenCalledTimes(1);
@@ -805,17 +805,17 @@ describe("creating a token", () => {
     const { form } = await openDialog();
     fill("field-name", "probe-office");
     fireEvent.click(within(form).getByTestId("form-submit"));
-    const shown = await screen.findByTestId("dialog-enrol-token");
-    const token = within(shown).getByTestId("enrol-token").textContent ?? "";
+    const shown = await screen.findByTestId("dialog-enroll-token");
+    const token = within(shown).getByTestId("enroll-token").textContent ?? "";
     const secret = token.split(".")[2] ?? "";
     expect(secret).toHaveLength(43);
 
     // The list behind the dialog has the new token already.
     await waitFor(() => expect(tokens()).toHaveLength(2));
-    fireEvent.click(within(shown).getByTestId("enrol-done"));
-    await waitFor(() => expect(screen.queryByTestId("dialog-enrol-token")).toBeNull());
-    expect(screen.queryByTestId("enrol-token")).toBeNull();
-    expect(screen.queryByTestId("enrol-command")).toBeNull();
+    fireEvent.click(within(shown).getByTestId("enroll-done"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-enroll-token")).toBeNull());
+    expect(screen.queryByTestId("enroll-token")).toBeNull();
+    expect(screen.queryByTestId("enroll-command")).toBeNull();
 
     // Newest first.
     expect(tokens().map((r) => r.dataset.state)).toEqual(["pending", "pending"]);
@@ -830,17 +830,17 @@ describe("creating a token", () => {
   });
 
   it("creates a token without a name and with the default lifetime", async () => {
-    const posted = recordPosts("/api/v1/nodes/enrolments");
+    const posted = recordPosts("/api/v1/nodes/enrollments");
     const { form } = await openDialog();
     fireEvent.click(within(form).getByTestId("form-submit"));
-    await screen.findByTestId("dialog-enrol-token");
+    await screen.findByTestId("dialog-enroll-token");
     expect(posted).toEqual([{ roles: ["probe"], name: null, vrf: null, expires_in_secs: 3600 }]);
     await waitFor(() => expect(tokens()).toHaveLength(2));
     expect(tokens()[0]?.textContent).toContain("chosen by the node");
   });
 
   it("offers the VRF choice when there are several VRFs", async () => {
-    const posted = recordPosts("/api/v1/nodes/enrolments");
+    const posted = recordPosts("/api/v1/nodes/enrollments");
     const vrfs = await api.get("/api/v1/vrfs");
     await api.post("/api/v1/vrfs", { body: { name: "guests", tenant: null } as never });
     const all = await api.get("/api/v1/vrfs");
@@ -852,31 +852,31 @@ describe("creating a token", () => {
     expect(select.options[0]?.textContent).toBe("The default VRF");
     fireEvent.change(select, { target: { value: guests?.id } });
     fireEvent.click(within(form).getByTestId("form-submit"));
-    await screen.findByTestId("dialog-enrol-token");
+    await screen.findByTestId("dialog-enroll-token");
     expect(posted).toEqual([{ roles: ["probe"], name: null, vrf: guests?.id, expires_in_secs: 3600 }]);
   });
 
   it("refuses a bad name at the field and sends nothing", async () => {
-    const posted = recordPosts("/api/v1/nodes/enrolments");
+    const posted = recordPosts("/api/v1/nodes/enrollments");
     const { form } = await openDialog();
     fill("field-name", "-bad name");
     fireEvent.click(within(form).getByTestId("form-submit"));
     await waitFor(() => expect(fieldError("field-name")).toBe("1 to 63 letters, digits, dots, hyphens and underscores, starting with a letter or digit."));
     expect(screen.getByTestId("field-name").getAttribute("aria-invalid")).toBe("true");
     expect(posted).toEqual([]);
-    expect(screen.queryByTestId("dialog-enrol-token")).toBeNull();
+    expect(screen.queryByTestId("dialog-enroll-token")).toBeNull();
     expect(tokens()).toHaveLength(1);
     expect(await axeViolations(form)).toEqual([]);
 
     // A good name goes through.
     fill("field-name", "probe-office.example.test");
     fireEvent.click(within(form).getByTestId("form-submit"));
-    await screen.findByTestId("dialog-enrol-token");
+    await screen.findByTestId("dialog-enroll-token");
     expect(posted).toHaveLength(1);
   });
 
   it("refuses a token without a role and sends nothing", async () => {
-    const posted = recordPosts("/api/v1/nodes/enrolments");
+    const posted = recordPosts("/api/v1/nodes/enrollments");
     const { form } = await openDialog();
     fireEvent.click(screen.getByTestId("field-role-probe"));
     fireEvent.click(within(form).getByTestId("form-submit"));
@@ -893,38 +893,38 @@ describe("creating a token", () => {
     fireEvent.click(within(form).getByTestId("form-submit"));
     const alert = await within(form).findByRole("alert");
     expect(alert.textContent).toBe("Another node has this name.");
-    expect(screen.queryByTestId("dialog-enrol-token")).toBeNull();
+    expect(screen.queryByTestId("dialog-enroll-token")).toBeNull();
     expect((screen.getByTestId("field-name") as HTMLInputElement).value).toBe("probe-dmz");
     expect(tokens()).toHaveLength(1);
     // The refusal goes away with a new try.
     fill("field-name", "probe-office");
     fireEvent.click(within(form).getByTestId("form-submit"));
-    await screen.findByTestId("dialog-enrol-token");
+    await screen.findByTestId("dialog-enroll-token");
   });
 
   it("closes with Cancel and with Escape without creating anything", async () => {
-    const posted = recordPosts("/api/v1/nodes/enrolments");
+    const posted = recordPosts("/api/v1/nodes/enrollments");
     const { form } = await openDialog();
     fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByTestId("dialog-enrol")).toBeNull());
-    fireEvent.click(screen.getByTestId("nodes-enrol"));
-    fireEvent.keyDown(await screen.findByTestId("dialog-enrol"), { key: "Escape" });
-    await waitFor(() => expect(screen.queryByTestId("dialog-enrol")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId("dialog-enroll")).toBeNull());
+    fireEvent.click(screen.getByTestId("nodes-enroll"));
+    fireEvent.keyDown(await screen.findByTestId("dialog-enroll"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("dialog-enroll")).toBeNull());
     expect(posted).toEqual([]);
     expect(tokens()).toHaveLength(1);
   });
 });
 
 describe("the page for an operator and a viewer", () => {
-  it.each(["operator", "viewer"] as const)("shows the nodes to a %s, without tokens and without the buttons to enrol and revoke", async (role) => {
+  it.each(["operator", "viewer"] as const)("shows the nodes to a %s, without tokens and without the buttons to enroll and revoke", async (role) => {
     await signInWithRole(role);
     const view = openNodes();
     await listed(2);
     await screen.findByTestId("nodes-cluster");
     expect(names()).toEqual(["probe-dmz", "probe-lab"]);
     expect(screen.queryByTestId("nodes-tokens")).toBeNull();
-    expect(screen.queryByTestId("nodes-enrol")).toBeNull();
-    expect(screen.queryByTestId("enrolment")).toBeNull();
+    expect(screen.queryByTestId("nodes-enroll")).toBeNull();
+    expect(screen.queryByTestId("enrollment")).toBeNull();
     expect(screen.getByTestId("nodes-version-mismatch").textContent).toContain("probe-lab");
     expect(await axeViolations(view.container)).toEqual([]);
   });
@@ -945,21 +945,21 @@ describe("live updates", () => {
   it("lists a token that is created through the API", async () => {
     stopBridge = bridgeMockEvents();
     openNodes();
-    await screen.findAllByTestId("enrolment");
-    expect((await call("POST", "/api/v1/nodes/enrolments", { name: "probe-annex", roles: ["probe", "dhcp"] })).status).toBe(201);
+    await screen.findAllByTestId("enrollment");
+    expect((await call("POST", "/api/v1/nodes/enrollments", { name: "probe-annex", roles: ["probe", "dhcp"] })).status).toBe(201);
     await waitFor(() => expect(tokens()).toHaveLength(2), { timeout: 3000 });
     expect(tokens()[0]?.textContent).toContain("probe-annex");
     expect(tokens()[0]?.textContent).toContain("Probe, DHCP");
   });
 
-  it("shows a node that enrols through the API and the token that it used", async () => {
+  it("shows a node that enrolls through the API and the token that it used", async () => {
     stopBridge = bridgeMockEvents();
     openNodes();
     await listed(2);
-    await screen.findAllByTestId("enrolment");
+    await screen.findAllByTestId("enrollment");
     const csr = "-----BEGIN CERTIFICATE REQUEST-----\nZXhhbXBsZQ==\n-----END CERTIFICATE REQUEST-----\n";
-    const made = (await (await call("POST", "/api/v1/nodes/enrolments", { name: "probe-annex" })).json()) as { token: string };
-    expect((await call("POST", "/api/v1/nodes/enrol", { token: made.token, csr, majors: [1] })).status).toBe(201);
+    const made = (await (await call("POST", "/api/v1/nodes/enrollments", { name: "probe-annex" })).json()) as { token: string };
+    expect((await call("POST", "/api/v1/nodes/enroll", { token: made.token, csr, majors: [1] })).status).toBe(201);
     await listed(3);
     await waitFor(() => expect(tokenOf("probe-annex").dataset.state).toBe("used"), { timeout: 3000 });
   });

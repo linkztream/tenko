@@ -1,4 +1,4 @@
-//! The pseudonymisation keys of the query log: one random 256-bit key per UTC day.
+//! The pseudonymization keys of the query log: one random 256-bit key per UTC day.
 //!
 //! A client address is written as `p:` and the hexadecimal digits of an HMAC-SHA-256 of
 //! the address under the key of the query's day: 8 octets in JSON lines, and in dnstap an
@@ -121,7 +121,7 @@ impl Keys {
 
     fn save(&self) -> io::Result<()> {
         let mut text = String::from(
-            "# Tenko DNS query log: the pseudonymisation key of each UTC day (days since 1970).\n",
+            "# Tenko DNS query log: the pseudonymization key of each UTC day (days since 1970).\n",
         );
         for (day, key) in &self.days {
             let _ = write!(text, "{day} ");
@@ -189,7 +189,7 @@ pub fn tag(key: &[u8; 32], client: IpAddr) -> [u8; 32] {
     out
 }
 
-/// The pseudonym text of the leading `octets` of a tag (or of a pseudonymised address):
+/// The pseudonym text of the leading `octets` of a tag (or of a pseudonymized address):
 /// `p:` and their hexadecimal digits.
 pub fn pseudonym_text(octets: &[u8]) -> String {
     let mut out = String::with_capacity(2 + octets.len() * 2);

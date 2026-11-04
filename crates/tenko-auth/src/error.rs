@@ -44,7 +44,7 @@ pub enum AuthError {
         /// unlocks the account.
         retry_after: Option<u64>,
     },
-    /// The login or enrolment challenge is unknown or has expired.
+    /// The login or enrollment challenge is unknown or has expired.
     #[error("the challenge is unknown or has expired")]
     ChallengeInvalid,
     /// The action needs a stronger or fresher authentication.
@@ -77,7 +77,7 @@ pub enum AuthError {
     /// The account has no TOTP enrolled.
     #[error("TOTP is not enrolled")]
     TotpNotEnrolled,
-    /// The TOTP code of an enrolment does not match the new secret.
+    /// The TOTP code of an enrollment does not match the new secret.
     #[error("the TOTP code does not match")]
     TotpCodeMismatch,
     /// The requested token lifetime exceeds the maximum of the profile (TGL-05).
@@ -98,8 +98,8 @@ pub enum AuthError {
     /// The change would leave no active administrator.
     #[error("the change would leave no active administrator")]
     LastAdministrator,
-    /// The factor is the last one that satisfies the profile; enrol another first.
-    #[error("the profile requires this factor; enrol another one first")]
+    /// The factor is the last one that satisfies the profile; enroll another first.
+    #[error("the profile requires this factor; enroll another one first")]
     LastFactor,
     /// The object changed since it was read (`If-Match` or a concurrent writer).
     #[error("the object was changed concurrently; reload and retry")]

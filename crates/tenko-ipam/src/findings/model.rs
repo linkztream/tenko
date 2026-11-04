@@ -609,7 +609,7 @@ impl Default for FindingsConfig {
 }
 
 impl FindingsConfig {
-    /// The ghost ageing as a duration.
+    /// The ghost aging as a duration.
     pub const fn ghost_review_after(&self) -> Duration {
         Duration::from_secs(self.ghost_review_after_secs)
     }

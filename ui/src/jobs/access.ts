@@ -1,4 +1,4 @@
-// What the signed-in account may do with jobs. Cancelling a job and marking a task done need the
+// What the signed-in account may do with jobs. Canceling a job and marking a task done need the
 // `execute` right on jobs, which the operator and administrator roles have, and, for a scoped
 // operator, every target of the job inside its scope (docs/access.md section 10). A viewer reads
 // jobs but sees the buttons disabled with the reason, instead of an error after the click.

@@ -3,13 +3,13 @@
 //! [`ServerTable`], the bookkeeping of every authority server address it asked.
 //!
 //! - **Zone cuts.** Per cut the NS set with its TTL, the DS state the validator fills and the
-//!   minimisation fallback slot of WP10.3; at most `cuts` of them (1,000 under the Home
+//!   minimization fallback slot of WP10.3; at most `cuts` of them (1,000 under the Home
 //!   profile, 10,000 under the others).
 //! - **Name servers.** Per name-server name its A and AAAA addresses with their TTLs and
 //!   where they came from ([`AddressOrigin`]: the hints, sibling glue, in-domain glue, an
 //!   authoritative answer); a less trusted origin never replaces a more trusted one that
 //!   has not expired (RFC 2181 section 5.4.1).
-//! - **Server addresses.** Per address what the resolver learnt ([`ServerState`]): EDNS and
+//! - **Server addresses.** Per address what the resolver learned ([`ServerState`]): EDNS and
 //!   TCP capability, the server cookie, lameness per zone, the unreachable mark of an
 //!   address family without a route; together with names, at most `servers` entries.
 //! - **Figures** ([`ServerTable`], [`servers`]): per address the smoothed round-trip time
@@ -18,7 +18,7 @@
 //!   the current hour and the TCP hour they cause.
 //!
 //! Every entry lives at most the infrastructure TTL (`[dns.recursion] infra_ttl_secs`, 900
-//! seconds) beyond what its own TTL allows for learnt capabilities and lameness. Over a
+//! seconds) beyond what its own TTL allows for learned capabilities and lameness. Over a
 //! bound the least recently used sixteenth goes at once, so an insert at the bound costs one
 //! scan per sixteenth of the bound rather than one per insert. The cache is read and written
 //! on the runtime only, never on the worker; it holds no client data.
@@ -51,7 +51,7 @@ struct Used<T> {
 struct Inner {
     cuts: HashMap<DnsName, Used<ZoneCut>>,
     names: HashMap<DnsName, Used<NameServer>>,
-    /// Each with the time its EDNS and TCP capabilities were learnt.
+    /// Each with the time its EDNS and TCP capabilities were learned.
     servers: HashMap<IpAddr, Used<(ServerState, Instant)>>,
     tick: u64,
     next_id: u64,
@@ -64,10 +64,10 @@ impl Inner {
     }
 }
 
-/// Forgets the EDNS and TCP capabilities of `state`, learnt at `learnt`, once the
+/// Forgets the EDNS and TCP capabilities of `state`, learned at `learned`, once the
 /// infrastructure TTL has passed (RFC 6891 section 6.2.2: probe again later).
-fn age_capabilities(state: &mut ServerState, learnt: Instant, ttl: Duration, now: Instant) {
-    if learnt + ttl <= now {
+fn age_capabilities(state: &mut ServerState, learned: Instant, ttl: Duration, now: Instant) {
+    if learned + ttl <= now {
         state.edns = crate::recursion::infra::EdnsSupport::Unknown;
         state.tcp_only = false;
     }
@@ -136,8 +136,8 @@ impl Infra {
         });
         let ttl = self.bounds.ttl;
         inner.servers.retain(|_, entry| {
-            let (state, learnt) = &mut entry.value;
-            age_capabilities(state, *learnt, ttl, now);
+            let (state, learned) = &mut entry.value;
+            age_capabilities(state, *learned, ttl, now);
             state.lame.retain(|(_, until)| *until > now);
             if state.unreachable_until.is_some_and(|until| until <= now) {
                 state.unreachable_until = None;
@@ -182,7 +182,7 @@ impl InfraCache for Infra {
         entry.used = tick;
         let mut cut = entry.value.clone();
         cut.ds = cut.ds.at(now);
-        cut.minimise_fallback = cut.minimise_fallback.filter(|until| *until > now);
+        cut.minimize_fallback = cut.minimize_fallback.filter(|until| *until > now);
         Some(cut)
     }
 
@@ -207,7 +207,7 @@ impl InfraCache for Infra {
                     servers,
                     expires,
                     ds: DsState::Unknown,
-                    minimise_fallback: None,
+                    minimize_fallback: None,
                 },
                 used: tick,
             },
@@ -222,9 +222,9 @@ impl InfraCache for Infra {
         }
     }
 
-    fn set_minimise_fallback(&self, zone: &DnsName, until: Instant) {
+    fn set_minimize_fallback(&self, zone: &DnsName, until: Instant) {
         if let Some(entry) = self.lock().cuts.get_mut(zone) {
-            entry.value.minimise_fallback = Some(until);
+            entry.value.minimize_fallback = Some(until);
         }
     }
 
@@ -298,8 +298,8 @@ impl InfraCache for Infra {
         match inner.servers.get_mut(&address) {
             Some(entry) => {
                 entry.used = tick;
-                let (stored, learnt) = &mut entry.value;
-                age_capabilities(stored, *learnt, ttl, now);
+                let (stored, learned) = &mut entry.value;
+                age_capabilities(stored, *learned, ttl, now);
                 let mut state = stored.clone();
                 state.lame.retain(|(_, until)| *until > now);
                 if state.unreachable_until.is_some_and(|until| until <= now) {
@@ -325,13 +325,13 @@ impl InfraCache for Infra {
             used: tick,
         });
         entry.used = tick;
-        let (state, learnt) = &mut entry.value;
-        age_capabilities(state, *learnt, ttl, now);
+        let (state, learned) = &mut entry.value;
+        age_capabilities(state, *learned, ttl, now);
         state.lame.retain(|(_, until)| *until > now);
         let before = (state.edns, state.tcp_only);
         update(state);
         if (state.edns, state.tcp_only) != before {
-            *learnt = now;
+            *learned = now;
         }
         let bound = self.bounds.servers;
         trim(&mut inner.servers, bound, |entry| entry.used);

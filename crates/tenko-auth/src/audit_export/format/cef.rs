@@ -55,7 +55,7 @@ impl Extension {
         self.0.push_str(&extension_value(value));
     }
 
-    fn labelled(&mut self, key: &str, label: &str, value: &str) {
+    fn labeled(&mut self, key: &str, label: &str, value: &str) {
         self.pair(key, value);
         self.pair(&format!("{key}Label"), label);
     }
@@ -72,7 +72,7 @@ fn record_extension(record: &AuditRecord) -> Extension {
     ext.pair("suser", &record.principal.subject());
     match draft.source_ip {
         Some(ip @ std::net::IpAddr::V4(_)) => ext.pair("src", &ip.to_string()),
-        Some(ip @ std::net::IpAddr::V6(_)) => ext.labelled("c6a2", "source", &ip.to_string()),
+        Some(ip @ std::net::IpAddr::V6(_)) => ext.labeled("c6a2", "source", &ip.to_string()),
         None => {}
     }
     match &draft.outcome {
@@ -83,16 +83,16 @@ fn record_extension(record: &AuditRecord) -> Extension {
             ext.pair("reason", code);
         }
     }
-    ext.labelled("cn1", "seq", &record.seq.to_string());
-    ext.labelled("cs1", "hash", &record.hash.to_string());
-    ext.labelled("cs2", "prev", &record.prev.to_string());
-    ext.labelled("cn2", "revision", &record.revision.to_string());
+    ext.labeled("cn1", "seq", &record.seq.to_string());
+    ext.labeled("cs1", "hash", &record.hash.to_string());
+    ext.labeled("cs2", "prev", &record.prev.to_string());
+    ext.labeled("cn2", "revision", &record.revision.to_string());
     if !draft.objects.is_empty() {
         let objects: Vec<String> = draft.objects.iter().map(ToString::to_string).collect();
-        ext.labelled("cs3", "objects", &objects.join(","));
+        ext.labeled("cs3", "objects", &objects.join(","));
     }
     if let Some(request) = record.request {
-        ext.labelled("cs4", "request", &request.to_string());
+        ext.labeled("cs4", "request", &request.to_string());
     }
     if (!draft.details.changes.is_empty() || !draft.details.context.is_empty())
         && let Ok(details) = serde_json::to_string(&draft.details)
@@ -105,10 +105,10 @@ fn record_extension(record: &AuditRecord) -> Extension {
 fn checkpoint_extension(origin: &Origin, checkpoint: &Checkpoint) -> Extension {
     let mut ext = Extension::default();
     ext.pair("rt", &millis(checkpoint.at));
-    ext.labelled("cn1", "seq", &checkpoint.head.seq.to_string());
-    ext.labelled("cs1", "hash", &checkpoint.head.hash.to_string());
-    ext.labelled("cn3", "store_head", &checkpoint.store_head.to_string());
-    ext.labelled("cs5", "sink", &origin.sink);
+    ext.labeled("cn1", "seq", &checkpoint.head.seq.to_string());
+    ext.labeled("cs1", "hash", &checkpoint.head.hash.to_string());
+    ext.labeled("cn3", "store_head", &checkpoint.store_head.to_string());
+    ext.labeled("cs5", "sink", &origin.sink);
     ext
 }
 

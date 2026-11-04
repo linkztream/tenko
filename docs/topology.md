@@ -57,7 +57,7 @@ A node carries its label (the host of intent, else the controller's name, the in
 
 A client reported by several sources (the controller and an SNMP probe) is one edge with every source listed, whatever each source calls the port. Links are one edge per pair of ports. An edge whose two ends turn out to be the same device is dropped.
 
-A `wired` or `wireless` edge that no network controller reports is **inferred** (`inferred: true`, also on the neighbours of the node view): only a bridge table of a probe names it, and a MAC address learned on a port says that the device is somewhere behind that port, not that it hangs on it. LLDP links, uplinks and placements of virtual machines are never inferred.
+A `wired` or `wireless` edge that no network controller reports is **inferred** (`inferred: true`, also on the neighbors of the node view): only a bridge table of a probe names it, and a MAC address learned on a port says that the device is somewhere behind that port, not that it hangs on it. LLDP links, uplinks and placements of virtual machines are never inferred.
 
 ## 4 The API
 
@@ -74,7 +74,7 @@ A `wired` or `wireless` edge that no network controller reports is **inferred** 
 
 Without `kind`, an answer adds the context of the kept nodes, so a filtered map still shows how things connect: the network devices and hypervisors next to a kept node, and every network device reachable from those over links between network devices (the backbone). With `kind` the answer holds exactly the nodes of those kinds and the edges between them.
 
-`GET /api/v1/topology/nodes/{id}` answers one node with its ports, its neighbours and the host of intent with its live addresses (network and VLAN of each). The ports are the controller's port table (name, uplink flag, untagged VLAN, link state) and every port the node's edges name, each with what hangs on it. `port` keeps one port, matched by the name the sources use or by the controller's port name: this answers "what is connected to this port". Both endpoints need read access to observations; the identifier of an unknown node answers 404 `ipam.topology.not_found`.
+`GET /api/v1/topology/nodes/{id}` answers one node with its ports, its neighbors and the host of intent with its live addresses (network and VLAN of each). The ports are the controller's port table (name, uplink flag, untagged VLAN, link state) and every port the node's edges name, each with what hangs on it. `port` keeps one port, matched by the name the sources use or by the controller's port name: this answers "what is connected to this port". Both endpoints need read access to observations; the identifier of an unknown node answers 404 `ipam.topology.not_found`.
 
 ## 5 Computation and caching
 
@@ -86,7 +86,7 @@ The topology area (`/topology`, the `T` chord of the `G` shortcuts) draws the gr
 
 Under the controller lines, a disclosure "N networks from the network controllers" lists every network the controllers report: name, VLAN chip (or "untagged"), subnet (or "no subnet"), the DHCP mode and a "Management" tag for the network Tenko or the controller is reached through, with the controller's name when there are several. The list is also there when the controller runs on a server of its own and no gateway of it is on the map.
 
-Selecting a node opens its panel with its ports and what hangs on each, its neighbours, and links to the host page and to the observations of the device. The panel of a router that a network controller reports also lists that controller's networks, as above. The panel highlights the path to the nearest router or between two chosen nodes. The map is keyboard reachable: one node is in the tab order at a time, the arrow keys move to the nearest node in that direction, Enter opens the panel, and `+`, `-` and `0` zoom and fit. VLAN colors follow the rules of IPAM-20 (design decision 11): hues spread around the circle for the VLANs in view with at least 3:1 contrast against the map, a swatch shape and the VLAN id as text as the redundant cues; with 150 or more VLANs in view only the selected VLAN keeps its color.
+Selecting a node opens its panel with its ports and what hangs on each, its neighbors, and links to the host page and to the observations of the device. The panel of a router that a network controller reports also lists that controller's networks, as above. The panel highlights the path to the nearest router or between two chosen nodes. The map is keyboard reachable: one node is in the tab order at a time, the arrow keys move to the nearest node in that direction, Enter opens the panel, and `+`, `-` and `0` zoom and fit. VLAN colors follow the rules of IPAM-20 (design decision 11): hues spread around the circle for the VLANs in view with at least 3:1 contrast against the map, a swatch shape and the VLAN id as text as the redundant cues; with 150 or more VLANs in view only the selected VLAN keeps its color.
 
 ### 6.1 The root of the map
 
@@ -137,7 +137,7 @@ The in-house layout was chosen (`ui/src/topology/layout.ts`, with `path.ts` for 
 
 - The device tables of controllers are read live and kept for five minutes; a scheduled poll does not hand them to the topology yet, so the first map after a start or after five minutes waits for one read (at most three seconds).
 - Addresses join aliases regardless of their VRF.
-- LLDP neighbours that no source classifies are `device` nodes; LLDP system capabilities and CDP are not read yet ([scanning.md](scanning.md)).
+- LLDP neighbors that no source classifies are `device` nodes; LLDP system capabilities and CDP are not read yet ([scanning.md](scanning.md)).
 - Paths are computed in the browser over the graph in view.
 
 ## 8 The VLAN provision job

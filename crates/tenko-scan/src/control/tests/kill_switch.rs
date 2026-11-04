@@ -68,7 +68,7 @@ async fn stopping_every_probe_issues_one_command_each() {
     let rig = Rig::with_local(Some(LOCAL));
     rig.probe(1001, &["192.0.2.0/24"], &[]).await;
     rig.probe(1002, &["198.51.100.0/24"], &[]).await;
-    rig.enrol(1003, &[Role::Dns]).await;
+    rig.enroll(1003, &[Role::Dns]).await;
 
     let result = rig
         .control
@@ -127,7 +127,7 @@ async fn a_long_reason_is_cut_and_a_blank_one_gets_the_default() {
 #[tokio::test]
 async fn only_probes_can_be_stopped_or_resumed() {
     let rig = Rig::new();
-    rig.enrol(1002, &[Role::Dns]).await;
+    rig.enroll(1002, &[Role::Dns]).await;
     for node in [1002, 77] {
         let (code, status) = if node == 77 {
             (codes::NODE_NOT_FOUND, 404)

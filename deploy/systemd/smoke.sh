@@ -9,7 +9,7 @@
 # that has /var/lib/tenko from something other than this script is refused (set
 # SMOKE_FORCE=1 to override that on a throwaway VM).
 #
-# Argument 1 is a debug build of tenko (only debug builds honour the test variable that lets
+# Argument 1 is a debug build of tenko (only debug builds honor the test variable that lets
 # the update install this same binary as the next version). What it does, in order:
 #   1. installs the binary, the service account, a smoke tenko.toml, the unit from this
 #      repository and a drop-in with TENKO_TEST_VERSION_FROM_LAYOUT=1;

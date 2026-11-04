@@ -143,7 +143,7 @@ Design (`src/events.rs`):
 
 `/api/events/axum` differs in that it uses axum's `Sse` with its per-connection `KeepAlive` timer
 (fixed at 15 s) and builds an axum `Event` for every event for every client, so the formatting
-cost grows with the number of clients. It has the same replay, reset and shutdown behaviour.
+cost grows with the number of clients. It has the same replay, reset and shutdown behavior.
 
 Graceful shutdown on ctrl-c: the hub broadcasts `shutdown`, every stream sends it and ends, new SSE
 requests get `503`, and the server waits at most `--shutdown-grace-secs` before exiting anyway.

@@ -491,7 +491,7 @@ async fn a_notify_from_the_primary_with_its_key_reaches_the_service() {
     let mut verifier = Verifier::new(key, signer.last_mac().expect("mac"));
     verifier
         .verify(&out, now())
-        .expect("a signed acknowledgement");
+        .expect("a signed acknowledgment");
     assert_eq!(
         lab.notified.0.lock().expect("notified").as_slice(),
         &[(

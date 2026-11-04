@@ -37,21 +37,21 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
         })
 }
 
-/// Which passive neighbour protocol a [`Neighbour`] was read from.
+/// Which passive neighbor protocol a [`Neighbor`] was read from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NeighbourSource {
+pub enum NeighborSource {
     /// Link Layer Discovery Protocol (IEEE 802.1AB).
     Lldp,
     /// Cisco Discovery Protocol version 2.
     Cdp,
 }
 
-impl NeighbourSource {
+impl NeighborSource {
     /// The protocol name for a note.
     pub const fn name(self) -> &'static str {
         match self {
-            NeighbourSource::Lldp => "LLDP",
-            NeighbourSource::Cdp => "CDP",
+            NeighborSource::Lldp => "LLDP",
+            NeighborSource::Cdp => "CDP",
         }
     }
 }
@@ -60,11 +60,11 @@ impl NeighbourSource {
 /// from one LLDP or CDP frame. The fields are those shared by both protocols; a field the
 /// frame did not carry is `None`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Neighbour {
+pub struct Neighbor {
     /// The chassis identifier: a MAC address, a network address or a name, formatted by
     /// its subtype (LLDP) or the device id (CDP).
     pub chassis_id: Option<String>,
-    /// The port the probe is attached to, as the neighbour names it (LLDP port id, CDP
+    /// The port the probe is attached to, as the neighbor names it (LLDP port id, CDP
     /// port id).
     pub port_id: Option<String>,
     /// The port description, when the frame carried one.
@@ -76,19 +76,19 @@ pub struct Neighbour {
     /// The system description (LLDP system description, CDP software version and
     /// platform).
     pub system_desc: Option<String>,
-    /// The capabilities the neighbour claims (the enabled set).
-    pub capabilities: NeighbourCapabilities,
+    /// The capabilities the neighbor claims (the enabled set).
+    pub capabilities: NeighborCapabilities,
     /// Management addresses (LLDP management address TLV, CDP addresses TLV).
     pub mgmt_addrs: Vec<IpAddr>,
     /// The VLAN of the link: the 802.1 port VLAN id (LLDP) or the native VLAN (CDP).
     pub vlan: Option<u16>,
-    /// The name of a VLAN the neighbour named (LLDP 802.1 VLAN name TLV).
+    /// The name of a VLAN the neighbor named (LLDP 802.1 VLAN name TLV).
     pub vlan_name: Option<String>,
     /// Which protocol carried the frame.
-    pub source: Option<NeighbourSource>,
+    pub source: Option<NeighborSource>,
 }
 
-impl Neighbour {
+impl Neighbor {
     /// The chassis id as a MAC address, when it is one (for the OUI vendor lookup).
     pub fn chassis_mac(&self) -> Option<MacAddr> {
         self.chassis_id.as_deref()?.parse().ok()
@@ -103,11 +103,11 @@ impl Neighbour {
     }
 }
 
-/// The device capabilities LLDP and CDP report; the set a neighbour says is enabled.
+/// The device capabilities LLDP and CDP report; the set a neighbor says is enabled.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 // The fields mirror the protocol's capability bits.
 #[allow(clippy::struct_excessive_bools)]
-pub struct NeighbourCapabilities {
+pub struct NeighborCapabilities {
     /// Acts as a bridge (switch).
     pub bridge: bool,
     /// Acts as a router.
@@ -120,7 +120,7 @@ pub struct NeighbourCapabilities {
     pub station: bool,
 }
 
-impl NeighbourCapabilities {
+impl NeighborCapabilities {
     /// Whether any capability is set.
     pub fn any(self) -> bool {
         self.bridge || self.router || self.wlan || self.telephone || self.station

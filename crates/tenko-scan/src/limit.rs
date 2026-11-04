@@ -190,7 +190,7 @@ impl Pacer {
 }
 
 /// A reserved slot on the timeline of one address; released again when the acquisition
-/// is cancelled and nobody reserved behind it.
+/// is canceled and nobody reserved behind it.
 struct Reservation<'a> {
     pacer: &'a Pacer,
     target: IpAddr,
@@ -576,21 +576,21 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn dropping_a_pending_acquire_does_not_block_the_next_one() {
-        // Address spacing: the cancelled probe gives its reserved slot back.
+        // Address spacing: the canceled probe gives its reserved slot back.
         let pacer = Pacer::new(limits(None, 100, 8));
         let start = Instant::now();
         let _first = pacer.acquire(HOST_A).await;
-        let cancelled = timeout(Duration::from_millis(10), pacer.acquire(HOST_A)).await;
-        assert!(cancelled.is_err());
+        let canceled = timeout(Duration::from_millis(10), pacer.acquire(HOST_A)).await;
+        assert!(canceled.is_err());
         let _second = pacer.acquire(HOST_A).await;
         assert_eq!(start.elapsed(), Duration::from_millis(100));
 
-        // Global rate: the cancelled probe does not take a token with it.
+        // Global rate: the canceled probe does not take a token with it.
         let pacer = Pacer::new(limits(Some(10), 0, 8));
         let start = Instant::now();
         let _first = pacer.acquire(HOST_A).await;
-        let cancelled = timeout(Duration::from_millis(10), pacer.acquire(HOST_B)).await;
-        assert!(cancelled.is_err());
+        let canceled = timeout(Duration::from_millis(10), pacer.acquire(HOST_B)).await;
+        assert!(canceled.is_err());
         let _second = pacer.acquire(HOST_B).await;
         assert_eq!(start.elapsed(), Duration::from_millis(100));
     }
@@ -600,7 +600,7 @@ mod tests {
         let pacer = Arc::new(Pacer::new(limits(None, 100, 8)));
         let start = Instant::now();
         let _first = pacer.acquire(HOST_A).await;
-        // Two probes queue behind the first; the first of them is cancelled.
+        // Two probes queue behind the first; the first of them is canceled.
         let doomed = {
             let pacer = Arc::clone(&pacer);
             tokio::spawn(async move {
@@ -619,7 +619,7 @@ mod tests {
         doomed.abort();
         let survived_at = survivor.await.expect("the task finishes");
         assert_eq!(survived_at, Duration::from_millis(200));
-        // The next caller of the address is not held up by the cancelled probe.
+        // The next caller of the address is not held up by the canceled probe.
         let _next = pacer.acquire(HOST_A).await;
         assert_eq!(start.elapsed(), Duration::from_millis(300));
     }
@@ -634,11 +634,11 @@ mod tests {
         drop((first, second));
         let _third = pacer.acquire(HOST_A).await;
         assert_eq!(pacer.sent(), 3);
-        // A cancelled acquisition is not counted.
+        // A canceled acquisition is not counted.
         let busy = Pacer::new(limits(None, 0, 1));
         let _held = busy.acquire(HOST_A).await;
-        let cancelled = timeout(Duration::from_millis(5), busy.acquire(HOST_B)).await;
-        assert!(cancelled.is_err());
+        let canceled = timeout(Duration::from_millis(5), busy.acquire(HOST_B)).await;
+        assert!(canceled.is_err());
         assert_eq!(busy.sent(), 1);
     }
 

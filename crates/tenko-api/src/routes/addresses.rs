@@ -1031,11 +1031,11 @@ mod tests {
         let (api, _) = api_with_network().await;
         let created = api.post("/addresses", &body(10)).await;
         let path = format!("/addresses/{}", created.item_id());
-        let colour = api
-            .post("/addresses", &json!({ "ip": ip4(11), "colour": "red" }))
+        let color = api
+            .post("/addresses", &json!({ "ip": ip4(11), "color": "red" }))
             .await;
-        colour.assert_problem(400, "sys.invalid_request");
-        assert_eq!(colour.body["params"]["part"], "body");
+        color.assert_problem(400, "sys.invalid_request");
+        assert_eq!(color.body["params"]["part"], "body");
         // The VRF of an address cannot change: it is refused rather than ignored.
         let moved = api
             .patch(&path, None, &json!({ "vrf": unknown_id() }))

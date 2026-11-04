@@ -126,7 +126,7 @@ pub enum SystemComponent {
     Connector,
     /// Discovery (Slice 2).
     Scan,
-    /// Cluster management (enrolment, membership).
+    /// Cluster management (enrollment, membership).
     Cluster,
     /// The audit export (Slice 3, IAM-18): sinks, cursors and checkpoints.
     AuditExport,

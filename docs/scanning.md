@@ -52,7 +52,7 @@ privacy = "aes128"
 privacy_password_file = "/etc/tenko/snmp-switch-a-priv"
 ```
 
-With the node enrolled (see [cluster.md](cluster.md#1-enrolment)), these commands start the node and show what the scanner does:
+With the node enrolled (see [cluster.md](cluster.md#1-enrollment)), these commands start the node and show what the scanner does:
 
 ```
 tenko serve --roles probe --data-dir /var/lib/tenko
@@ -178,13 +178,13 @@ Scope applies to the address sightings only; the name and OS of the polled devic
 
 ### 2.8 `arp_sweep`
 
-An active ARP sweep (SCAN-04). It sends an ARP request (RFC 826) for every usable IPv4 address of the scope from the probe's interface, honouring the rate limit (one probe per request), and collects the replies for `timeout_ms` (default 2000) after the last request. Each reply makes the same facts the passive `arp` method makes: an `address` sighting with the MAC address, and a `vendor` sighting for each MAC the OUI table knows (section 11). The host view and the IPAM observation path therefore see no difference between a swept and a passively read address. An ARP request to an on-link address also fills the operating system's neighbor table, so the next `arp` run sees it too.
+An active ARP sweep (SCAN-04). It sends an ARP request (RFC 826) for every usable IPv4 address of the scope from the probe's interface, honoring the rate limit (one probe per request), and collects the replies for `timeout_ms` (default 2000) after the last request. Each reply makes the same facts the passive `arp` method makes: an `address` sighting with the MAC address, and a `vendor` sighting for each MAC the OUI table knows (section 11). The host view and the IPAM observation path therefore see no difference between a swept and a passively read address. An ARP request to an on-link address also fills the operating system's neighbor table, so the next `arp` run sees it too.
 
 The interface is the one whose address lies in the scope, or the `interface` key when set. IPv6 is left to the passive `nd` method; a neighbor-solicitation sweep is a follow-up, and the run notes so when the scope has an IPv6 prefix. A run is complete when a request was sent for every target and nothing stopped it; absence of a reply is not a closed address, only an address that did not answer.
 
 ### 2.9 `tcp_syn`
 
-A half-open TCP SYN scan over raw sockets (SCAN-04, SCAN-08). The ports are the list `ports`, which takes single ports and `"a-b"` ranges and may hold up to all 65,535 ports, which the connect scan cannot (section 6). The targets are the known addresses in scope (`targets = "known"`, the default) or, with `targets = "all"`, also the addresses a sweep enumerates. A half-open scan is a link-layer send, so the method first resolves each target's MAC with an ARP request; a target that does not answer ARP (off-link or absent) is skipped and counted in a note. For each (host, port) it sends a raw SYN, honouring the rate limit, the blackout windows and the kill switch, and classifies the reply: a SYN-ACK is an open port, an RST is a closed port, silence is a filtered port. It sends an RST to close every open port it found. Each host with at least one open port becomes one `services` sighting with its `open_tcp` ports; `tcp_syn` reports no TLS hint (`tls_tcp` is empty). IPv4 only; an IPv6 SYN scan is a follow-up.
+A half-open TCP SYN scan over raw sockets (SCAN-04, SCAN-08). The ports are the list `ports`, which takes single ports and `"a-b"` ranges and may hold up to all 65,535 ports, which the connect scan cannot (section 6). The targets are the known addresses in scope (`targets = "known"`, the default) or, with `targets = "all"`, also the addresses a sweep enumerates. A half-open scan is a link-layer send, so the method first resolves each target's MAC with an ARP request; a target that does not answer ARP (off-link or absent) is skipped and counted in a note. For each (host, port) it sends a raw SYN, honoring the rate limit, the blackout windows and the kill switch, and classifies the reply: a SYN-ACK is an open port, an RST is a closed port, silence is a filtered port. It sends an RST to close every open port it found. Each host with at least one open port becomes one `services` sighting with its `open_tcp` ports; `tcp_syn` reports no TLS hint (`tls_tcp` is empty). IPv4 only; an IPv6 SYN scan is a follow-up.
 
 ### 2.10 `os_fingerprint`
 
@@ -192,7 +192,7 @@ Passive and active-assisted OS fingerprinting (SCAN-04). It SYNs a short port li
 
 ### 2.11 `lldp` (and CDP)
 
-Passive link-layer discovery (SCAN-02, SCAN-05). It listens on the probe's interface for LLDP frames (ethertype `0x88cc`) and, with `cdp = true` (the default), CDP frames (SNAP, Cisco OUI, protocol `0x2000`) for the listen window (`listen_secs`, default 35, raised to at least 65 when CDP is on, since CDP announces every 60 seconds), and parses their TLVs: chassis id, port id, TTL, port description, system name, system description, capabilities, management address and, for LLDP, the 802.1 port VLAN id and VLAN name; for CDP the device id, addresses, port id, capabilities, software version, platform and native VLAN. For each neighbour it emits facts in the shape of the SNMP LLDP neighbours, so the port mapping of section 3 merges them: a `link` between the probe's interface and the switch port, an `attachment` of the probe's own MAC to that switch port and VLAN, and, for a management address in scope, an `address`, a `name` (the system name) and a low-confidence `os` (the system description). It sends nothing, so blackout windows do not hold it; its batch is never complete, because the protocols announce periodically and one window may miss a frame.
+Passive link-layer discovery (SCAN-02, SCAN-05). It listens on the probe's interface for LLDP frames (ethertype `0x88cc`) and, with `cdp = true` (the default), CDP frames (SNAP, Cisco OUI, protocol `0x2000`) for the listen window (`listen_secs`, default 35, raised to at least 65 when CDP is on, since CDP announces every 60 seconds), and parses their TLVs: chassis id, port id, TTL, port description, system name, system description, capabilities, management address and, for LLDP, the 802.1 port VLAN id and VLAN name; for CDP the device id, addresses, port id, capabilities, software version, platform and native VLAN. For each neighbor it emits facts in the shape of the SNMP LLDP neighbors, so the port mapping of section 3 merges them: a `link` between the probe's interface and the switch port, an `attachment` of the probe's own MAC to that switch port and VLAN, and, for a management address in scope, an `address`, a `name` (the system name) and a low-confidence `os` (the system description). It sends nothing, so blackout windows do not hold it; its batch is never complete, because the protocols announce periodically and one window may miss a frame.
 
 ### 2.12 `dhcp_snoop`
 
@@ -202,7 +202,7 @@ Passive DHCPv4 snooping (SCAN-03). It listens for DHCPv4 DISCOVER, REQUEST and A
 
 ### 3.1 Subjects and keys
 
-The controller turns each sighting into a fact. Facts of different sources are never merged: the `address` fact of `icmp` and the one of `arp` for the same address are two facts, and the computed view of [reconciliation.md](reconciliation.md#25-the-computed-view) puts them together when it is read. The VRF of the addresses is the `vrf` key of `[scan]`, else the VRF of the enrolment token of the node, else the default VRF.
+The controller turns each sighting into a fact. Facts of different sources are never merged: the `address` fact of `icmp` and the one of `arp` for the same address are two facts, and the computed view of [reconciliation.md](reconciliation.md#25-the-computed-view) puts them together when it is read. The VRF of the addresses is the `vrf` key of `[scan]`, else the VRF of the enrollment token of the node, else the default VRF.
 
 | Fact | Subject key | Reported by | What it says |
 |---|---|---|---|
@@ -298,7 +298,7 @@ The limits are those of one process. `tenko node scan run` (section 7.2) starts 
 
 ### 4.4 Deadlines
 
-A run that takes longer than the deadline of its method is stopped. The scanner gives a stopped run 5 seconds to hand back what it saw, and sends that as a batch that is not complete. The run is recorded as `cancelled` with the error `stopped at its deadline`.
+A run that takes longer than the deadline of its method is stopped. The scanner gives a stopped run 5 seconds to hand back what it saw, and sends that as a batch that is not complete. The run is recorded as `canceled` with the error `stopped at its deadline`.
 
 | Method | Deadline |
 |---|---|
@@ -335,7 +335,7 @@ The times are wall-clock times in `timezone`, an IANA name; the default is the t
 What a window does:
 
 - It holds every method that sends packets: all of them except `arp` and `nd` (and the raw method `lldp`, which only listens). A scheduled run that falls due inside a window does not start; the method shows the state `blackout` and tries again a second after the window ends.
-- A run in progress when a window begins is stopped at that moment. It is recorded as `cancelled` with the error `stopped by a blackout window`, and what it saw goes out as a batch that is not complete.
+- A run in progress when a window begins is stopped at that moment. It is recorded as `canceled` with the error `stopped by a blackout window`, and what it saw goes out as a batch that is not complete.
 - An on-demand run inside a window is refused with `scan.blackout`; `--ignore-blackout` runs it anyway, and then a window that begins during the run does not stop it either (section 7.2).
 - `tenko node scan status` shows the windows, their time zone and, while one is in force, when it ends.
 
@@ -367,7 +367,7 @@ The commands of this section run on the probe node and read its configuration th
 - The node process looks at the file once a second. Within that time every running scan is stopped, with the 5 seconds of grace that a stop gets to hand back what it saw as a batch that is not complete, and no method starts, on schedule or on demand. The methods show the state `stopped`.
 - When the switch goes off, a method whose run it stopped runs again at once; the other methods wait for their schedules.
 - A node process that starts while the file exists starts with the switch on.
-- An on-demand run is refused with `scan.stopped` while the switch is on, and a run in progress stops when the switch is turned on: `tenko node scan run` looks at the file once a second itself, so this holds in its own process too. The stopped run hands back what it saw, which is queued as a batch that is not complete, and it is recorded as `cancelled` with the error `stopped by the kill switch`.
+- An on-demand run is refused with `scan.stopped` while the switch is on, and a run in progress stops when the switch is turned on: `tenko node scan run` looks at the file once a second itself, so this holds in its own process too. The stopped run hands back what it saw, which is queued as a batch that is not complete, and it is recorded as `canceled` with the error `stopped by the kill switch`.
 
 `resume` answers `the kill switch was not on` when there was nothing to remove.
 
@@ -396,7 +396,7 @@ icmp: partial, 3 sighting(s), 13 probe(s) in 1.4 s
 dry run: nothing was queued
 ```
 
-A run that is queued prints `queued for the controller; the running node process sends it within a second`, and a run with nothing to report and nothing to expire prints `nothing to queue`. A run whose batch could not be queued (the buffer directory cannot be written, the disk is full) prints `tenko node scan run: error: the batch could not be queued: ...` on standard error and ends with the exit status 1; what the run saw is lost. A run that was refused prints the error with its code and ends with the exit status of section 13. With `--json` the command prints the object `{"method", "run", "queued", "batch"}`, where `run` is the record of section 7.3, `queued` says whether a batch went to the buffer, and `batch` is the batch of a dry run; the exit statuses are the same. A run with the outcome `failed` ends with the exit status 1; a run that ended `partial` or `cancelled` and whose batch was queued ends with 0. Scans with progress and a result diff, started from the API, are in section 7.7.
+A run that is queued prints `queued for the controller; the running node process sends it within a second`, and a run with nothing to report and nothing to expire prints `nothing to queue`. A run whose batch could not be queued (the buffer directory cannot be written, the disk is full) prints `tenko node scan run: error: the batch could not be queued: ...` on standard error and ends with the exit status 1; what the run saw is lost. A run that was refused prints the error with its code and ends with the exit status of section 13. With `--json` the command prints the object `{"method", "run", "queued", "batch"}`, where `run` is the record of section 7.3, `queued` says whether a batch went to the buffer, and `batch` is the batch of a dry run; the exit statuses are the same. A run with the outcome `failed` ends with the exit status 1; a run that ended `partial` or `canceled` and whose batch was queued ends with 0. Scans with progress and a result diff, started from the API, are in section 7.7.
 
 ### 7.3 Status
 
@@ -458,8 +458,11 @@ The rows of `tcp_syn`, `os_fingerprint`, `lldp` and `dhcp_snoop` look like the o
 |---|---|
 | `complete` | The run covered everything it was asked to cover. The batch is complete too, except for `mdns` and `llmnr` (section 3.3) |
 | `partial` | The run covered part: a narrower `--target`, a lookup or a device that did not answer, a batch that was cut |
-| `cancelled` | The kill switch, a blackout window, the deadline or the shutdown stopped the run. What it saw went out as a batch that is not complete |
+| `canceled` | The kill switch, a blackout window, the deadline or the shutdown stopped the run. What it saw went out as a batch that is not complete |
 | `failed` | The method could not run at all. No batch was made, and the error is shown |
+
+<!-- spelling: alias -->
+Up to 0.0.11 the state `canceled` was written `cancelled`. Tenko writes `canceled` and reads both spellings, so old records keep their meaning.
 
 ### 7.5 Configuration from the controller
 
@@ -530,9 +533,9 @@ The run has these fields: `id`, `job_id`, `target`, `networks` (what the target 
 
 | Field | Meaning |
 |---|---|
-| `state` | `queued` (waiting for the job runner), `running`, `done` (every probe finished and every batch arrived), `partial` (the deadline passed, or a probe failed, or batches are missing; the diff covers what arrived), `failed` (no probe covered the target any more when the job started) or `cancelled` (cancelled with its job: the commands that were not over are withdrawn and the probes are asked to cancel) |
+| `state` | `queued` (waiting for the job runner), `running`, `done` (every probe finished and every batch arrived), `partial` (the deadline passed, or a probe failed, or batches are missing; the diff covers what arrived), `failed` (no probe covered the target any more when the job started) or `canceled` (canceled with its job: the commands that were not over are withdrawn and the probes are asked to cancel) |
 | `progress` | Percent, the mean over the probes; 100 once the run ended |
-| `probes` | Per probe: `node`, `command`, `target` (the part it scans), `state` of the command (`pending`, `accepted`, `running`, `done`, `failed`, `rejected`, `expired`, `cancelled`), `progress`, `detail` (the method it runs, or its notes), `batches` and `ingested` |
+| `probes` | Per probe: `node`, `command`, `target` (the part it scans), `state` of the command (`pending`, `accepted`, `running`, `done`, `failed`, `rejected`, `expired`, `canceled`), `progress`, `detail` (the method it runs, or its notes), `batches` and `ingested` |
 | `diff` | Once the run ended |
 
 The diff counts, per fact type (`address`, `services`, `os`, `name`, `vendor`, `attachment`, `link`), the facts that are `new` (not known before), `changed` (other attributes), `unchanged` and `gone`, and lists the new, changed and gone facts as `items` with `change`, `fact_type`, `subject`, `source` and the attributes `before` and `after`; the list holds at most 5,000 items and `truncated` says that it or the baseline was cut. A fact is `gone` only when it was current in the baseline, came from a method of this run on a probe whose command finished, and the scan did not see it. A probe whose command did not finish removes nothing. The facts of the scan are also ingested by the reconciler like those of a scheduled run, so the scan updates the picture of the network as well as describing the difference.
@@ -629,7 +632,7 @@ The `[scan]` section of `tenko.toml`, with the example in `deploy/tenko.example.
 | `enabled` | `true` | Runs the scanner when the node has the `probe` role |
 | `prefixes` | `[]` | The prefixes or addresses the probe covers (section 4.1). Empty: the scanner scans nothing |
 | `exclude` | `[]` | Prefixes and addresses inside `prefixes` that are never probed or reported |
-| `vrf` | Not set | The VRF of the addresses, as a VRF id. Not set: the VRF of the enrolment token, else the default VRF |
+| `vrf` | Not set | The VRF of the addresses, as a VRF id. Not set: the VRF of the enrollment token, else the default VRF |
 | `active` | `true` | Active probing (TGL-18, section 6) |
 | `rate` | `"normal"` | Rate profile (TGL-19): `normal` (100 probes per second), `slow` (50), `slowest` (10) or `unlimited` |
 | `packets_per_second` | Not set | Probes per second; overrides `rate`; 0 is unlimited |
@@ -739,7 +742,7 @@ A code is stable. The scanner reports it in the log, in the status (`error` and 
 | `scan.out_of_scope` | The `--target` of a run lies outside the configured prefixes | 2 |
 | `scan.stopped` | The kill switch is on | 2 |
 | `scan.blackout` | A blackout window is in force and `--ignore-blackout` was not given | 2 |
-| `scan.cancelled` | A run was stopped by the kill switch, a blackout window or the shutdown of the process. It appears in the error of a cancelled run and in the notes of an `snmp` run | 0 |
+| `scan.canceled` | A run was stopped by the kill switch, a blackout window or the shutdown of the process. It appears in the error of a canceled run and in the notes of an `snmp` run | 0 |
 | `scan.snmp.timeout` | A device did not answer the discovery or a request after the retries, or its port is unreachable | 0, as a note of the run |
 | `scan.snmp.auth` | A device rejected the user: unknown user, wrong password or protocol (wrong digest), wrong privacy password (decryption error), an unsupported security level, or a time window the device did not accept after a resynchronization | 0, as a note of the run |
 | `scan.snmp.protocol` | A device broke the protocol: it answered with an error status (such as `noSuchName` or `tooBig`), rejected its own engine id after a new discovery, or sent an unexpected report | 0, as a note of the run |
@@ -759,7 +762,7 @@ The codes of the scan control answer the API routes of sections 7.5 to 7.7 as pr
 | `scan.job.invalid` | 422 | A value of the request is out of range, such as `deadline_secs` |
 | `scan.job.not_found` | 404 | There is no scan run with that id |
 
-The last column is the exit status of `tenko node scan run` when it ends with that error. A run that ended `partial` or `cancelled` exits with 0 once its batch is queued. A run whose batch could not be queued exits with 1 and prints `the batch could not be queued` with the cause on standard error; the status of the node process shows the same cause as `delivery_error` of the run and the line `the batch could not be queued: ...` below the method. `status`, `stop` and `resume` exit with 3 when the configuration does not load, and `stop` and `resume` with 1 when the switch file cannot be written or removed.
+The last column is the exit status of `tenko node scan run` when it ends with that error. A run that ended `partial` or `canceled` exits with 0 once its batch is queued. A run whose batch could not be queued exits with 1 and prints `the batch could not be queued` with the cause on standard error; the status of the node process shows the same cause as `delivery_error` of the run and the line `the batch could not be queued: ...` below the method. `status`, `stop` and `resume` exit with 3 when the configuration does not load, and `stop` and `resume` with 1 when the switch file cannot be written or removed.
 
 ## 14. What comes next
 

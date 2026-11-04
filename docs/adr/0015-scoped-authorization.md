@@ -38,9 +38,9 @@ Authorization runs on every request and must not read the store (ADR 0011, decis
     - Secrets stay global-only: a scoped principal gets an empty list and a 403 on single reads.
 14. **Password change requirement.** An account that must change its password gets 403 `auth.password_change_required` on every route except `POST /auth/password`, `POST /auth/password/check`, `POST /auth/logout` and `GET /auth/session`.
 15. **Unlock watch.** Unlocking a user clears its login throttle on every controller: each controller follows the user records and clears its own throttle when the unlock is written.
-16. **Neighbours.** WP3.5 checks `tenko_auth::authz::METRICS_OBJECT` on the metrics route, which a token with the scope `metrics` may read. The single-use challenge row in the login and enrolment batches is delivered by WP3.1b and is not part of this decision.
+16. **Neighbors.** WP3.5 checks `tenko_auth::authz::METRICS_OBJECT` on the metrics route, which a token with the scope `metrics` may read. The single-use challenge row in the login and enrollment batches is delivered by WP3.1b and is not part of this decision.
 
-`docs/access.md` describes the behaviour for operators and administrators.
+`docs/access.md` describes the behavior for operators and administrators.
 
 ## Consequences
 

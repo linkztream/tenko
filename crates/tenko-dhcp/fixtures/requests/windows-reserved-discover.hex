@@ -2,7 +2,7 @@
 # (WP8.4, the reservation identity): client identifier type 1 with the MAC, maximum
 # message size 1500, host name, vendor class MSFT 5.0 and the Windows parameter request
 # list; padded to 300 octets. The reservation holds although the client's identity is its
-# option 61. Modelled by hand on the option order and parameter request list this client
+# option 61. Modeled by hand on the option order and parameter request list this client
 # sends; documentation addresses (RFC 5737) and MACs (RFC 7042).
 #
 # op 1, htype 1, hlen 6, hops 1

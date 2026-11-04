@@ -26,7 +26,7 @@
 //! | [`offer`] | [`OfferTable`], the offer hold |
 //! | [`expiry`] | [`ExpiryService`], expiry as a leader service |
 //! | [`history`] | [`PurgeService`], history retention per profile (P3-Q13) |
-//! | [`refusal`] | [`RefusalGate`], the behaviour while the store refuses (P3-Q14) |
+//! | [`refusal`] | [`RefusalGate`], the behavior while the store refuses (P3-Q14) |
 //! | [`metrics`] | the series the lease path counts |
 //! | [`row`] | the table's compact row and [`LeaseView`], what the DORA path reads of a lease (E32) |
 

@@ -30,7 +30,7 @@ The new address keeps the host part (the last octet, or the interface ID for IPv
 - the steps of the device's job, automatic and manual, in order;
 - the warnings of the device.
 
-For the whole move, the preview shows the longest migration deadline of its devices and how it was chosen (`timeout_secs`, `timeout_source`), whether the move changes the networks at once (`move_now`), whether it bounces or kicks (`nudge`) and whether a controller that sees one of its devices offers that at all (`nudge_offered`), the parallelism, the network controllers that were read, the warnings that need an acknowledgement, and a `fingerprint`.
+For the whole move, the preview shows the longest migration deadline of its devices and how it was chosen (`timeout_secs`, `timeout_source`), whether the move changes the networks at once (`move_now`), whether it bounces or kicks (`nudge`) and whether a controller that sees one of its devices offers that at all (`nudge_offered`), the parallelism, the network controllers that were read, the warnings that need an acknowledgment, and a `fingerprint`.
 
 **Move now.** By default a device whose lease Tenko holds keeps its network until its next renewal, which gets the short lease (section 5). The preview's "Move now" choice (`move_now: true` in the request) changes the network at once instead: for a device known to ask for a new lease when its link changes, and for the port bounce of a later release. It removes the wait from the job and changes the fingerprint.
 
@@ -38,7 +38,7 @@ The web UI shows the L2 action in the "Network change" column, and the diff and 
 
 **Bounce or kick.** When a controller offers it, the preview shows a switch beside "Move now", on by default: "Bounce the port or disconnect the device". Switched off (`nudge: false` in the request), no device of the move is bounced or kicked, and the fingerprint changes.
 
-**What was previewed is what runs.** A submit (`POST /api/v1/moves` without `dry_run`) computes the plan again from a fresh read of the store and of the controllers; it never takes the client's copy. The fingerprint covers what would run: per item the address, the new address, the step kinds and the L2 decision with its change and diff. The identifiers of the new addresses and the read times are left out. A submit that names `expect_fingerprint` starts nothing and answers 409 `ipam.move.plan_changed` when its plan differs from the confirmed preview. The UI then shows the new preview to confirm. A submit also refuses while a warning that needs an acknowledgement is not listed in `acknowledge` (409 `ipam.plan.unacknowledged`).
+**What was previewed is what runs.** A submit (`POST /api/v1/moves` without `dry_run`) computes the plan again from a fresh read of the store and of the controllers; it never takes the client's copy. The fingerprint covers what would run: per item the address, the new address, the step kinds and the L2 decision with its change and diff. The identifiers of the new addresses and the read times are left out. A submit that names `expect_fingerprint` starts nothing and answers 409 `ipam.move.plan_changed` when its plan differs from the confirmed preview. The UI then shows the new preview to confirm. A submit also refuses while a warning that needs an acknowledgment is not listed in `acknowledge` (409 `ipam.plan.unacknowledged`).
 
 ## 3 The L2 step
 
@@ -123,7 +123,7 @@ The controller offers them through its connector's capabilities `port_bounce` an
 
 | Refused when | Code |
 |---|---|
-| Bounce: the port is an uplink or links to another device (an access point, a switch, an LLDP neighbour) | `connect.guardrail.uplink` |
+| Bounce: the port is an uplink or links to another device (an access point, a switch, an LLDP neighbor) | `connect.guardrail.uplink` |
 | Bounce: Tenko or the controller is reached through the port, or the controller or Tenko's host is attached to it | `connect.guardrail.management_port` |
 | Bounce: more than one client is behind the port (two listed clients, or more than one MAC address learned on it: a dock, an unmanaged switch, a phone with a PC port) | `connect.guardrail.shared_port` |
 | Bounce: the port is down already (no link, or switched off) | `connect.guardrail.port_down` |
@@ -139,7 +139,7 @@ The controller offers them through its connector's capabilities `port_bounce` an
 | Reason | Meaning |
 |---|---|
 | `ipam.move.nudge.no_capability` | The controller offers neither for this device |
-| `ipam.move.nudge.refused` | A guardrail refuses it; `problem` names the rule. The move runs without it; nothing needs an acknowledgement |
+| `ipam.move.nudge.refused` | A guardrail refuses it; `problem` names the rule. The move runs without it; nothing needs an acknowledgment |
 | `ipam.move.nudge.off` | The move switched it off; `change` says what it would have done |
 
 **When a port stays down (runbook).** The health view (`GET /api/v1/system/status`, the warnings on the start page) shows `connect.port_stuck` with the controller, the device, the port, the failed attempts and their cause, and the move's job failed with the same code. Tenko keeps trying on its own. To bring the port up at once:
@@ -249,7 +249,7 @@ Every change of the deadline is a transition of the job with a note that says wh
 
 ## 6 Rollback
 
-The job rolls back when the migration deadline passes, when a step fails, or when the job is cancelled. Before anything is undone, the first compensation removes the moving client (section 4); the compensations of the observation and of the preparation wait until the role's image no longer holds it (at most 60 seconds), so a device that comes back to its old network renews with its normal lease. The restored reservation is served again, and a device already in DISCOVER on its old network gets its old address back by itself. Then the steps are undone in reverse:
+The job rolls back when the migration deadline passes, when a step fails, or when the job is canceled. Before anything is undone, the first compensation removes the moving client (section 4); the compensations of the observation and of the preparation wait until the role's image no longer holds it (at most 60 seconds), so a device that comes back to its old network renews with its normal lease. The restored reservation is served again, and a device already in DISCOVER on its old network gets its old address back by itself. Then the steps are undone in reverse:
 
 - The **controller step** is undone with the undo steps of its receipt: the previous port profile, or the previous per-client override, or none. When the move bounces or kicks (section 3.6), the same bounce or kick follows right after the undo, without a wait, so that the device takes its old address at once; what becomes of it is logged and never stops the rollback. A person is asked instead, with a manual undo task on the step that the jobs view explains with the previous value, in three cases: the receipt has no undo steps (the port had no profile on record), the undo fails (writes off by now, a guardrail refuses, or the controller changed since the write and Tenko will not overwrite that), or an interrupted attempt may have written without keeping the receipt.
 - The automatic **DNS step** plans again without the move and writes the old address's records back; when that fails the reconciler's next run does it.
@@ -257,7 +257,10 @@ The job rolls back when the migration deadline passes, when a step fails, or whe
 - The **manual steps** have no undo task: a rollback never waits for a person to take back the DHCP reservation of a network outside Tenko, the DNS records of a name outside Tenko or a manual L2 change. The job's error names the reason, and the jobs view lists what was done.
 - The **intent step** removes the new address, restores the old one if needed, and tags the moved object `move-failed`. The tag goes away with the next successful move of the object.
 
-The job ends `rolled_back` with the reason in its error, or `cancelled` when a cancel started the rollback. Every address has its own job, so a failure rolls back that address only and never touches the other devices of the move.
+The job ends `rolled_back` with the reason in its error, or `canceled` when a cancel started the rollback. Every address has its own job, so a failure rolls back that address only and never touches the other devices of the move.
+
+<!-- spelling: alias -->
+Up to 0.0.11 the state `canceled` was written `cancelled`. Tenko writes `canceled` and reads both spellings, so old jobs keep their meaning.
 
 ## 7 Bulk moves
 
@@ -284,7 +287,7 @@ The jobs of one move form one job group whose limit is the move's parallelism: 4
 | `ipam.move.invalid_request` | 400 | Empty, too large, a duplicate object, a timeout or parallelism out of bounds |
 | `ipam.move.unmanaged`, `ipam.move.nothing_to_move`, `ipam.move.already_in_target`, `ipam.move.family_mismatch`, `ipam.move.unsupported_object`, `ipam.move.target_not_network` | 422 | An object cannot move |
 | `ipam.host.locked` | 423 | A host is locked |
-| `ipam.plan.unacknowledged` | 409 | A warning needs an acknowledgement (`ipam.move.dns_collision`, `ipam.move.l2_refused`, `ipam.move.controller_unavailable`, ...) |
+| `ipam.plan.unacknowledged` | 409 | A warning needs an acknowledgment (`ipam.move.dns_collision`, `ipam.move.l2_refused`, `ipam.move.controller_unavailable`, ...) |
 | `ipam.move.plan_changed` | 409 | The plan differs from the confirmed preview (`expect_fingerprint`) |
 | `ipam.move.l2_changed` | 409 | The job's controller step found the device or its port changed since the submit (a step error, the job rolls back) |
 | `ipam.move.dns_collision` | 409 | The automatic DNS step found the name's RRset or a PTR it needs held by another origin (a step error, the job rolls back) |

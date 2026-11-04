@@ -209,7 +209,7 @@ async fn every_edit_writes_an_audit_record_and_a_stale_one_does_not() {
 #[tokio::test]
 async fn unknown_nodes_and_nodes_without_the_probe_role_have_no_configuration() {
     let rig = Rig::new();
-    rig.enrol(1002, &[Role::Dns]).await;
+    rig.enroll(1002, &[Role::Dns]).await;
     let error = rig.control.config(NodeId(77)).await.expect_err("unknown");
     assert_eq!(refused(&error), (codes::NODE_NOT_FOUND, 404));
     let error = rig.control.config(NodeId(1002)).await.expect_err("dns");

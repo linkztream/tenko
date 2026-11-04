@@ -2,7 +2,7 @@
 
 Verdict: PASS (the static musl release binary, 76.05 MiB at most over 600 s; the glibc build of the same source fails at 123 to 127 MiB)
 
-Measurement M9 of the Phase 1 plan (section 8), run again on Linux to explain the failure of the [first Slice 3 run](2026-10-16-m9-idle-rss.md) (idle VmRSS 120.9 MiB against 75.1 MiB on [2026-10-09](2026-10-09-m9-idle-rss.md)). Three binaries of the same source were measured with `m9-idle-rss.sh`: the glibc release build that the procedure in [../README.md](../README.md) describes, the same binary stripped, and the static musl binary built the way the release workflow builds it (`.github/workflows/release.yml`, deviation 30 of [phase-1-exit.md](../../../docs/plans/phase-1-exit.md)). The musl binary is the Linux release binary, and it passes; the glibc build fails. Further runs with glibc tunables, a heap profile and a link-time-optimised build say where the memory lives.
+Measurement M9 of the Phase 1 plan (section 8), run again on Linux to explain the failure of the [first Slice 3 run](2026-10-16-m9-idle-rss.md) (idle VmRSS 120.9 MiB against 75.1 MiB on [2026-10-09](2026-10-09-m9-idle-rss.md)). Three binaries of the same source were measured with `m9-idle-rss.sh`: the glibc release build that the procedure in [../README.md](../README.md) describes, the same binary stripped, and the static musl binary built the way the release workflow builds it (`.github/workflows/release.yml`, deviation 30 of [phase-1-exit.md](../../../docs/plans/phase-1-exit.md)). The musl binary is the Linux release binary, and it passes; the glibc build fails. Further runs with glibc tunables, a heap profile and a link-time-optimized build say where the memory lives.
 
 ## Summary
 
@@ -83,7 +83,7 @@ MALLOC_ARENA_MAX=1 | MALLOC_TRIM_THRESHOLD_=131072 | MALLOC_MMAP_THRESHOLD_=1310
 HEAP_OUT=/home/plm/m9mem/heap bash bench/phase1-server/tools/heap-ready.sh <binary> 18465 <label>
 ```
 
-`ready-probe.sh` sums `Rss` and `Anonymous` of `/proc/<pid>/smaps` by kind of mapping and lists the threads. `heap-ready.sh` runs the server under `heapshim.c`, an `LD_PRELOAD` interposer of the glibc allocation functions that records, per call stack, the live bytes and the bytes allocated since the start, dumps them at ready and symbolises them with `heapsym.py` (`addr2line` on the unstripped binary). `trimshim.c` calls `malloc_trim(0)` every 10 s from its own thread. No tool was installed for these; gcc, python3 and binutils were already in the WSL image.
+`ready-probe.sh` sums `Rss` and `Anonymous` of `/proc/<pid>/smaps` by kind of mapping and lists the threads. `heap-ready.sh` runs the server under `heapshim.c`, an `LD_PRELOAD` interposer of the glibc allocation functions that records, per call stack, the live bytes and the bytes allocated since the start, dumps them at ready and symbolizes them with `heapsym.py` (`addr2line` on the unstripped binary). `trimshim.c` calls `malloc_trim(0)` every 10 s from its own thread. No tool was installed for these; gcc, python3 and binutils were already in the WSL image.
 
 ## Results
 
@@ -141,7 +141,7 @@ RssAnon in MiB (the 2026-10-09 run; the first Slice 3 run of `64e337d`, whose ph
 | After setup and login | 40.79 | +19.41 | 53.59 | +19.55 |
 | End of idle, 200 prefixes | 47.18 | +6.39 | 60.37 | +6.78 |
 
-Setup, login and the prefixes add the same in both builds: one Argon2id hash at 19 MiB that glibc keeps in a thread arena (observation 2 of 2026-10-09) and about 6.5 MiB for the requests and the data. The whole difference is there at ready, +12.7 MiB: +11.6 MiB in the main heap, which follows the start-up peak of live blocks (+10.9 MiB), and about 1 MiB of relocated data and small mappings. So the 13.2 MiB of anonymous rise in the first Slice 3 run are the higher start-up peak that glibc keeps (most of it the language packs) plus about 4 MiB of new live data at ready (the language catalogue, the metrics registry, more routes), of which part sits inside the retained heap.
+Setup, login and the prefixes add the same in both builds: one Argon2id hash at 19 MiB that glibc keeps in a thread arena (observation 2 of 2026-10-09) and about 6.5 MiB for the requests and the data. The whole difference is there at ready, +12.7 MiB: +11.6 MiB in the main heap, which follows the start-up peak of live blocks (+10.9 MiB), and about 1 MiB of relocated data and small mappings. So the 13.2 MiB of anonymous rise in the first Slice 3 run are the higher start-up peak that glibc keeps (most of it the language packs) plus about 4 MiB of new live data at ready (the language catalog, the metrics registry, more routes), of which part sits inside the retained heap.
 
 ### Where the file-backed rise lives
 
@@ -173,7 +173,7 @@ M9 is met on Linux by the Linux release binary: the static musl build of `9ac107
 
 - Idle length: the runs except the last one used 120 s of idle (5 samples) instead of 600 s, a deviation from the procedure; every run was flat after 60 s, and the 600 s run of the musl binary was flat from 60 s to 600 s within 0.01 MiB.
 - The procedure in [../README.md](../README.md) builds the glibc binary (`cargo build -p tenko --release`). The Linux release binary is the musl build, so M9 on Linux as written measures a binary that is not shipped as a file. The container image is: `deploy/Dockerfile` builds with `rust:1-slim-bookworm` and runs on `distroless/cc-debian12`, a glibc build (glibc 2.36). It was not measured here; with glibc malloc it should behave like (a), so the image very likely fails OPS-15 today.
-- S3-Q10 (deviation 30) falls back to a glibc release binary if M5 on musl drops more than 10 percent. With that fallback, M9 on Linux fails again unless the allocator behaviour changes. Settled on 2026-10-17: the fallback was withdrawn, the musl binary is the only Linux binary, and the container image and the procedure build it ([2026-10-17-m9-idle-rss.md](2026-10-17-m9-idle-rss.md)).
+- S3-Q10 (deviation 30) falls back to a glibc release binary if M5 on musl drops more than 10 percent. With that fallback, M9 on Linux fails again unless the allocator behavior changes. Settled on 2026-10-17: the fallback was withdrawn, the musl binary is the only Linux binary, and the container image and the procedure build it ([2026-10-17-m9-idle-rss.md](2026-10-17-m9-idle-rss.md)).
 - The heap profile ran with glibc only and slows the server by orders of magnitude (start-up takes minutes); the sizes are requested sizes, not allocator chunks. It accounts for the anonymous memory at ready and the start-up peak; it was not taken after setup or after the prefixes.
 - WSL2, not bare metal; one machine; the workstation was building and measuring other binaries at the same time (memory figures are not sensitive to that, timings are).
 - The data set is CLI-created prefixes, not an import, and only the controller role exists, as in every M9 run so far.

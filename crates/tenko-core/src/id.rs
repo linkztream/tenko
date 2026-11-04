@@ -194,7 +194,7 @@ id_type! {
     RequestId,
 }
 
-/// Raft node identifier, assigned at enrolment.
+/// Raft node identifier, assigned at enrollment.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
 )]

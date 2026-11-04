@@ -3,7 +3,7 @@
 //! vault opens (plan section 2.7).
 //!
 //! A controller that joined keeps its identity under `<data_dir>/node/` from its
-//! enrolment, like a probe ([`NodeDirIdentity`]). The first controller of an installation
+//! enrollment, like a probe ([`NodeDirIdentity`]). The first controller of an installation
 //! starts with its cluster-port key as a system secret of the vault (`cluster.node_key`);
 //! when the first peer joins, [`VaultIdentity::portable`] writes that certificate and key
 //! to `<data_dir>/node/` (the key sealed with DPAPI on Windows, mode 0600 elsewhere), and

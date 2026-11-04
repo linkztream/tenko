@@ -1,4 +1,4 @@
-//! Tests of the findings model: the mapping per source and severity, the ghost ageing, the
+//! Tests of the findings model: the mapping per source and severity, the ghost aging, the
 //! counts per area, the conflict listed once, and the cost of the counts.
 
 use std::{
@@ -360,7 +360,7 @@ fn the_rows_of_the_view_get_their_severities_and_proposals_are_not_listed_twice(
     }
 }
 
-/// IPAM-21: the ghost ageing.
+/// IPAM-21: the ghost aging.
 #[test]
 fn a_ghost_is_info_until_the_review_age_then_review_with_decommission() {
     let config = FindingsConfig::default();

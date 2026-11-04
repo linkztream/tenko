@@ -145,7 +145,9 @@ pub enum RunOutcome {
     Partial,
     /// The kill switch, a blackout window, the deadline or the shutdown stopped it; what
     /// it saw so far went out as a batch that is not complete.
-    Cancelled,
+    // Status files written by 0.0.11 carry the old name.
+    #[serde(alias = "cancelled")] // spelling: alias permanently
+    Canceled,
     /// It could not run; no batch.
     Failed,
 }
@@ -253,6 +255,17 @@ impl ScanStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_status_file_written_by_0_0_11_still_reads() {
+        let old = "\"cancelled\""; // spelling: alias permanently (the value of 0.0.11)
+        let outcome: RunOutcome = serde_json::from_str(old).expect("old outcome");
+        assert_eq!(outcome, RunOutcome::Canceled);
+        assert_eq!(
+            serde_json::to_string(&RunOutcome::Canceled).expect("json"),
+            "\"canceled\""
+        );
+    }
 
     #[test]
     fn the_kill_switch_is_a_file() {

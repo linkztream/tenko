@@ -3,7 +3,7 @@
 // The controller's own probe is node 1 (`ctl-1.example.test`); the enrolled probes are the nodes
 // of nodes-store.ts with the role `probe`, so enrolling or revoking one shows here as well.
 //
-// Simplifications: the commands to the probes are not modelled, a probe confirms a command at
+// Simplifications: the commands to the probes are not modeled, a probe confirms a command at
 // once; a scan runs on a clock of reads: it goes from `queued` to `running` on the first read
 // and gains 20 percent on every later read of it or of the list, until it is `done`; the diff
 // of a run that was started here is one new address, one new name and one changed vendor.
@@ -79,7 +79,7 @@ onMockReset(() => {
   state = null;
 });
 
-/** The state, built from the seed on first use after a reset, with the probes synchronised with the nodes. */
+/** The state, built from the seed on first use after a reset, with the probes synchronized with the nodes. */
 export function scansState(): ScansState {
   if (!state) {
     const empty = db.scenario === "setup" || db.scenario === "setup-slow-disk";
@@ -270,7 +270,7 @@ export function setKillSwitch(probe: StoredProbe, stopped: boolean, reason: stri
 const ACTIVE_PART = new Set(["pending", "accepted", "running"]);
 
 function isOver(view: ScanView): boolean {
-  return ["done", "partial", "failed", "cancelled"].includes(view.state);
+  return ["done", "partial", "failed", "canceled"].includes(view.state);
 }
 
 /** The probe's part of a run is withdrawn; the run ends when no part is left to wait for. */
@@ -278,12 +278,12 @@ function cancelPart(view: ScanView, node: number): void {
   if (isOver(view)) return;
   const part = view.probes.find((p) => p.node === node);
   if (!part || !ACTIVE_PART.has(part.state)) return;
-  part.state = "cancelled";
+  part.state = "canceled";
   part.detail = "stopped by the kill switch";
   if (view.probes.some((p) => ACTIVE_PART.has(p.state))) return;
   if (view.probes.some((p) => p.state === "done")) finish(view);
   else {
-    view.state = "cancelled";
+    view.state = "canceled";
     view.error = "stopped by the kill switch";
     view.finished_at = iso(Date.now());
   }

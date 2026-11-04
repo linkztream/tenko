@@ -169,7 +169,7 @@ describe("layout of a home lab", () => {
     expect(xy(result, "w2")).toEqual([600, 225]);
   });
 
-  it("sizes the drawing to the right-most centre plus half a slot and the lowest centre plus half a row", () => {
+  it("sizes the drawing to the right-most center plus half a slot and the lowest center plus half a row", () => {
     expect(result.width).toBe(600 + 60);
     expect(result.height).toBe(405 + 45);
   });
@@ -518,7 +518,7 @@ describe("layout of several components", () => {
         edge("e5", "wired", "rb", "b3"),
       ],
     );
-    // A takes the slots 60 .. 300 (centres 120, 240), the empty slot 300 .. 420, B 420 .. 780.
+    // A takes the slots 60 .. 300 (centers 120, 240), the empty slot 300 .. 420, B 420 .. 780.
     expect(xy(result, "a1")).toEqual([120, 135]);
     expect(xy(result, "a2")).toEqual([240, 135]);
     expect(xy(result, "ra")).toEqual([180, 45]);

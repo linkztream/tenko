@@ -1,4 +1,4 @@
-//! Behaviour of the vault over `MemStore`: round trips, reveal and its audit trail,
+//! Behavior of the vault over `MemStore`: round trips, reveal and its audit trail,
 //! operator-secret tracking, replacement and DEK rotation, atomic staging into the
 //! caller's batch, and tamper detection on the stored envelopes.
 
@@ -182,7 +182,7 @@ async fn meta_records_class_purpose_owner_label_and_creation_time() {
             &ctx,
             spec("connect.proxmox_token")
                 .owned_by(owner)
-                .labelled("Proxmox cluster A"),
+                .labeled("Proxmox cluster A"),
             value("token"),
         )
         .await
@@ -434,7 +434,7 @@ async fn no_audit_record_contains_a_secret_value() {
     let operator = vault
         .put_operator(
             &ctx,
-            spec("connect.proxmox_token").labelled("proxmox"),
+            spec("connect.proxmox_token").labeled("proxmox"),
             value(&format!("{marker}-operator")),
         )
         .await
@@ -622,7 +622,7 @@ async fn replace_changes_the_value_and_keeps_the_reference() {
     let secret = vault
         .put_operator(
             &created,
-            spec("connect.proxmox_token").labelled("proxmox"),
+            spec("connect.proxmox_token").labeled("proxmox"),
             value("old-value"),
         )
         .await
@@ -1127,7 +1127,7 @@ async fn flipping_any_byte_of_a_stored_envelope_is_detected() {
 }
 
 #[tokio::test]
-async fn relabelling_a_system_secret_as_operator_does_not_make_it_revealable() {
+async fn relabeling_a_system_secret_as_operator_does_not_make_it_revealable() {
     let vault = MemVault::new();
     let store = vault.mem_store();
     let ctx = ctx();
@@ -1143,14 +1143,11 @@ async fn relabelling_a_system_secret_as_operator_does_not_make_it_revealable() {
     put_envelope(store.as_ref(), secret, &envelope).await;
 
     assert_eq!(
-        vault.reveal(&ctx, secret).await.expect_err("relabelled"),
+        vault.reveal(&ctx, secret).await.expect_err("relabeled"),
         VaultError::Integrity
     );
     assert_eq!(
-        vault
-            .get_system(&ctx, secret)
-            .await
-            .expect_err("relabelled"),
+        vault.get_system(&ctx, secret).await.expect_err("relabeled"),
         VaultError::Integrity
     );
 }

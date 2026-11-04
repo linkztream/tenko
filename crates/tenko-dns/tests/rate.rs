@@ -224,11 +224,11 @@ fn the_other_addresses_of_the_victims_prefix_share_its_bucket() {
     let key = answer(&name);
     rig.flood(ip(VICTIM), &key, 100, 0);
 
-    for neighbour in ["198.51.100.8", "198.51.100.200", "198.51.100.255"] {
+    for neighbor in ["198.51.100.8", "198.51.100.200", "198.51.100.255"] {
         assert_ne!(
-            rig.response(ip(neighbour), &key, 0),
+            rig.response(ip(neighbor), &key, 0),
             SEND,
-            "{neighbour} is in the /24 of the victim"
+            "{neighbor} is in the /24 of the victim"
         );
     }
     for other in ["198.51.101.7", "203.0.113.9", "192.0.2.7"] {
@@ -859,7 +859,7 @@ fn clients_are_limited_one_by_one_for_ipv4() {
     assert!(!rig.query(ip("198.51.100.7"), 0));
     assert!(
         rig.query(ip("198.51.100.8"), 0),
-        "the neighbour has its own budget"
+        "the neighbor has its own budget"
     );
 }
 

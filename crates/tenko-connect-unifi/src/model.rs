@@ -5,7 +5,7 @@
 //!
 //! - **Uplinks.** A port is reported as an uplink when it carries a link to another network
 //!   device: the device's own uplink port, the port of a parent device that a managed
-//!   device hangs on, a port whose LLDP neighbour is a managed device, a port the controller
+//!   device hangs on, a port whose LLDP neighbor is a managed device, a port the controller
 //!   marks as uplink, and every member of an aggregate one of those belongs to.
 //! - **Management.** A network is a management network when it is the untagged default
 //!   network, or its subnet holds the controller's address, the address Tenko reaches the
@@ -168,10 +168,10 @@ fn link_ports(devices: &[&Device]) -> HashSet<(MacAddr, u16)> {
                 ports.insert((parent, remote));
             }
         }
-        for neighbour in &device.lldp {
-            let is_managed = crate::json::parse_mac(&neighbour.chassis)
-                .is_some_and(|mac| managed.contains(&mac));
-            if let (true, Some(local)) = (is_managed, neighbour.local_port) {
+        for neighbor in &device.lldp {
+            let is_managed =
+                crate::json::parse_mac(&neighbor.chassis).is_some_and(|mac| managed.contains(&mac));
+            if let (true, Some(local)) = (is_managed, neighbor.local_port) {
                 ports.insert((device.mac, local));
             }
         }
@@ -307,7 +307,7 @@ impl<'a> View<'a> {
         }
     }
 
-    /// Uplinks of managed devices, then LLDP neighbours that no uplink already covers.
+    /// Uplinks of managed devices, then LLDP neighbors that no uplink already covers.
     fn links(&self) -> Vec<TopologyLink> {
         let mut links = Vec::new();
         let mut pairs: HashSet<(MacAddr, MacAddr)> = HashSet::new();
@@ -343,19 +343,19 @@ impl<'a> View<'a> {
         }
         let mut seen: HashSet<(String, Option<String>, String, Option<String>)> = HashSet::new();
         for device in &self.devices {
-            for neighbour in &device.lldp {
-                let neighbour_mac = crate::json::parse_mac(&neighbour.chassis);
-                if neighbour_mac.is_some_and(|mac| pairs.contains(&(device.mac, mac))) {
+            for neighbor in &device.lldp {
+                let neighbor_mac = crate::json::parse_mac(&neighbor.chassis);
+                if neighbor_mac.is_some_and(|mac| pairs.contains(&(device.mac, mac))) {
                     continue;
                 }
-                let managed = neighbour_mac.is_some_and(|mac| self.by_mac.contains_key(&mac));
+                let managed = neighbor_mac.is_some_and(|mac| self.by_mac.contains_key(&mac));
                 let near = (
                     device.mac.to_string(),
-                    neighbour.local_port.map(|p| p.to_string()),
+                    neighbor.local_port.map(|p| p.to_string()),
                 );
                 let far = (
-                    neighbour_mac.map_or_else(|| neighbour.chassis.clone(), |m| m.to_string()),
-                    neighbour
+                    neighbor_mac.map_or_else(|| neighbor.chassis.clone(), |m| m.to_string()),
+                    neighbor
                         .port
                         .as_deref()
                         .map(|text| match (managed, lldp_port_index(text)) {

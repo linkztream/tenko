@@ -1,6 +1,6 @@
 //! The rule table of P3-Q15: what the project knows about the DHCP requests of common
 //! systems, written by hand from captured requests and published descriptions of client
-//! behaviour.
+//! behavior.
 //!
 //! Each [`Entry`] says what a fingerprint must show (the option 55 list exactly or as a
 //! prefix, the option 60 vendor class, and whether options 77, 81 and 93 were sent) and
@@ -13,7 +13,7 @@
 //! - `Captured`: the request was captured from the client in the compose lab
 //!   (`deploy/compose/lab-dhcp`'s tools image, Debian 12 packages) and is kept as a fixture in
 //!   `src/fingerprint/captured/`.
-//! - `Modelled`: the request is one of the WP7.3 corpus (`fixtures/requests/`), modelled by
+//! - `Modeled`: the request is one of the WP7.3 corpus (`fixtures/requests/`), modeled by
 //!   hand on the option order and parameter list the client sends.
 //! - `Published`: the parameter list or vendor class comes from published fingerprint
 //!   collections or the client's own source (the request lists of lwIP and `NetworkManager`).
@@ -67,8 +67,8 @@ pub enum Version {
 pub enum Provenance {
     /// Captured from the client in the compose lab.
     Captured,
-    /// One of the WP7.3 corpus's modelled requests.
-    Modelled,
+    /// One of the WP7.3 corpus's modeled requests.
+    Modeled,
     /// From published fingerprint collections or the client's source.
     Published,
 }
@@ -147,7 +147,7 @@ impl Entry {
 }
 
 use List::{Any, Exact, Prefix};
-use Provenance::{Captured, Modelled, Published};
+use Provenance::{Captured, Modeled, Published};
 use Version::{Fixed, FromVendor, Unknown};
 
 /// The vendor class every Windows release since 2000 sends.
@@ -165,7 +165,7 @@ pub static ENTRIES: &[Entry] = &[
         "windows",
         Fixed("10 or 11 (or Server 2016 and later)"),
         85,
-        Modelled,
+        Modeled,
     ),
     Entry::new(
         "windows-7",
@@ -174,7 +174,7 @@ pub static ENTRIES: &[Entry] = &[
         "windows",
         Fixed("7 or 8 (or Server 2008 R2 to 2012 R2)"),
         80,
-        Modelled,
+        Modeled,
     ),
     Entry::new(
         "windows-xp",
@@ -193,7 +193,7 @@ pub static ENTRIES: &[Entry] = &[
         "macos",
         Fixed("13 or later"),
         80,
-        Modelled,
+        Modeled,
     ),
     Entry::new(
         "macos-11",
@@ -248,7 +248,7 @@ pub static ENTRIES: &[Entry] = &[
         "android",
         FromVendor("{}"),
         90,
-        Modelled,
+        Modeled,
     ),
     Entry::new(
         "android-11",
@@ -285,7 +285,7 @@ pub static ENTRIES: &[Entry] = &[
         "linux",
         Fixed("(systemd-networkd: Ubuntu Server, Debian)"),
         65,
-        Modelled,
+        Modeled,
     ),
     Entry::new(
         "networkmanager",
@@ -438,7 +438,7 @@ pub static ENTRIES: &[Entry] = &[
         "firmware",
         Fixed("(UEFI PXE, x64)"),
         70,
-        Modelled,
+        Modeled,
     )
     .with_architecture(true),
     Entry::new(
@@ -458,7 +458,7 @@ pub static ENTRIES: &[Entry] = &[
         "firmware",
         Fixed("(BIOS PXE)"),
         70,
-        Modelled,
+        Modeled,
     )
     .with_architecture(true),
     Entry::new(

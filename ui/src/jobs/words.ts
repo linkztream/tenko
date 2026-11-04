@@ -13,13 +13,13 @@ import { countdownParts, manualOf } from "./model";
 // ---------------------------------------------------------------------------------
 // States
 
-/** "Queued", "Running", "Waiting", "Rolling back", "Done", "Failed", "Rolled back", "Cancelled". */
+/** "Queued", "Running", "Waiting", "Rolling back", "Done", "Failed", "Rolled back", "Canceled". */
 export function jobStateWord(state: JobState): string {
   return t(`jobs.state.${state}`);
 }
 
 /**
- * The `.jstate` classes of design.css for a job state. A cancelled job looks like a queued one
+ * The `.jstate` classes of design.css for a job state. A canceled job looks like a queued one
  * (hollow ring) with its word struck through; a job that rolls back looks like a rolled back
  * one. The glyph and the word always come together, so color is never the only cue.
  */
@@ -38,28 +38,28 @@ export function jobStateClass(state: JobState): string {
     case "rolled_back":
     case "rolling_back":
       return "rolledback";
-    case "cancelled":
-      return "queued cancelled";
+    case "canceled":
+      return "queued canceled";
   }
 }
 
 /**
- * Whether a cancelled job was rolled back by its cancellation: a cancel that reaches a job whose
- * steps have run undoes them first, and the job still ends `cancelled` (a move then keeps the old
+ * Whether a canceled job was rolled back by its cancellation: a cancel that reaches a job whose
+ * steps have run undoes them first, and the job still ends `canceled` (a move then keeps the old
  * address and tags the host `move-failed`). A summary tells by its current step, the first step
  * that is not done, which the compensation leaves `compensated`; a full job by its steps.
  */
 export function cancelRolledBack(
   job: Pick<JobSummary, "state" | "current_step_state"> | { state: JobState; steps: readonly StepRecord[] },
 ): boolean {
-  if (job.state !== "cancelled") return false;
+  if (job.state !== "canceled") return false;
   if ("steps" in job) return job.steps.some((step) => step.state.state === "compensated");
   return job.current_step_state === "compensated";
 }
 
-/** The state of a job in words, with "Rolled back (cancelled)" for a cancel that undid steps. */
+/** The state of a job in words, with "Rolled back (canceled)" for a cancel that undid steps. */
 export function jobStateText(state: JobState, rollback?: "cancel"): string {
-  return rollback === "cancel" && state === "cancelled" ? t("jobs.state.cancelled_rolled_back") : jobStateWord(state);
+  return rollback === "cancel" && state === "canceled" ? t("jobs.state.canceled_rolled_back") : jobStateWord(state);
 }
 
 /** The state of one step in words. */
@@ -303,7 +303,7 @@ export function codedErrorText(error: CodedError): string {
  * sentence that only repeats it.
  */
 const SELF_EXPLAINING: ReadonlySet<string> = new Set([
-  "jobs.cancelled",
+  "jobs.canceled",
   "jobs.timeout",
   "jobs.step.deadline_passed",
   "jobs.step.timeout",

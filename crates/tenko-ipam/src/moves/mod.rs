@@ -200,7 +200,7 @@ pub mod codes {
     pub const HOST_PART_RESERVED: &str = "ipam.move.host_part_reserved";
     /// Reason: the same host part is used already.
     pub const HOST_PART_TAKEN: &str = "ipam.move.host_part_taken";
-    /// Warning (needs acknowledgement): another object in the target VRF has the DNS name;
+    /// Warning (needs acknowledgment): another object in the target VRF has the DNS name;
     /// and the error of the automatic DNS step when another origin holds the name's RRset
     /// or a PTR the move needs (409).
     pub const DNS_COLLISION: &str = "ipam.move.dns_collision";
@@ -211,10 +211,10 @@ pub mod codes {
     pub const PLAN_CHANGED: &str = "ipam.move.plan_changed";
     /// The L2 step found the device or its port changed since the submit (409).
     pub const L2_CHANGED: &str = "ipam.move.l2_changed";
-    /// Warning (needs acknowledgement): a guardrail refuses the L2 change of a device, so a
+    /// Warning (needs acknowledgment): a guardrail refuses the L2 change of a device, so a
     /// person moves it.
     pub const L2_REFUSED: &str = "ipam.move.l2_refused";
-    /// Warning: a network controller could not be read; it needs an acknowledgement when
+    /// Warning: a network controller could not be read; it needs an acknowledgment when
     /// a device's L2 step is left to a person because of it.
     pub const CONTROLLER_UNAVAILABLE: &str = "ipam.move.controller_unavailable";
 
@@ -667,7 +667,7 @@ pub struct MovePreview {
     /// Every warning of the move (also listed per item where it belongs).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<PlanWarning>,
-    /// Warning codes that need an acknowledgement before a submit.
+    /// Warning codes that need an acknowledgment before a submit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unacknowledged: Vec<String>,
     /// The network controllers that were read for the L2 steps.

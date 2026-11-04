@@ -51,7 +51,7 @@ fn refusal(resolved: &Resolved) -> Option<(u8, String)> {
         return Some((
             exit::CONFIG,
             format!(
-                "[cluster.node.not_enrolled] this node is not enrolled; run `tenko node enrol \
+                "[cluster.node.not_enrolled] this node is not enrolled; run `tenko node enroll \
                  --controller <url> --token <token> --data-dir {}` first",
                 resolved.data_dir.display()
             ),

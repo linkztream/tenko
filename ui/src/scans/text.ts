@@ -52,7 +52,7 @@ export function noteText(note: string): string {
   return tDynamic(`errors.${note}`) ?? note;
 }
 
-/** What a scan covers, in words a person recognises: its networks, else the value of the target. */
+/** What a scan covers, in words a person recognizes: its networks, else the value of the target. */
 export function targetText(scan: Pick<ScanView, "networks" | "target">): string {
   return scan.networks.length > 0 ? scan.networks.join(", ") : scan.target.value;
 }
@@ -62,7 +62,7 @@ export function stateGlyph(state: ScanState): string {
   switch (state) {
     case "partial":
       return "rolledback";
-    case "cancelled":
+    case "canceled":
       return "queued";
     default:
       return state;

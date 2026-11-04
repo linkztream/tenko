@@ -1453,7 +1453,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_refuses_unknown_parameters_and_honours_at_least() {
+    async fn get_refuses_unknown_parameters_and_honors_at_least() {
         let api = Api::new();
         let created = api
             .post("/prefixes", &json!({ "cidr": "192.0.2.0/24" }))
@@ -1650,7 +1650,7 @@ mod tests {
         assert_eq!(newest.texts("id")[0], ids[4]);
         let by_status = api.get("/prefixes?sort=status,cidr").await;
         assert_eq!(by_status.items().len(), 5);
-        api.get("/prefixes?sort=colour")
+        api.get("/prefixes?sort=color")
             .await
             .assert_problem(400, "sys.invalid_query");
         api.get("/prefixes?foo=1")
@@ -1791,7 +1791,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_nibble_boundary_needs_an_acknowledgement() {
+    async fn the_nibble_boundary_needs_an_acknowledgment() {
         let api = Api::new();
         let body = json!({ "cidr": "2001:db8::/33" });
         let refused = api.post("/prefixes", &body).await;
@@ -2815,7 +2815,7 @@ mod tests {
             "[]",
             "{",
             "42",
-            r#"{"colour": "red"}"#,
+            r#"{"color": "red"}"#,
             r#"{"policy": "middle"}"#,
         ] {
             api.post_raw(&path, body)
@@ -2978,7 +2978,7 @@ mod tests {
         for body in [
             r"{}",
             r#"{"length": "big"}"#,
-            r#"{"length": 26, "colour": 1}"#,
+            r#"{"length": 26, "color": 1}"#,
             "",
         ] {
             let reply = api.post_raw(&path, body).await;

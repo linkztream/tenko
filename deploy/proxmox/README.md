@@ -259,7 +259,7 @@ which you take from the repository's Settings, Actions, Runners, "New self-hoste
 page. The install script checks the tarball with `sha256sum --check --strict` and unpacks
 nothing that does not match.
 
-Exit statuses: 2 usage or invalid settings, 3 not a Proxmox VE host, 4 dialog cancelled,
+Exit statuses: 2 usage or invalid settings, 3 not a Proxmox VE host, 4 dialog canceled,
 5 template, 6 `pct create`, 7 start or network, 8 install, 9 after the install, 233 update
 mode in a container without the runner.
 

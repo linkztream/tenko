@@ -2,7 +2,7 @@
 # M42 (the denial cache's effect, docs/plans/dns-recursion-plan.md section 6): the queries
 # the recursive resolver sends to the authority for 1,000 random names under one range an
 # NSEC record covers (and one an NSEC3 record covers), with the denial cache on and off and
-# with QNAME minimisation relaxed, strict and off. Threshold: below 50 per 1,000 names (one
+# with QNAME minimization relaxed, strict and off. Threshold: below 50 per 1,000 names (one
 # per range) with the denial cache, 1,000 without.
 #
 # It runs in the compose DNS lab (deploy/compose/lab-dns, the round `recursion`), against the

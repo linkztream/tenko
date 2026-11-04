@@ -109,7 +109,7 @@ async fn cancel(t: &TestEngine, id: JobId) {
 async fn cancel_as(t: &TestEngine, id: JobId, ctx: &RequestCtx) {
     within(t.engine.cancel(id, ctx))
         .await
-        .expect("the job is cancelled");
+        .expect("the job is canceled");
 }
 
 async fn complete(t: &TestEngine, id: JobId, step: u16, note: Option<&str>) {
@@ -296,8 +296,8 @@ async fn two_steps(first: Scripted) -> Ran {
 }
 
 /// Two steps, a runner, and a cancel while the second step runs: the second step is held
-/// at its gate, the job is cancelled, then the step is let go.
-async fn cancelled_mid_run() -> Ran {
+/// at its gate, the job is canceled, then the step is let go.
+async fn canceled_mid_run() -> Ran {
     let first = Scripted::new(MOVE);
     let second = Scripted::new(PATCH).gated();
     let t = engine_with(&[&first, &second]);
@@ -319,7 +319,7 @@ async fn cancelled_mid_run() -> Ran {
     assert!(requested.cancel_requested.is_some());
 
     second.release(1);
-    let job = t.wait_for_state(id, JobState::Cancelled).await;
+    let job = t.wait_for_state(id, JobState::Canceled).await;
     stop(runner).await;
     Ran {
         t,
@@ -348,7 +348,7 @@ async fn finished(state: JobState) -> (TestEngine, JobId) {
             let ran = two_steps(Scripted::new(MOVE).compensations(vec![Err(undo_failed())])).await;
             (ran.t, ran.id)
         }
-        JobState::Cancelled => {
+        JobState::Canceled => {
             let only = Scripted::new(MOVE);
             let t = engine_with(&[&only]);
             let id = submit(&t, vec![step(&only.kind())]).await;
@@ -402,7 +402,7 @@ async fn queued_start() {
     assert_eq!(row.by.user(), t.ctx().principal.user());
 }
 
-/// `Queued` + `Cancel` -> `Cancelled`: a job that never started ends at once.
+/// `Queued` + `Cancel` -> `Canceled`: a job that never started ends at once.
 #[tokio::test]
 async fn queued_cancel() {
     let mover = Scripted::new(MOVE);
@@ -413,8 +413,8 @@ async fn queued_cancel() {
     cancel_as(&t, id, &ctx).await;
 
     let job = read(&t, id).await;
-    assert_eq!(job.state, JobState::Cancelled);
-    assert_eq!(error_code(&job), Some("jobs.cancelled"));
+    assert_eq!(job.state, JobState::Canceled);
+    assert_eq!(error_code(&job), Some("jobs.canceled"));
     assert_eq!(job.finished, Some(t.clock.now()));
     let requested = job
         .cancel_requested
@@ -428,16 +428,16 @@ async fn queued_cancel() {
         id,
         JobState::Queued,
         JobAction::Cancel,
-        JobState::Cancelled,
+        JobState::Canceled,
     )
     .await;
     assert_eq!(row.by, ctx.principal);
     assert_eq!(row.request, Some(ctx.request));
     assert_eq!(record.draft.outcome, AuditOutcome::Success);
 
-    // A cancelled job is never run.
+    // A canceled job is never run.
     let driven = drive(&t, id).await;
-    assert_eq!(driven.state, JobState::Cancelled);
+    assert_eq!(driven.state, JobState::Canceled);
     assert_eq!(mover.executions(), 0);
 }
 
@@ -566,11 +566,11 @@ async fn rolling_back_finish_rollback() {
 /// `Running` + `Cancel` -> `RollingBack`: a cancel during a step takes effect when the step ends.
 #[tokio::test]
 async fn running_cancel() {
-    let ran = cancelled_mid_run().await;
+    let ran = canceled_mid_run().await;
     let ctx = ran.t.ctx();
 
-    assert_eq!(ran.job.state, JobState::Cancelled);
-    assert_eq!(error_code(&ran.job), Some("jobs.cancelled"));
+    assert_eq!(ran.job.state, JobState::Canceled);
+    assert_eq!(error_code(&ran.job), Some("jobs.canceled"));
     assert_eq!(
         ran.job.cancel_requested.as_ref().map(|stamp| &stamp.by),
         Some(&ctx.principal)
@@ -612,20 +612,20 @@ async fn running_cancel() {
     assert!(requests[0].seq < row.seq);
 }
 
-/// `RollingBack` + `FinishCancel` -> `Cancelled`: a rollback that a cancel started ends in
-/// `cancelled`, not `rolled_back`.
+/// `RollingBack` + `FinishCancel` -> `Canceled`: a rollback that a cancel started ends in
+/// `canceled`, not `rolled_back`.
 #[tokio::test]
 async fn rolling_back_finish_cancel() {
-    let ran = cancelled_mid_run().await;
+    let ran = canceled_mid_run().await;
 
-    assert_eq!(ran.job.state, JobState::Cancelled);
+    assert_eq!(ran.job.state, JobState::Canceled);
     assert_eq!(ran.job.finished, Some(ran.t.clock.now()));
     let (row, _) = assert_transition(
         &ran.t,
         ran.id,
         JobState::RollingBack,
         JobAction::FinishCancel,
-        JobState::Cancelled,
+        JobState::Canceled,
     )
     .await;
     let rows = ran.t.transitions(ran.id).await;
@@ -874,10 +874,10 @@ async fn waiting_cancel() {
 
     t.wait_for_state(id, JobState::Waiting).await;
     cancel(&t, id).await;
-    let job = t.wait_for_state(id, JobState::Cancelled).await;
+    let job = t.wait_for_state(id, JobState::Canceled).await;
     stop(runner).await;
 
-    assert_eq!(error_code(&job), Some("jobs.cancelled"));
+    assert_eq!(error_code(&job), Some("jobs.canceled"));
     // A task that names no undo message leaves nothing to undo by hand: the step is
     // compensated by the engine.
     assert_eq!(job.steps[0].state, StepState::Compensated);
@@ -903,7 +903,7 @@ async fn waiting_cancel() {
         id,
         JobState::RollingBack,
         JobAction::FinishCancel,
-        JobState::Cancelled,
+        JobState::Canceled,
     )
     .await;
 }
@@ -944,7 +944,7 @@ async fn rolling_back_fail() {
     );
     let rows = ran.t.transitions(ran.id).await;
     assert_eq!(rows.last(), Some(&row));
-    // The rollback did not end in `rolled_back` or `cancelled`.
+    // The rollback did not end in `rolled_back` or `canceled`.
     assert!(rows.iter().all(|row| !matches!(
         row.action,
         Some(JobAction::FinishRollback | JobAction::FinishCancel)
@@ -982,7 +982,7 @@ async fn manual_undo_task_finishes_a_rollback() {
     };
     assert_eq!(task.instruction.as_str(), TAKE_BACK);
     assert_eq!(task.args["host"], "printer-1");
-    // A job that is rolling back cannot be cancelled.
+    // A job that is rolling back cannot be canceled.
     let refused = within(t.engine.cancel(id, &t.ctx())).await;
     assert_eq!(
         refused,
@@ -1016,7 +1016,7 @@ async fn manual_undo_task_finishes_a_rollback() {
     .await;
 }
 
-/// The same for a cancel: the undo task of a cancelled job ends it in `cancelled`.
+/// The same for a cancel: the undo task of a canceled job ends it in `canceled`.
 #[tokio::test]
 async fn manual_undo_task_finishes_a_cancel() {
     let t = engine_with(&[]);
@@ -1043,15 +1043,15 @@ async fn manual_undo_task_finishes_a_cancel() {
     complete(&t, id, 0, None).await;
     let job = drive(&t, id).await;
 
-    assert_eq!(job.state, JobState::Cancelled);
-    assert_eq!(error_code(&job), Some("jobs.cancelled"));
+    assert_eq!(job.state, JobState::Canceled);
+    assert_eq!(error_code(&job), Some("jobs.canceled"));
     assert_eq!(job.steps[0].state, StepState::Compensated);
     assert_transition(
         &t,
         id,
         JobState::RollingBack,
         JobAction::FinishCancel,
-        JobState::Cancelled,
+        JobState::Canceled,
     )
     .await;
 }
@@ -1068,7 +1068,7 @@ async fn final_jobs_refuse_cancel_and_completion() {
         JobState::Succeeded,
         JobState::Failed,
         JobState::RolledBack,
-        JobState::Cancelled,
+        JobState::Canceled,
     ] {
         let (t, id) = finished(state).await;
         assert_eq!(read(&t, id).await.state, state);
@@ -1077,7 +1077,7 @@ async fn final_jobs_refuse_cancel_and_completion() {
 
         let refused = within(t.engine.cancel(id, &t.ctx()))
             .await
-            .expect_err("a final job cannot be cancelled");
+            .expect_err("a final job cannot be canceled");
         assert_eq!(
             refused,
             JobError::InvalidTransition {
@@ -1211,7 +1211,7 @@ async fn long_notes_are_refused() {
     assert_eq!(drive(&t, id).await.state, JobState::Succeeded);
 }
 
-/// Cancelling a running or waiting job twice is harmless: one request is recorded.
+/// Canceling a running or waiting job twice is harmless: one request is recorded.
 #[tokio::test]
 async fn cancel_twice_is_harmless() {
     let t = engine_with(&[]);
@@ -1238,15 +1238,15 @@ async fn cancel_twice_is_harmless() {
     assert_eq!(requests, 1);
 
     let job = drive(&t, id).await;
-    assert_eq!(job.state, JobState::Cancelled);
+    assert_eq!(job.state, JobState::Canceled);
     assert_log_is_consistent(&t.transitions(id).await);
 
-    // Once the job is cancelled there is nothing left to cancel.
+    // Once the job is canceled there is nothing left to cancel.
     let refused = within(t.engine.cancel(id, &t.ctx())).await;
     assert_eq!(
         refused,
         Err(JobError::InvalidTransition {
-            from: JobState::Cancelled,
+            from: JobState::Canceled,
             action: "cancel"
         })
     );

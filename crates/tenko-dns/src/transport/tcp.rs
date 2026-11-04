@@ -156,7 +156,7 @@ thread_local! {
     pub(crate) static SCRATCH: RefCell<Option<Scratch>> = const { RefCell::new(None) };
 }
 
-/// Accepts connections until `stop` is cancelled.
+/// Accepts connections until `stop` is canceled.
 pub(crate) async fn serve<R: Resolver + 'static>(
     listener: TcpListener,
     responder: Arc<Responder<R>>,

@@ -290,13 +290,13 @@ async fn record_guest(
     }
 }
 
-/// Records the answers of the real cluster as the anonymised fixture
+/// Records the answers of the real cluster as the anonymized fixture
 /// `tests/fixtures/recorded.json`, in the layout of `documented.json`: every route the
-/// plugin reads, the node names in the paths anonymised like the names in the answers. It
+/// plugin reads, the node names in the paths anonymized like the names in the answers. It
 /// runs only with `TENKO_LIVE_PROXMOX=1` and `TENKO_RECORD=1`; it prints counts only.
 #[tokio::test]
 async fn live_record_fixture() {
-    use tenko_connect::sdk::anonymise::Anonymiser;
+    use tenko_connect::sdk::anonymize::Anonymizer;
     use tenko_connect_proxmox::{Settings, api::Api};
 
     if std::env::var("TENKO_LIVE_PROXMOX").as_deref() != Ok("1")
@@ -353,14 +353,14 @@ async fn live_record_fixture() {
         record_guest(&api, guest, &online, &mut nodes, &mut routes).await;
     }
 
-    // One anonymisation over the node names and every answer, so that the names in the
+    // One anonymization over the node names and every answer, so that the names in the
     // paths and in the answers stay the same placeholder.
     let raw = serde_json::json!({
         "node": nodes,
         "answers": routes.iter().map(|(_, answer)| answer.clone()).collect::<Vec<_>>(),
     });
-    let mut anonymiser = Anonymiser::new();
-    let output = anonymiser.anonymise(&raw);
+    let mut anonymizer = Anonymizer::new();
+    let output = anonymizer.anonymize(&raw);
     let names: Vec<String> = output["node"]
         .as_array()
         .into_iter()
@@ -381,7 +381,7 @@ async fn live_record_fixture() {
         table.insert(path, answer);
     }
     let description = format!(
-        "The answers of a real Proxmox VE node, recorded through the plugin's own client and anonymised with tenko_connect::sdk::anonymise (see README.md). {} routes, {} cluster resources, {} online node(s).",
+        "The answers of a real Proxmox VE node, recorded through the plugin's own client and anonymized with tenko_connect::sdk::anonymize (see README.md). {} routes, {} cluster resources, {} online node(s).",
         table.len(),
         resources.len(),
         names.len()
@@ -394,5 +394,5 @@ async fn live_record_fixture() {
         resources.len(),
         names.len()
     );
-    eprintln!("replaced: {:?}", anonymiser.counts());
+    eprintln!("replaced: {:?}", anonymizer.counts());
 }

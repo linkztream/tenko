@@ -170,9 +170,9 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
-      # PUBLICATION: every production dependency of the UI carries a licence on the allow
+      # PUBLICATION: every production dependency of the UI carries a license on the allow
       # list of scripts/licenses.mjs (the npm counterpart of cargo deny check).
-      - name: Licences of the dependencies
+      - name: Licenses of the dependencies
         run: npm run licenses
       # L1.4 of docs/plans/security-audit-plan.md. The full report first, development
       # dependencies included: it is printed and written to the job summary and never fails
@@ -249,6 +249,7 @@ jobs:
           TENKO_BIN: ${{ github.workspace }}/target/debug/tenko
         run: npm run e2e
       - name: Keep the Playwright report
+        # spelling: alias (the GitHub Actions status function)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
@@ -782,6 +783,26 @@ jobs:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: node scripts/changelog.mjs check --base "$BASE"
 
+  # American English (CONTRIBUTING.md, "Conventions"). Everything the project writes uses
+  # the American spelling; node scripts/spelling.mjs lists the British forms of its word
+  # table in the tracked files and fails on any. A kept spelling carries the marker
+  # `spelling: alias` or `spelling: stored key`. Plain Node, no packages, cheap, so it runs
+  # on every push and pull request and is not gated by `Changed paths`.
+  spelling:
+    name: Spelling
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - name: American English
+        run: node scripts/spelling.mjs
+
   # -------------------------------------------------------------------------------------
   # PUBLICATION: the Developer Certificate of Origin check. CONTRIBUTING.md and CLA.md
   # require a Signed-off-by trailer on every commit, with the name and email of the
@@ -887,7 +908,7 @@ jobs:
           echo "workflows=$workflows systemd=$systemd"
 
   # L1.3: a pull request adds no dependency with a High or Critical advisory and none whose
-  # licence is outside the allow list. The list is the allow list of deny.toml
+  # license is outside the allow list. The list is the allow list of deny.toml
   # ([licenses] allow), in its order; keep the two equal. The production dependencies of the
   # UI are also held to ui/scripts/licenses.mjs by the UI job. Development-only npm packages
   # are not checked (fail-on-scopes); Cargo.lock does not mark them, so every crate is. The

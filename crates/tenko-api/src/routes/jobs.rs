@@ -25,7 +25,7 @@
 //! # Authorization
 //!
 //! With an [`Authorizer`](tenko_core::Authorizer) in the [`AppState`], reading one job
-//! needs [`Action::Read`] on it, cancelling and completing need [`Action::Execute`], and
+//! needs [`Action::Read`] on it, canceling and completing need [`Action::Execute`], and
 //! the list is empty when the principal may read no jobs. Without an authorizer every check
 //! passes (development and tests). A job anchors to its targets (IAM-01): a scoped
 //! principal lists and reads the jobs one of whose targets lies in its scope, and cancels
@@ -432,10 +432,10 @@ async fn get_job(
 
 /// Cancels a job.
 ///
-/// A queued job is cancelled at once. A running or waiting job is marked: the runner stops
-/// it at the next step boundary, rolls back what ran and ends it as `cancelled`; the answer
-/// shows `cancel_requested: true` until then. Cancelling twice is harmless. A job that is
-/// rolling back or finished cannot be cancelled.
+/// A queued job is canceled at once. A running or waiting job is marked: the runner stops
+/// it at the next step boundary, rolls back what ran and ends it as `canceled`; the answer
+/// shows `cancel_requested: true` until then. Canceling twice is harmless. A job that is
+/// rolling back or finished cannot be canceled.
 #[utoipa::path(
     post,
     path = "/jobs/{id}/cancel",
@@ -911,7 +911,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_honours_at_least() {
+    async fn list_honors_at_least() {
         let engine = engine();
         three_jobs(&engine).await;
         let router = app(Some(&engine), None);
@@ -962,7 +962,7 @@ mod tests {
             ("limit=abc".into(), "limit"),
             ("limit=1&limit=2".into(), "limit"),
             ("at_least=soon".into(), "at_least"),
-            ("colour=red".into(), "colour"),
+            ("color=red".into(), "color"),
             ("state=waiting&sort=-updated".into(), "sort"),
         ];
         for (query, parameter) in shared {
@@ -1057,7 +1057,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_honours_at_least() {
+    async fn get_honors_at_least() {
         let engine = engine();
         let id = waiting(&engine, "ipam.move", host()).await;
         let router = app(Some(&engine), None);
@@ -1111,7 +1111,7 @@ mod tests {
     // Cancel.
 
     #[tokio::test]
-    async fn cancelling_a_waiting_job_requests_the_cancellation() {
+    async fn canceling_a_waiting_job_requests_the_cancellation() {
         let engine = engine();
         let id = waiting(&engine, "ipam.move", host()).await;
         let router = app(Some(&engine), None);
@@ -1122,29 +1122,29 @@ mod tests {
         assert_eq!(reply.body["cancel_requested"], true);
         // Without a runner the job stays where it was; the runner rolls it back.
         assert_eq!(reply.body["state"], "waiting");
-        // Cancelling again is harmless.
+        // Canceling again is harmless.
         let again = post(&router, &format!("/jobs/{id}/cancel")).await;
         assert_eq!(again.status, StatusCode::ACCEPTED);
         assert_eq!(again.body["cancel_requested"], true);
     }
 
     #[tokio::test]
-    async fn cancelling_a_queued_job_cancels_it() {
+    async fn canceling_a_queued_job_cancels_it() {
         let engine = engine();
         let id = queued(&engine, "ipam.move", host()).await;
         let router = app(Some(&engine), None);
         let reply = post(&router, &format!("/jobs/{id}/cancel")).await;
         assert_eq!(reply.status, StatusCode::ACCEPTED, "{}", reply.body);
-        assert_eq!(reply.body["state"], "cancelled");
+        assert_eq!(reply.body["state"], "canceled");
         assert_eq!(reply.body["cancel_requested"], true);
         assert!(reply.body["finished"].is_string());
 
         let detail = get(&router, &format!("/jobs/{id}")).await;
-        assert_eq!(detail.body["job"]["state"], "cancelled");
+        assert_eq!(detail.body["job"]["state"], "canceled");
     }
 
     #[tokio::test]
-    async fn cancelling_a_cancelled_job_conflicts() {
+    async fn canceling_a_canceled_job_conflicts() {
         let engine = engine();
         let id = queued(&engine, "ipam.move", host()).await;
         let router = app(Some(&engine), None);
@@ -1158,7 +1158,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelling_an_unknown_job_is_not_found() {
+    async fn canceling_an_unknown_job_is_not_found() {
         let engine = engine();
         let id = JobId::generate();
         let reply = post(&app(Some(&engine), None), &format!("/jobs/{id}/cancel")).await;

@@ -23,7 +23,7 @@
         <segment><source>DHCP options</source></segment>
       </unit>
       <unit id="dhcp.classes.title">
-        <notes><note category="description">Title of the page of client classes, groups of clients that are recognised by what they send.</note></notes>
+        <notes><note category="description">Title of the page of client classes, groups of clients that are recognized by what they send.</note></notes>
         <segment><source>Client classes</source></segment>
       </unit>
       <unit id="dhcp.policies.title">
@@ -872,7 +872,7 @@
         <segment><source>Definition {name} deleted</source></segment>
       </unit>
       <unit id="dhcp.classes.sub">
-        <segment><source>Groups of clients that are recognised by what they send.</source></segment>
+        <segment><source>Groups of clients that are recognized by what they send.</source></segment>
       </unit>
       <unit id="dhcp.classes.empty">
         <segment><source>No classes</source></segment>

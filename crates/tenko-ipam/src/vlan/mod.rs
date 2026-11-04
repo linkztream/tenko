@@ -3,7 +3,7 @@
 //!
 //! VLANs are objects of the IPAM model (`tenko_core::ipam::Vlan`, table `ipam.vlans`, the
 //! commands `CreateVlan` and `UpdateVlan`, unique per site), and a prefix names its VLAN
-//! (`Prefix::vlan`). This module adds the synchronisation with the network:
+//! (`Prefix::vlan`). This module adds the synchronization with the network:
 //!
 //! - [`controllers`]: the port to the network-controller connectors and the slot that
 //!   holds it; [`memory`]: an in-memory controller for tests and demonstrations.
@@ -28,7 +28,7 @@
 //! (`ipam.vlan.controller_ambiguous`, a warning to acknowledge). A connector with writes
 //! off gets a manual step with the planned diff shown (`ipam.vlan.controller_read_only`,
 //! a warning to acknowledge). A plan that changes a network the controller already has
-//! (another name on the VLAN) needs an acknowledgement (`ipam.vlan.network_changes`). The
+//! (another name on the VLAN) needs an acknowledgment (`ipam.vlan.network_changes`). The
 //! guardrails of the connector host refuse the management VLAN (CONN-09): the preview and
 //! the submit answer the refusal (409 `connect.guardrail.protected_vlan`), and
 //! `manual: true` creates the VLAN in IPAM without touching the controller.
@@ -102,11 +102,11 @@ pub mod codes {
     pub const NO_CONTROLLER: &str = "ipam.vlan.no_controller";
     /// Reason of a manual step: the request asked for it.
     pub const MANUAL_REQUESTED: &str = "ipam.vlan.manual_requested";
-    /// Warning and reason (needs acknowledgement): several controllers, none named.
+    /// Warning and reason (needs acknowledgment): several controllers, none named.
     pub const CONTROLLER_AMBIGUOUS: &str = "ipam.vlan.controller_ambiguous";
-    /// Warning and reason (needs acknowledgement): the controller does not allow writes.
+    /// Warning and reason (needs acknowledgment): the controller does not allow writes.
     pub const CONTROLLER_READ_ONLY: &str = "ipam.vlan.controller_read_only";
-    /// Warning (needs acknowledgement): the write changes a network the controller has.
+    /// Warning (needs acknowledgment): the write changes a network the controller has.
     pub const NETWORK_CHANGES: &str = "ipam.vlan.network_changes";
 }
 
@@ -283,7 +283,7 @@ pub struct VlanProvisionPreview {
     /// Every warning: of the IPAM plan and of the network step.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<PlanWarning>,
-    /// Warning codes that need an acknowledgement before a submit.
+    /// Warning codes that need an acknowledgment before a submit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unacknowledged: Vec<String>,
     /// The store revision the preview was computed at.

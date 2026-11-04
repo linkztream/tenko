@@ -14,7 +14,7 @@
 //! to the store, and its commit clears the finding while a refusal closes the gate for
 //! another interval. So no probe write is ever made, and a store that heals is used within
 //! the interval. On one node the store refuses only on a disk failure or through the test
-//! hook (`TENKO_TEST_REFUSE_WRITES_FILE`); in Phase 5 it is also the quorum-loss behaviour.
+//! hook (`TENKO_TEST_REFUSE_WRITES_FILE`); in Phase 5 it is also the quorum-loss behavior.
 
 use std::{
     sync::{

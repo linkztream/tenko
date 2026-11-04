@@ -76,7 +76,7 @@ pub struct Manifest {
     /// Where to read more.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homepage: Option<String>,
-    /// SPDX licence expression of the plugin.
+    /// SPDX license expression of the plugin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
     /// The protocol major versions the plugin speaks.

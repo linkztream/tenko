@@ -1,6 +1,6 @@
 #![no_main]
 
-//! The passive neighbour frame parsers of the probe (WP3.14): LLDP (IEEE 802.1AB) and CDP
+//! The passive neighbor frame parsers of the probe (WP3.14): LLDP (IEEE 802.1AB) and CDP
 //! version 2 TLVs, reached both directly and through the Ethernet/SNAP framing. Their input
 //! is attacker-controlled frames on the segment, so it is fuzzed like any network input.
 

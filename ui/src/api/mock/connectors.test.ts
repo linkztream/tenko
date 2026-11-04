@@ -326,7 +326,7 @@ describe("GET /connectors/{id}", () => {
     expect(bad.params.field).toBe("id");
     const missing = problemOf(await get(connectorPath(UNKNOWN_ID)), 404, "connect.instance.not_found");
     expect(missing.params.id).toBe(UNKNOWN_ID);
-    problemOf(await get(`${connectorPath(INVENTORY)}?colour=red`), 400, "sys.invalid_query");
+    problemOf(await get(`${connectorPath(INVENTORY)}?color=red`), 400, "sys.invalid_query");
   });
 
   it("answers every operation on an unknown or malformed identifier", async () => {
@@ -571,7 +571,7 @@ describe("POST /connectors", () => {
       { plugin: "sample" },
       { name: "A" },
       { plugin: 4, name: "A" },
-      { plugin: "sample", name: "A", colour: "red" },
+      { plugin: "sample", name: "A", color: "red" },
       { plugin: "sample", name: "A", secrets: [] },
       { plugin: "sample", name: "A", secrets: { api_key: "abc" } },
       { plugin: "sample", name: "A", secrets: { api_key: { secret: "abc" } } },
@@ -693,7 +693,7 @@ describe("PATCH /connectors/{id}", () => {
 
   it("refuses a malformed body", async () => {
     const cases: [unknown, number, string][] = [
-      [{ colour: "red" }, 400, "sys.invalid_request"],
+      [{ color: "red" }, 400, "sys.invalid_request"],
       [{ name: 5 }, 400, "sys.invalid_request"],
       [{ secrets: { api_key: { secret: "abc" } } }, 400, "sys.invalid_request"],
       [{ writes_enabled: "yes" }, 400, "sys.invalid_request"],

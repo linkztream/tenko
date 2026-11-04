@@ -231,7 +231,7 @@ pub(crate) const fn job_state_name(state: JobState) -> &'static str {
         JobState::Succeeded => "succeeded",
         JobState::Failed => "failed",
         JobState::RolledBack => "rolled_back",
-        JobState::Cancelled => "cancelled",
+        JobState::Canceled => "canceled",
     }
 }
 

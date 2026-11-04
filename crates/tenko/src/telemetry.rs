@@ -18,7 +18,7 @@
 //!   it and the provider is shut down inside it ([`Telemetry::shutdown`]).
 //! - The global propagator is the W3C trace context (`traceparent`, `tracestate`), which
 //!   `tenko-cluster` and `tenko-connect` use to carry the context in gRPC metadata.
-//! - Only spans of Tenko's own crates are exported, never log events: the span catalogue of
+//! - Only spans of Tenko's own crates are exported, never log events: the span catalog of
 //!   `docs/observability.md` section 8 is the whole content, and log messages (which may name
 //!   objects) do not leave the process this way.
 

@@ -56,7 +56,7 @@ const REQUIREMENTS = `# Requirements
 | OPS-1 | Hypothetical short id. | 1 | Must |
 | OPS-15 | Idle memory. | 1 | Must |
 | OPS-22 | TLS modes (a) | (b) escaped \\| pipe. | 1 (ACME: 3) | Must (ACME: Should) |
-| OPS-26 | Partition behaviour. | 1 (Slice 3) | Must |
+| OPS-26 | Partition behavior. | 1 (Slice 3) | Must |
 | OPS-28 | Sites. | 1 (delta sync, Slice 3); 2 (IXFR) | Must |
 | OPS-30 | Switch. | 2 and 3 (DNS and DHCP modules) | Must |
 | OPS-31 | Not phase one. | 10 | Must |
@@ -628,7 +628,7 @@ describe("phases", () => {
       "| # | Check | Requirements | Package |",
       "|---|---|---|---|",
       "| E33 | Validation from the lab root | DNS-13, DHCP-12 | WP10.2 |",
-      "| E35 | QNAME minimisation on the wire | DNS-34 | WP10.3 |",
+      "| E35 | QNAME minimization on the wire | DNS-34 | WP10.3 |",
       "",
     ].join("\n");
     const HA_PLAN = [
@@ -648,7 +648,7 @@ describe("phases", () => {
         "| DHCP-07 | Leases. | 3 | Must |",
         "| DHCP-12 | Failover. | 3 | Must |",
         "| DNS-13 | Validation. | 3 (Slice 10) | Should |",
-        "| DNS-34 | Minimisation. | 5 | Should |",
+        "| DNS-34 | Minimization. | 5 | Should |",
         "| DNS-35 | Other. | 4 (Slice 11) | Could |",
       ].join("\n"),
     );

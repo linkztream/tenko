@@ -26,7 +26,7 @@
 //! ```
 //!
 //! Both bind the row (table name and encoded key) and the class, so an envelope copied to
-//! another row, or relabelled from system to operator to make it revealable, fails
+//! another row, or relabeled from system to operator to make it revealable, fails
 //! authentication. The data AAD leaves out the KEK identifier, so KEK rotation re-wraps
 //! the DEK without touching the ciphertext.
 
@@ -483,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn relabelling_the_class_fails() {
+    fn relabeling_the_class_fails() {
         let ring = ring();
         let envelope = seal(
             ring.active().as_ref(),
@@ -495,12 +495,12 @@ mod tests {
         .expect("seal");
         let mut payload = envelope.payload.to_vec();
         payload[0] = class_code(SecretClass::Operator);
-        let relabelled = VaultEnvelope {
+        let relabeled = VaultEnvelope {
             payload: Bytes::from(payload),
             ..envelope
         };
         assert_eq!(
-            open(&ring, row(b"k1"), &relabelled).expect_err("class"),
+            open(&ring, row(b"k1"), &relabeled).expect_err("class"),
             VaultError::Integrity
         );
     }

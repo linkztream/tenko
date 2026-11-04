@@ -4,7 +4,7 @@
 //! the group of the process, else the `ping` command. Windows uses `ping.exe`: the safe
 //! wrappers of `IcmpSendEcho` are unmaintained, and a command per address within the rate
 //! limit is cheap enough for the prefixes a probe covers. An echo to an on-link address
-//! also fills the operating system's neighbour table, so the next `arp` run sees the
+//! also fills the operating system's neighbor table, so the next `arp` run sees the
 //! address with its MAC address even when the host drops ICMP.
 
 use std::{net::IpAddr, sync::Arc, time::Duration};
@@ -233,7 +233,7 @@ impl Method for IcmpSweep {
         let mut done = 0usize;
         let limit = ctx.pacer.limits().concurrency.max(1);
         loop {
-            while pending.len() < limit && !ctx.cancel.is_cancelled() {
+            while pending.len() < limit && !ctx.cancel.is_canceled() {
                 let Some(ip) = queue.next() else { break };
                 let pinger = Arc::clone(&pinger);
                 let pacer = Arc::clone(&ctx.pacer);
@@ -245,7 +245,7 @@ impl Method for IcmpSweep {
             }
             let next = tokio::select! {
                 next = pending.next() => next,
-                () = ctx.cancel.cancelled() => break,
+                () = ctx.cancel.canceled() => break,
             };
             let Some((ip, result)) = next else { break };
             done += 1;
@@ -263,7 +263,7 @@ impl Method for IcmpSweep {
                 }
             }
         }
-        output.covered_all = done == total && errors == 0 && !ctx.cancel.is_cancelled();
+        output.covered_all = done == total && errors == 0 && !ctx.cancel.is_canceled();
         if errors > 1 {
             output
                 .notes
@@ -361,7 +361,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_cancelled_sweep_is_not_complete() {
+    async fn a_canceled_sweep_is_not_complete() {
         let (stop, receiver) = tokio::sync::watch::channel(true);
         let mut ctx = context(Vec::new());
         ctx.cancel = Cancel::new(receiver);

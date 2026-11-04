@@ -34,7 +34,7 @@ pub mod tables {
 
     /// The one record of the installation's KEK state, under the key `()`.
     pub const STATE: TableDef<(), KekState> = TableDef::new("vault.kek_state");
-    /// Acknowledgements of a new generation by (generation id, node).
+    /// Acknowledgments of a new generation by (generation id, node).
     pub const ACKS: TableDef<(String, NodeId), KekAck> = TableDef::new("vault.kek_acks");
     /// The KEK protection of each controller.
     pub const PROTECTION: TableDef<NodeId, ProtectionRecord> =

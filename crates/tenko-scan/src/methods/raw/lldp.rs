@@ -1,7 +1,7 @@
 //! Passive `lldp` (SCAN-02, SCAN-05): listens on the probe's interface for LLDP (ethertype
 //! `0x88cc`) and, when `cdp` is on, CDP (SNAP, Cisco OUI, protocol `0x2000`) frames for the
-//! listen window, parses the TLVs and emits neighbour facts in the shape of the SNMP LLDP
-//! neighbours, so the port mapping of section 3 merges them: a link between the probe's
+//! listen window, parses the TLVs and emits neighbor facts in the shape of the SNMP LLDP
+//! neighbors, so the port mapping of section 3 merges them: a link between the probe's
 //! interface and the switch port, the probe's own MAC attached to that port and VLAN, and
 //! the switch's management address, name and OS when in scope. It sends nothing, so
 //! blackout windows do not hold it; its batch is never complete, like the other
@@ -21,7 +21,7 @@ use crate::{
     config::LldpMethod,
     error::ScanError,
     frame::{
-        Neighbour, cdp,
+        Neighbor, cdp,
         ethernet::{self, CISCO_OUI, Protocol, SNAP_PROTOCOL_CDP},
         lldp,
     },
@@ -29,8 +29,8 @@ use crate::{
     oui,
 };
 
-/// Parses one frame into a neighbour, when it is an LLDP frame or (with `cdp`) a CDP frame.
-fn neighbour_in(frame: &[u8], cdp_on: bool) -> Option<Neighbour> {
+/// Parses one frame into a neighbor, when it is an LLDP frame or (with `cdp`) a CDP frame.
+fn neighbor_in(frame: &[u8], cdp_on: bool) -> Option<Neighbor> {
     let parsed = ethernet::parse(frame)?;
     match parsed.protocol {
         Protocol::EtherType(ethernet::ETHERTYPE_LLDP) => lldp::parse(parsed.payload),
@@ -43,16 +43,16 @@ fn neighbour_in(frame: &[u8], cdp_on: bool) -> Option<Neighbour> {
     }
 }
 
-/// A key that deduplicates repeated frames from the same neighbour on the same port.
-fn key(neighbour: &Neighbour) -> String {
+/// A key that deduplicates repeated frames from the same neighbor on the same port.
+fn key(neighbor: &Neighbor) -> String {
     format!(
         "{}|{}",
-        neighbour
+        neighbor
             .system_name
             .as_deref()
-            .or(neighbour.chassis_id.as_deref())
+            .or(neighbor.chassis_id.as_deref())
             .unwrap_or("?"),
-        neighbour.port_id.as_deref().unwrap_or("?")
+        neighbor.port_id.as_deref().unwrap_or("?")
     )
 }
 
@@ -104,35 +104,35 @@ impl Method for LldpListen {
             .await?;
         let own_mac = link.interface().mac;
         let if_name = link.interface().name.clone();
-        let mut neighbours: BTreeMap<String, Neighbour> = BTreeMap::new();
+        let mut neighbors: BTreeMap<String, Neighbor> = BTreeMap::new();
         let deadline = Instant::now() + self.window;
-        while Instant::now() < deadline && !ctx.cancel.is_cancelled() {
+        while Instant::now() < deadline && !ctx.cancel.is_canceled() {
             if let Ok(Some(frame)) = link.recv(Duration::from_millis(200)).await
-                && let Some(neighbour) = neighbour_in(&frame, self.cdp)
+                && let Some(neighbor) = neighbor_in(&frame, self.cdp)
             {
-                neighbours.entry(key(&neighbour)).or_insert(neighbour);
+                neighbors.entry(key(&neighbor)).or_insert(neighbor);
             }
         }
         let mut output = MethodOutput {
-            covered_all: !ctx.cancel.is_cancelled(),
+            covered_all: !ctx.cancel.is_canceled(),
             ..MethodOutput::default()
         };
         let local = Endpoint {
             device: own_mac.to_string(),
             port: Some(if_name),
         };
-        for neighbour in neighbours.values() {
-            let switch = neighbour
+        for neighbor in neighbors.values() {
+            let switch = neighbor
                 .system_name
                 .clone()
-                .or_else(|| neighbour.chassis_id.clone());
+                .or_else(|| neighbor.chassis_id.clone());
             let Some(switch) = switch else { continue };
             // The topology edge between the probe and the switch.
             output.found.push(Found::now(SightingSubject::Link {
                 a: local.clone(),
                 b: Endpoint {
                     device: switch.clone(),
-                    port: neighbour.port_id.clone(),
+                    port: neighbor.port_id.clone(),
                 },
                 kind: LinkKind::Lldp,
             }));
@@ -140,24 +140,24 @@ impl Method for LldpListen {
             output.found.push(Found::now(SightingSubject::Attachment {
                 mac: own_mac,
                 device: switch.clone(),
-                port: neighbour.port_id.clone(),
-                vlan: neighbour.vlan,
+                port: neighbor.port_id.clone(),
+                vlan: neighbor.vlan,
             }));
             // The switch's management addresses, when in scope.
-            for ip in &neighbour.mgmt_addrs {
+            for ip in &neighbor.mgmt_addrs {
                 if !ctx.scope.contains(*ip) {
                     continue;
                 }
                 output
                     .found
                     .push(Found::now(SightingSubject::Address { ip: *ip, mac: None }));
-                if let Some(name) = &neighbour.system_name {
+                if let Some(name) = &neighbor.system_name {
                     output.found.push(Found::now(SightingSubject::Name {
                         ip: *ip,
                         name: name.clone(),
                     }));
                 }
-                if let Some(desc) = &neighbour.system_desc {
+                if let Some(desc) = &neighbor.system_desc {
                     output.found.push(Found::now(SightingSubject::Os {
                         ip: *ip,
                         guess: desc.chars().take(120).collect(),
@@ -166,7 +166,7 @@ impl Method for LldpListen {
                 }
             }
             // The vendor of the chassis MAC, when the chassis id is one.
-            if let Some(mac) = neighbour.chassis_mac()
+            if let Some(mac) = neighbor.chassis_mac()
                 && let Some(vendor) = oui::vendor(mac)
             {
                 output.found.push(Found::now(SightingSubject::Vendor {

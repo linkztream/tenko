@@ -318,7 +318,7 @@ describe("the list", () => {
   it("refuses a bad query", async () => {
     expectProblem(await get(`${V}/secrets?kind=nothing`), 400, "sys.invalid_query");
     expectProblem(await get(`${V}/secrets?host=nas`), 400, "sys.invalid_query");
-    expectProblem(await get(`${V}/secrets?colour=blue`), 400, "sys.invalid_query");
+    expectProblem(await get(`${V}/secrets?color=blue`), 400, "sys.invalid_query");
     expectProblem(await get(`${V}/secrets?limit=0`), 400, "sys.invalid_query");
     expectProblem(await get(`${V}/secrets?cursor=%25`), 400, "sys.invalid_cursor");
   });
@@ -409,7 +409,7 @@ describe("create", () => {
 
   it("refuses a malformed body", async () => {
     expectProblem(await post(`${V}/secrets`, { kind: "other", value: "x" }), 400, "sys.invalid_request");
-    expectProblem(await post(`${V}/secrets`, { name: "x", kind: "colour", value: "x" }), 400, "sys.invalid_request");
+    expectProblem(await post(`${V}/secrets`, { name: "x", kind: "color", value: "x" }), 400, "sys.invalid_request");
     expectProblem(await post(`${V}/secrets`, { name: "x", kind: "other" }), 400, "sys.invalid_request");
     expectProblem(await post(`${V}/secrets`, { name: "x", kind: "other", value: "x", extra: 1 }), 400, "sys.invalid_request");
     expectProblem(await post(`${V}/secrets`, { name: "x", kind: "other", value: "x", tags: "lab" }), 400, "sys.invalid_request");
@@ -536,8 +536,8 @@ describe("get and patch", () => {
     expect(expectProblem(await patch(secretPath(NAS), { tags: ["no way"] }), 422, "vault.secret.invalid").params.field).toBe("tags");
     expect(expectProblem(await patch(secretPath(NAS), { value: "" }), 422, "vault.secret.invalid").params.field).toBe("value");
     expect(expectProblem(await patch(secretPath(NAS), { username: "u".repeat(257) }), 422, "vault.secret.invalid").params.field).toBe("username");
-    expectProblem(await patch(secretPath(NAS), { colour: "red" }), 400, "sys.invalid_request");
-    expectProblem(await patch(secretPath(NAS), { kind: "colour" }), 400, "sys.invalid_request");
+    expectProblem(await patch(secretPath(NAS), { color: "red" }), 400, "sys.invalid_request");
+    expectProblem(await patch(secretPath(NAS), { kind: "color" }), 400, "sys.invalid_request");
     expectProblem(await patch(secretPath(UNKNOWN_ID), { name: "x" }), 404, "vault.secret.not_found");
     expect((await get<SecretView>(secretPath(NAS))).body.name).toBe("nas admin");
   });
@@ -677,7 +677,7 @@ describe("reveal", () => {
     expectProblem(await post(revealPath(UNKNOWN_ID)), 404, "vault.secret.not_found");
     expectProblem(await post(revealPath("nothing")), 400, "sys.invalid_request");
     expectProblem(await post(revealPath(NAS), { host: "nas" }), 400, "sys.invalid_request");
-    expectProblem(await post(revealPath(NAS), { colour: "red" }), 400, "sys.invalid_request");
+    expectProblem(await post(revealPath(NAS), { color: "red" }), 400, "sys.invalid_request");
     expect(revealsOf(NAS)).toEqual([]);
   });
 
@@ -1132,7 +1132,7 @@ describe("remote hand-off", () => {
       "protocol=ssh&port=-1",
       "protocol=ssh&interface=eth0",
       `protocol=ssh&user=${"u".repeat(257)}`,
-      "protocol=ssh&colour=blue",
+      "protocol=ssh&color=blue",
     ];
     for (const query of bad) expectProblem(await get(remotePath(NAS_HOST, query)), 400, "sys.invalid_query");
     expect((await get(remotePath(NAS_HOST, "protocol=ssh&port=65535"))).status).toBe(200);

@@ -301,8 +301,8 @@ impl ForwardSink for PolicySink {
 
     fn intake(&self, query: &IntakeQuery<'_>, out: &mut Vec<u8>) -> Intake {
         let intake = self.inner.intake(query, out);
-        // WP10.3: a synthesised wildcard answer carries addresses as well.
-        let (Intake::Answered { .. } | Intake::Synthesised { .. }) = intake else {
+        // WP10.3: a synthesized wildcard answer carries addresses as well.
+        let (Intake::Answered { .. } | Intake::Synthesized { .. }) = intake else {
             return intake;
         };
         let catalog = self.catalog.load();

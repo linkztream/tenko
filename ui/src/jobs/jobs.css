@@ -1,11 +1,11 @@
 /*
  * Jobs: the list, the group panel with its checklist, and the job page. Token roles only. The
- * job state glyphs (`.jstate`) are in app/styles/design.css; this adds the cancelled variant,
+ * job state glyphs (`.jstate`) are in app/styles/design.css; this adds the canceled variant,
  * the rows that wait for a person, and the layout of the three views.
  */
 
-/* A cancelled job looks like a queued one (hollow ring) with its word struck through. */
-.jstate.cancelled { text-decoration: line-through; }
+/* A canceled job looks like a queued one (hollow ring) with its word struck through. */
+.jstate.canceled { text-decoration: line-through; }
 
 /* ---------- The list ---------- */
 .jobs-page { overflow: auto; }

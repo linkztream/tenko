@@ -5,7 +5,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use super::{Neighbour, NeighbourCapabilities, NeighbourSource};
+use super::{Neighbor, NeighborCapabilities, NeighborSource};
 
 const TLV_DEVICE_ID: u16 = 0x0001;
 const TLV_ADDRESSES: u16 = 0x0002;
@@ -23,8 +23,8 @@ fn text(value: &[u8]) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn capabilities(bits: u32) -> NeighbourCapabilities {
-    NeighbourCapabilities {
+fn capabilities(bits: u32) -> NeighborCapabilities {
+    NeighborCapabilities {
         router: bits & 0x01 != 0,
         bridge: bits & 0x02 != 0 || bits & 0x08 != 0,
         wlan: false,
@@ -35,7 +35,7 @@ fn capabilities(bits: u32) -> NeighbourCapabilities {
 
 /// Reads the addresses TLV: a 4-byte count, then entries of protocol type, protocol,
 /// address length and address. IPv4 (4 bytes) and IPv6 (16 bytes) addresses are kept.
-fn read_addresses(value: &[u8], neighbour: &mut Neighbour) {
+fn read_addresses(value: &[u8], neighbor: &mut Neighbor) {
     if value.len() < 4 {
         return;
     }
@@ -68,22 +68,22 @@ fn read_addresses(value: &[u8], neighbour: &mut Neighbour) {
             _ => None,
         };
         if let Some(ip) = ip
-            && !neighbour.mgmt_addrs.contains(&ip)
+            && !neighbor.mgmt_addrs.contains(&ip)
         {
-            neighbour.mgmt_addrs.push(ip);
+            neighbor.mgmt_addrs.push(ip);
         }
     }
 }
 
-/// Parses a CDP frame into a [`Neighbour`]. The device id serves as both the chassis id
+/// Parses a CDP frame into a [`Neighbor`]. The device id serves as both the chassis id
 /// and the system name; the platform and software version form the system description.
-pub fn parse(payload: &[u8]) -> Option<Neighbour> {
+pub fn parse(payload: &[u8]) -> Option<Neighbor> {
     if payload.len() < 4 {
         return None;
     }
-    let mut neighbour = Neighbour {
-        source: Some(NeighbourSource::Cdp),
-        ..Neighbour::default()
+    let mut neighbor = Neighbor {
+        source: Some(NeighborSource::Cdp),
+        ..Neighbor::default()
     };
     let mut platform = None;
     let mut software = None;
@@ -101,31 +101,31 @@ pub fn parse(payload: &[u8]) -> Option<Neighbour> {
         match tlv_type {
             TLV_DEVICE_ID => {
                 let id = text(value);
-                neighbour.chassis_id.clone_from(&id);
-                neighbour.system_name = id;
+                neighbor.chassis_id.clone_from(&id);
+                neighbor.system_name = id;
             }
-            TLV_ADDRESSES => read_addresses(value, &mut neighbour),
-            TLV_PORT_ID => neighbour.port_id = text(value),
+            TLV_ADDRESSES => read_addresses(value, &mut neighbor),
+            TLV_PORT_ID => neighbor.port_id = text(value),
             TLV_CAPABILITIES if value.len() >= 4 => {
                 let bits = u32::from_be_bytes([value[0], value[1], value[2], value[3]]);
-                neighbour.capabilities = capabilities(bits);
+                neighbor.capabilities = capabilities(bits);
             }
             TLV_SOFTWARE => software = text(value),
             TLV_PLATFORM => platform = text(value),
             TLV_NATIVE_VLAN if value.len() >= 2 => {
-                neighbour.vlan = Some(u16::from_be_bytes([value[0], value[1]]));
+                neighbor.vlan = Some(u16::from_be_bytes([value[0], value[1]]));
             }
             _ => {}
         }
     }
-    neighbour.system_desc = match (platform, software) {
+    neighbor.system_desc = match (platform, software) {
         (Some(p), Some(s)) => Some(format!("{p}; {}", s.lines().next().unwrap_or(&s))),
         (Some(p), None) => Some(p),
         (None, Some(s)) => Some(s.lines().next().unwrap_or(&s).to_owned()),
         (None, None) => None,
     };
-    if saw_tlv && !neighbour.is_empty() {
-        Some(neighbour)
+    if saw_tlv && !neighbor.is_empty() {
+        Some(neighbor)
     } else {
         None
     }
@@ -163,27 +163,27 @@ mod tests {
 
     #[test]
     fn every_cdp_tlv_is_read() {
-        let neighbour = parse(&sample()).expect("neighbour");
+        let neighbor = parse(&sample()).expect("neighbor");
         assert_eq!(
-            neighbour.system_name.as_deref(),
+            neighbor.system_name.as_deref(),
             Some("switch-b.example.test")
         );
         assert_eq!(
-            neighbour.chassis_id.as_deref(),
+            neighbor.chassis_id.as_deref(),
             Some("switch-b.example.test")
         );
-        assert_eq!(neighbour.port_id.as_deref(), Some("GigabitEthernet0/2"));
-        assert!(neighbour.capabilities.bridge);
+        assert_eq!(neighbor.port_id.as_deref(), Some("GigabitEthernet0/2"));
+        assert!(neighbor.capabilities.bridge);
         assert_eq!(
-            neighbour.mgmt_addrs,
+            neighbor.mgmt_addrs,
             vec!["192.0.2.3".parse::<IpAddr>().unwrap()]
         );
-        assert_eq!(neighbour.vlan, Some(10));
+        assert_eq!(neighbor.vlan, Some(10));
         assert_eq!(
-            neighbour.system_desc.as_deref(),
+            neighbor.system_desc.as_deref(),
             Some("ExampleSwitch 2960; Example IOS")
         );
-        assert_eq!(neighbour.source, Some(NeighbourSource::Cdp));
+        assert_eq!(neighbor.source, Some(NeighborSource::Cdp));
     }
 
     #[test]

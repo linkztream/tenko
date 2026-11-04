@@ -47,7 +47,7 @@ The goals the design must hold:
 
    The environment is refused: it is readable in `/proc/<pid>/environ`, inherited by every child (a Hyper-V plugin starts PowerShell), lands in crash dumps and shows in `systemctl show`; [plugins.md](../plugins.md) section 9 already keeps secrets and tokens out of it. There is no API route through which a plugin token reads a secret, so a stolen token does not yield the credentials. A plugin never stores a secret; a changed secret restarts the plugin. A remote plugin's secrets are its host's business: Tenko does not send credentials over the network to a process it does not run.
 
-5. **The manifest.** `plugin.json` gains a manifest version 2 that keeps the members, rules and settings-schema subset of [plugins.md](../plugins.md) section 5 (name, version, description, licence, `platforms`, `settings`, `secrets`, `network`, `entry`) and adds:
+5. **The manifest.** `plugin.json` gains a manifest version 2 that keeps the members, rules and settings-schema subset of [plugins.md](../plugins.md) section 5 (name, version, description, license, `platforms`, `settings`, `secrets`, `network`, `entry`) and adds:
 
    - `api`: the plugin API version range it speaks (`">=1.0, <2"`), in place of `protocol`;
    - `scopes`: the scopes its token needs, for example `["inventory:read", "observations:write"]`, bound to the instance's source by the server;
@@ -101,7 +101,7 @@ The goals the design must hold:
 - **The Windows gap.** Until per-plugin virtual accounts exist, a managed plugin on Windows runs as `NT SERVICE\tenko` and can read the data directory and the DPAPI-sealed key material: a malicious one is a compromised Tenko, as an installed plugin is today. The connectors page says so, and Hardened refuses managed plugins there. A remote plugin under its own account is the contained way on Windows, and Hyper-V's on Hardened sites.
 - **What Hardened allows.** Verified plugins only, as uploaded files matching the index until API-19, then from the index when it is signed; no community and no local plugins; no managed plugins on Windows; remote plugins with tokens an administrator mints, within TGL-05.
 - **The repository is a second release path**: `tenko-plugins` needs the layer-1 checks of the security audit plan and its own tag ruleset before its first release, because its index decides what nodes install.
-- **No review proves code harmless.** The containment is the token's scopes, the sandbox and the repository's layer-1 checks (dependency review, secret scanning, licence checks per language): the review lowers the chance of harm, the containment bounds it. A plugin with a malicious dependency can still lie in the observations it may write (facts of its source, never intent) and reach the networks its unit allows; the documentation says so beside the tiers.
+- **No review proves code harmless.** The containment is the token's scopes, the sandbox and the repository's layer-1 checks (dependency review, secret scanning, license checks per language): the review lowers the chance of harm, the containment bounds it. A plugin with a malicious dependency can still lie in the observations it may write (facts of its source, never intent) and reach the networks its unit allows; the documentation says so beside the tiers.
 
 ### Open for the owner
 

@@ -2,7 +2,7 @@
 //!
 //! The resolver is Tenko's own iterative engine on the forwarder's task pool (WP10.1,
 //! `tenko_dns::recurse`), validating with Tenko's own validator (WP10.2), with QNAME
-//! minimisation, the denial cache and the failure cache (WP10.3). This module holds what
+//! minimization, the denial cache and the failure cache (WP10.3). This module holds what
 //! those packages share, with in-memory references that are simple and correct and serve
 //! as the test oracles, so that the engine is tested without sockets:
 //!
@@ -121,13 +121,13 @@ pub enum Outbound {
     Both,
 }
 
-/// QNAME minimisation (RFC 9156, REC-Q8, `[dns.recursion] qname_minimisation`).
+/// QNAME minimization (RFC 9156, REC-Q8, `[dns.recursion] qname_minimization`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Minimisation {
-    /// Minimise, falling back to the full name for a zone whose servers break on it.
+pub enum Minimization {
+    /// Minimize, falling back to the full name for a zone whose servers break on it.
     #[default]
     Relaxed,
-    /// Minimise, never fall back.
+    /// Minimize, never fall back.
     Strict,
     /// Send the full name.
     Off,
@@ -153,16 +153,16 @@ pub struct RecursionSettings {
     pub budget: WorkBudget,
     /// The infrastructure cache's bounds.
     pub infra: InfraBounds,
-    /// QNAME minimisation.
-    pub minimisation: Minimisation,
+    /// QNAME minimization.
+    pub minimization: Minimization,
     /// The denial cache on (RFC 8198).
     pub aggressive_nsec: bool,
     /// The denial cache's bound.
     pub denial_entries: usize,
     /// The longest hold of the failure cache.
     pub failure_max: Duration,
-    /// RFC 8145 trust anchor signalling.
-    pub signalling: bool,
+    /// RFC 8145 trust anchor signaling.
+    pub signaling: bool,
     /// RFC 8509 root key sentinel.
     pub key_sentinel: bool,
     /// A fresh source port per exchange with an authority.
@@ -180,11 +180,11 @@ impl Default for RecursionSettings {
             timeout: Duration::from_millis(2_000),
             budget: WorkBudget::DEFAULT,
             infra: InfraBounds::STANDARD,
-            minimisation: Minimisation::Relaxed,
+            minimization: Minimization::Relaxed,
             aggressive_nsec: true,
             denial_entries: 20_000,
             failure_max: failure::FAILURE_MAX,
-            signalling: true,
+            signaling: true,
             key_sentinel: true,
             fresh_port: true,
             caps: ValidationCaps::DEFAULT,

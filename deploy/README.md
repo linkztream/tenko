@@ -247,7 +247,7 @@ to.
 **Exit statuses** of `install.sh`: 0 done or nothing to change, 1 an unexpected failure, 2
 usage, 3 an unsupported host, 4 a port taken by another program, 5 the download or the
 checksum, 6 the configuration, 7 the service did not start or become ready, 8 the upgrade
-was refused, 9 first-run setup failed (the node runs), 10 cancelled at a question.
+was refused, 9 first-run setup failed (the node runs), 10 canceled at a question.
 
 ### A Proxmox VE host
 
@@ -309,7 +309,7 @@ Debian and Ubuntu) and `make`. A glibc build of the same source is not a support
 allocator keeps the start-up peak and its idle memory fails OPS-15
 ([bench/phase1-server/results/2026-10-16-m9-linux-memory.md](../bench/phase1-server/results/2026-10-16-m9-linux-memory.md)).
 
-The musl binary uses jemalloc as its allocator instead of musl's own malloc, which serialises
+The musl binary uses jemalloc as its allocator instead of musl's own malloc, which serializes
 the many small allocations of the replicated store's write path across threads: a zone import
 and a DNSSEC signing pass ran about three times slower than with jemalloc, and NSEC3 signing
 of a million records missed its 5 minutes. jemalloc is built from source by the
@@ -658,7 +658,7 @@ docker run --rm -v tenko-data:/var/lib/tenko --entrypoint /usr/local/bin/tenko \
 
 Controllers that join each other and nodes (probes) talk gRPC over mutual TLS on 8444/tcp.
 Only a controller that has cluster members or enrolled nodes needs it reachable: the server
-opens the port once a node is enrolled or an enrolment token is waiting, and a member of a
+opens the port once a node is enrolled or an enrollment token is waiting, and a member of a
 cluster opens it at once. The `[cluster] listen` setting defaults to `0.0.0.0:8444`, which
 is every interface of the container, so a published port reaches it; the compose files set
 `TENKO_CLUSTER__LISTEN='["0.0.0.0:8444"]'` anyway, so that a configuration file cannot
@@ -674,12 +674,12 @@ See [../docs/cluster.md](../docs/cluster.md) section 7.
 
 A probe is the same image with `--roles probe`. It keeps its identity in `/var/lib/tenko`,
 which must be a volume that survives the container. Create a token on the controller
-(`tenko node enrol-token --roles probe --name <name>`, or in the web UI), enrol once into
+(`tenko node enroll-token --roles probe --name <name>`, or in the web UI), enroll once into
 the volume, then run the node. `compose/macvlan.example.yml` has the commands in its header:
 
 ```
 docker compose -f macvlan.example.yml --profile probe run --rm --no-deps \
-  --entrypoint /usr/local/bin/tenko probe node enrol --controller https://192.0.2.10:8443 \
+  --entrypoint /usr/local/bin/tenko probe node enroll --controller https://192.0.2.10:8443 \
   --token <token> --ca-fingerprint <sha256> --address 192.0.2.11 --data-dir /var/lib/tenko
 docker compose -f macvlan.example.yml --profile probe up -d probe
 ```
@@ -687,7 +687,7 @@ docker compose -f macvlan.example.yml --profile probe up -d probe
 The image's `HEALTHCHECK` asks the API on 8443, which a probe does not serve; the example
 replaces it with `tenko node status --check`, which also checks the connection to the
 controller. In Phase 1 the probe role runs in two ways: inside the controller's process
-(`--roles controller,probe`, no enrolment; `host.example.yml`), or as a node of its own
+(`--roles controller,probe`, no enrollment; `host.example.yml`), or as a node of its own
 (`--roles probe`, enrolled; `macvlan.example.yml`). The image has no `ping` command and no
 `ip` command: ICMP echo works through an unprivileged datagram socket, which needs
 `net.ipv4.ping_group_range` to admit gid 65532 (Docker sets it in the network namespace of a
@@ -744,7 +744,7 @@ capability. To check on a given host, from inside the container, in this order:
 - **Data directory on SSD (OPS-19).** `/var/lib/tenko` must be on SSD or NVMe storage: the
   store fsyncs on every commit. In Proxmox put the container's root disk or a mount point
   for `/var/lib/tenko` on SSD-backed storage (not on a rotating disk or an SMR disk, and
-  not on a network file system that does not honour fsync). The server logs the median
+  not on a network file system that does not honor fsync). The server logs the median
   fsync at start and warns above 10 ms; read that line after the first start.
 - **Raw sockets.** `CAP_NET_RAW` is a capability over the container's own network
   namespace, and an unprivileged container owns that namespace through its user namespace,
@@ -807,7 +807,7 @@ runner (`ct/tenko-ci-runner.sh`), a build machine, not a Tenko installation.
 `compose/smoke-macvlan.sh` creates a dummy link `tenkosmoke0`, builds the image (or uses
 `IMAGE=<tag>`), starts the controller on a macvlan network on it, waits for the
 `HEALTHCHECK`, checks `/api/v1/health/ready` from a throwaway container on the same network,
-runs first-run setup, enrols the probe with a token and checks that it runs, then removes
+runs first-run setup, enrolls the probe with a token and checks that it runs, then removes
 everything, the link included, even on failure. It needs root (sudo), Docker with the compose
 and buildx plugins, and `ip`, and the Docker daemon must run in the network namespace of the
 shell that creates the link (a Linux host, or docker.io inside a WSL distribution; the engine

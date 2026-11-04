@@ -583,7 +583,7 @@ impl ClusterLab {
         self.wait_until(what, limit, || check().then_some(()));
     }
 
-    /// The last [`LOG_TAIL`] lines of every process of the lab, labelled.
+    /// The last [`LOG_TAIL`] lines of every process of the lab, labeled.
     pub fn diagnostics(&self) -> String {
         let mut text = format!("--- lab after {:?} ---\n", self.started.elapsed());
         for id in self.ids() {
@@ -716,10 +716,10 @@ impl ClusterLab {
         );
     }
 
-    /// A controller enrolment token from the API (a fresh session for the step-up); also
+    /// A controller enrollment token from the API (a fresh session for the step-up); also
     /// remembers the CA fingerprint.
     #[track_caller]
-    fn enrolment_token(&mut self, role: &str) -> String {
+    fn enrollment_token(&mut self, role: &str) -> String {
         if role == "controller" {
             self.login();
         }
@@ -729,7 +729,7 @@ impl ClusterLab {
             .send(
                 Method::POST,
                 &base,
-                "/nodes/enrolments",
+                "/nodes/enrollments",
                 Some(&self.cookie),
                 Some(&json!({ "roles": [role] })),
                 &[("Idempotency-Key", uuid::Uuid::now_v7().to_string())],
@@ -749,10 +749,10 @@ impl ClusterLab {
         body["token"].as_str().expect("a token").to_owned()
     }
 
-    /// The enrolment token of a probe.
+    /// The enrollment token of a probe.
     #[track_caller]
     pub fn probe_token(&mut self) -> String {
-        self.enrolment_token("probe")
+        self.enrollment_token("probe")
     }
 
     /// Joins a new controller in an empty slot: `tenko cluster join` with a fresh
@@ -763,7 +763,7 @@ impl ClusterLab {
             matches!(self.slots[index].state, State::Empty | State::Removed),
             "slot {index} is in use"
         );
-        let token = self.enrolment_token("controller");
+        let token = self.enrollment_token("controller");
         let controller = self
             .current_leader()
             .map_or_else(|| self.any_url(), |(leader, _)| self.url(leader));

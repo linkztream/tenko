@@ -270,7 +270,7 @@ describe("changing the mode", () => {
     expect(items[0]?.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("keeps the mode when the dialog is cancelled", async () => {
+  it("keeps the mode when the dialog is canceled", async () => {
     const writes = recordWrites();
     await openHost("thermostat-1");
     await chooseMode("dynamic");

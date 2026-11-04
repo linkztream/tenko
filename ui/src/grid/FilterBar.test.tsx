@@ -116,7 +116,7 @@ describe("a bar without a query field", () => {
     expect(screen.getByRole("button", { name: "Chip" })).toBeTruthy();
   });
 
-  it("takes the role group for a bar of labelled fields", () => {
+  it("takes the role group for a bar of labeled fields", () => {
     render(() => <FilterBar label="Filter the log" role="group" />);
     expect(screen.getByRole("group", { name: "Filter the log" })).toBeTruthy();
     expect(screen.queryByRole("toolbar")).toBeNull();

@@ -82,7 +82,7 @@ async fn a_plugin_starts_answers_and_stops_gracefully() {
     // Settings the plugin rejects come back as invalid settings, and the plugin lives on.
     let rejected = launched
         .client
-        .poll(&ctx(serde_json::json!({ "colour": "blue" })), None, CALL)
+        .poll(&ctx(serde_json::json!({ "color": "blue" })), None, CALL)
         .await;
     assert!(
         matches!(rejected, Err(ConnectorError::InvalidSettings(_))),

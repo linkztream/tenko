@@ -10,7 +10,7 @@
 //! | 5 | The server answered with an error (problem details; the code is printed) |
 //! | 6 | Not signed in, or the stored credentials were refused: run `tenko login` |
 //! | 7 | The server could not be reached (connection, TLS, timeout) |
-//! | 8 | A job or an import ended without success (rolled back, failed, cancelled) |
+//! | 8 | A job or an import ended without success (rolled back, failed, canceled) |
 //! | 9 | `tenko audit verify`: the audit chain does not verify |
 //! | 10 | `tenko upgrade check`: the data directory needs a migration and the dry run passed |
 //! | 11 | `tenko upgrade check`: this binary refuses the data directory (a newer format, a missing migration, or a migration that failed in the dry run) |

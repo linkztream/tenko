@@ -19,7 +19,7 @@ function kindOf(c: CredentialInfo): Kind {
 
 const KIND_ICON: Record<Kind, IconName> = { synced: "refresh", hardware: "key", device: "lock" };
 
-/** Passkeys and security keys: the list, removal and enrolment (IAM-06). */
+/** Passkeys and security keys: the list, removal and enrollment (IAM-06). */
 export function PasskeySection(props: {
   data: MethodsData;
   onCodes: (codes: string[]) => void;

@@ -3306,7 +3306,7 @@ mod tests {
     }
 
     #[test]
-    fn tokens_honour_quotes() {
+    fn tokens_honor_quotes() {
         assert_eq!(
             tokenize("10  mx.example.test").expect("ok"),
             strings(&["10", "mx.example.test"])

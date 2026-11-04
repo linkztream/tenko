@@ -1653,7 +1653,7 @@ mod tests {
         for kind in KINDS {
             let created = api.post(kind.collection, &(kind.body)(1)).await;
             let path = kind.at(&created.item_id());
-            let unknown = kind.body_with(2, json!({ "colour": "red" }));
+            let unknown = kind.body_with(2, json!({ "color": "red" }));
             let post = api.post(kind.collection, &unknown).await;
             post.assert_problem(400, "sys.invalid_request");
             assert_eq!(post.body["params"]["part"], "body", "{}", kind.noun);
@@ -1661,9 +1661,9 @@ mod tests {
                 post.body["detail"]
                     .as_str()
                     .expect("detail")
-                    .contains("colour")
+                    .contains("color")
             );
-            let change = api.patch(&path, None, &json!({ "colour": "red" })).await;
+            let change = api.patch(&path, None, &json!({ "color": "red" })).await;
             change.assert_problem(400, "sys.invalid_request");
             assert_eq!(api.get(&path).await.etag, created.etag, "{}", kind.noun);
             assert_eq!(api.get(kind.collection).await.items().len(), 1);

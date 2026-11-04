@@ -432,7 +432,7 @@ async fn a_bad_reason_or_body_is_a_400_problem() {
         .assert_problem(400, "sys.invalid_request");
     lab.send(
         "POST",
-        &format!("/proposals/{id}/keep?colour=red"),
+        &format!("/proposals/{id}/keep?color=red"),
         &[],
         Some(&json!({})),
     )

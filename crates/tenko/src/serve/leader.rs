@@ -17,7 +17,7 @@
 //! another controller took office every write of a deposed one fails. The term ends when
 //! the store reports another leader or term, when the supervisor stops, or when a service
 //! gives up while the epoch moved past this term's (another controller bumped it): the
-//! services are cancelled, and a controller that still leads takes office again with a
+//! services are canceled, and a controller that still leads takes office again with a
 //! new epoch.
 //!
 //! # Services
@@ -69,7 +69,7 @@ pub(crate) const SERVICE_EVENT: &str = "cluster.leader.service";
 
 /// How long to wait before trying to take office again after a store error.
 const RETRY: Duration = Duration::from_secs(5);
-/// How long a cancelled service may take to end before it is aborted.
+/// How long a canceled service may take to end before it is aborted.
 const SERVICE_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A cancellation token that fires when `stop` is set (or its sender is gone).

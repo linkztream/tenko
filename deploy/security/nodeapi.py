@@ -2,15 +2,15 @@
 """The security round's client of the node's API (deploy/security/README.md).
 
 Python standard library only. It completes first-run setup with a fresh administrator
-(and, where the profile requires a second factor for administrators, enrols an
+(and, where the profile requires a second factor for administrators, enrolls an
 authenticator and signs in again with it), then sends the few requests the rows need with
 the session it keeps in a state file.
 
     nodeapi.py --state S --url https://tenko.example.test:8443 --connect 127.0.0.1 \
         --ca ca-root.pem setup --token-file F --profile standard
-    nodeapi.py --state S get /nodes/enrolments
-    nodeapi.py --state S post /nodes/enrolments '{"roles": ["probe"]}'
-    nodeapi.py --state S delete /nodes/enrolments/<id>
+    nodeapi.py --state S get /nodes/enrollments
+    nodeapi.py --state S post /nodes/enrollments '{"roles": ["probe"]}'
+    nodeapi.py --state S delete /nodes/enrollments/<id>
     nodeapi.py --state S unauth --public rules/public-operations.txt --out unauth.jsonl         --findings unauth-findings.json --document-out openapi.served.json
     nodeapi.py --state S scan-access --dir DIR
     nodeapi.py --state S scan-revoke --dir DIR
@@ -100,7 +100,7 @@ def save_state(path, state):
 
 
 def totp_code(secret_b32, params, at=None):
-    """RFC 6238 with the enrolment's parameters."""
+    """RFC 6238 with the enrollment's parameters."""
     secret = base64.b32decode(secret_b32.strip().upper() + "=" * (-len(secret_b32.strip()) % 8))
     period = int(params.get("period", 30))
     digits = int(params.get("digits", 6))
@@ -233,7 +233,7 @@ class Client:
             keyed=False,
         )
         self.save()
-        if session.get("flags", {}).get("mfa_enrolment_required"):
+        if session.get("flags", {}).get("mfa_enrollment_required"):
             start = self.checked("POST", "/auth/totp/enroll/start", {}, keyed=False)
             self.state["totp_secret"] = start["secret"]
             self.state["totp_params"] = start.get("params", {})
@@ -241,7 +241,7 @@ class Client:
             self.checked(
                 "POST",
                 "/auth/totp/enroll/finish",
-                {"enrolment_id": start["enrolment_id"], "code": self.totp()},
+                {"enrollment_id": start["enrollment_id"], "code": self.totp()},
                 keyed=False,
             )
             self.checked("POST", "/auth/logout", {}, keyed=False)

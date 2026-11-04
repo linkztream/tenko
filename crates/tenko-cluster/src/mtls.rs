@@ -10,7 +10,7 @@
 //!   and whose serial is not in the [`RevocationSet`]. A revoked certificate fails the
 //!   handshake with the alert `certificate_revoked`.
 //! - **Node (client).** [`client_config`] presents the node certificate and accepts a
-//!   server certificate only when it chains to the CA root the node received at enrolment
+//!   server certificate only when it chains to the CA root the node received at enrollment
 //!   (a controller of another installation is refused) and carries the role `controller`.
 //!
 //! The controller tracks every accepted connection with a [`KillSwitch`] per node, so a
@@ -224,7 +224,7 @@ impl ClientCertVerifier for NodeClientVerifier {
 }
 
 /// The server certificate check of a node: the certificate chains to the CA root of the
-/// node's enrolment and belongs to a controller. The host name the node dialled is not
+/// node's enrollment and belongs to a controller. The host name the node dialed is not
 /// checked; the node identity in the certificate is.
 struct ControllerVerifier {
     roots: Arc<RootCertStore>,

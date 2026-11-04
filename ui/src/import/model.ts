@@ -8,7 +8,7 @@
 //
 // Editing the mapping on the preview page (proposals) saves it and previews again; the
 // preview is only applied when the server says it can be (`can_apply`) and every warning
-// that needs an acknowledgement has one.
+// that needs an acknowledgment has one.
 import { MAX_ROWS_PAGE, PREVIEW_ROWS, type ImportRowsPage, type RowsRequest } from "./api";
 import type {
   ColumnMapping,
@@ -117,7 +117,7 @@ export function reduce(state: WizardState, event: WizardEvent): WizardState {
         ...state,
         preview: event.preview,
         rowsCursor: null,
-        // Acknowledgements of warnings the new preview no longer has are dropped.
+        // Acknowledgments of warnings the new preview no longer has are dropped.
         acknowledged: state.acknowledged.filter((c) => event.preview.warnings.some((w) => w.code === c)),
       };
     case "rows": {
@@ -161,7 +161,7 @@ function clone<T>(value: T): T {
 // ---------------------------------------------------------------------------------
 // Guards
 
-/** Warning codes of the preview that still need an acknowledgement. */
+/** Warning codes of the preview that still need an acknowledgment. */
 export function unacknowledged(state: WizardState): string[] {
   const preview = state.preview;
   if (!preview) return [];
@@ -201,12 +201,12 @@ export function allRowsListed(state: WizardState): boolean {
   return !state.preview || state.preview.rows.length >= state.preview.total_rows;
 }
 
-/** The plan blocker that the acknowledgements sent with apply can clear. */
+/** The plan blocker that the acknowledgments sent with apply can clear. */
 export const UNACKNOWLEDGED_BLOCKER = "ipam.plan.unacknowledged";
 
 /**
  * What stops apply now: the server's blockers, except the unacknowledged warnings once the
- * person has acknowledged every one of them here (apply sends those acknowledgements).
+ * person has acknowledged every one of them here (apply sends those acknowledgments).
  */
 export function blockersOf(state: WizardState): string[] {
   const preview = state.preview;

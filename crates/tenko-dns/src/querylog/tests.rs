@@ -93,7 +93,7 @@ fn lines_are_written_and_read_back_newest_first_in_pages() {
 }
 
 #[test]
-fn clients_are_pseudonymised_by_default_and_stable_across_a_restart() {
+fn clients_are_pseudonymized_by_default_and_stable_across_a_restart() {
     let dir = tempdir();
     write_lines(
         settings(dir.path()),

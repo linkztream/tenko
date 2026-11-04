@@ -587,7 +587,7 @@ table.grid { width: 100%; border-collapse: separate; border-spacing: 0; table-la
 /* ---------- Floating layers ---------- */
 .actionbar {
   position: absolute;
-  left: 50%; /* physical: centred with translateX(-50%) */ bottom: var(--sp-6);
+  left: 50%; /* physical: centered with translateX(-50%) */ bottom: var(--sp-6);
   transform: translateX(-50%);
   z-index: var(--z-panel);
   display: flex; align-items: center; gap: var(--sp-2);
@@ -622,7 +622,7 @@ table.grid { width: 100%; border-collapse: separate; border-spacing: 0; table-la
 .overlay { position: fixed; inset: 0; z-index: var(--z-palette); background: var(--scrim); display: none; }
 .overlay.open { display: block; }
 .palette {
-  position: absolute; left: 50%; /* physical: centred with translateX(-50%) */ top: 12vh; transform: translateX(-50%);
+  position: absolute; left: 50%; /* physical: centered with translateX(-50%) */ top: 12vh; transform: translateX(-50%);
   width: min(680px, calc(100vw - 32px));
   border: 1px solid var(--line-strong);
   border-radius: var(--r-4);
@@ -645,7 +645,7 @@ table.grid { width: 100%; border-collapse: separate; border-spacing: 0; table-la
 
 /* Keyboard sheet */
 .sheet {
-  position: absolute; left: 50%; /* physical: centred with translateX(-50%) */ top: 8vh; transform: translateX(-50%);
+  position: absolute; left: 50%; /* physical: centered with translateX(-50%) */ top: 8vh; transform: translateX(-50%);
   width: min(820px, calc(100vw - 32px)); max-height: 84vh; overflow: auto;
   border: 1px solid var(--line-strong); border-radius: var(--r-4);
   background: var(--surface); box-shadow: var(--shadow-drag);

@@ -1,5 +1,5 @@
 {
-  "description": "The answers of a real Home Assistant, recorded through the plugin's own client and anonymised with tenko_connect::sdk::anonymise (see README.md). Counts: /api/ 0, /api/config 0, /api/states 2247, config/area_registry/list 17, config/device_registry/list 360, config/entity_registry/list 3346, config_entries/get 89.",
+  "description": "The answers of a real Home Assistant, recorded through the plugin's own client and anonymized with tenko_connect::sdk::anonymize (see README.md). Counts: /api/ 0, /api/config 0, /api/states 2247, config/area_registry/list 17, config/device_registry/list 360, config/entity_registry/list 3346, config_entries/get 89.",
   "rest": {
     "/api/": {"message":"API running."},
     "/api/config": {"version":"2026.10.1"},

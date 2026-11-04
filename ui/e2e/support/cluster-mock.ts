@@ -7,7 +7,7 @@
 // the API (sign-in, IPAM, the plan dialog's dry run, events) reach the real server. What the
 // tests prove with these fakes is the UI: which preview a dialog shows, what it sends (method,
 // path and body, and nothing before the person confirms), and how the page, the banner and the
-// queue view follow the answers. The real behaviour of the cluster is proven elsewhere: the Rust
+// queue view follow the answers. The real behavior of the cluster is proven elsewhere: the Rust
 // lab tests `crates/tenko/tests/acceptance_cluster.rs` (membership, step-down, digests) and
 // `crates/tenko/tests/acceptance_partition.rs` (isolation, the queue, the heal).
 //
@@ -297,9 +297,9 @@ export class FakeCluster {
 
   private spare = 0;
 
-  /** Makes the cluster page read the members again: the real server announces a new enrolment on `cluster`. */
+  /** Makes the cluster page read the members again: the real server announces a new enrollment on `cluster`. */
   async refreshCluster(api: Api): Promise<void> {
-    await api.post("/nodes/enrolments", { name: `e2e-${randomUUID().slice(0, 8)}`, roles: ["probe"] }, { idempotencyKey: null });
+    await api.post("/nodes/enrollments", { name: `e2e-${randomUUID().slice(0, 8)}`, roles: ["probe"] }, { idempotencyKey: null });
   }
 
   // -- the routes --------------------------------------------------------------------------

@@ -5,7 +5,7 @@
  * at least 3:1 contrast against the background. Two further rules apply to the lists and maps
  * of the IPAM views:
  *
- * - VLANs that are neighbours in id order never get neighbouring hues. The i-th VLAN takes hue
+ * - VLANs that are neighbors in id order never get neighboring hues. The i-th VLAN takes hue
  *   slot `(i * s) mod n`, with a stride `s` near the golden section of the circle that has no
  *   common factor with `n`, so consecutive ids are far apart on the circle.
  * - Color is never the only cue: each VLAN also gets a swatch shape, and the chip always shows
@@ -36,7 +36,7 @@ export interface VlanStyle {
 const MIN_VID = 1;
 const MAX_VID = 4094;
 
-/** Share of the circle between the hues of two neighbouring ids: 1 - 1/phi, about 137.5 degrees. */
+/** Share of the circle between the hues of two neighboring ids: 1 - 1/phi, about 137.5 degrees. */
 const STRIDE_SHARE = 0.382;
 
 function gcd(a: number, b: number): number {

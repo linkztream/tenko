@@ -21,7 +21,7 @@ const MAX_VERSION_CHARS: usize = 64;
 const MAX_DESCRIPTION_CHARS: usize = 500;
 /// Longest homepage.
 const MAX_HOMEPAGE_CHARS: usize = 2_048;
-/// Longest licence expression.
+/// Longest license expression.
 const MAX_LICENSE_CHARS: usize = 100;
 /// Most secrets a plugin declares.
 const MAX_SECRETS: usize = 16;
@@ -76,7 +76,7 @@ fn push(problems: &mut Vec<ManifestProblem>, path: impl Into<String>, message: i
 }
 
 // ---------------------------------------------------------------------------------------
-// Identity: format version, name, version, description, homepage, licence
+// Identity: format version, name, version, description, homepage, license
 // ---------------------------------------------------------------------------------------
 
 fn check_identity(manifest: &Manifest, problems: &mut Vec<ManifestProblem>) {

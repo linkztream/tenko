@@ -358,7 +358,7 @@ async fn invalid_requests_are_precise_problems() {
         &fx.router,
         "POST",
         "/connectors",
-        Some(json!({ "plugin": "sample", "name": "x", "colour": "red" })),
+        Some(json!({ "plugin": "sample", "name": "x", "color": "red" })),
         None,
     )
     .await;

@@ -278,9 +278,9 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/nodes", "list_nodes"),
     ("GET", "/nodes/{id}", "get_node"),
     ("DELETE", "/nodes/{id}", "revoke_node"),
-    ("GET", "/nodes/enrolments", "list_enrolments"),
-    ("POST", "/nodes/enrolments", "create_enrolment"),
-    ("DELETE", "/nodes/enrolments/{id}", "delete_enrolment"),
+    ("GET", "/nodes/enrollments", "list_enrollments"),
+    ("POST", "/nodes/enrollments", "create_enrollment"),
+    ("DELETE", "/nodes/enrollments/{id}", "delete_enrollment"),
     // node-roles: the stored role set of a node.
     ("GET", "/nodes/{id}/roles", "get_node_roles"),
     ("PUT", "/nodes/{id}/roles", "put_node_roles"),
@@ -301,7 +301,7 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     // kek
     ("GET", "/system/kek", "get_kek_status"),
     ("POST", "/system/kek/rotate", "rotate_kek"),
-    ("POST", "/nodes/enrol", "enrol_node"),
+    ("POST", "/nodes/enroll", "enroll_node"),
     // audit_export
     ("GET", "/settings/audit-export", "get_audit_export"),
     ("PUT", "/settings/audit-export", "put_audit_export"),

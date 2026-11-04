@@ -209,14 +209,14 @@ describe("ruleOrder", () => {
 });
 
 describe("knownResolver", () => {
-  it("recognises Quad9 by every one of its addresses", () => {
+  it("recognizes Quad9 by every one of its addresses", () => {
     for (const address of ["9.9.9.9", "149.112.112.112", "2620:fe::fe", "2620:fe::9"]) {
       expect(knownResolver([address])?.tlsName, address).toBe("dns.quad9.net");
     }
     expect(knownResolver(["9.9.9.9", "149.112.112.112", "2620:fe::fe", "2620:fe::9"])?.name).toBe("Quad9");
   });
 
-  it("recognises the other resolvers of the docs", () => {
+  it("recognizes the other resolvers of the docs", () => {
     expect(knownResolver(["1.1.1.1", "1.0.0.1"])?.tlsName).toBe("cloudflare-dns.com");
     expect(knownResolver(["8.8.8.8", "2001:4860:4860::8844"])?.tlsName).toBe("dns.google");
   });

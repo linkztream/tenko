@@ -1,5 +1,5 @@
 // Scenario 2: sign-in with a password and TOTP, then a passkey (E2, IAM-03, IAM-06). The
-// TOTP codes are computed from the secret the enrolment shows (RFC 6238); the passkey lives
+// TOTP codes are computed from the secret the enrollment shows (RFC 6238); the passkey lives
 // on Chromium's virtual platform authenticator with user verification. Plain HTTP on
 // localhost is a secure context, so the relying party is `localhost`. The last test repeats
 // the passkey sign-in over HTTPS with the internal CA (TLS mode a of OPS-22).
@@ -16,7 +16,7 @@ import { addPlatformAuthenticator } from "./support/webauthn";
 test("password with TOTP, then a passkey enrolled and used to sign in", async ({ page, api, signedIn }) => {
   expect(signedIn.session.strength).toBe("pin");
 
-  // Enrol the authenticator app from the account page.
+  // Enroll the authenticator app from the account page.
   await page.goto("/account");
   await expect(page.getByTestId("page-account")).toBeVisible();
   await expect(withKey(page, "account-totp-status", "off")).toBeVisible();
@@ -51,7 +51,7 @@ test("password with TOTP, then a passkey enrolled and used to sign in", async ({
   await expect(page.getByTestId("page-dashboard")).toBeVisible();
   expect((await api.session()).strength).toBe("password_totp");
 
-  // Enrol a passkey on the platform authenticator.
+  // Enroll a passkey on the platform authenticator.
   const authenticator = await addPlatformAuthenticator(page);
   await page.goto("/account");
   await page.getByTestId("field-passkey-label").fill("Test laptop");
@@ -74,7 +74,7 @@ test("password with TOTP, then a passkey enrolled and used to sign in", async ({
 
 test("a TOTP code cannot be used twice", async ({ api, signedIn }) => {
   expect(signedIn.session.user.name).toBe(ADMIN.name);
-  const { authenticator } = await api.enrolTotp();
+  const { authenticator } = await api.enrollTotp();
   const first = await api.loginPassword();
   expect(first.status).toBe("second_factor");
   if (first.status !== "second_factor") return;

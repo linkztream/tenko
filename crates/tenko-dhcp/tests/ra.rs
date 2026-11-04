@@ -344,7 +344,7 @@ fn a_scope_that_contains_or_is_contained_by_a_prefix_belongs_to_the_link() {
 }
 
 #[test]
-fn a_neighbouring_network_is_not_an_overlap() {
+fn a_neighboring_network_is_not_an_overlap() {
     let image = image(vec![scope_of("2001:db8:1::/64")]);
     for prefix in ["2001:db8:2::/64", "2001:db8:0:1::/64", "2001:db9:1::/64"] {
         let entries = [heard(2, 1, false, false, &[prefix], at(10))];

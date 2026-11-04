@@ -456,7 +456,7 @@ mod tests {
         assert!(matches!(
             sample
                 .poll(
-                    &CallContext::with_settings(serde_json::json!({ "colour": 1 })),
+                    &CallContext::with_settings(serde_json::json!({ "color": 1 })),
                     None
                 )
                 .await,

@@ -1613,7 +1613,7 @@ installation whose check is off and which has no manifest.
 After an upgrade, a user's first sign-in shows "what's new": the notes of the versions
 between the one the user saw last and the one that runs. The notes come from the changelog
 compiled into the binary, and from the stored manifest for versions the changelog lacks. The
-user's acknowledgement is recorded per user (`POST /api/v1/system/updates/whats-new/seen`).
+user's acknowledgment is recorded per user (`POST /api/v1/system/updates/whats-new/seen`).
 A user with no recorded version, such as a new account, sees nothing.
 
 ### 8.3 TGL-23 per profile
@@ -1774,7 +1774,7 @@ upload is refused with `update.version_unknown` or `update.not_newer`.
 
 ### 8.9 Containers
 
-A container is recognised by `updates.container = true`, which the image sets with
+A container is recognized by `updates.container = true`, which the image sets with
 `TENKO_UPDATES__CONTAINER=true`, and by the marker files `/.dockerenv` and
 `/run/.containerenv`. The UI does not install in a container. It shows the command that
 pulls the newest image, for example `docker pull ghcr.io/linkztream/tenko:0.2.0` (the image

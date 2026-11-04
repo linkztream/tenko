@@ -10,7 +10,7 @@
 use super::message::{Rr, types};
 use crate::recursion::{LOCAL_ZONES, LocalAnswer};
 
-/// The TTL of the synthesised records (RFC 6303 section 3: the SOA's minimum).
+/// The TTL of the synthesized records (RFC 6303 section 3: the SOA's minimum).
 pub const LOCAL_TTL: u32 = 10_800;
 
 /// The locally served zones in force: [`LOCAL_ZONES`] without the exceptions.

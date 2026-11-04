@@ -19,7 +19,7 @@ export const SSH_ALTERNATIVES: readonly number[] = [SSH_PORT, 2222];
 /** The usual web ports; the scheme follows the port unless the fact marks the port as TLS. */
 const HTTPS_PORT = 443;
 const HTTP_PORT = 80;
-/** The other web ports the panel recognises (Proxmox 8006, Home Assistant 8123), with their usual scheme. */
+/** The other web ports the panel recognizes (Proxmox 8006, Home Assistant 8123), with their usual scheme. */
 export const MORE_WEB_PORTS: readonly { port: number; scheme: Scheme }[] = [
   { port: 8080, scheme: "http" },
   { port: 8443, scheme: "https" },

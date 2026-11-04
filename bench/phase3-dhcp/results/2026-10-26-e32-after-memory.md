@@ -4,7 +4,7 @@ Verdict: PASS (Windows release: M34 idles at 87.75 MiB with every role, the thre
 
 Supersedes: `2026-10-26-e32-rss-leases-metrics.md` (its M30 and M34 rows; its M33 row is carried over unchanged)
 
-E32 of `docs/plans/phase-3-plan.md` (section 1.2) and the open items of deviations 177 and 178 of `docs/plans/phase-3-exit.md`: WP9.5 measured the `dhcp` role at about 27.5 MiB resident before any scope existed (fixed tables of 4,096 pending commits, a committer's queue of 4,096 changes, 65,536 offer slots and the probe's tables) and the role's table of 100,000 leases at about 1 KiB a lease (`2026-10-26-e32-rss-leases-metrics.md`). This package sizes those tables from the configuration image and makes the table's row compact (`docs/dhcp.md` section 10.8); this file holds the same measurements again, by the same scripts, on the same machine and the same day, and the M26 loopback ceiling before and after. Every figure is from the Windows release build and is labelled so; the criterion names the static musl binary, whose figures are the lab's. Every figure is a single-node figure (plan section 2.12).
+E32 of `docs/plans/phase-3-plan.md` (section 1.2) and the open items of deviations 177 and 178 of `docs/plans/phase-3-exit.md`: WP9.5 measured the `dhcp` role at about 27.5 MiB resident before any scope existed (fixed tables of 4,096 pending commits, a committer's queue of 4,096 changes, 65,536 offer slots and the probe's tables) and the role's table of 100,000 leases at about 1 KiB a lease (`2026-10-26-e32-rss-leases-metrics.md`). This package sizes those tables from the configuration image and makes the table's row compact (`docs/dhcp.md` section 10.8); this file holds the same measurements again, by the same scripts, on the same machine and the same day, and the M26 loopback ceiling before and after. Every figure is from the Windows release build and is labeled so; the criterion names the static musl binary, whose figures are the lab's. Every figure is a single-node figure (plan section 2.12).
 
 Machine: Intel Core i9-13900K (24 cores, 32 threads), 63.7 GiB RAM, Windows 11 Enterprise 10.0.26300; rustc 1.99.0. Build: `main` at `116cabc9` (version 0.0.7) with the WP9.5 branch (`c5c6d5ec`) and this package; `cargo build -p tenko --release --locked` with the web UI embedded (147.4 MiB), `cargo build -p tenko-dhcp --release --locked --example dhcp_server`, the test binary with `cargo test --release --locked -p tenko-dhcp --test lease_rebuild --no-run`. "Before" is the WP9.5 build (the M34 figures of `2026-10-26-e32-rss-leases-metrics.md`, and this package's own runs of the example and the test binary built from `c5c6d5ec`). The data directories on a local SSD (`F:`).
 
@@ -87,7 +87,7 @@ The rows of M30 carry a client and nothing else. `crates/tenko-dhcp/tests/lease_
 | M27 renewals, 20 s, script | 97,098 /s, p99 1.28 ms | 103,081 /s, p99 0.79 ms |
 | M28 at 1,000/s, script | p99 0.22 ms | p99 0.21 ms |
 
-No exchange was lost and the server dropped nothing in any run. The median moved by +0.4 percent, within the spread of the runs (89,974 to 94,552): the DORA path did not regress. Loopback figures are upper bounds and labelled so.
+No exchange was lost and the server dropped nothing in any run. The median moved by +0.4 percent, within the spread of the runs (89,974 to 94,552): the DORA path did not regress. Loopback figures are upper bounds and labeled so.
 
 ## Left for the lab
 

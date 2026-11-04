@@ -33,7 +33,7 @@ import { expectRendered } from "./support/i18n";
 import { ProbeNode } from "./support/probe";
 import type { TenkoServer } from "./support/server";
 
-type Created = Schemas["CreatedEnrolment"];
+type Created = Schemas["CreatedEnrollment"];
 type ProbeList = Schemas["ProbeList"];
 type ProbeConfigView = Schemas["ProbeConfigView"];
 
@@ -46,10 +46,10 @@ const NODE_ADDRESS = "192.0.2.20";
 
 /** The probe node of a test: enrolled, started and connected to `server`. */
 async function startProbe(server: TenkoServer, api: Api): Promise<ProbeNode> {
-  const created = await api.post<Created>("/nodes/enrolments", { roles: ["probe"], name: NODE_NAME }, { idempotencyKey: null });
+  const created = await api.post<Created>("/nodes/enrollments", { roles: ["probe"], name: NODE_NAME }, { idempotencyKey: null });
   const probe = await ProbeNode.create();
   try {
-    const enrolled = await probe.enrol(server, created.token, { name: NODE_NAME, address: NODE_ADDRESS });
+    const enrolled = await probe.enroll(server, created.token, { name: NODE_NAME, address: NODE_ADDRESS });
     expect(enrolled.code, enrolled.stderr).toBe(0);
     await probe.serve();
     await expect

@@ -60,7 +60,7 @@ cargo run -p tenko -- serve --roles controller,dns --data-dir <dir>
 
 The same `tenko` binary is the command-line client: `tenko login`, `import`, `export`, `prefix` and `audit verify` talk to the public API of a running controller (stubs for now).
 
-## Licence
+## License
 
 Tenko DDI is source-available under the [Business Source License 1.1](LICENSE.md). The
 source is public, you can read it, build it, change it and run it on your own networks
@@ -73,7 +73,7 @@ explains where the line runs. Contributions are welcome under the
 ## Commercial Use & Royalties
 
 Tenko is free to use on your own networks, whoever you are and however big they are.
-The licence draws one line: you may use and change Tenko for yourself, but you may not
+The license draws one line: you may use and change Tenko for yourself, but you may not
 turn it into a product or a service that you sell or provide to others without an
 agreement with the licensor. Here is what that means in practice.
 
@@ -84,7 +84,7 @@ agreement with the licensor. Here is what that means in practice.
 - **A company's own network.** Any number of nodes, sites, users and devices, for the
   company and its subsidiaries. You may modify Tenko and you are not required to publish
   your modifications. Running it in production for your own network is exactly what the
-  licence is for.
+  license is for.
 - **Schools, universities, non-profits and public bodies.** The same as a company: your
   own network, your own members, free.
 - **A consultant or integrator deploying Tenko for a customer.** Install it, configure it,
@@ -95,8 +95,8 @@ agreement with the licensor. Here is what that means in practice.
 - **Development, testing and evaluation.** Anyone may build, test and evaluate Tenko,
   including a vendor who is considering one of the arrangements in the next list.
 - **Redistributing Tenko itself.** Packaging it for a distribution, publishing a
-  container image, or sharing a modified version is allowed, under the same licence and
-  with the licence file included; the people who receive it get the same rights and the
+  container image, or sharing a modified version is allowed, under the same license and
+  with the license file included; the people who receive it get the same rights and the
   same limits as you.
 
 ### Needs a royalty agreement

@@ -31,7 +31,7 @@ function intervalText(l: BlockListItem): string {
   return l.source.kind === "url" && l.interval_hours ? t("dns.list.every", { hours: l.interval_hours }) : "";
 }
 
-const FINAL = new Set(["succeeded", "failed", "cancelled", "rolled_back"]);
+const FINAL = new Set(["succeeded", "failed", "canceled", "rolled_back"]);
 
 /** The job a fetch or an upload started, followed until it ends; the lists are read again then. */
 function ListJob(props: { id: string; name: string; onFinished: () => void }) {

@@ -18,7 +18,7 @@
   Memory is read with Get-Process: WorkingSet64 (the resident set), PrivateMemorySize64
   (private bytes) and the peak counters. The verdict is against 100 MB read as
   100,000,000 bytes (95.37 MiB), as in M9. The criterion names the static musl binary;
-  a Windows figure is the release build's and is labelled so.
+  a Windows figure is the release build's and is labeled so.
 
   Nothing secret is written out: the setup token is read from the data directory, the
   administrator PIN is generated for the run and never printed, and the server log is

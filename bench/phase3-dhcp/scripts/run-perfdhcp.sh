@@ -35,7 +35,7 @@
 #
 # Where (--node and --load, each an ssh target or `local`):
 #   loopback  --node and --load the same host (or both `local`), addresses 127.0.0.1: an
-#             upper bound, labelled so
+#             upper bound, labeled so
 #   two-host  --node on the node VM, --load on the load VM, --node-addr the node's address
 #             on the link; tune-udp.sh (bench/phase2-dns/scripts) raises the load host's UDP
 #             sysctls for the run and restores them, the node's are recorded, not changed

@@ -29,7 +29,7 @@ const PUBLIC: [&str; 14] = [
     "POST /auth/login/totp",
     "POST /auth/webauthn/login/finish",
     "POST /auth/webauthn/login/start",
-    "POST /nodes/enrol",
+    "POST /nodes/enroll",
     "POST /setup",
 ];
 

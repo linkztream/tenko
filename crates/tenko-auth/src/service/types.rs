@@ -211,8 +211,8 @@ pub struct UserSummary {
 pub struct SessionFlags {
     /// The password no longer meets the policy and must be changed.
     pub password_change_required: bool,
-    /// The profile requires a stronger factor than this session used; enrol one.
-    pub mfa_enrolment_required: bool,
+    /// The profile requires a stronger factor than this session used; enroll one.
+    pub mfa_enrollment_required: bool,
     /// The break-glass account is in use.
     pub break_glass: bool,
 }
@@ -361,9 +361,9 @@ pub struct PasswordChanged {
 
 /// The answer of `POST /auth/totp/enroll/start`. The secret is shown once.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct TotpEnrolment {
+pub struct TotpEnrollment {
     /// Pass this to the finish step.
-    pub enrolment_id: String,
+    pub enrollment_id: String,
     /// The seed in base32, for manual entry.
     pub secret: SecretString,
     /// The `otpauth://` URI for a QR code.
@@ -374,14 +374,15 @@ pub struct TotpEnrolment {
 
 /// `POST /auth/totp/enroll/finish`.
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
-pub struct TotpEnrolFinish {
+pub struct TotpEnrollFinish {
     /// From the start step.
-    pub enrolment_id: String,
+    #[serde(alias = "enrolment_id")] // spelling: alias until 0.0.13
+    pub enrollment_id: String,
     /// A current code from the authenticator app.
     pub code: SecretString,
 }
 
-/// The answer of a factor enrolment. Enrolling a factor does not raise the strength of the
+/// The answer of a factor enrollment. Enrolling a factor does not raise the strength of the
 /// session that enrolled it: when the session is below what the profile requires, the UI
 /// logs in again with the new factor.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -829,4 +830,19 @@ pub struct RolePolicyView {
 pub struct RolePolicyUpdate {
     /// The requirement; one weaker than the profile's has no effect beyond it.
     pub mfa: RoleMfa,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TotpEnrollFinish;
+
+    #[test]
+    fn the_totp_finish_body_of_0_0_11_still_reads() {
+        let old = r#"{"enrolment_id": "e1", "code": "123456"}"#; // spelling: alias until 0.0.13
+        let body: TotpEnrollFinish = serde_json::from_str(old).expect("old body");
+        assert_eq!(body.enrollment_id, "e1");
+        let new: TotpEnrollFinish =
+            serde_json::from_str(r#"{"enrollment_id": "e2", "code": "123456"}"#).expect("body");
+        assert_eq!(new.enrollment_id, "e2");
+    }
 }

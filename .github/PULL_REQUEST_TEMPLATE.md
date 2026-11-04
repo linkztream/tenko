@@ -6,7 +6,7 @@ text, and tick the boxes that hold.
 
 ## What this change does
 
-<!-- The behaviour before and after, in a few sentences, written for a user of the
+<!-- The behavior before and after, in a few sentences, written for a user of the
 product. Link the issue it closes, if any. -->
 
 ## How it was tested
@@ -38,6 +38,6 @@ lab, a manual check in the UI. A performance claim links to a result file under 
       (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`) and RFC 3849
       (`2001:db8::/32`), MAC addresses from RFC 7042, names under `example.test`. No
       real hosts, domains, accounts or secrets.
-- [ ] Third-party code is declared above with its source and licence, and is
+- [ ] Third-party code is declared above with its source and license, and is
       permissively licensed (see `CONTRIBUTING.md`, "Licensing and the Contributor
       License Agreement").

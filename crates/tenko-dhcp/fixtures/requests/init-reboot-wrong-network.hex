@@ -1,5 +1,5 @@
 # A relayed DHCPREQUEST in the INIT-REBOOT state whose requested address 203.0.113.77 lies
-# on another network than the relay's; not padded. Modelled by hand on the option order
+# on another network than the relay's; not padded. Modeled by hand on the option order
 # and parameter request list this client sends; documentation addresses (RFC 5737) and
 # MACs (RFC 7042).
 #

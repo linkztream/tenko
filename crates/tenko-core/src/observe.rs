@@ -76,9 +76,9 @@ pub enum ObservationSource {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ProbeMethod {
-    /// IPv4 neighbours from the probe host's ARP table.
+    /// IPv4 neighbors from the probe host's ARP table.
     Arp,
-    /// IPv6 neighbours from the probe host's neighbour discovery table.
+    /// IPv6 neighbors from the probe host's neighbor discovery table.
     Nd,
     /// Multicast DNS.
     Mdns,
@@ -184,7 +184,7 @@ pub enum Observed {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         placeholder: bool,
     },
-    /// The organisation a MAC address is registered to (its OUI), or the manufacturer a
+    /// The organization a MAC address is registered to (its OUI), or the manufacturer a
     /// device reports.
     Vendor {
         /// The MAC address.
@@ -356,7 +356,7 @@ pub struct Endpoint {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum LinkKind {
-    /// LLDP neighbour.
+    /// LLDP neighbor.
     Lldp,
     /// Uplink reported by a network controller.
     Uplink,

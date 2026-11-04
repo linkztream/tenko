@@ -642,7 +642,7 @@ describe("role policies", () => {
     await put(`${V}/access/role-policies/viewer`, { mfa: "totp_or_stronger" });
     const totp = await loginAsCasey();
     expect(totp.required_strength).toBe("password_totp");
-    expect(totp.flags.mfa_enrolment_required).toBe(true);
+    expect(totp.flags.mfa_enrollment_required).toBe(true);
     // A global role that has no policy is not affected.
     signInAs("sam");
     expect((await get<SessionInfo>(`${V}/auth/session`)).body.required_strength).toBe("password");
@@ -658,7 +658,7 @@ describe("role policies", () => {
     await del(`${V}/access/role-policies/viewer`);
     const back = await loginAsCasey();
     expect(back.required_strength).toBe("password");
-    expect(back.flags.mfa_enrolment_required).toBe(false);
+    expect(back.flags.mfa_enrollment_required).toBe(false);
   });
 
   it("takes a grant to make a policy apply to somebody who holds no such role", async () => {

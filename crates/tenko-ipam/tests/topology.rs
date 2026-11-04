@@ -597,21 +597,21 @@ fn a_port_shows_what_hangs_on_it() {
     let names: Vec<&str> = ports.iter().map(|p| p.port.as_str()).collect();
     assert_eq!(names, ["1", "5", "6", "Port 1"]);
     assert!(ports[0].uplink);
-    assert_eq!(ports[0].neighbours[0].label, "Gateway");
+    assert_eq!(ports[0].neighbors[0].label, "Gateway");
     assert_eq!(ports[1].native_vlan, Some(20));
     let five = filter::ports(&computed, &switch, Some("5"));
     assert_eq!(five.len(), 1);
-    assert_eq!(five[0].neighbours.len(), 1);
-    assert_eq!(five[0].neighbours[0].label, "printer");
-    assert_eq!(five[0].neighbours[0].edge_kind, EdgeKind::Wired);
+    assert_eq!(five[0].neighbors.len(), 1);
+    assert_eq!(five[0].neighbors[0].label, "printer");
+    assert_eq!(five[0].neighbors[0].edge_kind, EdgeKind::Wired);
     let by_name = filter::ports(&computed, &switch, Some("Port 5"));
     assert_eq!(
         by_name.len(),
         1,
         "a port is found by its controller name too"
     );
-    let neighbours = filter::neighbours(&computed, &switch);
-    assert_eq!(neighbours.len(), 4, "{neighbours:?}");
+    let neighbors = filter::neighbors(&computed, &switch);
+    assert_eq!(neighbors.len(), 4, "{neighbors:?}");
 }
 
 #[test]
@@ -727,16 +727,16 @@ async fn the_service_reads_facts_intent_and_controllers_and_keeps_the_graph() {
     let intent = view.intent.expect("intent");
     assert_eq!(intent.name, "printer");
     assert_eq!(intent.addresses.len(), 1);
-    assert_eq!(view.neighbours[0].label, "USW-24");
-    assert_eq!(view.neighbours[0].remote_port.as_deref(), Some("5"));
-    assert_eq!(view.neighbours[0].port, None);
+    assert_eq!(view.neighbors[0].label, "USW-24");
+    assert_eq!(view.neighbors[0].remote_port.as_deref(), Some("5"));
+    assert_eq!(view.neighbors[0].port, None);
     let switch = by_label(&graph, "USW-24").id.clone();
     let port = topology
         .node(&switch, Some("5"), None, None)
         .await
         .expect("port");
     assert_eq!(port.ports.len(), 1);
-    assert_eq!(port.ports[0].neighbours[0].label, "printer");
+    assert_eq!(port.ports[0].neighbors[0].label, "printer");
     let missing = topology
         .node("m-000000000000", None, None, None)
         .await

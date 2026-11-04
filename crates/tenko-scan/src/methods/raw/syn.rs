@@ -75,7 +75,7 @@ fn reply_in(frame: &[u8]) -> Option<(Ipv4Addr, ipv4::Ipv4<'_>, Tcp)> {
 }
 
 /// Sends a SYN to every (host, port) pair and classifies the replies. `macs` gives the
-/// on-link MAC of each host. Honours the pacer (one permit per SYN) and the kill switch;
+/// on-link MAC of each host. Honors the pacer (one permit per SYN) and the kill switch;
 /// sends an RST to close every open port.
 async fn syn_scan(
     link: &dyn RawLink,
@@ -93,7 +93,7 @@ async fn syn_scan(
     // Ports outer, hosts inner: consecutive SYNs go to different hosts.
     'ports: for port in ports {
         for host in hosts {
-            if ctx.cancel.is_cancelled() {
+            if ctx.cancel.is_canceled() {
                 break 'ports;
             }
             let Some(dest_mac) = macs.get(host) else {
@@ -116,7 +116,7 @@ async fn syn_scan(
     }
     // Collect for the rest of the window.
     let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline && !ctx.cancel.is_cancelled() && outstanding > 0 {
+    while Instant::now() < deadline && !ctx.cancel.is_canceled() && outstanding > 0 {
         if let Ok(Some(frame)) = link.recv(Duration::from_millis(100)).await
             && classify(link, source_mac, source_ip, macs, &frame, &mut results).await
         {
@@ -155,7 +155,7 @@ async fn classify(
                 ip,
                 SOURCE_PORT,
                 port,
-                tcp.acknowledgement,
+                tcp.acknowledgment,
                 tcp.sequence.wrapping_add(1),
             );
             let _ = link
@@ -245,7 +245,7 @@ async fn scan(
             "{unresolved} target(s) did not answer ARP and were not scanned"
         ));
     }
-    let covered_all = unresolved == 0 && !ctx.cancel.is_cancelled();
+    let covered_all = unresolved == 0 && !ctx.cancel.is_canceled();
     Ok((results, arp_probes + syn_probes, covered_all, notes))
 }
 

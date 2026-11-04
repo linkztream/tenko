@@ -14,7 +14,7 @@ import { Authenticator } from "./totp";
 export type Schemas = components["schemas"];
 export type SessionInfo = Schemas["SessionInfo"];
 export type LoginResponse = Schemas["LoginResponse"];
-export type TotpEnrolment = Schemas["TotpEnrolment"];
+export type TotpEnrollment = Schemas["TotpEnrollment"];
 export type FactorEnrolled = Schemas["FactorEnrolled"];
 export type JobDetail = Schemas["JobDetail"];
 
@@ -152,15 +152,15 @@ export class Api {
   }
 
   /**
-   * Enrols an authenticator app for the signed-in account and returns the authenticator
-   * (its first code is spent on the enrolment) and the recovery codes, if any.
+   * Enrolls an authenticator app for the signed-in account and returns the authenticator
+   * (its first code is spent on the enrollment) and the recovery codes, if any.
    */
-  async enrolTotp(): Promise<{ authenticator: Authenticator; enrolled: FactorEnrolled }> {
-    const start = await this.post<TotpEnrolment>("/auth/totp/enroll/start", undefined, { idempotencyKey: null });
+  async enrollTotp(): Promise<{ authenticator: Authenticator; enrolled: FactorEnrolled }> {
+    const start = await this.post<TotpEnrollment>("/auth/totp/enroll/start", undefined, { idempotencyKey: null });
     const authenticator = new Authenticator(start.secret);
     const enrolled = await this.post<FactorEnrolled>(
       "/auth/totp/enroll/finish",
-      { enrolment_id: start.enrolment_id, code: authenticator.code() },
+      { enrollment_id: start.enrollment_id, code: authenticator.code() },
       { idempotencyKey: null },
     );
     return { authenticator, enrolled };
@@ -168,7 +168,7 @@ export class Api {
 
   /** A job, read until it is final or `timeoutMs` has passed. */
   async waitForJob(id: string, timeoutMs = 60_000): Promise<JobDetail> {
-    const final = new Set(["succeeded", "failed", "rolled_back", "cancelled"]);
+    const final = new Set(["succeeded", "failed", "rolled_back", "canceled"]);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const detail = await this.get<JobDetail>(`/jobs/${id}`);

@@ -1,4 +1,4 @@
-//! Enrolment tokens: the single-use, time-limited secret a new data-plane node presents to a
+//! Enrollment tokens: the single-use, time-limited secret a new data-plane node presents to a
 //! controller to obtain its certificate (OPS-04, OPS-08).
 //!
 //! An administrator creates a token on a controller, the controller shows it once, and the
@@ -18,12 +18,12 @@
 //! * `<secret>` is [`SECRET_LEN`] random bytes as unpadded base64url (RFC 4648 section 5,
 //!   alphabet `A-Z a-z 0-9 - _`), which is 43 characters.
 //!
-//! The whole text is [`TOKEN_TEXT_LEN`] characters long. [`EnrolmentToken::parse`] is strict:
+//! The whole text is [`TOKEN_TEXT_LEN`] characters long. [`EnrollmentToken::parse`] is strict:
 //! exactly three parts, no padding, and only the canonical base64url spelling of a secret.
 //!
 //! # Digest
 //!
-//! The digest is SHA-256 over the domain separator `tenko-enrolment-token-v1\0`, the 16 bytes
+//! The digest is SHA-256 over the domain separator `tenko-enrolment-token-v1\0` (spelling: stored key), the 16 bytes
 //! of the id and the 32 bytes of the secret, in that order. The secret is full-entropy random
 //! data, so a plain hash is enough and no slow key-derivation function is needed. Binding the
 //! id into the digest means a secret cannot be moved to another token record. Digests are
@@ -31,7 +31,7 @@
 //!
 //! # Secrecy
 //!
-//! [`EnrolmentToken`] is deliberately not `Clone`, `Display`, `Serialize` or `Deserialize`, and
+//! [`EnrollmentToken`] is deliberately not `Clone`, `Display`, `Serialize` or `Deserialize`, and
 //! its `Debug` output hides the secret, so a token cannot leak into a log line or a JSON body
 //! by accident. Buffers that hold the secret or its text are wiped when they are dropped.
 
@@ -65,8 +65,9 @@ const ID_HEX_LEN: usize = 32;
 /// The length of a SHA-256 digest in bytes.
 const DIGEST_LEN: usize = 32;
 
-/// The domain separator that starts the hashed input of a digest.
-const DIGEST_DOMAIN: &[u8] = b"tenko-enrolment-token-v1\0";
+/// The domain separator that starts the hashed input of a digest. Stored digests depend on
+/// these bytes, so they keep the spelling of 0.0.11.
+const DIGEST_DOMAIN: &[u8] = b"tenko-enrolment-token-v1\0"; // spelling: stored key
 
 /// The base64url alphabet of RFC 4648 section 5.
 const BASE64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -77,13 +78,13 @@ const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";
 const _: () = assert!(SECRET_TEXT_LEN == (SECRET_LEN * 4).div_ceil(3));
 const _: () = assert!(TOKEN_PREFIX.len() + 1 + ID_HEX_LEN + 1 + SECRET_TEXT_LEN == TOKEN_TEXT_LEN);
 
-/// Why an enrolment token could not be created or read.
+/// Why an enrollment token could not be created or read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum TokenError {
-    /// The text is not an enrolment token; the reason is a short English phrase that never
+    /// The text is not an enrollment token; the reason is a short English phrase that never
     /// contains part of the text.
-    #[error("the enrolment token is malformed: {reason}")]
+    #[error("the enrollment token is malformed: {reason}")]
     Malformed {
         /// What is wrong with the text.
         reason: &'static str,
@@ -96,8 +97,8 @@ pub enum TokenError {
 impl Coded for TokenError {
     fn code(&self) -> &'static str {
         match self {
-            Self::Malformed { .. } => "cluster.enrolment.invalid_token",
-            Self::Random => "cluster.enrolment.random",
+            Self::Malformed { .. } => "cluster.enrollment.invalid_token",
+            Self::Random => "cluster.enrollment.random",
         }
     }
 
@@ -114,17 +115,17 @@ const fn malformed(reason: &'static str) -> TokenError {
     TokenError::Malformed { reason }
 }
 
-/// A single-use enrolment token: the id of its record and its secret.
+/// A single-use enrollment token: the id of its record and its secret.
 ///
 /// The secret is wiped from memory when the token is dropped. The type has no `Clone`,
 /// `Display`, `Serialize` or `Deserialize` on purpose; the only way to get the text is
-/// [`EnrolmentToken::to_text`], which is meant to be shown once.
-pub struct EnrolmentToken {
+/// [`EnrollmentToken::to_text`], which is meant to be shown once.
+pub struct EnrollmentToken {
     id: Uuid,
     secret: Zeroizing<[u8; SECRET_LEN]>,
 }
 
-impl EnrolmentToken {
+impl EnrollmentToken {
     /// Creates a token for the record `id` with a fresh secret from the system random number
     /// generator.
     ///
@@ -207,16 +208,16 @@ impl EnrolmentToken {
     }
 }
 
-impl fmt::Debug for EnrolmentToken {
+impl fmt::Debug for EnrollmentToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("EnrolmentToken")
+        f.debug_struct("EnrollmentToken")
             .field("id", &self.id)
             .field("secret", &"<redacted>")
             .finish()
     }
 }
 
-/// The SHA-256 digest of an [`EnrolmentToken`], as a controller stores it.
+/// The SHA-256 digest of an [`EnrollmentToken`], as a controller stores it.
 ///
 /// Its text form is 64 hexadecimal digits; it serializes as that string.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -243,7 +244,7 @@ impl TokenDigest {
     }
 
     /// Whether `token` is the token this digest was made from, compared in constant time.
-    pub fn matches(&self, token: &EnrolmentToken) -> bool {
+    pub fn matches(&self, token: &EnrollmentToken) -> bool {
         verify_slices_are_equal(&self.0, &token.digest().0).is_ok()
     }
 }
@@ -416,16 +417,16 @@ mod tests {
         "tnk1.0190d1c2000070008000000000000001.QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI";
 
     /// The digest of the known-answer token: SHA-256 over the bytes
-    /// `"tenko-enrolment-token-v1\0"`, then the 16 bytes of `KNOWN_ID`, then 32 bytes of 0x42.
+    /// `"tenko-enrollment-token-v1\0"`, then the 16 bytes of `KNOWN_ID`, then 32 bytes of 0x42.
     const KNOWN_DIGEST: &str = "7b5f2bacfacffaa5379cfbb771e97ca6acf1e79c0acd97ea70960ae7bdf0dd75";
 
-    fn known() -> EnrolmentToken {
-        EnrolmentToken::from_parts(KNOWN_ID, [0x42; SECRET_LEN])
+    fn known() -> EnrollmentToken {
+        EnrollmentToken::from_parts(KNOWN_ID, [0x42; SECRET_LEN])
     }
 
     /// The reason of the `Malformed` error that parsing `text` must give.
     fn reason(text: &str) -> &'static str {
-        match EnrolmentToken::parse(text) {
+        match EnrollmentToken::parse(text) {
             Err(TokenError::Malformed { reason }) => reason,
             Err(other) => panic!("unexpected error for {text:?}: {other}"),
             Ok(_) => panic!("{text:?} was accepted"),
@@ -445,9 +446,9 @@ mod tests {
     #[test]
     fn generated_token_round_trips_through_its_text() {
         let id = Uuid::now_v7();
-        let token = EnrolmentToken::generate(id).unwrap();
+        let token = EnrollmentToken::generate(id).unwrap();
         let text = token.to_text();
-        let parsed = EnrolmentToken::parse(&text).unwrap();
+        let parsed = EnrollmentToken::parse(&text).unwrap();
         assert_eq!(parsed.id(), id);
         assert_eq!(parsed.digest(), token.digest());
         assert!(token.digest().matches(&parsed));
@@ -456,7 +457,7 @@ mod tests {
 
     #[test]
     fn text_has_the_fixed_length_and_prefix() {
-        let token = EnrolmentToken::generate(Uuid::now_v7()).unwrap();
+        let token = EnrollmentToken::generate(Uuid::now_v7()).unwrap();
         let text = token.to_text();
         assert_eq!(text.len(), TOKEN_TEXT_LEN);
         assert_eq!(text.len(), 81);
@@ -472,8 +473,8 @@ mod tests {
     #[test]
     fn two_generated_tokens_differ() {
         let id = Uuid::now_v7();
-        let first = EnrolmentToken::generate(id).unwrap();
-        let second = EnrolmentToken::generate(id).unwrap();
+        let first = EnrollmentToken::generate(id).unwrap();
+        let second = EnrollmentToken::generate(id).unwrap();
         assert_ne!(*first.to_text(), *second.to_text());
         assert_ne!(first.digest(), second.digest());
         assert!(!first.digest().matches(&second));
@@ -487,15 +488,15 @@ mod tests {
         assert_eq!(KNOWN_TEXT.len(), TOKEN_TEXT_LEN);
         assert!(KNOWN_TEXT.ends_with(KNOWN_SECRET_TEXT));
 
-        let parsed = EnrolmentToken::parse(KNOWN_TEXT).unwrap();
+        let parsed = EnrollmentToken::parse(KNOWN_TEXT).unwrap();
         assert_eq!(parsed.id(), KNOWN_ID);
         assert_eq!(parsed.digest().to_hex(), KNOWN_DIGEST);
     }
 
     #[test]
     fn digest_is_bound_to_the_id() {
-        let first = EnrolmentToken::from_parts(KNOWN_ID, [0x42; SECRET_LEN]);
-        let second = EnrolmentToken::from_parts(Uuid::from_u128(2), [0x42; SECRET_LEN]);
+        let first = EnrollmentToken::from_parts(KNOWN_ID, [0x42; SECRET_LEN]);
+        let second = EnrollmentToken::from_parts(Uuid::from_u128(2), [0x42; SECRET_LEN]);
         assert_ne!(first.digest(), second.digest());
     }
 
@@ -532,8 +533,8 @@ mod tests {
             [0xfb; SECRET_LEN],
             counting,
         ] {
-            let token = EnrolmentToken::from_parts(KNOWN_ID, secret);
-            let parsed = EnrolmentToken::parse(&token.to_text()).unwrap();
+            let token = EnrollmentToken::from_parts(KNOWN_ID, secret);
+            let parsed = EnrollmentToken::parse(&token.to_text()).unwrap();
             assert_eq!(parsed.digest(), token.digest());
             assert_eq!(*parsed.secret, secret);
         }
@@ -542,14 +543,14 @@ mod tests {
     #[test]
     fn parse_accepts_surrounding_whitespace() {
         let padded = format!(" \t{KNOWN_TEXT}\r\n");
-        let parsed = EnrolmentToken::parse(&padded).unwrap();
+        let parsed = EnrollmentToken::parse(&padded).unwrap();
         assert_eq!(parsed.id(), KNOWN_ID);
         assert_eq!(parsed.digest().to_hex(), KNOWN_DIGEST);
     }
 
     #[test]
     fn parse_accepts_an_uppercase_id() {
-        let parsed = EnrolmentToken::parse(&with_id("0190D1C2000070008000000000000001")).unwrap();
+        let parsed = EnrollmentToken::parse(&with_id("0190D1C2000070008000000000000001")).unwrap();
         assert_eq!(parsed.id(), KNOWN_ID);
         assert_eq!(parsed.digest().to_hex(), KNOWN_DIGEST);
         // The text form is always lowercase.
@@ -726,7 +727,7 @@ mod tests {
         let head = &KNOWN_SECRET_TEXT[..42];
         for (index, &last) in BASE64URL.iter().enumerate() {
             let text = with_secret(&format!("{head}{}", char::from(last)));
-            let parsed = EnrolmentToken::parse(&text);
+            let parsed = EnrollmentToken::parse(&text);
             assert_eq!(
                 parsed.is_ok(),
                 index % 4 == 0,
@@ -745,16 +746,16 @@ mod tests {
         let token = known();
         let digest = token.digest();
         assert!(digest.matches(&token));
-        assert!(digest.matches(&EnrolmentToken::parse(KNOWN_TEXT).unwrap()));
+        assert!(digest.matches(&EnrollmentToken::parse(KNOWN_TEXT).unwrap()));
 
-        let other_secret = EnrolmentToken::from_parts(KNOWN_ID, [0x43; SECRET_LEN]);
+        let other_secret = EnrollmentToken::from_parts(KNOWN_ID, [0x43; SECRET_LEN]);
         assert!(!digest.matches(&other_secret));
 
         let mut one_bit = [0x42; SECRET_LEN];
         one_bit[SECRET_LEN - 1] ^= 0x01;
-        assert!(!digest.matches(&EnrolmentToken::from_parts(KNOWN_ID, one_bit)));
+        assert!(!digest.matches(&EnrollmentToken::from_parts(KNOWN_ID, one_bit)));
 
-        let other_id = EnrolmentToken::from_parts(Uuid::from_u128(2), [0x42; SECRET_LEN]);
+        let other_id = EnrollmentToken::from_parts(Uuid::from_u128(2), [0x42; SECRET_LEN]);
         assert!(!digest.matches(&other_id));
     }
 
@@ -790,7 +791,7 @@ mod tests {
         assert_eq!(upper, digest);
         assert_eq!(upper.to_hex(), KNOWN_DIGEST);
 
-        let fresh = EnrolmentToken::generate(Uuid::now_v7()).unwrap().digest();
+        let fresh = EnrollmentToken::generate(Uuid::now_v7()).unwrap().digest();
         assert_eq!(TokenDigest::from_hex(&fresh.to_hex()).unwrap(), fresh);
     }
 
@@ -854,12 +855,15 @@ mod tests {
     #[test]
     fn errors_carry_stable_codes_and_statuses() {
         let malformed = TokenError::Malformed { reason: "x" };
-        assert_eq!(malformed.code(), "cluster.enrolment.invalid_token");
+        assert_eq!(malformed.code(), "cluster.enrollment.invalid_token");
         assert_eq!(malformed.http_status(), 401);
-        assert_eq!(malformed.to_string(), "the enrolment token is malformed: x");
+        assert_eq!(
+            malformed.to_string(),
+            "the enrollment token is malformed: x"
+        );
         assert!(malformed.params().is_empty());
 
-        assert_eq!(TokenError::Random.code(), "cluster.enrolment.random");
+        assert_eq!(TokenError::Random.code(), "cluster.enrollment.random");
         assert_eq!(TokenError::Random.http_status(), 500);
         assert_eq!(
             TokenError::Random.to_string(),
@@ -870,7 +874,7 @@ mod tests {
     #[test]
     fn error_text_never_contains_the_input() {
         let secret_looking = with_secret("QkJC-not-a-secret!");
-        let error = EnrolmentToken::parse(&secret_looking).unwrap_err();
+        let error = EnrollmentToken::parse(&secret_looking).unwrap_err();
         assert!(!error.to_string().contains("QkJC"));
     }
 }

@@ -18,7 +18,7 @@
 //! # Quirk mode
 //!
 //! The recursive resolver's lab (`deploy/compose/lab-dns`, the service `quirk`) needs an
-//! authoritative server that misbehaves on purpose, one misbehaviour per container. Giving
+//! authoritative server that misbehaves on purpose, one misbehavior per container. Giving
 //! `--quirk-zone` switches to that mode, and `--workers`, `--names`, `--metrics`, `--mode`,
 //! `--tcp` and `--pid-file` are then refused:
 //!
@@ -36,12 +36,12 @@
 //! authoritative answers, NXDOMAIN and NODATA with the SOA, REFUSED outside the zone. A
 //! small UDP and TCP loop on tokio runs each query through the responder and then spoils
 //! the finished answer as asked. `--listen` defaults to 0.0.0.0:53 in this mode. The
-//! misbehaviours combine.
+//! misbehaviors combine.
 //!
 //! `--no-edns` answers a query that carries an OPT record with FORMERR, the question and no
 //! OPT record, as a server that predates EDNS does, and answers a query without one
 //! normally. `--lower-case` writes the question name of every answer in lower case, which
-//! breaks the 0x20 case randomisation of a resolver. `--truncate` answers every UDP query
+//! breaks the 0x20 case randomization of a resolver. `--truncate` answers every UDP query
 //! with the header and the question and the TC bit (and an empty OPT record when the query
 //! had one); TCP is answered in full. `--delay-ms` holds every answer back by that many
 //! milliseconds. `--wrong-source` sends the UDP answers from a second socket on the same
@@ -55,14 +55,14 @@
 //! query at `CHILD` itself is the parent's to answer and goes to the engine. `--glue
 //! NAME=ADDR` (repeatable, IPv4 or IPv6) adds `NAME A ADDR` (or `AAAA`) to the additional
 //! section of every referral, before the OPT record and whatever `NAME` is, so that it can
-//! be glue outside the bailiwick that a resolver must ignore. The other misbehaviours apply
+//! be glue outside the bailiwick that a resolver must ignore. The other misbehaviors apply
 //! to a referral as to any answer. The line `ready quirk ZONE on ADDR... flags ...` on
 //! standard output tells that the server answers.
 //!
 //! `--nxdomain-ent` (WP10.3) adds `www.a.b.ZONE` (`192.0.2.7`) and answers NXDOMAIN for
 //! its empty non-terminals `b.ZONE` and `a.b.ZONE`, as the servers do that QNAME
-//! minimisation falls back for (RFC 9156 section 3, not RFC 8020 clean); it prints one line
-//! `asked NAME TYPE` per query on standard output, the witness of the lab's minimisation
+//! minimization falls back for (RFC 9156 section 3, not RFC 8020 clean); it prints one line
+//! `asked NAME TYPE` per query on standard output, the witness of the lab's minimization
 //! rows.
 //!
 //! `--proxy ADDR` (WP10.2) turns the server into a forwarding proxy for the lab's
@@ -301,11 +301,11 @@ fn quirk_image(origin: &str, address: Ipv4Addr, ent: bool) -> DnsData {
     zone.image
 }
 
-/// The misbehaviours of quirk mode.
+/// The misbehaviors of quirk mode.
 #[derive(Debug, Clone, Copy, Default)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "one switch per misbehaviour, as the flags"
+    reason = "one switch per misbehavior, as the flags"
 )]
 struct Quirks {
     no_edns: bool,
@@ -943,7 +943,7 @@ fn proxy_answer(upstream: SocketAddr, query: &[u8], strip: bool) -> Option<Vec<u
 }
 // WP10.2: end.
 
-/// The answer to one query message with the misbehaviours applied, or `None` when the
+/// The answer to one query message with the misbehaviors applied, or `None` when the
 /// responder drops it.
 fn quirk_answer(
     responder: &Engine,

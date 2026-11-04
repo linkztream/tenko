@@ -216,7 +216,7 @@ fn outcome_text(record: &RunRecord) -> &'static str {
     match record.outcome {
         tenko_scan::status::RunOutcome::Complete => "complete",
         tenko_scan::status::RunOutcome::Partial => "partial",
-        tenko_scan::status::RunOutcome::Cancelled => "cancelled",
+        tenko_scan::status::RunOutcome::Canceled => "canceled",
         tenko_scan::status::RunOutcome::Failed => "failed",
     }
 }
@@ -419,8 +419,8 @@ async fn run_method(args: &RunArgs) -> Result<Output, Failure> {
         if !node.is_enrolled() {
             return Err(Failure::new(
                 exit::USAGE,
-                "this node is not enrolled, so nothing would reach a controller; enrol it with \
-                 `tenko node enrol`, or look with --dry-run",
+                "this node is not enrolled, so nothing would reach a controller; enroll it with \
+                 `tenko node enroll`, or look with --dry-run",
             ));
         }
         Arc::new(IncomingSink::new(node.buffer()))

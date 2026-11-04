@@ -93,7 +93,7 @@ describe("GET /proposals", () => {
     const second = await get<Page<S["IntentProposal"]>>(`${V}/proposals?limit=4&cursor=${first.body.next_cursor}`);
     expect(second.body.items).toHaveLength(4);
     expect(second.body.items[0]?.id).not.toBe(first.body.items[0]?.id);
-    for (const query of ["kind=other", "state=closed", "severity=error", "sort=name", "prefix=lan", "colour=red"]) {
+    for (const query of ["kind=other", "state=closed", "severity=error", "sort=name", "prefix=lan", "color=red"]) {
       const answer = await get<Problem>(`${V}/proposals?${query}`);
       expect(answer.status, query).toBe(400);
       expect(answer.body.code).toBe("sys.invalid_query");
@@ -235,7 +235,7 @@ describe("observations", () => {
     expect(expired.map((f) => f.subject_key)).toEqual(["host:vm-200"]);
     const inventory = (await get<Page<S["ObservedFact"]>>(`${V}/observations?source=${RECONCILE_IDS.inventory}&q=debian`)).body.items;
     expect(inventory.map((f) => f.subject_key)).toEqual(["host:vm-104", "host:vm-110"]);
-    for (const query of ["type=vm", "mac=nope", "within=10.0.0.0/33", "current=yes", "sort=size", "colour=red"]) {
+    for (const query of ["type=vm", "mac=nope", "within=10.0.0.0/33", "current=yes", "sort=size", "color=red"]) {
       expect((await get<Problem>(`${V}/observations?${query}`)).status, query).toBe(400);
     }
   });
@@ -433,7 +433,7 @@ describe("adoption policies", () => {
     expect(audit.records.at(-1)?.draft.action).toBe("ipam.adoption.set");
     for (const [field, invalid] of [
       ["mode", { mode: "always" }],
-      ["colour", { mode: "manual", colour: "red" }],
+      ["color", { mode: "manual", color: "red" }],
       ["min_sightings", { mode: "manual", min_sightings: 0 }],
       ["vendors", { mode: "manual", vendors: [""] }],
       ["host_mode", { mode: "manual", host_mode: "sometimes" }],

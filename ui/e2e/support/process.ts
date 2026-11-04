@@ -198,7 +198,7 @@ export class Proc {
     return this.exitCode ?? null;
   }
 
-  /** Standard output and standard error so far, labelled per line. */
+  /** Standard output and standard error so far, labeled per line. */
   output(): string {
     return this.lines.map((line) => `${line.stream === "stdout" ? "out" : "err"} | ${line.text}`).join("\n");
   }
@@ -211,7 +211,7 @@ export interface RunResult {
 }
 
 /**
- * Runs one command of the `tenko` CLI to its end (`tenko node enrol …`, `tenko plugin
+ * Runs one command of the `tenko` CLI to its end (`tenko node enroll …`, `tenko plugin
  * list`) and returns its exit status and output. Fails when it does not end in time.
  */
 export async function runTenko(

@@ -105,7 +105,7 @@ Nothing applies silently: every settled item, applied ones included, becomes a r
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/v1/queue/conflicts` | The caller's settled changes, oldest first: `state` (`applied`, `conflict`, `expired`), the request, the queued plan, the current plan, the conflict as problem details (`code`, `status`, `title`, `detail`, `params`) and the record's `revision` (for an applied change, the revision of the change) |
-| `POST /api/v1/queue/conflicts/{id}/reapply` | Plans the stored commands now, as the caller, and applies them; answers as the original endpoint would (the object with `ETag`, or the bulk answer). `?dry_run=true` answers the plan only; `?acknowledge=` adds acknowledgements to those of the original request. The `If-Match` of the original request is dropped, since the caller confirms against the current state; an `If-Match` on this request takes its place for a single-object change. The record goes once the change applied |
+| `POST /api/v1/queue/conflicts/{id}/reapply` | Plans the stored commands now, as the caller, and applies them; answers as the original endpoint would (the object with `ETag`, or the bulk answer). `?dry_run=true` answers the plan only; `?acknowledge=` adds acknowledgments to those of the original request. The `If-Match` of the original request is dropped, since the caller confirms against the current state; an `If-Match` on this request takes its place for a single-object change. The record goes once the change applied |
 | `DELETE /api/v1/queue/conflicts/{id}` | Discards a record: a conflict the author gives up, or an applied change the author has seen |
 
 The UI shows the local queue and these records with their conflicts. A re-apply of an `applied` record answers 409 `queue.changed`.

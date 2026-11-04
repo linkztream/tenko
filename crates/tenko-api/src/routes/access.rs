@@ -9,7 +9,7 @@
 //! 2.1). Their changes reach the `admin` event topic through the `auth` namespace.
 //!
 //! The service decides who may do what (`tenko_auth::service::AuthService`), so the
-//! handlers only translate. `docs/access.md` describes the behaviour.
+//! handlers only translate. `docs/access.md` describes the behavior.
 //!
 //! | Endpoint | Success | Notes |
 //! |---|---|---|

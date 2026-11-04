@@ -464,7 +464,7 @@ impl ImportService {
             Some(job) => match self.engine.job(job).await {
                 Ok(job) => match job.state {
                     JobState::Succeeded => ImportState::Applied,
-                    JobState::Failed | JobState::RolledBack | JobState::Cancelled => {
+                    JobState::Failed | JobState::RolledBack | JobState::Canceled => {
                         ImportState::Failed
                     }
                     _ => ImportState::Applying,

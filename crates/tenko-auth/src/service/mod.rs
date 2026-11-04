@@ -95,7 +95,7 @@ pub mod actions {
     /// A password change.
     pub const PASSWORD_CHANGE: AuditAction = AuditAction::from_static("auth.password.change");
     /// TOTP enrolled.
-    pub const TOTP_ENROL: AuditAction = AuditAction::from_static("auth.totp.enrol");
+    pub const TOTP_ENROLL: AuditAction = AuditAction::from_static("auth.totp.enroll");
     /// TOTP removed.
     pub const TOTP_REMOVE: AuditAction = AuditAction::from_static("auth.totp.remove");
     /// A WebAuthn credential registered.
@@ -523,7 +523,7 @@ impl AuthService {
             source_ip,
             user_agent: user_agent.map(|agent| agent.chars().take(200).collect()),
             break_glass,
-            mfa_enrolment_required: strength < self.required_for(user),
+            mfa_enrollment_required: strength < self.required_for(user),
         };
         let hash = secret.hash();
         batch.put_typed(&SESSIONS, &hash, &record)?;
@@ -556,7 +556,7 @@ impl AuthService {
             absolute_expires_at: absolute,
             flags: SessionFlags {
                 password_change_required: user.password_change_required,
-                mfa_enrolment_required: session.strength < self.required_for(user),
+                mfa_enrollment_required: session.strength < self.required_for(user),
                 break_glass: session.break_glass,
             },
             profile: settings.profile,
@@ -698,7 +698,7 @@ impl AuthService {
             expires_at: Some(expires_at),
             flags: AuthFlags {
                 password_change_required: user.password_change_required,
-                mfa_enrolment_required: session.strength < self.required_for(&user),
+                mfa_enrollment_required: session.strength < self.required_for(&user),
                 break_glass: session.break_glass,
             },
         })

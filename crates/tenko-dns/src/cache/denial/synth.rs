@@ -1,4 +1,4 @@
-//! The synthesised answer, written into the worker's buffer without allocating (RFC 8198
+//! The synthesized answer, written into the worker's buffer without allocating (RFC 8198
 //! section 5): the client's id and question, RA, its RD and CD, AD for secure records when
 //! the client asked with AD or DO; NXDOMAIN and NODATA with the SOA in the authority
 //! section and, for a client with DO, the NSEC or NSEC3 records of the proof and every

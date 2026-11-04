@@ -184,7 +184,7 @@ describe("the web interface", () => {
     expect(http.rel).toBe("noopener noreferrer");
   });
 
-  it("lists the other web ports found open under More, each labelled by its port, and no guess beyond the fact", async () => {
+  it("lists the other web ports found open under More, each labeled by its port, and no guess beyond the fact", async () => {
     await hostAt("pve.example.test", ["192.0.2.93"]);
     putServices("192.0.2.93", [22, 8006, 8123, 8080, 9000], { tls: [8080] });
     const panel = await open("pve.example.test");

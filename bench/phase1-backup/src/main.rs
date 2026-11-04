@@ -276,7 +276,7 @@ async fn add_secrets(store: &RaftStore, ring: &KekRing) -> Result<()> {
             .put_operator(
                 &ctx(),
                 SecretSpec::new(SecretPurpose::from_static("connect.backup_bench"))
-                    .labelled(format!("secret {index}")),
+                    .labeled(format!("secret {index}")),
                 SecretBytes::new(format!("secret value {index}").into_bytes()),
             )
             .await?;

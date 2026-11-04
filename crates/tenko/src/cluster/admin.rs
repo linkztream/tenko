@@ -200,7 +200,7 @@ fn confirm_removal(args: &RemoveArgs) -> Result<(), Failure> {
         exit::USAGE,
         format!(
             "removing node {id} takes it out of the controller cluster and revokes its \
-             certificates, so it can only come back with a new enrolment; nothing was \
+             certificates, so it can only come back with a new enrollment; nothing was \
              changed. Run `tenko cluster remove {id} --yes` to remove it",
             id = args.id
         ),

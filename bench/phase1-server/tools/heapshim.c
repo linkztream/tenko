@@ -117,7 +117,7 @@ static void dump(const char *path) {
   if (fd < 0) return;
   pthread_mutex_lock(&mu);
   char buf[512];
-  // Copy /proc/self/maps first so the offline symboliser knows the load base.
+  // Copy /proc/self/maps first so the offline symbolizer knows the load base.
   int m = open("/proc/self/maps", O_RDONLY); ssize_t r;
   dprintf(fd, "MAPS\n");
   while ((r = read(m, buf, sizeof buf)) > 0)

@@ -66,7 +66,7 @@ export default function QueueView() {
     fetch: async (signal) => ({ value: await load(() => listQueuedChanges(signal)) }),
   });
 
-  const [cancelling, setCancelling] = createSignal<QueueItemView | null>(null);
+  const [canceling, setCanceling] = createSignal<QueueItemView | null>(null);
   const [reapplying, setReapplying] = createSignal<QueuedChangeView | null>(null);
   const [discarding, setDiscarding] = createSignal<QueuedChangeView | null>(null);
 
@@ -88,10 +88,10 @@ export default function QueueView() {
   };
 
   const cancel = async (item: QueueItemView) => {
-    setCancelling(null);
+    setCanceling(null);
     try {
       await cancelQueued(item.id);
-      toast({ kind: "ok", title: t("cluster.queue.cancelled") });
+      toast({ kind: "ok", title: t("cluster.queue.canceled") });
       refresh();
     } catch (err) {
       toast({ kind: "bad", title: t("cluster.queue.cancel_failed"), body: errorMessage(err) });
@@ -179,7 +179,7 @@ export default function QueueView() {
                               class="btn sm"
                               data-testid={`queue-cancel-${item.id}`}
                               aria-label={t("cluster.queue.cancel_named", { what: summaryText(item.summary) })}
-                              onClick={() => setCancelling(item)}
+                              onClick={() => setCanceling(item)}
                             >
                               {t("common.action.cancel")}
                             </button>
@@ -286,7 +286,7 @@ export default function QueueView() {
         </Show>
       </div>
 
-      <Show when={cancelling()} keyed>
+      <Show when={canceling()} keyed>
         {(item) => (
           <ConfirmDialog
             testid="dialog-cancel-queued"
@@ -295,7 +295,7 @@ export default function QueueView() {
             confirmLabel={t("cluster.queue.cancel_confirm")}
             cancelLabel={t("cluster.queue.keep")}
             danger
-            onClose={() => setCancelling(null)}
+            onClose={() => setCanceling(null)}
             onConfirm={() => void cancel(item)}
           />
         )}

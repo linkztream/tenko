@@ -1,5 +1,5 @@
 # A relayed DHCPDISCOVER carrying option 82 (RFC 3046) with circuit ID 0004000a0003 and
-# remote ID the relay MAC; not padded. Modelled by hand on the option order and parameter
+# remote ID the relay MAC; not padded. Modeled by hand on the option order and parameter
 # request list this client sends; documentation addresses (RFC 5737) and MACs (RFC 7042).
 #
 # op 1, htype 1, hlen 6, hops 1

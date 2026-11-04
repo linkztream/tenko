@@ -120,7 +120,7 @@ impl FromStr for ResolutionMode {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum RuleMode {
-    /// Ask the rule's upstreams (Phase 2's behaviour).
+    /// Ask the rule's upstreams (Phase 2's behavior).
     #[default]
     Forward,
     /// Resolve iteratively; the rule names no upstream.
@@ -461,7 +461,7 @@ pub enum AnchorSource {
     },
     /// Added by an operator.
     Operator,
-    /// Learnt by RFC 5011 from the zone's DNSKEY set.
+    /// Learned by RFC 5011 from the zone's DNSKEY set.
     Rfc5011,
 }
 

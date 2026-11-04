@@ -1,6 +1,6 @@
 # Observability: metrics and traces
 
-This document describes the metrics and the traces of a Tenko DDI controller: where the metrics are served, who may read them, how the gauges are computed, every series with its labels, how to scrape them with Prometheus, what they cost, the live metrics of the start page, and the OpenTelemetry traces exported over OTLP with their span catalogue, and the diagnostics a bug report carries. It is for administrators who monitor Tenko and for reviewers. Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md) (OPS-05, OPS-20, OPS-21); the endpoint is in the [OpenAPI document](api/openapi.json). Where this document and the code disagree, the code is right and the document has a defect.
+This document describes the metrics and the traces of a Tenko DDI controller: where the metrics are served, who may read them, how the gauges are computed, every series with its labels, how to scrape them with Prometheus, what they cost, the live metrics of the start page, and the OpenTelemetry traces exported over OTLP with their span catalog, and the diagnostics a bug report carries. It is for administrators who monitor Tenko and for reviewers. Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md) (OPS-05, OPS-20, OPS-21); the endpoint is in the [OpenAPI document](api/openapi.json). Where this document and the code disagree, the code is right and the document has a defect.
 
 Contents:
 
@@ -282,7 +282,7 @@ The process is the resource: `service.name` is `tenko`, `service.version` the ve
 
 When traces are on, the start logs `telemetry: traces are exported over OTLP` with the endpoint (without any `user:password@` part) and the ratio.
 
-### 8.2 Span catalogue
+### 8.2 Span catalog
 
 Every span is at level `INFO`. Attribute names follow the OpenTelemetry semantic conventions where one exists; the others are under `tenko.`. The bridge from `tracing` adds the source location (`code.file.path`, `code.module.name`, `code.line.number`), the busy and idle time (`busy_ns`, `idle_ns`) and `target`; spans that end in an error have the status `error` (an HTTP status of 500 or more, a gRPC status other than the expected refusals, a failed connector call).
 

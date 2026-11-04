@@ -894,7 +894,7 @@ pub enum QuorumState {
     Isolated {
         /// When the member became isolated.
         since: Timestamp,
-        /// The last message from a leader (follower) or the last quorum acknowledgement
+        /// The last message from a leader (follower) or the last quorum acknowledgment
         /// (leader), if any.
         last_contact: Option<Timestamp>,
         /// The last revision this member applied: the age of its local copy.

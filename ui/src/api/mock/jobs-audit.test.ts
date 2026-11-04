@@ -195,7 +195,7 @@ describe("job list", () => {
       MOCK_JOB_IDS.applySucceeded,
       MOCK_JOB_IDS.moveQueued,
       MOCK_JOB_IDS.moveWaiting,
-      MOCK_JOB_IDS.applyCancelled,
+      MOCK_JOB_IDS.applyCanceled,
       MOCK_JOB_IDS.moveRolledBack,
     ]);
     const created = page.body.items.map((j) => Date.parse(j.created.at));
@@ -269,8 +269,8 @@ describe("job list", () => {
     });
     expect(rolledBack.finished).toBeTypeOf("string");
 
-    const cancelled = await summaryOf(MOCK_JOB_IDS.applyCancelled);
-    expect(cancelled).toMatchObject({ kind: "ipam.apply", state: "cancelled", cancel_requested: true, error: { code: "jobs.cancelled" } });
+    const canceled = await summaryOf(MOCK_JOB_IDS.applyCanceled);
+    expect(canceled).toMatchObject({ kind: "ipam.apply", state: "canceled", cancel_requested: true, error: { code: "jobs.canceled" } });
   });
 
   it("filters by state and kind, as comma lists or repeated parameters", async () => {
@@ -281,8 +281,8 @@ describe("job list", () => {
     expect(await ids("?state=waiting,%20,")).toEqual([MOCK_JOB_IDS.moveWaiting]);
     expect(await ids("?state=failed")).toEqual([]);
     expect(await ids("?kind=import.apply")).toEqual([MOCK_JOB_IDS.importRunning]);
-    expect(await ids("?kind=ipam.apply")).toEqual([MOCK_JOB_IDS.applySucceeded, MOCK_JOB_IDS.applyCancelled]);
-    expect(await ids("?kind=ipam.apply,import.apply&state=cancelled")).toEqual([MOCK_JOB_IDS.applyCancelled]);
+    expect(await ids("?kind=ipam.apply")).toEqual([MOCK_JOB_IDS.applySucceeded, MOCK_JOB_IDS.applyCanceled]);
+    expect(await ids("?kind=ipam.apply,import.apply&state=canceled")).toEqual([MOCK_JOB_IDS.applyCanceled]);
     expect(await ids("?kind=ipam.move&state=succeeded")).toEqual([]);
   });
 
@@ -313,8 +313,8 @@ describe("job list", () => {
     for (const target of ["host", "nothing/00000000-0000-0000-0000-000000000001", "host/not-a-uuid"]) {
       expect(expectProblem(await get(`/api/v1/jobs?target=${encodeURIComponent(target)}`), 400, "jobs.query.invalid").params.param).toBe("target");
     }
-    const unknown = expectProblem(await get("/api/v1/jobs?colour=red"), 400, "sys.invalid_query");
-    expect(unknown.params).toEqual({ parameter: "colour" });
+    const unknown = expectProblem(await get("/api/v1/jobs?color=red"), 400, "sys.invalid_query");
+    expect(unknown.params).toEqual({ parameter: "color" });
     expectProblem(await get(`/api/v1/jobs?target=host/${MOCK_HOST_IDS.nas}&target=host/${MOCK_HOST_IDS.camDoor}`), 400, "sys.invalid_query");
     expectProblem(await get("/api/v1/jobs?at_least=soon"), 400, "sys.invalid_query");
     expect(expectProblem(await get("/api/v1/jobs?limit=0"), 400, "sys.invalid_query").params).toEqual({ parameter: "limit" });
@@ -606,17 +606,17 @@ describe("completing manual steps", () => {
 // ---------------------------------------------------------------------------------
 // Jobs: cancel
 
-describe("cancelling jobs", () => {
+describe("canceling jobs", () => {
   it("cancels a queued job at once", async () => {
     const id = MOCK_JOB_IDS.moveQueued;
     const auditBefore = audit.records.length;
     const answer = await post<JobSummary>(`${jobPath(id)}/cancel`);
     expect(answer.status).toBe(202);
-    expect(answer.body).toMatchObject({ id, state: "cancelled", cancel_requested: true, error: { code: "jobs.cancelled" } });
+    expect(answer.body).toMatchObject({ id, state: "canceled", cancel_requested: true, error: { code: "jobs.canceled" } });
     expect(answer.body.finished).toBeTypeOf("string");
     const detail = await detailOf(id);
     expect(detail.job.cancel_requested).toMatchObject({ by: { kind: "user", id: MOCK_USER_IDS.alex } });
-    expect(detail.transitions.at(-1)).toMatchObject({ event: "job", action: "cancel", from: "queued", state: "cancelled" });
+    expect(detail.transitions.at(-1)).toMatchObject({ event: "job", action: "cancel", from: "queued", state: "canceled" });
     expect(audit.records).toHaveLength(auditBefore + 1);
     expect(audit.records.at(-1)?.draft).toMatchObject({ action: "jobs.job.cancel", objects: [{ kind: "job", id }] });
     expect(db.journal.filter((e) => e.topic === "jobs").at(-1)?.data.objects).toEqual([{ kind: "job", id }]);
@@ -626,13 +626,13 @@ describe("cancelling jobs", () => {
     const id = MOCK_JOB_IDS.moveQueued;
     expect((await post(`${jobPath(id)}/cancel`)).status).toBe(202);
     const again = expectProblem(await post(`${jobPath(id)}/cancel`), 409, "jobs.invalid_transition");
-    expect(again.params).toEqual({ from: "Cancelled", action: "cancel" });
-    for (const done of [MOCK_JOB_IDS.applySucceeded, MOCK_JOB_IDS.moveRolledBack, MOCK_JOB_IDS.applyCancelled]) {
+    expect(again.params).toEqual({ from: "Canceled", action: "cancel" });
+    for (const done of [MOCK_JOB_IDS.applySucceeded, MOCK_JOB_IDS.moveRolledBack, MOCK_JOB_IDS.applyCanceled]) {
       expectProblem(await post(`${jobPath(done)}/cancel`), 409, "jobs.invalid_transition");
     }
-    // The cancelled waiting move has no task to undo, so it is cancelled for good at once.
+    // The canceled waiting move has no task to undo, so it is canceled for good at once.
     expect((await post(`${jobPath(MOCK_JOB_IDS.moveWaiting)}/cancel`)).status).toBe(202);
-    expect(expectProblem(await post(`${jobPath(MOCK_JOB_IDS.moveWaiting)}/cancel`), 409, "jobs.invalid_transition").params.from).toBe("Cancelled");
+    expect(expectProblem(await post(`${jobPath(MOCK_JOB_IDS.moveWaiting)}/cancel`), 409, "jobs.invalid_transition").params.from).toBe("Canceled");
     // A job with an undo task stays rolling back until a person has undone it.
     const rolling = createJob(undoJob());
     expect((await post(`${jobPath(rolling)}/cancel`)).status).toBe(202);
@@ -646,9 +646,9 @@ describe("cancelling jobs", () => {
     const answer = await post<JobSummary>(`${jobPath(id)}/cancel`);
     expect(answer.status).toBe(202);
     expect(answer.body).toMatchObject({
-      state: "cancelled",
+      state: "canceled",
       cancel_requested: true,
-      error: { code: "jobs.cancelled" },
+      error: { code: "jobs.canceled" },
       steps_done: 0,
       // The first step that is neither done nor skipped: the intent was compensated.
       current_step: 0,
@@ -681,14 +681,14 @@ describe("cancelling jobs", () => {
     expect(audit.records.map((r) => r.draft.action).at(-1)).toBe("jobs.job.cancel_request");
   });
 
-  it("rolls a waiting job back: the task becomes an undo task and the job ends cancelled when it is done", async () => {
+  it("rolls a waiting job back: the task becomes an undo task and the job ends canceled when it is done", async () => {
     const id = createJob(undoJob());
     const answer = await post<JobSummary>(`${jobPath(id)}/cancel`);
     expect(answer.status).toBe(202);
     expect(answer.body).toMatchObject({
       state: "rolling_back",
       cancel_requested: true,
-      error: { code: "jobs.cancelled" },
+      error: { code: "jobs.canceled" },
       manual_steps: [1],
       // The first step that is neither done nor skipped: the intent was compensated.
       current_step: 0,
@@ -715,18 +715,18 @@ describe("cancelling jobs", () => {
     // A person undoes it; the rollback finishes.
     const done = await post<JobSummary>(completePath(id, 1), { note: "Released the reservation." });
     expect(done.status).toBe(200);
-    expect(done.body).toMatchObject({ state: "cancelled", steps_done: 0, error: { code: "jobs.cancelled" } });
+    expect(done.body).toMatchObject({ state: "canceled", steps_done: 0, error: { code: "jobs.canceled" } });
     expect(done.body.manual_steps).toBeUndefined();
     const finished = await detailOf(id);
     expect(finished.job.steps.map((s) => s.state.state).slice(0, 2)).toEqual(["compensated", "compensated"]);
-    expect(finished.transitions.at(-1)).toMatchObject({ action: "finish_cancel", from: "rolling_back", state: "cancelled" });
+    expect(finished.transitions.at(-1)).toMatchObject({ action: "finish_cancel", from: "rolling_back", state: "canceled" });
     expect(audit.records.map((r) => r.draft.action).slice(-2)).toEqual(["jobs.job.cancel_request", "jobs.step.complete"]);
   });
 
   it("rolls a running import back at once", async () => {
     const answer = await post<JobSummary>(`${jobPath(MOCK_JOB_IDS.importRunning)}/cancel`);
     expect(answer.status).toBe(202);
-    expect(answer.body).toMatchObject({ state: "cancelled", cancel_requested: true, error: { code: "jobs.cancelled" }, steps_done: 0 });
+    expect(answer.body).toMatchObject({ state: "canceled", cancel_requested: true, error: { code: "jobs.canceled" }, steps_done: 0 });
     const detail = await detailOf(MOCK_JOB_IDS.importRunning);
     expect(detail.job.steps.map((s) => s.state.state)).toEqual(["compensated", "compensated", "compensated"]);
   });
@@ -783,9 +783,9 @@ describe("createJob", () => {
     // Finishing the first job starts the oldest queued one only (the limit is one).
     expect((await post<JobSummary>(completePath(first, 1))).body.state).toBe("succeeded");
     expect(await states()).toEqual(["succeeded", "waiting", "queued"]);
-    // Cancelling the running one frees the slot as well; its manual step has no undo task.
-    expect((await post<JobSummary>(`${jobPath(second)}/cancel`)).body.state).toBe("cancelled");
-    expect(await states()).toEqual(["succeeded", "cancelled", "waiting"]);
+    // Canceling the running one frees the slot as well; its manual step has no undo task.
+    expect((await post<JobSummary>(`${jobPath(second)}/cancel`)).body.state).toBe("canceled");
+    expect(await states()).toEqual(["succeeded", "canceled", "waiting"]);
   });
 
   it("lets a group with room start the new job, but keeps the order of the queue", async () => {
@@ -1074,7 +1074,7 @@ describe("audit log", () => {
     for (const alarm of by("ipam.prefix.alarm")) expect(alarm.principal).toEqual({ kind: "system", component: "ipam" });
     // The ids the records name are the ones of the seed jobs.
     expect(AUDIT_SEED_IDS.jobRolledBack).toBe(MOCK_JOB_IDS.moveRolledBack);
-    expect(AUDIT_SEED_IDS.jobCancelled).toBe(MOCK_JOB_IDS.applyCancelled);
+    expect(AUDIT_SEED_IDS.jobCanceled).toBe(MOCK_JOB_IDS.applyCanceled);
     expect(AUDIT_SEED_IDS.hostNas).toBe(MOCK_HOST_IDS.nas);
     expect(AUDIT_SEED_IDS.hostThermostat).toBe(MOCK_HOST_IDS.thermostat1);
     expect(AUDIT_SEED_IDS.hostCamDoor).toBe(MOCK_HOST_IDS.camDoor);
@@ -1118,7 +1118,7 @@ describe("audit log", () => {
     expect(await seqs("action=ipam.")).toEqual(expected((r) => r.draft.action.startsWith("ipam.")));
     expect(await seqs("action=ipam.prefix.")).toEqual(expected((r) => r.draft.action.startsWith("ipam.prefix.")));
     expect(await seqs("action=jobs.")).toEqual(expected((r) => r.draft.action.startsWith("jobs.")));
-    // An exact action does not match its longer neighbours.
+    // An exact action does not match its longer neighbors.
     expect(await seqs("action=ipam.prefix")).toEqual([]);
 
     expect(await seqs("object=prefix")).toEqual(expected((r) => r.draft.objects?.some((o) => o.kind === "prefix") ?? false));
@@ -1166,7 +1166,7 @@ describe("audit log", () => {
     await invalid("from=yesterday", "from");
     await invalid("to=2026-10-09", "to");
     await invalid("order=up", "order");
-    await invalid("colour=red", "colour");
+    await invalid("color=red", "color");
     await invalid("action=ipam.&action=jobs.", "action");
     await invalid("at_least=soon", "at_least");
     await invalid("limit=0", "limit");

@@ -1,6 +1,6 @@
-// The cluster nodes and enrolment tokens of the mock (docs/cluster.md): two enrolled probes,
+// The cluster nodes and enrollment tokens of the mock (docs/cluster.md): two enrolled probes,
 // one connected and current, one disconnected after its handshake was refused for want of a
-// common protocol major and with a certificate close to renewal; and one pending enrolment
+// common protocol major and with a certificate close to renewal; and one pending enrollment
 // token. Everything uses the documentation ranges. The state is built when it is first read
 // and again after every reset; the setup scenarios have no nodes.
 import type { components } from "../generated/schema";
@@ -11,7 +11,7 @@ import { DAY_MS, HOUR_MS, MINUTE, iso, randomHex } from "./util";
 
 type S = components["schemas"];
 export type NodeView = S["NodeView"];
-export type EnrolmentView = S["EnrolmentView"];
+export type EnrollmentView = S["EnrollmentView"];
 export type ClusterStatus = S["ClusterStatus"];
 
 /** The protocol majors the mock controller implements. */
@@ -33,19 +33,19 @@ export const MISMATCH_WARNING = "cluster.protocol.mismatch";
 export const NODE_IDS = {
   dmz: 1001,
   lab: 1002,
-  /** The pending enrolment token. */
+  /** The pending enrollment token. */
   token: "0190d1c2-0000-7000-8000-00000f000001",
 } as const;
 
-/** An enrolment token as the mock keeps it: the view and the secret part of the token text. */
-export interface StoredEnrolment {
-  view: Omit<EnrolmentView, "state">;
+/** An enrollment token as the mock keeps it: the view and the secret part of the token text. */
+export interface StoredEnrollment {
+  view: Omit<EnrollmentView, "state">;
   secret: string;
 }
 
 export interface NodesState {
   nodes: Map<number, NodeView>;
-  enrolments: Map<string, StoredEnrolment>;
+  enrollments: Map<string, StoredEnrollment>;
   /** The last id handed out. */
   lastId: number;
   /** Revoked certificate serials with the node they belonged to. */
@@ -65,7 +65,7 @@ export function nodesState(): NodesState {
   if (!state) {
     const empty = db.scenario === "setup" || db.scenario === "setup-slow-disk";
     state = empty
-      ? { nodes: new Map(), enrolments: new Map(), lastId: FIRST_NODE_ID - 1, revoked: new Map(), listening: [] }
+      ? { nodes: new Map(), enrollments: new Map(), lastId: FIRST_NODE_ID - 1, revoked: new Map(), listening: [] }
       : buildSeed(Date.now(), db.revision);
   }
   return state;
@@ -87,15 +87,15 @@ export function certificate(notBefore: number): S["CertificateRef"] {
 }
 
 /** The state of a token at `now`. */
-export function enrolmentState(view: Omit<EnrolmentView, "state">, now = Date.now()): S["EnrolmentState"] {
+export function enrollmentState(view: Omit<EnrollmentView, "state">, now = Date.now()): S["EnrollmentState"] {
   if (view.used) return "used";
   return Date.parse(view.expires_at) <= now ? "expired" : "pending";
 }
 
 /** The tokens to list at `now`: newest first, without used and expired ones older than a week. */
-export function enrolmentList(now = Date.now()): EnrolmentView[] {
-  return [...nodesState().enrolments.values()]
-    .map(({ view }) => ({ ...view, state: enrolmentState(view, now) }))
+export function enrollmentList(now = Date.now()): EnrollmentView[] {
+  return [...nodesState().enrollments.values()]
+    .map(({ view }) => ({ ...view, state: enrollmentState(view, now) }))
     .filter((view) => {
       if (view.state === "pending") return true;
       const ended = view.used ? Date.parse(view.used.at) : Date.parse(view.expires_at);
@@ -187,7 +187,7 @@ function buildSeed(now: number, revision: number): NodesState {
     connection: null,
     revision,
   };
-  const token: StoredEnrolment = {
+  const token: StoredEnrollment = {
     view: {
       id: NODE_IDS.token,
       name: "probe-garage",
@@ -206,7 +206,7 @@ function buildSeed(now: number, revision: number): NodesState {
       [dmz.id, dmz],
       [lab.id, lab],
     ]),
-    enrolments: new Map([[token.view.id, token]]),
+    enrollments: new Map([[token.view.id, token]]),
     lastId: NODE_IDS.lab,
     revoked: new Map(),
     listening: ["0.0.0.0:8444"],

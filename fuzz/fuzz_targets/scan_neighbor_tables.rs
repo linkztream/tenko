@@ -1,11 +1,11 @@
 #![no_main]
 
-//! The neighbour table parsers of the probe: `/proc/net/arp`, `ip neigh show` and the CSV of
+//! The neighbor table parsers of the probe: `/proc/net/arp`, `ip neigh show` and the CSV of
 //! `Get-NetNeighbor`. Their input comes from the operating system, but it lists what other
 //! hosts on the segment claim, so it is parsed like network input.
 
 use libfuzzer_sys::fuzz_target;
-use tenko_scan::methods::neighbours::{
+use tenko_scan::methods::neighbors::{
     findings, parse_get_net_neighbor_csv, parse_ip_neigh, parse_proc_net_arp,
 };
 

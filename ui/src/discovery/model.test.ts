@@ -456,7 +456,7 @@ describe("the names of a device", () => {
 });
 
 describe("the subject of a proposal", () => {
-  it("is labelled by its name, its MAC address, its address or its network, in that order", () => {
+  it("is labeled by its name, its MAC address, its address or its network, in that order", () => {
     expect(subjectLabel({ subject: { name: "media-pc", mac: "00:00:5e:00:53:d1", ip: "192.0.2.150", cidr: "192.0.2.0/24", objects: [] } })).toBe("media-pc");
     expect(subjectLabel({ subject: { mac: "00:00:5e:00:53:d1", ip: "192.0.2.150", objects: [] } })).toBe("00:00:5e:00:53:d1");
     expect(subjectLabel({ subject: { ip: "192.0.2.150", cidr: "192.0.2.0/24", objects: [] } })).toBe("192.0.2.150");
@@ -504,7 +504,7 @@ describe("sources", () => {
   it("has a word for every probe method and keeps one it does not know", () => {
     expect(["arp", "nd", "mdns", "lldp", "icmp", "tcp_syn", "os_fingerprint", "snmp", "tcp_connect", "reverse_dns", "llmnr", "arp_sweep", "dhcp_snoop"].map(probeMethodWord)).toEqual([
       "ARP",
-      "neighbour discovery",
+      "neighbor discovery",
       "mDNS",
       "LLDP",
       "ping",

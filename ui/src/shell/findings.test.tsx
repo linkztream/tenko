@@ -183,7 +183,7 @@ describe("the rail", () => {
     expect(shown.at(-1)).toBe("settings");
   });
 
-  it("draws each badge in the fill of its worst severity, labelled with the count and the area", async () => {
+  it("draws each badge in the fill of its worst severity, labeled with the count and the area", async () => {
     const counts = countsOf(7, {
       ipam: { act: 1, review: 2, info: 9 },
       dns: { act: 0, review: 3, info: 0 },

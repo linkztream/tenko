@@ -79,7 +79,7 @@ describe("import wizard state machine", () => {
     let s = reduce(reduce(INITIAL, { type: "uploaded", view: view() }), { type: "saved", view: view("mapped") });
     s = reduce(s, {
       type: "previewed",
-      // As the server answers: the warning that needs an acknowledgement blocks apply.
+      // As the server answers: the warning that needs an acknowledgment blocks apply.
       preview: preview({
         warnings: [
           { code: "ipam.prefix.nibble_boundary", message: "off nibble", requires_ack: true },
@@ -95,7 +95,7 @@ describe("import wizard state machine", () => {
     s = reduce(s, { type: "acknowledge", code: "ipam.prefix.nibble_boundary", on: true });
     expect(blockersOf(s)).toEqual([]);
     expect(canApply(s)).toBe(true);
-    // A new preview without the warning drops its acknowledgement.
+    // A new preview without the warning drops its acknowledgment.
     s = reduce(s, { type: "previewed", preview: preview() });
     expect(s.acknowledged).toEqual([]);
   });
@@ -104,7 +104,7 @@ describe("import wizard state machine", () => {
     let s = reduce(reduce(INITIAL, { type: "uploaded", view: view() }), { type: "saved", view: view("mapped") });
     s = reduce(s, { type: "previewed", preview: preview({ can_apply: false, blockers: ["import.credentials.vault_required"] }) });
     expect(canApply(s)).toBe(false);
-    // An acknowledgement clears only the unacknowledged warnings, never another blocker.
+    // An acknowledgment clears only the unacknowledged warnings, never another blocker.
     s = reduce(s, {
       type: "previewed",
       preview: preview({ can_apply: false, blockers: ["ipam.plan.unacknowledged", "import.conflict.kept"] }),

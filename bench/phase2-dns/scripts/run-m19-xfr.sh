@@ -27,7 +27,7 @@
 # Every figure is a single-node figure (plan section 2.10). The lab runs on one Docker host:
 # Tenko, BIND and the client are containers on one bridge network, so the latencies are an
 # upper bound of what the same software does over a real link minus that link's delay;
-# they are labelled loopback figures.
+# they are labeled loopback figures.
 #
 # Run as root (Docker) on the Docker host, from the repository root:
 #   IMAGE=tenko:lab bash bench/phase2-dns/scripts/run-m19-xfr.sh [--records N] [--changes N] [--rounds N]

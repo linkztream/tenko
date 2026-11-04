@@ -144,7 +144,7 @@ fn m1_section(
     out.push_str(
         "**Method.** A leader (node 1) and a learner (node 2) run in one process over \
          `InProcessNetwork`, each with its own data directory. The learner holds a test \
-         `DerivedIndex` modelled on Spike A's serving index: 64 shards of \
+         `DerivedIndex` modeled on Spike A's serving index: 64 shards of \
          `RwLock<HashMap<Bytes, Bytes>>` behind an `ArcSwap`; `apply` updates the live image in \
          place, `build` scans the table in pages of 20,000 rows into a new image, `install` \
          swaps it in. N records of 150 bytes (22-byte key, 128-byte value) are loaded into the \

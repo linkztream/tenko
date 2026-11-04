@@ -305,7 +305,7 @@ export type MessageKey =
   | "audit.action.auth.setup.complete"
   | "audit.action.auth.token.create"
   | "audit.action.auth.token.revoke"
-  | "audit.action.auth.totp.enrol"
+  | "audit.action.auth.totp.enroll"
   | "audit.action.auth.totp.remove"
   | "audit.action.auth.user.create"
   | "audit.action.auth.user.delete"
@@ -316,15 +316,15 @@ export type MessageKey =
   | "audit.action.auth.webauthn.register"
   | "audit.action.auth.webauthn.remove"
   | "audit.action.cluster.ca.create"
-  | "audit.action.cluster.enrolment.create"
-  | "audit.action.cluster.enrolment.delete"
+  | "audit.action.cluster.enrollment.create"
+  | "audit.action.cluster.enrollment.delete"
   | "audit.action.cluster.member.announce"
   | "audit.action.cluster.member.join"
   | "audit.action.cluster.member.promote"
   | "audit.action.cluster.member.remove"
   | "audit.action.cluster.member.step_down"
   | "audit.action.cluster.node.controller_cert"
-  | "audit.action.cluster.node.enrol"
+  | "audit.action.cluster.node.enroll"
   | "audit.action.cluster.node.renew"
   | "audit.action.cluster.node.revoke"
   | "audit.action.cluster.node.secrets"
@@ -800,7 +800,7 @@ export type MessageKey =
   | "auth.signin.break_glass_link"
   | "auth.signin.break_glass_title"
   | "auth.signin.break_glass_warning"
-  | "auth.signin.ceremony.cancelled"
+  | "auth.signin.ceremony.canceled"
   | "auth.signin.ceremony.exists"
   | "auth.signin.ceremony.failed"
   | "auth.signin.ceremony.insecure"
@@ -1104,7 +1104,7 @@ export type MessageKey =
   | "cluster.queue.cancel_failed"
   | "cluster.queue.cancel_named"
   | "cluster.queue.cancel_title"
-  | "cluster.queue.cancelled"
+  | "cluster.queue.canceled"
   | "cluster.queue.change_state.applied"
   | "cluster.queue.change_state.conflict"
   | "cluster.queue.change_state.expired"
@@ -3957,10 +3957,10 @@ export type MessageKey =
   | "errors.client.aborted"
   | "errors.client.bad_response"
   | "errors.client.network"
-  | "errors.cluster.enrolment.lifetime"
-  | "errors.cluster.enrolment.not_found"
-  | "errors.cluster.enrolment.random"
-  | "errors.cluster.enrolment.roles"
+  | "errors.cluster.enrollment.lifetime"
+  | "errors.cluster.enrollment.not_found"
+  | "errors.cluster.enrollment.random"
+  | "errors.cluster.enrollment.roles"
   | "errors.cluster.member.changing"
   | "errors.cluster.member.even_voters"
   | "errors.cluster.member.last_voter"
@@ -4580,7 +4580,7 @@ export type MessageKey =
   | "import.conflict.skip"
   | "import.conflict.update"
   | "import.credentials.not_allowed"
-  | "import.credentials.pin_enrol"
+  | "import.credentials.pin_enroll"
   | "import.credentials.reason.forbidden"
   | "import.credentials.reason.pin_coupling"
   | "import.credentials.reason.step_up_required"
@@ -5426,7 +5426,7 @@ export type MessageKey =
   | "jobs.empty.body"
   | "jobs.empty.filtered"
   | "jobs.empty.title"
-  | "jobs.error.cancelled"
+  | "jobs.error.canceled"
   | "jobs.error.invalid_transition"
   | "jobs.error.not_found"
   | "jobs.error.note_too_long"
@@ -5531,8 +5531,8 @@ export type MessageKey =
   | "jobs.problem.detail"
   | "jobs.problem.title"
   | "jobs.progress"
-  | "jobs.state.cancelled"
-  | "jobs.state.cancelled_rolled_back"
+  | "jobs.state.canceled"
+  | "jobs.state.canceled_rolled_back"
   | "jobs.state.failed"
   | "jobs.state.queued"
   | "jobs.state.rolled_back"
@@ -5954,7 +5954,7 @@ export type MessageKey =
   | "node.role.dhcp"
   | "node.role.dns"
   | "node.role.probe"
-  | "nodes.action.enrol"
+  | "nodes.action.enroll"
   | "nodes.cert.days_left"
   | "nodes.cert.expired"
   | "nodes.col.address"
@@ -5968,35 +5968,35 @@ export type MessageKey =
   | "nodes.col.version"
   | "nodes.empty.body"
   | "nodes.empty.title"
-  | "nodes.enrol.command"
-  | "nodes.enrol.copied_command"
-  | "nodes.enrol.copied_token"
-  | "nodes.enrol.copy_blocked"
-  | "nodes.enrol.copy_command"
-  | "nodes.enrol.copy_token"
-  | "nodes.enrol.create"
-  | "nodes.enrol.created_title"
-  | "nodes.enrol.done"
-  | "nodes.enrol.fingerprint"
-  | "nodes.enrol.fingerprint_help"
-  | "nodes.enrol.intro"
-  | "nodes.enrol.lifetime"
-  | "nodes.enrol.lifetime_help"
-  | "nodes.enrol.name"
-  | "nodes.enrol.name_help"
-  | "nodes.enrol.name_rule"
-  | "nodes.enrol.next"
-  | "nodes.enrol.once"
-  | "nodes.enrol.role_hint.dhcp"
-  | "nodes.enrol.role_hint.dns"
-  | "nodes.enrol.role_hint.probe"
-  | "nodes.enrol.roles"
-  | "nodes.enrol.roles_required"
-  | "nodes.enrol.title"
-  | "nodes.enrol.token"
-  | "nodes.enrol.vrf"
-  | "nodes.enrol.vrf_default"
-  | "nodes.enrol.vrf_help"
+  | "nodes.enroll.command"
+  | "nodes.enroll.copied_command"
+  | "nodes.enroll.copied_token"
+  | "nodes.enroll.copy_blocked"
+  | "nodes.enroll.copy_command"
+  | "nodes.enroll.copy_token"
+  | "nodes.enroll.create"
+  | "nodes.enroll.created_title"
+  | "nodes.enroll.done"
+  | "nodes.enroll.fingerprint"
+  | "nodes.enroll.fingerprint_help"
+  | "nodes.enroll.intro"
+  | "nodes.enroll.lifetime"
+  | "nodes.enroll.lifetime_help"
+  | "nodes.enroll.name"
+  | "nodes.enroll.name_help"
+  | "nodes.enroll.name_rule"
+  | "nodes.enroll.next"
+  | "nodes.enroll.once"
+  | "nodes.enroll.role_hint.dhcp"
+  | "nodes.enroll.role_hint.dns"
+  | "nodes.enroll.role_hint.probe"
+  | "nodes.enroll.roles"
+  | "nodes.enroll.roles_required"
+  | "nodes.enroll.title"
+  | "nodes.enroll.token"
+  | "nodes.enroll.vrf"
+  | "nodes.enroll.vrf_default"
+  | "nodes.enroll.vrf_help"
   | "nodes.grid.label"
   | "nodes.lifetime.s3600"
   | "nodes.lifetime.s604800"
@@ -6455,7 +6455,7 @@ export type MessageKey =
   | "scans.part.col.node"
   | "scans.part.ingested"
   | "scans.part.state.accepted"
-  | "scans.part.state.cancelled"
+  | "scans.part.state.canceled"
   | "scans.part.state.done"
   | "scans.part.state.expired"
   | "scans.part.state.failed"
@@ -6481,7 +6481,7 @@ export type MessageKey =
   | "scans.progress.percent"
   | "scans.section.jobs"
   | "scans.section.probes"
-  | "scans.state.cancelled"
+  | "scans.state.canceled"
   | "scans.state.done"
   | "scans.state.failed"
   | "scans.state.partial"
@@ -6566,7 +6566,7 @@ export type MessageKey =
   | "secrets.form.name_help"
   | "secrets.form.notes"
   | "secrets.form.notes_help"
-  | "secrets.form.pin_enrol"
+  | "secrets.form.pin_enroll"
   | "secrets.form.pin_title"
   | "secrets.form.reload"
   | "secrets.form.reloaded"
@@ -7567,9 +7567,9 @@ export type MessageKey =
   | "topology.legend.vlans_none"
   | "topology.loading"
   | "topology.map.label"
-  | "topology.neighbour.local"
-  | "topology.neighbour.remote"
-  | "topology.neighbour.ssid"
+  | "topology.neighbor.local"
+  | "topology.neighbor.remote"
+  | "topology.neighbor.ssid"
   | "topology.networks.dhcp.disabled"
   | "topology.networks.dhcp.relay"
   | "topology.networks.dhcp.server"
@@ -7592,8 +7592,8 @@ export type MessageKey =
   | "topology.panel.last_seen"
   | "topology.panel.macs"
   | "topology.panel.model"
-  | "topology.panel.neighbours"
-  | "topology.panel.neighbours_none"
+  | "topology.panel.neighbors"
+  | "topology.panel.neighbors_none"
   | "topology.panel.observation_link"
   | "topology.panel.os"
   | "topology.panel.paths"
@@ -9071,8 +9071,8 @@ export interface MessageArgs {
   "move.timing.when": { absolute: string | number; relative: string | number };
   "nodes.cert.days_left": { days: number };
   "nodes.col.major": { major: string | number };
-  "nodes.enrol.next": { roles: string | number };
-  "nodes.enrol.once": { expires: string | number };
+  "nodes.enroll.next": { roles: string | number };
+  "nodes.enroll.once": { expires: string | number };
   "nodes.mismatch": { count: number; majors: string | number; names: string | number };
   "nodes.panel.buffer_value": { batches: number; size: string | number };
   "nodes.panel.id": { id: string | number };
@@ -9324,9 +9324,9 @@ export interface MessageArgs {
   "topology.group.bucket_aria": { bucket: string | number; count: number };
   "topology.group.label": { count: number };
   "topology.legend.too_many": { count: number };
-  "topology.neighbour.local": { port: string | number };
-  "topology.neighbour.remote": { port: string | number };
-  "topology.neighbour.ssid": { ssid: string | number };
+  "topology.neighbor.local": { port: string | number };
+  "topology.neighbor.remote": { port: string | number };
+  "topology.neighbor.ssid": { ssid: string | number };
   "topology.networks.summary": { count: number };
   "topology.node.aria": { kind: string | number; label: string | number };
   "topology.path.start": { label: string | number };
@@ -9695,7 +9695,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.auth.setup.complete",
   "audit.action.auth.token.create",
   "audit.action.auth.token.revoke",
-  "audit.action.auth.totp.enrol",
+  "audit.action.auth.totp.enroll",
   "audit.action.auth.totp.remove",
   "audit.action.auth.user.create",
   "audit.action.auth.user.delete",
@@ -9706,15 +9706,15 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.auth.webauthn.register",
   "audit.action.auth.webauthn.remove",
   "audit.action.cluster.ca.create",
-  "audit.action.cluster.enrolment.create",
-  "audit.action.cluster.enrolment.delete",
+  "audit.action.cluster.enrollment.create",
+  "audit.action.cluster.enrollment.delete",
   "audit.action.cluster.member.announce",
   "audit.action.cluster.member.join",
   "audit.action.cluster.member.promote",
   "audit.action.cluster.member.remove",
   "audit.action.cluster.member.step_down",
   "audit.action.cluster.node.controller_cert",
-  "audit.action.cluster.node.enrol",
+  "audit.action.cluster.node.enroll",
   "audit.action.cluster.node.renew",
   "audit.action.cluster.node.revoke",
   "audit.action.cluster.node.secrets",
@@ -10190,7 +10190,7 @@ export const messageKeys: readonly MessageKey[] = [
   "auth.signin.break_glass_link",
   "auth.signin.break_glass_title",
   "auth.signin.break_glass_warning",
-  "auth.signin.ceremony.cancelled",
+  "auth.signin.ceremony.canceled",
   "auth.signin.ceremony.exists",
   "auth.signin.ceremony.failed",
   "auth.signin.ceremony.insecure",
@@ -10494,7 +10494,7 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.queue.cancel_failed",
   "cluster.queue.cancel_named",
   "cluster.queue.cancel_title",
-  "cluster.queue.cancelled",
+  "cluster.queue.canceled",
   "cluster.queue.change_state.applied",
   "cluster.queue.change_state.conflict",
   "cluster.queue.change_state.expired",
@@ -13347,10 +13347,10 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.client.aborted",
   "errors.client.bad_response",
   "errors.client.network",
-  "errors.cluster.enrolment.lifetime",
-  "errors.cluster.enrolment.not_found",
-  "errors.cluster.enrolment.random",
-  "errors.cluster.enrolment.roles",
+  "errors.cluster.enrollment.lifetime",
+  "errors.cluster.enrollment.not_found",
+  "errors.cluster.enrollment.random",
+  "errors.cluster.enrollment.roles",
   "errors.cluster.member.changing",
   "errors.cluster.member.even_voters",
   "errors.cluster.member.last_voter",
@@ -13970,7 +13970,7 @@ export const messageKeys: readonly MessageKey[] = [
   "import.conflict.skip",
   "import.conflict.update",
   "import.credentials.not_allowed",
-  "import.credentials.pin_enrol",
+  "import.credentials.pin_enroll",
   "import.credentials.reason.forbidden",
   "import.credentials.reason.pin_coupling",
   "import.credentials.reason.step_up_required",
@@ -14816,7 +14816,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.empty.body",
   "jobs.empty.filtered",
   "jobs.empty.title",
-  "jobs.error.cancelled",
+  "jobs.error.canceled",
   "jobs.error.invalid_transition",
   "jobs.error.not_found",
   "jobs.error.note_too_long",
@@ -14921,8 +14921,8 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.problem.detail",
   "jobs.problem.title",
   "jobs.progress",
-  "jobs.state.cancelled",
-  "jobs.state.cancelled_rolled_back",
+  "jobs.state.canceled",
+  "jobs.state.canceled_rolled_back",
   "jobs.state.failed",
   "jobs.state.queued",
   "jobs.state.rolled_back",
@@ -15344,7 +15344,7 @@ export const messageKeys: readonly MessageKey[] = [
   "node.role.dhcp",
   "node.role.dns",
   "node.role.probe",
-  "nodes.action.enrol",
+  "nodes.action.enroll",
   "nodes.cert.days_left",
   "nodes.cert.expired",
   "nodes.col.address",
@@ -15358,35 +15358,35 @@ export const messageKeys: readonly MessageKey[] = [
   "nodes.col.version",
   "nodes.empty.body",
   "nodes.empty.title",
-  "nodes.enrol.command",
-  "nodes.enrol.copied_command",
-  "nodes.enrol.copied_token",
-  "nodes.enrol.copy_blocked",
-  "nodes.enrol.copy_command",
-  "nodes.enrol.copy_token",
-  "nodes.enrol.create",
-  "nodes.enrol.created_title",
-  "nodes.enrol.done",
-  "nodes.enrol.fingerprint",
-  "nodes.enrol.fingerprint_help",
-  "nodes.enrol.intro",
-  "nodes.enrol.lifetime",
-  "nodes.enrol.lifetime_help",
-  "nodes.enrol.name",
-  "nodes.enrol.name_help",
-  "nodes.enrol.name_rule",
-  "nodes.enrol.next",
-  "nodes.enrol.once",
-  "nodes.enrol.role_hint.dhcp",
-  "nodes.enrol.role_hint.dns",
-  "nodes.enrol.role_hint.probe",
-  "nodes.enrol.roles",
-  "nodes.enrol.roles_required",
-  "nodes.enrol.title",
-  "nodes.enrol.token",
-  "nodes.enrol.vrf",
-  "nodes.enrol.vrf_default",
-  "nodes.enrol.vrf_help",
+  "nodes.enroll.command",
+  "nodes.enroll.copied_command",
+  "nodes.enroll.copied_token",
+  "nodes.enroll.copy_blocked",
+  "nodes.enroll.copy_command",
+  "nodes.enroll.copy_token",
+  "nodes.enroll.create",
+  "nodes.enroll.created_title",
+  "nodes.enroll.done",
+  "nodes.enroll.fingerprint",
+  "nodes.enroll.fingerprint_help",
+  "nodes.enroll.intro",
+  "nodes.enroll.lifetime",
+  "nodes.enroll.lifetime_help",
+  "nodes.enroll.name",
+  "nodes.enroll.name_help",
+  "nodes.enroll.name_rule",
+  "nodes.enroll.next",
+  "nodes.enroll.once",
+  "nodes.enroll.role_hint.dhcp",
+  "nodes.enroll.role_hint.dns",
+  "nodes.enroll.role_hint.probe",
+  "nodes.enroll.roles",
+  "nodes.enroll.roles_required",
+  "nodes.enroll.title",
+  "nodes.enroll.token",
+  "nodes.enroll.vrf",
+  "nodes.enroll.vrf_default",
+  "nodes.enroll.vrf_help",
   "nodes.grid.label",
   "nodes.lifetime.s3600",
   "nodes.lifetime.s604800",
@@ -15845,7 +15845,7 @@ export const messageKeys: readonly MessageKey[] = [
   "scans.part.col.node",
   "scans.part.ingested",
   "scans.part.state.accepted",
-  "scans.part.state.cancelled",
+  "scans.part.state.canceled",
   "scans.part.state.done",
   "scans.part.state.expired",
   "scans.part.state.failed",
@@ -15871,7 +15871,7 @@ export const messageKeys: readonly MessageKey[] = [
   "scans.progress.percent",
   "scans.section.jobs",
   "scans.section.probes",
-  "scans.state.cancelled",
+  "scans.state.canceled",
   "scans.state.done",
   "scans.state.failed",
   "scans.state.partial",
@@ -15956,7 +15956,7 @@ export const messageKeys: readonly MessageKey[] = [
   "secrets.form.name_help",
   "secrets.form.notes",
   "secrets.form.notes_help",
-  "secrets.form.pin_enrol",
+  "secrets.form.pin_enroll",
   "secrets.form.pin_title",
   "secrets.form.reload",
   "secrets.form.reloaded",
@@ -16957,9 +16957,9 @@ export const messageKeys: readonly MessageKey[] = [
   "topology.legend.vlans_none",
   "topology.loading",
   "topology.map.label",
-  "topology.neighbour.local",
-  "topology.neighbour.remote",
-  "topology.neighbour.ssid",
+  "topology.neighbor.local",
+  "topology.neighbor.remote",
+  "topology.neighbor.ssid",
   "topology.networks.dhcp.disabled",
   "topology.networks.dhcp.relay",
   "topology.networks.dhcp.server",
@@ -16982,8 +16982,8 @@ export const messageKeys: readonly MessageKey[] = [
   "topology.panel.last_seen",
   "topology.panel.macs",
   "topology.panel.model",
-  "topology.panel.neighbours",
-  "topology.panel.neighbours_none",
+  "topology.panel.neighbors",
+  "topology.panel.neighbors_none",
   "topology.panel.observation_link",
   "topology.panel.os",
   "topology.panel.paths",

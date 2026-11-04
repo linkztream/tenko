@@ -5,7 +5,7 @@
 // prefix as `planned`, planned by the IPAM mock with a dry run), the network the controller
 // should have with the read-back diff, the steps of the job and the warnings to acknowledge.
 // Without `dry_run` it computes the preview again, refuses while a warning that needs an
-// acknowledgement is not acknowledged, writes the intent, puts the network on the mock
+// acknowledgment is not acknowledged, writes the intent, puts the network on the mock
 // controller and starts the job `ipam.vlan.provision`. `GET /vlans/{id}/prefixes` lists the
 // prefixes linked to a VLAN.
 //
@@ -14,7 +14,7 @@
 //
 // Simplifications: the job runs at once. The VLAN and the prefix become `active` when the job
 // succeeds: at submit for an automatic or unchanged network step, when a person completes the
-// manual task otherwise (a cancelled or failed job soft-deletes what it created).
+// manual task otherwise (a canceled or failed job soft-deletes what it created).
 import type { HttpHandler } from "msw";
 import { bitsOf, formatIp, parseIp } from "../../ipam/ip";
 import type { components } from "../generated/schema";
@@ -524,7 +524,7 @@ function follow(commands: { op: string; args: Record<string, unknown> }[]): void
   }
 }
 
-/** Activates what a succeeded job created and soft-deletes what a failed or cancelled one created. */
+/** Activates what a succeeded job created and soft-deletes what a failed or canceled one created. */
 function settle(jobId: string): void {
   const created = settling.get(jobId);
   if (!created) return;
@@ -540,14 +540,14 @@ function settle(jobId: string): void {
     if (created.vlan) commands.push(update("vlan", created.vlan));
     if (created.prefix) commands.push(update("prefix", created.prefix));
     follow(commands);
-  } else if (state === "cancelled" || state === "rolled_back" || state === "failed") {
+  } else if (state === "canceled" || state === "rolled_back" || state === "failed") {
     settling.delete(jobId);
     if (created.prefix) follow([remove("prefix", created.prefix)]);
     if (created.vlan) follow([remove("vlan", created.vlan)]);
   }
 }
 
-// The manual task is completed (or the job cancelled) through the jobs API: look at the jobs
+// The manual task is completed (or the job canceled) through the jobs API: look at the jobs
 // that wait for it when the jobs topic announces a change.
 subscribeEvents((event) => {
   if (event.topic !== "jobs") return;

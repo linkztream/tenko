@@ -1,4 +1,4 @@
-//! Node-to-node transport: gRPC over mutual TLS, node enrolment, and the internal
+//! Node-to-node transport: gRPC over mutual TLS, node enrollment, and the internal
 //! certificate authority (OPS-04, OPS-08, OPS-28).
 //!
 //! | Module | Contents |
@@ -6,10 +6,10 @@
 //! | [`admin`] | the administration of the controller cluster behind `/cluster/*`: views and membership changes |
 //! | [`ca`] | the internal CA and the TLS model of the API listener (WP1.3); node certificates with roles |
 //! | [`proto`] | the protocol `tenko.cluster.v1`, compiled from `proto/` |
-//! | [`token`] | enrolment tokens: format, generation, digest |
+//! | [`token`] | enrollment tokens: format, generation, digest |
 //! | [`mod@version`] | protocol majors and their negotiation (OPS-08) |
 //! | [`model`] | the records of the node registry and the views and requests of its API |
-//! | [`registry`] | the node registry: tokens, enrolment, renewal, revocation, protocol state |
+//! | [`registry`] | the node registry: tokens, enrollment, renewal, revocation, protocol state |
 //! | [`mtls`] | the mutual TLS of the cluster port: verifiers, revocation, kill switches |
 //! | [`session`] | the live heartbeat sessions and connections of the cluster port |
 //! | [`server`] | the controller's cluster port: accept loop, mutual TLS, the router and the helpers the services share |
@@ -25,7 +25,7 @@
 //! | [`trace`] | the W3C trace context of the controller-to-controller calls and their spans (OPS-05) |
 //! | [`error`] | the coded error of the registry and the transport |
 //!
-//! `docs/cluster.md` describes enrolment, certificates, revocation, the versioning rule,
+//! `docs/cluster.md` describes enrollment, certificates, revocation, the versioning rule,
 //! the buffer and the ports.
 
 pub mod admin;

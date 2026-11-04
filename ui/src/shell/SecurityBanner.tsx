@@ -23,7 +23,7 @@ export function SecurityBanner() {
 function ActionBanner() {
   const flags = () => session()?.flags;
   return (
-    <Show when={flags()?.mfa_enrolment_required || flags()?.password_change_required}>
+    <Show when={flags()?.mfa_enrollment_required || flags()?.password_change_required}>
       <div class="banner warn" role="status">
         <Icon name="key" />
         <span class="grow">

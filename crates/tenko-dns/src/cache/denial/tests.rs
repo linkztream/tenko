@@ -1,6 +1,6 @@
 //! The denial cache against hand-built signed answers: the NSEC and NSEC3 proofs of
 //! NXDOMAIN, NODATA, an empty non-terminal and a wildcard (RFC 8198), RFC 8020 in an
-//! unsigned zone, what is never kept or never synthesised, the rendering by the client's
+//! unsigned zone, what is never kept or never synthesized, the rendering by the client's
 //! flags, the bound, the flush and the expiry.
 
 use std::time::{Duration, Instant};
@@ -206,7 +206,7 @@ fn client(asked: &Asked, dnssec_ok: bool, max_len: usize) -> Client<'_> {
 type Record = (usize, String, u16, u32);
 
 /// What the cache answers: the hit, the header and the records (section, owner, type).
-fn synthesise(
+fn synthesize(
     cache: &Denials,
     view: Option<ViewId>,
     qname: &str,
@@ -246,7 +246,7 @@ fn kinds(records: &[Record]) -> Vec<(usize, &str, u16)> {
 fn a_covered_name_is_nxdomain_with_the_soa_and_both_proofs() {
     let cache = denials();
     nsec_zone(&cache, None);
-    let (hit, header, records) = synthesise(&cache, None, "c.example.test", A, true).expect("hit");
+    let (hit, header, records) = synthesize(&cache, None, "c.example.test", A, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Nxdomain);
     assert_eq!((header.rcode, header.ad, header.qr), (3, true, true));
     assert_eq!(
@@ -268,13 +268,13 @@ fn a_covered_name_is_nxdomain_with_the_soa_and_both_proofs() {
     );
 
     // A client without DO gets the SOA alone and no AD.
-    let (_, header, records) = synthesise(&cache, None, "c.example.test", A, false).expect("hit");
+    let (_, header, records) = synthesize(&cache, None, "c.example.test", A, false).expect("hit");
     assert_eq!((header.rcode, header.ad), (3, false));
     assert_eq!(kinds(&records), vec![(1, "example.test", types::SOA)]);
 
     // Below an existing name: the closest encloser is `a`, its wildcard covered by the
     // same record.
-    let (hit, _, records) = synthesise(&cache, None, "x.a.example.test", AAAA, true).expect("hit");
+    let (hit, _, records) = synthesize(&cache, None, "x.a.example.test", AAAA, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Nxdomain);
     assert_eq!(
         records
@@ -291,7 +291,7 @@ fn an_existing_name_without_the_type_is_nodata_and_with_it_a_miss() {
     let cache = denials();
     nsec_zone(&cache, None);
     let (hit, header, records) =
-        synthesise(&cache, None, "m.example.test", AAAA, true).expect("hit");
+        synthesize(&cache, None, "m.example.test", AAAA, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Nodata);
     assert_eq!((header.rcode, header.ancount), (0, 0));
     assert_eq!(
@@ -303,32 +303,32 @@ fn an_existing_name_without_the_type_is_nodata_and_with_it_a_miss() {
             (1, "m.example.test", types::RRSIG),
         ]
     );
-    assert!(synthesise(&cache, None, "m.example.test", MX, true).is_none());
-    assert!(synthesise(&cache, None, "m.example.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "m.example.test", MX, true).is_none());
+    assert!(synthesize(&cache, None, "m.example.test", A, true).is_none());
     // The empty non-terminal `w` (the next name lies below it): NODATA.
-    let (hit, _, _) = synthesise(&cache, None, "w.example.test", A, true).expect("hit");
+    let (hit, _, _) = synthesize(&cache, None, "w.example.test", A, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Nodata);
 }
 
 #[test]
-fn a_delegation_proves_nothing_below_it_and_some_types_are_never_synthesised() {
+fn a_delegation_proves_nothing_below_it_and_some_types_are_never_synthesized() {
     let cache = denials();
     nsec_zone(&cache, None);
     // `sub` is a delegation: the parent's record says nothing about its children, and
     // nothing about its data but DS.
-    assert!(synthesise(&cache, None, "x.sub.example.test", A, true).is_none());
-    assert!(synthesise(&cache, None, "sub.example.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "x.sub.example.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "sub.example.test", A, true).is_none());
     for qtype in [types::DS, types::ANY, types::RRSIG, types::NSEC, 252] {
         assert!(
-            synthesise(&cache, None, "c.example.test", qtype, true).is_none(),
+            synthesize(&cache, None, "c.example.test", qtype, true).is_none(),
             "{qtype}"
         );
     }
     // A name the records do not cover (after `*.w`), and a zone the cache does not hold.
-    assert!(synthesise(&cache, None, "zz.example.test", A, true).is_none());
-    assert!(synthesise(&cache, None, "c.other.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "zz.example.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "c.other.test", A, true).is_none());
     // Another view holds nothing.
-    assert!(synthesise(&cache, Some(ViewId::generate()), "c.example.test", A, true).is_none());
+    assert!(synthesize(&cache, Some(ViewId::generate()), "c.example.test", A, true).is_none());
 }
 
 #[test]
@@ -352,7 +352,7 @@ fn a_validated_wildcard_expansion_answers_other_names_under_it() {
     let message = message("one.w.example.test", A, 0, &answer, &authority);
     assert!(cache.insert(None, &zone, &message, &SECURE, Instant::now()));
     let (hit, header, records) =
-        synthesise(&cache, None, "two.w.example.test", A, true).expect("hit");
+        synthesize(&cache, None, "two.w.example.test", A, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Wildcard);
     assert_eq!((header.rcode, header.ancount, header.ad), (0, 2, true));
     assert_eq!(
@@ -367,12 +367,12 @@ fn a_validated_wildcard_expansion_answers_other_names_under_it() {
     assert!(records.iter().all(|(_, _, _, ttl)| *ttl <= 120));
     // Without DO: the address alone.
     let (_, header, records) =
-        synthesise(&cache, None, "two.w.example.test", A, false).expect("hit");
+        synthesize(&cache, None, "two.w.example.test", A, false).expect("hit");
     assert_eq!((header.ancount, header.nscount), (1, 0));
     assert_eq!(kinds(&records), vec![(0, "two.w.example.test", A)]);
     // The wildcard has no AAAA: wildcard NODATA.
     let (hit, _, records) =
-        synthesise(&cache, None, "two.w.example.test", AAAA, true).expect("hit");
+        synthesize(&cache, None, "two.w.example.test", AAAA, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Nodata);
     assert!(records.iter().any(|record| record.1 == "*.w.example.test"));
 }
@@ -399,7 +399,7 @@ fn nothing_is_kept_from_bogus_answers_and_only_names_from_insecure_ones() {
     // Unsigned records: the NSEC is not kept; the name of the NXDOMAIN is (RFC 8020).
     assert!(cache.insert(None, &zone, &answer, &INSECURE, Instant::now()));
     assert_eq!(cache.len(), 1);
-    assert!(synthesise(&cache, None, "c.example.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "c.example.test", A, true).is_none());
 }
 
 #[test]
@@ -413,15 +413,15 @@ fn names_below_a_cached_nxdomain_of_an_unsigned_zone_are_nxdomain() {
         "y.x.gone.plain.test",
         "gone.plain.test",
     ] {
-        let (hit, header, records) = synthesise(&cache, None, name, MX, true).expect(name);
+        let (hit, header, records) = synthesize(&cache, None, name, MX, true).expect(name);
         assert_eq!(hit.kind, DenialKind::NxdomainCut, "{name}");
         assert_eq!((header.rcode, header.ad), (3, false), "{name}");
         assert_eq!(kinds(&records), vec![(1, "plain.test", types::SOA)]);
         // The SOA's MINIMUM bounds the TTL.
         assert!(records[0].3 <= 300);
     }
-    assert!(synthesise(&cache, None, "other.plain.test", A, true).is_none());
-    assert!(synthesise(&cache, None, "plain.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "other.plain.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "plain.test", A, true).is_none());
 
     // The NXDOMAIN at the end of a CNAME chain denies the target, not the name asked.
     let answer = message(
@@ -437,8 +437,8 @@ fn names_below_a_cached_nxdomain_of_an_unsigned_zone_are_nxdomain() {
         &[soa("plain.test", 600)],
     );
     assert!(cache.insert(None, &zone, &answer, &INSECURE, Instant::now()));
-    assert!(synthesise(&cache, None, "x.target.plain.test", A, false).is_some());
-    assert!(synthesise(&cache, None, "x.alias.plain.test", A, false).is_none());
+    assert!(synthesize(&cache, None, "x.target.plain.test", A, false).is_some());
+    assert!(synthesize(&cache, None, "x.alias.plain.test", A, false).is_none());
 }
 
 /// The NSEC3 zone `n3.test` (no salt, no iterations) with the apex and `www` (A): two
@@ -475,7 +475,7 @@ fn nsec3_zone(cache: &Denials, opt_out: bool) {
 fn nsec3_proves_nxdomain_and_nodata_by_hashed_owner() {
     let cache = denials();
     nsec3_zone(&cache, false);
-    let (hit, header, records) = synthesise(&cache, None, "other.n3.test", A, true).expect("hit");
+    let (hit, header, records) = synthesize(&cache, None, "other.n3.test", A, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Nxdomain);
     assert_eq!((header.rcode, header.ad), (3, true));
     // The SOA, then the closest encloser's match, the next closer's cover and the
@@ -485,20 +485,20 @@ fn nsec3_proves_nxdomain_and_nodata_by_hashed_owner() {
         .filter(|record| record.2 == types::NSEC3)
         .collect();
     assert_eq!(nsec3.len(), 2);
-    let (hit, _, _) = synthesise(&cache, None, "deep.other.n3.test", A, true).expect("hit");
+    let (hit, _, _) = synthesize(&cache, None, "deep.other.n3.test", A, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Nxdomain);
-    let (hit, header, _) = synthesise(&cache, None, "www.n3.test", AAAA, true).expect("hit");
+    let (hit, header, _) = synthesize(&cache, None, "www.n3.test", AAAA, true).expect("hit");
     assert_eq!((hit.kind, header.rcode), (DenialKind::Nodata, 0));
-    assert!(synthesise(&cache, None, "www.n3.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "www.n3.test", A, true).is_none());
 }
 
 #[test]
 fn an_opt_out_span_proves_no_nxdomain() {
     let cache = denials();
     nsec3_zone(&cache, true);
-    assert!(synthesise(&cache, None, "other.n3.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "other.n3.test", A, true).is_none());
     // NODATA for a name that exists still holds.
-    assert!(synthesise(&cache, None, "www.n3.test", AAAA, true).is_some());
+    assert!(synthesize(&cache, None, "www.n3.test", AAAA, true).is_some());
 }
 
 #[test]
@@ -510,7 +510,7 @@ fn the_switch_the_truncation_the_flush_and_the_bound() {
     nsec_zone(&off, None);
     assert!(off.len() > 0, "kept");
     assert!(
-        synthesise(&off, None, "c.example.test", A, true).is_none(),
+        synthesize(&off, None, "c.example.test", A, true).is_none(),
         "not used"
     );
 
@@ -532,12 +532,12 @@ fn the_switch_the_truncation_the_flush_and_the_bound() {
     let header = wire::parse_header(&out).expect("header");
     assert!(header.tc);
     assert_eq!((header.ancount, header.nscount), (0, 0));
-    assert_eq!(cache.synthesised()[0], 1);
+    assert_eq!(cache.synthesized()[0], 1);
 
     let before = cache.len();
     assert_eq!(cache.flush(Some(&wire_name("n3.test"))), 2);
     assert_eq!(cache.len(), before - 2);
-    assert!(synthesise(&cache, None, "other.n3.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "other.n3.test", A, true).is_none());
     assert!(cache.flush(Some(&wire_name("sub.example.test"))) >= 1);
     assert!(cache.flush(None) > 0);
     assert!(cache.is_empty());
@@ -580,7 +580,7 @@ fn records_expire_with_their_ttl() {
     let answer = message("b.example.test", A, 3, &[], &authority);
     let now = Instant::now();
     assert!(cache.insert(None, &zone, &answer, &SECURE, now));
-    assert!(synthesise(&cache, None, "c.example.test", A, true).is_some());
+    assert!(synthesize(&cache, None, "c.example.test", A, true).is_some());
     let asked = ask("c.example.test", A);
     let mut out = Vec::new();
     let later = now + Duration::from_secs(3);
@@ -653,11 +653,11 @@ fn a_wildcard_expansion_alone_answers_other_names_under_it() {
     let message = message("one.wild.example.test", A, 0, &answer, &authority);
     assert_eq!(super::zone_of(&message), Some(zone.clone()));
     assert!(cache.insert(None, &zone, &message, &SECURE, Instant::now()));
-    let (hit, header, _) = synthesise(&cache, None, "foo.wild.example.test", A, true).expect("hit");
+    let (hit, header, _) = synthesize(&cache, None, "foo.wild.example.test", A, true).expect("hit");
     assert_eq!((hit.kind, header.ancount), (DenialKind::Wildcard, 2));
     // A name after `host` is not in the range the record covers.
-    assert!(synthesise(&cache, None, "two.wild.example.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "two.wild.example.test", A, true).is_none());
     // The purge keeps a zone without an SOA while its records live.
     assert_eq!(cache.purge(Instant::now()), 0);
-    assert!(synthesise(&cache, None, "foo.wild.example.test", A, true).is_some());
+    assert!(synthesize(&cache, None, "foo.wild.example.test", A, true).is_some());
 }

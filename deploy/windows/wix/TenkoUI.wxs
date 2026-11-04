@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The wizard: the standard WixUI dialogs (welcome, licence, ready, progress, finish, and the
+  The wizard: the standard WixUI dialogs (welcome, license, ready, progress, finish, and the
   maintenance pages) around one Tenko dialog that edits the same TENKO_* properties as the
   msiexec command line, so the two paths cannot drift.
 

@@ -36,7 +36,7 @@ describe("sign-in methods: the summary", () => {
     await signInAlex({ prepare: (u) => (u.password_change_required = true) });
     const s = session();
     if (!s) throw new Error("no session");
-    setSessionForTest({ ...s, flags: { ...s.flags, mfa_enrolment_required: true } });
+    setSessionForTest({ ...s, flags: { ...s.flags, mfa_enrollment_required: true } });
     show();
     expect(screen.getByText(/You must choose a new password or PIN before you continue/)).toBeTruthy();
     expect(screen.getByText(/asks for a stronger sign-in than this session used/)).toBeTruthy();
@@ -134,12 +134,12 @@ describe("sign-in methods: passkeys and security keys", () => {
     expect(alex().credentials.some((c) => c.hardware_key)).toBe(true);
   });
 
-  it("explains a cancelled ceremony in words", async () => {
+  it("explains a canceled ceremony in words", async () => {
     await signInAlex();
     stubWebAuthn({ fail: "NotAllowedError" });
     show();
     fireEvent.click(await screen.findByRole("button", { name: "Add a passkey" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("The passkey request was cancelled or timed out.");
+    expect((await screen.findByRole("alert")).textContent).toContain("The passkey request was canceled or timed out.");
     expect(alex().credentials).toHaveLength(1);
   });
 
@@ -150,7 +150,7 @@ describe("sign-in methods: passkeys and security keys", () => {
     expect(screen.getByRole("button", { name: "Add a passkey" }).hasAttribute("disabled")).toBe(true);
   });
 
-  it("shows the recovery codes an enrolment returns, once", async () => {
+  it("shows the recovery codes an enrollment returns, once", async () => {
     await signInAlex({ prepare: (u) => (u.recovery_codes = []) });
     stubWebAuthn();
     show();

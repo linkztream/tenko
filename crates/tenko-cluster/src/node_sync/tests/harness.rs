@@ -34,7 +34,7 @@ use crate::{
     client::{self, Agent, AgentConfig},
     error::ClusterError,
     identity::{Credentials, NodeIdentity, NodePaths},
-    model::{EnrolRequest, NewEnrolment},
+    model::{EnrollRequest, NewEnrollment},
     node_sync::{NodeSync, local::ConfigFiles, secrets::SecretUse, tables::PROBE_CONFIG},
     probe::{IngestCounts, ProbeBatch, ProbeSink, Sighting, SightingSubject},
     registry::{NodeRegistry, RegistryConfig},
@@ -44,7 +44,7 @@ use crate::{
 /// How long a test waits for anything before it fails.
 pub const WAIT: Duration = Duration::from_secs(20);
 
-/// The id of the first node a controller enrols.
+/// The id of the first node a controller enrolls.
 pub const FIRST_NODE: NodeId = NodeId(1001);
 
 /// Records every batch it gets.
@@ -268,17 +268,17 @@ impl Controller {
         );
     }
 
-    /// Enrols a node whose files live in `dir`, with this controller's cluster port as
+    /// Enrolls a node whose files live in `dir`, with this controller's cluster port as
     /// its endpoint.
-    pub async fn enrol(&self, dir: &Path, name: &str) -> Credentials {
-        self.enrol_at(dir, name, &[self.addr]).await
+    pub async fn enroll(&self, dir: &Path, name: &str) -> Credentials {
+        self.enroll_at(dir, name, &[self.addr]).await
     }
 
-    /// As [`enrol`](Self::enrol), with these endpoints in the node's identity.
-    pub async fn enrol_at(&self, dir: &Path, name: &str, endpoints: &[SocketAddr]) -> Credentials {
+    /// As [`enroll`](Self::enroll), with these endpoints in the node's identity.
+    pub async fn enroll_at(&self, dir: &Path, name: &str, endpoints: &[SocketAddr]) -> Credentials {
         let (_, token) = self
             .registry
-            .create_enrolment(&system(), NewEnrolment::default())
+            .create_enrollment(&system(), NewEnrollment::default())
             .await
             .expect("token");
         let (key, csr) = generate_csr().expect("csr");
@@ -286,9 +286,9 @@ impl Controller {
         ctx.source_ip = Some("192.0.2.20".parse().expect("ip"));
         let enrolled = self
             .registry
-            .enrol(
+            .enroll(
                 &ctx,
-                EnrolRequest {
+                EnrollRequest {
                     token: token.to_text().to_string(),
                     csr: pem_block("CERTIFICATE REQUEST", &csr),
                     name: Some(name.to_owned()),
@@ -299,7 +299,7 @@ impl Controller {
                 },
             )
             .await
-            .expect("enrol");
+            .expect("enroll");
         let identity = NodeIdentity {
             node: enrolled.node.id,
             name: enrolled.node.name.clone(),

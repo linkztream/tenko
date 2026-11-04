@@ -20,7 +20,7 @@ TENKO_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${TENKO_LIB_DIR}/common.sh"
 
 # ── Exit codes and failure handling ────────────────────────────────────────────────────────
-TENKO_E_USAGE=2 TENKO_E_NOT_PVE=3 TENKO_E_CANCELLED=4 TENKO_E_TEMPLATE=5 TENKO_E_CREATE=6
+TENKO_E_USAGE=2 TENKO_E_NOT_PVE=3 TENKO_E_CANCELED=4 TENKO_E_TEMPLATE=5 TENKO_E_CREATE=6
 TENKO_E_NETWORK=7 TENKO_E_INSTALL=8 TENKO_E_POST_INSTALL=9
 TENKO_PHASE=1             # the exit code the error trap uses for the step that is running
 TENKO_CREATED_CTID=""     # set once pct create succeeded in this run
@@ -344,20 +344,20 @@ tenko_ask() {
     if ((${#list[@]} > 1)); then
       for s in "${list[@]}"; do items+=("$s" ""); done
       answer="$(tenko_whiptail --title "$label" --default-item "$value" --menu "$label" 16 64 8 "${items[@]}")" ||
-        die "$TENKO_E_CANCELLED" "Cancelled"
+        die "$TENKO_E_CANCELED" "Canceled"
       printf -v "$name" '%s' "$answer"
       return 0
     fi
     ;;
   var_password)
     answer="$(tenko_whiptail --title "$label" --passwordbox "${label}\n\nEmpty: no root password (use pct enter)." 12 64)" ||
-      die "$TENKO_E_CANCELLED" "Cancelled"
+      die "$TENKO_E_CANCELED" "Canceled"
     printf -v "$name" '%s' "$answer"
     return 0
     ;;
   esac
   answer="$(tenko_whiptail --title "$label" --inputbox "$label" 10 64 "$value")" ||
-    die "$TENKO_E_CANCELLED" "Cancelled"
+    die "$TENKO_E_CANCELED" "Canceled"
   printf -v "$name" '%s' "$answer"
 }
 
@@ -377,7 +377,7 @@ defaults_or_advanced() {
     tenko_whiptail --title "${APP}: settings" --yes-button "Create" --no-button "Advanced" \
       --yesno "$(tenko_settings_text)" $((${#TENKO_SETTINGS[@]} + ${#TENKO_APP_SETTINGS[@]} + 8)) 78 || rc=$?
     if ((rc == 255)); then
-      die "$TENKO_E_CANCELLED" "Cancelled"
+      die "$TENKO_E_CANCELED" "Canceled"
     elif ((rc == 0)); then
       if errors="$(tenko_validate_settings)"; then
         return 0

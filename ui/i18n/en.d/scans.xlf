@@ -95,7 +95,7 @@
         <segment><source>SNMP poll</source></segment>
       </unit>
       <unit id="scans.kind.os_fingerprint">
-        <notes><note category="description">Kind of scan: guess the operating system of a host from its network behaviour.</note></notes>
+        <notes><note category="description">Kind of scan: guess the operating system of a host from its network behavior.</note></notes>
         <segment><source>OS fingerprint</source></segment>
       </unit>
       <unit id="scans.state.queued">
@@ -118,9 +118,9 @@
         <notes><note category="description">State of a scan job that no probe finished.</note></notes>
         <segment><source>Failed</source></segment>
       </unit>
-      <unit id="scans.state.cancelled">
+      <unit id="scans.state.canceled">
         <notes><note category="description">State of a scan job that was stopped before it finished.</note></notes>
-        <segment><source>Cancelled</source></segment>
+        <segment><source>Canceled</source></segment>
       </unit>
       <unit id="scans.progress.percent">
         <notes><note category="description">Progress of a scan job in percent. The argument percent is a whole number from 0 to 100.</note></notes>
@@ -359,7 +359,7 @@
         <segment><source>Deadline</source></segment>
       </unit>
       <unit id="scans.view.error">
-        <notes><note category="description">Label: why a scan job failed or was cancelled.</note></notes>
+        <notes><note category="description">Label: why a scan job failed or was canceled.</note></notes>
         <segment><source>Ended with</source></segment>
       </unit>
       <unit id="scans.view.probes">
@@ -418,9 +418,9 @@
         <notes><note category="description">State of the command sent to one probe: the probe did not answer in time.</note></notes>
         <segment><source>Expired</source></segment>
       </unit>
-      <unit id="scans.part.state.cancelled">
+      <unit id="scans.part.state.canceled">
         <notes><note category="description">State of the command sent to one probe: withdrawn before it finished.</note></notes>
-        <segment><source>Cancelled</source></segment>
+        <segment><source>Canceled</source></segment>
       </unit>
       <unit id="scans.diff.heading">
         <notes><note category="description">Heading of the findings of a scan job.</note></notes>

@@ -132,7 +132,7 @@ pub mod ids {
     pub const IDLE: &str = "00:00:5e:00:53:45";
     /// A known client that is offline (a record in `user.json`, not in `sta.json`).
     pub const TABLET: &str = "00:00:5e:00:53:46";
-    /// The wired NAS on sw-core port 12 (the non-UniFi LLDP neighbour).
+    /// The wired NAS on sw-core port 12 (the non-UniFi LLDP neighbor).
     pub const NAS: &str = "00:00:5e:00:53:80";
 }
 
@@ -202,7 +202,7 @@ impl Write {
     }
 }
 
-/// The data the fake serves and the knobs of its behaviour. Change the arrays between
+/// The data the fake serves and the knobs of its behavior. Change the arrays between
 /// calls to change what the plugin reads; keep the guard out of `.await` points.
 #[derive(Debug)]
 pub struct State {
@@ -255,7 +255,7 @@ impl State {
         }
     }
 
-    /// The anonymised recordings of a real controller (`tests/fixtures/recorded`), in place
+    /// The anonymized recordings of a real controller (`tests/fixtures/recorded`), in place
     /// of the documented fixtures.
     fn recorded() -> Self {
         Self {
@@ -476,7 +476,7 @@ impl FakeController {
         self.shared.lock().rate_limit = n;
     }
 
-    /// Replaces the documented fixtures with the anonymised recordings of a real controller
+    /// Replaces the documented fixtures with the anonymized recordings of a real controller
     /// (`tests/fixtures/recorded`); the sessions and counters stay.
     pub fn load_recorded(&self) {
         let recorded = State::recorded();

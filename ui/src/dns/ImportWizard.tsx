@@ -23,7 +23,7 @@ import "./dns.css";
 
 type Step = "upload" | "preview" | "apply" | "done";
 const STEPS: readonly Step[] = ["upload", "preview", "apply", "done"];
-const FINAL = new Set(["succeeded", "failed", "cancelled", "rolled_back"]);
+const FINAL = new Set(["succeeded", "failed", "canceled", "rolled_back"]);
 /** The largest zone file the browser reads into the request (the server has its own limit). */
 export const MAX_ZONE_FILE_BYTES = 64 * 1024 * 1024;
 

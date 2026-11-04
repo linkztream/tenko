@@ -171,7 +171,7 @@ async fn refusals_and_bad_requests_are_problems() {
     api.send(
         "POST",
         "/vlans/provision",
-        Some(json!({ "create": { "vid": 30, "name": "IoT" }, "colour": "blue" })),
+        Some(json!({ "create": { "vid": 30, "name": "IoT" }, "color": "blue" })),
     )
     .await
     .assert_problem(400, "sys.invalid_request");

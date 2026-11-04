@@ -2,7 +2,7 @@
 //!
 //! | Module | Methods |
 //! |---|---|
-//! | [`neighbours`] | `arp`, `nd`: the neighbour tables of the probe host |
+//! | [`neighbors`] | `arp`, `nd`: the neighbor tables of the probe host |
 //! | [`icmp`] | `icmp`: echo requests through the operating system |
 //! | [`tcp`] | `tcp_connect`: connect scan with a TLS hint |
 //! | [`rdns`] | `reverse_dns`: PTR lookups of discovered addresses |
@@ -12,7 +12,7 @@
 
 pub mod icmp;
 pub mod names;
-pub mod neighbours;
+pub mod neighbors;
 pub mod raw;
 pub mod rdns;
 pub mod snmp;

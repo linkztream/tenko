@@ -910,7 +910,7 @@
   function cancelPtrJob() {
     if (S.ptr !== 'waiting') return;
     var n = S.ptrJob; S.ptr = 'open'; if (S.ptrLi) S.ptrLi.remove(); render();
-    toast({ title: 'Job #' + n + ' cancelled', body: 'The PTR still differs from intent.' });
+    toast({ title: 'Job #' + n + ' canceled', body: 'The PTR still differs from intent.' });
   }
   function applyPtrAccept() {
     var n = S.job++; S.ptr = 'accepted'; S.pv = null;

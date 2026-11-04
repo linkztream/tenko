@@ -425,7 +425,7 @@ fn recursion_settings(
     profile: Profile,
 ) -> Result<Option<tenko_dns::recurse::EngineSettings>, StartError> {
     use tenko_dns::recursion::{
-        InfraBounds, Minimisation, Outbound, RecursionSettings, WorkBudget,
+        InfraBounds, Minimization, Outbound, RecursionSettings, WorkBudget,
     };
     let keys = &section.recursion;
     if !keys.enabled_for(profile) {
@@ -460,15 +460,15 @@ fn recursion_settings(
             servers: cuts.saturating_mul(2),
             ttl: Duration::from_secs(u64::from(keys.infra_ttl_secs)),
         },
-        minimisation: match keys.qname_minimisation {
-            crate::config::QnameMinimisation::Relaxed => Minimisation::Relaxed,
-            crate::config::QnameMinimisation::Strict => Minimisation::Strict,
-            crate::config::QnameMinimisation::Off => Minimisation::Off,
+        minimization: match keys.qname_minimization {
+            crate::config::QnameMinimization::Relaxed => Minimization::Relaxed,
+            crate::config::QnameMinimization::Strict => Minimization::Strict,
+            crate::config::QnameMinimization::Off => Minimization::Off,
         },
         aggressive_nsec: keys.aggressive_nsec,
         denial_entries: keys.denial_entries_for(profile),
         failure_max: Duration::from_secs(u64::from(keys.failure_cache_max_secs)),
-        signalling: keys.trust_anchor_signalling_for(profile),
+        signaling: keys.trust_anchor_signaling_for(profile),
         key_sentinel: keys.key_sentinel,
         fresh_port: keys.fresh_port_per_query,
         ..defaults
@@ -671,7 +671,7 @@ fn start_log(
         days: effective.days,
         size_mb: section.log.size_mb,
         sample: section.log.sample,
-        client: match (section.log.client, section.log.pseudonymise) {
+        client: match (section.log.client, section.log.pseudonymize) {
             (DnsLogClient::Hidden, _) => ClientField::Hidden,
             (DnsLogClient::Logged, true) => ClientField::Pseudonym,
             (DnsLogClient::Logged, false) => ClientField::Address,

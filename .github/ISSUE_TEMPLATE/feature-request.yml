@@ -18,7 +18,7 @@ body:
     id: proposal
     attributes:
       label: What you would like Tenko to do
-      description: The behaviour you have in mind, as concretely as you can; a sketch of the UI or the API call if it helps.
+      description: The behavior you have in mind, as concretely as you can; a sketch of the UI or the API call if it helps.
     validations:
       required: true
   - type: textarea

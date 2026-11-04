@@ -1,4 +1,4 @@
-//! Behaviour of `RaftStore` beyond the shared conformance suite: restart and recovery, the
+//! Behavior of `RaftStore` beyond the shared conformance suite: restart and recovery, the
 //! write coalescer, snapshot-and-purge, snapshot installs that write a fresh state file and
 //! swap derived indexes without ever exposing an empty one, the in-place re-seed, and the
 //! journal's byte limit.
@@ -317,7 +317,7 @@ async fn concurrent_proposals_are_coalesced_into_shared_entries() {
     assert_eq!(batches, 400);
     assert!(
         entries < batches / 4,
-        "400 concurrent batches travelled in {entries} entries"
+        "400 concurrent batches traveled in {entries} entries"
     );
     let view = store.read(ReadConsistency::Local).await.expect("view");
     assert_eq!(
@@ -502,7 +502,7 @@ async fn group_commit_never_delays_a_lone_batch_and_keeps_entries_within_the_bou
     assert_eq!(batches, 2_000);
     assert!(
         entries < batches / 4,
-        "2,000 batches travelled in {entries} entries"
+        "2,000 batches traveled in {entries} entries"
     );
     assert!(
         entries * 128 >= batches,

@@ -385,7 +385,7 @@ fn a_signed_zone_validates_with_nsec_and_nsec3_and_through_a_zsk_rollover() {
             break;
         }
         assert!(
-            !matches!(state.as_str(), "failed" | "rolled_back" | "cancelled"),
+            !matches!(state.as_str(), "failed" | "rolled_back" | "canceled"),
             "the rollover ended as {state}: {detail}"
         );
         assert!(

@@ -28,7 +28,7 @@ function share(value: number): string {
 }
 
 /**
- * The cluster summary of the status, following the `cluster` topic (nodes enrol, connect and are
+ * The cluster summary of the status, following the `cluster` topic (nodes enroll, connect and are
  * revoked) while the page's status is only polled; until it has read, `fallback` stands in.
  */
 export function useClusterSummary(fallback: () => SystemStatus | null): () => ClusterStatus | null {

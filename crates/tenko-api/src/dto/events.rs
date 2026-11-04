@@ -37,7 +37,7 @@ pub enum Topic {
     Discovery,
     /// Operator secrets: metadata, reveals and host credential bindings (never values).
     Secrets,
-    /// Cluster nodes, enrolment tokens and controller members.
+    /// Cluster nodes, enrollment tokens and controller members.
     Cluster,
     /// One metrics snapshot per second while a client listens (OPS-20); published by the
     /// metrics collector, not from the store journal, and never replayed.

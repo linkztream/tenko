@@ -10,7 +10,7 @@ import "google/protobuf/timestamp.proto";
 service Observations {
   // Hands one batch of a probe's buffer to the reconciler. The node sends its batches in
   // buffer order, one at a time, and removes a batch only after this call succeeded; a
-  // batch sent again after a lost answer is recognised by its epoch and sequence on every
+  // batch sent again after a lost answer is recognized by its epoch and sequence on every
   // controller and answered with `duplicate` set. Refused with PERMISSION_DENIED
   // (`cluster.node.role`) when the node does not have the role `probe`, and with
   // UNAVAILABLE (`cluster.no_quorum`) while the controller cannot write; the node keeps
@@ -44,7 +44,7 @@ message IngestRequest {
   // How the probe saw what the batch reports.
   ProbeMethod method = 3;
   // The VRF the addresses belong to (a UUID). Absent: the VRF the controller assigned to
-  // the node at enrolment, else the default VRF.
+  // the node at enrollment, else the default VRF.
   optional string vrf = 4;
   // Whether the batch is the probe's whole picture for this method: the controller
   // expires what the method reported before and no longer reports.
@@ -132,7 +132,7 @@ message NameSighting {
   string name = 2;
 }
 
-// The vendor of a MAC address: the organisation its OUI is registered to, or the
+// The vendor of a MAC address: the organization its OUI is registered to, or the
 // manufacturer the device reports.
 message VendorSighting {
   string mac = 1;

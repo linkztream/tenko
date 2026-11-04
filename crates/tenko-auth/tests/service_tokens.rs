@@ -11,7 +11,7 @@ use tenko_auth::{
     roles::RoleName,
     secret::{TOKEN_PREFIX, hash_secret},
     service::{
-        CodeLogin, CreatedToken, PasswordChange, PasswordLogin, TokenCreate, TotpEnrolFinish,
+        CodeLogin, CreatedToken, PasswordChange, PasswordLogin, TokenCreate, TotpEnrollFinish,
         UserCreate, UserInfo, UserUpdate, WebAuthnLoginFinish, WebAuthnLoginStart,
         WebAuthnRegisterFinish, WebAuthnRegisterStart, types::SecretString,
     },
@@ -92,25 +92,25 @@ async fn add_user(env: &TestEnv, name: &str, role: RoleName, password: &str) -> 
         .expect("the user is created")
 }
 
-/// Enrols TOTP for the session's user and returns the seed.
-async fn enrol_totp(env: &TestEnv, ctx: &RequestCtx) -> Vec<u8> {
+/// Enrolls TOTP for the session's user and returns the seed.
+async fn enroll_totp(env: &TestEnv, ctx: &RequestCtx) -> Vec<u8> {
     let start = env
         .service
-        .totp_enrol_start(ctx)
+        .totp_enroll_start(ctx)
         .await
-        .expect("enrolment starts");
+        .expect("enrollment starts");
     let seed = base32_decode(start.secret.expose()).expect("a base32 seed");
     let code = totp::code_at(&seed, &TotpParams::default(), unix_seconds(env));
     env.service
-        .totp_enrol_finish(
+        .totp_enroll_finish(
             ctx,
-            &TotpEnrolFinish {
-                enrolment_id: start.enrolment_id,
+            &TotpEnrollFinish {
+                enrollment_id: start.enrollment_id,
                 code: SecretString::new(code.as_str()),
             },
         )
         .await
-        .expect("enrolment finishes");
+        .expect("enrollment finishes");
     seed
 }
 
@@ -143,11 +143,11 @@ async fn totp_login(env: &TestEnv, user: &str, password: &str, seed: &[u8]) -> N
 /// session where that suffices, otherwise one that used TOTP as well.
 async fn strong_session(env: &TestEnv, user: &str, password: &str) -> NewSession {
     let first = expect_session(password_login(env, user, password).await.expect("login"));
-    if !first.info.flags.mfa_enrolment_required {
+    if !first.info.flags.mfa_enrollment_required {
         return first;
     }
     let ctx = env.session_ctx(&first).await.expect("ctx");
-    let seed = enrol_totp(env, &ctx).await;
+    let seed = enroll_totp(env, &ctx).await;
     totp_login(env, user, password, &seed).await
 }
 
@@ -831,7 +831,7 @@ async fn a_token_cannot_create_tokens_or_change_the_account() {
         Err(AuthError::Unauthenticated)
     ));
     assert!(matches!(
-        env.service.totp_enrol_start(&ctx).await,
+        env.service.totp_enroll_start(&ctx).await,
         Err(AuthError::Unauthenticated)
     ));
     assert!(matches!(
@@ -935,7 +935,7 @@ async fn a_session_below_the_required_strength_cannot_create_a_token() {
         }
     );
     let ctx = env.session_ctx(&admin_session).await.expect("ctx");
-    let seed = enrol_totp(&env, &ctx).await;
+    let seed = enroll_totp(&env, &ctx).await;
     let strong = totp_login(&env, ADMIN, ADMIN_PASSWORD, &seed).await;
     assert_eq!(strong.info.strength, AuthStrength::PasswordTotp);
     let created = make_token(&env, &strong, "admin token", None)

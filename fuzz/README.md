@@ -11,9 +11,9 @@ before it merges.
 |---|---|
 | `scan_dns_message` | DNS messages of the probe: mDNS, LLMNR and reverse DNS answers (`tenko_scan::dns`) |
 | `scan_snmp_message` | SNMPv3 messages and scoped PDUs (`tenko_scan::snmp::message`) |
-| `scan_neighbour_tables` | The neighbour tables the probe reads: `/proc/net/arp`, `ip neigh` and `Get-NetNeighbor` CSV (`tenko_scan::methods::neighbours`) |
+| `scan_neighbor_tables` | The neighbor tables the probe reads: `/proc/net/arp`, `ip neigh` and `Get-NetNeighbor` CSV (`tenko_scan::methods::neighbors`) |
 <!-- WP3.14 raw-socket frame parsers (marked block). -->
-| `scan_lldp_cdp` | The passive neighbour frame parsers: LLDP (IEEE 802.1AB) and CDP version 2 TLVs, through the Ethernet/SNAP framing (`tenko_scan::frame::{lldp, cdp, ethernet}`) |
+| `scan_lldp_cdp` | The passive neighbor frame parsers: LLDP (IEEE 802.1AB) and CDP version 2 TLVs, through the Ethernet/SNAP framing (`tenko_scan::frame::{lldp, cdp, ethernet}`) |
 | `scan_arp` | The active-scan frame parsers: Ethernet, ARP (RFC 826), and the IPv4 and TCP parsers the SYN scan and the fingerprint read (`tenko_scan::frame::{ethernet, arp, ipv4, tcp}`) |
 | `scan_dhcp_snoop` | The DHCP-snoop field parser (RFC 2131), through the Ethernet/IPv4/UDP framing; replaced by `tenko-dhcp`'s codec once it merges (`tenko_scan::frame::{dhcp, ethernet, ipv4}`) |
 <!-- End WP3.14 raw-socket frame parsers. -->

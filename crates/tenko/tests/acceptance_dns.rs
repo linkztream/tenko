@@ -159,7 +159,7 @@ fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
         // off (a recursing node uses it only where a view says `forward`).
         .with_config(&format!(
             "[dns]\nlisten = [\"{dns}\"]\nworkers = 2\nforwarders = [\"{upstream}\"]\n\
-             forward_timeout_ms = 1000\n[dns.log]\nenabled = true\npseudonymise = false\n\
+             forward_timeout_ms = 1000\n[dns.log]\nenabled = true\npseudonymize = false\n\
              [dns.recursion]\nenabled = false\n"
         ));
     let mut server = node.start();

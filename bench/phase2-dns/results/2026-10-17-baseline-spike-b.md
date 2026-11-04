@@ -108,7 +108,7 @@ Windows (88,776).
 ## Caveats
 
 - **Loopback.** Client and server share one host and one network stack: upper bounds, nothing about
-  NIC, driver or switch behaviour. M17 measures the real link.
+  NIC, driver or switch behavior. M17 measures the real link.
 - **Other load on the machine.** Other sessions were building on the same host. Host CPU
   (Windows `Win32_Processor.LoadPercentage`, the whole machine including the responder and the
   generator, sampled about every 3 s) was, per run, approximately: Windows round 1: 23 percent
@@ -120,7 +120,7 @@ Windows (88,776).
   with other work whose size cannot be separated from the VM's own overhead. The numbers are if
   anything lower bounds for an idle machine; the spread between rounds (up to 7 percent) is the
   size of the effect seen.
-- **WSL2 is a VM**, not bare-metal Linux. Its numbers are labelled so and are compared only with
+- **WSL2 is a VM**, not bare-metal Linux. Its numbers are labeled so and are compared only with
   later WSL2 numbers (the Tenko musl binary in the same VM), never with Windows ones. The
   Windows host runs 8 workers at 704,000 QPS where WSL2 reaches 1,721,000: that is the loopback
   stack, not the responder.

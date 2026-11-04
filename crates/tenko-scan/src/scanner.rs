@@ -37,7 +37,7 @@ use crate::{
     methods::{
         icmp::{IcmpSweep, pinger_for},
         names::NameQuery,
-        neighbours::NeighbourTable,
+        neighbors::NeighborTable,
         raw,
         rdns::ReverseDns,
         snmp::SnmpPoll,
@@ -215,8 +215,8 @@ pub fn build_methods(
         .into_iter()
         .map(|kind| -> Result<Arc<dyn Method>, ScanError> {
             Ok(match kind {
-                MethodKind::Arp => Arc::new(NeighbourTable::new(false, Arc::clone(&system))),
-                MethodKind::Nd => Arc::new(NeighbourTable::new(true, Arc::clone(&system))),
+                MethodKind::Arp => Arc::new(NeighborTable::new(false, Arc::clone(&system))),
+                MethodKind::Nd => Arc::new(NeighborTable::new(true, Arc::clone(&system))),
                 MethodKind::Icmp => Arc::new(IcmpSweep::new(
                     pinger_for(environment.capabilities.icmp, Arc::clone(&system)),
                     ms(config.icmp.timeout_ms),
@@ -327,7 +327,7 @@ enum StopReason {
     KillSwitch,
     Blackout,
     Deadline,
-    Cancelled,
+    Canceled,
 }
 
 impl StopReason {
@@ -337,7 +337,7 @@ impl StopReason {
             StopReason::KillSwitch => "stopped by the kill switch",
             StopReason::Blackout => "stopped by a blackout window",
             StopReason::Deadline => "stopped at its deadline",
-            StopReason::Cancelled => "cancelled by the controllers",
+            StopReason::Canceled => "canceled by the controllers",
         }
     }
 }
@@ -801,7 +801,7 @@ impl Scanner {
             if *stop.borrow() {
                 return;
             }
-            rerun = record.outcome == RunOutcome::Cancelled && *self.kill.borrow();
+            rerun = record.outcome == RunOutcome::Canceled && *self.kill.borrow();
             next = Instant::now() + jitter(schedule.interval);
         }
     }
@@ -872,7 +872,7 @@ impl Scanner {
         };
         match result {
             None => {
-                record.outcome = RunOutcome::Cancelled;
+                record.outcome = RunOutcome::Canceled;
                 record.error = stopped.map(|reason| reason.text().to_owned());
             }
             Some(Err(error)) => {
@@ -883,7 +883,7 @@ impl Scanner {
                 let covered = output.covered_all && !narrowed && stopped.is_none();
                 let complete = covered && method.completes();
                 record.outcome = if stopped.is_some() {
-                    RunOutcome::Cancelled
+                    RunOutcome::Canceled
                 } else if covered {
                     RunOutcome::Complete
                 } else {
@@ -918,7 +918,7 @@ impl Scanner {
         ctx: &RunContext,
         cancel: &watch::Sender<bool>,
         stop: &mut watch::Receiver<bool>,
-        mut cancelled: Option<watch::Receiver<bool>>,
+        mut canceled: Option<watch::Receiver<bool>>,
         respect_blackout: bool,
     ) -> (Option<Result<MethodOutput, ScanError>>, Option<StopReason>) {
         let kind = method.kind();
@@ -941,7 +941,7 @@ impl Scanner {
         let result = loop {
             tokio::select! {
                 result = &mut run => break Some(result),
-                reason = stop_reason(stop, &mut kill, cancelled.as_mut(), deadline, blackout_at), if stopped.is_none() => {
+                reason = stop_reason(stop, &mut kill, canceled.as_mut(), deadline, blackout_at), if stopped.is_none() => {
                     tracing::info!(method = %kind, "{}", reason.text());
                     stopped = Some(reason);
                     let _ = cancel.send(true);
@@ -1084,14 +1084,14 @@ impl Scanner {
 async fn stop_reason(
     stop: &mut watch::Receiver<bool>,
     kill: &mut watch::Receiver<bool>,
-    cancelled: Option<&mut watch::Receiver<bool>>,
+    canceled: Option<&mut watch::Receiver<bool>>,
     deadline: Instant,
     blackout_at: Option<Instant>,
 ) -> StopReason {
     let cancel = async {
-        match cancelled {
-            Some(cancelled) => {
-                if cancelled.wait_for(|cancelled| *cancelled).await.is_err() {
+        match canceled {
+            Some(canceled) => {
+                if canceled.wait_for(|canceled| *canceled).await.is_err() {
                     std::future::pending::<()>().await;
                 }
             }
@@ -1119,7 +1119,7 @@ async fn stop_reason(
         () = killed => StopReason::KillSwitch,
         () = blackout => StopReason::Blackout,
         () = sleep_until(deadline) => StopReason::Deadline,
-        () = cancel => StopReason::Cancelled,
+        () = cancel => StopReason::Canceled,
     }
 }
 

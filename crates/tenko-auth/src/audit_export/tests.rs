@@ -503,7 +503,7 @@ async fn a_sink_that_is_down_raises_the_alarm_and_catches_up_without_gaps() {
         &store,
         &AuditExportSettings {
             sinks: vec![sink.clone()],
-            // Below the API's minimum: the store accepts it, the exporter honours it.
+            // Below the API's minimum: the store accepts it, the exporter honors it.
             alert_after_secs: 1,
         },
     )

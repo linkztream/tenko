@@ -18,7 +18,7 @@ use tenko_cluster::{
     client::{Agent, AgentConfig},
     error::ClusterError,
     identity::{AgentState, Credentials, NodeIdentity, NodePaths},
-    model::{EnrolRequest, NewEnrolment},
+    model::{EnrollRequest, NewEnrollment},
     probe::{IngestCounts, ProbeBatch, ProbeSink, Sighting, SightingSubject},
     registry::{NodeRegistry, RegistryConfig},
     server::ClusterListener,
@@ -192,11 +192,11 @@ impl Controller {
             .expect("task");
     }
 
-    /// Enrols a node whose files live in `dir`; it learns `endpoints` in the given order.
-    async fn enrol(&self, dir: &Path, name: &str, endpoints: Vec<String>) -> Credentials {
+    /// Enrolls a node whose files live in `dir`; it learns `endpoints` in the given order.
+    async fn enroll(&self, dir: &Path, name: &str, endpoints: Vec<String>) -> Credentials {
         let (_, token) = self
             .registry
-            .create_enrolment(&system(), NewEnrolment::default())
+            .create_enrollment(&system(), NewEnrollment::default())
             .await
             .expect("token");
         let (key, csr) = generate_csr().expect("csr");
@@ -204,9 +204,9 @@ impl Controller {
         ctx.source_ip = Some("192.0.2.20".parse().expect("ip"));
         let enrolled = self
             .registry
-            .enrol(
+            .enroll(
                 &ctx,
-                EnrolRequest {
+                EnrollRequest {
                     token: token.to_text().to_string(),
                     csr: pem_block("CERTIFICATE REQUEST", &csr),
                     name: Some(name.to_owned()),
@@ -217,7 +217,7 @@ impl Controller {
                 },
             )
             .await
-            .expect("enrol");
+            .expect("enroll");
         let identity = NodeIdentity {
             node: enrolled.node.id,
             name: enrolled.node.name.clone(),
@@ -296,7 +296,7 @@ async fn a_probe_whose_controller_lost_quorum_delivers_to_another_controller() {
 
     let dir = tempfile::tempdir().expect("dir");
     let credentials = x
-        .enrol(
+        .enroll(
             dir.path(),
             "probe-minority",
             vec![x.addr.to_string(), y.addr.to_string()],

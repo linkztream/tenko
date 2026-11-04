@@ -132,7 +132,7 @@ describe("the backup page", () => {
     fillPassphrase(dialog, "short", "short");
     fireEvent.click(within(dialog).getByTestId("form-submit"));
     expect(await within(dialog).findByText("Use at least 12 characters.")).toBeTruthy();
-    fillPassphrase(dialog, "lantern-quartz-harbor", "lantern-quartz-harbour");
+    fillPassphrase(dialog, "lantern-quartz-harbor", "lantern-quartz-harbors");
     fireEvent.click(within(dialog).getByTestId("form-submit"));
     expect(await within(dialog).findByText("The two passphrases differ.")).toBeTruthy();
     fillPassphrase(dialog, "lantern-quartz-harbor", "lantern-quartz-harbor");

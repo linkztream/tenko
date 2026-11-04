@@ -16,7 +16,7 @@ import { raFindingKind, raFindingText } from "./raWords";
 type Report = NonNullable<NodeStatus["ra"]>;
 type Link = NonNullable<Report["links"]>[number];
 
-/** A flag as a tag: yes or no, never colour alone. */
+/** A flag as a tag: yes or no, never color alone. */
 function Flag(props: { flag: "m" | "o"; on: boolean }) {
   return (
     <span class={props.on ? "tag ok" : "tag"} data-testid={`ra-flag-${props.flag}`} data-key={props.on ? "yes" : "no"}>

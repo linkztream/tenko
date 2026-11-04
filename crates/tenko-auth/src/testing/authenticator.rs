@@ -484,7 +484,7 @@ fn client_data_json(
         cross_origin: tweaks.cross_origin.unwrap_or(false),
         top_origin: tweaks.top_origin.as_deref(),
     })
-    .expect("client data serialises")
+    .expect("client data serializes")
 }
 
 /// Authenticator data (WebAuthn Level 3, section 6.1): RP ID hash, flags, counter and,

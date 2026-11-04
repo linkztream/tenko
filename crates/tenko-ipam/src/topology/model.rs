@@ -1,5 +1,5 @@
 //! The shapes of the topology graph (IPAM-20): nodes, edges, the summary, the filter and
-//! the view of one node with its ports and neighbours.
+//! the view of one node with its ports and neighbors.
 
 use std::{collections::BTreeMap, net::IpAddr};
 
@@ -32,7 +32,7 @@ pub enum NodeKind {
     Container,
     /// A host or client.
     Host,
-    /// A network device that no source classifies, such as an LLDP neighbour.
+    /// A network device that no source classifies, such as an LLDP neighbor.
     Device,
 }
 
@@ -87,7 +87,7 @@ pub enum EdgeKind {
     Wired,
     /// A client associated with an access point.
     Wireless,
-    /// An LLDP neighbourship between two devices.
+    /// An LLDP neighborship between two devices.
     Lldp,
     /// An uplink a network controller reports.
     Uplink,
@@ -312,7 +312,7 @@ pub struct TopologyFilter {
     pub vlan: Option<u16>,
     /// Nodes with an address inside this network.
     pub within: Option<ipnet::IpNet>,
-    /// Nodes of these kinds; when set, neighbours of other kinds are not added.
+    /// Nodes of these kinds; when set, neighbors of other kinds are not added.
     pub kinds: Vec<NodeKind>,
     /// Case-insensitive text over the label, MAC and IP addresses, vendor and model.
     pub q: Option<String>,
@@ -331,10 +331,10 @@ impl TopologyFilter {
     }
 }
 
-/// A neighbour of a node across one edge.
+/// A neighbor of a node across one edge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub struct Neighbour {
-    /// The neighbour.
+pub struct Neighbor {
+    /// The neighbor.
     pub node: String,
     /// Its label.
     pub label: String,
@@ -347,7 +347,7 @@ pub struct Neighbour {
     /// The port on this node's side.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<String>,
-    /// The port on the neighbour's side.
+    /// The port on the neighbor's side.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_port: Option<String>,
     /// The VLAN of the edge.
@@ -379,7 +379,7 @@ pub struct TopologyPort {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub up: Option<bool>,
     /// Everything seen behind the port.
-    pub neighbours: Vec<Neighbour>,
+    pub neighbors: Vec<Neighbor>,
 }
 
 /// An address of intent on a node.
@@ -414,15 +414,15 @@ pub struct NodeIntent {
     pub addresses: Vec<IntentAddress>,
 }
 
-/// One node with its ports, neighbours and intent (`GET /topology/nodes/{id}`).
+/// One node with its ports, neighbors and intent (`GET /topology/nodes/{id}`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct TopologyNodeView {
     /// The node.
     pub node: TopologyNode,
     /// Its ports with what hangs on each; with `port`, only that port.
     pub ports: Vec<TopologyPort>,
-    /// Every neighbour, also those across edges without a port on this side.
-    pub neighbours: Vec<Neighbour>,
+    /// Every neighbor, also those across edges without a port on this side.
+    pub neighbors: Vec<Neighbor>,
     /// The host of intent, when the node is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<NodeIntent>,

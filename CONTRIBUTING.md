@@ -49,6 +49,17 @@ where each option stands in this order. The rules below are that order applied.
   enforced.
 - Code, comments, commit messages, and docs are in English. UI strings are localized
   (`sv`, `en`).
+- English means American English, with Merriam-Webster's first spelling where it lists two:
+  code identifiers, API and CLI names, configuration keys, error codes, UI text, docs,
+  comments, commit messages and the changelog (`enroll`, `canceled`, `neighbor`,
+  `behavior`, `license`, `normalize`). The standards Tenko implements (RFC 7030, RFC 9156,
+  RFC 9432) and the products it sits beside write American English, and a mixed text reads
+  as careless. `node scripts/spelling.mjs` checks the tracked files and runs in CI. What
+  stays: third-party text and data (`crates/tenko-scan/data/oui.tsv`, dependency licenses,
+  quoted standards, proper names, URLs, dependency names); an old spelling kept so that an
+  old client, configuration or data file still works, marked `spelling: alias` with the
+  version in which it goes away; stored key bytes, marked `spelling: stored key`; git
+  history and published release texts.
 - Conventional Commits, with crate short names as scopes: `feat(dns): …`, `fix(ipam): …`,
   `docs: …`, `chore: …`, `bench: …`.
 - Small, focused commits. Never use `--no-verify`. Never amend or force-push a shared
@@ -59,7 +70,7 @@ where each option stands in this order. The rules below are that order applied.
   edited by hand.
 - Measure before optimizing. Benchmarks and their results live in `bench/`; a performance
   claim in a pull request links to a result file.
-- Every RFC behaviour that is implemented or deliberately skipped is recorded in
+- Every RFC behavior that is implemented or deliberately skipped is recorded in
   `docs/CONFORMANCE.md`.
 - A change under `crates/` or `ui/src/` comes with an entry under `## [Unreleased]` in
   `CHANGELOG.md` (`node scripts/changelog.mjs check --base origin/main`). A change nothing a
@@ -75,17 +86,17 @@ Tenko DDI is source-available under the Business Source License 1.1 (`LICENSE.md
 to use and modify for your own networks, not to be embedded, packaged, hosted or sold
 as part of a commercial product or service without a separate agreement. Every version
 becomes available under the Change License named in `LICENSE.md` four years after its
-release. The licensor also sells commercial licences; to keep that possible while the
+release. The licensor also sells commercial licenses; to keep that possible while the
 source is open to contributions, every contribution is accepted under the Contributor
 License Agreement in `CLA.md`. You keep the copyright in what you write and grant the
-licensor the right to distribute it under the project's licences, including commercial
+licensor the right to distribute it under the project's licenses, including commercial
 ones.
 
 What this means for a pull request:
 
 - **Accept the CLA once before your first pull request is merged.** Individuals put the
   acceptance sentence from `CLA.md`, Part D.1, in the description of their first pull
-  request. Companies and other entities have an authorised representative send the
+  request. Companies and other entities have an authorized representative send the
   completed Schedule 1 from `CLA.md`, Part B, to the contact named there, and each of
   their contributors uses the sentence from Part D.2 instead.
 - **Sign off every commit.** Each commit carries a `Signed-off-by: Full Name <email>`
@@ -93,14 +104,14 @@ What this means for a pull request:
   field. The trailer certifies that the commit is covered by the CLA you accepted.
   Pull requests with unsigned commits are not merged, and maintainers merge in a way that
   keeps the trailers (merge commit or rebase; no squash that drops them).
-- **Third-party code is declared, and only permissive.** Name the source and licence of
+- **Third-party code is declared, and only permissive.** Name the source and license of
   anything you did not write yourself in the pull request. Dependencies must carry a
-  licence on the allow list in `deny.toml`; `cargo deny check` enforces it. No code or
+  license on the allow list in `deny.toml`; `cargo deny check` enforces it. No code or
   snippets copied into the repository under the GPL, AGPL, SSPL or another copyleft
-  licence, in any amount. MPL-2.0 is accepted only as an unmodified dependency, and a new
+  license, in any amount. MPL-2.0 is accepted only as an unmodified dependency, and a new
   one is reviewed in its pull request before it is accepted.
-- **No per-file licence headers.** `LICENSE.md` governs the whole repository; files carry
-  no licence or copyright banner (API-13).
+- **No per-file license headers.** `LICENSE.md` governs the whole repository; files carry
+  no license or copyright banner (API-13).
 - **Only contribute what you may license.** Code you wrote for an employer or a customer
   needs their permission or their entity CLA; see `CLA.md`, Part A.4.
 
@@ -110,7 +121,7 @@ What this means for a pull request:
 |-------------------------|----------------------------------------------------------------------|
 | `tenko-core`            | Shared data model (IPAM tree, zones, leases, policies), migration IR |
 | `tenko-store`           | Raft-replicated store, embedded KV, snapshots, local cache           |
-| `tenko-cluster`         | Node-to-node gRPC over mTLS, enrolment, internal CA                  |
+| `tenko-cluster`         | Node-to-node gRPC over mTLS, enrollment, internal CA                  |
 | `tenko-auth`            | Users, passkeys, TOTP, password policy presets, RBAC, sessions       |
 | `tenko-vault`           | Envelope encryption, KEK providers (DPAPI, keyring, PKCS#11)         |
 | `tenko-ipam`            | Address tree, intent/observation reconciler, import/export           |
@@ -156,6 +167,6 @@ The workflows live in `.github/workflows/`: `ci.yml` on every push and pull requ
 - **Actions are pinned to a commit.** Every `uses:` names a full 40-character commit SHA with its tag in a trailing comment: `uses: actions/checkout@<sha> # v5.1.0`. Resolve the SHA from the tag, never from memory: `gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, and when that returns an object of type `tag` (an annotated tag), `gh api repos/<owner>/<repo>/git/tags/<sha>` for the commit it points at. The same action is pinned to the same SHA everywhere. An action without release tags (`dtolnay/rust-toolchain`) is pinned to a commit of its default branch, with the branch in the comment and the toolchain as an input. Every `actions/checkout` sets `persist-credentials: false` unless a later step pushes.
 - **Pins are updated by Dependabot.** `.github/dependabot.yml` opens one grouped pull request a week for the GitHub Actions, taking a release only when it is a week old; it moves the SHA and the comment together. Review it like any dependency change: read what changed in each action. Cargo and npm get no version pull requests; their advisories are covered by `cargo audit`, `cargo deny`, `npm audit` and Dependabot's security updates.
 - **zizmor lints the workflows** (job `workflow-lint`, when a change touches `.github/`). A finding of High severity fails the job; the others are listed in the job summary. Fix a finding where you can. When it is a false positive or an accepted risk, suppress it in `.github/zizmor.yml` under `rules.<audit>.ignore`, as narrowly as possible (`<file>:<line>` rather than a whole file), with a comment that gives the reason and, for a temporary entry, what removes it. Never suppress a finding without a reason.
-- **CodeQL ignores test, bench and fuzz paths.** `.github/codeql/config.yml` lists the paths code scanning does not analyse (integration tests, `testing` modules, `bench/`, `fuzz/`, `ui/e2e/`, the UI's dev mock and unit tests, `design/`); add a new class of test or benchmark code there, with a one-line reason. A product alert is answered in the security report (`docs/security/README.md`, one finding per rule and crate) and is never dismissed without a reason.
+- **CodeQL ignores test, bench and fuzz paths.** `.github/codeql/config.yml` lists the paths code scanning does not analyze (integration tests, `testing` modules, `bench/`, `fuzz/`, `ui/e2e/`, the UI's dev mock and unit tests, `design/`); add a new class of test or benchmark code there, with a one-line reason. A product alert is answered in the security report (`docs/security/README.md`, one finding per rule and crate) and is never dismissed without a reason.
 - **The unit's hardening has gates** (job `unit-check`, when a change touches `deploy/systemd/`, `deploy/install.sh` or `ci.yml`). `deploy/systemd/check-hardening.sh` scores `tenko.service` alone and with each drop-in with `systemd-analyze security --offline=true` and fails when a score reaches its gate: the score measured with systemd 255 plus 0.1 (the unit 1.5, the drop-ins `probe.conf` and `dhcp-direct.conf` 1.7, the installer's data-directory and key-file drop-ins 1.5, all of them at once 1.7). Run it with `bash deploy/systemd/check-hardening.sh` on any Linux host with systemd 250 or later, no root needed. A new drop-in needs its gate in the script, and a deliberate change that moves a score changes the gate in the same commit, with the reason.
-- **Dependencies.** `npm audit --omit=dev --audit-level=high` in the UI job fails on a High or Critical advisory against a production dependency of the UI; the full `npm audit` is reported beside it. On a pull request, the dependency review fails on a new dependency with a High or Critical advisory or with a licence outside the allow list of `deny.toml`.
+- **Dependencies.** `npm audit --omit=dev --audit-level=high` in the UI job fails on a High or Critical advisory against a production dependency of the UI; the full `npm audit` is reported beside it. On a pull request, the dependency review fails on a new dependency with a High or Critical advisory or with a license outside the allow list of `deny.toml`.

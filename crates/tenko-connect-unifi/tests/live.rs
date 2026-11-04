@@ -233,13 +233,13 @@ const RECORDED: [&str; 7] = [
     "stat/sysinfo",
 ];
 
-/// Records the classic answers of the real controller as anonymised fixtures under
+/// Records the classic answers of the real controller as anonymized fixtures under
 /// `tests/fixtures/recorded/`. It runs only with `TENKO_LIVE_UNIFI=1` and `TENKO_RECORD=1`
 /// and a local account in `.env`; it never prints an answer, only counts.
 #[tokio::test]
 #[ignore = "reads a real controller and rewrites the recorded fixtures; set TENKO_LIVE_UNIFI=1 and TENKO_RECORD=1"]
 async fn live_record_fixtures() {
-    use tenko_connect::sdk::anonymise::Anonymiser;
+    use tenko_connect::sdk::anonymize::Anonymizer;
     use tenko_connect_unifi::{classic::Session, detect, http::Http, settings};
 
     if std::env::var("TENKO_LIVE_UNIFI").ok().as_deref() != Some("1")
@@ -294,8 +294,8 @@ async fn live_record_fixtures() {
         });
     }
 
-    let mut anonymiser = Anonymiser::new();
-    let output = anonymiser.anonymise(&serde_json::Value::Object(raw));
+    let mut anonymizer = Anonymizer::new();
+    let output = anonymizer.anonymize(&serde_json::Value::Object(raw));
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/recorded");
     std::fs::create_dir_all(&dir).expect("the recorded directory");
     for path in RECORDED {
@@ -311,5 +311,5 @@ async fn live_record_fixtures() {
             file.file_name().unwrap_or_default().to_string_lossy()
         );
     }
-    println!("replaced: {:?}", anonymiser.counts());
+    println!("replaced: {:?}", anonymizer.counts());
 }

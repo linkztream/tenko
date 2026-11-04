@@ -321,7 +321,7 @@ sentinel_row() {
   out="$(dig_val "root-key-sentinel-not-ta-$tag.wild.example.test" A 2>&1)" || true
   [[ "$(rcode_of <<<"$out")" == SERVFAIL ]]
 }
-signalling_seen() { authority_saw "_ta-"; }
+signaling_seen() { authority_saw "_ta-"; }
 flush_cache() { on tenko && api POST "/nodes/$node_id/dns/cache/flush" >/dev/null; }
 system_warns() {
   on tenko && api GET /system/status >/dev/null &&
@@ -371,7 +371,7 @@ validation_rows() {
   row val.sentinel "the RFC 8509 sentinel names answer as the anchors say" sentinel_row
   row val.log "the query log shows the validation state" log_shows_validation www.example.test secure
   row val.status "the status shows the anchor valid, the outcomes and the key sets" status_shows_validation
-  row val.signalling "the RFC 8145 signalling query reached the lab root" within 30 signalling_seen
+  row val.signaling "the RFC 8145 signaling query reached the lab root" within 30 signaling_seen
   # A negative trust anchor makes the bogus zone insecure until it is deleted.
   on tenko
   api POST /dns/ntas '{"zone": "bogus.example.test", "reason": "the lab checks RFC 7646"}' >/dev/null ||

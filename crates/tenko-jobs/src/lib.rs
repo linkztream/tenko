@@ -31,7 +31,7 @@
 //!   [`JobEngine::cancel`] or their deadline.
 //! - **Rollback** ([`machine`]): a failed step, a passed deadline or a cancel compensates the
 //!   steps that ran, in reverse; steps that cannot be undone become manual undo tasks.
-//!   End states are `succeeded`, `rolled_back`, `cancelled` and `failed` (a compensation
+//!   End states are `succeeded`, `rolled_back`, `canceled` and `failed` (a compensation
 //!   failed).
 //! - **Persistence** ([`tables`]): jobs, transition logs, indexes and runner leases live in
 //!   `jobs.*` tables; every transition is an audited write batch, and its transition row

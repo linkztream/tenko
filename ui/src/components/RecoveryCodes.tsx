@@ -5,7 +5,7 @@ import { toast } from "./toast";
 
 /**
  * Recovery codes, shown once (IAM-06): download, print or copy, then confirm they are
- * saved. Used after first-run setup, after the first factor enrolment and after
+ * saved. Used after first-run setup, after the first factor enrollment and after
  * regenerating codes. The parent gates on `onSavedChange(true)`.
  */
 export function RecoveryCodes(props: {

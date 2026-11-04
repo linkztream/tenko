@@ -995,7 +995,7 @@ fn an_unreadable_controller_leaves_a_device_nobody_else_sees_to_a_person() {
 }
 
 #[test]
-fn an_unreadable_controller_needs_no_acknowledgement_when_the_device_was_found_elsewhere() {
+fn an_unreadable_controller_needs_no_acknowledgment_when_the_device_was_found_elsewhere() {
     let broken = info("broken");
     let (other, state) = wired_lab(1);
     let plans = run(

@@ -3,7 +3,7 @@
 # user installs it: deploy/install.sh with the binary under test, unattended, the Standard
 # profile, the roles controller and dns; then DNS over TLS on 853 with a certificate of the
 # round's lab CA (the one change of tenko.toml a user makes by hand for DoT), and first-run
-# setup through the API with a fresh administrator, who enrols an authenticator because the
+# setup through the API with a fresh administrator, who enrolls an authenticator because the
 # Standard profile requires a second factor for administrators (TGL-02). Last, a zone with
 # one name that the probes of fuzz.dns_wire ask for.
 #

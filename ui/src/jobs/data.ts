@@ -60,7 +60,7 @@ export function completeStep(id: string, index: number, note: string): Promise<J
   return api.post("/api/v1/jobs/{id}/steps/{index}/complete", { path, body: { note } });
 }
 
-/** Asks to cancel a job. A queued job is cancelled at once; a running one rolls back. */
+/** Asks to cancel a job. A queued job is canceled at once; a running one rolls back. */
 export function cancelJob(id: string): Promise<JobSummary> {
   return api.post("/api/v1/jobs/{id}/cancel", { path: { id } });
 }

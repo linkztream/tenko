@@ -753,7 +753,7 @@ async fn nsec3_covers_every_name_and_empty_non_terminal_in_hash_order() {
 }
 
 #[tokio::test]
-async fn a_change_re_signs_only_its_rrsets_and_neighbours_and_is_journaled() {
+async fn a_change_re_signs_only_its_rrsets_and_neighbors_and_is_journaled() {
     for denial in [Denial::Nsec, nsec3()] {
         let setup = setup();
         let zone = new_zone(&setup).await;
@@ -794,7 +794,7 @@ async fn a_change_re_signs_only_its_rrsets_and_neighbours_and_is_journaled() {
             .await
             .expect("pass");
         assert!(!report.full);
-        // The pass writes the changed owners, their chain neighbours and the apex: a
+        // The pass writes the changed owners, their chain neighbors and the apex: a
         // handful of rows, where a full pass writes every one.
         assert!(report.rows > 0 && report.rows <= 14, "{report:?}");
         let after = zone_rows(&setup, zone).await;

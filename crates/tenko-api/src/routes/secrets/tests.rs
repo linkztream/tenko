@@ -572,7 +572,7 @@ async fn a_pin_session_never_stores_or_reveals_and_a_pin_only_revealer_blocks_th
         "/api/v1/auth/webauthn/register/start"
     );
     let detail = blocked.body["detail"].as_str().expect("detail");
-    assert!(detail.contains("PIN coupling rule") && detail.contains("enrol a passkey"));
+    assert!(detail.contains("PIN coupling rule") && detail.contains("enroll a passkey"));
     // A viewer cannot reveal, so a PIN is fine for them.
     h.create_user("vera", &["viewer"]).await;
     let olga_pin = h.login("olga", USER_PIN).await;

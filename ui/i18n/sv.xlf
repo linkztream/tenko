@@ -303,8 +303,8 @@
       <unit id="auth.signin.insecure">
         <segment><source>Unencrypted connection: passwords travel in plain text</source><target>Okrypterad anslutning: lösenord skickas i klartext</target></segment>
       </unit>
-      <unit id="auth.signin.ceremony.cancelled">
-        <segment><source>The passkey request was cancelled or timed out.</source><target>Begäran om nyckel avbröts eller tog för lång tid.</target></segment>
+      <unit id="auth.signin.ceremony.canceled">
+        <segment><source>The passkey request was canceled or timed out.</source><target>Begäran om nyckel avbröts eller tog för lång tid.</target></segment>
       </unit>
       <unit id="auth.signin.ceremony.unsupported">
         <segment><source>This browser or device does not support passkeys.</source><target>Webbläsaren eller enheten stöder inte nycklar.</target></segment>
@@ -829,7 +829,7 @@
         <segment><source>The server cannot be reached. Check the connection and try again.</source><target>Servern går inte att nå. Kontrollera anslutningen och försök igen.</target></segment>
       </unit>
       <unit id="errors.client.aborted">
-        <segment><source>The request was cancelled.</source><target>Begäran avbröts.</target></segment>
+        <segment><source>The request was canceled.</source><target>Begäran avbröts.</target></segment>
       </unit>
       <unit id="errors.client.bad_response">
         <segment><source>The server answered with status {status} and no explanation.</source><target>Servern svarade med status {status} utan förklaring.</target></segment>
@@ -1171,7 +1171,7 @@
         <segment><source>Credentials need the vault and a sign-in strong enough for operator secrets.</source><target>Inloggningsuppgifter kräver valvet och en inloggning som är stark nog för hemligheter.</target></segment>
       </unit>
       <unit id="errors.import.plan.blocked">
-        <segment><source>The plan has errors or warnings that need an acknowledgement.</source><target>Planen har fel eller varningar som måste bekräftas.</target></segment>
+        <segment><source>The plan has errors or warnings that need an acknowledgment.</source><target>Planen har fel eller varningar som måste bekräftas.</target></segment>
       </unit>
       <unit id="errors.import.unavailable">
         <segment><source>Import is not available on this server.</source><target>Import finns inte på denna server.</target></segment>
@@ -1461,7 +1461,7 @@
         <segment><source>Where you are signed in</source><target>Var du är inloggad</target></segment>
       </unit>
       <unit id="account.sessions.lede">
-        <segment><source>Every browser and device with an open session on your account. Revoke the ones you do not recognise.</source><target>Alla webbläsare och enheter med en öppen session på ditt konto. Återkalla de du inte känner igen.</target></segment>
+        <segment><source>Every browser and device with an open session on your account. Revoke the ones you do not recognize.</source><target>Alla webbläsare och enheter med en öppen session på ditt konto. Återkalla de du inte känner igen.</target></segment>
       </unit>
       <unit id="account.sessions.sign_out_others">
         <segment><source>Sign out everywhere else</source><target>Logga ut från alla andra enheter</target></segment>
@@ -5045,7 +5045,7 @@
         <segment><source>Failed or rolled back</source><target>Misslyckade eller återställda</target></segment>
       </unit>
       <unit id="jobs.view.finished">
-        <notes><note category="description">Jobs in a final state: done, failed, rolled back or cancelled.</note></notes>
+        <notes><note category="description">Jobs in a final state: done, failed, rolled back or canceled.</note></notes>
         <segment><source>Finished</source><target>Avslutade</target></segment>
       </unit>
       <unit id="jobs.flag.cancel_requested">
@@ -5114,8 +5114,8 @@
       <unit id="jobs.state.rolled_back">
         <segment><source>Rolled back</source><target>Återställt</target></segment>
       </unit>
-      <unit id="jobs.state.cancelled">
-        <segment><source>Cancelled</source><target>Avbrutet</target></segment>
+      <unit id="jobs.state.canceled">
+        <segment><source>Canceled</source><target>Avbrutet</target></segment>
       </unit>
       <unit id="jobs.step_state.pending">
         <segment><source>Not started</source><target>Ej startat</target></segment>
@@ -5229,8 +5229,8 @@
       <unit id="jobs.problem.title">
         <segment><source>What went wrong</source><target>Vad som gick fel</target></segment>
       </unit>
-      <unit id="jobs.error.cancelled">
-        <segment><source>The job was cancelled.</source><target>Jobbet avbröts.</target></segment>
+      <unit id="jobs.error.canceled">
+        <segment><source>The job was canceled.</source><target>Jobbet avbröts.</target></segment>
       </unit>
       <unit id="jobs.error.timeout">
         <segment><source>The job did not finish within its timeout, so it was rolled back.</source><target>Jobbet blev inte klart inom sin tidsgräns och återställdes därför.</target></segment>
@@ -5324,7 +5324,7 @@
         <segment><source>Cancel this job?</source><target>Avbryta jobbet?</target></segment>
       </unit>
       <unit id="jobs.cancel.body_queued">
-        <segment><source>The job has not started. It is cancelled and never runs.</source><target>Jobbet har inte startat. Det avbryts och körs aldrig.</target></segment>
+        <segment><source>The job has not started. It is canceled and never runs.</source><target>Jobbet har inte startat. Det avbryts och körs aldrig.</target></segment>
       </unit>
       <unit id="jobs.cancel.body_active">
         <segment><source>The steps that already ran are undone. Some undo tasks may need you.</source><target>De steg som redan körts ångras. Vissa ångra-uppgifter kan behöva dig.</target></segment>
@@ -5336,7 +5336,7 @@
         <segment><source>Keep job</source><target>Behåll jobbet</target></segment>
       </unit>
       <unit id="jobs.cancel.done">
-        <segment><source>Job cancelled</source><target>Jobbet avbröts</target></segment>
+        <segment><source>Job canceled</source><target>Jobbet avbröts</target></segment>
       </unit>
       <unit id="jobs.cancel.requested">
         <segment><source>Cancel requested. The job is rolling back.</source><target>Avbrott begärt. Jobbet återställs.</target></segment>
@@ -5476,7 +5476,7 @@
         <segment><source>Rollback started</source><target>Återställning startade</target></segment>
       </unit>
       <unit id="jobs.action.cancel">
-        <segment><source>Cancelled</source><target>Avbröts</target></segment>
+        <segment><source>Canceled</source><target>Avbröts</target></segment>
       </unit>
       <unit id="jobs.action.finish_rollback">
         <segment><source>Rollback finished</source><target>Återställningen slutfördes</target></segment>
@@ -6378,7 +6378,7 @@
         <segment><source>Warnings</source><target>Varningar</target></segment>
       </unit>
       <unit id="import.preview.steps">
-        <notes><note category="description">Heading of the card that lists changes the import makes to existing objects and that need an acknowledgement.</note></notes>
+        <notes><note category="description">Heading of the card that lists changes the import makes to existing objects and that need an acknowledgment.</note></notes>
         <segment><source>Steps the import takes</source><target>Steg som importen tar</target></segment>
       </unit>
       <unit id="import.preview.supernet_step">
@@ -6610,9 +6610,9 @@
       <unit id="import.credentials.reason.pin_coupling">
         <segment><source>Another account that may reveal secrets still signs in with a PIN alone. Add a second factor or a password to it first, or leave the credential columns out.</source><target>Ett annat konto som får visa hemligheter loggar fortfarande in enbart med PIN-kod. Lägg först till en andra faktor eller ett lösenord på det, eller utelämna inloggningsuppgifterna.</target></segment>
       </unit>
-      <unit id="import.credentials.pin_enrol">
+      <unit id="import.credentials.pin_enroll">
         <notes><note category="description">Link in the import preview when credentials cannot be stored because of the PIN coupling rule; it opens the account page where a passkey is enrolled.</note></notes>
-        <segment><source>Enrol a passkey</source><target>Registrera en nyckel</target></segment>
+        <segment><source>Enroll a passkey</source><target>Registrera en nyckel</target></segment>
       </unit>
       <unit id="import.sheets.title">
         <segment><source>Outcome per sheet</source><target>Utfall per blad</target></segment>
@@ -7720,7 +7720,7 @@
       </unit>
       <unit id="errors.vault.pin_coupling">
         <notes><note category="description">Argument: accounts is a comma-separated list of login names.</note></notes>
-        <segment><source>A secret cannot be stored while an account that may reveal secrets signs in with a PIN alone (the PIN coupling rule). Accounts with a PIN alone: {accounts}. Enrol a passkey for them first; a second factor, a password or other roles also lift the rule.</source><target>En hemlighet kan inte sparas så länge ett konto som får visa hemligheter loggar in med enbart PIN-kod (PIN-kopplingsregeln). Konton med bara PIN-kod: {accounts}. Registrera en nyckel för dem först; en andra faktor, ett lösenord eller andra roller häver också regeln.</target></segment>
+        <segment><source>A secret cannot be stored while an account that may reveal secrets signs in with a PIN alone (the PIN coupling rule). Accounts with a PIN alone: {accounts}. Enroll a passkey for them first; a second factor, a password or other roles also lift the rule.</source><target>En hemlighet kan inte sparas så länge ett konto som får visa hemligheter loggar in med enbart PIN-kod (PIN-kopplingsregeln). Konton med bara PIN-kod: {accounts}. Registrera en nyckel för dem först; en andra faktor, ett lösenord eller andra roller häver också regeln.</target></segment>
       </unit>
       <unit id="errors.vault.reveal.host_required">
         <segment><source>The security profile reveals secrets only on the page of a host they are bound to.</source><target>Säkerhetsprofilen visar hemligheter bara på sidan för en värd som de är kopplade till.</target></segment>
@@ -8168,9 +8168,9 @@
       <unit id="secrets.form.pin_title">
         <segment><source>Secrets cannot be stored yet</source><target>Hemligheter kan inte sparas ännu</target></segment>
       </unit>
-      <unit id="secrets.form.pin_enrol">
+      <unit id="secrets.form.pin_enroll">
         <notes><note category="description">Link in the notice about the PIN coupling rule; it opens the account page where a passkey is enrolled.</note></notes>
-        <segment><source>Enrol a passkey</source><target>Registrera en nyckel</target></segment>
+        <segment><source>Enroll a passkey</source><target>Registrera en nyckel</target></segment>
       </unit>
       <unit id="secrets.form.reload">
         <segment><source>Reload</source><target>Läs in igen</target></segment>
@@ -8298,7 +8298,7 @@
         <segment><source>ARP</source><target>ARP</target></segment>
       </unit>
       <unit id="discovery.method.nd">
-        <segment><source>neighbour discovery</source><target>grannupptäckt</target></segment>
+        <segment><source>neighbor discovery</source><target>grannupptäckt</target></segment>
       </unit>
       <unit id="discovery.method.mdns">
         <segment><source>mDNS</source><target>mDNS</target></segment>
@@ -9261,7 +9261,7 @@
         <segment><source>Secrets</source><target>Hemligheter</target></segment>
       </unit>
       <unit id="connectors.plugins.license">
-        <segment><source>Licence</source><target>Licens</target></segment>
+        <segment><source>License</source><target>Licens</target></segment>
       </unit>
       <unit id="connectors.plugins.homepage">
         <segment><source>Homepage</source><target>Webbplats</target></segment>
@@ -9604,8 +9604,8 @@
       <unit id="nodes.summary">
         <segment><source>{nodes, plural, =0 {No node enrolled} one {# node} other {# nodes}}, {connected} connected</source><target>{nodes, plural, =0 {Ingen nod registrerad} one {# nod} other {# noder}}, {connected} anslutna</target></segment>
       </unit>
-      <unit id="nodes.action.enrol">
-        <segment><source>New enrolment token</source><target>Ny registreringstoken</target></segment>
+      <unit id="nodes.action.enroll">
+        <segment><source>New enrollment token</source><target>Ny registreringstoken</target></segment>
       </unit>
       <unit id="nodes.mismatch">
         <segment><source>{count, plural, one {# node shares} other {# nodes share}} no protocol version with this controller ({names}); this controller speaks {majors}. Upgrade the older side.</source><target>{count, plural, one {# nod delar} other {# noder delar}} ingen protokollversion med den här styrnoden ({names}); styrnoden talar {majors}. Uppgradera den äldre sidan.</target></segment>
@@ -9614,7 +9614,7 @@
         <segment><source>The cluster port listens on {addresses} with protocol {majors}</source><target>Klusterporten lyssnar på {addresses} med protokoll {majors}</target></segment>
       </unit>
       <unit id="nodes.port_closed">
-        <segment><source>The cluster port opens when the first enrolment token is created.</source><target>Klusterporten öppnas när den första registreringstoken skapas.</target></segment>
+        <segment><source>The cluster port opens when the first enrollment token is created.</source><target>Klusterporten öppnas när den första registreringstoken skapas.</target></segment>
       </unit>
       <unit id="nodes.versions">
         <segment><source>connected versions: {versions}</source><target>anslutna versioner: {versions}</target></segment>
@@ -9671,7 +9671,7 @@
         <segment><source>No node enrolled</source><target>Ingen nod registrerad</target></segment>
       </unit>
       <unit id="nodes.empty.body">
-        <segment><source>A probe in another network enrols with a token and then reports what it sees. Create a token to add one.</source><target>En sond i ett annat nät registreras med en token och rapporterar sedan vad den ser. Skapa en token för att lägga till en.</target></segment>
+        <segment><source>A probe in another network enrolls with a token and then reports what it sees. Create a token to add one.</source><target>En sond i ett annat nät registreras med en token och rapporterar sedan vad den ser. Skapa en token för att lägga till en.</target></segment>
       </unit>
       <unit id="nodes.panel.label">
         <segment><source>Node</source><target>Nod</target></segment>
@@ -9758,7 +9758,7 @@
         <segment><source>{name} was not revoked</source><target>{name} återkallades inte</target></segment>
       </unit>
       <unit id="nodes.token.title">
-        <segment><source>Enrolment tokens</source><target>Registreringstoken</target></segment>
+        <segment><source>Enrollment tokens</source><target>Registreringstoken</target></segment>
       </unit>
       <unit id="nodes.token.hint">
         <segment><source>Single use; used and expired ones stay listed for seven days</source><target>Engångs; använda och utgångna visas i sju dagar</target></segment>
@@ -9806,16 +9806,16 @@
         <segment><source>Delete the token {name}</source><target>Ta bort token {name}</target></segment>
       </unit>
       <unit id="nodes.token.delete_title">
-        <segment><source>Delete the enrolment token?</source><target>Ta bort registreringstoken?</target></segment>
+        <segment><source>Delete the enrollment token?</source><target>Ta bort registreringstoken?</target></segment>
       </unit>
       <unit id="nodes.token.delete_pending">
-        <segment><source>Nobody can enrol a node with it any more.</source><target>Ingen kan längre registrera en nod med den.</target></segment>
+        <segment><source>Nobody can enroll a node with it any more.</source><target>Ingen kan längre registrera en nod med den.</target></segment>
       </unit>
       <unit id="nodes.token.delete_done">
         <segment><source>It is used or expired; only the list entry goes.</source><target>Den är använd eller utgången; bara posten i listan försvinner.</target></segment>
       </unit>
       <unit id="nodes.token.deleted">
-        <segment><source>Deleted the enrolment token</source><target>Tog bort registreringstoken</target></segment>
+        <segment><source>Deleted the enrollment token</source><target>Tog bort registreringstoken</target></segment>
       </unit>
       <unit id="nodes.token.delete_failed">
         <segment><source>The token was not deleted</source><target>Token togs inte bort</target></segment>
@@ -9832,95 +9832,95 @@
       <unit id="nodes.lifetime.s604800">
         <segment><source>7 days</source><target>7 dagar</target></segment>
       </unit>
-      <unit id="nodes.enrol.title">
-        <segment><source>New enrolment token</source><target>Ny registreringstoken</target></segment>
+      <unit id="nodes.enroll.title">
+        <segment><source>New enrollment token</source><target>Ny registreringstoken</target></segment>
       </unit>
-      <unit id="nodes.enrol.intro">
-        <segment><source>A token lets one node enrol once. The node gets its own certificate from the internal CA.</source><target>En token låter en nod registrera sig en gång. Noden får ett eget certifikat från den interna CA:n.</target></segment>
+      <unit id="nodes.enroll.intro">
+        <segment><source>A token lets one node enroll once. The node gets its own certificate from the internal CA.</source><target>En token låter en nod registrera sig en gång. Noden får ett eget certifikat från den interna CA:n.</target></segment>
       </unit>
-      <unit id="nodes.enrol.roles">
+      <unit id="nodes.enroll.roles">
         <segment><source>Roles the node may take</source><target>Roller som noden får ta</target></segment>
       </unit>
-      <unit id="nodes.enrol.role_hint.probe">
+      <unit id="nodes.enroll.role_hint.probe">
         <segment><source>Scans and observes its networks.</source><target>Skannar och observerar sina nät.</target></segment>
       </unit>
-      <unit id="nodes.enrol.role_hint.dns">
+      <unit id="nodes.enroll.role_hint.dns">
         <segment><source>Registered now; its process starts once the DNS engine exists.</source><target>Registreras nu; processen startar när DNS-motorn finns.</target></segment>
       </unit>
-      <unit id="nodes.enrol.role_hint.dhcp">
+      <unit id="nodes.enroll.role_hint.dhcp">
         <segment><source>Registered now; its process starts once the DHCP engine exists.</source><target>Registreras nu; processen startar när DHCP-motorn finns.</target></segment>
       </unit>
-      <unit id="nodes.enrol.roles_required">
+      <unit id="nodes.enroll.roles_required">
         <segment><source>Choose at least one role.</source><target>Välj minst en roll.</target></segment>
       </unit>
-      <unit id="nodes.enrol.name">
+      <unit id="nodes.enroll.name">
         <segment><source>Node name</source><target>Nodnamn</target></segment>
       </unit>
-      <unit id="nodes.enrol.name_help">
+      <unit id="nodes.enroll.name_help">
         <segment><source>Optional; without it the node uses its host name.</source><target>Frivilligt; utan det använder noden sitt värdnamn.</target></segment>
       </unit>
-      <unit id="nodes.enrol.name_rule">
+      <unit id="nodes.enroll.name_rule">
         <segment><source>1 to 63 letters, digits, dots, hyphens and underscores, starting with a letter or digit.</source><target>1 till 63 bokstäver, siffror, punkter, bindestreck och understreck, med en bokstav eller siffra först.</target></segment>
       </unit>
-      <unit id="nodes.enrol.lifetime">
+      <unit id="nodes.enroll.lifetime">
         <segment><source>Valid for</source><target>Giltig i</target></segment>
       </unit>
-      <unit id="nodes.enrol.lifetime_help">
+      <unit id="nodes.enroll.lifetime_help">
         <segment><source>Unused, it expires after this time.</source><target>Oanvänd upphör den efter den här tiden.</target></segment>
       </unit>
-      <unit id="nodes.enrol.vrf">
+      <unit id="nodes.enroll.vrf">
         <segment><source>VRF of its observations</source><target>VRF för dess observationer</target></segment>
       </unit>
-      <unit id="nodes.enrol.vrf_help">
+      <unit id="nodes.enroll.vrf_help">
         <segment><source>Used when a batch of the node names no VRF.</source><target>Används när en omgång från noden inte anger någon VRF.</target></segment>
       </unit>
-      <unit id="nodes.enrol.vrf_default">
+      <unit id="nodes.enroll.vrf_default">
         <segment><source>The default VRF</source><target>Standard-VRF</target></segment>
       </unit>
-      <unit id="nodes.enrol.create">
+      <unit id="nodes.enroll.create">
         <segment><source>Create token</source><target>Skapa token</target></segment>
       </unit>
-      <unit id="nodes.enrol.created_title">
-        <segment><source>Enrol the node</source><target>Registrera noden</target></segment>
+      <unit id="nodes.enroll.created_title">
+        <segment><source>Enroll the node</source><target>Registrera noden</target></segment>
       </unit>
-      <unit id="nodes.enrol.once">
+      <unit id="nodes.enroll.once">
         <segment><source>This is the only time the token is shown; it is not stored. It works once, until {expires}.</source><target>Det här är enda gången token visas; den sparas inte. Den fungerar en gång, till {expires}.</target></segment>
       </unit>
-      <unit id="nodes.enrol.command">
+      <unit id="nodes.enroll.command">
         <segment><source>Command to run on the node</source><target>Kommando att köra på noden</target></segment>
       </unit>
-      <unit id="nodes.enrol.copy_command">
+      <unit id="nodes.enroll.copy_command">
         <segment><source>Copy command</source><target>Kopiera kommandot</target></segment>
       </unit>
-      <unit id="nodes.enrol.token">
+      <unit id="nodes.enroll.token">
         <segment><source>Token</source><target>Token</target></segment>
       </unit>
-      <unit id="nodes.enrol.copy_token">
+      <unit id="nodes.enroll.copy_token">
         <segment><source>Copy token</source><target>Kopiera token</target></segment>
       </unit>
-      <unit id="nodes.enrol.fingerprint">
+      <unit id="nodes.enroll.fingerprint">
         <segment><source>CA root fingerprint (SHA-256)</source><target>CA-rotens fingeravtryck (SHA-256)</target></segment>
       </unit>
-      <unit id="nodes.enrol.fingerprint_help">
+      <unit id="nodes.enroll.fingerprint_help">
         <segment><source>The node compares it with the CA root it is offered; it is in the command already.</source><target>Noden jämför det med CA-roten den erbjuds; det finns redan i kommandot.</target></segment>
       </unit>
-      <unit id="nodes.enrol.next">
+      <unit id="nodes.enroll.next">
         <segment><source>Then start the node process with the roles {roles}; it appears in the list when it connects.</source><target>Starta sedan nodprocessen med rollerna {roles}; den syns i listan när den ansluter.</target></segment>
       </unit>
-      <unit id="nodes.enrol.copy_blocked">
+      <unit id="nodes.enroll.copy_blocked">
         <segment><source>The browser did not allow copying; select the text and copy it.</source><target>Webbläsaren tillät inte kopiering; markera texten och kopiera den.</target></segment>
       </unit>
-      <unit id="nodes.enrol.done">
+      <unit id="nodes.enroll.done">
         <segment><source>Done</source><target>Klar</target></segment>
       </unit>
-      <unit id="errors.cluster.enrolment.roles">
+      <unit id="errors.cluster.enrollment.roles">
         <segment><source>A token cannot grant this role.</source><target>En token kan inte ge den här rollen.</target></segment>
       </unit>
-      <unit id="errors.cluster.enrolment.lifetime">
+      <unit id="errors.cluster.enrollment.lifetime">
         <segment><source>A token lives 60 seconds to 7 days.</source><target>En token gäller 60 sekunder till 7 dagar.</target></segment>
       </unit>
-      <unit id="errors.cluster.enrolment.not_found">
-        <segment><source>The enrolment token does not exist.</source><target>Registreringstoken finns inte.</target></segment>
+      <unit id="errors.cluster.enrollment.not_found">
+        <segment><source>The enrollment token does not exist.</source><target>Registreringstoken finns inte.</target></segment>
       </unit>
       <unit id="errors.cluster.node.not_found">
         <segment><source>The node is not enrolled.</source><target>Noden är inte registrerad.</target></segment>
@@ -9934,7 +9934,7 @@
       <unit id="errors.cluster.node.conflict">
         <segment><source>The node changed at the same time; try again.</source><target>Noden ändrades samtidigt; försök igen.</target></segment>
       </unit>
-      <unit id="errors.cluster.enrolment.random">
+      <unit id="errors.cluster.enrollment.random">
         <segment><source>The server could not draw a random token.</source><target>Servern kunde inte ta fram en slumpmässig token.</target></segment>
       </unit>
       <unit id="cluster.job.edit">
@@ -9943,10 +9943,10 @@
       <unit id="cluster.job.write_preview">
         <segment><source>Write the node registry</source><target>Skriv nodregistret</target></segment>
       </unit>
-      <unit id="nodes.enrol.copied_command">
+      <unit id="nodes.enroll.copied_command">
         <segment><source>Copied the command</source><target>Kopierade kommandot</target></segment>
       </unit>
-      <unit id="nodes.enrol.copied_token">
+      <unit id="nodes.enroll.copied_token">
         <segment><source>Copied the token</source><target>Kopierade token</target></segment>
       </unit>
     </group>
@@ -10199,11 +10199,11 @@
       <unit id="topology.panel.ports_none">
         <segment><source>No ports are known for this device.</source><target>Inga portar är kända för enheten.</target></segment>
       </unit>
-      <unit id="topology.panel.neighbours">
-        <segment><source>Neighbours</source><target>Grannar</target></segment>
+      <unit id="topology.panel.neighbors">
+        <segment><source>Neighbors</source><target>Grannar</target></segment>
       </unit>
-      <unit id="topology.panel.neighbours_none">
-        <segment><source>This device has no neighbours in the graph.</source><target>Enheten har inga grannar i grafen.</target></segment>
+      <unit id="topology.panel.neighbors_none">
+        <segment><source>This device has no neighbors in the graph.</source><target>Enheten har inga grannar i grafen.</target></segment>
       </unit>
       <unit id="topology.port.uplink">
         <segment><source>Uplink</source><target>Upplänk</target></segment>
@@ -10241,13 +10241,13 @@
       <unit id="topology.port.nothing">
         <segment><source>Nothing is connected to this port.</source><target>Inget är anslutet till porten.</target></segment>
       </unit>
-      <unit id="topology.neighbour.local">
+      <unit id="topology.neighbor.local">
         <segment><source>port {port}</source><target>port {port}</target></segment>
       </unit>
-      <unit id="topology.neighbour.remote">
+      <unit id="topology.neighbor.remote">
         <segment><source>remote port {port}</source><target>fjärrport {port}</target></segment>
       </unit>
-      <unit id="topology.neighbour.ssid">
+      <unit id="topology.neighbor.ssid">
         <segment><source>network {ssid}</source><target>nät {ssid}</target></segment>
       </unit>
       <unit id="topology.path.router">

@@ -1,6 +1,6 @@
 // VLAN provisioning and the prefixes of a VLAN in the mock API through `fetch` against the msw
 // server: the preview in each mode, the guardrail, duplicates and validation, the
-// acknowledgements, the submit with its job, the IPAM objects and the controller network it
+// acknowledgments, the submit with its job, the IPAM objects and the controller network it
 // creates, the manual task, idempotency, and the prefix list.
 import { beforeEach, describe, expect, it } from "vitest";
 import { apiOperations } from "../generated/operations";
@@ -157,7 +157,7 @@ describe("GET /vlans/{id}/prefixes", () => {
     const missing = expectProblem(await list("0190d1c2-0000-7000-8000-0000000400ff"), 404, "ipam.not_found");
     expect(missing.params).toMatchObject({ kind: "vlan" });
     expectProblem(await list("nope"), 400, "sys.invalid_request");
-    expectProblem(await list(IPAM_IDS.vlan.v10, "?colour=blue"), 400, "sys.invalid_query");
+    expectProblem(await list(IPAM_IDS.vlan.v10, "?color=blue"), 400, "sys.invalid_query");
     expectProblem(await list(IPAM_IDS.vlan.v10, "?limit=0"), 400, "sys.invalid_query");
     expectProblem(await list(IPAM_IDS.vlan.v10, "?at_least=soon"), 400, "sys.invalid_query");
     expect((await list(IPAM_IDS.vlan.v10, "?limit=1000&at_least=1")).status).toBe(200);
@@ -270,7 +270,7 @@ describe("the preview of an existing VLAN", () => {
     expect(p.steps.map((s) => [s.kind, s.automatic])).toEqual([["l2.network", true]]);
   });
 
-  it("changes a network the controller has under another name, which needs an acknowledgement", async () => {
+  it("changes a network the controller has under another name, which needs an acknowledgment", async () => {
     const body = { vlan: IPAM_IDS.vlan.v30, network_name: "Things" };
     const p = await preview(body);
     expect(p.controller.mode).toBe("automatic");
@@ -338,7 +338,7 @@ describe("the guardrail and the manual network step", () => {
     expect(management.steps.map((s) => s.kind)).toEqual(["ipam.intent", "l2.manual", "activate"]);
   });
 
-  it("asks a person when the controller does not allow writes, shows the plan and needs an acknowledgement", async () => {
+  it("asks a person when the controller does not allow writes, shows the plan and needs an acknowledgment", async () => {
     mockVlanController.writes_enabled = false;
     const p = await preview(guests());
     expect(p.controller).toMatchObject({
@@ -360,7 +360,7 @@ describe("the guardrail and the manual network step", () => {
     expect(p.steps.map((s) => s.kind)).toEqual(["ipam.intent", "l2.manual", "activate"]);
     // The manual task names the controller.
     expect(p.steps[1]?.params).toEqual({ vid: "60", name: "Guests", cidr: FREE_NET, connector: CONTROLLER_NAME });
-    // A rename on a read-only controller asks for the one acknowledgement only.
+    // A rename on a read-only controller asks for the one acknowledgment only.
     const rename = await preview({ vlan: IPAM_IDS.vlan.v30, network_name: "Things" });
     expect(rename.controller.mode).toBe("manual");
     expect(rename.warnings?.map((w) => w.code)).toEqual(["ipam.vlan.controller_read_only"]);
@@ -405,8 +405,8 @@ describe("the guardrail and the manual network step", () => {
 describe("validation", () => {
   it("refuses a body with unknown or mistyped members: 400 `sys.invalid_request`", async () => {
     for (const body of [
-      { create: { vid: 60, name: "Guests" }, colour: "blue" },
-      { create: { vid: 60, name: "Guests", colour: "blue" } },
+      { create: { vid: 60, name: "Guests" }, color: "blue" },
+      { create: { vid: 60, name: "Guests", color: "blue" } },
       { create: { vid: 60, name: "Guests" }, prefix: { cidr: FREE_NET, vlan: "x" } },
       { create: { vid: "60", name: "Guests" } },
       { create: { vid: 60 } },
@@ -495,7 +495,7 @@ describe("validation", () => {
 
   it("refuses unknown query parameters and values", async () => {
     expectProblem(await post(`${PROVISION}?dry_run=maybe`, guests()), 400, "sys.invalid_query");
-    expectProblem(await post(`${PROVISION}?colour=blue`, guests()), 400, "sys.invalid_query");
+    expectProblem(await post(`${PROVISION}?color=blue`, guests()), 400, "sys.invalid_query");
     expectProblem(await post(`${PROVISION}?dry_run=true&dry_run=false`, guests()), 400, "sys.invalid_query");
     for (const value of ["true", "1", "yes"]) expect((await post(`${PROVISION}?dry_run=${value}`, guests())).status, value).toBe(200);
     expect((await post(`${PROVISION}?dry_run=true&at_least=1`, guests())).status).toBe(200);
@@ -505,13 +505,13 @@ describe("validation", () => {
 });
 
 describe("submitting a provision", () => {
-  it("refuses while a warning that needs an acknowledgement is not acknowledged, and writes nothing", async () => {
+  it("refuses while a warning that needs an acknowledgment is not acknowledged, and writes nothing", async () => {
     const body = { vlan: IPAM_IDS.vlan.v30, network_name: "Things" };
     const problem = expectProblem(await post(PROVISION, body), 409, "ipam.plan.unacknowledged");
     expect(problem.params).toEqual({ codes: "ipam.vlan.network_changes" });
     expect(network(30)?.name).toBe("IoT");
     expect(jobStore.jobs.some((j) => j.job.spec.kind === "ipam.vlan.provision")).toBe(false);
-    // Another code is no acknowledgement.
+    // Another code is no acknowledgment.
     expectProblem(await post(PROVISION, { ...body, acknowledge: ["ipam.vlan.controller_read_only"] }), 409, "ipam.plan.unacknowledged");
     // The warnings of the IPAM plan count as well, and several codes are listed sorted.
     mockVlanController.writes_enabled = false;
@@ -606,7 +606,7 @@ describe("submitting a provision", () => {
     expect(vlanOf(IPAM_IDS.vlan.v20)?.meta.revision).toBeLessThanOrEqual(revision);
   });
 
-  it("does nothing on the controller when it has the network, and renames it after an acknowledgement", async () => {
+  it("does nothing on the controller when it has the network, and renames it after an acknowledgment", async () => {
     const same = await submit({ vlan: IPAM_IDS.vlan.v30 });
     expect((await job(same.job_id)).job.state).toBe("succeeded");
     expect(network(30)?.name).toBe("IoT");
@@ -692,12 +692,12 @@ describe("submitting a provision", () => {
     expect(only.preview?.steps[0]?.manual?.args).toEqual({ vid: "20", name: "Lab" });
   });
 
-  it("soft-deletes what the job created when the job is cancelled", async () => {
+  it("soft-deletes what the job created when the job is canceled", async () => {
     const s = await submit(guests({ manual: true }));
     expect(vlanOf(s.vlan)?.status).toBe("planned");
-    const cancelled = await post(`${V}/jobs/${s.job_id}/cancel`);
-    expect(cancelled.status).toBe(202);
-    expect((await job(s.job_id)).job.state).toBe("cancelled");
+    const canceled = await post(`${V}/jobs/${s.job_id}/cancel`);
+    expect(canceled.status).toBe(202);
+    expect((await job(s.job_id)).job.state).toBe("canceled");
     expect(vlanOf(s.vlan)?.meta.deleted).not.toBeNull();
     expect(prefixOf(s.prefix ?? "")?.meta.deleted).not.toBeNull();
     expect((await get<{ items: S["Prefix"][] }>(`${V}/vlans/${s.vlan}/prefixes`)).body.items).toEqual([]);

@@ -326,7 +326,7 @@ impl StepHandler for ChunkStep {
                 crate::error::codes::PLAN_UNACKNOWLEDGED,
                 409,
                 format!(
-                    "the chunk needs an acknowledgement of: {}",
+                    "the chunk needs an acknowledgment of: {}",
                     unacknowledged.join(", ")
                 ),
             ));
@@ -474,7 +474,7 @@ async fn stage_credentials(
         }
         let spec = SecretSpec::new(SecretPurpose::from_static(CREDENTIAL_PURPOSE))
             .owned_by(ObjectRef::from(op.host_id))
-            .labelled(format!("Login and password of {}", op.host));
+            .labeled(format!("Login and password of {}", op.host));
         let secret = vault
             .stage_put(
                 batch,

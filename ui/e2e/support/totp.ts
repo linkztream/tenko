@@ -1,6 +1,6 @@
 // Time-based one-time passwords (RFC 6238) over HOTP (RFC 4226) for the sign-in tests: the
-// codes an authenticator app would show for the secret the enrolment displays. SHA-1, six
-// digits and 30-second steps are the parameters Tenko enrols with; the others are accepted
+// codes an authenticator app would show for the secret the enrollment displays. SHA-1, six
+// digits and 30-second steps are the parameters Tenko enrolls with; the others are accepted
 // for completeness.
 
 import { createHmac } from "node:crypto";
@@ -55,7 +55,7 @@ export function totpAt(secret: string, step: number, options: TotpOptions = {}):
 /**
  * An authenticator for one secret that never hands out a code of a step it already used:
  * the server refuses a replayed step, and a test may need two codes within 30 seconds
- * (enrolment, then sign-in). The server accepts one step of clock skew, so the next step
+ * (enrollment, then sign-in). The server accepts one step of clock skew, so the next step
  * is used when the current one is spent.
  */
 export class Authenticator {

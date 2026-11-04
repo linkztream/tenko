@@ -85,7 +85,7 @@ impl FsyncProbe {
 /// latency summary.
 ///
 /// The database `dir/.tenko-fsync-probe-<unique>.redb` is created with a 64 KiB cache, one
-/// untimed warm-up commit initialises it, and then `samples` commits are timed, each a redb
+/// untimed warm-up commit initializes it, and then `samples` commits are timed, each a redb
 /// write transaction with [`Durability::Immediate`] that inserts one small key/value. A
 /// `samples` of 0 is treated as 1. The file is deleted before the function returns, also
 /// when a commit fails.
@@ -112,7 +112,7 @@ pub fn fsync_probe(dir: &Path, samples: usize) -> io::Result<FsyncProbe> {
         measure_commits(&db, samples)?
     };
     drop(file);
-    Ok(summarise(durations))
+    Ok(summarize(durations))
 }
 
 /// Runs the probe and logs the result through `tracing`.
@@ -233,7 +233,7 @@ fn commit_once(db: &Database, key: u64) -> io::Result<()> {
 }
 
 /// Sorts `durations` and computes the summary. The slice is never empty here.
-fn summarise(mut durations: Vec<Duration>) -> FsyncProbe {
+fn summarize(mut durations: Vec<Duration>) -> FsyncProbe {
     durations.sort_unstable();
     FsyncProbe {
         samples: durations.len(),
@@ -378,8 +378,8 @@ mod tests {
     }
 
     #[test]
-    fn summarise_sorts_its_input() {
-        let probe = summarise(vec![ms(30), ms(10), ms(20), ms(50), ms(40)]);
+    fn summarize_sorts_its_input() {
+        let probe = summarize(vec![ms(30), ms(10), ms(20), ms(50), ms(40)]);
         assert_eq!(
             probe,
             FsyncProbe {

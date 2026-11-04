@@ -6,7 +6,7 @@
 // path), into a finding with a stable fingerprint, carries the finding
 // IDs of the previous report over by fingerprint and gives an unmatched finding the next free
 // `SF-NNNN`, and writes the public summary of SA-Q3 (b). The triage (Appendix A) writes
-// sections 3 to 5 and the judgement; this script does the mechanical part it can check.
+// sections 3 to 5 and the judgment; this script does the mechanical part it can check.
 //
 //   node scripts/security-report.mjs --rows bundle/rows.jsonl --version 0.0.11 \
 //     --commit <sha> --run-url <url> --bundle-sha256 <hex> \
@@ -14,7 +14,7 @@
 //     [--layer1 layer1.json] --out report.md --summary docs/security/release-0.0.11.md
 //
 // A finding's fingerprint is `<tool>:<rule>:<location>`; a location with an identifier (a
-// UUID, a long hex id, a numeric id in a path) is normalised to its OpenAPI-style template
+// UUID, a long hex id, a numeric id in a path) is normalized to its OpenAPI-style template
 // so the same weakness keeps its id when the id in the path changes, a content-hashed file of
 // the web interface to `<name>-{hash}.<ext>`, a URL to its path, and line numbers are never
 // part of it. Node's standard library only.
@@ -97,7 +97,7 @@ export const SITE_WIDE_ZAP_RULES = new Set([
 export const SITE_LOCATION = "site";
 
 /** A scanner's severity in the report's words (unknown: Info). */
-export function normaliseSeverity(value) {
+export function normalizeSeverity(value) {
   const text = String(value ?? "").trim().toLowerCase();
   const known = SEVERITIES.find((s) => s.toLowerCase() === text);
   return known ?? SEVERITY_ALIASES[text] ?? "Info";
@@ -119,18 +119,18 @@ export function parseJsonl(text) {
 }
 
 /**
- * Normalise a location so a weakness keeps one fingerprint across runs: a path segment that
+ * Normalize a location so a weakness keeps one fingerprint across runs: a path segment that
  * is a UUID, a long hex id or a bare number becomes `{id}`, and a trailing `#<function>` and
  * line/column suffixes are left to the caller (line numbers are never part of a fingerprint,
  * so a `:<line>` or `#L<line>` suffix is stripped).
  */
-export function normaliseLocation(location) {
+export function normalizeLocation(location) {
   if (!location) return "";
   let loc = String(location).trim();
   // Drop a line (and column) suffix such as ":123" or ":123:4" or "#L123".
   loc = loc.replace(/#L\d+(-L?\d+)?$/i, "");
   loc = loc.replace(/:\d+(:\d+)?$/, "");
-  // Normalise identifiers inside a path. A bare number is an identifier only in a URL path
+  // Normalize identifiers inside a path. A bare number is an identifier only in a URL path
   // (a leading slash), so a resource id such as `/nodes/42` is templated while a port in an
   // nmap location such as `tcp/8444` keeps its number. A UUID or a long hex id is always an
   // identifier.
@@ -140,7 +140,7 @@ export function normaliseLocation(location) {
   if (method) loc = method[2];
   const urlPath = loc.startsWith("/");
   const parts = loc.split("/");
-  const normalised = parts.map((seg) => {
+  const normalized = parts.map((seg) => {
     if (/^\{[^/]+\}$/.test(seg)) return "{id}"; // already a template
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg)) return "{id}";
     if (/^[0-9a-f]{16,}$/i.test(seg)) return "{id}";
@@ -151,23 +151,23 @@ export function normaliseLocation(location) {
     if (urlPath && hashed && /[0-9A-Z_]/.test(hashed[2])) return `${hashed[1]}-{hash}.${hashed[3]}`;
     return seg;
   });
-  return prefix + normalised.join("/");
+  return prefix + normalized.join("/");
 }
 
 /**
  * A URL as a scanner reports it (`https://host:8443/api/v1/zones/7?x=1`) reduced to its
- * normalised path: no scheme, host, port, query or fragment.
+ * normalized path: no scheme, host, port, query or fragment.
  */
-export function normaliseUrl(url) {
+export function normalizeUrl(url) {
   const text = String(url ?? "").trim();
   const match = text.match(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*([^?#]*)/i);
   const pathOnly = match ? match[1] || "/" : text.split(/[?#]/, 1)[0];
-  return normaliseLocation(pathOnly);
+  return normalizeLocation(pathOnly);
 }
 
-/** `<tool>:<rule>:<location>` with the location normalised. */
+/** `<tool>:<rule>:<location>` with the location normalized. */
 export function fingerprint({ tool, rule, location }) {
-  return `${tool}:${rule}:${normaliseLocation(location)}`;
+  return `${tool}:${rule}:${normalizeLocation(location)}`;
 }
 
 /** How many example locations a site-wide finding and an informational row carry. */
@@ -175,7 +175,7 @@ const EXAMPLES = 3;
 
 /**
  * Every entry of the rows' `findings`, merged by fingerprint: `<tool>:<rule>:<location>` with
- * the location normalised (a URL to its path, identifiers and content hashes to templates),
+ * the location normalized (a URL to its path, identifiers and content hashes to templates),
  * and `site` for a site-wide ZAP rule. Entries with one fingerprint are one item at the
  * highest severity, with the locations they came from.
  */
@@ -188,11 +188,11 @@ function itemsFromEntries(rows) {
       const tool = entry.tool || row.tool || "row";
       const rule = String(entry.rule ?? "");
       const location = /^[a-z][a-z0-9+.-]*:\/\//i.test(entry.location ?? "")
-        ? normaliseUrl(entry.location)
-        : normaliseLocation(entry.location);
+        ? normalizeUrl(entry.location)
+        : normalizeLocation(entry.location);
       const siteWide = tool === "zap" && SITE_WIDE_ZAP_RULES.has(rule);
       const fp = fingerprint({ tool, rule, location: siteWide ? SITE_LOCATION : location });
-      const severity = normaliseSeverity(entry.severity);
+      const severity = normalizeSeverity(entry.severity);
       const known = byFingerprint.get(fp);
       if (known) {
         if (rank(severity) < rank(known.severity)) known.severity = severity;
@@ -242,7 +242,7 @@ export function findingsFromRows(rows, promoted = new Map()) {
   for (const item of itemsFromEntries(rows)) {
     if (isInformational(item, promoted)) continue;
     const { locations, siteWide, rule, ...finding } = item;
-    if (finding.severity === "Info") finding.severity = normaliseSeverity(promoted.get(finding.fingerprint));
+    if (finding.severity === "Info") finding.severity = normalizeSeverity(promoted.get(finding.fingerprint));
     if (siteWide) {
       finding.evidence = [
         ...finding.evidence,

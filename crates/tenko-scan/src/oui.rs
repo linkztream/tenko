@@ -2,9 +2,9 @@
 //!
 //! The table is `data/oui.tsv`: comment lines that start with `#` (the source, the date the
 //! file was generated and the number of entries), then one line per OUI with six hexadecimal
-//! digits, a tab and the name of the organisation, sorted by OUI. `data/generate-oui.mjs`
+//! digits, a tab and the name of the organization, sorted by OUI. `data/generate-oui.mjs`
 //! writes the file from the registry's CSV. Only the 24-bit MA-L blocks are in it; the
-//! smaller MA-M and MA-S blocks share an OUI between several organisations and are not
+//! smaller MA-M and MA-S blocks share an OUI between several organizations and are not
 //! looked up.
 
 use std::sync::OnceLock;
@@ -25,7 +25,7 @@ pub struct Dataset {
     pub entries: usize,
 }
 
-/// The organisation the OUI of `mac` is registered to; `None` for locally administered
+/// The organization the OUI of `mac` is registered to; `None` for locally administered
 /// or group addresses, for the all-zero address (its block is registered, but no device
 /// carries it) and for OUIs the table does not know.
 pub fn vendor(mac: MacAddr) -> Option<&'static str> {
@@ -218,7 +218,7 @@ mod tests {
 00005E\tICANN, IANA Department
 0A1B2C\tExample Devices
 \x20\x20
-ABCDEF\tOrganisation Test
+ABCDEF\tOrganization Test
 FFFFFF\tLast Entry
 ";
 
@@ -232,7 +232,7 @@ FFFFFF\tLast Entry
         assert_eq!(table.lookup(0x00_00_42), Some("Example Networks Ltd"));
         assert_eq!(table.lookup(0x00_00_5e), Some("ICANN, IANA Department"));
         assert_eq!(table.lookup(0x0a_1b_2c), Some("Example Devices"));
-        assert_eq!(table.lookup(0xab_cd_ef), Some("Organisation Test"));
+        assert_eq!(table.lookup(0xab_cd_ef), Some("Organization Test"));
         assert_eq!(table.lookup(0xff_ff_ff), Some("Last Entry"));
         for missing in [
             0x00_00_00, 0x00_00_41, 0x00_00_43, 0x00_00_5f, 0x0a_1b_2d, 0xff_ff_fe,

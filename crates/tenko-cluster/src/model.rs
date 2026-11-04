@@ -6,11 +6,11 @@
 //! | `cluster.nodes` | node id | [`NodeRecord`] |
 //! | `cluster.node_names` | lower-case name | node id |
 //! | `cluster.node_seq` | `()` | the last node id handed out |
-//! | `cluster.enrolments` | token id | [`EnrolmentRecord`] |
+//! | `cluster.enrolments` (spelling: stored key) | token id | [`EnrollmentRecord`] |
 //! | `cluster.revocations` | certificate serial (hex) | [`Revocation`] |
 //! | `cluster.controller_certs` | node id | [`ControllerCertRecord`] |
 //! | `cluster.members` | node id | [`MemberRecord`]: a controller of the Raft group and its cluster port |
-//! | `cluster.kek_transfers` | enrolment token id | [`KekTransferRecord`]: the one key transfer a join token allows |
+//! | `cluster.kek_transfers` | enrollment token id | [`KekTransferRecord`]: the one key transfer a join token allows |
 //! | `cluster.connections` | node id | [`ConnectionRecord`]: the controller a node is connected to |
 //!
 //! Heartbeats are kept in memory; `last_seen` is written at connect, at disconnect and at
@@ -37,7 +37,7 @@ pub const LAST_SEEN_INTERVAL_SECS: u64 = 300;
 /// The store tables of the node registry.
 pub mod tables {
     use super::{
-        ConnectionRecord, ControllerCertRecord, EnrolmentRecord, KekTransferRecord, MemberRecord,
+        ConnectionRecord, ControllerCertRecord, EnrollmentRecord, KekTransferRecord, MemberRecord,
         NodeRecord, Revocation, TableDef, Uuid,
     };
 
@@ -47,8 +47,8 @@ pub mod tables {
     pub const NODE_NAMES: TableDef<String, u64> = TableDef::new("cluster.node_names");
     /// The last node id handed out (ids are never reused).
     pub const NODE_SEQ: TableDef<(), u64> = TableDef::new("cluster.node_seq");
-    /// Enrolment tokens by id (only a digest of the secret).
-    pub const ENROLMENTS: TableDef<Uuid, EnrolmentRecord> = TableDef::new("cluster.enrolments");
+    /// Enrollment tokens by id (only a digest of the secret).
+    pub const ENROLLMENTS: TableDef<Uuid, EnrollmentRecord> = TableDef::new("cluster.enrolments"); // spelling: stored key
     /// Revoked certificates by serial (lower-case hex), until they expire.
     pub const REVOCATIONS: TableDef<String, Revocation> = TableDef::new("cluster.revocations");
     /// The cluster-port certificate of each controller.
@@ -57,7 +57,7 @@ pub mod tables {
     /// The controllers of the Raft group by node id, with the cluster port their peers
     /// dial. Peers resolve endpoints here, not from the Raft membership.
     pub const MEMBERS: TableDef<u64, MemberRecord> = TableDef::new("cluster.members");
-    /// Key transfers to joining controllers by the id of the enrolment token they used.
+    /// Key transfers to joining controllers by the id of the enrollment token they used.
     pub const KEK_TRANSFERS: TableDef<Uuid, KekTransferRecord> =
         TableDef::new("cluster.kek_transfers");
     /// The controller each connected node is connected to, written when the node connects
@@ -117,7 +117,7 @@ pub struct NodeRecord {
     pub name: String,
     /// Its roles, also in its certificate.
     pub roles: Vec<Role>,
-    /// The address the node gave at enrolment, else the address it enrolled from.
+    /// The address the node gave at enrollment, else the address it enrolled from.
     pub address: Option<String>,
     /// The VRF of its observations when a batch names none.
     pub vrf: Option<VrfId>,
@@ -129,7 +129,8 @@ pub struct NodeRecord {
     /// When the node enrolled.
     pub enrolled_at: Timestamp,
     /// The token it enrolled with.
-    pub enrolment: Uuid,
+    #[serde(alias = "enrolment")] // spelling: alias permanently (stored node records carry it)
+    pub enrollment: Uuid,
     /// The user who created that token.
     pub enrolled_by: Option<UserId>,
     /// When the certificate was last renewed.
@@ -157,9 +158,9 @@ impl NodeRecord {
     }
 }
 
-/// An enrolment token as the controller stores it: never the secret, only its digest.
+/// An enrollment token as the controller stores it: never the secret, only its digest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EnrolmentRecord {
+pub struct EnrollmentRecord {
     /// The token id (the middle part of the token text).
     pub id: Uuid,
     /// SHA-256 over the id and the secret.
@@ -180,7 +181,7 @@ pub struct EnrolmentRecord {
     pub used: Option<TokenUse>,
 }
 
-/// The enrolment a token was used for.
+/// The enrollment a token was used for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct TokenUse {
     /// The node that enrolled.
@@ -189,10 +190,10 @@ pub struct TokenUse {
     pub at: Timestamp,
 }
 
-/// The state of an enrolment token.
+/// The state of an enrollment token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum EnrolmentState {
+pub enum EnrollmentState {
     /// Waiting for a node.
     Pending,
     /// A node enrolled with it.
@@ -201,15 +202,15 @@ pub enum EnrolmentState {
     Expired,
 }
 
-impl EnrolmentRecord {
+impl EnrollmentRecord {
     /// The state at `now`.
-    pub fn state(&self, now: Timestamp) -> EnrolmentState {
+    pub fn state(&self, now: Timestamp) -> EnrollmentState {
         if self.used.is_some() {
-            EnrolmentState::Used
+            EnrollmentState::Used
         } else if now >= self.expires_at {
-            EnrolmentState::Expired
+            EnrollmentState::Expired
         } else {
-            EnrolmentState::Pending
+            EnrollmentState::Pending
         }
     }
 }
@@ -292,7 +293,7 @@ pub struct ConnectionRecord {
     pub major: u32,
 }
 
-/// The key transfer a joining controller received with its enrolment token (single use).
+/// The key transfer a joining controller received with its enrollment token (single use).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KekTransferRecord {
     /// The joining controller.
@@ -317,7 +318,7 @@ pub struct NodeView {
     /// Its roles: `probe`, `dns`, `dhcp`.
     #[schema(value_type = Vec<String>)]
     pub roles: Vec<Role>,
-    /// The address the node gave at enrolment, else the address it enrolled from.
+    /// The address the node gave at enrollment, else the address it enrolled from.
     pub address: Option<String>,
     /// The VRF of its observations when a batch names none.
     #[schema(value_type = Option<String>, format = Uuid)]
@@ -326,7 +327,7 @@ pub struct NodeView {
     pub certificate: CertificateRef,
     /// When the node enrolled.
     pub enrolled_at: Timestamp,
-    /// The user who created the enrolment token.
+    /// The user who created the enrollment token.
     #[schema(value_type = Option<String>, format = Uuid)]
     pub enrolled_by: Option<UserId>,
     /// When the certificate was last renewed.
@@ -413,9 +414,9 @@ pub struct ConnectionView {
     pub controller: Option<NodeId>,
 }
 
-/// An enrolment token as `GET /nodes/enrolments` shows it (never the secret).
+/// An enrollment token as `GET /nodes/enrollments` shows it (never the secret).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub struct EnrolmentView {
+pub struct EnrollmentView {
     /// The token id.
     #[schema(value_type = String, format = Uuid)]
     pub id: Uuid,
@@ -435,17 +436,17 @@ pub struct EnrolmentView {
     /// When it stops working.
     pub expires_at: Timestamp,
     /// `pending`, `used` or `expired`.
-    pub state: EnrolmentState,
-    /// The enrolment it was used for.
+    pub state: EnrollmentState,
+    /// The enrollment it was used for.
     pub used: Option<TokenUse>,
     /// Store revision of the record.
     #[schema(value_type = u64)]
     pub revision: tenko_core::Revision,
 }
 
-impl EnrolmentView {
+impl EnrollmentView {
     /// The view of a record at `now`.
-    pub fn new(record: EnrolmentRecord, revision: tenko_core::Revision, now: Timestamp) -> Self {
+    pub fn new(record: EnrollmentRecord, revision: tenko_core::Revision, now: Timestamp) -> Self {
         let state = record.state(now);
         Self {
             id: record.id,
@@ -462,10 +463,10 @@ impl EnrolmentView {
     }
 }
 
-/// Body of `POST /nodes/enrolments`.
+/// Body of `POST /nodes/enrollments`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct NewEnrolment {
+pub struct NewEnrollment {
     /// The roles the node may take (`probe`, `dns`, `dhcp`); default `probe`.
     #[serde(default)]
     #[schema(value_type = Vec<String>)]
@@ -482,11 +483,11 @@ pub struct NewEnrolment {
     pub expires_in_secs: Option<u64>,
 }
 
-/// Answer of `POST /nodes/enrolments`: the token, shown once.
+/// Answer of `POST /nodes/enrollments`: the token, shown once.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub struct CreatedEnrolment {
+pub struct CreatedEnrollment {
     /// The stored token.
-    pub enrolment: EnrolmentView,
+    pub enrollment: EnrollmentView,
     /// The token text. It is shown only in this answer and cannot be read again.
     pub token: String,
     /// The SHA-256 fingerprint of the internal CA root, for `--ca-fingerprint`.
@@ -495,11 +496,11 @@ pub struct CreatedEnrolment {
     pub command: String,
 }
 
-/// Body of `POST /nodes/enrol`: a node presents its token and its certificate request.
+/// Body of `POST /nodes/enroll`: a node presents its token and its certificate request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EnrolRequest {
-    /// The enrolment token.
+pub struct EnrollRequest {
+    /// The enrollment token.
     pub token: String,
     /// A PKCS#10 certificate signing request over an ECDSA P-256 key, PEM.
     pub csr: String,
@@ -523,9 +524,9 @@ pub struct EnrolRequest {
     pub majors: Vec<u32>,
 }
 
-/// Answer of `POST /nodes/enrol`.
+/// Answer of `POST /nodes/enroll`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub struct EnrolResponse {
+pub struct EnrollResponse {
     /// The node as registered.
     pub node: NodeView,
     /// The node certificate, PEM, leaf first.
@@ -572,7 +573,7 @@ pub struct NodeMismatch {
     pub mismatch: MismatchRecord,
 }
 
-/// Parses a node address given at enrolment: an IP address or a host name, at most 253
+/// Parses a node address given at enrollment: an IP address or a host name, at most 253
 /// characters, without spaces or control characters.
 pub fn valid_address(text: &str) -> bool {
     let text = text.trim();
@@ -593,10 +594,10 @@ mod tests {
     }
 
     #[test]
-    fn enrolment_state_follows_use_and_time() {
-        let mut record = EnrolmentRecord {
+    fn enrollment_state_follows_use_and_time() {
+        let mut record = EnrollmentRecord {
             id: Uuid::nil(),
-            digest: crate::token::EnrolmentToken::from_parts(Uuid::nil(), [7; 32]).digest(),
+            digest: crate::token::EnrollmentToken::from_parts(Uuid::nil(), [7; 32]).digest(),
             name: None,
             roles: vec![Role::Probe],
             vrf: None,
@@ -607,11 +608,11 @@ mod tests {
         };
         assert_eq!(
             record.state(at("2026-10-10T08:30:00Z")),
-            EnrolmentState::Pending
+            EnrollmentState::Pending
         );
         assert_eq!(
             record.state(at("2026-10-10T09:00:00Z")),
-            EnrolmentState::Expired
+            EnrollmentState::Expired
         );
         record.used = Some(TokenUse {
             node: NodeId(1001),
@@ -619,8 +620,58 @@ mod tests {
         });
         assert_eq!(
             record.state(at("2026-10-10T10:00:00Z")),
-            EnrolmentState::Used
+            EnrollmentState::Used
         );
+    }
+
+    #[test]
+    fn a_node_record_stored_by_0_0_11_still_reads() {
+        let certificate = CertificateRef {
+            serial: "0a".to_owned(),
+            sha256: "00".repeat(32),
+            not_before: at("2026-10-10T08:00:00Z"),
+            not_after: at("2026-11-10T08:00:00Z"),
+        };
+        let record = NodeRecord {
+            id: NodeId(1001),
+            name: "probe-dmz".to_owned(),
+            roles: vec![Role::Probe],
+            address: Some("192.0.2.20".to_owned()),
+            vrf: None,
+            certificate: certificate.clone(),
+            serials: vec![certificate],
+            enrolled_at: at("2026-10-10T08:00:00Z"),
+            enrollment: Uuid::from_u128(7),
+            enrolled_by: None,
+            renewed_at: None,
+            last_seen: None,
+            version: Some("0.0.11".to_owned()),
+            protocol: ProtocolState::default(),
+        };
+        let new = tables::NODES.encode(&record).expect("cbor").to_vec();
+        // The bytes 0.0.11 wrote: the same map with the CBOR text key of the old name.
+        let new_key = cbor_text("enrollment");
+        let old_key = cbor_text("enrolment"); // spelling: alias permanently
+        let at_key = new
+            .windows(new_key.len())
+            .position(|window| window == new_key)
+            .expect("the key");
+        let mut old = new[..at_key].to_vec();
+        old.extend_from_slice(&old_key);
+        old.extend_from_slice(&new[at_key + new_key.len()..]);
+        assert_eq!(
+            tables::NODES.decode(&old).expect("an old record decodes"),
+            record
+        );
+    }
+
+    /// A short CBOR text string: the header byte (major type 3, length below 24) and the bytes.
+    fn cbor_text(text: &str) -> Vec<u8> {
+        let length = u8::try_from(text.len()).expect("short");
+        assert!(length < 24);
+        let mut out = vec![0x60 | length];
+        out.extend_from_slice(text.as_bytes());
+        out
     }
 
     #[test]

@@ -1,5 +1,5 @@
 // One device, docked beside the map (/topology/<id>): what it is and what the sources know
-// about it, its ports and what hangs on each, its neighbours, the host of intent with its
+// about it, its ports and what hangs on each, its neighbors, the host of intent with its
 // addresses, the networks of its controller when it is a controller's gateway, links to the
 // host page and the observations, and the path actions. The panel follows the `discovery`
 // and `ipam` topics, so a change of the graph shows up at once.
@@ -15,13 +15,13 @@ import { TimeAgo } from "../grid/cells";
 import { formatList, t } from "../i18n";
 import type { VlanStyle } from "../ipam/vlan/palette";
 import { VlanChip } from "../ipam/vlan/VlanChip";
-import { getNode, isNodeGone, type Neighbour, type NetworkInView, type TopologyNodeView, type TopologyPort } from "./api";
+import { getNode, isNodeGone, type Neighbor, type NetworkInView, type TopologyNodeView, type TopologyPort } from "./api";
 import { edgeWord, kindWord, portStateWord, portTitle, sourceWord } from "./model";
 import { NetworkList } from "./NetworkList";
 
 export interface NodePanelProps {
   id: string;
-  /** Selects another device (a neighbour). */
+  /** Selects another device (a neighbor). */
   onSelect: (id: string) => void;
   onClose: () => void;
   /** The device that starts a path between two devices, when one was remembered. */
@@ -50,11 +50,11 @@ export function controllersOf(sources: readonly string[]): string[] {
 }
 
 /** The ports, edge kind and wireless network of a link, in words. */
-function linkText(n: Neighbour): string {
+function linkText(n: Neighbor): string {
   const parts: string[] = [edgeWord(n.edge_kind)];
-  if (n.port) parts.push(t("topology.neighbour.local", { port: n.port }));
-  if (n.remote_port) parts.push(t("topology.neighbour.remote", { port: n.remote_port }));
-  if (n.ssid) parts.push(t("topology.neighbour.ssid", { ssid: n.ssid }));
+  if (n.port) parts.push(t("topology.neighbor.local", { port: n.port }));
+  if (n.remote_port) parts.push(t("topology.neighbor.remote", { port: n.remote_port }));
+  if (n.ssid) parts.push(t("topology.neighbor.ssid", { ssid: n.ssid }));
   // U7: a link only a MAC table names says where the device is learned, not that it hangs there.
   if (n.inferred) parts.push(t("topology.edge.inferred"));
   return formatList(parts, "unit");
@@ -70,7 +70,7 @@ export function NodePanel(props: NodePanelProps) {
   });
   const view = () => live.latest();
 
-  // The port whose neighbours are listed: one more read, for that port only.
+  // The port whose neighbors are listed: one more read, for that port only.
   const [openPort, setOpenPort] = createSignal<string | null>(null);
   const [portView] = createResource(
     () => {
@@ -79,29 +79,29 @@ export function NodePanel(props: NodePanelProps) {
     },
     ({ port }) => getNode(props.id, port),
   );
-  const portNeighbours = (): Neighbour[] => portView()?.ports[0]?.neighbours ?? [];
+  const portNeighbors = (): Neighbor[] => portView()?.ports[0]?.neighbors ?? [];
   const listId = createUniqueId();
 
   const intentVlan = (vid: number | null | undefined) =>
     vid === null || vid === undefined ? undefined : { vid, name: props.vlanName(vid), style: props.vlanStyle(vid) };
 
-  const NeighbourButton = (p: { neighbour: Neighbour; testid: string }) => (
+  const NeighborButton = (p: { neighbor: Neighbor; testid: string }) => (
     <li>
       <button
         type="button"
-        class="neighbour"
+        class="neighbor"
         data-testid={p.testid}
-        data-id={p.neighbour.node}
-        data-edge={p.neighbour.edge}
-        data-kind={p.neighbour.kind}
-        onClick={() => props.onSelect(p.neighbour.node)}
+        data-id={p.neighbor.node}
+        data-edge={p.neighbor.edge}
+        data-kind={p.neighbor.kind}
+        onClick={() => props.onSelect(p.neighbor.node)}
       >
-        <span class="neighbour-name">
-          <strong>{p.neighbour.label}</strong>
-          <span class="muted">{kindWord(p.neighbour.kind)}</span>
+        <span class="neighbor-name">
+          <strong>{p.neighbor.label}</strong>
+          <span class="muted">{kindWord(p.neighbor.kind)}</span>
         </span>
-        <span class="neighbour-link muted">{linkText(p.neighbour)}</span>
-        <Show when={p.neighbour.vlan}>
+        <span class="neighbor-link muted">{linkText(p.neighbor)}</span>
+        <Show when={p.neighbor.vlan}>
           {(vid) => <VlanChip vid={vid()} name={props.vlanName(vid())} style={props.vlanStyle(vid())} />}
         </Show>
       </button>
@@ -110,7 +110,7 @@ export function NodePanel(props: NodePanelProps) {
 
   const PortItem = (p: { port: TopologyPort }) => {
     const open = () => openPort() === p.port.port;
-    const count = () => p.port.neighbours.length;
+    const count = () => p.port.neighbors.length;
     const vlan = () => intentVlan(p.port.native_vlan);
     return (
       <li class="topology-port" data-testid="node-port" data-key={p.port.port}>
@@ -148,7 +148,7 @@ export function NodePanel(props: NodePanelProps) {
           </button>
         </div>
         <Show when={open()}>
-          <div id={`${listId}-${p.port.port}`} data-testid="port-neighbours" data-key={p.port.port}>
+          <div id={`${listId}-${p.port.port}`} data-testid="port-neighbors" data-key={p.port.port}>
             <Switch>
               <Match when={portView.error}>
                 <ErrorNotice error={portView.error} />
@@ -158,12 +158,12 @@ export function NodePanel(props: NodePanelProps) {
                   {t("common.loading")}
                 </p>
               </Match>
-              <Match when={portNeighbours().length === 0}>
+              <Match when={portNeighbors().length === 0}>
                 <p class="muted">{t("topology.port.nothing")}</p>
               </Match>
               <Match when={true}>
-                <ul class="neighbour-list" aria-label={t("topology.port.connected", { port: p.port.port })}>
-                  <For each={portNeighbours()}>{(n) => <NeighbourButton neighbour={n} testid="port-neighbour" />}</For>
+                <ul class="neighbor-list" aria-label={t("topology.port.connected", { port: p.port.port })}>
+                  <For each={portNeighbors()}>{(n) => <NeighborButton neighbor={n} testid="port-neighbor" />}</For>
                 </ul>
               </Match>
             </Switch>
@@ -452,14 +452,14 @@ export function NodePanel(props: NodePanelProps) {
                   </Show>
                 </section>
 
-                <section class="section" aria-labelledby={`${listId}-neighbours`}>
-                  <h3 id={`${listId}-neighbours`}>
-                    {t("topology.panel.neighbours")}
-                    <span class="more muted">{v().neighbours.length}</span>
+                <section class="section" aria-labelledby={`${listId}-neighbors`}>
+                  <h3 id={`${listId}-neighbors`}>
+                    {t("topology.panel.neighbors")}
+                    <span class="more muted">{v().neighbors.length}</span>
                   </h3>
-                  <Show when={v().neighbours.length > 0} fallback={<p class="muted">{t("topology.panel.neighbours_none")}</p>}>
-                    <ul class="neighbour-list" data-testid="node-neighbours" aria-label={t("topology.panel.neighbours")}>
-                      <For each={v().neighbours}>{(n) => <NeighbourButton neighbour={n} testid="neighbour" />}</For>
+                  <Show when={v().neighbors.length > 0} fallback={<p class="muted">{t("topology.panel.neighbors_none")}</p>}>
+                    <ul class="neighbor-list" data-testid="node-neighbors" aria-label={t("topology.panel.neighbors")}>
+                      <For each={v().neighbors}>{(n) => <NeighborButton neighbor={n} testid="neighbor" />}</For>
                     </ul>
                   </Show>
                 </section>

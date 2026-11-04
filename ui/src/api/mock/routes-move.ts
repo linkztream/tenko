@@ -469,7 +469,7 @@ const moves = http.post("/api/v1/moves", async ({ request }) => {
     }
     if ((preview.unacknowledged ?? []).length > 0) {
       const codes = (preview.unacknowledged ?? []).join(",");
-      return problem("ipam.plan.unacknowledged", 409, `the move needs an acknowledgement of: ${codes}`, { codes });
+      return problem("ipam.plan.unacknowledged", 409, `the move needs an acknowledgment of: ${codes}`, { codes });
     }
 
     // The IPAM intent of every object, as one change, then one job per object.

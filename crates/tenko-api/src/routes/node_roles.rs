@@ -23,7 +23,7 @@
 //! - The `controller` role follows the cluster membership: it is never taken from the last
 //!   controller (`node.roles.last_controller`), and otherwise neither taken nor given by
 //!   this endpoint (`node.roles.controller`): a controller joins with a controller
-//!   enrolment token and leaves with `DELETE /cluster/members/{id}`.
+//!   enrollment token and leaves with `DELETE /cluster/members/{id}`.
 //! - A node without the controller role runs the `probe` role and only that role until
 //!   Phase 5 (`node.roles.unsupported`), the same rule as `tenko serve` at start.
 //!
@@ -220,7 +220,7 @@ enum Kind {
     Own,
     /// Another controller.
     Controller,
-    /// An enrolled data-plane node with the roles of its enrolment.
+    /// An enrolled data-plane node with the roles of its enrollment.
     Enrolled(RoleSet),
 }
 
@@ -400,7 +400,7 @@ impl NodeRoleService {
                 "node.roles.controller",
                 409,
                 "the controller role follows the cluster membership: a controller joins with a \
-                 controller enrolment token",
+                 controller enrollment token",
             ));
         }
         if !kind.is_controller() {

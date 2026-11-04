@@ -616,7 +616,7 @@ async fn the_list_filters_sorts_and_pages() {
     let error = query::list(
         view.as_ref(),
         &ProposalQuery {
-            sort: vec!["colour".to_owned()],
+            sort: vec!["color".to_owned()],
             ..ProposalQuery::default()
         },
     )

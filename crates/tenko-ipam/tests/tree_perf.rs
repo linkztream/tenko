@@ -376,12 +376,12 @@ async fn the_tree_of_a_sixteen_equivalent_space_is_fast() {
     assert!(applied.revision > revision);
     let after = service.tree().utilization(target).expect("utilization");
     assert_eq!((after.used, after.free), (241, 4));
-    let neighbour = service
+    let neighbor = service
         .tree()
         .utilization(space.networks[8])
         .expect("utilization");
     assert_eq!(
-        (neighbour.used, neighbour.free),
+        (neighbor.used, neighbor.free),
         (240, 5),
         "other networks stay as they were"
     );

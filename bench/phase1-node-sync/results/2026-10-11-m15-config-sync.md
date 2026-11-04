@@ -23,7 +23,7 @@ Measurement M15 of the Slice 3 plan (`docs/plans/slice-3-plan.md`, section 5): a
 
 ## Source and build
 
-- Git commit: the build started at `2f0864d1617365d42cb40d438dfad2d787553ab9`; the runs were done with HEAD at `1c8e8f0d21923090c3a2d2292777e9d587f5e4d4` (latency and cap runs, recorded in the raw `result.json`) and later `41a442507a740cabef648f68e0996a9797ae0bce` (the two extra runs). The working tree was shared with other builders. The commits made between the start of the build and the runs touch tests and documents only under `crates/` (`git diff --stat 2f0864d HEAD -- crates` lists test files of `tenko-cluster`), and the tree had no uncommitted change in product code besides the deletion of `crates/tenko-scan/src/control/tests.rs` in favour of a `tests/` directory, so the binary is the code of those commits; this was not proven by a rebuild.
+- Git commit: the build started at `2f0864d1617365d42cb40d438dfad2d787553ab9`; the runs were done with HEAD at `1c8e8f0d21923090c3a2d2292777e9d587f5e4d4` (latency and cap runs, recorded in the raw `result.json`) and later `41a442507a740cabef648f68e0996a9797ae0bce` (the two extra runs). The working tree was shared with other builders. The commits made between the start of the build and the runs touch tests and documents only under `crates/` (`git diff --stat 2f0864d HEAD -- crates` lists test files of `tenko-cluster`), and the tree had no uncommitted change in product code besides the deletion of `crates/tenko-scan/src/control/tests.rs` in favor of a `tests/` directory, so the binary is the code of those commits; this was not proven by a rebuild.
 - Build: `cd ui && npm ci && npm run build`, then `cargo build -p tenko --release --locked` (24 min 12 s on 4 shared cores). `ui/dist` was built first, `TENKO_UI_STUB` was not set. It is a release build.
 - Binary: `target/release/tenko`, 106,706,136 bytes, `tenko 0.0.1`.
 
@@ -33,7 +33,7 @@ Everything runs on 127.0.0.1. Two processes started by the driver:
 
 ```
 tenko serve --config $TMP/tenko-m15-*/controller/tenko.toml --stop-on-eof          controller
-tenko node enrol --controller https://localhost:<port> --token <token> --ca-fingerprint <sha256> --name probe-m15.example.test --address 192.0.2.20 --data-dir $TMP/tenko-m15-*/probe/data
+tenko node enroll --controller https://localhost:<port> --token <token> --ca-fingerprint <sha256> --name probe-m15.example.test --address 192.0.2.20 --data-dir $TMP/tenko-m15-*/probe/data
 TENKO_LOG__LEVEL=info tenko serve --roles probe --stop-on-eof --data-dir $TMP/tenko-m15-*/probe/data     probe
 node bench/phase1-node-sync/m15-config-sync.mjs --changes 30                                              driver (latency and both caps)
 node bench/phase1-node-sync/m15-config-sync.mjs --only cap --caps 256 --cap-runs 1 --prefixes 256=46000   largest valid configuration

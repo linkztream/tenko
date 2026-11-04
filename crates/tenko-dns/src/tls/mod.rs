@@ -517,7 +517,7 @@ fn trusted(networks: &[IpNet], address: IpAddr) -> bool {
     networks.iter().any(|network| network.contains(&address))
 }
 
-/// Accepts connections until `stop` is cancelled.
+/// Accepts connections until `stop` is canceled.
 async fn accept<R: Resolver + 'static>(
     socket: TcpListener,
     shared: Arc<Shared<R>>,
