@@ -9922,6 +9922,9 @@
       <unit id="errors.cluster.enrollment.not_found">
         <segment><source>The enrollment token does not exist.</source><target>Registreringstoken finns inte.</target></segment>
       </unit>
+      <unit id="errors.cluster.enrollment.wrong_controller">
+        <segment><source>The enrollment token was created by another controller.</source><target>Registreringstoken skapades av en annan controller.</target></segment>
+      </unit>
       <unit id="errors.cluster.node.not_found">
         <segment><source>The node is not enrolled.</source><target>Noden är inte registrerad.</target></segment>
       </unit>

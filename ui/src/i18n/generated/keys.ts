@@ -3961,6 +3961,7 @@ export type MessageKey =
   | "errors.cluster.enrollment.not_found"
   | "errors.cluster.enrollment.random"
   | "errors.cluster.enrollment.roles"
+  | "errors.cluster.enrollment.wrong_controller"
   | "errors.cluster.member.changing"
   | "errors.cluster.member.even_voters"
   | "errors.cluster.member.last_voter"
@@ -13351,6 +13352,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.cluster.enrollment.not_found",
   "errors.cluster.enrollment.random",
   "errors.cluster.enrollment.roles",
+  "errors.cluster.enrollment.wrong_controller",
   "errors.cluster.member.changing",
   "errors.cluster.member.even_voters",
   "errors.cluster.member.last_voter",

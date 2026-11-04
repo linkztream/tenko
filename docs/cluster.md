@@ -50,7 +50,13 @@ Every field is optional. The command line flags are `--roles` (comma-separated),
 
 The answer shows the token once and carries `Cache-Control: no-store`. It holds the stored token record, the SHA-256 fingerprint of the CA root and the command line to run on the node. `tenko node enroll-token` prints the token on standard output and the other lines as notes, so a script can capture the token. The controller keeps only a digest, SHA-256 over a fixed label, the token id and the secret, so a copy of its store reveals no token.
 
-The token text has the form `tnk1.<id>.<secret>`: the prefix `tnk1`, the id of the token record as 32 hexadecimal digits, and the secret as 43 characters of unpadded base64url. Creating a token opens the cluster port when it starts on demand, and the port closes again once no token is waiting and no node is enrolled (section 7.2).
+The token text has the form `tnk2.<id>.<secret>.<fingerprint>`, 125 characters: the prefix `tnk2`, the id of the token record as 32 hexadecimal digits, the secret as 43 characters of unpadded base64url, and the SHA-256 of the controller's CA root (its DER encoding) as 43 characters of unpadded base64url. The fingerprint is not secret and is not part of the digest; it is the same fingerprint the answer shows in hexadecimal, carried in the token so that the node can verify the controller without a separate step. Every token a controller creates is a `tnk2` token, since a controller always runs its internal CA (it signs the node certificates). For example:
+
+```
+tnk2.0190d1c2000070008000000000000001.QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI.47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU
+```
+
+Tokens created up to 0.0.11 have the form `tnk1.<id>.<secret>`, 81 characters, without the fingerprint. A controller still accepts them. Without `--ca-fingerprint`, `tenko node enroll` trusts the CA root on first use with such a token, with a warning, until 0.0.13, which refuses a `tnk1` token without the option (section 1.2). Creating a token opens the cluster port when it starts on demand, and the port closes again once no token is waiting and no node is enrolled (section 7.2).
 
 `GET /api/v1/nodes/enrollments` lists the tokens, newest first, with the state `pending`, `used` or `expired` and the node a used token enrolled; it never shows the token text. Used and expired tokens stay listed for seven days. `DELETE /api/v1/nodes/enrollments/{id}` withdraws a token, whatever its state.
 
@@ -59,18 +65,18 @@ Up to 0.0.11 these names were spelled with one l: the paths `/api/v1/nodes/enrol
 
 ### 1.2 Enrolling the node
 
-On the node, run the command that the token answer printed:
+On the node, run the command that the token answer printed, or give the token alone, which carries the CA fingerprint:
 
 ```
-tenko node enroll --controller https://ddi.example.net:8443 --token <token> \
-  --ca-fingerprint <sha256> --name probe-dmz --address 192.0.2.20
+tenko node enroll --controller https://ddi.example.net:8443 --token tnk2.… \
+  --name probe-dmz --address 192.0.2.20
 ```
 
 | Option | Meaning |
 |---|---|
-| `--controller URL` | Required. The URL of the controller as administrators open it. A plain `http://` URL needs `--ca-fingerprint`, because nothing else protects the token |
+| `--controller URL` | Required. The URL of the controller as administrators open it. A plain `http://` URL needs a `tnk2` token or `--ca-fingerprint`, because nothing else protects the token |
 | `--token`, `--token-file`, `TENKO_ENROLL_TOKEN` | The token, or a file whose first line is the token, or the environment variable |
-| `--ca-fingerprint` | The SHA-256 of the CA root, hexadecimal, colons allowed. The controller prints it at start (TLS mode a) and shows it with every token |
+| `--ca-fingerprint` | The SHA-256 of the CA root, hexadecimal, colons allowed. The controller prints it at start (TLS mode a) and shows it with every token. A `tnk2` token carries it already: the option is then not needed, and when given it must agree with the token's fingerprint, else the command stops before it contacts the controller. With a `tnk1` token it is the only fingerprint |
 | `--name` | The node name; the name of the token wins when it has one. Default: the host name |
 | `--roles` | The roles the node runs; each must be allowed by the token. Default: the roles of the token |
 | `--address` | The address the controller shows for the node. Default: the address the controller sees the request come from |
@@ -79,20 +85,21 @@ tenko node enroll --controller https://ddi.example.net:8443 --token <token> \
 
 The steps:
 
-1. The command checks the form of the token.
-2. It fetches `GET /api/v1/system/ca-root` without trusting the server yet and compares the SHA-256 of the root with `--ca-fingerprint`. Without the option it trusts the root on first use and prints a warning with the fingerprint, which the administrator should compare with the one the controller printed. From then on the API connection trusts only that root. When the API certificate is imported or TLS ends at a reverse proxy, that route answers 404 and the system roots verify the API connection instead; the fingerprint is then checked against the CA root in the answer of step 4.
+1. The command checks the form of the token, and that `--ca-fingerprint`, when given, agrees with the fingerprint of a `tnk2` token.
+2. It fetches `GET /api/v1/system/ca-root` without trusting the server yet and compares the SHA-256 of the root with the fingerprint of the token, or with `--ca-fingerprint` for a `tnk1` token. When they differ the command stops and names the first eight characters of both fingerprints: the token comes from another controller, or something answers in the controller's place. Only a `tnk1` token without the option trusts the root on first use and prints a warning with the fingerprint, which the administrator should compare with the one the controller printed (until 0.0.13). From then on the API connection trusts only that root. When the API certificate is imported or TLS ends at a reverse proxy, that route answers 404 and the system roots verify the API connection instead; the fingerprint is then checked against the CA root in the answer of step 4.
 3. The node generates an ECDSA P-256 key, which never leaves the node, and sends a PKCS#10 certificate request with the token, its name, roles, address, software version and the protocol majors it implements to `POST /api/v1/nodes/enroll`. The route is public: the token is the credential.
 4. The controller answers with the node id, the certificate, the CA root, the cluster endpoints and the heartbeat interval. The node checks the root against the fingerprint and against the root of step 2 once more and writes its files (section 1.4). If this last check fails, the node is registered on the controller but not set up on the node; the command says so, and the administrator revokes the node.
 
 Then `tenko serve --roles probe --data-dir <dir>` starts the node process. In Phase 1 only the `probe` role runs without the controller role; a node enrolled for `dns` or `dhcp` is registered, but its process refuses to start until those engines exist. A node needs neither the store nor the vault.
 
-The command exits with status 9 when a fingerprint does not match, 6 when the controller refuses the token (401), 5 for other refusals of the API, 7 when the controller cannot be reached and 2 when the node is enrolled already.
+The command exits with status 9 when a fingerprint does not match or `--ca-fingerprint` disagrees with the token, 6 when the controller refuses the token (401), 5 for other refusals of the API, 7 when the controller cannot be reached and 2 when the node is enrolled already.
 
 ### 1.3 What the controller checks
 
 | Check | Error code |
 |---|---|
 | The token has the right form, its id exists and its secret matches. A wrong secret and an unknown id give the same answer | `cluster.enrollment.invalid_token` |
+| The CA fingerprint of a `tnk2` token is this controller's: a token taken to another controller is a misdirected enrollment. A `tnk1` token has none and passes | `cluster.enrollment.wrong_controller` |
 | The token is unused | `cluster.enrollment.used` |
 | The token has not expired | `cluster.enrollment.expired` |
 | Every requested role is allowed by the token | `cluster.enrollment.roles` |
@@ -377,6 +384,7 @@ Up to 0.0.11 the enrollment codes were spelled with one l (`cluster.enrolment.*`
 | Code | Status | Meaning |
 |---|---|---|
 | `cluster.enrollment.invalid_token` | 401 | The token is malformed, unknown or has a wrong secret |
+| `cluster.enrollment.wrong_controller` | 401 | The CA fingerprint of the token is not this controller's: the token was created by another controller |
 | `cluster.enrollment.used` | 401 | The token was used already |
 | `cluster.enrollment.expired` | 401 | The token expired |
 | `cluster.enrollment.roles` | 403 at enrollment, 422 at creation | The token does not allow a requested role; a token for `controller` is refused |
@@ -469,12 +477,12 @@ Terms: a **member** is a controller in the Raft group. A **voter** counts for th
 
 The first controller is an ordinary installation. Each further controller joins it, on its own host and with an empty data directory:
 
-1. An administrator who signed in within the last five minutes creates a controller token on any controller (the token lets a host receive the installation's key encryption keys), with the API: `POST /api/v1/nodes/enrollments` with `{"roles": ["controller"]}`. The token carries the role `controller` alone and lives at most an hour. A personal API token cannot create it (403 `auth.step_up_required`). The answer shows the command to run, with the token and the CA fingerprint filled in.
+1. An administrator who signed in within the last five minutes creates a controller token on any controller (the token lets a host receive the installation's key encryption keys), with the API: `POST /api/v1/nodes/enrollments` with `{"roles": ["controller"]}`. The token carries the role `controller` alone and lives at most an hour. A personal API token cannot create it (403 `auth.step_up_required`). The answer shows the command to run, with the token and the CA fingerprint filled in; the token carries the fingerprint as well, so `--ca-fingerprint` may be left out (section 1.2).
 2. On the new host:
 
    ```sh
    tenko cluster join --controller https://ddi.example.test:8443 \
-     --token tnk1.… --ca-fingerprint 3f9a… \
+     --token tnk2.… --ca-fingerprint 3f9a… \
      --address controller-2.example.test:8444 --data-dir /var/lib/tenko \
      --config /etc/tenko/tenko.toml
    ```

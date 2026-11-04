@@ -415,7 +415,7 @@ async fn delete_enrollment(
     responses(
         (status = 201, description = "The node, its certificate and the CA root (`Cache-Control: no-store`)", body = EnrollResponse),
         (status = 400, description = "The body is not valid JSON (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "The token is not valid (`cluster.enrollment.invalid_token`), was used (`cluster.enrollment.used`) or expired (`cluster.enrollment.expired`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "The token is not valid (`cluster.enrollment.invalid_token`), was created by another controller (`cluster.enrollment.wrong_controller`), was used (`cluster.enrollment.used`) or expired (`cluster.enrollment.expired`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The token does not allow a requested role (`cluster.enrollment.roles`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "No common protocol major (`cluster.protocol.unsupported`) or the name is taken (`cluster.node.name_taken`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The certificate request (`cluster.ca.invalid_csr`), the name (`cluster.node.name`) or the address (`cluster.node.address`) is not usable", body = ProblemDetails, content_type = "application/problem+json")
@@ -458,6 +458,7 @@ mod tests {
     use tenko_cluster::{
         ca::{CaPolicy, InternalCa, generate_csr, pem_block},
         registry::RegistryConfig,
+        token::{CaFingerprint, EnrollmentToken},
     };
     use tenko_core::{Authorizer, Denied, DenyReason, RequestCtx, SystemComponent};
     use tenko_jobs::{EngineConfig, JobEngine};
@@ -604,11 +605,19 @@ mod tests {
         assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
         assert_eq!(created.headers[header::CACHE_CONTROL], "no-store");
         let text = created.body["token"].as_str().expect("token");
-        assert!(text.starts_with("tnk1.") && text.len() == 81, "{text}");
+        assert!(text.starts_with("tnk2.") && text.len() == 125, "{text}");
         let fingerprint = created.body["ca_fingerprint"]
             .as_str()
             .expect("fingerprint");
         assert_eq!(fingerprint.len(), 64);
+        // The token carries the fingerprint the answer shows.
+        assert_eq!(
+            EnrollmentToken::parse(text)
+                .expect("a token")
+                .ca_fingerprint()
+                .map(|carried| carried.to_hex()),
+            Some(fingerprint.to_owned())
+        );
         let command = created.body["command"].as_str().expect("command");
         assert!(
             command.contains(text) && command.contains(fingerprint),
@@ -810,6 +819,63 @@ mod tests {
         send(&router, "DELETE", "/nodes/1001", None)
             .await
             .assert_problem(404, "cluster.node.not_found");
+    }
+
+    /// The enrollment request for `token` with a fresh certificate request.
+    fn enroll_request(token: &str) -> Value {
+        json!({
+            "token": token,
+            "csr": csr(),
+            "address": "192.0.2.21",
+            "version": "0.0.1",
+            "majors": [1],
+        })
+    }
+
+    #[tokio::test]
+    async fn a_token_of_another_controller_is_refused_and_a_tnk1_token_enrolls() {
+        let router = router(None, true).await;
+
+        // The same id and secret, but the fingerprint of another CA root.
+        let text = token(&router).await;
+        let ours = EnrollmentToken::parse(&text).expect("a token");
+        let foreign = EnrollmentToken::parse(&text)
+            .expect("a token")
+            .with_ca_fingerprint(CaFingerprint::of_der(b"another controller's CA root"));
+        assert_ne!(foreign.ca_fingerprint(), ours.ca_fingerprint());
+        send(
+            &router,
+            "POST",
+            "/nodes/enroll",
+            Some(enroll_request(&foreign.to_text())),
+        )
+        .await
+        .assert_problem(401, "cluster.enrollment.wrong_controller");
+
+        // The refusal did not use the token: with the right fingerprint it enrolls.
+        let enrolled = send(
+            &router,
+            "POST",
+            "/nodes/enroll",
+            Some(enroll_request(&text)),
+        )
+        .await;
+        assert_eq!(enrolled.status, StatusCode::CREATED, "{}", enrolled.body);
+
+        // A token in the format of 0.0.11 has no fingerprint and enrolls as before.
+        let text = token(&router).await;
+        let (tnk1, _) = text.rsplit_once('.').expect("four parts");
+        let tnk1 = tnk1.replacen("tnk2.", "tnk1.", 1);
+        assert_eq!(tnk1.len(), 81);
+        let enrolled = send(
+            &router,
+            "POST",
+            "/nodes/enroll",
+            Some(enroll_request(&tnk1)),
+        )
+        .await;
+        assert_eq!(enrolled.status, StatusCode::CREATED, "{}", enrolled.body);
+        assert_eq!(enrolled.body["node"]["id"], 1002);
     }
 
     #[tokio::test]

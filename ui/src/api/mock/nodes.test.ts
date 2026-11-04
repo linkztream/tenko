@@ -133,15 +133,15 @@ describe("enrollment tokens", () => {
     const list = await get<S["EnrollmentList"]>(`${V}/nodes/enrollments`);
     expect(list.status).toBe(200);
     expect(list.body.items.map((e) => [e.id, e.state, e.name])).toEqual([[NODE_IDS.token, "pending", "probe-garage"]]);
-    expect(JSON.stringify(list.body)).not.toContain("tnk1.");
+    expect(JSON.stringify(list.body)).not.toContain("tnk2.");
   });
 
   it("creates a token once, with the fingerprint and the command, and never shows it again", async () => {
     const made = await post<S["CreatedEnrollment"]>(`${V}/nodes/enrollments`, { roles: ["probe"], name: "probe-attic", expires_in_secs: 600 });
     expect(made.status).toBe(201);
     expect(made.headers.get("cache-control")).toBe("no-store");
-    expect(made.body.token).toMatch(/^tnk1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}$/);
-    expect(made.body.token).toHaveLength(81);
+    expect(made.body.token).toMatch(/^tnk2\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
+    expect(made.body.token).toHaveLength(125);
     expect(made.body.ca_fingerprint).toBe(MOCK_CA_FINGERPRINT);
     expect(made.body.command).toContain(`--token ${made.body.token}`);
     expect(made.body.command).toContain(`--ca-fingerprint ${MOCK_CA_FINGERPRINT}`);
@@ -211,9 +211,13 @@ describe("POST /nodes/enroll", () => {
 
   it("refuses forged tokens, other roles, unusable requests and protocol mismatches", async () => {
     const made = await post<S["CreatedEnrollment"]>(`${V}/nodes/enrollments`, { roles: ["probe"] });
-    const forged = made.body.token.slice(0, -1) + (made.body.token.endsWith("A") ? "B" : "A");
+    // The secret ends at character 81; the CA fingerprint follows it.
+    const token = made.body.token;
+    const forged = token.slice(0, 80) + (token[80] === "A" ? "Q" : "A") + token.slice(81);
+    const foreign = token.slice(0, 82) + "A".repeat(43);
     const cases: [Record<string, unknown>, number, string][] = [
       [{ token: forged, csr: CSR }, 401, "cluster.enrollment.invalid_token"],
+      [{ token: foreign, csr: CSR }, 401, "cluster.enrollment.wrong_controller"],
       [{ token: "x", csr: CSR }, 401, "cluster.enrollment.invalid_token"],
       [{ token: made.body.token, csr: CSR, roles: ["dns"] }, 403, "cluster.enrollment.roles"],
       [{ token: made.body.token, csr: "not a request" }, 422, "cluster.ca.invalid_csr"],
@@ -224,6 +228,13 @@ describe("POST /nodes/enroll", () => {
       const answer = await post<Problem>(`${V}/nodes/enroll`, body);
       expect([answer.status, answer.body.code], JSON.stringify(body)).toEqual([status, code]);
     }
+  });
+
+  it("accepts a token in the format of 0.0.11, without the CA fingerprint", async () => {
+    const made = await post<S["CreatedEnrollment"]>(`${V}/nodes/enrollments`, {});
+    const tnk1 = made.body.token.slice(0, 81).replace(/^tnk2\./, "tnk1.");
+    const enrolled = await post<S["EnrollResponse"]>(`${V}/nodes/enroll`, { token: tnk1, csr: CSR, name: "probe-shed" });
+    expect(enrolled.status).toBe(201);
   });
 
   it("answers without a session", async () => {

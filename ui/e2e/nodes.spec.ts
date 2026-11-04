@@ -135,7 +135,7 @@ test("a token is shown once, enrolls a probe that connects, and the node shows i
       await expect(form).toHaveCount(0);
       await expect(dialog.getByTestId("enroll-once")).toBeVisible();
       token = (await dialog.getByTestId("enroll-token").innerText()).trim();
-      expect(token).toMatch(/^tnk1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}$/);
+      expect(token).toMatch(/^tnk2\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
       const [, id, tail] = token.split(".");
       enrollmentId = id!;
       secret = tail!;

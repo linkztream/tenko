@@ -9,17 +9,24 @@
 //! # Text form
 //!
 //! ```text
+//! tnk2.<id>.<secret>.<fingerprint>
 //! tnk1.<id>.<secret>
 //! ```
 //!
-//! * `tnk1` is the fixed prefix; the digit is the format version.
+//! * `tnk2` (or `tnk1`) is the prefix; the digit is the format version.
 //! * `<id>` is the identifier of the token record as 32 lowercase hexadecimal digits (the
 //!   "simple" form of a UUID). It is not secret: a controller uses it to find the record.
 //! * `<secret>` is [`SECRET_LEN`] random bytes as unpadded base64url (RFC 4648 section 5,
 //!   alphabet `A-Z a-z 0-9 - _`), which is 43 characters.
+//! * `<fingerprint>`, in `tnk2` only, is the [`CaFingerprint`] of the controller's CA root:
+//!   the SHA-256 of its DER encoding, 32 bytes as unpadded base64url, 43 characters. It is
+//!   not secret and takes no part in the digest; it lets the node verify the CA root it
+//!   fetches from the controller without a separate fingerprint.
 //!
-//! The whole text is [`TOKEN_TEXT_LEN`] characters long. [`EnrollmentToken::parse`] is strict:
-//! exactly three parts, no padding, and only the canonical base64url spelling of a secret.
+//! A controller renders `tnk2`, [`TOKEN_TEXT_LEN`] characters long. `tnk1` is the format of
+//! 0.0.11 and earlier, [`LEGACY_TOKEN_TEXT_LEN`] characters long, and is still read.
+//! [`EnrollmentToken::parse`] is strict: exactly the parts of the version, no padding, and only
+//! the canonical base64url spelling of a secret or a fingerprint.
 //!
 //! # Digest
 //!
@@ -46,17 +53,25 @@ use tenko_core::Coded;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-/// The text every token starts with; the digit is the format version.
-pub const TOKEN_PREFIX: &str = "tnk1";
+/// The text a token with a CA fingerprint starts with; the digit is the format version.
+pub const TOKEN_PREFIX: &str = "tnk2";
+
+/// The text a token of 0.0.11 and earlier starts with: no CA fingerprint.
+pub const LEGACY_TOKEN_PREFIX: &str = "tnk1";
 
 /// The number of random bytes in the secret of a token.
 pub const SECRET_LEN: usize = 32;
 
-/// The length of the text form of a token: the prefix, a dot, 32 hexadecimal digits of the id,
-/// a dot and 43 characters of secret (4 + 1 + 32 + 1 + 43).
-pub const TOKEN_TEXT_LEN: usize = 81;
+/// The length of the text form of a `tnk2` token: the prefix, a dot, 32 hexadecimal digits of
+/// the id, a dot, 43 characters of secret, a dot and 43 characters of fingerprint
+/// (4 + 1 + 32 + 1 + 43 + 1 + 43).
+pub const TOKEN_TEXT_LEN: usize = 125;
 
-/// The length of the secret as unpadded base64url.
+/// The length of the text form of a `tnk1` token: the prefix, a dot, 32 hexadecimal digits of
+/// the id, a dot and 43 characters of secret (4 + 1 + 32 + 1 + 43).
+pub const LEGACY_TOKEN_TEXT_LEN: usize = 81;
+
+/// The length of the secret, and of a fingerprint, as unpadded base64url.
 const SECRET_TEXT_LEN: usize = 43;
 
 /// The length of the id as hexadecimal digits.
@@ -76,7 +91,11 @@ const BASE64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvw
 const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";
 
 const _: () = assert!(SECRET_TEXT_LEN == (SECRET_LEN * 4).div_ceil(3));
-const _: () = assert!(TOKEN_PREFIX.len() + 1 + ID_HEX_LEN + 1 + SECRET_TEXT_LEN == TOKEN_TEXT_LEN);
+const _: () = assert!(
+    LEGACY_TOKEN_PREFIX.len() + 1 + ID_HEX_LEN + 1 + SECRET_TEXT_LEN == LEGACY_TOKEN_TEXT_LEN
+);
+const _: () = assert!(LEGACY_TOKEN_TEXT_LEN + 1 + SECRET_TEXT_LEN == TOKEN_TEXT_LEN);
+const _: () = assert!(TOKEN_PREFIX.len() == LEGACY_TOKEN_PREFIX.len());
 
 /// Why an enrollment token could not be created or read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -123,11 +142,14 @@ const fn malformed(reason: &'static str) -> TokenError {
 pub struct EnrollmentToken {
     id: Uuid,
     secret: Zeroizing<[u8; SECRET_LEN]>,
+    ca_fingerprint: Option<CaFingerprint>,
 }
 
 impl EnrollmentToken {
     /// Creates a token for the record `id` with a fresh secret from the system random number
-    /// generator.
+    /// generator, and without a CA fingerprint (see [`with_ca_fingerprint`]).
+    ///
+    /// [`with_ca_fingerprint`]: EnrollmentToken::with_ca_fingerprint
     ///
     /// # Errors
     ///
@@ -135,7 +157,11 @@ impl EnrollmentToken {
     pub fn generate(id: Uuid) -> Result<Self, TokenError> {
         let mut secret = Zeroizing::new([0_u8; SECRET_LEN]);
         rand::fill(secret.as_mut_slice()).map_err(|_| TokenError::Random)?;
-        Ok(Self { id, secret })
+        Ok(Self {
+            id,
+            secret,
+            ca_fingerprint: None,
+        })
     }
 
     /// Creates a token from a known id and secret, for tests and fixtures.
@@ -145,7 +171,16 @@ impl EnrollmentToken {
         Self {
             id,
             secret: Zeroizing::new(secret),
+            ca_fingerprint: None,
         }
+    }
+
+    /// The token with the fingerprint of the CA root of the controller that issued it; its
+    /// text form is then `tnk2`. The digest does not change.
+    #[must_use]
+    pub fn with_ca_fingerprint(mut self, fingerprint: CaFingerprint) -> Self {
+        self.ca_fingerprint = Some(fingerprint);
+        self
     }
 
     /// The id of the token record.
@@ -153,45 +188,102 @@ impl EnrollmentToken {
         self.id
     }
 
-    /// The text form `tnk1.<id>.<secret>` (see the module documentation).
+    /// The fingerprint of the issuing controller's CA root: `Some` for a `tnk2` token, `None`
+    /// for a `tnk1` token.
+    pub fn ca_fingerprint(&self) -> Option<CaFingerprint> {
+        self.ca_fingerprint
+    }
+
+    /// The text form (see the module documentation): `tnk2.<id>.<secret>.<fingerprint>` with a
+    /// CA fingerprint, `tnk1.<id>.<secret>` without one.
     ///
     /// The returned buffer is wiped when it is dropped.
     pub fn to_text(&self) -> Zeroizing<String> {
         let mut text = Zeroizing::new(String::with_capacity(TOKEN_TEXT_LEN));
-        text.push_str(TOKEN_PREFIX);
+        text.push_str(if self.ca_fingerprint.is_some() {
+            TOKEN_PREFIX
+        } else {
+            LEGACY_TOKEN_PREFIX
+        });
         text.push('.');
         text.push_str(self.id.simple().encode_lower(&mut Uuid::encode_buffer()));
         text.push('.');
         push_base64url(&mut text, self.secret.as_slice());
+        if let Some(fingerprint) = &self.ca_fingerprint {
+            text.push('.');
+            push_base64url(&mut text, &fingerprint.0);
+        }
         text
     }
 
-    /// Reads the text form.
+    /// Reads the text form, `tnk2` or `tnk1`.
     ///
     /// Leading and trailing ASCII whitespace is ignored. The id may be written in either
-    /// case; the secret must be the canonical unpadded base64url spelling.
+    /// case; the secret and the fingerprint must be the canonical unpadded base64url spelling.
     ///
     /// # Errors
     ///
-    /// [`TokenError::Malformed`] when the text is not a token of this format; the reason names
-    /// the first rule that failed.
+    /// [`TokenError::Malformed`] when the text is not a token of these formats; the reason
+    /// names the first rule that failed.
     pub fn parse(text: &str) -> Result<Self, TokenError> {
         let mut parts = text.trim_ascii().split('.');
-        check_prefix(parts.next().unwrap_or_default())?;
+        let with_fingerprint = check_prefix(parts.next().unwrap_or_default())?;
         let id = parts
             .next()
             .ok_or(malformed("the token has too few parts"))?;
         let secret = parts
             .next()
             .ok_or(malformed("the token has too few parts"))?;
+        let fingerprint = if with_fingerprint {
+            Some(
+                parts
+                    .next()
+                    .ok_or(malformed("the token has too few parts"))?,
+            )
+        } else {
+            None
+        };
         if parts.next().is_some() {
             return Err(malformed("the token has too many parts"));
         }
         let id = decode_hex::<16>(id)
             .map(Uuid::from_bytes)
             .ok_or(malformed("the token id is not 32 hexadecimal digits"))?;
-        let secret = decode_secret(secret)?;
-        Ok(Self { id, secret })
+        let secret = decode_base64url_32(secret).map_err(|fault| {
+            malformed(match fault {
+                Base64Fault::Padded => "the token secret must not be padded",
+                Base64Fault::Length => "the token secret is not 43 characters long",
+                Base64Fault::Alphabet => {
+                    "the token secret has a character outside the base64url alphabet"
+                }
+                Base64Fault::NonCanonical => "the token secret is not in canonical form",
+            })
+        })?;
+        let ca_fingerprint = fingerprint
+            .map(|text| {
+                decode_base64url_32(text)
+                    .map(|bytes| CaFingerprint(*bytes))
+                    .map_err(|fault| {
+                        malformed(match fault {
+                            Base64Fault::Padded => "the token CA fingerprint must not be padded",
+                            Base64Fault::Length => {
+                                "the token CA fingerprint is not 43 characters long"
+                            }
+                            Base64Fault::Alphabet => {
+                                "the token CA fingerprint has a character outside the base64url alphabet"
+                            }
+                            Base64Fault::NonCanonical => {
+                                "the token CA fingerprint is not in canonical form"
+                            }
+                        })
+                    })
+            })
+            .transpose()?;
+        Ok(Self {
+            id,
+            secret,
+            ca_fingerprint,
+        })
     }
 
     /// The digest a controller stores in place of the token.
@@ -213,7 +305,58 @@ impl fmt::Debug for EnrollmentToken {
         f.debug_struct("EnrollmentToken")
             .field("id", &self.id)
             .field("secret", &"<redacted>")
+            .field("ca_fingerprint", &self.ca_fingerprint)
             .finish()
+    }
+}
+
+/// The SHA-256 of a CA root certificate's DER encoding, as a `tnk2` token carries it.
+///
+/// Its text form here is 64 lowercase hexadecimal digits, the form the controller prints at
+/// start, shows beside every token and accepts in `--ca-fingerprint`; in a token it is
+/// unpadded base64url.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CaFingerprint([u8; DIGEST_LEN]);
+
+impl CaFingerprint {
+    /// The fingerprint of the certificate `der`.
+    pub fn of_der(der: &[u8]) -> Self {
+        let output = aws_lc_rs::digest::digest(&SHA256, der);
+        let mut bytes = [0_u8; DIGEST_LEN];
+        // SHA-256 output is always `DIGEST_LEN` bytes long.
+        bytes.copy_from_slice(output.as_ref());
+        Self(bytes)
+    }
+
+    /// Reads a fingerprint from exactly 64 hexadecimal digits, in either case.
+    ///
+    /// # Errors
+    ///
+    /// [`TokenError::Malformed`] when the text has another length or a character that is not a
+    /// hexadecimal digit.
+    pub fn from_hex(text: &str) -> Result<Self, TokenError> {
+        decode_hex::<DIGEST_LEN>(text)
+            .map(Self)
+            .ok_or(malformed("the CA fingerprint is not 64 hexadecimal digits"))
+    }
+
+    /// The fingerprint as 64 lowercase hexadecimal digits.
+    pub fn to_hex(&self) -> String {
+        let mut text = String::with_capacity(DIGEST_LEN * 2);
+        push_hex(&mut text, &self.0);
+        text
+    }
+}
+
+impl fmt::Debug for CaFingerprint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "CaFingerprint({})", self.to_hex())
+    }
+}
+
+impl fmt::Display for CaFingerprint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_hex())
     }
 }
 
@@ -282,10 +425,14 @@ impl Visitor<'_> for DigestVisitor {
     }
 }
 
-/// Checks the first part of a token: `tnk1`, or a better message for another version.
-fn check_prefix(prefix: &str) -> Result<(), TokenError> {
+/// Checks the first part of a token: `tnk2` (true: a fingerprint follows) or `tnk1` (false),
+/// or a better message for another version.
+fn check_prefix(prefix: &str) -> Result<bool, TokenError> {
     if prefix == TOKEN_PREFIX {
-        return Ok(());
+        return Ok(true);
+    }
+    if prefix == LEGACY_TOKEN_PREFIX {
+        return Ok(false);
     }
     // `tnk` followed by digits is a token of a format version this code does not know.
     let other_version = prefix
@@ -294,7 +441,7 @@ fn check_prefix(prefix: &str) -> Result<(), TokenError> {
     Err(malformed(if other_version {
         "the token format version is unknown"
     } else {
-        "the token does not start with tnk1"
+        "the token does not start with tnk2 or tnk1"
     }))
 }
 
@@ -331,21 +478,32 @@ const fn sextet_value(byte: u8) -> Option<u8> {
     }
 }
 
-/// Decodes the 43 characters of a secret; refuses padding, other characters and any spelling
-/// that is not the canonical one.
-fn decode_secret(text: &str) -> Result<Zeroizing<[u8; SECRET_LEN]>, TokenError> {
+/// What is wrong with the base64url spelling of 32 bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Base64Fault {
+    /// It has padding.
+    Padded,
+    /// It is not 43 characters long.
+    Length,
+    /// A character is outside the alphabet.
+    Alphabet,
+    /// The unused low bits of the last character are not zero.
+    NonCanonical,
+}
+
+/// Decodes the 43 characters of 32 bytes, a secret or a fingerprint; refuses padding, other
+/// characters and any spelling that is not the canonical one.
+fn decode_base64url_32(text: &str) -> Result<Zeroizing<[u8; SECRET_LEN]>, Base64Fault> {
     let text = text.as_bytes();
     if text.contains(&b'=') {
-        return Err(malformed("the token secret must not be padded"));
+        return Err(Base64Fault::Padded);
     }
     if text.len() != SECRET_TEXT_LEN {
-        return Err(malformed("the token secret is not 43 characters long"));
+        return Err(Base64Fault::Length);
     }
     let mut sextets = Zeroizing::new([0_u8; SECRET_TEXT_LEN]);
     for (slot, &byte) in sextets.iter_mut().zip(text) {
-        *slot = sextet_value(byte).ok_or(malformed(
-            "the token secret has a character outside the base64url alphabet",
-        ))?;
+        *slot = sextet_value(byte).ok_or(Base64Fault::Alphabet)?;
     }
     let mut secret = Zeroizing::new([0_u8; SECRET_LEN]);
     for (group, dest) in sextets.chunks(4).zip(secret.chunks_mut(3)) {
@@ -358,12 +516,12 @@ fn decode_secret(text: &str) -> Result<Zeroizing<[u8; SECRET_LEN]>, TokenError> 
             ([s0, s1, s2], [o0, o1]) => {
                 // The two unused low bits of the last character must be zero.
                 if *s2 & 0x03 != 0 {
-                    return Err(malformed("the token secret is not in canonical form"));
+                    return Err(Base64Fault::NonCanonical);
                 }
                 *o0 = (*s0 << 2) | (*s1 >> 4);
                 *o1 = (*s1 << 4) | (*s2 >> 2);
             }
-            _ => return Err(malformed("the token secret is not 43 characters long")),
+            _ => return Err(Base64Fault::Length),
         }
     }
     Ok(secret)
@@ -459,15 +617,154 @@ mod tests {
     fn text_has_the_fixed_length_and_prefix() {
         let token = EnrollmentToken::generate(Uuid::now_v7()).unwrap();
         let text = token.to_text();
-        assert_eq!(text.len(), TOKEN_TEXT_LEN);
+        assert_eq!(text.len(), LEGACY_TOKEN_TEXT_LEN);
         assert_eq!(text.len(), 81);
         assert!(text.starts_with("tnk1."));
-        assert!(text.starts_with(&format!("{TOKEN_PREFIX}.")));
+        assert!(text.starts_with(&format!("{LEGACY_TOKEN_PREFIX}.")));
         assert!(text.is_ascii());
         let parts: Vec<&str> = text.split('.').collect();
         assert_eq!(parts.len(), 3);
         assert_eq!(parts[1], token.id().simple().to_string());
         assert_eq!(parts[2].len(), 43);
+    }
+
+    /// The fingerprint of the known-answer `tnk2` token: the SHA-256 of no bytes.
+    const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    /// [`EMPTY_SHA256`] as unpadded base64url.
+    const EMPTY_SHA256_TEXT: &str = "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU";
+
+    /// The known-answer token's text in `tnk2` with the fingerprint replaced.
+    fn with_fingerprint(fingerprint: &str) -> String {
+        format!("tnk2{}.{fingerprint}", &KNOWN_TEXT[4..])
+    }
+
+    #[test]
+    fn a_token_with_a_fingerprint_renders_as_tnk2() {
+        let fingerprint = CaFingerprint::of_der(b"");
+        assert_eq!(fingerprint.to_hex(), EMPTY_SHA256);
+        let token = known().with_ca_fingerprint(fingerprint);
+        let text = token.to_text();
+        assert_eq!(*text, with_fingerprint(EMPTY_SHA256_TEXT));
+        assert_eq!(text.len(), TOKEN_TEXT_LEN);
+        assert_eq!(text.len(), 125);
+        assert!(text.starts_with("tnk2."));
+        assert!(text.is_ascii());
+        let parts: Vec<&str> = text.split('.').collect();
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[3], EMPTY_SHA256_TEXT);
+        // The fingerprint takes no part in the digest.
+        assert_eq!(token.digest().to_hex(), KNOWN_DIGEST);
+        assert_eq!(token.ca_fingerprint(), Some(fingerprint));
+    }
+
+    #[test]
+    fn tnk2_parses_and_its_fingerprint_is_read() {
+        let parsed = EnrollmentToken::parse(&with_fingerprint(EMPTY_SHA256_TEXT)).unwrap();
+        assert_eq!(parsed.id(), KNOWN_ID);
+        assert_eq!(parsed.digest().to_hex(), KNOWN_DIGEST);
+        assert_eq!(
+            parsed
+                .ca_fingerprint()
+                .map(|fingerprint| fingerprint.to_hex()),
+            Some(EMPTY_SHA256.to_owned())
+        );
+        assert_eq!(*parsed.to_text(), with_fingerprint(EMPTY_SHA256_TEXT));
+
+        let generated = EnrollmentToken::generate(Uuid::now_v7())
+            .unwrap()
+            .with_ca_fingerprint(CaFingerprint([0xfb; DIGEST_LEN]));
+        let parsed = EnrollmentToken::parse(&generated.to_text()).unwrap();
+        assert_eq!(parsed.ca_fingerprint(), generated.ca_fingerprint());
+        assert!(generated.digest().matches(&parsed));
+        assert_eq!(*parsed.to_text(), *generated.to_text());
+    }
+
+    #[test]
+    fn tnk1_still_parses_without_a_fingerprint() {
+        let parsed = EnrollmentToken::parse(KNOWN_TEXT).unwrap();
+        assert_eq!(parsed.ca_fingerprint(), None);
+        assert_eq!(*parsed.to_text(), KNOWN_TEXT);
+        // The same id and secret with a fingerprint match the same digest.
+        let tnk2 = EnrollmentToken::parse(&with_fingerprint(EMPTY_SHA256_TEXT)).unwrap();
+        assert!(parsed.digest().matches(&tnk2));
+    }
+
+    #[test]
+    fn tnk2_refuses_a_bad_fingerprint() {
+        let long = format!("{EMPTY_SHA256_TEXT}A");
+        let padded = format!("{EMPTY_SHA256_TEXT}=");
+        let plus = EMPTY_SHA256_TEXT.replace('-', "+");
+        // 'U' ends the fingerprint; 'V' sets one of the two unused low bits.
+        let spoiled = format!("{}V", &EMPTY_SHA256_TEXT[..42]);
+        assert!(EMPTY_SHA256_TEXT.ends_with('U'));
+        for (fingerprint, expected) in [
+            (
+                &EMPTY_SHA256_TEXT[..42],
+                "the token CA fingerprint is not 43 characters long",
+            ),
+            (
+                long.as_str(),
+                "the token CA fingerprint is not 43 characters long",
+            ),
+            ("", "the token CA fingerprint is not 43 characters long"),
+            (
+                EMPTY_SHA256,
+                "the token CA fingerprint is not 43 characters long",
+            ),
+            (
+                padded.as_str(),
+                "the token CA fingerprint must not be padded",
+            ),
+            (
+                plus.as_str(),
+                "the token CA fingerprint has a character outside the base64url alphabet",
+            ),
+            (
+                spoiled.as_str(),
+                "the token CA fingerprint is not in canonical form",
+            ),
+        ] {
+            assert_eq!(
+                reason(&with_fingerprint(fingerprint)),
+                expected,
+                "{fingerprint:?}"
+            );
+        }
+        // A tnk2 token needs its fourth part, and a tnk1 token must not have one.
+        assert_eq!(
+            reason(&format!("tnk2{}", &KNOWN_TEXT[4..])),
+            "the token has too few parts"
+        );
+        assert_eq!(
+            reason(&format!("{KNOWN_TEXT}.{EMPTY_SHA256_TEXT}")),
+            "the token has too many parts"
+        );
+        assert_eq!(
+            reason(&format!(
+                "{}.{EMPTY_SHA256_TEXT}",
+                with_fingerprint(EMPTY_SHA256_TEXT)
+            )),
+            "the token has too many parts"
+        );
+    }
+
+    #[test]
+    fn ca_fingerprint_hex_round_trips() {
+        let fingerprint = CaFingerprint::from_hex(EMPTY_SHA256).unwrap();
+        assert_eq!(fingerprint, CaFingerprint::of_der(b""));
+        assert_eq!(fingerprint.to_string(), EMPTY_SHA256);
+        assert_eq!(
+            CaFingerprint::from_hex(&EMPTY_SHA256.to_ascii_uppercase()).unwrap(),
+            fingerprint
+        );
+        assert_eq!(
+            format!("{fingerprint:?}"),
+            format!("CaFingerprint({EMPTY_SHA256})")
+        );
+        for bad in ["", &EMPTY_SHA256[..63], EMPTY_SHA256_TEXT] {
+            assert!(CaFingerprint::from_hex(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
@@ -485,7 +782,7 @@ mod tests {
         let token = known();
         assert_eq!(*token.to_text(), KNOWN_TEXT);
         assert_eq!(token.digest().to_hex(), KNOWN_DIGEST);
-        assert_eq!(KNOWN_TEXT.len(), TOKEN_TEXT_LEN);
+        assert_eq!(KNOWN_TEXT.len(), LEGACY_TOKEN_TEXT_LEN);
         assert!(KNOWN_TEXT.ends_with(KNOWN_SECRET_TEXT));
 
         let parsed = EnrollmentToken::parse(KNOWN_TEXT).unwrap();
@@ -571,7 +868,7 @@ mod tests {
         ] {
             assert_eq!(
                 reason(&text),
-                "the token does not start with tnk1",
+                "the token does not start with tnk2 or tnk1",
                 "{text:?}"
             );
         }
@@ -580,7 +877,7 @@ mod tests {
     #[test]
     fn parse_refuses_another_format_version() {
         let id_and_secret = &KNOWN_TEXT[5..];
-        for version in ["tnk0", "tnk2", "tnk9", "tnk10"] {
+        for version in ["tnk0", "tnk3", "tnk9", "tnk10"] {
             let text = format!("{version}.{id_and_secret}");
             assert_eq!(
                 reason(&text),

@@ -622,7 +622,7 @@ describe("the enrollment tokens", () => {
     expect(token.textContent).toContain("Probe");
     expect(within(token).getByTestId("enrollment-delete").getAttribute("aria-label")).toBe("Delete the token probe-garage");
     // The token text is never part of the list.
-    expect(token.textContent).not.toContain("tnk1.");
+    expect(token.textContent).not.toContain("tnk2.");
     expect(document.body.textContent).not.toContain("Z2FyYWdlLXByb2JlLXRva2VuLW9mLXRoZS1tb2NrLTA");
   });
 
@@ -748,11 +748,11 @@ describe("creating a token", () => {
     expect(screen.queryByTestId("dialog-enroll")).toBeNull();
 
     const token = within(shown).getByTestId("enroll-token").textContent ?? "";
-    expect(token).toMatch(/^tnk1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}$/);
+    expect(token).toMatch(/^tnk2\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
     const command = within(shown).getByTestId("enroll-command").textContent ?? "";
     expect(command).toContain("tenko node enroll");
     expect(command).toContain(`--controller ${window.location.origin}`);
-    expect(command).toContain("--token tnk1.");
+    expect(command).toContain("--token tnk2.");
     expect(command).toContain(`--token ${token}`);
     expect(command).toContain(`--ca-fingerprint ${MOCK_CA_FINGERPRINT}`);
     expect(within(shown).getByTestId("enroll-fingerprint").textContent).toBe(fingerprintPairs(MOCK_CA_FINGERPRINT));
@@ -822,7 +822,7 @@ describe("creating a token", () => {
     const fresh = tokens()[0] as HTMLElement;
     expect(fresh.textContent).toContain("probe-office");
     expect(fresh.textContent).toContain("Probe");
-    expect(fresh.textContent).not.toContain("tnk1.");
+    expect(fresh.textContent).not.toContain("tnk2.");
     expect(document.body.innerHTML).not.toContain(secret);
     expect(document.body.textContent).not.toContain(token);
     // The page keeps the list of nodes as it was.

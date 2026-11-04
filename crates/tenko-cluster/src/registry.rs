@@ -71,7 +71,7 @@ use crate::{
     },
     mtls::RevocationSet,
     session::Sessions,
-    token::EnrollmentToken,
+    token::{CaFingerprint, EnrollmentToken},
     version::{self, VersionMismatch},
 };
 
@@ -214,6 +214,15 @@ fn invalid_token() -> ClusterError {
     )
 }
 
+fn wrong_controller() -> ClusterError {
+    ClusterError::new(
+        "cluster.enrollment.wrong_controller",
+        401,
+        "the enrollment token was created by another controller: its CA fingerprint is not \
+         this controller's; use the controller that showed the token",
+    )
+}
+
 /// What the cluster port that opens on demand (`[cluster] listen` not set) serves
 /// ([`NodeRegistry::port_demand`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,6 +340,11 @@ impl NodeRegistry {
     /// The internal CA.
     pub fn ca(&self) -> &Arc<InternalCa> {
         &self.ca
+    }
+
+    /// The fingerprint of the internal CA's root, as a `tnk2` token carries it.
+    pub fn ca_fingerprint(&self) -> CaFingerprint {
+        CaFingerprint::of_der(self.ca.root_der())
     }
 
     /// The store.
@@ -681,7 +695,9 @@ impl NodeRegistry {
             _ => None,
         };
         let id = Uuid::now_v7();
-        let token = EnrollmentToken::generate(id)?;
+        // The token carries the fingerprint of this controller's CA root (`tnk2`), so the
+        // node verifies the root it fetches without a separate fingerprint.
+        let token = EnrollmentToken::generate(id)?.with_ca_fingerprint(self.ca_fingerprint());
         let expires_at = cx
             .now
             .checked_add(ttl)
@@ -789,8 +805,9 @@ impl NodeRegistry {
     ///
     /// # Errors
     ///
-    /// `cluster.enrollment.invalid_token`, `cluster.enrollment.used`,
-    /// `cluster.enrollment.expired` (401), `cluster.enrollment.roles` (403),
+    /// `cluster.enrollment.invalid_token`, `cluster.enrollment.wrong_controller`,
+    /// `cluster.enrollment.used`, `cluster.enrollment.expired` (401),
+    /// `cluster.enrollment.roles` (403),
     /// `cluster.protocol.unsupported` (409), `cluster.node.name` (422),
     /// `cluster.node.name_taken` (409), `cluster.node.address` (422),
     /// `cluster.ca.invalid_csr` (422), or a store or job error.
@@ -814,6 +831,7 @@ impl NodeRegistry {
         }
         let code = match error.code() {
             "cluster.enrollment.invalid_token" => "cluster.enrollment.invalid_token",
+            "cluster.enrollment.wrong_controller" => "cluster.enrollment.wrong_controller",
             "cluster.enrollment.used" => "cluster.enrollment.used",
             "cluster.enrollment.expired" => "cluster.enrollment.expired",
             "cluster.enrollment.roles" => "cluster.enrollment.roles",
@@ -848,6 +866,14 @@ impl NodeRegistry {
         request: EnrollRequest,
     ) -> Result<Enrolled, (ClusterError, Option<Uuid>)> {
         let token = EnrollmentToken::parse(&request.token).map_err(|_| (invalid_token(), None))?;
+        // A `tnk2` token names the CA root of the controller that issued it: one that reached
+        // another controller is a misdirected enrollment, refused before its record is
+        // looked up. A `tnk1` token names none and goes on.
+        if let Some(fingerprint) = token.ca_fingerprint()
+            && fingerprint != self.ca_fingerprint()
+        {
+            return Err((wrong_controller(), None));
+        }
         let token_id = token.id();
         let with_token = |error: ClusterError| (error, Some(token_id));
         let view = self

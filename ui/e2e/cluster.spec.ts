@@ -161,7 +161,7 @@ test("Add a controller creates a controller token whose command joins a cluster,
     await expect(form).toHaveCount(0);
     await expect(dialog.getByTestId("enroll-once")).toBeVisible();
     const token = (await dialog.getByTestId("enroll-token").innerText()).trim();
-    expect(token).toMatch(/^tnk1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}$/);
+    expect(token).toMatch(/^tnk2\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
     secret = token.split(".")[2]!;
     const command = (await dialog.getByTestId("enroll-command").innerText()).trim();
     expect(command).toMatch(/^tenko cluster join /);

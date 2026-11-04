@@ -38246,7 +38246,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The token is not valid (`cluster.enrollment.invalid_token`), was used (`cluster.enrollment.used`) or expired (`cluster.enrollment.expired`) */
+            /** @description The token is not valid (`cluster.enrollment.invalid_token`), was created by another controller (`cluster.enrollment.wrong_controller`), was used (`cluster.enrollment.used`) or expired (`cluster.enrollment.expired`) */
             401: {
                 headers: {
                     [name: string]: unknown;

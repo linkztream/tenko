@@ -198,7 +198,7 @@ const createEnrollment = route("post", "/api/v1/nodes/enrollments", async (ctx) 
     objects: [REGISTRY],
     context: { enrollment: id, roles: roles.join(","), expires_at: view.expires_at },
   });
-  const token = `tnk1.${id.replace(/-/g, "")}.${secret}`;
+  const token = `tnk2.${id.replace(/-/g, "")}.${secret}.${MOCK_CA_FINGERPRINT_TEXT}`;
   const answer: S["CreatedEnrollment"] = {
     enrollment: { ...view, state: "pending" },
     token,
@@ -228,13 +228,19 @@ const deleteEnrollment = route("delete", "/api/v1/nodes/enrollments/{id}", (ctx)
 // ---------------------------------------------------------------------------------
 // Enrollment (public: the token is the credential)
 
-/** `tnk1.<32 hex>.<43 base64url>` as the id of its record and the secret. */
-function parseToken(text: string): { id: string; secret: string } | null {
-  const match = /^tnk1\.([0-9a-f]{32})\.([A-Za-z0-9_-]{43})$/.exec(text.trim());
+/** The CA fingerprint as a `tnk2` token carries it: the 32 bytes as unpadded base64url. */
+const MOCK_CA_FINGERPRINT_TEXT = b64url(Uint8Array.from(MOCK_CA_FINGERPRINT.match(/../g) ?? [], (pair) => parseInt(pair, 16)));
+
+/**
+ * `tnk2.<32 hex>.<43 base64url>.<43 base64url>` (or `tnk1` without the fingerprint) as the id of
+ * its record, the secret and the CA fingerprint.
+ */
+function parseToken(text: string): { id: string; secret: string; fingerprint: string | null } | null {
+  const match = /^(?:tnk1\.([0-9a-f]{32})\.([A-Za-z0-9_-]{43})|tnk2\.([0-9a-f]{32})\.([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43}))$/.exec(text.trim());
   if (!match) return null;
-  const hex = match[1] ?? "";
+  const hex = match[1] ?? match[3] ?? "";
   const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  return { id, secret: match[2] ?? "" };
+  return { id, secret: match[2] ?? match[4] ?? "", fingerprint: match[5] ?? null };
 }
 
 const enroll = route("post", "/api/v1/nodes/enroll", async (ctx) => {
@@ -242,6 +248,9 @@ const enroll = route("post", "/api/v1/nodes/enroll", async (ctx) => {
   if (typeof body.token !== "string" || typeof body.csr !== "string") throw invalidRequest("token and csr are required");
   const st = nodesState();
   const parsed = parseToken(body.token);
+  if (parsed?.fingerprint != null && parsed.fingerprint !== MOCK_CA_FINGERPRINT_TEXT) {
+    throw new Problem("cluster.enrollment.wrong_controller", { status: 401, detail: "the enrollment token was created by another controller" });
+  }
   const stored = parsed ? st.enrollments.get(parsed.id) : undefined;
   if (!parsed || !stored || stored.secret !== parsed.secret) {
     throw new Problem("cluster.enrollment.invalid_token", { status: 401, detail: "the token is malformed, unknown or has a wrong secret" });

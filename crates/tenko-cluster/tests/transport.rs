@@ -540,9 +540,11 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
     assert_eq!(used.code(), "cluster.enrollment.used");
 
     // A wrong secret under a real token id is the same answer as an unknown token.
+    // The secret ends at character 81 of a `tnk2` token; the CA fingerprint follows it.
     let mut forged = controller.token(NewEnrollment::default()).await;
-    let last = forged.pop().expect("a character");
-    forged.push(if last == 'A' { 'Q' } else { 'A' });
+    let last = forged.as_bytes()[80];
+    let replacement = if last == b'A' { "Q" } else { "A" };
+    forged.replace_range(80..81, replacement);
     let invalid = controller
         .enroll_with(again.path(), "probe-c", &forged, vec![1])
         .await

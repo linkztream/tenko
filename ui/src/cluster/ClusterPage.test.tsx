@@ -548,7 +548,7 @@ describe("adding a controller", () => {
     const shown = await screen.findByTestId("dialog-enroll-token");
     expect(bodies).toEqual([{ roles: ["controller"], name: null, vrf: null, expires_in_secs: 3600 }]);
     expect(within(shown).getByTestId("enroll-once")).toBeTruthy();
-    expect(within(shown).getByTestId("enroll-token").textContent).toMatch(/^tnk1\./);
+    expect(within(shown).getByTestId("enroll-token").textContent).toMatch(/^tnk2\./);
     expect(shown.textContent).toContain("The new controller joins as a learner.");
     expect(await axeViolations(shown)).toEqual([]);
 

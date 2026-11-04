@@ -148,26 +148,16 @@ impl Probe {
         command
     }
 
-    /// `tenko node enroll` with the token, the fingerprint and further arguments.
-    fn enroll(&self, controller: &Controller, token: &str, fingerprint: &str) -> Outcome {
+    /// `tenko node enroll` with the token, `--ca-fingerprint` when given, and further
+    /// arguments.
+    fn enroll(&self, controller: &Controller, token: &str, fingerprint: Option<&str>) -> Outcome {
         let url = controller.url();
-        run(
-            self.command(&[
-                "node",
-                "enroll",
-                "--controller",
-                &url,
-                "--token",
-                token,
-                "--ca-fingerprint",
-                fingerprint,
-                "--name",
-                "probe-dmz",
-                "--address",
-                "192.0.2.20",
-            ]),
-            None,
-        )
+        let mut args = vec!["node", "enroll", "--controller", &url, "--token", token];
+        if let Some(fingerprint) = fingerprint {
+            args.extend(["--ca-fingerprint", fingerprint]);
+        }
+        args.extend(["--name", "probe-dmz", "--address", "192.0.2.20"]);
+        run(self.command(&args), None)
     }
 
     /// `tenko serve --roles probe`, stopped by closing its standard input.
@@ -247,7 +237,14 @@ fn a_probe_enrolls_connects_and_delivers_observations() {
     let mut controller = Controller::start();
     let probe = Probe::new();
     let token = controller.token();
-    let enrolled = probe.enroll(&controller, &token, &controller.fingerprint);
+    // The token carries the CA fingerprint: no flag, and no trust on first use.
+    assert!(token.starts_with("tnk2."), "{token}");
+    let enrolled = probe.enroll(&controller, &token, None);
+    assert!(
+        !enrolled.stderr.contains("warning"),
+        "a tnk2 token warned: {}",
+        enrolled.stderr
+    );
     enrolled
         .assert_code(0)
         .assert_stdout_contains("enrolled as node 1001 (probe-dmz) with role(s) probe")
@@ -325,7 +322,16 @@ fn a_wrong_fingerprint_is_refused_and_a_token_works_once() {
     let probe = Probe::new();
     let token = controller.token();
     let wrong = "ab".repeat(32);
-    let refused = probe.enroll(&controller, &token, &wrong);
+    // A flag that disagrees with the token's fingerprint stops before the network.
+    let refused = probe.enroll(&controller, &token, Some(&wrong));
+    refused
+        .assert_code(9)
+        .assert_stderr_contains("must agree")
+        .assert_stderr_contains("abababab");
+    // A token of 0.0.11 (no fingerprint) is checked against the flag, as before.
+    let (tnk1, _) = token.rsplit_once('.').expect("four parts");
+    let tnk1 = tnk1.replacen("tnk2.", "tnk1.", 1);
+    let refused = probe.enroll(&controller, &tnk1, Some(&wrong));
     refused
         .assert_code(9)
         .assert_stderr_contains("do not trust it");
@@ -334,19 +340,22 @@ fn a_wrong_fingerprint_is_refused_and_a_token_works_once() {
         "a refused enrollment wrote files"
     );
 
-    // The token was not presented, so it still works once.
-    probe
-        .enroll(&controller, &token, &controller.fingerprint)
-        .assert_code(0);
+    // The token was not presented, so it still works once: in the format of 0.0.11 and
+    // without the flag it is trusted on first use, with the warning.
+    let first_use = probe.enroll(&controller, &tnk1, None);
+    first_use
+        .assert_code(0)
+        .assert_stderr_contains("warning: the token carries no CA fingerprint")
+        .assert_stderr_contains(&controller.fingerprint);
     let second = Probe::new();
-    let again = second.enroll(&controller, &token, &controller.fingerprint);
+    let again = second.enroll(&controller, &token, Some(&controller.fingerprint));
     again
         .assert_code(6)
         .assert_stderr_contains("cluster.enrollment.used");
     assert!(!exists(&second.identity_path()));
 
     // An enrolled node does not enroll again by accident.
-    let twice = probe.enroll(&controller, &controller.token(), &controller.fingerprint);
+    let twice = probe.enroll(&controller, &controller.token(), None);
     twice.assert_code(2).assert_stderr_contains("--force");
     controller.stop();
 }
@@ -388,7 +397,7 @@ fn the_buffer_replays_after_the_controller_restarts() {
     let mut controller = Controller::start();
     let probe = Probe::new();
     probe
-        .enroll(&controller, &controller.token(), &controller.fingerprint)
+        .enroll(&controller, &controller.token(), None)
         .assert_code(0);
     let mut node = probe.serve();
     node.wait_stderr_line(WAIT, |line| line.contains("connected to the controller"))
@@ -428,7 +437,7 @@ fn revocation_closes_the_connection() {
     let mut controller = Controller::start();
     let probe = Probe::new();
     probe
-        .enroll(&controller, &controller.token(), &controller.fingerprint)
+        .enroll(&controller, &controller.token(), None)
         .assert_code(0);
     let mut node = probe.serve();
     let api = controller.api();
@@ -466,9 +475,7 @@ fn a_controller_of_another_installation_is_refused() {
     let mut foreign = Controller::start();
     assert_ne!(home.fingerprint, foreign.fingerprint);
     let probe = Probe::new();
-    probe
-        .enroll(&home, &home.token(), &home.fingerprint)
-        .assert_code(0);
+    probe.enroll(&home, &home.token(), None).assert_code(0);
 
     // Point the node at the other controller's cluster port.
     let path = probe.identity_path();
@@ -485,8 +492,18 @@ fn a_controller_of_another_installation_is_refused() {
     // before the token is presented.
     let other = Probe::new();
     other
-        .enroll(&foreign, &foreign.token(), &home.fingerprint)
-        .assert_code(9);
+        .enroll(&foreign, &foreign.token(), Some(&home.fingerprint))
+        .assert_code(9)
+        .assert_stderr_contains("must agree");
+    // A token taken to the wrong controller stops at that controller's CA root, naming the
+    // first characters of both fingerprints.
+    other
+        .enroll(&home, &foreign.token(), None)
+        .assert_code(9)
+        .assert_stderr_contains("but the token names")
+        .assert_stderr_contains(&home.fingerprint[..8])
+        .assert_stderr_contains(&foreign.fingerprint[..8]);
+    assert!(!exists(&other.identity_path()));
     home.stop();
     foreign.stop();
 }

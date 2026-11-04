@@ -1,12 +1,16 @@
 //! `tenko node enroll`: the enrollment ceremony on a data-plane node (OPS-04).
 //!
 //! 1. The node reads the token (flag, `TENKO_ENROLL_TOKEN` or a file) and checks its form.
+//!    A `tnk2` token carries the SHA-256 fingerprint of the controller's CA root;
+//!    `--ca-fingerprint`, when given as well, must agree with it, else the command stops
+//!    here, before any network call.
 //! 2. It fetches the CA root from `GET /system/ca-root` without trusting the server yet,
-//!    and compares its SHA-256 with `--ca-fingerprint` when given (the fingerprint the
-//!    controller printed at start and shows with every token). From then on the API
-//!    connection trusts that root only. A controller whose API certificate does not come
-//!    from the internal CA (an imported certificate, a reverse proxy) answers 404, and the
-//!    system roots verify the API connection instead.
+//!    and compares its SHA-256 with the token's fingerprint, or with `--ca-fingerprint` for
+//!    a `tnk1` token (the fingerprint the controller printed at start and shows with every
+//!    token). A `tnk1` token without the flag trusts the root on first use, with a warning,
+//!    until 0.0.13. From then on the API connection trusts that root only. A controller whose
+//!    API certificate does not come from the internal CA (an imported certificate, a reverse
+//!    proxy) answers 404, and the system roots verify the API connection instead.
 //! 3. It generates its key pair (the key never leaves the node) and posts a certificate
 //!    request with the token to `POST /nodes/enroll`.
 //! 4. It checks the CA root of the answer against the fingerprint and the root of step 2,
@@ -71,8 +75,9 @@ pub struct EnrollArgs {
     pub token_file: Option<PathBuf>,
 
     /// The SHA-256 fingerprint of the controller's CA root (hexadecimal, colons allowed),
-    /// as the controller printed it at start and shows with every token. Without it the
-    /// root is trusted on first use.
+    /// as the controller printed it at start and shows with every token. A token of this
+    /// version carries it already, and the flag must then agree with it; with a token of
+    /// 0.0.11 and no flag the root is trusted on first use.
     #[arg(long, value_name = "SHA256")]
     pub ca_fingerprint: Option<String>,
 
@@ -200,9 +205,110 @@ fn unreachable(controller: &str, error: &reqwest::Error) -> Failure {
     )
 }
 
-/// Fetches the CA root without verifying the server; `None` when the API does not use the
-/// internal CA (404).
-async fn fetch_root(controller: &str) -> Result<Option<String>, Failure> {
+/// How step 2 trusts the CA root the controller sends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RootTrust {
+    /// The fingerprint a `tnk2` token carries (`--ca-fingerprint` may repeat it).
+    Token(String),
+    /// The fingerprint of `--ca-fingerprint`, with a `tnk1` token.
+    Flag(String),
+    /// Neither: a `tnk1` token without the flag trusts the root on first use (until 0.0.13).
+    FirstUse,
+}
+
+impl RootTrust {
+    /// The fingerprint the CA root must have, lower-case hexadecimal; `None` on first use.
+    fn fingerprint(&self) -> Option<&str> {
+        match self {
+            Self::Token(fingerprint) | Self::Flag(fingerprint) => Some(fingerprint),
+            Self::FirstUse => None,
+        }
+    }
+}
+
+/// The first eight characters of a fingerprint, for a message that names two.
+fn short(fingerprint: &str) -> &str {
+    fingerprint.get(..8).unwrap_or(fingerprint)
+}
+
+/// Where the trust in the CA root comes from: the token's fingerprint, the flag, or neither.
+///
+/// # Errors
+///
+/// A usage failure for a malformed flag; an integrity failure when the flag and the token's
+/// fingerprint disagree. Both come before any network call.
+fn root_trust(
+    token: Option<tenko_cluster::token::CaFingerprint>,
+    flag: Option<&str>,
+) -> Result<RootTrust, Failure> {
+    let flag = flag.map(normalize_fingerprint).transpose()?;
+    match (token.map(|fingerprint| fingerprint.to_hex()), flag) {
+        (Some(carried), Some(given)) if carried != given => Err(Failure::new(
+            exit::INTEGRITY,
+            format!(
+                "the token names the CA root {}…, but --ca-fingerprint names {}…: they must \
+                 agree; take both from the same controller, or leave out --ca-fingerprint, \
+                 since the token carries the fingerprint",
+                short(&carried),
+                short(&given)
+            ),
+        )),
+        (Some(carried), _) => Ok(RootTrust::Token(carried)),
+        (None, Some(given)) => Ok(RootTrust::Flag(given)),
+        (None, None) => Ok(RootTrust::FirstUse),
+    }
+}
+
+/// Checks the CA root of step 2 against `trust`; the warning to print on first use.
+///
+/// # Errors
+///
+/// An integrity failure when the root does not have the expected fingerprint.
+fn check_root(info: &CertInfo, trust: &RootTrust) -> Result<Option<String>, Failure> {
+    match trust {
+        RootTrust::Token(wanted) if *wanted != info.sha256 => Err(Failure::new(
+            exit::INTEGRITY,
+            format!(
+                "the controller's CA root has SHA-256 {}…, but the token names {}…: do not \
+                 trust it; the token comes from another controller, or something between \
+                 this node and the controller answers in its place",
+                short(&info.sha256),
+                short(wanted)
+            ),
+        )),
+        RootTrust::Flag(wanted) if *wanted != info.sha256 => Err(Failure::new(
+            exit::INTEGRITY,
+            format!(
+                "the controller's CA root has SHA-256 {}, not {wanted}: do not trust it; check \
+                 the fingerprint the controller printed at start",
+                info.sha256
+            ),
+        )),
+        RootTrust::Token(_) | RootTrust::Flag(_) => Ok(None),
+        RootTrust::FirstUse => Ok(Some(format!(
+            "warning: the token carries no CA fingerprint and no --ca-fingerprint was given; \
+             trusting the CA root {} with SHA-256 {} on first use; compare it with the \
+             fingerprint the controller printed. A token from a controller of version {} \
+             carries the fingerprint and needs no comparison",
+            info.subject,
+            info.sha256,
+            crate::version()
+        ))),
+    }
+}
+
+/// Fetches the CA root and checks it against `trust` before returning it: the PEM and, on
+/// first use, the warning to print; `None` when the API does not use the internal CA (404).
+///
+/// The connection accepts any server certificate, because this is how the node obtains the
+/// root before it can trust anything; nothing but the root's PEM is read from it, and the
+/// token is not sent. The root is returned only once its SHA-256 matches the fingerprint
+/// of `trust` (the token's or the flag's), so only the first use of a `tnk1` token without
+/// `--ca-fingerprint` trusts an unverified root, and says so.
+async fn fetch_root(
+    controller: &str,
+    trust: &RootTrust,
+) -> Result<Option<(String, Option<String>)>, Failure> {
     let http = reqwest::Client::builder()
         .use_rustls_tls()
         .danger_accept_invalid_certs(true)
@@ -231,7 +337,8 @@ async fn fetch_root(controller: &str) -> Result<Option<String>, Failure> {
             format!("the controller answered HTTP {status} for its CA root"),
         ));
     }
-    Ok(Some(body))
+    let note = check_root(&root_of(&body)?, trust)?;
+    Ok(Some((body, note)))
 }
 
 /// The machine's host name as a node registry name: lower case, every character other than a
@@ -289,18 +396,16 @@ pub async fn run(args: &EnrollArgs) -> Result<Output, Failure> {
             format!("`{controller}` is not an http(s) URL such as https://ddi.example.net:8443"),
         ));
     }
-    let wanted = args
-        .ca_fingerprint
-        .as_deref()
-        .map(normalize_fingerprint)
-        .transpose()?;
-    if controller.starts_with("http://") && wanted.is_none() {
+    let token = read_token(args)?;
+    let trust = root_trust(token.ca_fingerprint(), args.ca_fingerprint.as_deref())?;
+    if controller.starts_with("http://") && trust == RootTrust::FirstUse {
         return Err(Failure::new(
             exit::USAGE,
-            "a controller on plain HTTP needs --ca-fingerprint: nothing else protects the token",
+            "a controller on plain HTTP needs a token with a CA fingerprint or \
+             --ca-fingerprint: nothing else protects the token",
         ));
     }
-    let token = read_token(args)?;
+    let wanted = trust.fingerprint().map(str::to_owned);
     let roles: Vec<Role> = match &args.roles {
         Some(text) => text
             .parse::<tenko_core::RoleSet>()
@@ -312,29 +417,10 @@ pub async fn run(args: &EnrollArgs) -> Result<Output, Failure> {
 
     // Step 2: the CA root, checked against the fingerprint.
     let mut notes = Vec::new();
-    let fetched = fetch_root(&controller).await?;
-    let api_root = match &fetched {
-        Some(pem) => {
-            let info = root_of(pem)?;
-            match &wanted {
-                Some(wanted) if *wanted != info.sha256 => {
-                    return Err(Failure::new(
-                        exit::INTEGRITY,
-                        format!(
-                            "the controller's CA root has SHA-256 {}, not {wanted}: do not \
-                             trust it; check the fingerprint the controller printed at start",
-                            info.sha256
-                        ),
-                    ));
-                }
-                Some(_) => {}
-                None => notes.push(format!(
-                    "warning: no --ca-fingerprint given; trusting the CA root {} with SHA-256 \
-                     {} on first use; compare it with the fingerprint the controller printed",
-                    info.subject, info.sha256
-                )),
-            }
-            Some(pem.clone())
+    let api_root = match fetch_root(&controller, &trust).await? {
+        Some((pem, note)) => {
+            notes.extend(note);
+            Some(pem)
         }
         None => None,
     };
@@ -475,10 +561,172 @@ pub async fn run(args: &EnrollArgs) -> Result<Output, Failure> {
 mod tests {
     use super::*;
 
+    use tenko_cluster::token::CaFingerprint;
+
     #[test]
     fn fingerprints_are_normalized() {
         let hex = "AB:".repeat(31) + "AB";
         assert_eq!(normalize_fingerprint(&hex).expect("valid"), "ab".repeat(32));
         assert!(normalize_fingerprint("abc").is_err());
+    }
+
+    /// A CA root as step 2 reads it, with the fingerprint of `der`.
+    fn root(der: &[u8]) -> CertInfo {
+        CertInfo {
+            subject: "CN=Tenko internal CA".to_owned(),
+            issuer: "CN=Tenko internal CA".to_owned(),
+            dns_names: Vec::new(),
+            ip_addresses: Vec::new(),
+            uris: Vec::new(),
+            serial: "01".to_owned(),
+            not_before: Timestamp::now(),
+            not_after: Timestamp::now(),
+            sha256: CaFingerprint::of_der(der).to_hex(),
+            is_ca: true,
+        }
+    }
+
+    /// `tenko node enroll` arguments for `controller` with `token` and `flag`.
+    fn args(
+        dir: &std::path::Path,
+        controller: &str,
+        token: &str,
+        flag: Option<&str>,
+    ) -> EnrollArgs {
+        EnrollArgs {
+            node: NodeDirArgs {
+                config: None,
+                data_dir: Some(dir.to_path_buf()),
+                json: false,
+            },
+            controller: controller.to_owned(),
+            token: Some(token.to_owned()),
+            token_file: None,
+            ca_fingerprint: flag.map(str::to_owned),
+            name: None,
+            roles: None,
+            address: None,
+            force: false,
+        }
+    }
+
+    /// A `tnk2` token issued by the controller whose CA root is `der`.
+    fn tnk2(der: &[u8]) -> EnrollmentToken {
+        EnrollmentToken::generate(uuid::Uuid::now_v7())
+            .expect("a token")
+            .with_ca_fingerprint(CaFingerprint::of_der(der))
+    }
+
+    #[test]
+    fn a_tnk2_token_trusts_its_own_fingerprint_without_a_warning() {
+        let token = tnk2(b"our root");
+        let trust = root_trust(token.ca_fingerprint(), None).expect("trust");
+        assert_eq!(
+            trust,
+            RootTrust::Token(CaFingerprint::of_der(b"our root").to_hex())
+        );
+        assert_eq!(
+            check_root(&root(b"our root"), &trust).expect("trusted"),
+            None
+        );
+        // The same fingerprint in the flag agrees, in any spelling.
+        let upper = CaFingerprint::of_der(b"our root")
+            .to_hex()
+            .to_ascii_uppercase();
+        assert_eq!(
+            root_trust(token.ca_fingerprint(), Some(&upper)).expect("trust"),
+            trust
+        );
+    }
+
+    #[test]
+    fn a_controller_whose_root_does_not_match_the_token_is_refused() {
+        let token = tnk2(b"our root");
+        let trust = root_trust(token.ca_fingerprint(), None).expect("trust");
+        let failure = check_root(&root(b"another root"), &trust).expect_err("refused");
+        assert_eq!(failure.status, exit::INTEGRITY);
+        let ours = CaFingerprint::of_der(b"our root").to_hex();
+        let theirs = CaFingerprint::of_der(b"another root").to_hex();
+        assert!(failure.message.contains(&ours[..8]), "{}", failure.message);
+        assert!(
+            failure.message.contains(&theirs[..8]),
+            "{}",
+            failure.message
+        );
+        assert!(
+            failure.message.contains("do not trust it"),
+            "{}",
+            failure.message
+        );
+    }
+
+    #[tokio::test]
+    async fn a_flag_that_disagrees_with_the_token_stops_before_the_network() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let token = tnk2(b"our root");
+        let other = CaFingerprint::of_der(b"another root").to_hex();
+        // Nothing listens on port 9: a network call would fail with UNREACHABLE.
+        let failure = run(&args(
+            dir.path(),
+            "https://127.0.0.1:9",
+            &token.to_text(),
+            Some(&other),
+        ))
+        .await
+        .expect_err("refused");
+        assert_eq!(failure.status, exit::INTEGRITY, "{}", failure.message);
+        assert!(
+            failure.message.contains("must agree"),
+            "{}",
+            failure.message
+        );
+        assert!(failure.message.contains(&other[..8]), "{}", failure.message);
+        // On plain HTTP the token's fingerprint is enough to go on (and then fail to connect).
+        let failure = run(&args(
+            dir.path(),
+            "http://127.0.0.1:9",
+            &token.to_text(),
+            None,
+        ))
+        .await
+        .expect_err("unreachable");
+        assert_eq!(failure.status, exit::UNREACHABLE, "{}", failure.message);
+    }
+
+    #[tokio::test]
+    async fn a_tnk1_token_is_trusted_on_first_use_with_the_warning() {
+        let token = EnrollmentToken::generate(uuid::Uuid::now_v7()).expect("a token");
+        assert!(token.to_text().starts_with("tnk1."));
+        let trust = root_trust(token.ca_fingerprint(), None).expect("trust");
+        assert_eq!(trust, RootTrust::FirstUse);
+        let warning = check_root(&root(b"our root"), &trust)
+            .expect("trusted")
+            .expect("a warning");
+        assert!(warning.starts_with("warning: "), "{warning}");
+        assert!(
+            warning.contains(&CaFingerprint::of_der(b"our root").to_hex()),
+            "{warning}"
+        );
+        assert!(warning.contains("carries the fingerprint"), "{warning}");
+        // With the flag a tnk1 token is checked as before.
+        let flag = CaFingerprint::of_der(b"our root").to_hex();
+        let trust = root_trust(None, Some(&flag)).expect("trust");
+        assert_eq!(trust, RootTrust::Flag(flag));
+        assert_eq!(
+            check_root(&root(b"our root"), &trust).expect("trusted"),
+            None
+        );
+        assert!(check_root(&root(b"another root"), &trust).is_err());
+        // A tnk1 token without the flag is refused on plain HTTP, before the network.
+        let dir = tempfile::tempdir().expect("a directory");
+        let failure = run(&args(
+            dir.path(),
+            "http://127.0.0.1:9",
+            &token.to_text(),
+            None,
+        ))
+        .await
+        .expect_err("refused");
+        assert_eq!(failure.status, exit::USAGE, "{}", failure.message);
     }
 }
