@@ -202,10 +202,12 @@ fn key_digest(
 ) -> Result<KeyDigest, XmlError> {
     let mut digest = KeyDigest {
         id: attribute(attributes, "id")
-            .ok_or(XmlError("a KeyDigest has an id"))?
+            .filter(|id| !id.is_empty())
+            .ok_or(XmlError("a KeyDigest has a non-empty id"))?
             .to_owned(),
         valid_from: attribute(attributes, "validFrom")
-            .ok_or(XmlError("a KeyDigest has validFrom"))?
+            .filter(|from| !from.is_empty())
+            .ok_or(XmlError("a KeyDigest has a non-empty validFrom"))?
             .to_owned(),
         valid_until: attribute(attributes, "validUntil").map(str::to_owned),
         key_tag: 0,
@@ -278,7 +280,8 @@ pub fn parse(text: &str) -> Result<AnchorFile, XmlError> {
     }
     let mut file = AnchorFile {
         id: attribute(&attributes, "id")
-            .ok_or(XmlError("the TrustAnchor has an id"))?
+            .filter(|id| !id.is_empty())
+            .ok_or(XmlError("the TrustAnchor has a non-empty id"))?
             .to_owned(),
         source: attribute(&attributes, "source")
             .unwrap_or_default()
@@ -293,7 +296,13 @@ pub fn parse(text: &str) -> Result<AnchorFile, XmlError> {
         }
         let (name, attributes) = scanner.open()?;
         match name {
-            "Zone" => zone = Some(scanner.simple("Zone")?.to_owned()),
+            "Zone" => {
+                let name = scanner.simple("Zone")?;
+                if name.is_empty() {
+                    return Err(XmlError("the Zone is not empty"));
+                }
+                zone = Some(name.to_owned());
+            }
             "KeyDigest" => {
                 if file.digests.len() >= MAX_DIGESTS {
                     return Err(XmlError("too many key digests"));
@@ -367,5 +376,46 @@ mod tests {
         let file = parse(minimal).expect("minimal");
         assert_eq!(file.zone, "example.test");
         assert_eq!(file.digests, vec![]);
+    }
+
+    const CRASH_INPUT: &str = include_str!("../../tests/fixtures/anchor-empty-id.xml");
+
+    fn reason(text: &str) -> &'static str {
+        parse(text).expect_err("refused").0
+    }
+
+    #[test]
+    fn an_empty_trust_anchor_id_is_refused_with_its_reason() {
+        assert_eq!(
+            reason("<TrustAnchor id=\"\"><Zone>.</Zone></TrustAnchor>"),
+            "the TrustAnchor has a non-empty id"
+        );
+        assert_eq!(
+            reason("<TrustAnchor><Zone>.</Zone></TrustAnchor>"),
+            "the TrustAnchor has a non-empty id"
+        );
+        assert_eq!(reason(CRASH_INPUT), "the TrustAnchor has a non-empty id");
+    }
+
+    #[test]
+    fn empty_key_digest_attributes_and_an_empty_zone_are_refused() {
+        let digest = |attributes: &str| {
+            format!(
+                "<TrustAnchor id=\"x\"><Zone>.</Zone><KeyDigest {attributes}><KeyTag>1</KeyTag><Algorithm>8</Algorithm><DigestType>2</DigestType><Digest>AB</Digest></KeyDigest></TrustAnchor>"
+            )
+        };
+        assert!(parse(&digest("id=\"k\" validFrom=\"t\"")).is_ok());
+        assert_eq!(
+            reason(&digest("id=\"\" validFrom=\"t\"")),
+            "a KeyDigest has a non-empty id"
+        );
+        assert_eq!(
+            reason(&digest("id=\"k\" validFrom=\"\"")),
+            "a KeyDigest has a non-empty validFrom"
+        );
+        assert_eq!(
+            reason("<TrustAnchor id=\"x\"><Zone></Zone></TrustAnchor>"),
+            "the Zone is not empty"
+        );
     }
 }
