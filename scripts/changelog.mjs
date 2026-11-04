@@ -336,6 +336,61 @@ export function unreleasedChanged(baseText, headText) {
   return head !== base;
 }
 
+/**
+ * The body of the section of `version`, `null` when the changelog has none.
+ * @param {string} text
+ * @param {string} version
+ * @returns {string | null}
+ * @throws {ChangelogError}
+ */
+export function versionBody(text, version) {
+  const found = parseChangelog(text).sections.find((s) => s.version === version);
+  return found === undefined ? null : found.body;
+}
+
+/**
+ * The `version = "X.Y.Z"` of the `[package]` table of a Cargo.toml, `null` when there is none.
+ * @param {string} text
+ * @returns {string | null}
+ */
+export function packageVersion(text) {
+  let inPackage = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith("[")) {
+      inPackage = line === "[package]";
+      continue;
+    }
+    if (!inPackage) continue;
+    const m = /^version\s*=\s*"([^"]+)"\s*(#.*)?$/.exec(line);
+    if (m !== null) return isSemver(m[1]) ? m[1] : null;
+  }
+  return null;
+}
+
+/**
+ * Whether the section of `version` differs between the two changelogs. A section that is
+ * missing at the base counts as empty; a base that does not parse counts as empty too. A
+ * section missing at the head is not a change. The head must parse.
+ *
+ * @param {string} baseText
+ * @param {string} headText
+ * @param {string} version
+ * @returns {boolean}
+ * @throws {ChangelogError} when the head does not parse
+ */
+export function versionSectionChanged(baseText, headText, version) {
+  const head = versionBody(headText, version);
+  if (head === null) return false;
+  let base = null;
+  try {
+    base = versionBody(baseText, version);
+  } catch (error) {
+    if (!(error instanceof ChangelogError)) throw error;
+  }
+  return head !== (base ?? "");
+}
+
 // ---------------------------------------------------------------------------------------
 // Which changes need an entry
 
@@ -437,8 +492,9 @@ function showAt(ref, file, cwd) {
 const paths = (n) => `${n} product path${n === 1 ? "" : "s"}`;
 
 /**
- * The CI rule: when a change touches product paths, the Unreleased section of the changelog
- * must differ from the one at the base and the changelog must parse.
+ * The CI rule: when a change touches product paths, the Unreleased section of the changelog,
+ * or the section of the crate version at the head (open until the version is bumped), must
+ * differ from the one at the base and the changelog must parse.
  *
  * @param {{ base: string, head?: string, file?: string, cwd?: string }} options
  * @returns {{ ok: boolean, message: string, productPaths: string[] }}
@@ -503,9 +559,18 @@ export function runCheck({ base, head = "HEAD", file = "CHANGELOG.md", cwd = pro
     headText = showAt(head, file, cwd);
   }
 
+  // The section of the crate version at the head stays open until the version moves on: a
+  // version whose release has not been published still collects its entries.
+  const cargo = runGit(["show", `${head}:crates/tenko/Cargo.toml`], cwd);
+  const current = cargo.status === 0 ? packageVersion(cargo.stdout) : null;
   let sectionChanged;
+  let which = "the Unreleased section";
   try {
     sectionChanged = unreleasedChanged(baseText, headText);
+    if (!sectionChanged && current !== null && versionSectionChanged(baseText, headText, current)) {
+      sectionChanged = true;
+      which = `the section of the current version, ${current},`;
+    }
   } catch (error) {
     if (!(error instanceof ChangelogError)) throw error;
     return {
@@ -517,7 +582,7 @@ export function runCheck({ base, head = "HEAD", file = "CHANGELOG.md", cwd = pro
   if (sectionChanged) {
     return {
       ok: true,
-      message: `changelog check passed: ${paths(product.length)} changed and the Unreleased section of ${file} changed`,
+      message: `changelog check passed: ${paths(product.length)} changed and ${which} of ${file} changed`,
       productPaths: product,
     };
   }
@@ -527,10 +592,12 @@ export function runCheck({ base, head = "HEAD", file = "CHANGELOG.md", cwd = pro
   return {
     ok: false,
     message: [
-      `${file} was not updated: ${paths(product.length)} changed, but the Unreleased section is the same as at ${base}.`,
+      current === null
+        ? `${file} was not updated: ${paths(product.length)} changed, but the Unreleased section is the same as at ${base}.`
+        : `${file} was not updated: ${paths(product.length)} changed, but the Unreleased section and the section of the current version, ${current}, are the same as at ${base}.`,
       "Changed product paths:",
       ...listed,
-      `What to do: add an entry under "## [Unreleased]" in ${file}, in the matching subsection (Added, Changed, Deprecated, Removed, Fixed, Security or Action required), written for a user of the product.`,
+      `What to do: add an entry under "## [Unreleased]" in ${file} for work after the last release${current === null ? "" : `, or under "## [${current}]" when that version is being released and not yet published`}, in the matching subsection (Added, Changed, Deprecated, Removed, Fixed, Security or Action required), written for a user of the product.`,
       'A pull request that changes nothing a user can see carries the label "no-changelog", which skips this check; a push does the same with a line "Changelog: none" in the commit message.',
     ].join("\n"),
     productPaths: product,
@@ -550,7 +617,8 @@ Commands:
   check --base <git-ref> [--head HEAD] [--file CHANGELOG.md]
       The CI rule: when product paths (crates/**, ui/src/** except tests, fixtures,
       generated and mock code) changed between <base> and <head>, the Unreleased section
-      of the changelog must have changed too.
+      of the changelog, or the section of the crate version at <head> (open until the
+      version is bumped), must have changed too.
   --help
       Print this text.
 

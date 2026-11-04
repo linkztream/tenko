@@ -65,6 +65,9 @@ where each option stands in this order. The rules below are that order applied.
   `CHANGELOG.md` (`node scripts/changelog.mjs check --base origin/main`). A change nothing a
   user can see, such as a test inside a source file, carries the pull request label
   `no-changelog` or, on a push, a line `Changelog: none` in its commit message.
+  While a version is being released and not yet published, its entries go under its own
+  section (the version in `crates/tenko/Cargo.toml`), which the check counts as open until
+  the version is bumped.
 
 ## Licensing and the Contributor License Agreement
 

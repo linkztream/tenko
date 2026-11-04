@@ -1074,6 +1074,79 @@ describe("check", { skip: gitAvailable ? false : "git is not available" }, () =>
     });
   });
 
+  describe("the section of the current crate version", () => {
+    const CARGO = '[package]\nname = "tenko"\nversion = "0.2.0"\n\n[dependencies]\nversion = "9.9.9"\n';
+    const RELEASED = (extra) =>
+      `# Changelog\n\n## [Unreleased]\n\n### Added\n\n- First.\n\n## [0.2.0] - 2026-02-01\n\n### Fixed\n\n- Old fix.\n${extra}\n## [0.1.0] - 2026-01-01\n\n### Added\n\n- Oldest.\n`;
+
+    /** @param {(repo: TempRepo, base: string) => void} body */
+    function withVersion(body) {
+      const repo = new TempRepo();
+      try {
+        repo.write("CHANGELOG.md", RELEASED(""));
+        repo.write("crates/tenko/Cargo.toml", CARGO);
+        repo.write("crates/tenko/src/lib.rs", "// v1\n");
+        const base = repo.commit("base");
+        body(repo, base);
+      } finally {
+        repo.remove();
+      }
+    }
+
+    test("an entry only under the current version's section passes", () => {
+      withVersion((repo, base) => {
+        repo.write("crates/tenko/src/lib.rs", "// v2\n");
+        repo.write("CHANGELOG.md", RELEASED("- New fix.\n"));
+        repo.commit("fix");
+        const r = repo.check(["--base", base]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /the section of the current version, 0\.2\.0, of CHANGELOG\.md changed/);
+      });
+    });
+
+    test("no changelog change fails and names both sections", () => {
+      withVersion((repo, base) => {
+        repo.write("crates/tenko/src/lib.rs", "// v2\n");
+        repo.commit("code");
+        const r = repo.check(["--base", base]);
+        assert.equal(r.status, 1);
+        assert.match(r.stderr, /the Unreleased section and the section of the current version, 0\.2\.0, are the same as at/);
+        assert.match(r.stderr, /under "## \[0\.2\.0\]" when that version is being released and not yet published/);
+      });
+    });
+
+    test("a change under an older released section does not count", () => {
+      withVersion((repo, base) => {
+        repo.write("crates/tenko/src/lib.rs", "// v2\n");
+        repo.write("CHANGELOG.md", RELEASED("").replace("- Oldest.\n", "- Oldest.\n- Late addition.\n"));
+        repo.commit("old section");
+        assert.equal(repo.check(["--base", base]).status, 1);
+      });
+    });
+
+    test("a bumped version no longer keeps the old section open", () => {
+      withVersion((repo, base) => {
+        repo.write("crates/tenko/src/lib.rs", "// v2\n");
+        repo.write("crates/tenko/Cargo.toml", CARGO.replace('version = "0.2.0"', 'version = "0.3.0"'));
+        repo.write("CHANGELOG.md", RELEASED("- New fix.\n"));
+        repo.commit("bump");
+        assert.equal(repo.check(["--base", base]).status, 1);
+      });
+    });
+
+    test("an unreadable Cargo.toml leaves only Unreleased counting", () => {
+      withVersion((repo, base) => {
+        repo.write("crates/tenko/src/lib.rs", "// v2\n");
+        repo.write("crates/tenko/Cargo.toml", "this is not toml [[[\n");
+        repo.write("CHANGELOG.md", RELEASED("- New fix.\n"));
+        repo.commit("broken manifest");
+        const r = repo.check(["--base", base]);
+        assert.equal(r.status, 1);
+        assert.match(r.stderr, /but the Unreleased section is the same as at/);
+      });
+    });
+  });
+
   test("runCheck can be called directly", () => {
     withRepo((repo, base) => {
       repo.write("crates/tenko/src/lib.rs", "// v2\n");
