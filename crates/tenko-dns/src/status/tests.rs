@@ -11,22 +11,35 @@ use crate::{
     transport::udp::UdpSettings,
 };
 
+/// Starts a server on loopback with a port from the system. The server takes a UDP port
+/// from the system and binds TCP on the same number, which another test running in
+/// parallel can hold already (`AddrInUse`); a failed start leaves nothing running, so the
+/// start is tried again, and any other error is final.
 async fn server() -> Server {
-    let config = ServerConfig {
-        listen: vec![SocketAddr::from((Ipv4Addr::LOCALHOST, 0))],
-        udp: UdpSettings {
-            workers: 2,
-            ..UdpSettings::default()
-        },
-        ..ServerConfig::default()
-    };
-    Server::start_authoritative(
-        config,
-        CatalogHandle::new(Catalog::default()),
-        Hooks::default(),
-    )
-    .await
-    .expect("server")
+    let mut attempts = 0;
+    loop {
+        let config = ServerConfig {
+            listen: vec![SocketAddr::from((Ipv4Addr::LOCALHOST, 0))],
+            udp: UdpSettings {
+                workers: 2,
+                ..UdpSettings::default()
+            },
+            ..ServerConfig::default()
+        };
+        match Server::start_authoritative(
+            config,
+            CatalogHandle::new(Catalog::default()),
+            Hooks::default(),
+        )
+        .await
+        {
+            Ok(server) => return server,
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse && attempts < 20 => {
+                attempts += 1;
+            }
+            Err(error) => panic!("server: {error}"),
+        }
+    }
 }
 
 #[tokio::test]
