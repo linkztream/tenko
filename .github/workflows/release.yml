@@ -608,6 +608,21 @@ jobs:
           npx --yes "@cyclonedx/cyclonedx-npm@${CYCLONEDX_NPM_VERSION}" \
             --omit dev --package-lock-only --flatten-components --output-reproducible \
             --output-file "../sbom/tenko-${VERSION}-ui.cdx.json"
+          # --output-reproducible leaves the serial number out, and actions/attest takes a
+          # CycloneDX document only with bomFormat, specVersion and serialNumber (its
+          # src/sbom.ts): a serial number derived from the lock file keeps the output
+          # reproducible and the attestation possible.
+          node -e '
+            const fs = require("fs"), crypto = require("crypto");
+            const [file, lock] = process.argv.slice(1);
+            const bom = JSON.parse(fs.readFileSync(file, "utf8"));
+            const h = crypto.createHash("sha256").update(fs.readFileSync(lock)).digest("hex");
+            const variant = ((parseInt(h[16], 16) & 3) | 8).toString(16);
+            bom.serialNumber = `urn:uuid:${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+            fs.writeFileSync(file, JSON.stringify(bom, null, 2) + "\n");
+          ' "../sbom/tenko-${VERSION}-ui.cdx.json" package-lock.json
+          jq -e '.bomFormat == "CycloneDX" and .specVersion != null and (.serialNumber | startswith("urn:uuid:"))' \
+            "../sbom/tenko-${VERSION}-ui.cdx.json" > /dev/null
       - name: SBOM of the container image
         # The image is public; syft reads it from the registry by digest, without a token.
         run: |
