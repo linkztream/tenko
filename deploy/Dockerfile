@@ -109,7 +109,7 @@
 ARG TENKO_BINARY_SOURCE=source
 
 # Stage: web UI bundle (local development only).
-FROM node:22-bookworm-slim@sha256:2f0e17f8955e766e776ae16d3ac47519ca3edf47c07e5c1423527926fdd5d568 AS ui
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS ui
 WORKDIR /src/ui
 # Copy the manifests first so the dependency layer is cached. No install scripts: the UI's
 # dependencies need none, and the release's UI job installs them the same way.
