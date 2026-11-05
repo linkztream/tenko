@@ -27,6 +27,8 @@ tenko-core = { path = "../crates/tenko-core" }
 # The DHCPv4 wire codec of the `dhcp_v4` target.
 tenko-dhcp = { path = "../crates/tenko-dhcp" }
 tenko-dns = { path = "../crates/tenko-dns" }
+# The Kerberos codec, cipher, keytab, PAC, SPNEGO, AP-REQ and MIC targets.
+tenko-krb = { path = "../crates/tenko-krb" }
 tenko-scan = { path = "../crates/tenko-scan" }
 # The read view of the `dns_zonefile` target.
 tenko-store = { path = "../crates/tenko-store" }
@@ -347,3 +349,46 @@ test = false
 doc = false
 bench = false
 # WP9.2: end.
+
+# WP13.1: the Kerberos targets (marked block).
+[[bin]]
+name = "krb_der"
+path = "fuzz_targets/krb_der.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "krb_keytab"
+path = "fuzz_targets/krb_keytab.rs"
+test = false
+doc = false
+bench = false
+[[bin]]
+name = "krb_spnego"
+path = "fuzz_targets/krb_spnego.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "krb_ap_req"
+path = "fuzz_targets/krb_ap_req.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "krb_pac"
+path = "fuzz_targets/krb_pac.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gss_mic"
+path = "fuzz_targets/gss_mic.rs"
+test = false
+doc = false
+bench = false
+# WP13.1: end.

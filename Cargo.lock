@@ -3583,6 +3583,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tenko-krb"
+version = "0.0.11"
+dependencies = [
+ "aws-lc-rs",
+ "tenko-core",
+ "thiserror 2.0.21",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
 name = "tenko-migrate"
 version = "0.0.11"
 

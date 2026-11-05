@@ -3303,6 +3303,7 @@ dependencies = [
  "tenko-core",
  "tenko-dhcp",
  "tenko-dns",
+ "tenko-krb",
  "tenko-scan",
  "tenko-store",
  "tenko-vault",
@@ -3354,6 +3355,17 @@ dependencies = [
  "tokio-util",
  "tracing",
  "utoipa",
+]
+
+[[package]]
+name = "tenko-krb"
+version = "0.0.11"
+dependencies = [
+ "aws-lc-rs",
+ "tenko-core",
+ "thiserror 2.0.21",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]

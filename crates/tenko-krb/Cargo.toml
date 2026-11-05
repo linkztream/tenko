@@ -1,0 +1,24 @@
+[package]
+name = "tenko-krb"
+version = "0.0.11"
+description = "Kerberos for GSS-TSIG and web sign-in: the DER codec, the AES ciphers, keys and keytabs, the acceptor, MIC tokens and the KDC client, with no Kerberos library"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# The only cryptography: the AES block function (ECB and CBC without padding), HMAC-SHA1,
+# PBKDF2-HMAC-SHA1, constant-time comparison and the random generator (ADR 0026 point 1).
+aws-lc-rs = { workspace = true }
+tenko-core = { workspace = true }
+thiserror = { workspace = true }
+# The KDC and change-password exchanges of the controller (UDP and TCP with timeouts).
+tokio = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

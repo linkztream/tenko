@@ -68,6 +68,7 @@ tenko-core = { path = "crates/tenko-core" }
 tenko-dns = { path = "crates/tenko-dns" }
 tenko-ipam = { path = "crates/tenko-ipam" }
 tenko-jobs = { path = "crates/tenko-jobs" }
+tenko-krb = { path = "crates/tenko-krb" }
 tenko-migrate = { path = "crates/tenko-migrate" }
 tenko-store = { path = "crates/tenko-store" }
 tenko-vault = { path = "crates/tenko-vault" }

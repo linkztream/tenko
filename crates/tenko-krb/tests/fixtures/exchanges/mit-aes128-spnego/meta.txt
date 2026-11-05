@@ -1,0 +1,9 @@
+mech=spnego
+target=DNS@tenko128.corp.example.test
+mutual=1
+flags=0x13e
+recorded_unix=1793867453
+spn=DNS/tenko128.corp.example.test
+realm=CORP.EXAMPLE.TEST
+kdc=MIT Kerberos 1.20.1 (Ubuntu 24.04 krb5-kdc)
+acceptor=own
