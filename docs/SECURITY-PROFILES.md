@@ -37,7 +37,7 @@ Reading the matrix:
 | TGL-02 | MFA requirement | Optional (IAM-07 can force it) | Required for administrator roles | Required for all accounts | Optional (IAM-07 can force it) | 1 | IAM-06 |
 | TGL-03 | Passkey required for administrators | No | No (recommended) | Yes | No | 1 | IAM-06 |
 | TGL-04 | Session lifetime (absolute / idle) | 30 days / 7 days | 12 hours / 1 hour | 8 hours / 15 minutes | 30 days / 7 days | 1 | IAM-08 |
-| TGL-05 | API token maximum lifetime | 365 days | 90 days | 30 days | No maximum (non-expiring tokens allowed) | 1 | IAM-10 |
+| TGL-05 | API token maximum lifetime (mirror tokens included; the finding `migrate.mirror.token_expiring` is raised 14 days ahead) | 365 days | 90 days | 30 days | No maximum (non-expiring tokens allowed) | 1 | IAM-10 |
 | TGL-06 | Breached-password check (HIBP) | On, online k-anonymity | On, online k-anonymity | On, offline corpus preferred | Off | 1 | IAM-04 |
 | TGL-07 | Lockout | On, progressive delay | On, progressive delay then temporary lock | On, lock until timeout or administrator unlock, with alert | Off | 1 | IAM-05 |
 | TGL-08 | TLS on API and UI | On, certificate from the internal CA | On, internal CA or imported certificate | On, TLS 1.3 only, HSTS | Optional, plain HTTP allowed | 1 | API-01, OPS-04 (internal CA) |
