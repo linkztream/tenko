@@ -1,6 +1,6 @@
 # Windows takeover plan: DNS zones and DHCP off the domain controllers, step by step and reversible
 
-- Status: Accepted on 2026-11-01 for the decisions of section 6 that the owner took that day (WT-Q1 to WT-Q7); WT-Q8 to WT-Q12 decided by the owner on 2026-11-05 as recommended. The plan binds and changes only through rule 2.8 of the execution plan. The owner's standing direction, single node first and cluster-aware (section 2.10 of [phase-2-plan.md](phase-2-plan.md)), binds this work; section 2.14 says how
+- Status: Accepted on 2026-11-01 for the decisions of section 6 that the owner took that day (WT-Q1 to WT-Q7); WT-Q8 to WT-Q12 decided by the owner on 2026-11-05 as recommended. On 2026-11-05 the owner also reordered what follows the slice: the Kerberos line of Slice 13 (WP13.0 to WP13.4 of [identity-plan.md](identity-plan.md)) runs before the real cutover, which then happens under Hardened from its first day (WT-Q5 and WT-Q7, amended). The plan binds and changes only through rule 2.8 of the execution plan. The owner's standing direction, single node first and cluster-aware (section 2.10 of [phase-2-plan.md](phase-2-plan.md)), binds this work; section 2.14 says how
 - Date: 2026-11-01
 - Scope: Slice 14, Phase 4's first slice. An operator moves the DNS zones and the DHCP service of a small Active Directory domain from the domain controllers to Tenko with no client noticing, each step reversible, rehearsed first on a throwaway domain. DNS data arrives by zone transfer; DHCP data arrives by a mirror that a scheduled script on a controller pushes to Tenko's API; a takeover action per scope turns the mirror into Tenko's own leases and records. Written against `main` at `8e4f4112`. Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md). Exit criteria, measurements and risks continue the project's series: E72 onward, M69 onward and R137 onward (the high-availability plan ends at E71 and M68, the identity plan at R136)
 
@@ -55,7 +55,7 @@ Contents:
 |---|---|---|
 | 14. The Windows takeover | The contracts and two ADRs; the exporter script and its scheduled task; the mirrored source with its push, freshness, diff and loss report; the flip of a zone and its reverse; the prepare, the takeover and the reverse of a scope; the runbook around the mirror; the security rows; the rehearsal | E72 to E80 |
 
-After this slice, in the owner's order (WT-Q7): the real cutover at home with the runbook, then Slice 13 while the lab controller still stands.
+After this slice, in the owner's order (WT-Q7 as amended on 2026-11-05): the Kerberos line of Slice 13 (WP13.0 to WP13.4), with the rehearsal's throwaway domain kept as its interop lab; then the real cutover at home with the runbook, under Hardened from the first day; then the rest of Slice 13.
 
 ### 1.4 Requirements
 
@@ -418,6 +418,7 @@ Each question lists its options, the trade-offs and the recommendation. The owne
 - Trade-offs: (b) delays the takeover by Slice 13's 82 builder-days; (c) adds nothing the reference domain needs over Home except stricter defaults the runbook sets per zone anyway; (a) is the runbook's assumption and the footing whose limits section 4 of the runbook documents.
 - **Recommendation: (a).**
 - **Decided (2026-11-01): (a), Home now; Hardened after GSS-TSIG (Slice 13, WP13.0 to WP13.4 of identity-plan.md, which stays as planned and follows this slice).**
+- **Amended (2026-11-05): the Home profile with the access list stays the path of the rehearsal and of a home user without a domain; the owner's own cutover waits for Slice 13's GSS-TSIG and runs under Hardened from the first day, so that secure updates are the integration test and no interim period takes unsigned updates.**
 
 **WT-Q6. How is the takeover rehearsed?**
 - Options: (a) a throwaway domain controller and one Windows client on the owner's hypervisor, the lab node fed by a zone transfer from the real domain and by a read-only mirror of the real DHCP server, in one afternoon, as step 0 of the runbook; (b) the container lab only (Samba AD, `dhclient`); (c) straight to the real domain with the rollbacks ready.
@@ -430,6 +431,7 @@ Each question lists its options, the trade-offs and the recommendation. The owne
 - Trade-offs: (b) is WT-Q5 (b); (c) competes for the owner's lab time; (a) uses the rehearsal's lab for E44 of the identity plan.
 - **Recommendation: (a).**
 - **Decided (2026-11-01): (a).**
+- **Amended (2026-11-05): Slice 14 is built and rehearsed first; then WP13.0 to WP13.4 of identity-plan.md on the rehearsal's throwaway domain; then the real cutover under Hardened; then WP13.5 to WP13.8.**
 
 **WT-Q8. Does the takeover adopt `dynamic` names besides `transfer` ones?**
 - Options: (a) `transfer` only, as WT-Q3's text says; (b) `transfer`, and `dynamic` names that carry a DHCID and the mirrored lease's address; (c) also `manual` names with a DHCID.
