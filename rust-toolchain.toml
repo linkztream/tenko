@@ -1,4 +1,10 @@
+# The exact stable release every build uses: the release workflow, CI, the container image's
+# builder stage and a developer's checkout (rustup reads this file). An exact version, not
+# the channel name, so that a release is compiled by the compiler that was reviewed and not
+# by whatever the channel serves on the day of the run; the workflows pass this version to
+# their toolchain step. Bump it in its own commit, after reading the release notes of the
+# new version, and run the CI on that commit before anything else lands on it.
 [toolchain]
-channel = "stable"
+channel = "1.99.1"
 components = ["clippy", "rustfmt"]
 profile = "minimal"

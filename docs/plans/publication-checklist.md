@@ -118,15 +118,19 @@ after, and steps 14 to 16 in the days around it.
 **In the days around it**
 
 14. **The first tagged release.** Set the crate version, add the changelog section
-    `## [X.Y.Z] - <date>` and push the tag; the release workflow builds the binaries, the
-    MSI, the container image, `releases.json` and `SHA256SUMS` and writes the release
-    notes from the changelog. Mark it a pre-release (a `-rc.1` or `-alpha.1` tag does so by
-    itself) until the data-directory format is frozen. The notes say what the README's
-    pre-release notice says: unsigned binaries, no stability promise yet.
+    `## [X.Y.Z] - <date>` and push the tag on a commit of `main` (the workflow refuses a
+    tag whose commit is not on `main`, and a branch named like the tag); the release
+    workflow builds the binaries, the MSI, `releases.json` and `SHA256SUMS`, builds the
+    container image from the Linux binary, runs the security round, attests the files,
+    pushes the image by digest, attests it, and only then tags the image and writes the
+    release notes from the changelog. Mark it a pre-release (a `-rc.1` or `-alpha.1` tag
+    does so by itself) until the data-directory format is frozen. The notes say what the
+    README's pre-release notice says: unsigned binaries, no stability promise yet.
 15. **Signing.** A code-signing certificate for the Windows binary and the MSI
     (`deploy/windows/README.md`, "Signing"); the workflow signs as soon as the secrets
-    exist. Signing of the Linux binary and of `releases.json` is a later requirement with
-    its places marked in the release workflow.
+    exist, in the two jobs that hold them and run nothing but the signing script. Signing
+    of the Linux binary and of `releases.json` (which `SHA256SUMS` lists) is a later
+    requirement with its places marked in the release workflow.
 16. **The README's status line** (`pre-alpha, Phase 0`) is older than the code; update it
     to the current phase when the first release is tagged.
 

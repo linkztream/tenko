@@ -9,10 +9,12 @@
 #                   checks it against the release's SHA256SUMS before testing. This is how the
 #                   round is rehearsed between releases.
 #
-# The workspace is always the workflow's own commit (github.sha), so the round runs the
-# scripts of deploy/security/ of this commit. On a dispatch the tag's tree is checked out as
-# well, into release-source, and the fuzz targets of that tree are run (SOURCE); on a release
-# call the workspace is the source of the binary.
+# On a release call the workspace is the commit of the tag being released, the one `verify`
+# resolved and every job of the release builds (the `commit` input), so the round runs the
+# scripts of deploy/security/ and the fuzz targets of the released source, also when the
+# release was started by hand from another branch. On a dispatch the workspace is this
+# workflow's own commit, so the current scripts test an older tag, whose tree is checked out
+# as well, into release-source, for the fuzz targets of that tree (SOURCE).
 #
 # The job installs the node under test as a user installs it (deploy/install.sh), sets it up
 # through the API under the Standard profile, and runs deploy/security/round.sh. The log of a
@@ -41,7 +43,7 @@ on:
         required: true
         type: string
       commit:
-        description: "The commit the release is built from"
+        description: "The commit of the tag being released, as `verify` resolved it; checked out here"
         required: true
         type: string
       binary-artifact:
@@ -105,9 +107,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The round's scripts (deploy/security/) are those of this workflow's own commit,
-          # whatever is tested: a tag from before the scripts existed must still run.
-          ref: ${{ github.sha }}
+          # On a release call, the commit of the tag being released (the scripts and the fuzz
+          # targets of the released source); on a dispatch, this workflow's own commit, so
+          # that a tag from before the scripts existed can still be tested.
+          ref: ${{ inputs.commit != '' && inputs.commit || github.sha }}
           persist-credentials: false
 
       # The in-process fuzz targets (fuzz.targets) must be those of the source the tested

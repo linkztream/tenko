@@ -41,7 +41,17 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# The extensions must match the toolset in .config/dotnet-tools.json.
+# The extensions must match the toolset in .config/dotnet-tools.json. They are fetched by
+# name and version through `wix extension add` (as the toolset is through `dotnet tool
+# restore`), and neither command takes a hash: the WiX CLI resolves the version with NuGet's
+# client, which checks the repository signature of nuget.org and nothing more specific.
+# Pinning them by hash would take: a step before this script that downloads each package by
+# exact version from the NuGet flat container
+# (https://api.nuget.org/v3-flatcontainer/<id>/<version>/<id>.<version>.nupkg), compares it
+# with a SHA-256 recorded here, and offers the verified files to both commands as the only
+# package source (a nuget.config in the repository root with that folder and nuget.org
+# cleared); the digests are recorded once from a machine that downloads the four packages.
+# Until then the version is the pin, and the job that runs this script holds no secret.
 $WixVersion = '5.0.2'
 $Extensions = @('WixToolset.UI.wixext', 'WixToolset.Util.wixext', 'WixToolset.Firewall.wixext')
 

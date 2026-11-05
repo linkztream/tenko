@@ -917,21 +917,39 @@ binary reports another version than the manifest names (`update.version_mismatch
 
 Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
 
-1. **Verify.** The changelog has a section `## [<version>] - <date>` for the tag
-   (`node scripts/changelog.mjs notes <version>` fails when it is missing).
-2. **Build.** The web UI (`npm run build` in `ui/`) and then the binaries for Linux x86_64
-   and Windows x86_64 with the real UI embedded. A release build refuses the placeholder
-   page that `TENKO_UI_STUB=1` produces, so a release cannot ship without its UI. The Linux
-   binary is described below.
+1. **Verify.** The tag is resolved by its full ref name to its commit (a branch of the same
+   name is refused), the commit must be on `main`, the crate version must equal the tag, and
+   the changelog has a section `## [<version>] - <date>` for it
+   (`node scripts/changelog.mjs notes <version>` fails when it is missing). Every later job
+   builds that commit, not the tag name.
+2. **Build.** The web UI (`npm ci --ignore-scripts`, an audit of the whole dependency tree
+   that stops on a high or critical advisory, `npm run build` in `ui/`) and then the
+   binaries for Linux x86_64 and Windows x86_64 with the real UI embedded. A release build
+   refuses the placeholder page that `TENKO_UI_STUB=1` produces, so a release cannot ship
+   without its UI. The Linux binary is described below.
 3. **Smoke.** The job `smoke-linux` runs the Linux binary on two distributions (below).
-4. **Image.** The container image from `deploy/Dockerfile`.
-5. **SBOMs.** A CycloneDX SBOM for each binary, the web UI and the image (below).
-6. **Release files.** `SHA256SUMS` and the manifest `releases.json`
-   (`scripts/release-manifest.mjs`), with the installers and the SBOMs added to `SHA256SUMS`.
-7. **Attest.** A build provenance attestation for every release file and the image digest,
-   and an SBOM attestation for each SBOM.
-8. **Publish.** A release text taken from the changelog section, and the attachment of the
-   release files to the release.
+4. **Windows.** The Windows binary is signed (when a certificate is configured) in a job of
+   its own that holds the signing secrets and runs nothing else; the MSI is built from the
+   signed binary, signed the same way, and installed, upgraded and removed on the runner
+   (`deploy/windows/README.md`).
+5. **Image.** The container image is built from the Linux binary of step 2, the same file,
+   on a `distroless/static` base pinned by digest (`deploy/Dockerfile`); nothing is compiled
+   for it. It is written to an archive and pushed later (step 9).
+6. **SBOMs.** A CycloneDX SBOM for each binary, the web UI and the image (below).
+7. **Release files.** `SHA256SUMS` and the manifest `releases.json`
+   (`scripts/release-manifest.mjs`): every earlier release of the previous manifest is
+   checked against the `SHA256SUMS` its own release published before it is kept,
+   `SHA256SUMS` lists `releases.json` itself, and the installers and the SBOMs are added to
+   `SHA256SUMS`.
+8. **Attest.** A build provenance attestation for every release file and an SBOM
+   attestation for each SBOM of a binary.
+9. **Security round, then the image.** The lab round of `docs/plans/security-audit-plan.md`
+   runs on the Linux binary, from the tag's commit. Only after it and the attestations
+   passed is the image pushed to the registry, by digest and without a tag, and attested
+   (provenance and SBOM, pushed to the registry beside it).
+10. **Publish.** The image gets its tags `<version>` and, for a stable release, `latest`,
+    pointing at the attested digest; the release text is taken from the changelog section,
+    and the release files are attached to the release.
 
 The Linux binary is built for `x86_64-unknown-linux-musl` on `ubuntu-latest` with
 `musl-tools`, so it is one static executable that does not depend on the glibc of the host
@@ -951,11 +969,11 @@ start on those distributions is never published.
 |---|---|---|
 | Linux binary | `tenko-<version>-linux-x86_64` | Static, built for musl |
 | Windows binary | `tenko-<version>-windows-x86_64.exe` | |
-| Windows installer | `tenko-<version>-windows-x86_64.msi` | Built, smoke-tested and (with a certificate) signed by the job `msi`; `deploy/windows/README.md` |
-| Container image | `ghcr.io/linkztream/tenko:<version>` | The tag `latest` moves only for releases without a pre-release part |
+| Windows installer | `tenko-<version>-windows-x86_64.msi` | Built from the signed binary, signed (with a certificate) and smoke-tested by the jobs `msi`, `sign-msi` and `msi-smoke`; `deploy/windows/README.md` |
+| Container image | `ghcr.io/linkztream/tenko:<version>` | Built from the released Linux binary on a base pinned by digest; pushed by digest after the security round and the attestations, tagged when the release is published. The tag `latest` moves only for releases without a pre-release part |
 | Installers | `install.sh`, `tenko-proxmox.sh` | The Linux installer and the Proxmox script of this tag |
 | SBOMs | `tenko-<version>-linux-x86_64.cdx.json`, `tenko-<version>-windows-x86_64.cdx.json`, `tenko-<version>-ui.cdx.json`, `tenko-<version>-image.cdx.json` | CycloneDX JSON; not in `releases.json` |
-| Checksums | `SHA256SUMS` | `sha256sum` format, one line per binary, installer package, installer script and SBOM of this release |
+| Checksums | `SHA256SUMS` | `sha256sum` format, one line per binary, installer package, installer script and SBOM of this release, and one for `releases.json` |
 | Manifest | `releases.json` | Section 6.3 |
 
 From the release after 0.0.10 on, a release also carries an SBOM in CycloneDX JSON for
@@ -972,7 +990,9 @@ attestations do not prove.
 The manifest names each binary by `<base-url>/<file name>`, where the base URL is the
 download URL of the release, `https://github.com/linkztream/tenko/releases/download/v<version>`.
 The manifest of a release lists that release and, from the previous manifest, every earlier
-release. The address `https://github.com/linkztream/tenko/releases/latest/download/releases.json`
+release whose files and digests still match the `SHA256SUMS` that release published (an
+entry that does not match is dropped, with a warning in the release log). The address
+`https://github.com/linkztream/tenko/releases/latest/download/releases.json`
 therefore serves the manifest of the release that GitHub marks as the latest, with the
 notes of all earlier releases.
 

@@ -4,8 +4,9 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { describe, test } from "node:test";
@@ -20,9 +21,12 @@ import {
   buildRelease,
   formatChecksums,
   formatManifest,
+  formatReleaseFiles,
   hashFile,
   installerOf,
   mergeManifest,
+  parseChecksums,
+  verifyPreviousReleases,
   boundText,
   MAX_NOTES_BYTES,
 } from "./release-manifest.mjs";
@@ -545,6 +549,174 @@ describe("formatManifest and formatChecksums", () => {
   });
 });
 
+describe("formatReleaseFiles", () => {
+  const hex = (/** @type {string} */ c) => c.repeat(64);
+  const release = {
+    version: "0.2.0",
+    date: "2026-11-02",
+    notes: "",
+    security: false,
+    requires_action: false,
+    assets: [{ platform: "linux-x86_64", name: "tenko-0.2.0-linux-x86_64", url: "u", sha256: hex("a"), size: 1 }],
+    installers: [{ kind: "msi", platform: "windows-x86_64", name: "tenko-0.2.0-windows-x86_64.msi", url: "u", sha256: hex("c"), size: 3 }],
+  };
+
+  test("lists the manifest itself in the checksum file, by the digest of the text it returns", () => {
+    const manifest = { schema: 1, project: "tenko", releases: [release] };
+    const files = formatReleaseFiles(manifest, release);
+    assert.equal(files.manifest, formatManifest(manifest));
+    assert.equal(
+      files.checksums,
+      `${sha256(files.manifest)}  releases.json\n${hex("a")}  tenko-0.2.0-linux-x86_64\n${hex("c")}  tenko-0.2.0-windows-x86_64.msi\n`,
+    );
+  });
+
+  test("the digest is of the final manifest, earlier releases included", () => {
+    const old = { ...release, version: "0.1.0", notes: "old" };
+    const one = formatReleaseFiles({ schema: 1, project: "tenko", releases: [release] }, release);
+    const two = formatReleaseFiles({ schema: 1, project: "tenko", releases: [release, old] }, release);
+    assert.notEqual(one.manifest, two.manifest);
+    const line = (/** @type {{ checksums: string }} */ f) => f.checksums.split("\n").find((l) => l.endsWith("  releases.json"));
+    assert.equal(line(one), `${sha256(one.manifest)}  releases.json`);
+    assert.equal(line(two), `${sha256(two.manifest)}  releases.json`);
+    assert.notEqual(line(one), line(two));
+  });
+
+  test("names the manifest file as it is written", () => {
+    const files = formatReleaseFiles({ schema: 1, project: "tenko", releases: [release] }, release, "manifest.json");
+    assert.match(files.checksums, /^[0-9a-f]{64}  manifest\.json$/m);
+    assert.ok(!files.checksums.includes("releases.json"));
+  });
+});
+
+describe("parseChecksums", () => {
+  test("reads the sha256sum format, text and binary mode, and ignores the rest", () => {
+    const hex = (/** @type {string} */ c) => c.repeat(64);
+    const sums = parseChecksums(`${hex("a")}  install.sh\n${hex("B")} *tenko-0.1.0-linux-x86_64\n\nnot a line\n${hex("c")}  a name with spaces\n`);
+    assert.deepEqual(
+      [...sums.entries()],
+      [
+        ["install.sh", hex("a")],
+        ["tenko-0.1.0-linux-x86_64", hex("b")],
+        ["a name with spaces", hex("c")],
+      ],
+    );
+  });
+});
+
+// The check of the earlier releases of a previous manifest against their own SHA256SUMS.
+describe("verifyPreviousReleases", () => {
+  const DOWNLOAD_URL = "https://github.com/linkztream/tenko/releases/download";
+  const hex = (/** @type {string} */ c) => c.repeat(64);
+  /**
+   * @param {string} version
+   * @param {Record<string, unknown>} [extra]
+   */
+  const entry = (version, extra = {}) => ({
+    version,
+    date: "2026-01-01",
+    notes: `Notes of ${version}`,
+    security: false,
+    requires_action: false,
+    assets: [
+      { platform: "linux-x86_64", name: `tenko-${version}-linux-x86_64`, url: `${DOWNLOAD_URL}/v${version}/tenko-${version}-linux-x86_64`, sha256: hex("a"), size: 1 },
+      { platform: "windows-x86_64", name: `tenko-${version}-windows-x86_64.exe`, url: `${DOWNLOAD_URL}/v${version}/tenko-${version}-windows-x86_64.exe`, sha256: hex("b"), size: 2 },
+    ],
+    installers: [
+      { kind: "msi", platform: "windows-x86_64", name: `tenko-${version}-windows-x86_64.msi`, url: `${DOWNLOAD_URL}/v${version}/tenko-${version}-windows-x86_64.msi`, sha256: hex("c"), size: 3 },
+    ],
+    ...extra,
+  });
+  /** The SHA256SUMS a release with the digests of `entry` published, with the installers and SBOMs around them. */
+  const sumsOf = (/** @type {string} */ version) =>
+    `${hex("9")}  install.sh\n${hex("a")}  tenko-${version}-linux-x86_64\n${hex("8")}  tenko-${version}-linux-x86_64.cdx.json\n${hex("b")}  tenko-${version}-windows-x86_64.exe\n${hex("c")}  tenko-${version}-windows-x86_64.msi\n`;
+  /** @param {Record<string, { status: number, text: string }>} responses by URL */
+  const fetcher = (responses) => {
+    /** @type {string[]} */
+    const requested = [];
+    const fetchText = async (/** @type {string} */ url) => {
+      requested.push(url);
+      return responses[url] ?? { status: 404, text: "Not Found" };
+    };
+    return { fetchText, requested };
+  };
+  const manifest = (/** @type {unknown[]} */ releases) => ({ schema: 1, project: "tenko", releases });
+
+  test("keeps an entry whose digests are those of its release's SHA256SUMS, fetched by tag", async () => {
+    const { fetchText, requested } = fetcher({ [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 200, text: sumsOf("0.1.0") } });
+    const previous = manifest([entry("0.1.0", { future_field: 1 })]);
+    const copy = structuredClone(previous);
+    const result = await verifyPreviousReleases(previous, { downloadUrl: DOWNLOAD_URL, fetchText });
+    assert.deepEqual(result.previous, copy);
+    assert.deepEqual(result.dropped, []);
+    assert.deepEqual(requested, [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]);
+    assert.deepEqual(previous, copy);
+  });
+
+  test("drops a planted entry whose digest is not the one its release published, with a warning", async () => {
+    const planted = entry("0.1.0");
+    planted.assets[0] = { ...planted.assets[0], sha256: hex("f") };
+    const { fetchText } = fetcher({
+      [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 200, text: sumsOf("0.1.0") },
+      [`${DOWNLOAD_URL}/v0.0.9/SHA256SUMS`]: { status: 200, text: sumsOf("0.0.9") },
+    });
+    const result = await verifyPreviousReleases(manifest([planted, entry("0.0.9")]), { downloadUrl: DOWNLOAD_URL, fetchText });
+    assert.deepEqual(result.previous.releases.map((r) => r.version), ["0.0.9"]);
+    assert.equal(result.dropped.length, 1);
+    assert.equal(result.dropped[0]?.version, "0.1.0");
+    assert.match(result.dropped[0]?.reason ?? "", /tenko-0\.1\.0-linux-x86_64/);
+  });
+
+  test("drops an entry with a file its release never published, an installer included", async () => {
+    const extra = entry("0.1.0");
+    extra.installers = [{ ...extra.installers[0], name: "tenko-0.1.0-linux-x86_64.deb", kind: "deb", url: `${DOWNLOAD_URL}/v0.1.0/tenko-0.1.0-linux-x86_64.deb` }];
+    const { fetchText } = fetcher({ [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 200, text: sumsOf("0.1.0") } });
+    const result = await verifyPreviousReleases(manifest([extra]), { downloadUrl: DOWNLOAD_URL, fetchText });
+    assert.deepEqual(result.previous.releases, []);
+    assert.match(result.dropped[0]?.reason ?? "", /tenko-0\.1\.0-linux-x86_64\.deb/);
+  });
+
+  test("drops an entry whose files point elsewhere than its own release, before fetching anything", async () => {
+    const elsewhere = entry("0.1.0");
+    elsewhere.assets[1] = { ...elsewhere.assets[1], url: "https://example.com/tenko-0.1.0-windows-x86_64.exe" };
+    const { fetchText, requested } = fetcher({ [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 200, text: sumsOf("0.1.0") } });
+    const result = await verifyPreviousReleases(manifest([elsewhere]), { downloadUrl: DOWNLOAD_URL, fetchText });
+    assert.deepEqual(result.previous.releases, []);
+    assert.match(result.dropped[0]?.reason ?? "", /example\.com/);
+    assert.deepEqual(requested, []);
+  });
+
+  test("drops an entry without assets to check, or whose release has no SHA256SUMS", async () => {
+    const { fetchText } = fetcher({});
+    const result = await verifyPreviousReleases(manifest([entry("0.1.0"), entry("0.0.9", { assets: [] }), entry("0.0.8", { assets: "x" })]), { downloadUrl: DOWNLOAD_URL, fetchText });
+    assert.deepEqual(result.previous.releases, []);
+    assert.deepEqual(result.dropped.map((d) => d.version), ["0.1.0", "0.0.9", "0.0.8"]);
+    assert.match(result.dropped[0]?.reason ?? "", /404/);
+  });
+
+  test("any other failure to fetch stops the run instead of dropping", async () => {
+    const { fetchText } = fetcher({ [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 503, text: "" } });
+    await assert.rejects(verifyPreviousReleases(manifest([entry("0.1.0")]), { downloadUrl: DOWNLOAD_URL, fetchText }), ManifestError);
+    const failing = async () => {
+      throw new Error("connection reset");
+    };
+    await assert.rejects(verifyPreviousReleases(manifest([entry("0.1.0")]), { downloadUrl: DOWNLOAD_URL, fetchText: failing }), /connection reset/);
+  });
+
+  test("the entry of the version being released is not checked: it is replaced", async () => {
+    const { fetchText, requested } = fetcher({});
+    const result = await verifyPreviousReleases(manifest([entry("0.2.0")]), { downloadUrl: DOWNLOAD_URL, fetchText, skipVersion: "0.2.0" });
+    assert.equal(result.previous.releases.length, 1);
+    assert.deepEqual(requested, []);
+  });
+
+  test("refuses a manifest of another schema or a broken release, like mergeManifest", async () => {
+    const { fetchText } = fetcher({});
+    await assert.rejects(verifyPreviousReleases({ schema: 2, project: "tenko", releases: [] }, { downloadUrl: DOWNLOAD_URL, fetchText }), ManifestError);
+    await assert.rejects(verifyPreviousReleases(manifest([{ notes: "no version" }]), { downloadUrl: DOWNLOAD_URL, fetchText }), /without a valid version/);
+  });
+});
+
 // ---------------------------------------------------------------------------------------
 // The command line
 
@@ -555,6 +727,19 @@ describe("formatManifest and formatChecksums", () => {
 function cli(args, cwd = here) {
   const r = spawnSync(process.execPath, [script, ...args], { cwd, encoding: "utf8" });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+
+/**
+ * Like cli, without blocking the event loop, for the tests that serve a file to the script.
+ * @param {string[]} args
+ * @returns {Promise<{ status: number | null, stdout: string, stderr: string }>}
+ */
+function cliAsync(args) {
+  return new Promise((resolve) => {
+    execFile(process.execPath, [script, ...args], { cwd: here, encoding: "utf8" }, (error, stdout, stderr) => {
+      resolve({ status: error === null ? 0 : /** @type {{ code?: number }} */ (error).code ?? null, stdout, stderr });
+    });
+  });
 }
 
 describe("command line", () => {
@@ -606,30 +791,116 @@ describe("command line", () => {
       const sums = readFileSync(path.join(path.dirname(out), "SHA256SUMS"), "utf8");
       assert.equal(
         sums,
-        `${sha256("linux binary")}  tenko-0.2.0-linux-x86_64\n${sha256("windows binary")}  tenko-0.2.0-windows-x86_64.exe\n`,
+        `${sha256(text)}  releases.json\n${sha256("linux binary")}  tenko-0.2.0-linux-x86_64\n${sha256("windows binary")}  tenko-0.2.0-windows-x86_64.exe\n`,
       );
+      assert.match(r.stdout, /SHA256SUMS: 3 checksums/);
     });
   });
 
-  test("merges --previous, replaces the same version and rewrites it in place", async () => {
-    await withTempDir((dir) => {
+  /**
+   * Serves `files` by path for the check of earlier releases; `body` gets the download URL.
+   * @template T
+   * @param {Record<string, string>} files
+   * @param {(downloadUrl: string, requested: string[]) => Promise<T>} body
+   */
+  async function withSumsServer(files, body) {
+    /** @type {string[]} */
+    const requested = [];
+    const server = createServer((req, res) => {
+      requested.push(req.url ?? "");
+      const text = files[req.url ?? ""];
+      if (text === undefined) {
+        res.writeHead(404).end("Not Found");
+      } else {
+        res.writeHead(200, { "content-type": "text/plain" }).end(text);
+      }
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(undefined)));
+    const address = /** @type {import("node:net").AddressInfo} */ (server.address());
+    try {
+      return await body(`http://127.0.0.1:${address.port}/download`, requested);
+    } finally {
+      server.close();
+    }
+  }
+
+  test("merges --previous after checking each earlier release against its SHA256SUMS, and rewrites it in place", async () => {
+    await withTempDir(async (dir) => {
       const assets = path.join(dir, "dist");
       mkdirSync(assets);
       writeFiles(assets, { "tenko-0.2.0-linux-x86_64": "v2" });
       const changelog = path.join(dir, "CHANGELOG.md");
       writeFileSync(changelog, CHANGELOG);
       const out = path.join(dir, "releases.json");
-      const old = (/** @type {string} */ version) => ({ version, date: "2026-01-01", notes: "old", security: false, requires_action: false, assets: [] });
-      writeFileSync(out, formatManifest({ schema: 1, project: "tenko", releases: [old("0.2.0"), old("0.1.0")] }));
+      const old = (/** @type {string} */ version, /** @type {string} */ digest, /** @type {string} */ [base] = ["https://github.com/linkztream/tenko/releases/download"]) => ({
+        version,
+        date: "2026-01-01",
+        notes: "old",
+        security: false,
+        requires_action: false,
+        assets: [{ platform: "linux-x86_64", name: `tenko-${version}-linux-x86_64`, url: `${base}/v${version}/tenko-${version}-linux-x86_64`, sha256: digest, size: 1 }],
+      });
+      await withSumsServer(
+        {
+          "/download/v0.1.0/SHA256SUMS": `${sha256("v1")}  tenko-0.1.0-linux-x86_64\n`,
+          "/download/v0.0.9/SHA256SUMS": `${sha256("v0.9")}  tenko-0.0.9-linux-x86_64\n`,
+        },
+        async (downloadUrl, requested) => {
+          // The entry of 0.0.9 is planted: its digest is not the one that release published.
+          writeFileSync(out, formatManifest({ schema: 1, project: "tenko", releases: [old("0.2.0", sha256("stale")), old("0.1.0", sha256("v1"), [downloadUrl]), old("0.0.9", sha256("planted"), [downloadUrl])] }));
+          const r = await cliAsync(["--version", "0.2.0", "--assets", assets, "--base-url", BASE_URL, "--changelog", changelog, "--previous", out, "--verify-previous", downloadUrl, "--out", out]);
+          assert.equal(r.status, 0, r.stderr);
+          assert.match(r.stdout, /2 releases in the manifest, 1 earlier release dropped/);
+          assert.match(r.stderr, /warning: dropped release 0\.0\.9 from the manifest: .*tenko-0\.0\.9-linux-x86_64/);
+          assert.ok(!r.stderr.includes("0.1.0"), r.stderr);
+          assert.deepEqual(requested.sort(), ["/download/v0.0.9/SHA256SUMS", "/download/v0.1.0/SHA256SUMS"]);
+          const manifest = JSON.parse(readFileSync(out, "utf8"));
+          assert.deepEqual(manifest.releases.map((/** @type {any} */ x) => [x.version, x.notes]), [
+            ["0.2.0", "### Added\n\n- Update notice.\n- Release manifest."],
+            ["0.1.0", "old"],
+          ]);
+        },
+      );
+    });
+  });
 
-      const r = cli(["--version", "0.2.0", "--assets", assets, "--base-url", BASE_URL, "--changelog", changelog, "--previous", out, "--out", out]);
-      assert.equal(r.status, 0, r.stderr);
-      assert.match(r.stdout, /2 releases in the manifest/);
-      const manifest = JSON.parse(readFileSync(out, "utf8"));
-      assert.deepEqual(manifest.releases.map((/** @type {any} */ x) => [x.version, x.notes]), [
-        ["0.2.0", "### Added\n\n- Update notice.\n- Release manifest."],
-        ["0.1.0", "old"],
-      ]);
+  test("--previous without --verify-previous is a usage error, and a failing fetch exits 1", async () => {
+    await withTempDir(async (dir) => {
+      const assets = path.join(dir, "dist");
+      mkdirSync(assets);
+      writeFiles(assets, { "tenko-0.2.0-linux-x86_64": "v2" });
+      const changelog = path.join(dir, "CHANGELOG.md");
+      writeFileSync(changelog, CHANGELOG);
+      const previous = path.join(dir, "previous.json");
+      writeFileSync(previous, formatManifest({ schema: 1, project: "tenko", releases: [] }));
+      const out = path.join(dir, "releases.json");
+      const args = ["--version", "0.2.0", "--assets", assets, "--base-url", BASE_URL, "--changelog", changelog, "--previous", previous, "--out", out];
+      const r = cli(args);
+      assert.equal(r.status, 2);
+      assert.match(r.stderr, /--verify-previous is required with --previous/);
+      assert.equal(cli([...args, "--verify-previous", "ftp://example.com/x"]).status, 2);
+      assert.throws(() => readFileSync(out), { code: "ENOENT" });
+
+      const old = { version: "0.1.0", date: "2026-01-01", notes: "old", security: false, requires_action: false, assets: [{ platform: "linux-x86_64", name: "tenko-0.1.0-linux-x86_64", url: "", sha256: sha256("v1"), size: 1 }] };
+      await withSumsServer({}, async (downloadUrl) => {
+        old.assets[0].url = `${downloadUrl}/v0.1.0/tenko-0.1.0-linux-x86_64`;
+        writeFileSync(previous, formatManifest({ schema: 1, project: "tenko", releases: [old] }));
+        // A release without SHA256SUMS (404) drops the entry; the run goes on.
+        const gone = await cliAsync([...args, "--verify-previous", downloadUrl]);
+        assert.equal(gone.status, 0, gone.stderr);
+        assert.match(gone.stderr, /warning: dropped release 0\.1\.0 .*404/);
+        assert.match(gone.stdout, /1 release in the manifest, 1 earlier release dropped/);
+      });
+      // A server that cannot be reached stops the run.
+      const server = createServer(() => {});
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(undefined)));
+      const port = /** @type {import("node:net").AddressInfo} */ (server.address()).port;
+      await new Promise((resolve) => server.close(() => resolve(undefined)));
+      old.assets[0].url = `http://127.0.0.1:${port}/download/v0.1.0/tenko-0.1.0-linux-x86_64`;
+      writeFileSync(previous, formatManifest({ schema: 1, project: "tenko", releases: [old] }));
+      const down = await cliAsync([...args, "--verify-previous", `http://127.0.0.1:${port}/download`]);
+      assert.equal(down.status, 1);
+      assert.match(down.stderr, /release-manifest: cannot fetch .*SHA256SUMS/);
     });
   });
 
@@ -641,7 +912,7 @@ describe("command line", () => {
       const changelog = path.join(dir, "CHANGELOG.md");
       writeFileSync(changelog, CHANGELOG);
       const out = path.join(dir, "releases.json");
-      const args = ["--version", "0.2.0", "--assets", assets, "--base-url", BASE_URL, "--changelog", changelog, "--out", out];
+      const args = ["--version", "0.2.0", "--assets", assets, "--base-url", BASE_URL, "--changelog", changelog, "--out", out, "--verify-previous", "https://example.com/download"];
 
       const missing = cli([...args, "--previous", path.join(dir, "nope.json")]);
       assert.equal(missing.status, 1);

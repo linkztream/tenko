@@ -1,8 +1,11 @@
 # Dependabot version updates (check L1.2 of docs/plans/security-audit-plan.md).
 #
-# Only the GitHub Actions of the workflows: every `uses:` is pinned to a commit SHA with
-# its tag in a comment, and these weekly pull requests move the SHA and the comment
-# together, so the pins stay current without anyone resolving tags by hand.
+# The GitHub Actions of the workflows: every `uses:` is pinned to a commit SHA with its tag
+# in a comment, and these weekly pull requests move the SHA and the comment together, so
+# the pins stay current without anyone resolving tags by hand. And the base images of
+# deploy/Dockerfile: every `FROM` names a tag and its digest, and the pull requests move
+# the digest when the tag moves (the runtime base of the published image, and the two
+# images of the local-development stages).
 #
 # Cargo and npm get no version updates on purpose: their advisories are covered by
 # `cargo audit`, `cargo deny`, `npm audit` (ci.yml) and by Dependabot's security updates,
@@ -29,4 +32,20 @@ updates:
           - "*"
     commit-message:
       prefix: ci
+    open-pull-requests-limit: 5
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    cooldown:
+      default-days: 7
+    groups:
+      base-images:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: build
     open-pull-requests-limit: 5

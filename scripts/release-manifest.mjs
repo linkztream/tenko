@@ -3,14 +3,24 @@
 //
 //   node scripts/release-manifest.mjs --version 0.2.0 --assets dist \
 //     --base-url https://github.com/linkztream/tenko/releases/download/v0.2.0 \
-//     [--changelog CHANGELOG.md] [--previous releases.json] [--image ghcr.io/linkztream/tenko:0.2.0] \
-//     [--format 1] [--out releases.json]
+//     [--changelog CHANGELOG.md] [--previous releases.json \
+//     --verify-previous https://github.com/linkztream/tenko/releases/download] \
+//     [--image ghcr.io/linkztream/tenko:0.2.0] [--format 1] [--out releases.json]
 //
 // The release text comes from the section `## [0.2.0] - <date>` of the changelog (the
 // Unreleased section is never released). Every file in --assets named
 // `tenko-<version>-<platform>` or `tenko-<version>-<platform>.exe` becomes an asset with its
 // SHA-256 and size; other files are ignored with a note. The releases of --previous are kept
 // (an entry for the same version is replaced), newest first. Node's standard library only.
+//
+// The previous manifest is a release asset that whoever can write the releases can rewrite,
+// so nothing in it is taken on trust: before an earlier release is kept, its files and their
+// digests are checked against the SHA256SUMS of that release, fetched from
+// `<--verify-previous>/v<version>/SHA256SUMS` (the release's own asset, by tag; never from a
+// URL the entry names). An entry that does not match, or whose release has no SHA256SUMS, is
+// dropped with a warning; a fetch that fails otherwise stops the run. SHA256SUMS lists the
+// manifest itself, computed from the final text, so that what is attested and signed covers
+// the manifest too (formatReleaseFiles).
 //
 // WP6.7: installer packages. A file named `tenko-<version>-<platform>.<ext>`, where <ext> is a
 // key of INSTALLER_KINDS (today `msi`), becomes an entry of the release's `installers` with
@@ -337,6 +347,140 @@ export function formatChecksums(release) {
     .join("");
 }
 
+/**
+ * The two files of a release as written to disk: the manifest, and the checksum file that
+ * lists the release's assets and installers and the manifest itself. The manifest's line is
+ * the digest of the text returned here, so the manifest must be final (merged, sorted) before
+ * this is called, and the text must be written unchanged; the names are sorted as in
+ * formatChecksums, so the workflow's later lines (installers, SBOMs) sort in the same way.
+ *
+ * @param {{ schema: number, project: string, releases: Release[] }} manifest the final manifest
+ * @param {Release} release the release being made, whose files are listed
+ * @param {string} [manifestName] the file name of the manifest in the checksum file
+ * @returns {{ manifest: string, checksums: string }}
+ */
+export function formatReleaseFiles(manifest, release, manifestName = "releases.json") {
+  const text = formatManifest(manifest);
+  const digest = createHash("sha256").update(text, "utf8").digest("hex");
+  const lines = [...release.assets, ...(release.installers ?? [])].map((a) => ({ name: a.name, sha256: a.sha256 }));
+  lines.push({ name: manifestName, sha256: digest });
+  lines.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return { manifest: text, checksums: lines.map((a) => `${a.sha256}  ${a.name}\n`).join("") };
+}
+
+/**
+ * The names and digests of a SHA256SUMS file in the `sha256sum` format (`<hex>  <name>`, or
+ * `<hex> *<name>` for binary mode). Lines of another shape are ignored; the digests are
+ * returned in lowercase.
+ *
+ * @param {string} text
+ * @returns {Map<string, string>} name to digest
+ */
+export function parseChecksums(text) {
+  /** @type {Map<string, string>} */
+  const sums = new Map();
+  for (const line of text.split("\n")) {
+    const m = /^([0-9A-Fa-f]{64}) [ *](.+)$/.exec(line.replace(/\r$/, ""));
+    if (m !== null) sums.set(/** @type {string} */ (m[2]), /** @type {string} */ (m[1]).toLowerCase());
+  }
+  return sums;
+}
+
+/**
+ * The check of a previous manifest's releases against the SHA256SUMS each of them published.
+ * The input is validated as mergeManifest validates it and is not modified; the result holds
+ * copies of the entries that passed, unchanged, and the version and reason of each entry that
+ * was dropped. An entry passes when every asset and installer names a file under the
+ * release's own download directory, `<downloadUrl>/v<version>/`, and that release's
+ * SHA256SUMS, fetched from the same directory, lists the file with the same digest.
+ *
+ * Dropped: a digest or a name the release's SHA256SUMS does not have, a URL elsewhere, an
+ * entry without a file to check, a release without SHA256SUMS (404). Thrown, so that the run
+ * stops: any other failure to fetch, which says nothing about the entry.
+ *
+ * @param {{ schema?: unknown, project?: unknown, releases?: unknown } | null | undefined} previous
+ * @param {object} options
+ * @param {string} options.downloadUrl the download directory of the releases, without the tag
+ * @param {(url: string) => Promise<{ status: number, text: string }>} options.fetchText
+ * @param {string} [options.skipVersion] the version being released, whose entry is replaced
+ * @returns {Promise<{ previous: { schema: number, project: string, releases: Release[] }, dropped: { version: string, reason: string }[] }>}
+ * @throws {ManifestError}
+ */
+export async function verifyPreviousReleases(previous, { downloadUrl, fetchText, skipVersion }) {
+  if (previous === null || previous === undefined || typeof previous !== "object" || previous.schema !== SCHEMA || previous.project !== PROJECT || !Array.isArray(previous.releases)) {
+    throw new ManifestError(`the previous manifest is not a schema ${SCHEMA} manifest of project ${PROJECT}`);
+  }
+  const base = downloadUrl.replace(/\/+$/, "");
+  /** @type {Release[]} */
+  const kept = [];
+  /** @type {{ version: string, reason: string }[]} */
+  const dropped = [];
+  for (const r of previous.releases) {
+    if (r === null || typeof r !== "object" || typeof r.version !== "string" || !isSemver(r.version)) {
+      throw new ManifestError(`the previous manifest has a release without a valid version: ${JSON.stringify(r)}`);
+    }
+    if (r.version === skipVersion) {
+      kept.push(structuredClone(r));
+      continue;
+    }
+    const reason = await checkRelease(r, `${base}/v${r.version}/`, fetchText);
+    if (reason === null) kept.push(structuredClone(r));
+    else dropped.push({ version: r.version, reason });
+  }
+  return { previous: { schema: SCHEMA, project: PROJECT, releases: kept }, dropped };
+}
+
+/**
+ * Why one earlier release is dropped, or null when it passes (verifyPreviousReleases).
+ * @param {Release} r
+ * @param {string} dir the release's download directory, with a trailing slash
+ * @param {(url: string) => Promise<{ status: number, text: string }>} fetchText
+ * @returns {Promise<string | null>}
+ */
+async function checkRelease(r, dir, fetchText) {
+  const files = [...(Array.isArray(r.assets) ? r.assets : []), ...(Array.isArray(r.installers) ? r.installers : [])];
+  if (files.length === 0) return "it lists no file to check";
+  for (const f of files) {
+    if (f === null || typeof f !== "object" || typeof f.name !== "string" || typeof f.sha256 !== "string" || typeof f.url !== "string") {
+      return `it has a file entry without a name, url and sha256: ${JSON.stringify(f)}`;
+    }
+    if (f.url !== `${dir}${f.name}`) return `${f.name} points at ${f.url}, not at the release's own download directory ${dir}`;
+  }
+  const url = `${dir}SHA256SUMS`;
+  let response;
+  try {
+    response = await fetchText(url);
+  } catch (error) {
+    throw new ManifestError(`cannot fetch ${url}: ${/** @type {Error} */ (error).message}`);
+  }
+  if (response.status === 404) return `its release has no SHA256SUMS (${url} answered 404)`;
+  if (response.status !== 200) throw new ManifestError(`cannot fetch ${url}: HTTP status ${response.status}`);
+  const sums = parseChecksums(response.text);
+  for (const f of files) {
+    const published = sums.get(f.name);
+    if (published === undefined) return `${f.name} is not listed in the SHA256SUMS of its release`;
+    if (published !== f.sha256.toLowerCase()) return `${f.name} has the digest ${f.sha256} in the manifest, but its release published ${published}`;
+  }
+  return null;
+}
+
+/** The largest SHA256SUMS fetched for the check of an earlier release. */
+const MAX_CHECKSUMS_BYTES = 1024 * 1024;
+
+/**
+ * Fetches a text with the global fetch, bounded in time and size (the default fetchText of
+ * verifyPreviousReleases). Redirects are followed, as GitHub's release downloads redirect.
+ * @param {string} url
+ * @returns {Promise<{ status: number, text: string }>}
+ */
+async function fetchChecksums(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(30_000), redirect: "follow" });
+  if (response.status !== 200) return { status: response.status, text: "" };
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength > MAX_CHECKSUMS_BYTES) throw new Error(`${url} is larger than ${MAX_CHECKSUMS_BYTES} bytes`);
+  return { status: 200, text: new TextDecoder().decode(bytes) };
+}
+
 // ---------------------------------------------------------------------------------------
 // Command line
 
@@ -349,10 +493,16 @@ Options:
   --base-url <url>   where the assets are downloadable from; the URL of an asset is
                      <base-url>/<file name> (required)
   --changelog <file> the changelog (default CHANGELOG.md)
-  --previous <file>  the releases.json of earlier releases, merged into the result
+  --previous <file>  the releases.json of earlier releases, merged into the result after
+                     each of them is checked with --verify-previous
+  --verify-previous <url>
+                     the download directory of the releases, without the tag (the earlier
+                     release's SHA256SUMS is fetched from <url>/v<version>/SHA256SUMS);
+                     required with --previous
   --image <ref>      container image of the release
   --format <n>       data-directory format number of the binaries
-  --out <file>       the manifest to write (default releases.json); SHA256SUMS goes next to it
+  --out <file>       the manifest to write (default releases.json); SHA256SUMS, which lists
+                     it, goes next to it
   --help             print this text
 `;
 
@@ -371,6 +521,7 @@ export async function main(argv) {
     "base-url": { type: "string" },
     changelog: { type: "string" },
     previous: { type: "string" },
+    "verify-previous": { type: "string" },
     image: { type: "string" },
     format: { type: "string" },
     out: { type: "string" },
@@ -397,6 +548,18 @@ export async function main(argv) {
       if (!/^[1-9]\d*$/.test(v.format)) throw new UsageError(`--format must be a positive integer, got ${JSON.stringify(v.format)}`);
       format = Number(v.format);
     }
+    if (typeof v.previous === "string") {
+      if (typeof v["verify-previous"] !== "string" || v["verify-previous"] === "") throw new UsageError("--verify-previous is required with --previous");
+      let url;
+      try {
+        url = new URL(v["verify-previous"]);
+      } catch {
+        url = null;
+      }
+      if (url === null || (url.protocol !== "https:" && url.protocol !== "http:")) {
+        throw new UsageError(`--verify-previous ${JSON.stringify(v["verify-previous"])} is not an http(s) URL`);
+      }
+    }
     const changelogFile = /** @type {string} */ (v.changelog ?? "CHANGELOG.md");
     const outFile = /** @type {string} */ (v.out ?? "releases.json");
 
@@ -422,19 +585,36 @@ export async function main(argv) {
       image: /** @type {string | undefined} */ (v.image),
       format,
     });
+    /** @type {{ version: string, reason: string }[]} */
+    let dropped = [];
+    if (previous !== null) {
+      const checked = await verifyPreviousReleases(/** @type {any} */ (previous), {
+        downloadUrl: /** @type {string} */ (v["verify-previous"]),
+        fetchText: fetchChecksums,
+        skipVersion: release.version,
+      });
+      previous = checked.previous;
+      dropped = checked.dropped;
+    }
+    for (const d of dropped) {
+      process.stderr.write(`release-manifest: warning: dropped release ${d.version} from the manifest: ${d.reason}\n`);
+      if (process.env.GITHUB_ACTIONS === "true") process.stdout.write(`::warning title=releases.json::dropped release ${d.version}: ${d.reason}\n`);
+    }
     const manifest = mergeManifest(/** @type {any} */ (previous), release);
 
+    // The manifest is final here; SHA256SUMS lists it by the digest of the text written.
+    const files = formatReleaseFiles(manifest, release, path.basename(outFile));
     await mkdir(path.dirname(path.resolve(outFile)), { recursive: true });
-    await writeFile(outFile, formatManifest(manifest));
+    await writeFile(outFile, files.manifest);
     const sumsFile = path.join(path.dirname(outFile), "SHA256SUMS");
-    await writeFile(sumsFile, formatChecksums(release));
+    await writeFile(sumsFile, files.checksums);
 
     for (const name of ignored) process.stdout.write(`ignored ${name}: not a release asset of ${release.version}\n`);
     // WP6.7: installers count in the summary and in the checksums.
     const installerCount = release.installers?.length ?? 0;
-    const checksums = release.assets.length + installerCount;
+    const checksums = release.assets.length + installerCount + 1;
     process.stdout.write(
-      `${outFile}: release ${release.version}, ${release.assets.length} asset${release.assets.length === 1 ? "" : "s"}${installerCount === 0 ? "" : `, ${installerCount} installer${installerCount === 1 ? "" : "s"}`}, ${manifest.releases.length} release${manifest.releases.length === 1 ? "" : "s"} in the manifest\n`,
+      `${outFile}: release ${release.version}, ${release.assets.length} asset${release.assets.length === 1 ? "" : "s"}${installerCount === 0 ? "" : `, ${installerCount} installer${installerCount === 1 ? "" : "s"}`}, ${manifest.releases.length} release${manifest.releases.length === 1 ? "" : "s"} in the manifest${dropped.length === 0 ? "" : `, ${dropped.length} earlier release${dropped.length === 1 ? "" : "s"} dropped`}\n`,
     );
     process.stdout.write(`${sumsFile}: ${checksums} checksum${checksums === 1 ? "" : "s"}\n`);
     return 0;

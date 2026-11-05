@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-#
 # Container image for tenko (Tenko DDI): one binary, run as `tenko serve`.
 #
 # The binary is the static musl build that the release workflow ships for Linux
@@ -9,6 +7,27 @@
 # Build from the repository root, not from this directory:
 #
 #   docker build -f deploy/Dockerfile -t tenko .
+#
+# ---------------------------------------------------------------------------
+# HOW THE PUBLISHED IMAGE IS BUILT
+#
+# The image on ghcr.io is built by the release workflow (job `image-build` of
+# .github/workflows/release.yml) from the release's own Linux binary: the file the build job
+# produced, the smoke runs started, the security round tested and the provenance attestation
+# names. Nothing is compiled for it, so no second build exists whose output could differ
+# from the released binary, and its only base image is distroless/static, pinned by digest
+# below. The workflow passes
+#
+#   --build-arg TENKO_BINARY_SOURCE=release \
+#   --build-arg TENKO_BINARY=dist/tenko-<version>-linux-x86_64
+#
+# and pushes the result by digest after the security round and the attestations; the tags
+# <version> and latest are added when the release is published.
+#
+# Without the arguments (the command above, the compose examples) the stages `ui` and
+# `builder` build the web UI and the binary from the checkout, for local development. They
+# never run for the published image; their base images are pinned by digest as well, and
+# Dependabot moves every digest here (.github/dependabot.yml).
 #
 # ---------------------------------------------------------------------------
 # WHAT RUNS
@@ -85,17 +104,23 @@
 # (`docker stop -t 30`, or stop_grace_period in compose) instead of the default 10.
 # ---------------------------------------------------------------------------
 
-# Stage 1: web UI bundle.
-FROM node:22-bookworm-slim AS ui
+# The source of the binary: `source` (built below, local development) or `release` (the
+# release workflow's binary, named by TENKO_BINARY).
+ARG TENKO_BINARY_SOURCE=source
+
+# Stage: web UI bundle (local development only).
+FROM node:22-bookworm-slim@sha256:2f0e17f8955e766e776ae16d3ac47519ca3edf47c07e5c1423527926fdd5d568 AS ui
 WORKDIR /src/ui
-# Copy the manifests first so the dependency layer is cached.
+# Copy the manifests first so the dependency layer is cached. No install scripts: the UI's
+# dependencies need none, and the release's UI job installs them the same way.
 COPY ui/package.json ui/package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 COPY ui/ ./
 RUN npm run build
 
-# Stage 2: the tenko binary, static for musl as in .github/workflows/release.yml.
-FROM rust:1-slim-bookworm AS builder
+# Stage: the tenko binary (local development only), static for musl as in
+# .github/workflows/release.yml.
+FROM rust:1-slim-bookworm@sha256:ed2c95ca377d6571b124b05e75e01207973ded639dce7d5542eb7bcd797e32aa AS builder
 # musl-tools provides musl-gcc, which the C code of aws-lc-sys, ring and jemalloc (the
 # allocator of the musl binary) is built with for the musl target; jemalloc's build runs
 # make. Nothing else is needed (no cmake, perl or clang).
@@ -103,8 +128,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends make musl-tools \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-# rust-toolchain.toml selects the toolchain, which is not the one of the base image: install
-# it with the musl target in its own layer, cached until the file changes.
+# rust-toolchain.toml names the exact toolchain, which is not the one of the base image:
+# install it with the musl target in its own layer, cached until the file changes.
 COPY rust-toolchain.toml ./
 RUN rustup toolchain install \
     && rustup target add x86_64-unknown-linux-musl
@@ -117,16 +142,33 @@ COPY --from=ui /src/ui/dist ui/dist
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p tenko --target x86_64-unknown-linux-musl \
-    && mkdir -p -m 0700 /out/state \
-    && cp target/x86_64-unknown-linux-musl/release/tenko /out/tenko
+    && cp target/x86_64-unknown-linux-musl/release/tenko /out-tenko
 
-# Stage 3: runtime image. The binary is static and needs no libc, libgcc or libssl.
-FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=builder /out/tenko /usr/local/bin/tenko
-# Create the state directory owned by the distroless "nonroot" user (65532) so
-# that a new volume mounted here is writable (a named volume copies the owner and
-# mode of this directory on first use).
-COPY --from=builder --chown=65532:65532 /out/state /var/lib/tenko
+# The binary built here (TENKO_BINARY_SOURCE=source).
+FROM scratch AS source
+COPY --from=builder /out-tenko /tenko
+
+# The binary the release workflow hands in (TENKO_BINARY_SOURCE=release): a file of the
+# build context, with the execute bit set here because an artifact does not keep it.
+FROM scratch AS release
+ARG TENKO_BINARY=dist/tenko
+COPY --chmod=0755 ${TENKO_BINARY} /tenko
+
+# One of the two, by the build argument; the other stage is never built.
+FROM ${TENKO_BINARY_SOURCE} AS binary
+
+# An empty directory for the data volume, made here because the runtime image has no shell.
+FROM scratch AS state
+WORKDIR /state
+
+# Runtime image: distroless/static (no shell, no package manager, no C library), by digest.
+# The tag is nonroot; Dependabot moves the digest when the tag moves.
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+COPY --from=binary /tenko /usr/local/bin/tenko
+# The state directory is owned by the distroless "nonroot" user (65532) so that a new
+# volume mounted here is writable (a named volume copies the owner and mode of this
+# directory on first use).
+COPY --from=state --chown=65532:65532 --chmod=0700 /state /var/lib/tenko
 USER nonroot:nonroot
 ENV TENKO_DATA_DIR=/var/lib/tenko
 # Updates come as a new image: the web UI shows the pull command instead of installing.
