@@ -5,18 +5,29 @@
 //!
 //! 1. open the file: the header, the key slot, the manifest (a wrong passphrase or key
 //!    fails here, before anything is written), and refuse a data format this build does
-//!    not know;
-//! 2. read every part, checking every chunk and every part hash; the snapshot goes to a
-//!    file, the small parts stay in memory (the key generations in zeroizing buffers);
+//!    not know; the manifest's limits bound every part before it is read;
+//! 2. read every part, checking every chunk and every part hash, and the SHA-256 of the
+//!    whole file on the way; the snapshot goes to a file, the small parts stay in memory
+//!    (the key generations in zeroizing buffers), parts this build does not know are
+//!    checked and discarded;
 //! 3. create the store as a learner that was never initialized and install the snapshot
 //!    with a membership of one voter, this node, at the term of its last log id; open it
 //!    again as a single voter, which verifies the whole audit chain and elects it;
 //! 4. compare the store digest with the manifest, open every envelope of `vault.secrets`
 //!    with the key generations of the backup, compare the internal CA fingerprint and the
 //!    stored data format;
-//! 5. a restore then seals the key generations with the provider of this host, writes the
-//!    format marker, the imported TLS files and the configuration (under `restored/`) and
-//!    the restore notice `restored.json` that the first start records.
+//! 5. a restore then writes the restore notice into the store itself (`backup.restore_pending`),
+//!    seals the key generations with the provider of this host, writes the format marker,
+//!    the imported TLS files and the configuration (under `restored/`) and the restore
+//!    notice `restored.json` that the first start records; the first start finds the
+//!    notice in both places, and a notice file that is missing is itself recorded.
+//!
+//! Everything a restore creates under the data directory is created by this process
+//! alone: directories with one `create_dir` (mode 0700 on Unix), files with `create_new`
+//! (mode 0600), and a path that already exists as a symbolic link is refused, so no link
+//! that was planted in the data directory is followed. That is defense in depth: the
+//! command runs as the account that owns the data directory, and `main` refuses it as
+//! root over another account's files ([`crate::exec`], ADR 0023 I2).
 //!
 //! A failed restore removes the store it created and the files it wrote; key generations
 //! it already sealed stay (a repeated restore finds them and skips them).
@@ -24,7 +35,7 @@
 use std::{
     collections::BTreeMap,
     fs::{self, File},
-    io::{BufReader, BufWriter, Read as _, Write as _},
+    io::{BufReader, BufWriter, Read, Write as _},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -32,10 +43,13 @@ use std::{
 
 use openraft::{BasicNode, LeaderId, LogId, Membership, StoredMembership, Vote};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use tenko_auth::encoding::hex_encode;
-use tenko_core::{NodeId, Timestamp, secret::VaultEnvelope};
+use tenko_core::{
+    NodeId, RequestCtx, SystemComponent, Timestamp, secret::VaultEnvelope, table::TableDef,
+};
 use tenko_store::{
-    KeyRange, ReadConsistency, Store as _, format,
+    KeyRange, ReadConsistency, Store as _, WriteBatch, format,
     raft::{RaftStore, network::SNAPSHOT_CHUNK, types::SnapshotMeta},
 };
 use tenko_vault::{
@@ -50,15 +64,22 @@ use zeroize::Zeroizing;
 use super::{
     BackupError,
     archive::{
-        Manifest, PART_CONFIG, PART_KEKS, PART_LEASES, PART_SNAPSHOT, PART_TLS_CERT, PART_TLS_KEY,
-        PartEntry, Reader, Unlock,
+        Manifest, PART_CONFIG, PART_KEKS, PART_SNAPSHOT, PART_TLS_CERT, PART_TLS_KEY, PartEntry,
+        Reader, Unlock, printable,
     },
-    create::{Secret, TlsPair, ca_fingerprint, scratch_config, stored_format},
+    create::{
+        Secret, TlsPair, ca_fingerprint, create_private_dir, create_private_file,
+        existing_dir_not_link, scratch_config, stored_format,
+    },
 };
 use crate::upgrade::migrations::CURRENT;
 
 /// The restore notice a restore leaves in the data directory for the first start.
 pub const NOTICE_FILE: &str = "restored.json";
+
+/// The same notice inside the restored store, written by the restore after the digest
+/// check: the first start records the restore from it when the file is gone.
+pub const PENDING: TableDef<(), Notice> = TableDef::new("backup.restore_pending");
 
 /// The directory a restore writes the TLS files and the configuration into.
 pub const EXTRAS_DIR: &str = "restored";
@@ -70,7 +91,7 @@ pub const TLS_CERT_FILE: &str = "tls-certificate.pem";
 /// The file a restore writes the imported TLS key to.
 pub const TLS_KEY_FILE: &str = "tls-key.pem";
 
-/// What [`restore`] leaves for the first start (`restored.json`).
+/// What [`restore`] leaves for the first start (`restored.json` and [`PENDING`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Notice {
     /// When the restore ran.
@@ -79,6 +100,12 @@ pub struct Notice {
     pub backup_created_at: Timestamp,
     /// The backup file name.
     pub file: String,
+    /// The archive id of the backup's header, as hex.
+    #[serde(default)]
+    pub archive_id: String,
+    /// The SHA-256 of the backup file, as hex.
+    #[serde(default)]
+    pub sha256: String,
     /// The node the backup was made on.
     pub source_node: u64,
     /// The voters of the source then.
@@ -111,6 +138,11 @@ pub struct Target {
 pub struct Report {
     /// The backup file.
     pub file: PathBuf,
+    /// The archive id of its header, as hex; the `sys.backup.create` audit record of the
+    /// node that wrote the backup names the same id.
+    pub archive_id: String,
+    /// The SHA-256 of the whole file, as hex; the same record names it too.
+    pub sha256: String,
     /// The kinds of its key slots.
     pub slots: Vec<&'static str>,
     /// The manifest.
@@ -144,7 +176,7 @@ struct Unpacked {
     config: Option<Secret>,
 }
 
-/// Removes a path when dropped unless disarmed.
+/// Removes a path when dropped unless disarmed; also when the thread unwinds.
 struct Cleanup(Vec<PathBuf>);
 
 impl Cleanup {
@@ -171,6 +203,9 @@ fn millis(duration: Duration) -> u64 {
 
 /// Checks a backup completely in a scratch directory under `work_parent` and removes it.
 ///
+/// The scratch directory is created by this process alone (mode 0700 on Unix) and removed
+/// on every way out, a panic included.
+///
 /// # Errors
 ///
 /// The first [`BackupError`] the check meets.
@@ -185,7 +220,7 @@ pub async fn check(
         ".tenko-backup-check-{}",
         uuid::Uuid::now_v7().simple()
     ));
-    fs::create_dir_all(&work).map_err(|error| BackupError::io(&work, error))?;
+    create_private_dir(&work)?;
     let _cleanup = Cleanup(vec![work.clone()]);
     let (mut report, unpacked) = unpack(file, unlock, &work)?;
     let ring = memory_ring(&unpacked.generations)?;
@@ -209,8 +244,9 @@ pub async fn check(
 ///
 /// # Errors
 ///
-/// [`BackupError::TargetNotEmpty`] when the data directory holds a store, or the first
-/// [`BackupError`] of the sequence; what the restore wrote is removed again.
+/// [`BackupError::TargetNotEmpty`] when the data directory holds a store, [`BackupError::Io`]
+/// when the store directory, the work directory or `restored/` exists as a symbolic link,
+/// or the first [`BackupError`] of the sequence; what the restore wrote is removed again.
 pub async fn restore(
     file: &Path,
     unlock: Unlock<'_>,
@@ -223,12 +259,21 @@ pub async fn restore(
     }
     check_provider(&target.kek)?;
     if dry_run {
+        // The scratch directory goes beside the data directory, or into the system
+        // temporary directory when the account that runs the dry run may not write there.
         let parent = target
             .data_dir
             .parent()
             .filter(|parent| parent.is_dir())
             .map_or_else(std::env::temp_dir, Path::to_path_buf);
-        let mut report = check(file, unlock, &parent, target.node).await?;
+        let mut report = match check(file, unlock, &parent, target.node).await {
+            Err(BackupError::Io { source, .. })
+                if source.kind() == std::io::ErrorKind::PermissionDenied =>
+            {
+                check(file, unlock, &std::env::temp_dir(), target.node).await?
+            }
+            checked => checked?,
+        };
         report.notes.push(format!(
             "dry run: nothing was written to {}; the key generations would be sealed with the \
              {} provider",
@@ -240,14 +285,8 @@ pub async fn restore(
         return Ok(report);
     }
 
-    fs::create_dir_all(&target.data_dir)
-        .map_err(|error| BackupError::io(&target.data_dir, error))?;
-    let work = target
-        .data_dir
-        .join(format!(".restore-{}", uuid::Uuid::now_v7().simple()));
-    fs::create_dir_all(&work).map_err(|error| BackupError::io(&work, error))?;
+    let (mut cleanup, work) = prepare(target)?;
     let _work_cleanup = Cleanup(vec![work.clone()]);
-    let mut cleanup = Cleanup(vec![target.store_dir.clone()]);
     let (mut report, unpacked) = unpack(file, unlock, &work)?;
     let ring = memory_ring(&unpacked.generations)?;
     let store = install(
@@ -258,13 +297,19 @@ pub async fn restore(
         &unpacked.snapshot,
     )
     .await?;
-    let checked = verify_store(&store, &report.manifest, &ring).await;
+    let notice = Notice::of(file, &report);
+    let checked = match verify_store(&store, &report.manifest, &ring).await {
+        // The store is what the backup recorded: the notice goes into it, after the
+        // digest was compared, so that the first start finds it even without the file.
+        Ok(checked) => write_pending(&store, &notice).await.map(|()| checked),
+        Err(error) => Err(error),
+    };
     let _ = store.shutdown().await;
     drop(store);
     let (envelopes, fingerprint) = checked?;
 
     // The store is complete: seal the key generations with this host's provider.
-    let (protection, written) = finish(file, target, &report.manifest, unpacked)?;
+    let (protection, written) = finish(target, &report.manifest, unpacked, &notice)?;
     cleanup.0.extend(written.iter().cloned());
     cleanup.disarm();
 
@@ -274,13 +319,39 @@ pub async fn restore(
     report.node = target.node.0;
     report.dry_run = false;
     report.written = written;
+    add_restore_notes(&mut report, target.node, protection);
+    report.duration_ms = millis(started.elapsed());
+    Ok(report)
+}
+
+/// Prepares the data directory for a restore and returns the guard that removes the store
+/// on failure and the work directory: the data directory itself may be what the
+/// configuration names, an administrator's link included; `store` and the work directory
+/// inside it are created here, never followed.
+fn prepare(target: &Target) -> Result<(Cleanup, PathBuf), BackupError> {
+    if !target.data_dir.is_dir() {
+        create_private_dir(&target.data_dir)?;
+    }
+    if !existing_dir_not_link(&target.store_dir)? {
+        create_private_dir(&target.store_dir)?;
+    }
+    let cleanup = Cleanup(vec![target.store_dir.clone()]);
+    let work = target
+        .data_dir
+        .join(format!(".restore-{}", uuid::Uuid::now_v7().simple()));
+    create_private_dir(&work)?;
+    Ok((cleanup, work))
+}
+
+/// The remarks of a finished restore.
+fn add_restore_notes(report: &mut Report, node: NodeId, protection: KekProtection) {
     if protection.is_weak() {
         report.notes.push(format!(
             "the key generations are sealed {}: choose a stronger [kek] provider for this host",
             protection.describe()
         ));
     }
-    add_node_note(&mut report, target.node);
+    add_node_note(report, node);
     if report.manifest.voters.len() > 1 {
         report.notes.push(format!(
             "the backup comes from a cluster of {} controllers; this controller starts alone, \
@@ -294,18 +365,45 @@ pub async fn restore(
             report.manifest.data_format
         ));
     }
-    report.duration_ms = millis(started.elapsed());
-    Ok(report)
+}
+
+impl Notice {
+    /// The notice of a restore of `file` as `report` read it.
+    fn of(file: &Path, report: &Report) -> Self {
+        Self {
+            restored_at: Timestamp::now(),
+            backup_created_at: report.manifest.created_at,
+            file: file
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            archive_id: report.archive_id.clone(),
+            sha256: report.sha256.clone(),
+            source_node: report.manifest.node,
+            source_voters: report.manifest.voters.clone(),
+            revision: report.manifest.revision,
+            tenko_version: report.manifest.tenko_version.clone(),
+        }
+    }
+}
+
+/// Writes the notice into the restored store ([`PENDING`]).
+async fn write_pending(store: &RaftStore, notice: &Notice) -> Result<(), BackupError> {
+    let ctx = RequestCtx::system(SystemComponent::Backup);
+    let mut batch = WriteBatch::for_request(&ctx);
+    batch.put_typed(&PENDING, &(), notice)?;
+    store.propose(batch).await?;
+    Ok(())
 }
 
 /// Seals the key generations with this host's provider and writes the format marker, the
 /// extra files and the restore notice; returns the protection of the sealed generations
 /// and the files written.
 fn finish(
-    file: &Path,
     target: &Target,
     manifest: &Manifest,
     unpacked: Unpacked,
+    notice: &Notice,
 ) -> Result<(KekProtection, Vec<PathBuf>), BackupError> {
     let ids: Vec<String> = unpacked
         .generations
@@ -329,22 +427,10 @@ fn finish(
     )
     .map_err(|error| BackupError::Internal(error.to_string()))?;
     let mut written = write_extras(&target.data_dir, unpacked.tls, unpacked.config)?;
-    let notice = Notice {
-        restored_at: Timestamp::now(),
-        backup_created_at: manifest.created_at,
-        file: file
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        source_node: manifest.node,
-        source_voters: manifest.voters.clone(),
-        revision: manifest.revision,
-        tenko_version: manifest.tenko_version.clone(),
-    };
     let notice_path = target.data_dir.join(NOTICE_FILE);
     write_private(
         &notice_path,
-        &serde_json::to_vec_pretty(&notice)
+        &serde_json::to_vec_pretty(notice)
             .map_err(|error| BackupError::Internal(error.to_string()))?,
     )?;
     written.push(notice_path);
@@ -375,9 +461,27 @@ fn add_node_note(report: &mut Report, node: NodeId) {
     }
 }
 
+/// A reader that hashes everything read through it.
+struct Sha256Reader<R: Read> {
+    inner: R,
+    hasher: Sha256,
+}
+
+impl<R: Read> Read for Sha256Reader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        self.hasher.update(&buf[..read]);
+        Ok(read)
+    }
+}
+
 /// Opens the file and reads every part into `work` (the snapshot) or memory.
 fn unpack(file: &Path, unlock: Unlock<'_>, work: &Path) -> Result<(Report, Unpacked), BackupError> {
     let input = File::open(file).map_err(|error| BackupError::io(file, error))?;
+    let input = Sha256Reader {
+        inner: input,
+        hasher: Sha256::new(),
+    };
     let mut reader = Reader::open(BufReader::with_capacity(1 << 20, input), unlock)?;
     let manifest = reader.manifest().clone();
     if manifest.data_format > CURRENT {
@@ -387,46 +491,37 @@ fn unpack(file: &Path, unlock: Unlock<'_>, work: &Path) -> Result<(Report, Unpac
         });
     }
     let slots = reader.header().slot_kinds();
-    let snapshot = work.join("store.snapshot");
-    let mut generations = None;
-    let mut tls_cert = None;
-    let mut tls_key = None;
-    let mut config = None;
-    let mut parts = Vec::new();
-    let mut notes = Vec::new();
+    let archive_id = hex_encode(&reader.header().archive_id);
+    let mut read = ReadParts {
+        snapshot: work.join("store.snapshot"),
+        generations: None,
+        tls_cert: None,
+        tls_key: None,
+        config: None,
+        parts: Vec::new(),
+        notes: Vec::new(),
+    };
     loop {
         let Some(name) = manifest
             .parts
-            .get(parts.len())
+            .get(read.parts.len())
             .map(|entry| entry.name.clone())
         else {
             reader.next_part(&mut std::io::sink())?;
             break;
         };
-        let entry = if name == PART_SNAPSHOT {
-            let out = File::create(&snapshot).map_err(|error| BackupError::io(&snapshot, error))?;
-            let mut out = BufWriter::with_capacity(1 << 20, out);
-            let entry = reader.next_part(&mut out)?;
-            out.flush()
-                .map_err(|error| BackupError::io(&snapshot, error))?;
-            entry
-        } else {
-            let mut buffer = Zeroizing::new(Vec::new());
-            let entry = reader.next_part(&mut *buffer)?;
-            match name.as_str() {
-                PART_KEKS => generations = Some(super::archive::decode_keks(&buffer)?),
-                PART_TLS_CERT => tls_cert = Some(buffer),
-                PART_TLS_KEY => tls_key = Some(buffer),
-                PART_CONFIG => config = Some(buffer),
-                PART_LEASES => {}
-                other => notes.push(format!(
-                    "the part {other} is not known to this build; it was checked and skipped"
-                )),
-            }
-            entry
-        };
-        parts.extend(entry);
+        read.next(&mut reader, &name)?;
     }
+    let sha256 = hex_encode(&reader.into_inner().into_inner().hasher.finalize());
+    let ReadParts {
+        snapshot,
+        generations,
+        tls_cert,
+        tls_key,
+        config,
+        parts,
+        notes,
+    } = read;
     let generations = generations
         .ok_or_else(|| BackupError::Corrupt("the key generations are missing".to_owned()))?;
     let listed: Vec<&str> = generations.iter().map(|kek| kek.id.as_str()).collect();
@@ -444,6 +539,8 @@ fn unpack(file: &Path, unlock: Unlock<'_>, work: &Path) -> Result<(Report, Unpac
     }
     let report = Report {
         file: file.to_path_buf(),
+        archive_id,
+        sha256,
         slots,
         manifest,
         parts,
@@ -466,6 +563,72 @@ fn unpack(file: &Path, unlock: Unlock<'_>, work: &Path) -> Result<(Report, Unpac
             config,
         },
     ))
+}
+
+/// The parts of a backup while they are read.
+struct ReadParts {
+    snapshot: PathBuf,
+    generations: Option<Vec<TransferredKek>>,
+    tls_cert: Option<Secret>,
+    tls_key: Option<Secret>,
+    config: Option<Secret>,
+    parts: Vec<PartEntry>,
+    notes: Vec<String>,
+}
+
+impl ReadParts {
+    /// Reads the part `name`, the next one of the manifest. The manifest bounds every part
+    /// (`Manifest::validate`) and the reader stops at the declared length; the snapshot
+    /// goes to a file of this process alone, the small parts into wiped buffers, parts this
+    /// build does not know into nothing.
+    fn next<R: Read>(&mut self, reader: &mut Reader<R>, name: &str) -> Result<(), BackupError> {
+        let entry = match name {
+            PART_SNAPSHOT => {
+                let out = create_private_file(&self.snapshot)?;
+                let mut out = BufWriter::with_capacity(1 << 20, out);
+                let entry = reader.next_part(&mut out)?;
+                out.flush()
+                    .map_err(|error| BackupError::io(&self.snapshot, error))?;
+                entry
+            }
+            PART_KEKS | PART_TLS_CERT | PART_TLS_KEY | PART_CONFIG => {
+                let mut buffer = Zeroizing::new(Vec::new());
+                let entry = reader.next_part(&mut *buffer)?;
+                match name {
+                    PART_KEKS => {
+                        self.generations = Some(super::archive::decode_keks(&buffer)?);
+                    }
+                    PART_TLS_CERT => self.tls_cert = Some(buffer),
+                    PART_TLS_KEY => self.tls_key = Some(buffer),
+                    _ => self.config = Some(buffer),
+                }
+                entry
+            }
+            other => {
+                let entry = reader.next_part(&mut std::io::sink())?;
+                if other != super::archive::PART_LEASES {
+                    self.notes.push(format!(
+                        "the part {} is not known to this build; it was checked and skipped",
+                        filtered(other)
+                    ));
+                }
+                entry
+            }
+        };
+        self.parts.extend(entry);
+        Ok(())
+    }
+}
+
+/// `text` with every control character replaced, so that a line of a report stays one
+/// line of printable characters whatever an archive carries.
+pub fn filtered(text: &str) -> String {
+    if printable(text, usize::MAX) {
+        return text.to_owned();
+    }
+    text.chars()
+        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .collect()
 }
 
 /// A ring of the backup's generations in memory, the active one last.
@@ -627,17 +790,10 @@ async fn verify_store(
     Ok((envelopes, fingerprint))
 }
 
+/// Writes `bytes` to a new file of this process alone (mode 0600 on Unix); an existing
+/// path, a link included, is refused.
 fn write_private(path: &Path, bytes: &[u8]) -> Result<(), BackupError> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
-        .map_err(|error| BackupError::io(path, error))?;
+    let mut file = create_private_file(path)?;
     file.write_all(bytes)
         .and_then(|()| file.sync_all())
         .map_err(|error| BackupError::io(path, error))
@@ -652,7 +808,10 @@ fn write_extras(
         return Ok(Vec::new());
     }
     let dir = data_dir.join(EXTRAS_DIR);
-    fs::create_dir_all(&dir).map_err(|error| BackupError::io(&dir, error))?;
+    // An earlier restore's directory is reused; a link under the name is refused.
+    if !existing_dir_not_link(&dir)? {
+        create_private_dir(&dir)?;
+    }
     let mut written = Vec::new();
     if let Some((cert, key)) = tls {
         for (name, bytes) in [(TLS_CERT_FILE, cert), (TLS_KEY_FILE, key)] {
@@ -669,12 +828,12 @@ fn write_extras(
     Ok(written)
 }
 
-/// Reads and removes the restore notice of a data directory (the first start).
+/// Reads the restore notice file of a data directory (the first start); the file stays
+/// until [`clear_notice`].
 ///
 /// # Errors
 ///
-/// [`BackupError::Io`] or a notice that does not parse ([`BackupError::Internal`]); the
-/// file then stays.
+/// [`BackupError::Io`] or a notice that does not parse ([`BackupError::Internal`]).
 pub fn take_notice(data_dir: &Path) -> Result<Option<Notice>, BackupError> {
     let path = data_dir.join(NOTICE_FILE);
     let bytes = match fs::read(&path) {

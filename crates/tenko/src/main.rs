@@ -19,6 +19,13 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 fn main() -> ExitCode {
     let cli = tenko::Cli::parse();
+    // ADR 0023: an offline command over the store or the data directory never runs with
+    // full privileges over another account's files (`exec.unsafe_owner`, exit status 2).
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(refusal) = tenko::exec::check(&cli, &tenko::exec::Host, &arguments) {
+        eprintln!("{refusal}");
+        return ExitCode::from(tenko::exit::USAGE);
+    }
     // Unlocked handles: the server writes to both from other threads while this one waits.
     let status = tenko::execute(&cli, &mut std::io::stdout(), &mut std::io::stderr());
     ExitCode::from(status)

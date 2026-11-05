@@ -94,6 +94,7 @@ fn written(fixture: &Fixture, locks: &[Lock<'_>], chunk: u32) -> Vec<u8> {
         chunk,
     )
     .expect("write")
+    .0
 }
 
 fn read_all(file: &[u8], unlock: Unlock<'_>) -> Result<(Manifest, Vec<Vec<u8>>), BackupError> {
@@ -147,6 +148,125 @@ fn a_stream_of_exactly_whole_chunks_ends_with_an_empty_chunk() {
     let file = written(&fixture, &[passphrase_lock()], MIN_CHUNK);
     let (_, parts) = read_all(&file, Unlock::Passphrase(PASSPHRASE)).expect("read");
     assert_eq!(parts[0], fixture.parts[0].1);
+}
+
+/// The plain stream of `sealed` (a file of [`seal_plain_with_key`]) read back with the
+/// fixed key.
+fn plain_of(sealed: &[u8]) -> Vec<u8> {
+    let mut cursor = Cursor::new(sealed);
+    let header = Header::read(&mut cursor).expect("header");
+    let key = FileKey(Zeroizing::new(fuzzing::FIXED_KEY));
+    let chunk = usize::try_from(header.chunk_size).expect("chunk");
+    let mut stream = ChunkReader {
+        input: cursor,
+        key: payload_key(&key, &header.archive_id).expect("key"),
+        aad: header.hash,
+        chunk,
+        plain: Zeroizing::new(Vec::new()),
+        position: 0,
+        index: 0,
+        done: false,
+    };
+    let mut plain = Vec::new();
+    stream.read_to_end(&mut plain).expect("read");
+    plain
+}
+
+#[test]
+fn plain_streams_of_every_length_around_the_chunk_size_read_back() {
+    let chunk = usize::try_from(MIN_CHUNK).expect("chunk");
+    let key = FileKey(Zeroizing::new(fuzzing::FIXED_KEY));
+    // An empty stream, one byte, one short of a chunk, exactly one chunk, one over, exactly
+    // two chunks, and two and a half.
+    for len in [
+        0,
+        1,
+        chunk - 1,
+        chunk,
+        chunk + 1,
+        2 * chunk,
+        2 * chunk + chunk / 2,
+    ] {
+        let plain: Vec<u8> = (0..len)
+            .map(|index| u8::try_from(index % 253).unwrap_or_default())
+            .collect();
+        let sealed = seal_plain_with_key(&plain, &key).expect("seal");
+        let header_len = Header::read(&mut Cursor::new(&sealed))
+            .map(|_| 5 + 1 + 16 + 4 + 1 + 1 + 12 + 16 + 12 + 48 + 32)
+            .expect("header");
+        // Whole chunks of chunk + tag bytes, then a last chunk of the rest plus its tag,
+        // empty when the stream is empty or holds exactly whole chunks.
+        let whole = len / chunk;
+        let expected_body = whole * (chunk + 16) + (len - whole * chunk) + 16;
+        assert_eq!(sealed.len() - header_len, expected_body, "length {len}");
+        assert_eq!(plain_of(&sealed), plain, "length {len}");
+        // Without its last chunk the stream is short, not complete.
+        let truncated = &sealed[..sealed.len() - 16];
+        let mut cursor = Cursor::new(truncated);
+        let header = Header::read(&mut cursor).expect("header");
+        let mut stream = ChunkReader {
+            input: cursor,
+            key: payload_key(&key, &header.archive_id).expect("key"),
+            aad: header.hash,
+            chunk,
+            plain: Zeroizing::new(Vec::new()),
+            position: 0,
+            index: 0,
+            done: false,
+        };
+        assert!(
+            stream.read_to_end(&mut Vec::new()).is_err(),
+            "length {len}: a truncated stream must not read"
+        );
+    }
+}
+
+#[test]
+fn the_writer_reports_the_archive_id_of_the_header() {
+    let fixture = fixture(100);
+    let (file, archive_id) = write_with_chunk(
+        Vec::new(),
+        &[passphrase_lock()],
+        &fixture.manifest,
+        sources(&fixture),
+        MIN_CHUNK,
+    )
+    .expect("write");
+    let header = Header::read(&mut Cursor::new(&file)).expect("header");
+    assert_eq!(header.archive_id, archive_id);
+    assert_ne!(archive_id, [0; 16]);
+}
+
+#[test]
+fn manifests_with_unprintable_names_or_oversized_parts_are_refused() {
+    let mut fixture = fixture(10);
+    fixture.manifest.parts[2].name = "con\u{7}fig".to_owned();
+    assert!(matches!(
+        fixture.manifest.validate(),
+        Err(BackupError::Corrupt(_))
+    ));
+    let mut fixture = self::fixture(10);
+    fixture.manifest.tenko_version = "0.0.1\n".to_owned();
+    assert!(fixture.manifest.validate().is_err());
+    let mut fixture = self::fixture(10);
+    fixture.manifest.parts[1].bytes = MAX_KEKS_PART + 1;
+    assert!(fixture.manifest.validate().is_err(), "key generations");
+    let mut fixture = self::fixture(10);
+    fixture.manifest.parts[2].bytes = MAX_TEXT_PART + 1;
+    assert!(fixture.manifest.validate().is_err(), "config");
+    let mut fixture = self::fixture(10);
+    fixture.manifest.parts[0].bytes = MAX_PART + 1;
+    assert!(fixture.manifest.validate().is_err(), "snapshot");
+    let mut fixture = self::fixture(10);
+    fixture.manifest.kek.generations[0] = "not a key id".to_owned();
+    assert!(fixture.manifest.validate().is_err(), "key id");
+    assert_eq!(part_limit(PART_KEKS), MAX_KEKS_PART);
+    assert_eq!(part_limit(PART_CONFIG), MAX_TEXT_PART);
+    assert_eq!(part_limit(PART_SNAPSHOT), MAX_PART);
+    assert_eq!(part_limit("later.part"), MAX_PART);
+    assert!(printable("tenko-backup/1", 64));
+    assert!(!printable("a\tb", 64));
+    assert!(!printable(&"x".repeat(65), 64));
 }
 
 #[test]

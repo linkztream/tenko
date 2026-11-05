@@ -6,10 +6,11 @@ use std::{
     sync::Arc,
 };
 
+use sha2::Digest as _;
 use tenko_cluster::ca::{CaPolicy, InternalCa};
 use tenko_core::{NodeId, RequestCtx, TableName, principal::SystemComponent};
 use tenko_store::{
-    KeyRange, ReadConsistency, Store, WriteBatch,
+    KeyRange, ReadConsistency, ReadViewExt as _, Store, WriteBatch,
     raft::{RaftStore, RaftStoreConfig, fixture::InProcessCluster},
     testing::ConformanceConfig,
 };
@@ -159,6 +160,62 @@ async fn open_restored(data_dir: &Path, node: u64, secrets: &[(SecretRef, Vec<u8
     store
 }
 
+/// The identity a backup reports is the SHA-256 of its bytes and the archive id of its
+/// header (after the magic and the flags byte).
+fn assert_identity(created: &create::Created) {
+    let bytes = std::fs::read(&created.path).expect("read");
+    assert_eq!(
+        created.sha256,
+        tenko_auth::encoding::hex_encode(&sha2::Sha256::digest(&bytes))
+    );
+    assert_eq!(
+        created.archive_id,
+        tenko_auth::encoding::hex_encode(&bytes[6..22])
+    );
+}
+
+/// The scratch directories of a check left under `dir`.
+fn scratch_dirs(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .expect("dir")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".tenko-backup-check-")
+        })
+        .count()
+}
+
+/// What a restore created is the account's alone: the directories 0700, the notice 0600.
+fn assert_private_modes(data_dir: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        for (path, expected) in [
+            (data_dir.to_path_buf(), 0o700),
+            (data_dir.join("store"), 0o700),
+            (data_dir.join(restore::NOTICE_FILE), 0o600),
+        ] {
+            let mode = std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
+            assert_eq!(mode, expected, "{}", path.display());
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = data_dir;
+}
+
+/// The restore left the same notice in the store, for the first start.
+async fn assert_pending_notice(store: &RaftStore, notice: &restore::Notice) {
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    let (pending, _) = view
+        .get_typed(&restore::PENDING, &())
+        .expect("read")
+        .expect("the pending notice");
+    assert_eq!(pending, *notice);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_backup_restores_with_its_secrets_ca_and_chain() {
     let root = tempfile::tempdir().expect("dir");
@@ -177,6 +234,7 @@ async fn a_backup_restores_with_its_secrets_ca_and_chain() {
     assert!(create::is_backup_name(&created.file_name()));
     assert_eq!(created.manifest.kek.active, "mem-00000002");
     assert!(created.manifest.ca_fingerprint.is_some());
+    assert_identity(&created);
     let leftovers: Vec<PathBuf> = std::fs::read_dir(root.path().join("backups"))
         .expect("dir")
         .map(|entry| entry.expect("entry").path())
@@ -203,6 +261,13 @@ async fn a_backup_restores_with_its_secrets_ca_and_chain() {
     assert!(checked.digest_matches);
     assert!(checked.envelopes >= 5, "{}", checked.envelopes);
     assert_eq!(checked.ca_fingerprint, created.manifest.ca_fingerprint);
+    assert_eq!(checked.archive_id, created.archive_id);
+    assert_eq!(checked.sha256, created.sha256);
+    assert_eq!(
+        scratch_dirs(root.path()),
+        0,
+        "the check removes its scratch directory"
+    );
 
     let data_dir = root.path().join("restored");
     let dry = restore::restore(
@@ -230,9 +295,13 @@ async fn a_backup_restores_with_its_secrets_ca_and_chain() {
         .expect("notice")
         .expect("some");
     assert_eq!(notice.revision, created.manifest.revision);
+    assert_eq!(notice.archive_id, created.archive_id);
+    assert_eq!(notice.sha256, created.sha256);
+    assert_private_modes(&data_dir);
 
     let store = open_restored(&data_dir, 1, &secrets).await;
     assert_eq!(rows(&store).await, 200, "the later write is not restored");
+    assert_pending_notice(&store, &notice).await;
     let mut write = WriteBatch::for_request(&ctx());
     write.put(ROWS, b"row-new".to_vec(), b"after the restore".to_vec());
     store
@@ -458,4 +527,94 @@ async fn a_missing_file_key_is_refused_first_and_backups_are_private() {
         assert!(matches!(error, BackupError::InvalidKey(_)), "{error}");
     }
     assert!(!data_dir.exists());
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_restore_follows_no_link_planted_in_the_data_directory() {
+    let root = tempfile::tempdir().expect("dir");
+    let ring = ring();
+    let source = RaftStore::open(store_config(&root.path().join("source"), 1))
+        .await
+        .expect("source");
+    populate(Arc::new(source.clone()), &ring).await;
+    let config = root.path().join("tenko.toml");
+    std::fs::write(&config, "data_dir = \"/srv/tenko\"\n").expect("config");
+    let mut with_config = request(Target::Dir(root.path().join("backups")));
+    with_config.extras.config = Some(config);
+    let created = create::from_live(&source, &ring, with_config)
+        .await
+        .expect("backup");
+    source.shutdown().await.expect("shutdown");
+
+    // Somewhere the restore must never write into.
+    let elsewhere = root.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).expect("elsewhere");
+
+    // `store` as a link to an empty directory elsewhere: the restore refuses it.
+    let data_dir = root.path().join("linked-store");
+    std::fs::create_dir(&data_dir).expect("data dir");
+    std::os::unix::fs::symlink(&elsewhere, data_dir.join("store")).expect("link");
+    let error = restore::restore(
+        &created.path,
+        Unlock::Passphrase(PASSPHRASE),
+        &target(&data_dir, 1),
+        false,
+    )
+    .await
+    .expect_err("a linked store directory");
+    assert!(matches!(error, BackupError::Io { .. }), "{error}");
+    assert!(error.to_string().contains("symbolic link"), "{error}");
+    assert_eq!(std::fs::read_dir(&elsewhere).expect("dir").count(), 0);
+    assert!(!data_dir.join(restore::NOTICE_FILE).exists());
+
+    // `restored` as a link: the store is complete when the extras are written, so the
+    // restore fails at the link, removes the store and writes nothing through it.
+    let data_dir = root.path().join("linked-extras");
+    std::fs::create_dir(&data_dir).expect("data dir");
+    std::os::unix::fs::symlink(&elsewhere, data_dir.join(restore::EXTRAS_DIR)).expect("link");
+    let error = restore::restore(
+        &created.path,
+        Unlock::Passphrase(PASSPHRASE),
+        &target(&data_dir, 1),
+        false,
+    )
+    .await
+    .expect_err("a linked extras directory");
+    assert!(error.to_string().contains("symbolic link"), "{error}");
+    assert_eq!(std::fs::read_dir(&elsewhere).expect("dir").count(), 0);
+    assert!(!data_dir.join("store").exists());
+    assert!(!data_dir.join(restore::NOTICE_FILE).exists());
+
+    // `restored.json` as a link to a file elsewhere: never written through.
+    let data_dir = root.path().join("linked-notice");
+    std::fs::create_dir(&data_dir).expect("data dir");
+    let decoy = elsewhere.join("decoy");
+    std::fs::write(&decoy, b"untouched").expect("decoy");
+    std::os::unix::fs::symlink(&decoy, data_dir.join(restore::NOTICE_FILE)).expect("link");
+    let error = restore::restore(
+        &created.path,
+        Unlock::Passphrase(PASSPHRASE),
+        &target(&data_dir, 1),
+        false,
+    )
+    .await
+    .expect_err("a linked notice");
+    assert!(matches!(error, BackupError::Io { .. }), "{error}");
+    assert_eq!(std::fs::read(&decoy).expect("decoy"), b"untouched");
+    assert!(
+        !data_dir.join("store").exists(),
+        "the failed restore removed its store"
+    );
+
+    // Without links the same backup restores into a fresh directory.
+    let data_dir = root.path().join("clean");
+    restore::restore(
+        &created.path,
+        Unlock::Passphrase(PASSPHRASE),
+        &target(&data_dir, 1),
+        false,
+    )
+    .await
+    .expect("restore");
 }

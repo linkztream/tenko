@@ -5,9 +5,13 @@
 //! A backup through the API or the schedule is written by the controller that runs it, into
 //! its target directory, and then recorded with the inline job `backup.create`: its one step
 //! `backup.record` stages the record in `backup.runs` with the audit record
-//! `sys.backup.create`, so the record, the job and the audit commit in one write. A backup
-//! that fails is recorded and audited as failed without a job. A scheduled backup's record
-//! carries the leader epoch as a precondition, so a deposed leader cannot record one.
+//! `sys.backup.create`, which names the file, its archive id and its SHA-256, so the record,
+//! the job and the audit commit in one write. A backup that fails is recorded and audited
+//! as failed without a job. A scheduled backup's record carries the leader epoch as a
+//! precondition, so a deposed leader cannot record one. The files the schedule deletes
+//! beyond the keep count are audited as `sys.backup.prune`, and the first start after a
+//! restore records `sys.backup.restore` from the notice the restore left in the data
+//! directory and in the store, and says when the file was missing.
 
 use std::{
     collections::BTreeMap,
@@ -75,6 +79,9 @@ pub const JOB_TITLE: &str = "backup.job.create";
 pub const STEP_PREVIEW: &str = "backup.job.record_preview";
 /// The name of the leader service.
 pub const SCHEDULE: &str = "backup.schedule";
+/// The audit action of the files the schedule deleted beyond the keep count.
+pub const PRUNE: tenko_core::audit::AuditAction =
+    tenko_core::audit::AuditAction::from_static("sys.backup.prune");
 /// How old the last good backup may be before Standard and Hardened warn.
 pub const STALE_AFTER: Duration = Duration::from_secs(7 * 24 * 3600);
 /// How often the schedule looks at the settings.
@@ -307,6 +314,8 @@ impl BackupService {
                     id,
                     run: run.clone(),
                     epoch,
+                    archive_id: Some(created.archive_id.clone()),
+                    sha256: Some(created.sha256.clone()),
                 };
                 let job = match self.record_job(ctx, &params).await {
                     Ok(job) => job,
@@ -326,7 +335,7 @@ impl BackupService {
                     code: error.code().to_owned(),
                     detail: error.to_string(),
                 });
-                let mut batch = record_batch(ctx, id, &run, epoch, Some(&error));
+                let mut batch = record_batch(ctx, id, &run, epoch, Some(&error), None);
                 if let Ok(view) = self.view().await {
                     purge_runs(view.as_ref(), &mut batch);
                 }
@@ -502,15 +511,28 @@ impl BackupService {
         Arc::new(Schedule(Arc::clone(self)))
     }
 
-    /// Records the restore notice the restore left in the data directory (the first start
-    /// after a restore) and removes the file.
+    /// Records the restore notice a restore left (the first start after a restore) and
+    /// removes it: the file `restored.json` in the data directory and the row the restore
+    /// wrote into the store ([`restore::PENDING`]). Either alone is enough; the audit record
+    /// says in `notice` whether the file was there (`file`), the row alone (`missing`: the
+    /// file was removed before the first start) or the file alone (`file_only`: a restore by
+    /// a build before the row existed).
     ///
     /// # Errors
     ///
-    /// The store's error; the file then stays for the next start.
+    /// The store's error; the notice then stays for the next start.
     pub async fn record_restore(&self) -> Result<Option<RestoreRecord>, BackupError> {
-        let Some(notice) = restore::take_notice(&self.config.data_dir)? else {
-            return Ok(None);
+        let file = restore::take_notice(&self.config.data_dir)?;
+        let view = self.view().await?;
+        let pending = view
+            .get_typed(&restore::PENDING, &())?
+            .map(|(notice, _)| notice);
+        drop(view);
+        let (notice, found) = match (file, pending) {
+            (Some(file), Some(_)) => (file, "file"),
+            (Some(file), None) => (file, "file_only"),
+            (None, Some(pending)) => (pending, "missing"),
+            (None, None) => return Ok(None),
         };
         let record = RestoreRecord {
             restored_at: notice.restored_at,
@@ -525,19 +547,31 @@ impl BackupService {
         let ctx = RequestCtx::system(SystemComponent::Backup);
         let mut batch = WriteBatch::for_request(&ctx);
         batch.put_typed(&tables::RESTORE, &(), &record)?;
+        batch.delete_typed(&restore::PENDING, &());
         let mut draft = AuditDraft::success(actions::RESTORE, vec![system_object()]);
         draft.details.context = BTreeMap::from([
             ("file".to_owned(), record.file.clone()),
+            ("archive_id".to_owned(), notice.archive_id),
+            ("sha256".to_owned(), notice.sha256),
             ("revision".to_owned(), record.revision.to_string()),
             ("source_node".to_owned(), record.source_node.to_string()),
             (
                 "backup_created_at".to_owned(),
                 record.backup_created_at.to_string(),
             ),
+            ("restored_at".to_owned(), record.restored_at.to_string()),
+            ("notice".to_owned(), found.to_owned()),
         ]);
         batch.audit(draft);
         self.shared.propose(batch).await?;
         restore::clear_notice(&self.config.data_dir);
+        if found == "missing" {
+            tracing::warn!(
+                file = %record.file,
+                "the restore notice file was missing at the first start; the restore was \
+                 recorded from the store"
+            );
+        }
         tracing::warn!(
             file = %record.file,
             revision = record.revision,
@@ -546,10 +580,11 @@ impl BackupService {
         Ok(Some(record))
     }
 
-    /// Deletes the oldest backup files of `dir` beyond `keep`; only names this module writes.
-    fn prune(dir: &Path, keep: u32) -> usize {
+    /// Deletes the oldest backup files of `dir` beyond `keep`; only names this module
+    /// writes. Returns the names deleted.
+    fn prune(dir: &Path, keep: u32) -> Vec<String> {
         let Ok(entries) = std::fs::read_dir(dir) else {
-            return 0;
+            return Vec::new();
         };
         let mut names: Vec<String> = entries
             .filter_map(Result::ok)
@@ -559,16 +594,36 @@ impl BackupService {
         names.sort();
         let keep = usize::try_from(keep).unwrap_or(usize::MAX);
         let excess = names.len().saturating_sub(keep);
-        let mut removed = 0;
+        let mut removed = Vec::new();
         for name in names.into_iter().take(excess) {
             match std::fs::remove_file(dir.join(&name)) {
-                Ok(()) => removed += 1,
+                Ok(()) => removed.push(name),
                 Err(error) => {
                     tracing::warn!(%error, file = %name, "an old backup could not be deleted");
                 }
             }
         }
         removed
+    }
+
+    /// Records the files the schedule deleted (`sys.backup.prune`), fenced by the leader
+    /// epoch like the record of the backup itself.
+    async fn record_prune(&self, dir: &Path, keep: u32, removed: &[String], epoch: u64) {
+        let ctx = RequestCtx::system(SystemComponent::Backup);
+        let mut batch = WriteBatch::for_request(&ctx);
+        batch.expect_counter(LEADER_EPOCH, epoch);
+        let mut draft = AuditDraft::success(PRUNE, vec![system_object()]);
+        draft.details.context = BTreeMap::from([
+            ("node".to_owned(), self.config.node.to_string()),
+            ("target_dir".to_owned(), dir.display().to_string()),
+            ("keep".to_owned(), keep.to_string()),
+            ("removed".to_owned(), removed.len().to_string()),
+            ("files".to_owned(), removed.join(",")),
+        ]);
+        batch.audit(draft);
+        if let Err(error) = self.shared.propose(batch).await {
+            tracing::warn!(%error, "the deleted backups could not be recorded");
+        }
     }
 
     /// One look of the schedule: a backup when one is due.
@@ -594,9 +649,15 @@ impl BackupService {
             .await
         {
             Ok(run) => {
-                let removed = Self::prune(Path::new(&run.target_dir), settings.keep);
-                if removed > 0 {
-                    tracing::info!(removed, "old backups deleted (keep {})", settings.keep);
+                let dir = Path::new(&run.target_dir);
+                let removed = Self::prune(dir, settings.keep);
+                if !removed.is_empty() {
+                    tracing::info!(
+                        removed = removed.len(),
+                        "old backups deleted (keep {})",
+                        settings.keep
+                    );
+                    self.record_prune(dir, settings.keep, &removed, epoch).await;
                 }
                 Ok(())
             }
@@ -940,15 +1001,27 @@ struct RecordParams {
     id: Uuid,
     run: BackupRun,
     epoch: Option<u64>,
+    /// The archive id of the file, as hex (absent in records of earlier builds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    archive_id: Option<String>,
+    /// The SHA-256 of the file, as hex (absent in records of earlier builds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
 }
 
-/// The write of a record: the record, the audit record, and the fence of a scheduled one.
+/// The archive id and the SHA-256 of a written file, for its audit record.
+type FileIdentity<'a> = (&'a str, &'a str);
+
+/// The write of a record: the record, the audit record (with the archive id and the
+/// SHA-256 of a written file, so that a file can be checked against the exported audit
+/// log), and the fence of a scheduled one.
 fn record_batch(
     ctx: &RequestCtx,
     id: Uuid,
     run: &BackupRun,
     epoch: Option<u64>,
     error: Option<&BackupError>,
+    identity: Option<FileIdentity<'_>>,
 ) -> WriteBatch {
     let mut batch = WriteBatch::for_request(ctx);
     if let Some(epoch) = epoch {
@@ -976,6 +1049,10 @@ fn record_batch(
     }
     if let Some(revision) = run.revision {
         context.insert("revision".to_owned(), revision.to_string());
+    }
+    if let Some((archive_id, sha256)) = identity {
+        context.insert("archive_id".to_owned(), archive_id.to_owned());
+        context.insert("sha256".to_owned(), sha256.to_owned());
     }
     draft.details.context = context;
     batch.audit(draft);
@@ -1030,7 +1107,15 @@ impl StepHandler for RecordStep {
         let mut params: RecordParams =
             from_cbor(params).map_err(|error| StepError::InvalidParams(error.to_string()))?;
         params.run.job = Some(cx.job);
-        let mut batch = record_batch(&cx.request, params.id, &params.run, params.epoch, None);
+        let identity = params.archive_id.as_deref().zip(params.sha256.as_deref());
+        let mut batch = record_batch(
+            &cx.request,
+            params.id,
+            &params.run,
+            params.epoch,
+            None,
+            identity,
+        );
         let view = cx.store.read(ReadConsistency::Local).await?;
         purge_runs(view.as_ref(), &mut batch);
         drop(view);

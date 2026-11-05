@@ -3,6 +3,11 @@
 //! Secrets are never flags: a passphrase comes from a prompt without echo, from the first
 //! line of standard input (`--passphrase-stdin`) or of a file (`--passphrase-file`); a
 //! recipient key from its key file (`--key-file`).
+//!
+//! `restore`, the offline `create` and `verify` are offline commands: they run as the
+//! account that owns the data directory, and `main` refuses them as root over another
+//! account's files ([`crate::exec`], ADR 0023). Text that comes out of an archive is
+//! filtered to printable characters before it is printed ([`restore::filtered`]).
 
 use std::{
     fmt::Write as _,
@@ -283,6 +288,8 @@ pub fn keygen(args: &KeygenArgs) -> Result<Output, Failure> {
 struct CreatedView<'a> {
     file: &'a Path,
     bytes: u64,
+    archive_id: &'a str,
+    sha256: &'a str,
     revision: u64,
     slots: usize,
     duration_ms: u64,
@@ -363,6 +370,8 @@ pub fn create(args: &CreateArgs) -> Result<Output, Failure> {
     let view = CreatedView {
         file: &created.path,
         bytes: created.bytes,
+        archive_id: &created.archive_id,
+        sha256: &created.sha256,
         revision: created.manifest.revision,
         slots: created.manifest.parts.len(),
         duration_ms: u64::try_from(created.duration.as_millis()).unwrap_or(u64::MAX),
@@ -371,11 +380,13 @@ pub fn create(args: &CreateArgs) -> Result<Output, Failure> {
         return Ok(Output::json(&view));
     }
     Ok(Output::text(format!(
-        "wrote {} ({} bytes, revision {}) in {} ms\n",
+        "wrote {} ({} bytes, revision {}) in {} ms\narchive id {}, SHA-256 {}\n",
         created.path.display(),
         created.bytes,
         created.manifest.revision,
-        view.duration_ms
+        view.duration_ms,
+        created.archive_id,
+        created.sha256
     )))
 }
 
@@ -397,11 +408,17 @@ async fn online(args: &CreateArgs) -> Result<Output, Failure> {
     let password = read_secret(&format!("Password for {user}: "), args.password_stdin)?;
     let cookie = sign_in(&raw, &user, &password, args.totp_code.as_ref()).await?;
     drop(password);
-    let body = tenko_api::dto::backup::BackupCreateRequest {
+    // The request body holds the passphrase as the API's type does; it is wiped as soon
+    // as the request has been sent (the serialized form inside the HTTP client is not).
+    let mut body = tenko_api::dto::backup::BackupCreateRequest {
         passphrase: passphrase.as_ref().map(|passphrase| passphrase.to_string()),
         before_update: None,
     };
+    drop(passphrase);
     let answer = raw.post_json("/system/backups", &body, Some(&cookie)).await;
+    if let Some(mut passphrase) = body.passphrase.take() {
+        zeroize::Zeroize::zeroize(&mut passphrase);
+    }
     let _ = raw
         .post_json("/auth/logout", &serde_json::json!({}), Some(&cookie))
         .await;
@@ -471,14 +488,28 @@ async fn sign_in(
     cookie.ok_or_else(|| Failure::other("the server signed in but set no session cookie"))
 }
 
+/// The report as text. Every string that comes out of the archive passes through
+/// [`restore::filtered`]: the manifest refuses control characters already, and a line of the
+/// report stays one printable line whatever a file carries.
 fn render(report: &restore::Report) -> String {
+    use restore::filtered;
+
     let manifest = &report.manifest;
     let mut text = String::new();
     let _ = writeln!(text, "backup      {}", report.file.display());
     let _ = writeln!(
         text,
+        "archive     id {}, SHA-256 {}",
+        filtered(&report.archive_id),
+        filtered(&report.sha256)
+    );
+    let _ = writeln!(
+        text,
         "made        {} by Tenko {} on node {} (voters {:?})",
-        manifest.created_at, manifest.tenko_version, manifest.node, manifest.voters
+        manifest.created_at,
+        filtered(&manifest.tenko_version),
+        manifest.node,
+        manifest.voters
     );
     let _ = writeln!(
         text,
@@ -491,7 +522,12 @@ fn render(report: &restore::Report) -> String {
     );
     let _ = writeln!(text, "opens with  {}", report.slots.join(", "));
     for part in &report.parts {
-        let _ = writeln!(text, "part        {} ({} bytes) ok", part.name, part.bytes);
+        let _ = writeln!(
+            text,
+            "part        {} ({} bytes) ok",
+            filtered(&part.name),
+            part.bytes
+        );
     }
     let _ = writeln!(
         text,
@@ -502,21 +538,23 @@ fn render(report: &restore::Report) -> String {
             "DIFFERS"
         },
         report.envelopes,
-        manifest.kek.generations.join(", ")
+        filtered(&manifest.kek.generations.join(", "))
     );
     if let Some(fingerprint) = &report.ca_fingerprint {
-        let _ = writeln!(text, "CA          SHA-256 {fingerprint}");
+        let _ = writeln!(text, "CA          SHA-256 {}", filtered(fingerprint));
     }
     for path in &report.written {
         let _ = writeln!(text, "wrote       {}", path.display());
     }
     for note in &report.notes {
-        let _ = writeln!(text, "note        {note}");
+        let _ = writeln!(text, "note        {}", filtered(note));
     }
     text
 }
 
-/// Runs `tenko backup verify`.
+/// Runs `tenko backup verify`. The scratch store lives in a directory of this process alone
+/// (mode 0700) under `--work-dir`, else under the system temporary directory, and is
+/// removed on every way out.
 ///
 /// # Errors
 ///
@@ -536,7 +574,10 @@ pub fn verify(args: &VerifyArgs) -> Result<Output, Failure> {
     if args.json {
         return Ok(Output::json(&report));
     }
-    Ok(Output::text(render(&report)).note("the backup is complete and restores"))
+    Ok(Output::text(render(&report)).note(
+        "the backup is complete and restores; before a restore, compare the archive id and \
+         the SHA-256 above with the sys.backup.create record of the node that wrote it",
+    ))
 }
 
 /// Runs `tenko backup restore`.

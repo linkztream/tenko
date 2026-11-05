@@ -22,6 +22,12 @@
 //! written to a `.part` name, synced and renamed, so a complete name is a complete file;
 //! the trailing hash is checked when the file is installed, before the transaction commits.
 //! Transfer to another node streams the file in chunks (see `network`).
+//!
+//! The reader is bounded by declared limits, so a file that was crafted or damaged fails
+//! cleanly instead of making it allocate or write without bound: the header at most
+//! [`MAX_HEADER`] bytes, a key at most [`MAX_KEY`], a value at most [`MAX_FIELD`], and the
+//! records of a file at most [`MAX_PLAIN`] bytes after decompression, whatever the size of
+//! the compressed file.
 
 use std::{
     fs::File,
@@ -50,8 +56,17 @@ const TAG_TABLE: u8 = 0x01;
 const TAG_ROW: u8 = 0x02;
 const TAG_END: u8 = 0xFF;
 const BUFFER: usize = 1 << 20;
-/// Upper bound of one length field: a corrupt length fails cleanly instead of allocating.
-const MAX_FIELD: u32 = 256 * 1024 * 1024;
+/// Upper bound of a value's length field: a corrupt length fails cleanly instead of
+/// allocating.
+pub(crate) const MAX_FIELD: u32 = 256 * 1024 * 1024;
+/// Upper bound of a key's length field (the store's keys are short identifiers).
+pub(crate) const MAX_KEY: u32 = 64 * 1024;
+/// Upper bound of the header's length field.
+pub(crate) const MAX_HEADER: u32 = 1 << 20;
+/// Upper bound of the bytes of records a reader takes from one file, after
+/// decompression: the expansion of a compressed snapshot is bounded by it, not by the size
+/// of the file.
+pub(crate) const MAX_PLAIN: u64 = 64 << 30;
 
 /// What a snapshot file describes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,12 +221,21 @@ pub(crate) struct SnapshotReader {
     name: String,
     key: Vec<u8>,
     value: Vec<u8>,
+    /// Bytes of records read so far, after decompression.
+    plain: u64,
+    /// The most bytes of records this reader takes ([`MAX_PLAIN`]).
+    plain_limit: u64,
     done: bool,
 }
 
 impl SnapshotReader {
     /// Opens a file and reads its header.
     pub(crate) fn open(path: &Path) -> Result<Self, StoreError> {
+        Self::open_with_limit(path, MAX_PLAIN)
+    }
+
+    /// Opens a file and reads its header; its records may hold at most `plain_limit` bytes.
+    pub(crate) fn open_with_limit(path: &Path, plain_limit: u64) -> Result<Self, StoreError> {
         let file = File::open(path).map_err(storage)?;
         let mut input = BufReader::with_capacity(BUFFER, file);
         let mut hasher = Sha256::new();
@@ -223,7 +247,7 @@ impl SnapshotReader {
                 path.display()
             )));
         }
-        let len = read_u32(&mut input, &mut hasher)?;
+        let len = read_u32(&mut input, &mut hasher, MAX_HEADER, "header")?;
         let mut encoded = vec![0_u8; usize::try_from(len).map_err(storage)?];
         read_hashed(&mut input, &mut hasher, &mut encoded)?;
         let header: SnapshotHeader = from_cbor(&encoded)?;
@@ -243,8 +267,24 @@ impl SnapshotReader {
             name: String::new(),
             key: Vec::new(),
             value: Vec::new(),
+            plain: 0,
+            plain_limit,
             done: false,
         })
+    }
+
+    /// Counts `len` bytes of records against the limit before they are read.
+    fn take(&mut self, len: usize) -> Result<(), StoreError> {
+        self.plain = self
+            .plain
+            .saturating_add(u64::try_from(len).unwrap_or(u64::MAX));
+        if self.plain > self.plain_limit {
+            return Err(StoreError::Storage(format!(
+                "snapshot file is corrupt: more than {} bytes of records",
+                self.plain_limit
+            )));
+        }
+        Ok(())
     }
 
     /// The header.
@@ -259,21 +299,28 @@ impl SnapshotReader {
         }
         let mut tag = [0_u8; 1];
         read_hashed(&mut self.input, &mut self.hasher, &mut tag)?;
+        self.take(1)?;
         match tag[0] {
             TAG_TABLE => {
                 let mut len = [0_u8; 2];
                 read_hashed(&mut self.input, &mut self.hasher, &mut len)?;
-                let mut name = vec![0_u8; usize::from(u16::from_be_bytes(len))];
+                let name_len = usize::from(u16::from_be_bytes(len));
+                self.take(2 + name_len)?;
+                let mut name = vec![0_u8; name_len];
                 read_hashed(&mut self.input, &mut self.hasher, &mut name)?;
                 self.name = String::from_utf8(name).map_err(storage)?;
                 Ok(Some(Record::Table(&self.name)))
             }
             TAG_ROW => {
-                let len = read_u32(&mut self.input, &mut self.hasher)?;
-                self.key.resize(usize::try_from(len).map_err(storage)?, 0);
+                let len = read_u32(&mut self.input, &mut self.hasher, MAX_KEY, "key")?;
+                let key_len = usize::try_from(len).map_err(storage)?;
+                self.take(4 + key_len)?;
+                self.key.resize(key_len, 0);
                 read_hashed(&mut self.input, &mut self.hasher, &mut self.key)?;
-                let len = read_u32(&mut self.input, &mut self.hasher)?;
-                self.value.resize(usize::try_from(len).map_err(storage)?, 0);
+                let len = read_u32(&mut self.input, &mut self.hasher, MAX_FIELD, "value")?;
+                let value_len = usize::try_from(len).map_err(storage)?;
+                self.take(4 + value_len)?;
+                self.value.resize(value_len, 0);
                 read_hashed(&mut self.input, &mut self.hasher, &mut self.value)?;
                 Ok(Some(Record::Row(&self.key, &self.value)))
             }
@@ -312,13 +359,19 @@ fn read_hashed(
     Ok(())
 }
 
-fn read_u32(input: &mut impl Read, hasher: &mut Sha256) -> Result<u32, StoreError> {
+/// Reads a length field of `what`, refusing one above `limit`.
+fn read_u32(
+    input: &mut impl Read,
+    hasher: &mut Sha256,
+    limit: u32,
+    what: &str,
+) -> Result<u32, StoreError> {
     let mut buf = [0_u8; 4];
     read_hashed(input, hasher, &mut buf)?;
     let len = u32::from_be_bytes(buf);
-    if len > MAX_FIELD {
+    if len > limit {
         return Err(StoreError::Storage(format!(
-            "snapshot file is corrupt: field of {len} bytes"
+            "snapshot file is corrupt: {what} of {len} bytes, more than the limit of {limit}"
         )));
     }
     Ok(len)
@@ -429,5 +482,118 @@ mod tests {
         drop(db);
         std::fs::remove_dir_all(&dir).expect("clean up");
         written.bytes
+    }
+
+    /// A file of `format` with the given header length field, records and no hash: what
+    /// the reader does before the hash is what these tests look at.
+    fn crafted(
+        dir: &Path,
+        name: &str,
+        format: u32,
+        header_len: Option<u32>,
+        records: &[u8],
+    ) -> std::path::PathBuf {
+        let header = SnapshotHeader {
+            format,
+            meta: SnapshotMeta::default(),
+            state: SmMeta::default(),
+        };
+        let encoded = to_cbor(&header).expect("header");
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC);
+        let len = header_len.unwrap_or_else(|| u32::try_from(encoded.len()).expect("length"));
+        bytes.extend_from_slice(&len.to_be_bytes());
+        bytes.extend_from_slice(&encoded);
+        if format == FORMAT_PLAIN {
+            bytes.extend_from_slice(records);
+        } else {
+            let mut deflate = DeflateEncoder::new(Vec::new(), flate2::Compression::best());
+            deflate.write_all(records).expect("compress");
+            bytes.extend_from_slice(&deflate.finish().expect("finish"));
+        }
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).expect("write");
+        path
+    }
+
+    fn row(key_len: u32, value_len: u32) -> Vec<u8> {
+        let mut record = vec![TAG_ROW];
+        record.extend_from_slice(&key_len.to_be_bytes());
+        record.extend(std::iter::repeat_n(
+            1_u8,
+            usize::try_from(key_len).expect("key"),
+        ));
+        record.extend_from_slice(&value_len.to_be_bytes());
+        record.extend(std::iter::repeat_n(
+            2_u8,
+            usize::try_from(value_len).expect("value"),
+        ));
+        record
+    }
+
+    fn table(name: &str) -> Vec<u8> {
+        let mut record = vec![TAG_TABLE];
+        record.extend_from_slice(&u16::try_from(name.len()).expect("name").to_be_bytes());
+        record.extend_from_slice(name.as_bytes());
+        record
+    }
+
+    /// Reads every record until the reader stops, returning its error.
+    fn read_until_error(path: &Path, limit: u64) -> StoreError {
+        let mut reader = SnapshotReader::open_with_limit(path, limit).expect("open");
+        loop {
+            match reader.next_record() {
+                Ok(Some(_)) => {}
+                Ok(None) => panic!("the file must not read to the end"),
+                Err(error) => return error,
+            }
+        }
+    }
+
+    // Declared limits bound a crafted file: the header's length, a key's length, and the
+    // bytes of records a compressed file expands to.
+    #[test]
+    fn crafted_lengths_and_expansions_are_refused_by_declared_limits() {
+        let dir = temp_dir("limits");
+
+        let path = crafted(&dir, "header.tnks", FORMAT, Some(MAX_HEADER + 1), &[]);
+        let Err(error) = SnapshotReader::open(&path) else {
+            panic!("a header beyond the limit must not open");
+        };
+        assert!(error.to_string().contains("header of"), "{error}");
+
+        let mut records = table("ipam.rows");
+        records.extend_from_slice(&row(MAX_KEY + 1, 0));
+        let path = crafted(&dir, "key.tnks", FORMAT_PLAIN, None, &records);
+        let error = read_until_error(&path, MAX_PLAIN);
+        assert!(error.to_string().contains("key of"), "{error}");
+
+        // The key length is read first: 0 bytes of key, then the value length.
+        let mut with_key = table("ipam.rows");
+        with_key.extend_from_slice(&[TAG_ROW]);
+        with_key.extend_from_slice(&0_u32.to_be_bytes());
+        with_key.extend_from_slice(&(MAX_FIELD + 1).to_be_bytes());
+        let path = crafted(&dir, "value.tnks", FORMAT_PLAIN, None, &with_key);
+        let error = read_until_error(&path, MAX_PLAIN);
+        assert!(error.to_string().contains("value of"), "{error}");
+
+        // Four thousand rows of 64 KiB of the same byte compress to a few hundred bytes
+        // of DEFLATE and expand to 256 MiB; a limit below that stops the reader early.
+        let mut records = table("ipam.rows");
+        for _ in 0..4_000 {
+            records.extend_from_slice(&row(8, 65_536));
+        }
+        let path = crafted(&dir, "bomb.tnks", FORMAT, None, &records);
+        assert!(
+            std::fs::metadata(&path).expect("metadata").len() < 1 << 20,
+            "the compressed file is small"
+        );
+        let error = read_until_error(&path, 1 << 20);
+        assert!(error.to_string().contains("bytes of records"), "{error}");
+        // Within the limit the same records read until the missing hash is noticed.
+        let error = read_until_error(&path, MAX_PLAIN);
+        assert!(!error.to_string().contains("bytes of records"), "{error}");
+
+        std::fs::remove_dir_all(&dir).expect("clean up");
     }
 }

@@ -15,6 +15,9 @@
 //! A member of a cluster of controllers rotates online instead (`POST /system/kek/rotate`,
 //! which distributes the new generation to every controller first); this command refuses
 //! to run there.
+//!
+//! The command runs as the account that owns the data directory; `main` refuses it as root
+//! over another account's files before it starts ([`crate::exec`], ADR 0023 I2).
 
 use std::{fmt::Write as _, io::Write, sync::Arc, time::Duration};
 

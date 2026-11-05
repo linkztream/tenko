@@ -1054,6 +1054,10 @@
         <notes><note category="description">What the audit action sys.backup.create is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Create a backup</source></segment>
       </unit>
+      <unit id="audit.action.sys.backup.prune">
+        <notes><note category="description">What the audit action sys.backup.prune is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete old backups</source></segment>
+      </unit>
       <unit id="audit.action.sys.backup.restore">
         <notes><note category="description">What the audit action sys.backup.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Restore a backup</source></segment>

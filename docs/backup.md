@@ -64,7 +64,7 @@ A passphrase is never stored. A wrong passphrase or key fails at the slot, befor
 | Online, by hand | `POST /api/v1/system/backups`, or `tenko backup create --url …` | Administrators, with a sign-in within the last five minutes | The target directory of the controller that answers |
 | Online, scheduled | The leader service `backup.schedule` | The system | The target directory of the leader |
 | Online, before an update | "Backup now" in the install dialog (`POST /api/v1/system/backups` with `before_update`), or the first step `sys.update.backup` of an install asked to take one ([upgrades.md](upgrades.md) section 8.12) | The administrator who installs; the dialog needs a sign-in within the last five minutes | The target directory of the controller that answers |
-| Offline | `tenko backup create --config tenko.toml` (or `--data-dir`) with the server stopped | Whoever can read the data directory and the KEK | `--out`, else the target directory |
+| Offline | `tenko backup create --config tenko.toml` (or `--data-dir`) with the server stopped | The account that owns the data directory (`tenko` on a node installed by `deploy/install.sh`), which reads the store and the KEK | `--out`, else the target directory |
 
 The **target directory** is the `target_dir` of the backup settings when set, else `[backup] target_dir` of the controller's `tenko.toml`, else `backups/` in its data directory. Prefer another disk: a backup next to the data it protects does not survive the loss of that disk.
 
@@ -80,15 +80,17 @@ tenko backup create --url https://ddi.example.test:8443 --user admin
 
 The command signs in for this request only (a backup needs a fresh sign-in, which a stored API token is not), asks for the backup, and signs out. Accounts that sign in with a passkey only write backups from the web UI.
 
-Offline, with the server stopped:
+Offline, with the server stopped, as the account that owns the data directory:
 
 ```sh
-tenko backup create --config /etc/tenko/tenko.toml --out /srv/backup/
+runuser -u tenko -- tenko backup create --config /etc/tenko/tenko.toml --out /srv/backup/
 #   asks for a passphrase twice, unless --recipient tkbr1:… is given (repeatable);
 #   --passphrase-file FILE or --passphrase-stdin read it instead
 ```
 
-The command refuses a store that a running server holds open (`backup.in_use`). The UI offers no download of a backup in Phase 1 (owner decision S3-Q11): copy the files off the controller with the tools of the host.
+The command refuses a store that a running server holds open (`backup.in_use`), and prints the archive id and the SHA-256 of the file it wrote, which identify the file beyond its name (section 5). The UI offers no download of a backup in Phase 1 (owner decision S3-Q11): copy the files off the controller with the tools of the host.
+
+**Who runs the offline commands.** `backup create` of a stopped node, `backup verify`, `backup restore`, `kek rotate`, `upgrade check` and `upgrade layout` open the store or write under the data directory, and they run as the account that owns it ([ADR 0023](adr/0023-no-root-after-installation.md), I2): on a node installed by `deploy/install.sh` that is `tenko`, through `runuser -u tenko -- tenko …`, on Windows the service's virtual account through the service itself. Run as root (on Windows: as `SYSTEM` or from an elevated prompt) while this binary's file, the data directory or the directory the command writes into belongs to another account, the command does not start: it exits with status 2 and prints one line with the code `exec.unsafe_owner`, the file and its owner, and the same command in the form that runs it as that account. There is no override and no profile setting. The `--out` directory of an offline backup and the `--work-dir` of a check are checked the same way. A data directory that root owns itself, as in a container that runs as root, passes.
 
 A **backup before an update** is the restore point of that update (ADR 0023). It is an ordinary online backup with the reason `before_update` and the version the update is about to install, listed as "Before update 0.2.0" on the Backup page and in `GET /api/v1/system/backups` (`reason: before_update`, `before_update: "0.2.0"`); the archive's origin says `before_update`. The record is stored as a manual backup with the version beside it, so a previous release still reads it after a switch back. It does not count as a scheduled backup for the schedule. The step of an install job can take one only with a recipient, since a job never carries a passphrase; the install dialog asks for a passphrase when there is no recipient and writes the backup itself.
 
@@ -114,19 +116,24 @@ tenko backup verify tenko-backup-20261011T080000Z-n1.tkbk --key-file tenko-backu
 #   or --passphrase-file FILE, --passphrase-stdin, or a prompt; --json for a report
 ```
 
-`verify` does everything a restore does, in a temporary directory (`--work-dir`, default the system temporary directory, about twice the size of the backup), and removes it: it opens the slot, checks every chunk and every part hash, installs the snapshot into a fresh store, compares the store digest with the manifest, verifies the whole audit chain, opens every envelope of `vault.secrets` with the key generations of the backup (the values are wiped at once) and compares the CA fingerprint. A backup that passes restores. A changed byte anywhere in the file fails it (`backup.archive.corrupt`, exit status 9).
+`verify` does everything a restore does, in a scratch directory of its own (mode `0700`, created under `--work-dir`, default the system temporary directory, about twice the size of the backup) and removes it on every way out: it opens the slot, checks every chunk and every part hash, installs the snapshot into a fresh store, compares the store digest with the manifest, verifies the whole audit chain, opens every envelope of `vault.secrets` with the key generations of the backup (the values are wiped at once) and compares the CA fingerprint. A backup that passes restores. A changed byte anywhere in the file fails it (`backup.archive.corrupt`, exit status 9). The manifest bounds what the reader takes from a file: a part that declares more than its limit (64 KiB for the key generations, 1 MiB for the TLS files and the configuration, 64 GiB for the snapshot), a part name or a version with a control character, or a snapshot whose records expand beyond 64 GiB is refused as corrupt before anything is written.
 
-Check backups regularly on a machine that is not a controller; a restore drill on a spare host (section 6) is the best test.
+The report names the **archive id** (the random identifier in the file's header) and the **SHA-256 of the file**. The node that wrote the backup recorded both in its `sys.backup.create` audit record (section 10), which the audit export delivers to an external sink ([audit-export.md](audit-export.md)). Before a restore from a node that may have been compromised, compare the two values with that record at the sink: a backup is encrypted, but the archive carries no proof of where it came from, and a node that was taken over could have written one. Text that comes out of an archive (part names, the version, key generation identifiers) is printed with control characters replaced, one line per item.
+
+Check backups regularly on a machine that is not a controller; a restore drill on a spare host (section 6) is the best test. `verify` runs without a server and leaves no audit record; the comparison above is the operator's.
 
 ## 6. Restoring
 
-A restore creates a new data directory; it never writes into a directory that holds a store (`backup.restore.target_not_empty`). Prepare the host as for a new installation: install Tenko, write the `tenko.toml` of this host (its own KEK provider, listen addresses and data directory; the restored copy of the old one in `restored/` helps), and with the `file` provider create its key file. Then:
+A restore creates a new data directory; it never writes into a directory that holds a store (`backup.restore.target_not_empty`). Prepare the host as for a new installation: install Tenko, write the `tenko.toml` of this host (its own KEK provider, listen addresses and data directory; the restored copy of the old one in `restored/` helps), and with the `file` provider create its key file. The restore runs as the account that owns the data directory (section 3, "Who runs the offline commands"): on a node installed by `deploy/install.sh`, stop the unit and run it as `tenko`; the backup file must be readable by that account. Then:
 
 ```sh
-tenko backup restore tenko-backup-20261011T080000Z-n1.tkbk --config /etc/tenko/tenko.toml --dry-run
-tenko backup restore tenko-backup-20261011T080000Z-n1.tkbk --config /etc/tenko/tenko.toml
+systemctl stop tenko
+runuser -u tenko -- tenko backup restore tenko-backup-20261011T080000Z-n1.tkbk --config /etc/tenko/tenko.toml --dry-run
+runuser -u tenko -- tenko backup restore tenko-backup-20261011T080000Z-n1.tkbk --config /etc/tenko/tenko.toml
 #   --key-file FILE or a passphrase as for verify; --data-dir overrides data_dir
 ```
+
+Run as root while the data directory belongs to `tenko`, the command prints the `runuser` form and exits with status 2 (`exec.unsafe_owner`); nothing is written. Compare the archive id and the SHA-256 the dry run prints with the `sys.backup.create` record of the node that wrote the backup first (section 5).
 
 `--dry-run` checks everything and writes nothing. The restore:
 
@@ -134,11 +141,13 @@ tenko backup restore tenko-backup-20261011T080000Z-n1.tkbk --config /etc/tenko/t
 2. creates the store as a single voter under this host's `[node] id` and installs the snapshot into it; the restored store starts a new Raft term, whatever the membership of the source was;
 3. compares the store digest, verifies the audit chain and opens every envelope;
 4. seals the key generations with this host's KEK provider, keeping their identifiers (the same import a controller does when it joins a cluster);
-5. writes the format marker from the data format of the snapshot: a backup of an older format is migrated at the first start like any older data directory, a newer one is refused (`backup.format_newer`);
+5. writes the restore notice into the restored store (the row `backup.restore_pending`, after the digest was compared), then writes the format marker from the data format of the snapshot: a backup of an older format is migrated at the first start like any older data directory, a newer one is refused (`backup.format_newer`);
 6. writes the imported TLS files and the configuration of the backup to `<data_dir>/restored/` (mode `0600`) for you to put in place; a configuration is never overwritten;
-7. leaves `<data_dir>/restored.json`, the restore notice.
+7. leaves `<data_dir>/restored.json`, the restore notice, with the archive id and the SHA-256 of the backup.
 
-Any failure removes the store the restore created. Then start the server as usual. The first start records the restore (`backup.restore`, audit `sys.backup.restore`), deletes `restored.json` and shows the warning `backup.restored` until the next good backup: take one.
+Everything the restore creates under the data directory it creates itself: directories in one step with mode `0700`, files as new files with mode `0600`, and a path that already exists as a symbolic link (`store`, `restored`, `restored.json`, the work directory) is refused with `backup.io` and the restore stops before it writes through it. The data directory itself may be the path the configuration names, a link an administrator made included; when it does not exist, the restore creates it with mode `0700`.
+
+Any failure removes the store the restore created. Then start the server as usual. The first start records the restore (`backup.restore`, audit `sys.backup.restore` with the archive id and the SHA-256), deletes `restored.json` and the row in the store, and shows the warning `backup.restored` until the next good backup: take one. The notice is in two places so that the first start records the restore even when the file is gone: the audit record's `notice` says `file` (both found), `missing` (the row alone: the file was removed before the first start, which the log warns about) or `file_only` (a restore by a build before the row existed).
 
 What carries over: every user, password, passkey and TOTP enrollment (sign in as before; passkeys need the same host name, which is in the restored settings), every secret (revealable as before), the audit chain, the internal CA with its key and fingerprint, the node registry and the certificates of enrolled nodes, and each person's saved table layouts (`auth.preferences`; a backup written before that table existed restores with it empty, so the tables show their default layouts). A probe or another node keeps trusting the controller because the CA is the same; it reconnects without a new enrollment once it reaches the restored controller at the address in its configuration. The controller's own certificate is issued anew by the restored CA. What does not carry over: the key files of the old host, `logs/`, the update layout and the connections that were open.
 
@@ -174,11 +183,12 @@ A personal API token never administers the system and is refused with `403 auth.
 
 | Action | When | Details |
 |---|---|---|
-| `sys.backup.create` | Every backup written through the API or the schedule, also a failed one (outcome failed with its error) | `reason` (`manual`, `scheduled` or `before_update`), `before_update` (the version), `node`, `target_dir`, `file`, `revision`, `slots` |
+| `sys.backup.create` | Every backup written through the API or the schedule, also a failed one (outcome failed with its error) | `reason` (`manual`, `scheduled` or `before_update`), `before_update` (the version), `node`, `target_dir`, `file`, `revision`, `slots`; for a written file `archive_id` (the identifier in its header, hex) and `sha256` (of the whole file, hex), what `tenko backup verify` prints |
+| `sys.backup.prune` | The schedule deleted backup files beyond `keep` | `node`, `target_dir`, `keep`, `removed` (the count), `files` (the names, comma separated) |
 | `sys.backup.settings` | The settings changed | every setting, the recipient included (it is public) |
-| `sys.backup.restore` | The first start after a restore | `file`, `revision`, `source_node`, `backup_created_at` |
+| `sys.backup.restore` | The first start after a restore | `file`, `archive_id`, `sha256`, `revision`, `source_node`, `backup_created_at`, `restored_at`, `notice` (`file`, `missing` or `file_only`, section 6) |
 
-A backup through the API is the inline job `backup.create` with the step `backup.record`; the job, the record and the audit record commit in one write. Offline backups and the restore itself run without a server, so they are not in the audit log; the first start records the restore.
+A backup through the API is the inline job `backup.create` with the step `backup.record`; the job, the record and the audit record commit in one write. The record of the deleted files is fenced by the leader epoch like the record of a scheduled backup. Offline backups, `verify` and the restore itself run without a server, so they write no audit record when they run; the restore leaves its notice in the data directory and in the restored store, and the first start records it, also when the file is gone (NEVER-02).
 
 ## 11. Error codes
 
@@ -198,7 +208,8 @@ A backup through the API is the inline job `backup.create` with the step `backup
 | `backup.format_newer` | 422 | 11 | The backup holds a data format newer than this build |
 | `backup.digest_mismatch` | 422 | 9 | The installed store differs from the state the backup recorded |
 | `backup.check_failed` | 422 | 9 | The audit chain, an envelope, the CA or the data format did not check (parameter `check`) |
-| `backup.io` | 500 | 1 | A file could not be read or written |
+| `backup.io` | 500 | 1 | A file could not be read or written; a restore met a symbolic link where it creates a directory or a file |
+| `exec.unsafe_owner` | | 2 | An offline command run as root (Windows: `SYSTEM` or elevated) while this binary, the data directory or the directory it writes into belongs to another account (section 3); the line names the command to run as that account |
 
 ## 12. Limits and open items
 
@@ -206,5 +217,7 @@ A backup through the API is the inline job `backup.create` with the step `backup
 - Restoring needs the host to be stopped and a new data directory; there is no restore into a running installation and no partial restore.
 - Parts are not compressed in format 1 (each part's `encoding` is `identity`); a later release may compress them without a format change.
 - The server does not check its own backups again after writing them; run `tenko backup verify` on another machine.
+- An archive carries no proof of origin: a recipient slot proves who can read it, not who wrote it. The archive id and the SHA-256 in the `sys.backup.create` record at the external audit sink are what an operator compares before a restore (section 5). A signature by the node, verified at restore, is a later package.
+- `tenko backup verify` writes no audit record; it runs where there is no store to write it into.
 - Old controller records stay in the store after a cluster is re-formed from a backup until an administrator removes them.
 - Windows was not measured; M14 ran on Linux.

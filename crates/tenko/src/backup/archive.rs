@@ -11,10 +11,13 @@
 //! ```
 //!
 //! Every chunk but the last holds exactly the chunk size of plain bytes; the last holds
-//! fewer (possibly none) and is flagged in its nonce, so truncation, extension, reordering
-//! and every changed byte are detected. Nothing is written by a reader before the key slot
-//! opened, and the reader refuses Argon2 parameters, chunk sizes, manifest sizes and part
-//! counts beyond fixed limits, so a crafted file cannot make it allocate without bound.
+//! fewer (possibly none: a plain stream of exactly whole chunks, or an empty one, ends
+//! with an empty last chunk) and is flagged in its nonce, so truncation, extension,
+//! reordering and every changed byte are detected. Nothing is written by a reader before
+//! the key slot opened, and the reader refuses Argon2 parameters, chunk sizes, manifest
+//! sizes, part counts, part names and part sizes beyond fixed limits
+//! ([`Manifest::validate`]), so a crafted file cannot make it allocate or write without
+//! bound. Plain bytes pass through buffers that are wiped when they are dropped.
 //!
 //! The reader is fuzzed (`fuzz/fuzz_targets/backup_archive.rs`) through [`fuzzing`].
 
@@ -60,6 +63,14 @@ pub const MAX_MANIFEST: u32 = 1 << 20;
 pub const MAX_PARTS: usize = 32;
 /// The most key generations the `kek.generations` part may hold.
 pub const MAX_GENERATIONS: usize = 64;
+/// The longest part name, encoding name, version or snapshot id a manifest may carry.
+pub const MAX_NAME: usize = 64;
+/// The largest `kek.generations` part a reader accepts (64 generations take 6.3 KiB).
+pub const MAX_KEKS_PART: u64 = 64 * 1024;
+/// The largest `tls.certificate`, `tls.key` or `config` part a reader accepts.
+pub const MAX_TEXT_PART: u64 = 1 << 20;
+/// The largest part of any kind a reader accepts, the store snapshot included.
+pub const MAX_PART: u64 = 64 << 30;
 
 /// The Raft snapshot of the store (`TNKSNAP1`).
 pub const PART_SNAPSHOT: &str = "store.snapshot";
@@ -80,6 +91,8 @@ pub const ENCODING_IDENTITY: &str = "identity";
 
 const FLAGS: u8 = 0;
 const ID_LEN: usize = 16;
+/// The buffer of a copy between a part and the stream, wiped after use.
+const COPY_BUFFER: usize = 64 * 1024;
 const SALT_LEN: usize = 16;
 const TAG_LEN: usize = 16;
 const HASH_LEN: usize = 32;
@@ -189,11 +202,14 @@ pub enum Unlock<'a> {
     Key(&'a BackupKey),
 }
 
+/// The random identifier of a backup file, plain in its header.
+pub type ArchiveId = [u8; ID_LEN];
+
 /// The plain header of a backup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header {
     /// Random, unique per file.
-    pub archive_id: [u8; ID_LEN],
+    pub archive_id: ArchiveId,
     /// Plain bytes per chunk.
     pub chunk_size: u32,
     /// The key slots.
@@ -656,13 +672,18 @@ impl<W: Write> ChunkWriter<W> {
 }
 
 impl<W: Write> Write for ChunkWriter<W> {
+    /// Takes at most what fills the chunk, so the buffer never grows past the chunk size
+    /// (a reallocation would leave a copy of the plain bytes behind). A full chunk goes
+    /// out at once; `finish` writes the last chunk, which holds fewer bytes than the chunk
+    /// size, possibly none.
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        self.buffer.extend_from_slice(data);
-        // A full chunk goes out only when more follows: the last chunk is always short.
-        while self.buffer.len() > self.chunk {
+        let room = self.chunk.saturating_sub(self.buffer.len());
+        let taken = data.len().min(room);
+        self.buffer.extend_from_slice(&data[..taken]);
+        if self.buffer.len() >= self.chunk {
             self.seal(self.chunk, false)?;
         }
-        Ok(data.len())
+        Ok(taken)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -858,8 +879,24 @@ impl Manifest {
         if self.parts.len() > MAX_PARTS {
             return Err(corrupt("the manifest lists too many parts"));
         }
+        if !printable(&self.tenko_version, MAX_NAME)
+            || !printable(&self.snapshot.snapshot_id, MAX_NAME)
+            || !printable(&self.origin.reason, MAX_NAME)
+            || !printable(&self.origin.by, 4 * MAX_NAME)
+        {
+            return Err(corrupt("the manifest holds text that is not printable"));
+        }
+        if self.kek.generations.is_empty()
+            || self.kek.generations.len() > MAX_GENERATIONS
+            || !self.kek.generations.iter().all(|id| valid_kek_id(id))
+        {
+            return Err(corrupt("the manifest lists no valid key generations"));
+        }
         let mut names = BTreeSet::new();
         for part in &self.parts {
+            if !printable(&part.name, MAX_NAME) || !printable(&part.encoding, MAX_NAME) {
+                return Err(corrupt("a part has a name that is not printable"));
+            }
             if !names.insert(part.name.as_str()) {
                 return Err(corrupt(format!("the part {} appears twice", part.name)));
             }
@@ -872,6 +909,14 @@ impl Manifest {
             let hash = hex_decode(&part.sha256).ok();
             if hash.as_ref().map(Vec::len) != Some(HASH_LEN) {
                 return Err(corrupt(format!("the part {} has no valid hash", part.name)));
+            }
+            if part.bytes > part_limit(&part.name) {
+                return Err(corrupt(format!(
+                    "the part {} declares {} bytes, more than the limit of {}",
+                    part.name,
+                    part.bytes,
+                    part_limit(&part.name)
+                )));
             }
         }
         for required in REQUIRED_PARTS {
@@ -889,6 +934,23 @@ impl Manifest {
         }
         Ok(())
     }
+}
+
+/// The most bytes a part of `name` may declare: the key generations and the text parts
+/// are read into memory and have small limits; everything else is streamed and bounded
+/// by [`MAX_PART`].
+pub fn part_limit(name: &str) -> u64 {
+    match name {
+        PART_KEKS => MAX_KEKS_PART,
+        PART_TLS_CERT | PART_TLS_KEY | PART_CONFIG => MAX_TEXT_PART,
+        _ => MAX_PART,
+    }
+}
+
+/// Whether `text` is at most `max` characters, none of them a control character, so that a
+/// report can print it as it is.
+pub fn printable(text: &str, max: usize) -> bool {
+    text.chars().count() <= max && !text.chars().any(char::is_control)
 }
 
 /// A part to write: its name and a reader of exactly the bytes the manifest entry promises.
@@ -925,7 +987,7 @@ pub fn entry_of(name: &str, bytes: &[u8]) -> PartEntry {
 pub fn entry_of_file(name: &str, path: &std::path::Path) -> Result<PartEntry, BackupError> {
     let mut file = std::fs::File::open(path).map_err(|error| BackupError::io(path, error))?;
     let mut hasher = Sha256::new();
-    let bytes = io::copy(&mut file, &mut HashSink(&mut hasher))
+    let bytes = copy_wiped(&mut file, &mut HashSink(&mut hasher))
         .map_err(|error| BackupError::io(path, error))?;
     Ok(PartEntry {
         name: name.to_owned(),
@@ -950,7 +1012,8 @@ impl Write for HashSink<'_> {
 
 /// Writes a complete backup into `out`: the header, then the manifest and the parts in the
 /// order of `manifest.parts`, which must match `parts`. Every part is hashed again while it
-/// is written; a part that changed since its entry was computed fails the write.
+/// is written; a part that changed since its entry was computed fails the write. Returns
+/// `out` and the archive id of the header.
 ///
 /// # Errors
 ///
@@ -961,7 +1024,7 @@ pub fn write<W: Write>(
     locks: &[Lock<'_>],
     manifest: &Manifest,
     parts: Vec<PartSource<'_>>,
-) -> Result<W, BackupError> {
+) -> Result<(W, ArchiveId), BackupError> {
     write_with_chunk(out, locks, manifest, parts, DEFAULT_CHUNK)
 }
 
@@ -971,7 +1034,7 @@ fn write_with_chunk<W: Write>(
     manifest: &Manifest,
     parts: Vec<PartSource<'_>>,
     chunk_size: u32,
-) -> Result<W, BackupError> {
+) -> Result<(W, ArchiveId), BackupError> {
     manifest.validate()?;
     if parts
         .iter()
@@ -990,11 +1053,10 @@ fn write_with_chunk<W: Write>(
         key: payload_key(&file_key, &header.archive_id)?,
         aad: header.hash,
         chunk: usize::try_from(chunk_size).map_err(|_| internal("chunk size"))?,
-        buffer: Zeroizing::new(Vec::with_capacity(
-            usize::try_from(chunk_size).unwrap_or(0) + 1,
-        )),
+        buffer: Zeroizing::new(Vec::with_capacity(usize::try_from(chunk_size).unwrap_or(0))),
         index: 0,
     };
+    let archive_id = header.archive_id;
     drop(file_key);
     let manifest_json =
         serde_json::to_vec(manifest).map_err(|error| BackupError::Internal(error.to_string()))?;
@@ -1011,7 +1073,7 @@ fn write_with_chunk<W: Write>(
             out: &mut stream,
             hasher: &mut hasher,
         };
-        let copied = io::copy(&mut part.reader, &mut tee).map_err(io)?;
+        let copied = copy_wiped(&mut part.reader, &mut tee).map_err(io)?;
         if copied != part.entry.bytes || hex_encode(&hasher.finalize()) != part.entry.sha256 {
             return Err(corrupt(format!(
                 "the part {} changed while the backup was written",
@@ -1019,7 +1081,25 @@ fn write_with_chunk<W: Write>(
             )));
         }
     }
-    stream.finish().map_err(io)
+    let out = stream.finish().map_err(io)?;
+    Ok((out, archive_id))
+}
+
+/// Copies `reader` to `writer` through a buffer that is wiped afterwards (the standard
+/// copy keeps the bytes on the stack); returns the bytes copied.
+fn copy_wiped(reader: &mut dyn Read, writer: &mut dyn Write) -> io::Result<u64> {
+    let mut buffer = Zeroizing::new(vec![0u8; COPY_BUFFER]);
+    let mut copied = 0u64;
+    loop {
+        let read = match reader.read(&mut buffer) {
+            Ok(0) => return Ok(copied),
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        writer.write_all(&buffer[..read])?;
+        copied += u64::try_from(read).unwrap_or(u64::MAX);
+    }
 }
 
 struct TeeWriter<'a, W: Write> {
@@ -1113,6 +1193,11 @@ impl<R: Read> Reader<R> {
         &self.manifest
     }
 
+    /// The input, once every part has been read.
+    pub fn into_inner(self) -> R {
+        self.stream.input
+    }
+
     /// Copies the next part into `sink` and checks its length and hash; `None` after the
     /// last part, once the stream ended exactly there.
     ///
@@ -1139,7 +1224,7 @@ impl<R: Read> Reader<R> {
             out: &mut SinkWriter(sink),
             hasher: &mut hasher,
         };
-        let copied = io::copy(&mut limited, &mut tee)
+        let copied = copy_wiped(&mut limited, &mut tee)
             .map_err(|error| BackupError::io(format!("part {}", entry.name), error))?;
         if copied != entry.bytes {
             return Err(corrupt(format!("the part {} is short", entry.name)));
@@ -1320,12 +1405,13 @@ fn seal_plain_with_key(plain: &[u8], file_key: &FileKey) -> Result<Vec<u8>, Back
         )],
         MIN_CHUNK,
     )?;
+    let chunk = usize::try_from(MIN_CHUNK).map_err(|_| internal("chunk size"))?;
     let mut stream = ChunkWriter {
         out: raw,
         key: payload_key(file_key, &header.archive_id)?,
         aad: header.hash,
-        chunk: usize::try_from(MIN_CHUNK).map_err(|_| internal("chunk size"))?,
-        buffer: Zeroizing::new(Vec::new()),
+        chunk,
+        buffer: Zeroizing::new(Vec::with_capacity(chunk)),
         index: 0,
     };
     stream

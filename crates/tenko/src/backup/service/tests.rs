@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use sha2::Digest as _;
 use tenko_api::dto::backup::{BackupOutcome, BackupReason, BackupSettingsUpdate};
 use tenko_core::{NodeId, RequestCtx, SystemComponent, Timestamp};
 use tenko_jobs::{EngineConfig, JobEngine};
@@ -381,7 +382,10 @@ async fn the_schedule_writes_when_due_and_keeps_the_newest_files() {
         .await
         .expect("manual");
     let dir = fixture.data_dir.join("backups");
-    assert_eq!(BackupService::prune(&dir, 1), 1);
+    let removed = BackupService::prune(&dir, 1);
+    assert_eq!(removed.len(), 1);
+    assert!(create::is_backup_name(&removed[0]), "{removed:?}");
+    fixture.service.record_prune(&dir, 1, &removed, 0).await;
     let left: Vec<_> = std::fs::read_dir(&dir)
         .expect("dir")
         .filter_map(Result::ok)
@@ -390,18 +394,43 @@ async fn the_schedule_writes_when_due_and_keeps_the_newest_files() {
     assert_eq!(left.len(), 1);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_restore_is_recorded_once_and_shown_until_the_next_backup() {
-    let fixture = fixture().await;
-    let notice = restore::Notice {
+fn notice() -> restore::Notice {
+    restore::Notice {
         restored_at: Timestamp::now(),
         backup_created_at: Timestamp::now(),
         file: "tenko-backup-20261011T080000Z-n1.tkbk".to_owned(),
+        archive_id: "0f".repeat(16),
+        sha256: "ab".repeat(32),
         source_node: 2,
         source_voters: vec![1, 2, 3],
         revision: 41,
         tenko_version: "0.0.1".to_owned(),
-    };
+    }
+}
+
+/// The newest audit record of `action` with its context.
+async fn last_audit(
+    store: &RaftStore,
+    action: &str,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    let records = view
+        .scan_typed(
+            &tenko_store::tables::AUDIT,
+            tenko_store::KeyRange::all(),
+            1_000,
+            true,
+        )
+        .expect("scan");
+    records.into_iter().find_map(|(_, record, _)| {
+        (record.draft.action.as_str() == action).then(|| record.draft.details.context.clone())
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_restore_is_recorded_once_and_shown_until_the_next_backup() {
+    let fixture = fixture().await;
+    let notice = notice();
     std::fs::write(
         fixture.data_dir.join(restore::NOTICE_FILE),
         serde_json::to_vec(&notice).expect("json"),
@@ -415,6 +444,12 @@ async fn a_restore_is_recorded_once_and_shown_until_the_next_backup() {
         .expect("some");
     assert_eq!(record.source_node, 2);
     assert!(!fixture.data_dir.join(restore::NOTICE_FILE).exists());
+    let context = last_audit(&fixture.store, "sys.backup.restore")
+        .await
+        .expect("audited");
+    assert_eq!(context.get("archive_id"), Some(&notice.archive_id));
+    assert_eq!(context.get("sha256"), Some(&notice.sha256));
+    assert_eq!(context.get("notice").map(String::as_str), Some("file_only"));
     assert!(
         fixture
             .service
@@ -514,4 +549,134 @@ fn a_failed_scheduled_backup_is_retried_after_an_hour() {
     assert_eq!(due, add_hours(failed.finished_at, 1));
     failed.finished_at = Timestamp(now.0 - time::Duration::hours(2));
     assert_eq!(next_due(&[(Uuid::now_v7(), failed)], 24, now), now);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_missing_notice_file_is_recorded_from_the_store() {
+    let fixture = fixture().await;
+    let notice = notice();
+    // The row the restore writes into the store, and no file: the file was removed.
+    let mut batch = WriteBatch::for_request(&ctx());
+    batch
+        .put_typed(&restore::PENDING, &(), &notice)
+        .expect("encode");
+    fixture.store.propose(batch).await.expect("row");
+    let record = fixture
+        .service
+        .record_restore()
+        .await
+        .expect("record")
+        .expect("some");
+    assert_eq!(record.revision, 41);
+    let context = last_audit(&fixture.store, "sys.backup.restore")
+        .await
+        .expect("audited");
+    assert_eq!(context.get("notice").map(String::as_str), Some("missing"));
+    assert_eq!(context.get("archive_id"), Some(&notice.archive_id));
+    // The row is gone with the record, so the next start records nothing.
+    let view = fixture
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    assert!(
+        view.get_typed(&restore::PENDING, &())
+            .expect("read")
+            .is_none()
+    );
+    drop(view);
+    assert!(
+        fixture
+            .service
+            .record_restore()
+            .await
+            .expect("again")
+            .is_none()
+    );
+
+    // Both the file and the row: recorded once, as `file`.
+    let mut batch = WriteBatch::for_request(&ctx());
+    batch
+        .put_typed(&restore::PENDING, &(), &notice)
+        .expect("encode");
+    fixture.store.propose(batch).await.expect("row");
+    std::fs::write(
+        fixture.data_dir.join(restore::NOTICE_FILE),
+        serde_json::to_vec(&notice).expect("json"),
+    )
+    .expect("notice");
+    fixture
+        .service
+        .record_restore()
+        .await
+        .expect("record")
+        .expect("some");
+    let context = last_audit(&fixture.store, "sys.backup.restore")
+        .await
+        .expect("audited");
+    assert_eq!(context.get("notice").map(String::as_str), Some("file"));
+    assert!(!fixture.data_dir.join(restore::NOTICE_FILE).exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_written_backup_is_audited_with_its_archive_id_and_hash() {
+    let fixture = fixture().await;
+    let run = fixture
+        .service
+        .run(
+            &ctx(),
+            RunReason::Manual,
+            None,
+            Some(Zeroizing::new("a long backup passphrase".to_owned())),
+            None,
+        )
+        .await
+        .expect("backup");
+    let file = fixture
+        .data_dir
+        .join("backups")
+        .join(run.file.as_deref().expect("file"));
+    let context = last_audit(&fixture.store, "sys.backup.create")
+        .await
+        .expect("audited");
+    let archive_id = context.get("archive_id").expect("archive id");
+    let sha256 = context.get("sha256").expect("sha256");
+    // The hash is the file's, the id the header's (after the magic and the flags byte).
+    let bytes = std::fs::read(&file).expect("read");
+    assert_eq!(
+        *sha256,
+        tenko_auth::encoding::hex_encode(&sha2::Sha256::digest(&bytes))
+    );
+    assert_eq!(*archive_id, tenko_auth::encoding::hex_encode(&bytes[6..22]));
+    assert_eq!(context.get("file"), run.file.as_ref());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pruned_files_are_audited() {
+    let fixture = fixture().await;
+    let dir = fixture.data_dir.join("backups");
+    std::fs::create_dir_all(&dir).expect("dir");
+    let names = [
+        "tenko-backup-20261011T080000Z-n1.tkbk",
+        "tenko-backup-20261012T080000Z-n1.tkbk",
+        "tenko-backup-20261013T080000Z-n1.tkbk",
+    ];
+    for name in names {
+        std::fs::write(dir.join(name), b"x").expect("file");
+    }
+    std::fs::write(dir.join("notes.txt"), b"kept").expect("file");
+    let removed = BackupService::prune(&dir, 1);
+    assert_eq!(removed, names[..2]);
+    fixture.service.record_prune(&dir, 1, &removed, 0).await;
+    let context = last_audit(&fixture.store, "sys.backup.prune")
+        .await
+        .expect("audited");
+    assert_eq!(context.get("removed").map(String::as_str), Some("2"));
+    assert_eq!(context.get("keep").map(String::as_str), Some("1"));
+    assert_eq!(
+        context.get("files").map(String::as_str),
+        Some(names[..2].join(",").as_str())
+    );
+    assert!(dir.join(names[2]).exists());
+    assert!(dir.join("notes.txt").exists());
 }

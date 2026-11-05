@@ -4,7 +4,7 @@
 //! |---|---|
 //! | 0 | Success; for `tenko serve`, a graceful shutdown |
 //! | 1 | An unexpected failure: I/O, a server that stopped with an error, a bug |
-//! | 2 | Usage: invalid arguments, a command that does not exist on this platform, or roles that Phase 1 does not implement |
+//! | 2 | Usage: invalid arguments, a command that does not exist on this platform, roles that Phase 1 does not implement, or an offline command refused as root over another account's files (`exec.unsafe_owner`, ADR 0023) |
 //! | 3 | The configuration is invalid (`tenko serve`, `tenko config check`) |
 //! | 4 | `tenko serve` refused to start: a start step failed; the message names the step and its code |
 //! | 5 | The server answered with an error (problem details; the code is printed) |

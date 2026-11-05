@@ -6,8 +6,15 @@
 //! store is copied file by file ([`format::copy_closed_store`]). Either copy is opened as a
 //! scratch store in a work directory beside the target, so the snapshot that goes into the
 //! backup never touches the live store's log or snapshot rotation. The work directory is
-//! removed whatever the outcome, and the backup appears under its final name only once it
-//! is complete and synced.
+//! created by this process alone (mode 0700 on Unix, never an existing path, so no link
+//! planted under its name is followed), is removed whatever the outcome, and the backup
+//! appears under its final name only once it is complete and synced. The SHA-256 of the
+//! finished file and the archive id of its header are part of [`Created`], so that the
+//! record and the audit record of a backup name the file beyond its name.
+//!
+//! An offline backup (`tenko backup create --config …`) runs as the account that owns the
+//! data directory; `main` refuses it as root over another account's files
+//! ([`crate::exec`], ADR 0023).
 
 use std::{
     fs::{self, File},
@@ -100,6 +107,10 @@ pub struct Created {
     pub path: PathBuf,
     /// Its size.
     pub bytes: u64,
+    /// The archive id of its header, as hex.
+    pub archive_id: String,
+    /// The SHA-256 of the whole file, as hex.
+    pub sha256: String,
     /// Its manifest.
     pub manifest: Manifest,
     /// How long it took.
@@ -167,8 +178,59 @@ fn work_dir(parent: &Path) -> Result<WorkDir, BackupError> {
         ".tenko-backup-work-{}",
         uuid::Uuid::now_v7().simple()
     ));
-    fs::create_dir_all(&dir).map_err(|error| BackupError::io(&dir, error))?;
+    create_private_dir(&dir)?;
     Ok(WorkDir(dir))
+}
+
+/// Creates `dir` for this process alone: one component, mode 0700 on Unix, and never an
+/// existing path (a link or a directory already there fails with `AlreadyExists`, so
+/// nothing planted under the name is followed).
+pub(crate) fn create_private_dir(dir: &Path) -> Result<(), BackupError> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        builder.mode(0o700);
+    }
+    builder
+        .create(dir)
+        .map_err(|error| BackupError::io(dir, error))
+}
+
+/// Opens `path` as a new file for writing, mode 0600 on Unix; an existing path, a link
+/// included, fails with `AlreadyExists`.
+pub(crate) fn create_private_file(path: &Path) -> Result<File, BackupError> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    options
+        .open(path)
+        .map_err(|error| BackupError::io(path, error))
+}
+
+/// Refuses a path that exists and is a symbolic link; `Ok(true)` for an existing directory,
+/// `Ok(false)` for nothing there.
+pub(crate) fn existing_dir_not_link(path: &Path) -> Result<bool, BackupError> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(BackupError::io(
+            path,
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "the path is a symbolic link; refusing to follow it",
+            ),
+        )),
+        Ok(meta) if meta.is_dir() => Ok(true),
+        Ok(_) => Err(BackupError::io(
+            path,
+            std::io::Error::new(std::io::ErrorKind::AlreadyExists, "the path is a file"),
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(BackupError::io(path, error)),
+    }
 }
 
 fn target_parent(target: &Target) -> PathBuf {
@@ -350,7 +412,7 @@ async fn from_copy(
     let kdf = request.kdf;
     let target = path.clone();
     let written_manifest = manifest.clone();
-    tokio::task::spawn_blocking(move || {
+    let (archive_id, sha256) = tokio::task::spawn_blocking(move || {
         write_file(&target, &locks, kdf, &written_manifest, &contents)
     })
     .await
@@ -361,9 +423,29 @@ async fn from_copy(
     Ok(Created {
         path,
         bytes,
+        archive_id: hex_encode(&archive_id),
+        sha256: hex_encode(&sha256),
         manifest,
         duration: started.elapsed(),
     })
+}
+
+/// A writer that hashes everything written through it.
+struct Sha256Writer<W: std::io::Write> {
+    inner: W,
+    hasher: Sha256,
+}
+
+impl<W: std::io::Write> std::io::Write for Sha256Writer<W> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(data)?;
+        self.hasher.update(&data[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 /// The key generation identifiers of `ring`, oldest first and the active one last.
@@ -431,14 +513,15 @@ impl Contents {
     }
 }
 
-/// Writes the file under a `.part` name, syncs it and renames it to `path`.
+/// Writes the file under a `.part` name, syncs it and renames it to `path`; returns the
+/// archive id of the header and the SHA-256 of the file.
 fn write_file(
     path: &Path,
     locks: &[KeyLock],
     kdf: KdfParams,
     manifest: &Manifest,
     contents: &Contents,
-) -> Result<(), BackupError> {
+) -> Result<(archive::ArchiveId, [u8; 32]), BackupError> {
     let locks: Vec<Lock<'_>> = locks
         .iter()
         .map(|lock| match lock {
@@ -455,30 +538,27 @@ fn write_file(
         .collect();
     let part = path.with_extension(format!("{EXTENSION}.part"));
     let written = (|| {
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let file = options
-            .open(&part)
-            .map_err(|error| BackupError::io(&part, error))?;
-        let out = archive::write(
+        let file = Sha256Writer {
+            inner: create_private_file(&part)?,
+            hasher: Sha256::new(),
+        };
+        let (out, archive_id) = archive::write(
             BufWriter::with_capacity(1 << 20, file),
             &locks,
             manifest,
             sources,
         )?;
-        let file = out
+        let Sha256Writer {
+            inner: file,
+            hasher,
+        } = out
             .into_inner()
             .map_err(|error| BackupError::io(&part, error.into_error()))?;
         file.sync_all()
             .map_err(|error| BackupError::io(&part, error))?;
         fs::rename(&part, path).map_err(|error| BackupError::io(path, error))?;
         sync_dir(path.parent());
-        Ok(())
+        Ok((archive_id, hasher.finalize().into()))
     })();
     if written.is_err() {
         let _ = fs::remove_file(&part);

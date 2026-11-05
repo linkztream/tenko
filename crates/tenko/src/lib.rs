@@ -19,6 +19,7 @@
 //! | [`plugin`] | `tenko plugin`: list, run a bundled plugin, conformance test; the connector service of `tenko serve` |
 //! | [`logging`] | `tracing` to standard error or a file, as text or JSON |
 //! | [`telemetry`] | traces over OpenTelemetry, exported to an OTLP collector when configured |
+//! | [`exec`] | the privilege check of ADR 0023 before an offline command (`exec.unsafe_owner`) |
 //! | [`exit`] | the exit statuses |
 
 #![forbid(unsafe_code)]
@@ -33,6 +34,7 @@ pub mod cluster;
 pub mod config;
 // WP6.7: `tenko config init`, used by the Windows MSI.
 pub mod config_init;
+pub mod exec;
 pub mod exit;
 pub mod kek;
 pub mod local_node;
