@@ -101,10 +101,20 @@ unit_checks() {
       head -c 2097152 /dev/zero >"${tmp}/zeros"
       check_binary_case "2 MiB of zeros" "${tmp}/zeros" 5 "is not an ELF x86_64 executable" "file says:"
       if [[ -x /usr/sbin/nologin ]] && file -b /usr/sbin/nologin | grep -q 'ELF 64-bit LSB.*x86-64'; then
-        cp /usr/sbin/nologin "${tmp}/nologin"
-        head -c 2097152 /dev/zero >>"${tmp}/nologin"
-        chmod 0755 "${tmp}/nologin"
-        check_binary_case "an ELF that exits with a message" "${tmp}/nologin" 5 "does not run here (exit 1)" "not available"
+        # What nologin says to --version and how it exits differs between its implementations
+        # (shadow, util-linux) and hosts (/etc/nologin.txt replaces the text), so the case
+        # expects what this host's nologin does. One that exits 0 is no refusal: skipped.
+        local said said_rc=0
+        /usr/sbin/nologin --version >"${tmp}/said" 2>&1 || said_rc=$?
+        said="$(head -n 1 "${tmp}/said" | tr -cd '[:print:]')"
+        if ((said_rc != 0)) && [[ -n "$said" ]]; then
+          cp /usr/sbin/nologin "${tmp}/nologin"
+          head -c 2097152 /dev/zero >>"${tmp}/nologin"
+          chmod 0755 "${tmp}/nologin"
+          check_binary_case "an ELF that exits with a message" "${tmp}/nologin" 5 "does not run here (exit ${said_rc})" "$said"
+        else
+          echo "SKIP  nologin --version exits ${said_rc} here: the ELF that exits with a message"
+        fi
       fi
     else
       echo "SKIP  file is not installed here: the ELF checks"
