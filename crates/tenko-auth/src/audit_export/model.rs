@@ -342,7 +342,9 @@ impl AuditExportUpdate {
         }
         let mut ids = BTreeSet::new();
         let mut names = BTreeSet::new();
-        let mut sinks = Vec::with_capacity(self.sinks.len());
+        // At most `MAX_SINKS` after the check above; the list grows as it fills, so nothing
+        // the request sent sizes an allocation.
+        let mut sinks = Vec::new();
         for (index, spec) in self.sinks.into_iter().enumerate() {
             let at = |field: &str| format!("sinks[{index}].{field}");
             let id = match spec.id {
