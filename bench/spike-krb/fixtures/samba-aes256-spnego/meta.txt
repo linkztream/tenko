@@ -1,0 +1,9 @@
+mech=spnego
+target=DNS@tenko.corp.example.test
+mutual=1
+flags=0x13e
+recorded_unix=1793867714
+spn=DNS/tenko.corp.example.test
+realm=CORP.EXAMPLE.TEST
+kdc=Samba 4.19.5 AD DC (Ubuntu 24.04), msDS-SupportedEncryptionTypes 24
+acceptor=own

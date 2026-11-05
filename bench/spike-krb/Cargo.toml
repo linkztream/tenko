@@ -1,0 +1,48 @@
+[package]
+name = "spike-krb"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "WP13.0 spike: a GSS-TSIG Kerberos acceptor over sspi and over picky-krb alone, with the RFC 4121 MIC computed over aws-lc-rs"
+
+# Standalone crate: not part of the main workspace.
+[workspace]
+
+[features]
+default = ["sspi", "own"]
+# (b): sspi's Kerberos and SPNEGO server side as the acceptor. sspi has no feature flag for
+# "Kerberos server only"; `default-features = false` turns off its `aws-lc-rs` feature,
+# which only selects the rustls provider of the optional `network_client` and `tsssp`
+# features. Those, `dns_resolver` and `scard` stay off, so no reqwest, rustls, tokio,
+# hickory or PKCS#11 enters the graph.
+sspi = ["dep:sspi", "own-types"]
+# (b'): the acceptor written in this crate over picky-krb's types and ciphers.
+own = ["own-types"]
+own-types = ["dep:picky-krb", "dep:picky-asn1", "dep:picky-asn1-der", "dep:picky-asn1-x509", "dep:oid"]
+
+[dependencies]
+# The workspace's versions, so that the dependency comparison in RESULT.md is against
+# what Tenko already builds.
+aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["aws-lc-sys"] }
+time = { version = "=0.3.55", default-features = false, features = ["std"] }
+zeroize = { version = "=1.9.1", features = ["zeroize_derive"] }
+getrandom = { version = "=0.3.4" }
+
+sspi = { version = "=0.23.1", default-features = false, optional = true }
+picky-krb = { version = "=0.13.1", optional = true }
+picky-asn1 = { version = "=0.10.2", features = ["time_conversion"], optional = true }
+picky-asn1-der = { version = "=0.5.7", optional = true }
+picky-asn1-x509 = { version = "=0.15.6", optional = true }
+oid = { version = "0.2", optional = true }
+
+[dev-dependencies]
+picky-krb = "=0.13.1"
+picky-asn1 = { version = "=0.10.2", features = ["time_conversion"] }
+picky-asn1-der = "=0.5.7"
+picky-asn1-x509 = "=0.15.6"
+oid = "0.2"
+
+[profile.release]
+# The workspace's release profile; binaries are stripped afterwards with `strip`.
+lto = "fat"
+codegen-units = 1
