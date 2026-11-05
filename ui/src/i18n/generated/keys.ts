@@ -365,6 +365,9 @@ export type MessageKey =
   | "audit.action.dhcp.pool.update"
   | "audit.action.dhcp.scope.create"
   | "audit.action.dhcp.scope.delete"
+  | "audit.action.dhcp.scope.prepare"
+  | "audit.action.dhcp.scope.revert"
+  | "audit.action.dhcp.scope.takeover"
   | "audit.action.dhcp.scope.update"
   | "audit.action.dhcp.settings.update"
   | "audit.action.dhcp.shared_network.create"
@@ -421,6 +424,8 @@ export type MessageKey =
   | "audit.action.dns.zone.create"
   | "audit.action.dns.zone.delete"
   | "audit.action.dns.zone.export"
+  | "audit.action.dns.zone.flip"
+  | "audit.action.dns.zone.release"
   | "audit.action.dns.zone.transfer_in"
   | "audit.action.dns.zone.transfer_out"
   | "audit.action.dns.zone.update"
@@ -528,6 +533,13 @@ export type MessageKey =
   | "audit.action.jobs.step.update"
   | "audit.action.jobs.step.waiting_for_manual"
   | "audit.action.jobs.step.waiting_for_observation"
+  | "audit.action.migrate.mirror.create"
+  | "audit.action.migrate.mirror.delete"
+  | "audit.action.migrate.mirror.losses_ack"
+  | "audit.action.migrate.mirror.push"
+  | "audit.action.migrate.mirror.refuse"
+  | "audit.action.migrate.mirror.token"
+  | "audit.action.migrate.mirror.update"
   | "audit.action.nodes.roles"
   | "audit.action.scan.config.offer"
   | "audit.action.scan.config.update"
@@ -9773,6 +9785,9 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.dhcp.pool.update",
   "audit.action.dhcp.scope.create",
   "audit.action.dhcp.scope.delete",
+  "audit.action.dhcp.scope.prepare",
+  "audit.action.dhcp.scope.revert",
+  "audit.action.dhcp.scope.takeover",
   "audit.action.dhcp.scope.update",
   "audit.action.dhcp.settings.update",
   "audit.action.dhcp.shared_network.create",
@@ -9829,6 +9844,8 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.dns.zone.create",
   "audit.action.dns.zone.delete",
   "audit.action.dns.zone.export",
+  "audit.action.dns.zone.flip",
+  "audit.action.dns.zone.release",
   "audit.action.dns.zone.transfer_in",
   "audit.action.dns.zone.transfer_out",
   "audit.action.dns.zone.update",
@@ -9936,6 +9953,13 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.jobs.step.update",
   "audit.action.jobs.step.waiting_for_manual",
   "audit.action.jobs.step.waiting_for_observation",
+  "audit.action.migrate.mirror.create",
+  "audit.action.migrate.mirror.delete",
+  "audit.action.migrate.mirror.losses_ack",
+  "audit.action.migrate.mirror.push",
+  "audit.action.migrate.mirror.refuse",
+  "audit.action.migrate.mirror.token",
+  "audit.action.migrate.mirror.update",
   "audit.action.nodes.roles",
   "audit.action.scan.config.offer",
   "audit.action.scan.config.update",
