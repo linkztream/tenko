@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="identity">
+      <unit id="dns.kerberos.title">
+        <notes><note category="description">Title of the page of the Kerberos account of secure dynamic updates and its entry in the browser tab.</note></notes>
+        <segment><source>Kerberos</source></segment>
+      </unit>
+      <unit id="dns.nav.kerberos">
+        <notes><note category="description">Entry of the DNS sub-navigation that leads to the Kerberos account.</note></notes>
+        <segment><source>Kerberos</source></segment>
+      </unit>
+      <unit id="dns.kerberos.sub">
+        <notes><note category="description">Subtitle under the title of the Kerberos page: what the page is for.</note></notes>
+        <segment><source>The Active Directory account that signs secure dynamic updates, its status and the zones of its realm.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.coming.title">
+        <notes><note category="description">Heading of the notice on the Kerberos page while the wizard and the status are not built yet.</note></notes>
+        <segment><source>Coming in a later package</source></segment>
+      </unit>
+      <unit id="dns.kerberos.coming.body">
+        <notes><note category="description">Body of the notice on the Kerberos page: what the later packages add.</note></notes>
+        <segment><source>The wizard that takes over the computer account, the keytab import, the self-test and the status of the key versions arrive with the Kerberos packages of Slice 13.</source></segment>
+      </unit>
+      <unit id="settings.nav.providers">
+        <notes><note category="description">Entry of the settings sub-navigation that leads to the sign-in providers.</note></notes>
+        <segment><source>Sign-in providers</source></segment>
+      </unit>
+      <unit id="settings.providers.title">
+        <notes><note category="description">Title of the settings page of the sign-in providers (OpenID Connect, LDAP, Kerberos through the browser).</note></notes>
+        <segment><source>Sign-in providers</source></segment>
+      </unit>
+      <unit id="settings.providers.lede">
+        <notes><note category="description">Introductory sentence of the sign-in providers page.</note></notes>
+        <segment><source>Administrators sign in with the organization's identity through OpenID Connect, LDAP or Kerberos; directory groups map onto roles and scopes.</source></segment>
+      </unit>
+      <unit id="settings.providers.coming.title">
+        <notes><note category="description">Heading of the notice on the sign-in providers page while the forms are not built yet.</note></notes>
+        <segment><source>Coming in a later package</source></segment>
+      </unit>
+      <unit id="settings.providers.coming.body">
+        <notes><note category="description">Body of the notice on the sign-in providers page: what the later packages add.</note></notes>
+        <segment><source>The provider forms, the test sign-in and the certificate setup of LDAPS arrive with the directory packages of Slice 13.</source></segment>
+      </unit>
+      <unit id="access.mappings.title">
+        <notes><note category="description">Title of the page of the directory mappings: directory groups onto roles and scopes.</note></notes>
+        <segment><source>Directory mappings</source></segment>
+      </unit>
+      <unit id="access.mappings.lede">
+        <notes><note category="description">Introductory sentence of the directory mappings page.</note></notes>
+        <segment><source>A mapping gives the members of a directory group a role, and a scope for operators and viewers; it is applied at sign-in and at each directory check, never stored as a grant.</source></segment>
+      </unit>
+      <unit id="access.mappings.coming.title">
+        <notes><note category="description">Heading of the notice on the directory mappings page while the table is not built yet.</note></notes>
+        <segment><source>Coming in a later package</source></segment>
+      </unit>
+      <unit id="access.mappings.coming.body">
+        <notes><note category="description">Body of the notice on the directory mappings page: what the later package adds.</note></notes>
+        <segment><source>The table of mappings, the form and the dry run for a user name arrive with the directory sign-in package of Slice 13.</source></segment>
+      </unit>
+      <unit id="access.mappings.back">
+        <notes><note category="description">Button on the directory mappings page that leads back to the access settings.</note></notes>
+        <segment><source>Back to access</source></segment>
+      </unit>
+      <unit id="errors.dns.krb.account.not_found">
+        <segment><source>No Kerberos account is set up for this realm.</source></segment>
+      </unit>
+      <unit id="errors.dns.krb.account.exists">
+        <segment><source>A Kerberos account exists already for this realm; delete it before adopting or importing another.</source></segment>
+      </unit>
+      <unit id="errors.dns.krb.account.invalid">
+        <segment><source>The account settings are not valid.</source></segment>
+      </unit>
+      <unit id="errors.dns.krb.account.not_owned">
+        <segment><source>The account was imported from a keytab, so Tenko does not own its password and cannot rotate it.</source></segment>
+      </unit>
+      <unit id="errors.dns.krb.keytab.invalid">
+        <segment><source>The keytab does not parse or holds no AES entry for the principal.</source></segment>
+      </unit>
+      <unit id="errors.dns.krb.kdc.unreachable">
+        <segment><source>No domain controller of the realm answered.</source></segment>
+      </unit>
+      <unit id="errors.dns.krb.password.refused">
+        <segment><source>The domain controller refused the one-time password or the password change.</source></segment>
+      </unit>
+      <unit id="errors.dns.gss.refused">
+        <segment><source>The secure update negotiation was refused.</source></segment>
+      </unit>
+      <unit id="errors.auth.provider.not_found">
+        <segment><source>No sign-in provider with this identifier.</source></segment>
+      </unit>
+      <unit id="errors.auth.provider.invalid">
+        <segment><source>The provider settings are not valid.</source></segment>
+      </unit>
+      <unit id="errors.auth.provider.exists">
+        <segment><source>A sign-in provider of this name exists already.</source></segment>
+      </unit>
+      <unit id="errors.auth.provider.unverified">
+        <segment><source>The provider has not completed a test sign-in yet, so it cannot be offered.</source></segment>
+      </unit>
+      <unit id="errors.auth.provider.unavailable">
+        <segment><source>The provider or the directory cannot be reached.</source></segment>
+      </unit>
+      <unit id="errors.auth.provider.plain_refused">
+        <segment><source>Plain LDAP is allowed under the Lab profile only; use LDAPS or StartTLS.</source></segment>
+      </unit>
+      <unit id="errors.auth.provider.chain_changed">
+        <segment><source>The certificate chain the server presents is not the one that was confirmed.</source></segment>
+      </unit>
+      <unit id="errors.auth.provider.chain_unverified">
+        <segment><source>The certificate chain does not verify against the system trust store; compare the fingerprints before confirming it.</source></segment>
+      </unit>
+      <unit id="errors.auth.directory.no_mapping">
+        <segment><source>No mapping gives this user a role.</source></segment>
+      </unit>
+      <unit id="errors.auth.directory.account_disabled">
+        <segment><source>The directory reports the account as disabled or expired.</source></segment>
+      </unit>
+      <unit id="errors.auth.directory.overage">
+        <segment><source>The provider sent too many groups to list them; map app roles instead.</source></segment>
+      </unit>
+      <unit id="errors.auth.directory.mapping_not_found">
+        <segment><source>No directory mapping with this identifier.</source></segment>
+      </unit>
+      <unit id="errors.auth.directory.mapping_invalid">
+        <segment><source>The mapping is not valid.</source></segment>
+      </unit>
+      <unit id="errors.auth.directory.mapping_duplicate">
+        <segment><source>This group is mapped onto this role and scope already.</source></segment>
+      </unit>
+      <unit id="errors.auth.oidc.flow_invalid">
+        <segment><source>The sign-in could not be matched to a request that started it; start again.</source></segment>
+      </unit>
+      <unit id="errors.auth.oidc.token_invalid">
+        <segment><source>The provider's token was refused.</source></segment>
+      </unit>
+      <unit id="errors.auth.oidc.provider_error">
+        <segment><source>The provider answered an error.</source></segment>
+      </unit>
+      <unit id="errors.auth.oidc.discovery_failed">
+        <segment><source>The provider's discovery document could not be fetched.</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

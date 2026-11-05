@@ -446,7 +446,9 @@ mod tests {
         // node-roles: end.
         let tables: Vec<&str> = dns.role_tables().iter().map(TableName::as_str).collect();
         // WP10.0: the trust anchors, the negative trust anchors and their index.
-        assert_eq!(tables.len(), 12);
+        // WP13.0: the name owners and the Kerberos accounts.
+        assert_eq!(tables.len(), 14);
+        assert!(tables.contains(&"dns.name_owners") && tables.contains(&"dns.krb_accounts"));
         assert!(tables.contains(&"dns.zones") && tables.contains(&"dns.rrsets"));
         assert!(tables.contains(&"dns.journal") && tables.contains(&"dns.keys.meta"));
         assert!(!tables.contains(&"dns.sign_state"));

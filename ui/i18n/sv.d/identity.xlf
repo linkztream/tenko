@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="identity">
+      <unit id="dns.kerberos.title">
+        <notes><note category="description">Title of the page of the Kerberos account of secure dynamic updates and its entry in the browser tab.</note></notes>
+        <segment><source>Kerberos</source><target>Kerberos</target></segment>
+      </unit>
+      <unit id="dns.nav.kerberos">
+        <notes><note category="description">Entry of the DNS sub-navigation that leads to the Kerberos account.</note></notes>
+        <segment><source>Kerberos</source><target>Kerberos</target></segment>
+      </unit>
+      <unit id="dns.kerberos.sub">
+        <notes><note category="description">Subtitle under the title of the Kerberos page: what the page is for.</note></notes>
+        <segment><source>The Active Directory account that signs secure dynamic updates, its status and the zones of its realm.</source><target>Active Directory-kontot som signerar säkra dynamiska uppdateringar, dess status och zonerna i dess realm.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.coming.title">
+        <notes><note category="description">Heading of the notice on the Kerberos page while the wizard and the status are not built yet.</note></notes>
+        <segment><source>Coming in a later package</source><target>Kommer i ett senare paket</target></segment>
+      </unit>
+      <unit id="dns.kerberos.coming.body">
+        <notes><note category="description">Body of the notice on the Kerberos page: what the later packages add.</note></notes>
+        <segment><source>The wizard that takes over the computer account, the keytab import, the self-test and the status of the key versions arrive with the Kerberos packages of Slice 13.</source><target>Guiden som tar över datorkontot, keytab-importen, självtestet och statusen för nyckelversionerna kommer med Kerberos-paketen i etapp 13.</target></segment>
+      </unit>
+      <unit id="settings.nav.providers">
+        <notes><note category="description">Entry of the settings sub-navigation that leads to the sign-in providers.</note></notes>
+        <segment><source>Sign-in providers</source><target>Inloggningsleverantörer</target></segment>
+      </unit>
+      <unit id="settings.providers.title">
+        <notes><note category="description">Title of the settings page of the sign-in providers (OpenID Connect, LDAP, Kerberos through the browser).</note></notes>
+        <segment><source>Sign-in providers</source><target>Inloggningsleverantörer</target></segment>
+      </unit>
+      <unit id="settings.providers.lede">
+        <notes><note category="description">Introductory sentence of the sign-in providers page.</note></notes>
+        <segment><source>Administrators sign in with the organization's identity through OpenID Connect, LDAP or Kerberos; directory groups map onto roles and scopes.</source><target>Administratörer loggar in med organisationens identitet via OpenID Connect, LDAP eller Kerberos, och kataloggrupper mappas till roller och omfång.</target></segment>
+      </unit>
+      <unit id="settings.providers.coming.title">
+        <notes><note category="description">Heading of the notice on the sign-in providers page while the forms are not built yet.</note></notes>
+        <segment><source>Coming in a later package</source><target>Kommer i ett senare paket</target></segment>
+      </unit>
+      <unit id="settings.providers.coming.body">
+        <notes><note category="description">Body of the notice on the sign-in providers page: what the later packages add.</note></notes>
+        <segment><source>The provider forms, the test sign-in and the certificate setup of LDAPS arrive with the directory packages of Slice 13.</source><target>Leverantörsformulären, testinloggningen och certifikatinställningen för LDAPS kommer med katalogpaketen i etapp 13.</target></segment>
+      </unit>
+      <unit id="access.mappings.title">
+        <notes><note category="description">Title of the page of the directory mappings: directory groups onto roles and scopes.</note></notes>
+        <segment><source>Directory mappings</source><target>Katalogmappningar</target></segment>
+      </unit>
+      <unit id="access.mappings.lede">
+        <notes><note category="description">Introductory sentence of the directory mappings page.</note></notes>
+        <segment><source>A mapping gives the members of a directory group a role, and a scope for operators and viewers; it is applied at sign-in and at each directory check, never stored as a grant.</source><target>En mappning ger medlemmarna i en kataloggrupp en roll, och ett omfång för operatörer och läsare; den tillämpas vid inloggning och vid varje katalogkontroll och lagras aldrig som en behörighet.</target></segment>
+      </unit>
+      <unit id="access.mappings.coming.title">
+        <notes><note category="description">Heading of the notice on the directory mappings page while the table is not built yet.</note></notes>
+        <segment><source>Coming in a later package</source><target>Kommer i ett senare paket</target></segment>
+      </unit>
+      <unit id="access.mappings.coming.body">
+        <notes><note category="description">Body of the notice on the directory mappings page: what the later package adds.</note></notes>
+        <segment><source>The table of mappings, the form and the dry run for a user name arrive with the directory sign-in package of Slice 13.</source><target>Tabellen med mappningar, formuläret och provkörningen för ett användarnamn kommer med kataloginloggningspaketet i etapp 13.</target></segment>
+      </unit>
+      <unit id="access.mappings.back">
+        <notes><note category="description">Button on the directory mappings page that leads back to the access settings.</note></notes>
+        <segment><source>Back to access</source><target>Tillbaka till åtkomst</target></segment>
+      </unit>
+      <unit id="errors.dns.krb.account.not_found">
+        <segment><source>No Kerberos account is set up for this realm.</source><target>Inget Kerberos-konto är inställt för denna realm.</target></segment>
+      </unit>
+      <unit id="errors.dns.krb.account.exists">
+        <segment><source>A Kerberos account exists already for this realm; delete it before adopting or importing another.</source><target>Ett Kerberos-konto finns redan för denna realm; ta bort det innan du tar över eller importerar ett annat.</target></segment>
+      </unit>
+      <unit id="errors.dns.krb.account.invalid">
+        <segment><source>The account settings are not valid.</source><target>Kontoinställningarna är inte giltiga.</target></segment>
+      </unit>
+      <unit id="errors.dns.krb.account.not_owned">
+        <segment><source>The account was imported from a keytab, so Tenko does not own its password and cannot rotate it.</source><target>Kontot importerades från en keytab, så Tenko äger inte dess lösenord och kan inte rotera det.</target></segment>
+      </unit>
+      <unit id="errors.dns.krb.keytab.invalid">
+        <segment><source>The keytab does not parse or holds no AES entry for the principal.</source><target>Keytab-filen kan inte läsas eller saknar en AES-post för principalen.</target></segment>
+      </unit>
+      <unit id="errors.dns.krb.kdc.unreachable">
+        <segment><source>No domain controller of the realm answered.</source><target>Ingen domänkontrollant i realmen svarade.</target></segment>
+      </unit>
+      <unit id="errors.dns.krb.password.refused">
+        <segment><source>The domain controller refused the one-time password or the password change.</source><target>Domänkontrollanten avvisade engångslösenordet eller lösenordsbytet.</target></segment>
+      </unit>
+      <unit id="errors.dns.gss.refused">
+        <segment><source>The secure update negotiation was refused.</source><target>Förhandlingen om säker uppdatering avvisades.</target></segment>
+      </unit>
+      <unit id="errors.auth.provider.not_found">
+        <segment><source>No sign-in provider with this identifier.</source><target>Ingen inloggningsleverantör har denna identifierare.</target></segment>
+      </unit>
+      <unit id="errors.auth.provider.invalid">
+        <segment><source>The provider settings are not valid.</source><target>Leverantörsinställningarna är inte giltiga.</target></segment>
+      </unit>
+      <unit id="errors.auth.provider.exists">
+        <segment><source>A sign-in provider of this name exists already.</source><target>En inloggningsleverantör med detta namn finns redan.</target></segment>
+      </unit>
+      <unit id="errors.auth.provider.unverified">
+        <segment><source>The provider has not completed a test sign-in yet, so it cannot be offered.</source><target>Leverantören har inte slutfört någon testinloggning än, så den kan inte erbjudas.</target></segment>
+      </unit>
+      <unit id="errors.auth.provider.unavailable">
+        <segment><source>The provider or the directory cannot be reached.</source><target>Leverantören eller katalogen kan inte nås.</target></segment>
+      </unit>
+      <unit id="errors.auth.provider.plain_refused">
+        <segment><source>Plain LDAP is allowed under the Lab profile only; use LDAPS or StartTLS.</source><target>Okrypterad LDAP tillåts bara under labbprofilen; använd LDAPS eller StartTLS.</target></segment>
+      </unit>
+      <unit id="errors.auth.provider.chain_changed">
+        <segment><source>The certificate chain the server presents is not the one that was confirmed.</source><target>Certifikatkedjan som servern visar är inte den som bekräftades.</target></segment>
+      </unit>
+      <unit id="errors.auth.provider.chain_unverified">
+        <segment><source>The certificate chain does not verify against the system trust store; compare the fingerprints before confirming it.</source><target>Certifikatkedjan kan inte verifieras mot systemets betrodda certifikat; jämför fingeravtrycken innan du bekräftar den.</target></segment>
+      </unit>
+      <unit id="errors.auth.directory.no_mapping">
+        <segment><source>No mapping gives this user a role.</source><target>Ingen mappning ger den här användaren en roll.</target></segment>
+      </unit>
+      <unit id="errors.auth.directory.account_disabled">
+        <segment><source>The directory reports the account as disabled or expired.</source><target>Katalogen rapporterar kontot som inaktiverat eller utgånget.</target></segment>
+      </unit>
+      <unit id="errors.auth.directory.overage">
+        <segment><source>The provider sent too many groups to list them; map app roles instead.</source><target>Leverantören skickade för många grupper för att lista dem; mappa approller i stället.</target></segment>
+      </unit>
+      <unit id="errors.auth.directory.mapping_not_found">
+        <segment><source>No directory mapping with this identifier.</source><target>Ingen katalogmappning har denna identifierare.</target></segment>
+      </unit>
+      <unit id="errors.auth.directory.mapping_invalid">
+        <segment><source>The mapping is not valid.</source><target>Mappningen är inte giltig.</target></segment>
+      </unit>
+      <unit id="errors.auth.directory.mapping_duplicate">
+        <segment><source>This group is mapped onto this role and scope already.</source><target>Den här gruppen är redan mappad till den här rollen och det här omfånget.</target></segment>
+      </unit>
+      <unit id="errors.auth.oidc.flow_invalid">
+        <segment><source>The sign-in could not be matched to a request that started it; start again.</source><target>Inloggningen kunde inte kopplas till en begäran som startade den; börja om.</target></segment>
+      </unit>
+      <unit id="errors.auth.oidc.token_invalid">
+        <segment><source>The provider's token was refused.</source><target>Leverantörens token avvisades.</target></segment>
+      </unit>
+      <unit id="errors.auth.oidc.provider_error">
+        <segment><source>The provider answered an error.</source><target>Leverantören svarade med ett fel.</target></segment>
+      </unit>
+      <unit id="errors.auth.oidc.discovery_failed">
+        <segment><source>The provider's discovery document could not be fetched.</source><target>Leverantörens discovery-dokument kunde inte hämtas.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

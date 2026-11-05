@@ -163,6 +163,7 @@ async fn login(env: &TestEnv, name: &str, password: &str) -> NewSession {
             &PasswordLogin {
                 user_name: name.to_owned(),
                 password: SecretString::new(password),
+                provider: None,
             },
         )
         .await

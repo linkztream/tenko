@@ -1082,8 +1082,26 @@ The round `update` of [`deploy/compose/lab-dns`](../deploy/compose/lab-dns/READM
 ### 13.9 Limits
 
 - Updates are accepted for primary zones only; Tenko does not forward an update for a secondary zone to its primary (RFC 2136 section 6), it refuses it.
-- GSS-TSIG (the signature of Windows hosts in AD zones, RFC 3007 with RFC 3645) is Phase 4; until then a Windows host updates a zone in Tenko only with a TSIG key or, in the Lab profile, unsigned.
+- GSS-TSIG (the signature of Windows hosts in AD zones, RFC 3007 with RFC 3645) is Slice 13 (section 13.10); until WP13.2 ships, a Windows host updates a zone in Tenko only with a TSIG key or, in the Lab profile, unsigned.
 - An update of the SOA is ignored rather than applied: the SOA follows the zone settings.
 - The prerequisites of an update read the RRsets of its names as the store holds them under the commit, and the write expects those RRsets unchanged; an RRset of another type that a concurrent write of the API creates at a name that should not be in use, in the same moment, is not caught by that expectation.
 - The `dns` role serves updates when it runs in the controller's process (Phase 2); the `Dns.Update` message of a remote node is Phase 5.
 - Beyond the admission bounds of section 13.5 (`update.in_flight`, `update.per_source`), the queue of 4,096 per zone and the rate limiter over UDP, no per-client rate limit applies to updates; a storm from one client is bounded by its access list and its key.
+
+### 13.10 Secure updates with GSS-TSIG: the contracts (WP13.0)
+
+Slice 13 ([identity-plan.md](plans/identity-plan.md), ADR 0026) gives Tenko GSS-TSIG (RFC 3645) for the secure dynamic updates of Windows clients and domain controllers: a TKEY exchange (RFC 2930) negotiates a Kerberos context with the keys of an AD computer account Tenko holds in its vault, every later update is signed on that context, and a name is owned by the principal that created it, with the Windows rules (plan section 3.6). WP13.0 puts the contracts in place; nothing of it works yet: the TKEY handler and the signer are WP13.2, the account's wizard and its rotation WP13.3, the owner view and the Windows semantics WP13.4. What a reader sees today:
+
+- **The model.** A zone's `update` policy has `kerberos` (`DnsUpdatePolicy.kerberos`: the realms whose tickets the zone accepts, the ownership rule `windows` or `none`, the owner hold in days, the privileged groups and the DnsUpdateProxy group by SID). With it set, `require_tsig` means "a signature is required, TSIG or GSS-TSIG": the Windows modes map onto the policy (plan section 3.5; `windows_mode` in the model). An access list may hold an entry of kind `kerberos` (the realm, an optional name pattern such as `*$` for computer accounts, an optional prefix); such an entry matches a request signed with GSS-TSIG only, so a list of Kerberos entries alone refuses every TSIG or unsigned update. An RRset written by a secure update records the principal (`principal`), beside the TSIG key of a TSIG update (`key`). The owners live in `dns.name_owners`, the account's metadata in `dns.krb_accounts` ([dns-contracts.md](dns-contracts.md) section 12).
+- **The configuration** of a node's `dns` role, `[dns.gss]` in `tenko.toml` (`deploy/tenko.example.toml`), read and checked at start and consumed from WP13.2 on:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `context_max_secs` | 3600 | Seconds an established context lives at most (60 to 86,400); the ticket's end time cuts it shorter, and the client negotiates again |
+| `contexts_max` | 10,000; 2,000 under Home | Established contexts per node at most (100 to 1,000,000); the oldest idle one leaves first when the table is full |
+| `negotiating_max` | 1,000; 200 under Home | Negotiations in flight per node at most (10 to 100,000); one not completed within 30 s is dropped |
+| `per_client_max` | 32 | Negotiations in flight per client address at most (1 to 1,024) |
+| `skew_secs` | 300 | Seconds of clock skew the acceptor allows between a client's authenticator and the node (1 to 900) |
+
+- **The routes, the CLI and the UI.** `GET /dns/kerberos`, `POST /dns/kerberos/adopt|import|check|rotate` and `DELETE /dns/kerberos` (`tenko dns kerberos status|adopt|import|check|rotate|delete`, the page DNS, Kerberos) and `GET /dns/zones/{id}/owners` answer 501 `sys.not_implemented` after the scope check until their packages build them. The codes `dns.krb.*` and `dns.gss.refused`, the audit actions `dns.krb.account.*` and `dns.gss.refuse`, the health findings `dns.gss.*` and the metric families `tenko_dns_tkey_total{outcome}`, `tenko_dns_gss_contexts{state}` and `tenko_dns_gss_establish_seconds` are declared in the same way.
+- **The profiles.** TGL-09's Slice 13 values (secure only on the zones the wizard enables under Standard, secure only with ownership on every zone with Kerberos under Hardened, everything under Lab) are applied by WP13.2 and WP13.8 ([SECURITY-PROFILES.md](SECURITY-PROFILES.md)).

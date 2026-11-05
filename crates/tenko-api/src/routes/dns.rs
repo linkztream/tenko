@@ -98,6 +98,8 @@ mod records;
 // WP10.0: the recursive resolver's routes (trust anchors, negative trust anchors, the node's
 // recursion status and infrastructure cache).
 mod recursion;
+// WP13.0: the Kerberos account of secure updates and the owners of names.
+mod kerberos;
 // WP6.1: the two transfer routes.
 mod transfer;
 // WP14.0: the flip and the release of a zone (stubs until WP14.2).
@@ -246,6 +248,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .merge(node_routes())
         // WP10.0: the recursive resolver.
         .merge(recursion::routes())
+        // WP13.0: the Kerberos account and the owners.
+        .merge(kerberos::routes())
 }
 
 // The registration is split into small functions that are never inlined: the server builds

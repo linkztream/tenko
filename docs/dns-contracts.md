@@ -15,6 +15,7 @@ Contents:
 9. [Engine contracts](#9-engine-contracts)
 10. [Data format](#10-data-format)
 11. [The recursive resolver (WP10.0)](#11-the-recursive-resolver-wp100)
+12. [Kerberos and directory identity (WP13.0)](#12-kerberos-and-directory-identity-wp130)
 
 ## 1. Store tables
 
@@ -289,3 +290,61 @@ A path spells the root `root` (a URL turns the segment `.` into a dot segment); 
 **Configuration** `[dns.recursion]` (`crates/tenko/src/config.rs`, `deploy/tenko.example.toml`): `enabled`, `hints`, `outbound`, `timeout_ms`, `budget_queries`, `budget_restarts`, `budget_depth`, `budget_ms`, `infra_entries`, `infra_ttl_secs`, `qname_minimization`, `aggressive_nsec`, `denial_entries`, `failure_cache_max_secs`, `trust_anchor_signaling`, `key_sentinel`, `fresh_port_per_query`, `local_zones_except`, `rfc5011_hold_down_secs` (Lab only); read and validated, consumed from WP10.1 on.
 
 **CLI** (`crates/tenko/src/client/dns_recursion.rs`): `tenko dns trust-anchor list|add|remove|refresh`, `tenko dns nta list|add|remove`, `tenko dns recursion status|prime|infra|flush-infra`, `tenko dns forwarder create --recurse`, `tenko dns view create|update --resolution`.
+
+## 12. Kerberos and directory identity (WP13.0)
+
+The contracts of Slice 13 ([identity-plan.md](plans/identity-plan.md) section 4, [ADR 0026](adr/0026-kerberos-and-directory-identity.md)). Declared at 501 or as types by WP13.0; the packages WP13.1 to WP13.8 build on them. The new crates of section 4.2 (`tenko-krb`, `tenko-directory`) are made by the lead after the spike; every type of section 4.1 lives in `tenko-core` or `tenko-auth`, where the plan puts it.
+
+**Model** (`tenko_core::dns::identity`, re-exported from `tenko_core::dns`): `Realm` (the canonical upper-case form, 1 to 253 ASCII characters without whitespace, `@`, `/` or `\`; `domain()` is the lower-case form of the MS-KILE salt and the KDC lookup); `PrincipalName` (`component/component@REALM` in the string form of RFC 1964 section 2.1.1 with its escapes, at most 8 components and 1,024 characters, the realm always present; `is_computer`, `host_label` for the `ms-self` claim rule, `principal_matches(pattern, principal)` with `*` for the entries' patterns); `Sid` (the string form `S-1-<authority>-<sub-authorities>` with a 48-bit authority and at most 15 sub-authorities, the packet form of [MS-DTYP] 2.4.2.2 for the PAC; `rid`, `parent`, `is_domain_sid`; the RIDs 512, 516 and 519 as constants); `KerberosUpdate { realms, ownership: windows | none, owner_hold_days (14, at most 3,650), privileged: [Sid], update_proxy: Option<Sid> }` on `UpdatePolicy.kerberos` (validated with the zone, primary zones only; `UpdatePolicy::windows_mode` gives `none`, `nonsecure_and_secure`, `secure_only` or `tsig`); `AclEntry::Kerberos { realm, principal: Option<pattern>, from: Option<prefix>, deny }` with `Acl::allows_principal(client, principal)` (a Kerberos entry matches a GSS-TSIG request only; `Acl::allows` passes it by; the pattern is 1 to 256 characters without `@`, whitespace or control characters, checked by `AclEntry::validate` when a list is written); `RrSet.principal: Option<PrincipalName>` (a cold field with a serde default, left out when absent: a 0.0.11 row decodes and writes back byte for byte, `crates/tenko-core/tests/fixtures/rrset-0.0.11.cbor.hex`); `NameOwner { sid: Option<Sid>, principal, since, hold_until }` with `NameOwnerKey { zone, scope, name }` (`is_owner` by SID when both have one, by principal otherwise; `hold_passed`); `KrbAccount { realm, name, spns, kdcs, owned, rotation_days (30, 0 off, at most 365), versions: [KeyVersionMeta { kvno, etypes: [aes128-cts-hmac-sha1 | aes256-cts-hmac-sha1], state: current | previous | pending, created }], last_rotation, last_check }` (metadata only; `computer_salt`, `principal`, `current`, `holds_kvno`); the secret purpose `KRB_PURPOSE` (`krb`). The aging timestamp is not added (DNS-29's package). Tests: `crates/tenko-core/tests/dns_identity_model.rs` (unit and property tests) and the module's own.
+
+**Model** (`tenko_auth::directory`): `UserSource { local | external { provider, subject } }` on `UserRecord.source` (absent in 0.0.11 records: local); `SessionSource { local | oidc { provider } | ldap { provider } | negotiate { provider } }` on `SessionRecord.source` and `SessionRecord.directory_checked_at`; `ProviderId`, `ProviderState { draft | verified | disabled }`, `DirectoryProvider { oidc: OidcSettings | ldap: LdapSettings | negotiate: NegotiateSettings }` (tagged `kind`) in `ProviderRecord { id, name, provider, state, created_at, updated_at, last_success, last_error }`; `OidcSettings { issuer, client_id, client_secret: SecretRef, scopes, username_claim, groups_claim, mfa: none | trust_amr { values, hardware_key }, ca, button_label }`; `LdapSettings { urls, transport: ldaps | start_tls | plain, trust: LdapTrust, bind: Option<LdapBind { dn, secret }>, base_dn, user_filter, group_mode: token_groups | member_of | search, recheck_minutes, grace_minutes, suffixes, default }`; `LdapTrust { system | pem { certs } | imported { certs, fingerprints, confirmed_by, confirmed_at } }` (certificates only, 1 to 16; a PEM block that holds a key is refused); `NegotiateSettings { realm }`; `DirectoryMapping { id: MappingId, provider, group: sid | dn | claim, role, scope: Option<ScopeRule> }` (`admin` and `auditor` take no scope); `OidcFlow { provider, state, nonce, pkce_verifier, return_path, created_at, expires_at }` (ten minutes, single use); the secret purposes `auth.oidc` and `auth.ldap`. `PasswordLogin` gains an optional `provider`.
+
+**Tables**: `dns.name_owners` (key `NameOwnerKey`; value `NameOwner`) and `dns.krb_accounts` (key `Realm`; value `KrbAccount`), both in `tables::NODE_TABLES`; `auth.providers` (`ProviderId` to `ProviderRecord`), `auth.mappings` (`MappingId` to `DirectoryMapping`), `auth.oidc_flows` (the SHA-256 of the flow cookie's secret to `OidcFlow`), `auth.external_ids` ((`ProviderId`, subject) to `UserId`, unique).
+
+**Data format**: 6 (`crates/tenko/src/upgrade/migrations/v6.rs`, an empty migration, fixture `crates/tenko/tests/fixtures/datadir/v6/`): the `kerberos` entry of an access list is a new variant of a stored enum that `POST /dns/acls` accepts from the contracts on, which a format 5 binary cannot decode (`docs/upgrades.md`, the table of common changes). The tables of the slice are additive and the new fields carry serde defaults, so the later packages add no second format. The same format 6 covers the contracts of the Windows takeover (the `migrate` namespace of tables, audit actions and error codes, the object kinds `mirror` and `takeover` and the token scope `mirror:<id>`, [dhcp-contracts.md](dhcp-contracts.md) section 13): both sets of contracts share the one empty migration and its fixture.
+
+**Routes** (`crates/tenko-api/src/routes/dns/kerberos.rs`, `auth/providers.rs`, `access/mappings.rs`; every one answers 501 `sys.not_implemented` after its check until its package builds it):
+
+| Endpoint | Check | Body and answer | Package |
+|---|---|---|---|
+| `GET /dns/kerberos` | Read on `dns_key` (`dns.keys`) | `KerberosStatus { account, findings, contexts }` | WP13.3 |
+| `POST /dns/kerberos/adopt`, `POST /dns/kerberos/import` | Create on `dns_key` (`dns.keys`, interactive) | `KerberosAdopt { realm, name, password, spns, kdcs, rotation_days }`, `KerberosImport { realm, keytab, spns, kdcs }`; 201 `KerberosStatus` | WP13.3 |
+| `POST /dns/kerberos/check` | Execute on `dns_key` | 200 `KerberosStatus` | WP13.3 |
+| `POST /dns/kerberos/rotate` | Update on `dns_key` (interactive) | 202 `DnsJobStarted` | WP13.3 |
+| `DELETE /dns/kerberos` | Delete on `dns_key` (interactive) | 204 | WP13.3 |
+| `GET /dns/zones/{id}/owners` | Read on the zone (`dns.read`) | `OwnerParams { scope, name, owner }`, `Page<NameOwnerItem>` | WP13.4 |
+| `GET /auth/providers`, `GET /auth/providers/{id}` | Read on `settings` | `[ProviderItem]`, `ProviderItem` | WP13.5 |
+| `POST /auth/providers`, `PATCH /auth/providers/{id}`, `DELETE /auth/providers/{id}` | Update on `settings` (interactive) | `ProviderCreate { name, provider, secret }`, `ProviderPatch { name, provider, secret, state }`; 201 and 200 `ProviderItem`, 204 | WP13.5, WP13.6, WP13.7 |
+| `POST /auth/providers/{id}/test` | Update on `settings` (interactive) | `ProviderTest { user_name, password }`, `ProviderTestResult { subject, display_name, groups, roles, verified }` | WP13.6 |
+| `POST /auth/providers/ldap/chain` | Update on `settings` (interactive) | `LdapChainRequest { url, transport }`, `LdapChainResult { certificates: [ChainCertificate], verifies, compare_commands }`; stores nothing | WP13.6 |
+| `GET /auth/providers/public` | public | `PublicProviders { items: [PublicProvider { id, label, kind, suffixes }] }` | WP13.5 |
+| `GET /auth/oidc/{id}/start`, `GET /auth/oidc/{id}/callback` | public | the flow cookie `tenko_oidc` and a 303 to the provider; the callback's page with the session cookie | WP13.5 |
+| `GET /auth/negotiate` | public | 401 `WWW-Authenticate: Negotiate`, then the session | WP13.7 |
+| `GET /access/directory-mappings`, `POST /access/directory-mappings` | Read, Update on `settings` (the change interactive) | `MappingFilters { provider }`, `Page<MappingItem>`; `MappingCreate { provider, group, role, scope }`, 201 `MappingItem` | WP13.5 |
+| `DELETE /access/directory-mappings/{id}` | Update on `settings` (interactive) | 204 | WP13.5 |
+
+No object kind is added: the account authorizes as DNS key material, the providers and the mappings as settings (administrators, an interactive session for every change); the lead and the owner may give them kinds of their own when a package needs scoped grants over them. The four public operations are in `deploy/security/rules/public-operations.txt`.
+
+**Error codes**: `dns.krb.account.not_found` (404), `dns.krb.account.exists` (409), `dns.krb.account.invalid` (400, `field`, `reason`), `dns.krb.account.not_owned` (409), `dns.krb.keytab.invalid` (422), `dns.krb.kdc.unreachable` (503), `dns.krb.password.refused` (422), `dns.gss.refused` (the code of a refused negotiation); `auth.provider.not_found` (404), `.invalid` (400), `.exists` (409), `.unverified` (409), `.unavailable` (503), `.plain_refused` (409), `.chain_changed` (502, also a finding), `.chain_unverified` (a finding); `auth.directory.no_mapping` (403), `.account_disabled` (403), `.overage` (403), `.mapping_not_found` (404), `.mapping_invalid` (400), `.mapping_duplicate` (409); `auth.oidc.flow_invalid` (400), `.token_invalid` (401), `.provider_error` (502), `.discovery_failed` (502). Each has its text in `ui/i18n/en.d/identity.xlf` and `sv.d/identity.xlf`.
+
+**Audit actions**: `dns.krb.account.adopt`, `.import`, `.rotate`, `.check` (on failure or change), `.delete`, `dns.gss.refuse` (at most once a minute per client); `auth.provider.create`, `.update`, `.delete`, `.verify`, `auth.mapping.create`, `.delete`, `auth.directory.revoke`. `dns.update.apply` and `dns.update.refuse` gain the principal, its SID and the ownership decision, and `auth.login.*` the method and the provider, when WP13.2 and WP13.5 write them.
+
+**Health findings** (`tenko_core::dns::findings`): `dns.gss.clock_skew`, `dns.gss.kvno_unknown`, `dns.gss.rotation_failed`, `dns.gss.self_test_failed`, `dns.gss.spn_missing`, `dns.gss.spn_duplicate`, `dns.gss.weak_etype`, `dns.gss.context_limit`.
+
+**Metric families** (`tenko_dns::metrics`, `register_gss`, registered by the role from WP13.2 on):
+
+| Family | Kind | Labels |
+|---|---|---|
+| `tenko_dns_tkey` | counter | `outcome` (`established`, `continue`, `deleted`, `mechanism`, `token`, `skew`, `kvno`, `limit`, `unknown_context`) |
+| `tenko_dns_gss_contexts` | gauge, set before a scrape | `state` (`negotiating`, `established`) |
+| `tenko_dns_gss_establish_seconds` | histogram (50 µs to 2 s) | |
+
+The label `auth` (`none`, `tsig`, `gss`) on `tenko_dns_updates`, and `tenko_auth_logins_total{method,outcome}` and `tenko_auth_directory_request_seconds{provider,kind}`, are declared by the packages that count into them (WP13.2, WP13.5): they change or add families the running roles serve.
+
+**Configuration** `[dns.gss]` (`crates/tenko/src/config/gss.rs`, `deploy/tenko.example.toml`): `context_max_secs`, `contexts_max`, `negotiating_max`, `per_client_max`, `skew_secs`, with the defaults of plan section 3.3 and the Home profile's bounds ([dns.md](dns.md) section 13.10); read and validated, consumed from WP13.2 on.
+
+**CLI** (`crates/tenko/src/client/dns_kerberos.rs`, `client/auth.rs`, `client/access.rs`): `tenko dns kerberos status|adopt|import|check|rotate|delete`, `tenko auth provider list|create|show|update|delete|test|ldap-chain`, `tenko access mapping list|create|delete`; each prints the 501 problem details of its route until the route is built.
+
+**UI** (route stubs with empty pages): `/dns/kerberos` (the tab Kerberos of the DNS area, for administrators like the TSIG keys), `/settings/providers` (the settings tab Sign-in providers), `/settings/access/mappings`.
+
+**The lab**: `deploy/compose/lab-ad` with the services `samba`, `tenko` and `client` and the README that says what each later package fills in.

@@ -30,8 +30,8 @@ async function renderApp(url: string, roles?: string[]) {
 afterEach(() => setSessionForTest(null, "loading"));
 
 // WP7.4: the DHCP tab.
-const TABS = ["security", "users", "updates", "secrets", "access", "audit-export", "vault", "certificates", "backup", "reconciler", "guardrails", "dns", "dhcp", "languages"];
-const TAB_NAMES = ["Security", "Users", "Updates", "Secrets", "Access", "Audit export", "Vault", "Certificates", "Backup", "Reconciler", "Guardrails", "DNS", "DHCP", "Languages"];
+const TABS = ["security", "users", "updates", "secrets", "access", "providers", "audit-export", "vault", "certificates", "backup", "reconciler", "guardrails", "dns", "dhcp", "languages"];
+const TAB_NAMES = ["Security", "Users", "Updates", "Secrets", "Access", "Sign-in providers", "Audit export", "Vault", "Certificates", "Backup", "Reconciler", "Guardrails", "DNS", "DHCP", "Languages"];
 
 /** The sub-pages of WP3.11b, each with a part only the page itself shows. */
 const PAGES = [

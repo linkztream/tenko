@@ -263,6 +263,7 @@ impl Planner<'_> {
             rdata,
             origin: Origin::Dynamic,
             key: key.cloned(),
+            principal: None,
             updated: self.stamp.clone(),
         }
     }

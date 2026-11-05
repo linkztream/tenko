@@ -17,7 +17,8 @@
 //! | [`audit`] | the `dns.*` audit actions |
 //! | [`DnsScope`] | the scopes `dns.read`, `dns.write` and `dns.keys` |
 //! | [`recursion`] | the recursive resolver's model: [`TrustAnchor`], [`NegativeTrustAnchor`], [`ResolutionMode`], [`RuleMode`], [`SecurityState`], [`ExtendedError`] (WP10.0) |
-//! | [`findings`] | the health findings of the recursive resolver |
+//! | [`identity`] | the identity of a secure update: [`Realm`], [`PrincipalName`], [`Sid`], [`KerberosUpdate`], [`NameOwner`], [`KrbAccount`] (WP13.0) |
+//! | [`findings`] | the health findings of the recursive resolver and of the Kerberos account |
 
 use std::{fmt, net::IpAddr};
 
@@ -42,6 +43,9 @@ pub mod rrset;
 // WP10.0: the recursive resolver's model (recursion plan section 3.1).
 pub mod recursion;
 // WP10.0: end.
+// WP13.0: the identity of a secure update (identity plan section 4.1).
+pub mod identity;
+// WP13.0: end.
 
 pub use name::{DnsName, Rtype, ScopeName};
 pub use rdata::{Rdata, RecordData, SvcParam, TextBytes, split_txt};
@@ -52,6 +56,12 @@ pub use recursion::{
     NegativeTrustAnchor, NtaId, Rendering, ResolutionMode, RuleMode, SecurityState, TrustAnchor,
 };
 // WP10.0: end.
+// WP13.0: the identity of a secure update.
+pub use identity::{
+    EncryptionType, KerberosUpdate, KeyVersionMeta, KeyVersionState, KrbAccount, NameOwner,
+    NameOwnerKey, Ownership, PrincipalName, Realm, Sid,
+};
+// WP13.0: end.
 
 crate::id_type! {
     /// Identifier of a zone.
@@ -96,6 +106,14 @@ pub const TSIG_PURPOSE: &str = "tsig";
 /// The secret purpose of DNSSEC private keys in the vault; nodes receive public parts
 /// only (plan section 3.2).
 pub const DNSSEC_PURPOSE: &str = "dnssec";
+
+// WP13.0: the keys of the Kerberos account.
+/// The secret purpose of the Kerberos account's keys in the vault (identity plan section
+/// 3.2, ADR 0026 point 5): one system secret per account, never revealed, read by the
+/// `dns` role through the watcher that loads TSIG keys. Declared by the node-sync purposes
+/// when WP13.3 delivers the keys.
+pub const KRB_PURPOSE: &str = "krb";
+// WP13.0: end.
 
 /// The SSE topic of the DNS module.
 pub const TOPIC: &str = "dns";
@@ -229,8 +247,34 @@ pub mod codes {
     pub const RECURSION_DISABLED: &str = "dns.recursion.disabled";
     // WP10.0: end.
 
+    // WP13.0: the Kerberos account and GSS-TSIG (identity plan sections 3.10 and 4.3).
+    /// No Kerberos account is set up for the realm, or none at all (404). Params: `realm`.
+    pub const KRB_ACCOUNT_NOT_FOUND: &str = "dns.krb.account.not_found";
+    /// An account exists already for the realm (409): delete it before adopting or
+    /// importing another. Params: `realm`.
+    pub const KRB_ACCOUNT_EXISTS: &str = "dns.krb.account.exists";
+    /// The account settings are invalid (400). Params: `field`, `reason`.
+    pub const KRB_ACCOUNT_INVALID: &str = "dns.krb.account.invalid";
+    /// The account was imported from a keytab, so Tenko does not own its password and
+    /// cannot rotate it (409). Params: `realm`.
+    pub const KRB_ACCOUNT_NOT_OWNED: &str = "dns.krb.account.not_owned";
+    /// A keytab does not parse, holds no AES entry for the principal, or holds only
+    /// entries Tenko refuses (RC4, DES) (422). Params: `reason`.
+    pub const KRB_KEYTAB_INVALID: &str = "dns.krb.keytab.invalid";
+    /// No KDC of the realm answered (503). Params: `realm`, `reason`.
+    pub const KRB_KDC_UNREACHABLE: &str = "dns.krb.kdc.unreachable";
+    /// The KDC refused the one-time password or the password change (422). Params:
+    /// `realm`, `reason`.
+    pub const KRB_PASSWORD_REFUSED: &str = "dns.krb.password.refused";
+    /// A TKEY negotiation was refused: no Kerberos mechanism offered, a token that does
+    /// not verify, a skewed clock, an unknown key version, the context table full. The
+    /// code of the audit record `dns.gss.refuse`. Params: `client`, `reason`, `principal`
+    /// when known.
+    pub const GSS_REFUSED: &str = "dns.gss.refused";
+    // WP13.0: end.
+
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 39] = [
+    pub const ALL: [&str; 47] = [
         ZONE_NOT_FOUND,
         ZONE_EXISTS,
         ZONE_INVALID,
@@ -275,6 +319,15 @@ pub mod codes {
         ZONE_FLIP_NOT_SECONDARY,
         ZONE_FLIP_NOT_PRIMARY,
         ZONE_FLIP_CATALOG,
+        // WP13.0
+        KRB_ACCOUNT_NOT_FOUND,
+        KRB_ACCOUNT_EXISTS,
+        KRB_ACCOUNT_INVALID,
+        KRB_ACCOUNT_NOT_OWNED,
+        KRB_KEYTAB_INVALID,
+        KRB_KDC_UNREACHABLE,
+        KRB_PASSWORD_REFUSED,
+        GSS_REFUSED,
     ];
 }
 
@@ -691,6 +744,14 @@ pub struct UpdatePolicy {
     /// Home and Lab allow, Standard and Hardened do not until the operator allows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dhcp: Option<bool>,
+    // WP13.0: secure updates with GSS-TSIG (identity plan section 3.5).
+    /// The Kerberos settings of the zone: the realms whose principals may sign updates
+    /// with GSS-TSIG, the ownership rule and the privileged groups. Absent: no GSS-TSIG.
+    /// With it set, `require_tsig` means "a signature is required, TSIG or GSS-TSIG"
+    /// (the Windows mode "secure only"; with `require_tsig` off, "nonsecure and secure").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kerberos: Option<KerberosUpdate>,
+    // WP13.0: end.
 }
 
 // WP8.3: the effective DHCP switch of a zone.
@@ -700,7 +761,44 @@ impl UpdatePolicy {
     pub fn dhcp_allowed(&self, profile_allows: bool) -> bool {
         self.dhcp.unwrap_or(profile_allows)
     }
+
+    // WP13.0: the Windows zone modes (identity plan section 3.5).
+    /// The zone's mode in Windows terms: `none` without access lists, `secure_only` with
+    /// Kerberos settings and a required signature, `nonsecure_and_secure` with Kerberos
+    /// settings and the signature optional; a zone without Kerberos settings that takes
+    /// updates is `tsig` (Tenko's own mode, not a Windows one).
+    pub fn windows_mode(&self) -> WindowsUpdateMode {
+        if self.allowed.is_empty() {
+            WindowsUpdateMode::None
+        } else if self.kerberos.is_none() {
+            WindowsUpdateMode::Tsig
+        } else if self.require_tsig {
+            WindowsUpdateMode::SecureOnly
+        } else {
+            WindowsUpdateMode::NonsecureAndSecure
+        }
+    }
+    // WP13.0: end.
 }
+
+// WP13.0: the Windows zone modes.
+/// The mode of a zone's dynamic updates in the terms of Windows DNS (MS-DNSP
+/// `fAllowUpdate`), derived from the policy ([`UpdatePolicy::windows_mode`]).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowsUpdateMode {
+    /// No dynamic updates (`ZONE_UPDATE_OFF`).
+    None,
+    /// Unsigned and GSS-TSIG updates (`ZONE_UPDATE_UNSECURE`).
+    NonsecureAndSecure,
+    /// GSS-TSIG (or TSIG) updates only (`ZONE_UPDATE_SECURE`).
+    SecureOnly,
+    /// Updates with TSIG keys or from addresses, without Kerberos: Tenko's own mode.
+    Tsig,
+}
+// WP13.0: end.
 
 impl Default for UpdatePolicy {
     fn default() -> Self {
@@ -709,6 +807,8 @@ impl Default for UpdatePolicy {
             require_tsig: true,
             may_replace_ipam: false,
             dhcp: None,
+            // WP13.0
+            kerberos: None,
         }
     }
 }
@@ -994,6 +1094,17 @@ impl Zone {
                 "signatures are renewed before they expire",
             );
         }
+        // WP13.0: the Kerberos settings of a primary zone.
+        if let Some(kerberos) = &self.update.kerberos {
+            if self.kind != ZoneKind::Primary {
+                return invalid(
+                    "update.kerberos",
+                    "only a primary zone takes secure updates",
+                );
+            }
+            kerberos.validate()?;
+        }
+        // WP13.0: end.
         Ok(())
     }
 
@@ -1094,6 +1205,42 @@ mod text {
         let text = String::deserialize(deserializer)?;
         text.parse().map_err(D::Error::custom)
     }
+
+    // WP13.0: an optional value, for the `from` prefix of a Kerberos entry.
+    /// The same for an optional value.
+    pub(super) mod option {
+        use std::{fmt::Display, str::FromStr};
+
+        use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+        #[allow(
+            clippy::ref_option,
+            reason = "serde's `with` hands the field as `&Option<T>`"
+        )]
+        pub(in super::super) fn serialize<T: Display, S: Serializer>(
+            value: &Option<T>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            match value {
+                Some(value) => serializer.serialize_some(&value.to_string()),
+                None => serializer.serialize_none(),
+            }
+        }
+
+        pub(in super::super) fn deserialize<'de, T, D>(
+            deserializer: D,
+        ) -> Result<Option<T>, D::Error>
+        where
+            T: FromStr,
+            T::Err: Display,
+            D: Deserializer<'de>,
+        {
+            Option::<String>::deserialize(deserializer)?
+                .map(|text| text.parse().map_err(D::Error::custom))
+                .transpose()
+        }
+    }
+    // WP13.0: end.
 
     /// The same for a list.
     pub(super) mod list {
@@ -1527,7 +1674,53 @@ pub enum AclEntry {
         #[serde(default)]
         deny: bool,
     },
+    // WP13.0: principals of a realm, for updates signed with GSS-TSIG (identity plan
+    // section 3.5). Matched by WP13.2's signer; until then no request carries a principal,
+    // so the entry matches nothing.
+    /// Requests signed with GSS-TSIG by a principal of a realm.
+    Kerberos {
+        /// The realm.
+        realm: Realm,
+        /// A pattern the principal's name (without the realm) must match: `*` is any run
+        /// of characters, so `*$` is every computer account. Absent: every principal of
+        /// the realm.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        principal: Option<String>,
+        /// Only clients in this prefix.
+        #[schema(value_type = Option<String>, example = "192.0.2.0/24")]
+        #[serde(
+            default,
+            with = "text::option",
+            skip_serializing_if = "Option::is_none"
+        )]
+        from: Option<IpNet>,
+        /// The entry refuses instead of allowing.
+        #[serde(default)]
+        deny: bool,
+    },
+    // WP13.0: end.
 }
+
+// WP13.0: the rules of an entry.
+impl AclEntry {
+    /// Checks an entry: a Kerberos entry's principal pattern is 1 to 256 characters
+    /// without `@` or control characters.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::InvalidValue`] naming the rule broken.
+    pub fn validate(&self) -> Result<(), crate::error::InvalidValue> {
+        if let AclEntry::Kerberos {
+            principal: Some(pattern),
+            ..
+        } = self
+        {
+            identity::check_principal_pattern(pattern)?;
+        }
+        Ok(())
+    }
+}
+// WP13.0: end.
 
 /// A named access list for transfers, updates, recursion and queries.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -1545,7 +1738,9 @@ pub struct Acl {
 
 impl Acl {
     /// Whether a request from `client`, signed with `key` if any, is allowed: the first
-    /// matching entry decides; no match refuses.
+    /// matching entry decides; no match refuses. A Kerberos entry matches a request signed
+    /// with GSS-TSIG only ([`Acl::allows_principal`]); a request without a principal passes
+    /// it by.
     pub fn allows(&self, client: IpAddr, key: Option<&KeyName>) -> bool {
         for entry in &self.entries {
             match entry {
@@ -1557,6 +1752,36 @@ impl Acl {
         }
         false
     }
+
+    // WP13.0: the decision for a request signed with GSS-TSIG (identity plan section 3.5).
+    /// Whether a request from `client` signed with GSS-TSIG by `principal` is allowed: the
+    /// first matching entry decides (a prefix entry by the address, a Kerberos entry by
+    /// the realm, the pattern and the prefix, `any` always; a key entry never matches a
+    /// GSS-TSIG request); no match refuses.
+    pub fn allows_principal(&self, client: IpAddr, principal: &PrincipalName) -> bool {
+        for entry in &self.entries {
+            match entry {
+                AclEntry::Prefix { prefix, deny } if prefix.contains(&client) => return !deny,
+                AclEntry::Kerberos {
+                    realm,
+                    principal: pattern,
+                    from,
+                    deny,
+                } if realm == principal.realm()
+                    && pattern
+                        .as_deref()
+                        .is_none_or(|pattern| identity::principal_matches(pattern, principal))
+                    && from.is_none_or(|from| from.contains(&client)) =>
+                {
+                    return !deny;
+                }
+                AclEntry::Any { deny } => return !deny,
+                _ => {}
+            }
+        }
+        false
+    }
+    // WP13.0: end.
 }
 
 /// A TSIG algorithm (RFC 8945). HMAC-SHA256 is the default; HMAC-SHA1 is accepted for
@@ -1937,11 +2162,14 @@ pub struct JournalEntry {
 /// | `dns.trust_anchors` | [`DnsName`] (the zone) | [`TrustAnchor`] |
 /// | `dns.ntas` | [`NtaId`] | [`NegativeTrustAnchor`] |
 /// | `dns.ntas.by_zone` | ([`DnsName`], [`NtaId`]) | `()` |
+/// | `dns.name_owners` | [`NameOwnerKey`] (zone, scope, name) | [`NameOwner`] |
+/// | `dns.krb_accounts` | [`Realm`] | [`KrbAccount`] |
 pub mod tables {
     use super::{
         Acl, AclId, BlockList, BlockListId, DnsName, ForwardRule, ForwardRuleId, JournalEntry,
-        KeyMeta, KeyName, ListVersion, NegativeTrustAnchor, NtaId, RrSet, RrSetKey, ScopeName,
-        SignState, TrustAnchor, View, ViewId, Zone, ZoneId,
+        KeyMeta, KeyName, KrbAccount, ListVersion, NameOwner, NameOwnerKey, NegativeTrustAnchor,
+        NtaId, Realm, RrSet, RrSetKey, ScopeName, SignState, TrustAnchor, View, ViewId, Zone,
+        ZoneId,
     };
     use crate::{id::Revision, names::TableName, table::TableDef};
 
@@ -1975,6 +2203,14 @@ pub mod tables {
     /// The negative trust anchors by zone.
     pub static NTAS_BY_ZONE: TableDef<(DnsName, NtaId), ()> = TableDef::new("dns.ntas.by_zone");
     // WP10.0: end.
+    // WP13.0: the owners of names and the Kerberos accounts (identity plan section 4.1).
+    /// The owner of each name in a zone with ownership on, beside the RRsets it governs
+    /// (section 3.6); written by the update path (WP13.2) and the Windows adapter (MIG-06).
+    pub static NAME_OWNERS: TableDef<NameOwnerKey, NameOwner> = TableDef::new("dns.name_owners");
+    /// The Kerberos account of each realm, metadata only (section 3.1); written by the
+    /// controller's account service (WP13.3).
+    pub static KRB_ACCOUNTS: TableDef<Realm, KrbAccount> = TableDef::new("dns.krb_accounts");
+    // WP13.0: end.
 
     /// The tables a node with the `dns` role receives through node sync: every table of the
     /// namespace except `dns.sign_state`, which only the signing service on the controllers
@@ -1982,8 +2218,10 @@ pub mod tables {
     /// node of Phase 2 runs the role in the controller's process and reads the store
     /// directly (plan section 2.10); the node-file feed is Phase 5. The trust anchors and
     /// the negative trust anchors are in it (recursion plan section 3.2), so a Phase 5 node
-    /// validates with the same anchors.
-    pub static NODE_TABLES: [TableName; 12] = [
+    /// validates with the same anchors. The name owners and the account metadata are in it
+    /// (identity plan section 3.20): a Phase 5 `dns` node applies the ownership rules and
+    /// accepts with the key versions the metadata names.
+    pub static NODE_TABLES: [TableName; 14] = [
         TableName::from_static("dns.zones"),
         TableName::from_static("dns.rrsets"),
         TableName::from_static("dns.views"),
@@ -1997,10 +2235,13 @@ pub mod tables {
         TableName::from_static("dns.trust_anchors"),
         TableName::from_static("dns.ntas"),
         TableName::from_static("dns.ntas.by_zone"),
+        // WP13.0
+        TableName::from_static("dns.name_owners"),
+        TableName::from_static("dns.krb_accounts"),
     ];
 
     /// Every table of the namespace.
-    pub fn all() -> [&'static TableName; 13] {
+    pub fn all() -> [&'static TableName; 15] {
         [
             ZONES.name(),
             RRSETS.name(),
@@ -2016,6 +2257,9 @@ pub mod tables {
             TRUST_ANCHORS.name(),
             NTAS.name(),
             NTAS_BY_ZONE.name(),
+            // WP13.0
+            NAME_OWNERS.name(),
+            KRB_ACCOUNTS.name(),
         ]
     }
 }
@@ -2160,8 +2404,25 @@ pub mod audit {
         AuditAction::from_static("dns.recursion.unwanted_flush");
     // WP10.0: end.
 
+    // WP13.0: the Kerberos account and GSS-TSIG (identity plan section 3.11).
+    /// A pre-staged computer account was taken over: its password changed, its keys
+    /// derived and stored.
+    pub const KRB_ACCOUNT_ADOPT: AuditAction = AuditAction::from_static("dns.krb.account.adopt");
+    /// A keytab was imported: its AES keys stored, the file not kept.
+    pub const KRB_ACCOUNT_IMPORT: AuditAction = AuditAction::from_static("dns.krb.account.import");
+    /// The account's password was rotated (a new key version).
+    pub const KRB_ACCOUNT_ROTATE: AuditAction = AuditAction::from_static("dns.krb.account.rotate");
+    /// The self-test ran and failed, or its findings changed.
+    pub const KRB_ACCOUNT_CHECK: AuditAction = AuditAction::from_static("dns.krb.account.check");
+    /// The account and its keys were deleted from Tenko.
+    pub const KRB_ACCOUNT_DELETE: AuditAction = AuditAction::from_static("dns.krb.account.delete");
+    /// A TKEY negotiation was refused (the client, the reason, the principal when known;
+    /// at most once a minute per client, like `dns.update.refuse`).
+    pub const GSS_REFUSE: AuditAction = AuditAction::from_static("dns.gss.refuse");
+    // WP13.0: end.
+
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 56] = [
+    pub const ALL: [&AuditAction; 62] = [
         &ZONE_CREATE,
         &ZONE_UPDATE,
         &ZONE_DELETE,
@@ -2222,6 +2483,13 @@ pub mod audit {
         &RECURSION_PRIME,
         &INFRA_FLUSH,
         &RECURSION_UNWANTED_FLUSH,
+        // WP13.0
+        &KRB_ACCOUNT_ADOPT,
+        &KRB_ACCOUNT_IMPORT,
+        &KRB_ACCOUNT_ROTATE,
+        &KRB_ACCOUNT_CHECK,
+        &KRB_ACCOUNT_DELETE,
+        &GSS_REFUSE,
     ];
 }
 
@@ -2261,14 +2529,44 @@ pub mod findings {
     /// A forwarding rule's upstream strips the DNSSEC records, so its answers are bogus.
     pub const FORWARDER_STRIPS_DNSSEC: &str = "dns.forwarder.strips_dnssec";
 
+    // WP13.0: the findings of the Kerberos account and the acceptor (identity plan
+    // section 3.10), raised by the self-test and the TKEY handler of later packages.
+    /// The clock skew between the node and the KDC is above 60 s (OPS-09).
+    pub const GSS_CLOCK_SKEW: &str = "dns.gss.clock_skew";
+    /// A ticket named a key version Tenko does not hold: someone reset the password.
+    pub const GSS_KVNO_UNKNOWN: &str = "dns.gss.kvno_unknown";
+    /// The rotation of the account's password failed; alarms after two failures.
+    pub const GSS_ROTATION_FAILED: &str = "dns.gss.rotation_failed";
+    /// The self-test's AS exchange failed: the account is disabled, deleted or its
+    /// password changed.
+    pub const GSS_SELF_TEST_FAILED: &str = "dns.gss.self_test_failed";
+    /// A service principal name of a node is missing from the account.
+    pub const GSS_SPN_MISSING: &str = "dns.gss.spn_missing";
+    /// A service principal name is held by another account as well.
+    pub const GSS_SPN_DUPLICATE: &str = "dns.gss.spn_duplicate";
+    /// The account's tickets come with RC4: `msDS-SupportedEncryptionTypes` is not 24.
+    pub const GSS_WEAK_ETYPE: &str = "dns.gss.weak_etype";
+    /// The context table of a node stays full: negotiations are refused.
+    pub const GSS_CONTEXT_LIMIT: &str = "dns.gss.context_limit";
+    // WP13.0: end.
+
     /// Every finding.
-    pub const ALL: [&str; 6] = [
+    pub const ALL: [&str; 14] = [
         PRIMING_FAILED,
         VALIDATION_CLOCK,
         TRUST_ANCHOR_STALE,
         TRUST_ANCHOR_PENDING,
         NTA_ACTIVE,
         FORWARDER_STRIPS_DNSSEC,
+        // WP13.0
+        GSS_CLOCK_SKEW,
+        GSS_KVNO_UNKNOWN,
+        GSS_ROTATION_FAILED,
+        GSS_SELF_TEST_FAILED,
+        GSS_SPN_MISSING,
+        GSS_SPN_DUPLICATE,
+        GSS_WEAK_ETYPE,
+        GSS_CONTEXT_LIMIT,
     ];
 }
 // WP10.0: end.

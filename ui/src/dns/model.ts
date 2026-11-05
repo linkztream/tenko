@@ -366,7 +366,10 @@ export function splitList(text: string): string[] {
 // ---------------------------------------------------------------------------------
 // Access lists
 
-/** One entry in its typed form: `192.0.2.0/24`, `key xfr.example.test`, `any`; `!` in front denies; an address alone is its host prefix. */
+/**
+ * One entry in its typed form: `192.0.2.0/24`, `key xfr.example.test`, `any`, `kerberos CORP.EXAMPLE.TEST [principal *$] [from 192.0.2.0/24]`
+ * (WP13.0); `!` in front denies; an address alone is its host prefix.
+ */
 export function aclEntryText(entry: AclEntry): string {
   const not = entry.deny ? "!" : "";
   switch (entry.kind) {
@@ -376,7 +379,36 @@ export function aclEntryText(entry: AclEntry): string {
       return `${not}key ${entry.name}`;
     case "any":
       return `${not}any`;
+    case "kerberos": {
+      const principal = entry.principal ? ` principal ${entry.principal}` : "";
+      const from = entry.from ? ` from ${entry.from}` : "";
+      return `${not}kerberos ${entry.realm}${principal}${from}`;
+    }
   }
+}
+
+/** The `kerberos REALM [principal PATTERN] [from PREFIX]` line of an access list (WP13.0). */
+function parseKerberosEntry(line: string): AclEntry | undefined {
+  const match = /^kerberos\s+(\S+)((?:\s+(?:principal|from)\s+\S+)*)$/i.exec(line);
+  if (!match) return undefined;
+  const realm = match[1] ?? "";
+  if (realm === "" || /[@/\\]/.test(realm)) return undefined;
+  const entry: AclEntry = { kind: "kerberos", realm: realm.toUpperCase() };
+  const rest = (match[2] ?? "").trim();
+  if (rest !== "") {
+    const parts = rest.split(/\s+/);
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+      const word = (parts[i] ?? "").toLowerCase();
+      const value = parts[i + 1] ?? "";
+      if (word === "principal" && entry.principal === undefined && !value.includes("@")) entry.principal = value;
+      else if (word === "from" && entry.from === undefined && parseCidr(value)) {
+        const ip = parseIp(value);
+        entry.from = value.includes("/") || !ip ? value.toLowerCase() : `${value.toLowerCase()}/${ip.version === 4 ? 32 : 128}`;
+      }
+      else return undefined;
+    }
+  }
+  return entry;
 }
 
 /** Parses one entry per line; the first bad line answers its number (from 1). */
@@ -389,7 +421,9 @@ export function parseAclEntries(text: string): { ok: true; entries: AclEntry[] }
     if (deny) line = line.slice(1).trim();
     const flag = deny ? { deny: true } : {};
     const key = /^key\s+(\S+)$/i.exec(line);
+    const kerberos = parseKerberosEntry(line);
     if (line.toLowerCase() === "any") entries.push({ kind: "any", ...flag });
+    else if (kerberos) entries.push({ ...kerberos, ...flag });
     else if (key && validName(canonical(key[1] ?? ""))) entries.push({ kind: "key", name: canonical(key[1] ?? ""), ...flag });
     else if (line.includes("/") && parseCidr(line)) entries.push({ kind: "prefix", prefix: line.toLowerCase(), ...flag });
     else if (parseIp(line)) entries.push({ kind: "prefix", prefix: `${line.toLowerCase()}/${parseIp(line)?.version === 4 ? 32 : 128}`, ...flag });

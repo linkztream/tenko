@@ -293,6 +293,7 @@ mod tests {
             rdata: Vec::new(),
             origin,
             key: None,
+            principal: None,
             updated: Stamp::new(Timestamp::now(), Principal::system(SystemComponent::Dhcp)),
         }
     }

@@ -75,6 +75,7 @@ fn rrset(zone: &Zone, scope: &ScopeName, owner: &str, data: &[RecordData]) -> Rr
         rdata: data.iter().map(Rdata::from_data).collect(),
         origin: Origin::Manual,
         key: None,
+        principal: None,
         updated: stamp(),
     }
 }

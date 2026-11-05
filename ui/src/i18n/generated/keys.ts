@@ -28,6 +28,11 @@ export type MessageKey =
   | "access.grants.revoke_title"
   | "access.grants.revoked"
   | "access.lede"
+  | "access.mappings.back"
+  | "access.mappings.coming.body"
+  | "access.mappings.coming.title"
+  | "access.mappings.lede"
+  | "access.mappings.title"
   | "access.mfa.optional"
   | "access.mfa.optional_help"
   | "access.mfa.passkey"
@@ -288,6 +293,7 @@ export type MessageKey =
   | "account.totp.verify"
   | "audit.action.auth.access.denied"
   | "audit.action.auth.break_glass.set"
+  | "audit.action.auth.directory.revoke"
   | "audit.action.auth.grant.create"
   | "audit.action.auth.grant.revoke"
   | "audit.action.auth.installation.language"
@@ -297,7 +303,13 @@ export type MessageKey =
   | "audit.action.auth.login.totp"
   | "audit.action.auth.login.webauthn"
   | "audit.action.auth.logout"
+  | "audit.action.auth.mapping.create"
+  | "audit.action.auth.mapping.delete"
   | "audit.action.auth.password.change"
+  | "audit.action.auth.provider.create"
+  | "audit.action.auth.provider.delete"
+  | "audit.action.auth.provider.update"
+  | "audit.action.auth.provider.verify"
   | "audit.action.auth.recovery.regenerate"
   | "audit.action.auth.role_policy.update"
   | "audit.action.auth.service_account.create"
@@ -390,10 +402,16 @@ export type MessageKey =
   | "audit.action.dns.forwarder.create"
   | "audit.action.dns.forwarder.delete"
   | "audit.action.dns.forwarder.update"
+  | "audit.action.dns.gss.refuse"
   | "audit.action.dns.infra.flush"
   | "audit.action.dns.key.create"
   | "audit.action.dns.key.delete"
   | "audit.action.dns.key.rollover"
+  | "audit.action.dns.krb.account.adopt"
+  | "audit.action.dns.krb.account.check"
+  | "audit.action.dns.krb.account.delete"
+  | "audit.action.dns.krb.account.import"
+  | "audit.action.dns.krb.account.rotate"
   | "audit.action.dns.list.compile"
   | "audit.action.dns.list.create"
   | "audit.action.dns.list.delete"
@@ -3293,6 +3311,10 @@ export type MessageKey =
   | "dns.infra.suffix"
   | "dns.infra.title"
   | "dns.job.dnssec_rollover"
+  | "dns.kerberos.coming.body"
+  | "dns.kerberos.coming.title"
+  | "dns.kerberos.sub"
+  | "dns.kerberos.title"
   | "dns.key.col.algorithm"
   | "dns.key.col.created"
   | "dns.key.col.name"
@@ -3477,6 +3499,7 @@ export type MessageKey =
   | "dns.nav.blocking"
   | "dns.nav.cache"
   | "dns.nav.forwarders"
+  | "dns.nav.kerberos"
   | "dns.nav.keys"
   | "dns.nav.label"
   | "dns.nav.lists"
@@ -3940,8 +3963,18 @@ export type MessageKey =
   | "errors.auth.break_glass.hardware_key_only"
   | "errors.auth.challenge_invalid"
   | "errors.auth.conflict"
+  | "errors.auth.directory.account_disabled"
+  | "errors.auth.directory.mapping_duplicate"
+  | "errors.auth.directory.mapping_invalid"
+  | "errors.auth.directory.mapping_not_found"
+  | "errors.auth.directory.no_mapping"
+  | "errors.auth.directory.overage"
   | "errors.auth.forbidden"
   | "errors.auth.invalid_credentials"
+  | "errors.auth.oidc.discovery_failed"
+  | "errors.auth.oidc.flow_invalid"
+  | "errors.auth.oidc.provider_error"
+  | "errors.auth.oidc.token_invalid"
   | "errors.auth.password.breached"
   | "errors.auth.password.context_specific"
   | "errors.auth.password.incorrect"
@@ -3952,6 +3985,14 @@ export type MessageKey =
   | "errors.auth.password.too_long"
   | "errors.auth.password.too_short"
   | "errors.auth.password.trivial"
+  | "errors.auth.provider.chain_changed"
+  | "errors.auth.provider.chain_unverified"
+  | "errors.auth.provider.exists"
+  | "errors.auth.provider.invalid"
+  | "errors.auth.provider.not_found"
+  | "errors.auth.provider.plain_refused"
+  | "errors.auth.provider.unavailable"
+  | "errors.auth.provider.unverified"
   | "errors.auth.session_expired"
   | "errors.auth.setup.closed"
   | "errors.auth.setup.invalid_host_name"
@@ -4070,8 +4111,16 @@ export type MessageKey =
   | "errors.dns.default_zone.invalid"
   | "errors.dns.forwarder.invalid"
   | "errors.dns.forwarder.not_found"
+  | "errors.dns.gss.refused"
   | "errors.dns.key.exists"
   | "errors.dns.key.not_found"
+  | "errors.dns.krb.account.exists"
+  | "errors.dns.krb.account.invalid"
+  | "errors.dns.krb.account.not_found"
+  | "errors.dns.krb.account.not_owned"
+  | "errors.dns.krb.kdc.unreachable"
+  | "errors.dns.krb.keytab.invalid"
+  | "errors.dns.krb.password.refused"
   | "errors.dns.list.invalid"
   | "errors.dns.list.not_found"
   | "errors.dns.module.disabled"
@@ -6671,6 +6720,7 @@ export type MessageKey =
   | "settings.nav.guardrails"
   | "settings.nav.label"
   | "settings.nav.languages"
+  | "settings.nav.providers"
   | "settings.nav.reconciler"
   | "settings.nav.secrets"
   | "settings.nav.security"
@@ -6684,6 +6734,10 @@ export type MessageKey =
   | "settings.profile_card.summary"
   | "settings.profile_card.table"
   | "settings.profile_card.title"
+  | "settings.providers.coming.body"
+  | "settings.providers.coming.title"
+  | "settings.providers.lede"
+  | "settings.providers.title"
   | "settings.reloaded"
   | "settings.security.audit_export.local"
   | "settings.security.audit_export.local_help"
@@ -9449,6 +9503,11 @@ export const messageKeys: readonly MessageKey[] = [
   "access.grants.revoke_title",
   "access.grants.revoked",
   "access.lede",
+  "access.mappings.back",
+  "access.mappings.coming.body",
+  "access.mappings.coming.title",
+  "access.mappings.lede",
+  "access.mappings.title",
   "access.mfa.optional",
   "access.mfa.optional_help",
   "access.mfa.passkey",
@@ -9709,6 +9768,7 @@ export const messageKeys: readonly MessageKey[] = [
   "account.totp.verify",
   "audit.action.auth.access.denied",
   "audit.action.auth.break_glass.set",
+  "audit.action.auth.directory.revoke",
   "audit.action.auth.grant.create",
   "audit.action.auth.grant.revoke",
   "audit.action.auth.installation.language",
@@ -9718,7 +9778,13 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.auth.login.totp",
   "audit.action.auth.login.webauthn",
   "audit.action.auth.logout",
+  "audit.action.auth.mapping.create",
+  "audit.action.auth.mapping.delete",
   "audit.action.auth.password.change",
+  "audit.action.auth.provider.create",
+  "audit.action.auth.provider.delete",
+  "audit.action.auth.provider.update",
+  "audit.action.auth.provider.verify",
   "audit.action.auth.recovery.regenerate",
   "audit.action.auth.role_policy.update",
   "audit.action.auth.service_account.create",
@@ -9811,10 +9877,16 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.dns.forwarder.create",
   "audit.action.dns.forwarder.delete",
   "audit.action.dns.forwarder.update",
+  "audit.action.dns.gss.refuse",
   "audit.action.dns.infra.flush",
   "audit.action.dns.key.create",
   "audit.action.dns.key.delete",
   "audit.action.dns.key.rollover",
+  "audit.action.dns.krb.account.adopt",
+  "audit.action.dns.krb.account.check",
+  "audit.action.dns.krb.account.delete",
+  "audit.action.dns.krb.account.import",
+  "audit.action.dns.krb.account.rotate",
   "audit.action.dns.list.compile",
   "audit.action.dns.list.create",
   "audit.action.dns.list.delete",
@@ -12714,6 +12786,10 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.infra.suffix",
   "dns.infra.title",
   "dns.job.dnssec_rollover",
+  "dns.kerberos.coming.body",
+  "dns.kerberos.coming.title",
+  "dns.kerberos.sub",
+  "dns.kerberos.title",
   "dns.key.col.algorithm",
   "dns.key.col.created",
   "dns.key.col.name",
@@ -12898,6 +12974,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.nav.blocking",
   "dns.nav.cache",
   "dns.nav.forwarders",
+  "dns.nav.kerberos",
   "dns.nav.keys",
   "dns.nav.label",
   "dns.nav.lists",
@@ -13361,8 +13438,18 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.auth.break_glass.hardware_key_only",
   "errors.auth.challenge_invalid",
   "errors.auth.conflict",
+  "errors.auth.directory.account_disabled",
+  "errors.auth.directory.mapping_duplicate",
+  "errors.auth.directory.mapping_invalid",
+  "errors.auth.directory.mapping_not_found",
+  "errors.auth.directory.no_mapping",
+  "errors.auth.directory.overage",
   "errors.auth.forbidden",
   "errors.auth.invalid_credentials",
+  "errors.auth.oidc.discovery_failed",
+  "errors.auth.oidc.flow_invalid",
+  "errors.auth.oidc.provider_error",
+  "errors.auth.oidc.token_invalid",
   "errors.auth.password.breached",
   "errors.auth.password.context_specific",
   "errors.auth.password.incorrect",
@@ -13373,6 +13460,14 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.auth.password.too_long",
   "errors.auth.password.too_short",
   "errors.auth.password.trivial",
+  "errors.auth.provider.chain_changed",
+  "errors.auth.provider.chain_unverified",
+  "errors.auth.provider.exists",
+  "errors.auth.provider.invalid",
+  "errors.auth.provider.not_found",
+  "errors.auth.provider.plain_refused",
+  "errors.auth.provider.unavailable",
+  "errors.auth.provider.unverified",
   "errors.auth.session_expired",
   "errors.auth.setup.closed",
   "errors.auth.setup.invalid_host_name",
@@ -13491,8 +13586,16 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.dns.default_zone.invalid",
   "errors.dns.forwarder.invalid",
   "errors.dns.forwarder.not_found",
+  "errors.dns.gss.refused",
   "errors.dns.key.exists",
   "errors.dns.key.not_found",
+  "errors.dns.krb.account.exists",
+  "errors.dns.krb.account.invalid",
+  "errors.dns.krb.account.not_found",
+  "errors.dns.krb.account.not_owned",
+  "errors.dns.krb.kdc.unreachable",
+  "errors.dns.krb.keytab.invalid",
+  "errors.dns.krb.password.refused",
   "errors.dns.list.invalid",
   "errors.dns.list.not_found",
   "errors.dns.module.disabled",
@@ -16092,6 +16195,7 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.nav.guardrails",
   "settings.nav.label",
   "settings.nav.languages",
+  "settings.nav.providers",
   "settings.nav.reconciler",
   "settings.nav.secrets",
   "settings.nav.security",
@@ -16105,6 +16209,10 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.profile_card.summary",
   "settings.profile_card.table",
   "settings.profile_card.title",
+  "settings.providers.coming.body",
+  "settings.providers.coming.title",
+  "settings.providers.lede",
+  "settings.providers.title",
   "settings.reloaded",
   "settings.security.audit_export.local",
   "settings.security.audit_export.local_help",

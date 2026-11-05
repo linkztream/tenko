@@ -78,6 +78,12 @@ fn check(acl: &Acl) -> ZoneResult<()> {
             "an access list has at most 1000 entries",
         ));
     }
+    // WP13.0: the rules of an entry (the principal pattern of a Kerberos entry).
+    for entry in &acl.entries {
+        entry
+            .validate()
+            .map_err(|problem| invalid("entries", &problem.to_string()))?;
+    }
     Ok(())
 }
 

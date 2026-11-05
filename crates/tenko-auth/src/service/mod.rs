@@ -524,6 +524,9 @@ impl AuthService {
             user_agent: user_agent.map(|agent| agent.chars().take(200).collect()),
             break_glass,
             mfa_enrollment_required: strength < self.required_for(user),
+            // WP13.0: every session the service makes today is a local one.
+            source: crate::directory::SessionSource::Local,
+            directory_checked_at: None,
         };
         let hash = secret.hash();
         batch.put_typed(&SESSIONS, &hash, &record)?;

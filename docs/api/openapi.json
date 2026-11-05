@@ -10,6 +10,286 @@
     "version": "0.0.11"
   },
   "paths": {
+    "/api/v1/access/directory-mappings": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List the directory mappings",
+        "description": "Reads the settings (administrators and operators). The mappings of every provider, each with the users it applied to at their last sign-in or directory check.",
+        "operationId": "list_directory_mappings",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "description": "Only the mappings of this provider.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ProviderId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of mappings by provider and group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_MappingItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not read the settings",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Create a directory mapping",
+        "description": "Administrators, in an interactive session. A group of a provider onto a role, with a scope for `operator` and `viewer`. Audited as `auth.mapping.create`.",
+        "operationId": "create_directory_mapping",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MappingCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The mapping",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`) or the mapping is invalid (`auth.directory.mapping_invalid`, parameters `field` and `reason`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not change the settings, or a token tries to",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider does not exist (`auth.provider.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The same group, role and scope is mapped already (`auth.directory.mapping_duplicate`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/access/directory-mappings/{id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Delete a directory mapping",
+        "description": "Administrators, in an interactive session. The rights it gave end at the users' next sign-in or directory check. Audited as `auth.mapping.delete`.",
+        "operationId": "delete_directory_mapping",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Mapping identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The mapping is gone"
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not change the settings, or a token tries to",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The mapping does not exist (`auth.directory.mapping_not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/access/grants": {
       "get": {
         "tags": [
@@ -2834,6 +3114,321 @@
         ]
       }
     },
+    "/api/v1/auth/negotiate": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign in with Kerberos through the browser",
+        "description": "Public. Without a token answers `401` with `WWW-Authenticate: Negotiate`; with a SPNEGO token for `HTTP/<fqdn>` accepts it with the account's keys, answers the AP-REP in the header, maps the PAC's groups through the negotiate provider's mappings and creates the session (RFC 4559; identity plan section 3.14). Offered only while a negotiate provider is verified.",
+        "operationId": "negotiate_login",
+        "responses": {
+          "200": {
+            "description": "The session is created; the browser is moved to the UI",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The session cookie `tenko_session`"
+              },
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`Negotiate <AP-REP>`, the mutual authentication"
+              }
+            },
+            "content": {
+              "text/html": {}
+            }
+          },
+          "401": {
+            "description": "No token yet (`WWW-Authenticate: Negotiate`), or the token was refused (`auth.invalid_credentials`)",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`Negotiate`"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No mapping matches the principal (`auth.directory.no_mapping`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No verified negotiate provider (`auth.provider.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/oidc/{id}/callback": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Finish an OpenID Connect sign-in",
+        "description": "Public; the provider's redirect target. Matches the state and the flow cookie, exchanges the code with the client secret and the PKCE verifier, verifies the ID token (issuer, audience and `azp`, times, nonce, an algorithm of the allow-list, the key from the provider's JWKS), maps the claims onto roles and scopes, creates the session with the `tenko_session` cookie and answers a small page that moves the browser to the return path. No access or refresh token is kept.",
+        "operationId": "finish_oidc_login",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "description": "The authorization code.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "The state of the flow.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "description": "The provider's error, when it refused.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page that moves the browser to the return path, with the session cookie",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The session cookie `tenko_session`"
+              }
+            },
+            "content": {
+              "text/html": {}
+            }
+          },
+          "400": {
+            "description": "No flow matches the callback (`auth.oidc.flow_invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The ID token was refused (`auth.oidc.token_invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No mapping matches the user (`auth.directory.no_mapping`), or the groups came as an overage marker (`auth.directory.overage`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider does not exist (`auth.provider.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The provider answered an error (`auth.oidc.provider_error`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/oidc/{id}/start": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start an OpenID Connect sign-in",
+        "description": "Public. Creates the flow (state, nonce, PKCE verifier, the return path; ten minutes, single use), sets the flow cookie `tenko_oidc` (`HttpOnly; Secure; SameSite=Lax`) and redirects the browser to the provider's authorization endpoint (identity plan section 3.12).",
+        "operationId": "start_oidc_login",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "next",
+            "in": "query",
+            "description": "Where the browser goes after the sign-in: a path of the UI; `/` when absent or\nnot a path.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "test",
+            "in": "query",
+            "description": "A test sign-in by an administrator: verifies the provider instead of creating a\nsession.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "The redirect to the provider, with the flow cookie",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The provider's authorization endpoint"
+              },
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The flow cookie `tenko_oidc`"
+              }
+            }
+          },
+          "404": {
+            "description": "The provider does not exist or is not a verified OIDC provider (`auth.provider.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
     "/api/v1/auth/password": {
       "post": {
         "tags": [
@@ -3185,6 +3780,722 @@
           },
           "404": {
             "description": "The person has no such key (`auth.preference.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/providers": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "List the sign-in providers",
+        "description": "Reads the settings (administrators and operators). Every provider with its state, its last success and its last error; secrets as references.",
+        "operationId": "list_auth_providers",
+        "responses": {
+          "200": {
+            "description": "The providers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderItem"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not read the settings",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Create a sign-in provider",
+        "description": "Administrators, in an interactive session. The provider starts as a draft: it is offered on the sign-in page only after a test sign-in completed. An OIDC provider's discovery document is fetched now; plain LDAP is refused outside the Lab profile (TGL-34). Audited as `auth.provider.create`.",
+        "operationId": "create_auth_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`) or the settings are invalid (`auth.provider.invalid`, parameters `field` and `reason`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not change the settings, or a token tries to",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A provider of the name exists (`auth.provider.exists`), or plain LDAP outside Lab (`auth.provider.plain_refused`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The provider's discovery document could not be fetched (`auth.oidc.discovery_failed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/providers/ldap/chain": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Fetch the certificate chain of an LDAP server",
+        "description": "Administrators, in an interactive session. Opens a TLS connection to the URL (LDAPS, or StartTLS after the LDAP extended request), reads the chain the server presents, sends no credential and no other request, and answers the certificates with their fingerprints and whether the chain verifies against the system trust store. Stores nothing: the pin is made by the provider's create or update call that carries the confirmed certificates (identity plan section 3.13).",
+        "operationId": "fetch_ldap_chain",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LdapChainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The chain, the server's certificate first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapChainResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`) or the URL is not an LDAP URL (`auth.provider.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not change the settings, or a token tries to",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/providers/public": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "The providers the sign-in page offers",
+        "description": "Public. The verified providers as buttons and name suffixes; nothing of their settings.",
+        "operationId": "list_public_auth_providers",
+        "responses": {
+          "200": {
+            "description": "The providers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProviders"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/providers/{id}": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Get a sign-in provider",
+        "description": "Reads the settings (administrators and operators).",
+        "operationId": "get_auth_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not read the settings",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider does not exist (`auth.provider.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Delete a sign-in provider",
+        "description": "Administrators, in an interactive session. Deletes the provider, its mappings and its secret; the sessions signed in through it end at their next request; its users' records stay, disabled for sign-in. Audited as `auth.provider.delete`.",
+        "operationId": "delete_auth_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The provider is gone"
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not change the settings, or a token tries to",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider does not exist (`auth.provider.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change a sign-in provider",
+        "description": "Administrators, in an interactive session. New settings, a new secret, a new trust (the confirmed chain of `POST /auth/providers/ldap/chain`, a PEM bundle or the system store), or the state `disabled` or `draft`. A change of the settings withdraws the provider to `draft` until a test sign-in completes again. Audited as `auth.provider.update`.",
+        "operationId": "update_auth_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`) or the settings are invalid (`auth.provider.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not change the settings, or a token tries to",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider does not exist (`auth.provider.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The name is taken (`auth.provider.exists`), plain LDAP outside Lab (`auth.provider.plain_refused`), or `verified` asked for directly (`auth.provider.unverified`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/providers/{id}/test": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Test an LDAP provider with a user name and password",
+        "description": "Administrators, in an interactive session. Finds the user with the service account (or binds as the user alone), checks the password with the user's own bind, reads the groups and shows the roles the mappings would give; a completed test verifies the provider. An OIDC provider is tested through its own flow (`GET /auth/oidc/{id}/start?test=1`). The password is used for the bind and forgotten. Audited as `auth.provider.verify`.",
+        "operationId": "test_auth_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderTest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The user found, the groups and the roles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderTestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`), or the provider is not an LDAP provider (`auth.provider.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token, or the directory refused the password (`auth.invalid_credentials`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not change the settings, a token tries to, no mapping matches (`auth.directory.no_mapping`), or the account is disabled (`auth.directory.account_disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider does not exist (`auth.provider.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The chain the server presents is not the pinned one (`auth.provider.chain_changed`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12119,6 +13430,469 @@
         }
       }
     },
+    "/api/v1/dns/kerberos": {
+      "get": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Get the Kerberos account of secure updates",
+        "description": "Scope: `dns.keys`. The account's metadata (realm, name, SPNs, key versions with their numbers and states, the last rotation and self-test), the findings of the last self-test and the contexts of this node. Never a key.",
+        "operationId": "get_dns_kerberos",
+        "responses": {
+          "200": {
+            "description": "The status; `account` absent until one is set up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KerberosStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Delete the Kerberos account from Tenko",
+        "description": "Scope: `dns.keys`, in an interactive session. Removes the keys from the vault and the metadata; the zones with Kerberos settings fall back to their other lists. The account in the directory is the administrator's to delete. Audited as `dns.krb.account.delete`.",
+        "operationId": "delete_dns_kerberos",
+        "responses": {
+          "204": {
+            "description": "The account is gone"
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`, or a token tries to delete",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No account is set up (`dns.krb.account.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/dns/kerberos/adopt": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Take over a pre-staged computer account",
+        "description": "Scope: `dns.keys`, in an interactive session. Tenko obtains a ticket for `kadmin/changepw` with the one-time password, changes the password to a random one only Tenko knows, derives the AES keys, learns the key version from a service ticket for its own SPN, stores the keys in the vault and forgets both passwords (ID-Q4). Audited as `dns.krb.account.adopt`; the self-test runs after it.",
+        "operationId": "adopt_dns_kerberos",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KerberosAdopt"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The account is Tenko's; the status with its findings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KerberosStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`) or the account settings are invalid (`dns.krb.account.invalid`, parameters `field` and `reason`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`, or a token tries to change the account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An account exists already for the realm (`dns.krb.account.exists`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The KDC refused the one-time password (`dns.krb.password.refused`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No KDC of the realm answered (`dns.krb.kdc.unreachable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/dns/kerberos/check": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Run the self-test of the Kerberos account now",
+        "description": "Scope: `dns.keys`. An AS exchange as the account, a TGS exchange for each SPN and its acceptance by the node's own acceptor, the KDC's time against the node's, the encryption types, a duplicate-SPN check when an LDAP provider of the realm is configured (identity plan section 3.1). Audited as `dns.krb.account.check` on failure or change.",
+        "operationId": "check_dns_kerberos",
+        "responses": {
+          "200": {
+            "description": "The status with the findings of this run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KerberosStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No account is set up (`dns.krb.account.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No KDC of the realm answered (`dns.krb.kdc.unreachable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/kerberos/import": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Import a keytab",
+        "description": "Scope: `dns.keys`, in an interactive session. The AES entries for the principal are stored in the vault; RC4 and DES entries are refused; the file is not kept. The password stays the administrator's, so Tenko does not rotate it (ID-Q5). Audited as `dns.krb.account.import`.",
+        "operationId": "import_dns_kerberos",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KerberosImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The keys are held; the status with its findings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KerberosStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`) or the account settings are invalid (`dns.krb.account.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`, or a token tries to change the account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An account exists already for the realm (`dns.krb.account.exists`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The keytab does not parse or holds no AES entry for the principal (`dns.krb.keytab.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/dns/kerberos/rotate": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Rotate the password of the Kerberos account now",
+        "description": "Scope: `dns.keys`, in an interactive session. A job: the new keys are written as pending, the change-password request is sent, the new key version is read back, the keys move to current and the old ones to previous (ID-Q5). Only for an account Tenko owns. Audited as `dns.krb.account.rotate`.",
+        "operationId": "rotate_dns_kerberos",
+        "responses": {
+          "202": {
+            "description": "The rotation job started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsJobStarted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`, or a token tries to rotate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No account is set up (`dns.krb.account.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The account was imported, so its password is not Tenko's (`dns.krb.account.not_owned`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/dns/keys": {
       "get": {
         "tags": [
@@ -14859,6 +16633,147 @@
           },
           "404": {
             "description": "No such zone (`dns.zone.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/zones/{id}/owners": {
+      "get": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "List the owners of a zone's names",
+        "description": "Scope: `dns.read`. One row per name with an owner (identity plan section 3.6): the SID when the ticket carried a PAC, the principal, since when, and the hold after the name's last record went. Empty for a zone without ownership.",
+        "operationId": "list_dns_zone_owners",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Zone identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "The zone scope; `default` when absent.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ScopeName"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "description": "Only the names at or below this name.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DnsName"
+            }
+          },
+          {
+            "name": "owner",
+            "in": "query",
+            "description": "Only the names of this owner, by SID or principal.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of owners by scope and name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_NameOwnerItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.read`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The zone does not exist (`dns.zone.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39204,6 +41119,45 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "Requests signed with GSS-TSIG by a principal of a realm.",
+            "required": [
+              "realm",
+              "kind"
+            ],
+            "properties": {
+              "deny": {
+                "type": "boolean",
+                "description": "The entry refuses instead of allowing."
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Only clients in this prefix.",
+                "example": "192.0.2.0/24"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "kerberos"
+                ]
+              },
+              "principal": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "A pattern the principal's name (without the realm) must match: `*` is any run\nof characters, so `*$` is every computer account. Absent: every principal of\nthe realm."
+              },
+              "realm": {
+                "$ref": "#/components/schemas/Realm",
+                "description": "The realm."
+              }
+            }
           }
         ],
         "description": "One entry of an access list; the first entry that matches decides."
@@ -42391,6 +44345,62 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "ChainCertificate": {
+        "type": "object",
+        "description": "One certificate of a fetched or pasted chain, as the confirmation screen shows it.",
+        "required": [
+          "subject",
+          "issuer",
+          "not_before",
+          "not_after",
+          "key_type",
+          "names",
+          "fingerprint",
+          "ca",
+          "pem"
+        ],
+        "properties": {
+          "ca": {
+            "type": "boolean",
+            "description": "Whether the certificate is a CA (above the server's own)."
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "The SHA-256 fingerprint, lower-case hexadecimal."
+          },
+          "issuer": {
+            "type": "string",
+            "description": "The issuer."
+          },
+          "key_type": {
+            "type": "string",
+            "description": "The key type (`RSA 2048`, `ECDSA P-256`)."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The subject alternative names."
+          },
+          "not_after": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Valid until."
+          },
+          "not_before": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Valid from."
+          },
+          "pem": {
+            "type": "string",
+            "description": "The certificate, PEM, to send back as the confirmed trust."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The subject."
           }
         }
       },
@@ -46729,6 +48739,119 @@
           }
         }
       },
+      "DirectoryMapping": {
+        "type": "object",
+        "description": "A mapping of a directory group onto a role and a scope (section 3.16): evaluated at\nsign-in and at each directory check, held on the session, never stored as a grant.",
+        "required": [
+          "id",
+          "provider",
+          "group",
+          "role"
+        ],
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/GroupMatch",
+            "description": "The group."
+          },
+          "id": {
+            "$ref": "#/components/schemas/MappingId",
+            "description": "The id."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderId",
+            "description": "The provider whose groups this mapping reads."
+          },
+          "role": {
+            "$ref": "#/components/schemas/RoleName",
+            "description": "The role."
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScopeRule",
+                "description": "Where the role applies (`{kind, value}` as in a grant); absent for the whole\ninstallation. `admin` and `auditor` take none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "DirectoryProvider": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OidcSettings",
+                "description": "`OpenID Connect`."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "oidc"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "`OpenID Connect`."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LdapSettings",
+                "description": "LDAP."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "ldap"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "LDAP."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NegotiateSettings",
+                "description": "Kerberos through the browser."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "negotiate"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "Kerberos through the browser."
+          }
+        ],
+        "description": "A sign-in provider's settings by kind (section 4.1)."
+      },
       "DnsActuation": {
         "type": "object",
         "description": "What one run of the actuator did; part of the reconciler's run report.",
@@ -47163,6 +49286,17 @@
             ],
             "description": "Whether Tenko DHCP may write the names of its clients into the zone (ADR 0020; the\ninternal path, which TGL-09 does not govern). None follows the security profile:\nHome and Lab allow, Standard and Hardened do not until the operator allows it."
           },
+          "kerberos": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/KerberosUpdate",
+                "description": "The Kerberos settings of the zone: the realms whose principals may sign updates\nwith GSS-TSIG, the ownership rule and the privileged groups. Absent: no GSS-TSIG.\nWith it set, `require_tsig` means \"a signature is required, TSIG or GSS-TSIG\"\n(the Windows mode \"secure only\"; with `require_tsig` off, \"nonsecure and secure\")."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "may_replace_ipam": {
             "type": "boolean",
             "description": "A dynamic update may replace an RRset whose origin is `ipam` (plan section 2.5)."
@@ -47520,6 +49654,14 @@
             ]
           }
         }
+      },
+      "EncryptionType": {
+        "type": "string",
+        "description": "The Kerberos encryption types the account holds (RFC 3962): AES only (ID-Q3). RC4, DES\nand 3DES are never accepted (ADR 0026 point 3).",
+        "enum": [
+          "aes128-cts-hmac-sha1",
+          "aes256-cts-hmac-sha1"
+        ]
       },
       "Endpoint": {
         "type": "object",
@@ -49369,6 +51511,100 @@
       "GroupKey": {
         "type": "string",
         "description": "Groups jobs that share a parallelism limit, for example every write through one\nnetwork controller (CONN-09): 1 to 128 visible ASCII characters."
+      },
+      "GroupMatch": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A group SID, from `tokenGroups` or the PAC.",
+            "required": [
+              "sid",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sid"
+                ]
+              },
+              "sid": {
+                "$ref": "#/components/schemas/Sid",
+                "description": "The SID."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A group's distinguished name, from `memberOf` or a search.",
+            "required": [
+              "dn",
+              "kind"
+            ],
+            "properties": {
+              "dn": {
+                "type": "string",
+                "description": "The DN."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "dn"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A value of the OIDC groups claim (a group id or an app role).",
+            "required": [
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "claim"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "description": "The value."
+              }
+            }
+          }
+        ],
+        "description": "The group a mapping matches (section 3.16)."
+      },
+      "GssContexts": {
+        "type": "object",
+        "description": "The GSS-TSIG contexts of this node (identity plan section 3.3).",
+        "required": [
+          "negotiating",
+          "established",
+          "refused_last_hour"
+        ],
+        "properties": {
+          "established": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Established contexts.",
+            "minimum": 0
+          },
+          "negotiating": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Negotiations in flight.",
+            "minimum": 0
+          },
+          "refused_last_hour": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Negotiations refused in the last hour.",
+            "minimum": 0
+          }
+        }
       },
       "Guardrails": {
         "type": "object",
@@ -53971,6 +56207,184 @@
           }
         }
       },
+      "KerberosAdopt": {
+        "type": "object",
+        "description": "Body of `POST /dns/kerberos/adopt`: the pre-staged account and its one-time password\n(ID-Q4). Tenko changes the password at once; the one given is used once and forgotten.",
+        "required": [
+          "realm",
+          "name",
+          "password",
+          "spns"
+        ],
+        "properties": {
+          "kdcs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The KDCs, `host` or `host:port`; empty: found through `_kerberos._tcp.<realm>`."
+          },
+          "name": {
+            "type": "string",
+            "description": "The account name as the administrator created it (`TENKO-DNS$`)."
+          },
+          "password": {
+            "$ref": "#/components/schemas/SecretString",
+            "description": "The one-time password set by `New-ADComputer`."
+          },
+          "realm": {
+            "$ref": "#/components/schemas/Realm",
+            "description": "The realm (`CORP.EXAMPLE.TEST`; case does not matter)."
+          },
+          "rotation_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Days between password rotations, 0 to 365; absent: 30 (TGL-32; 0 under Lab only).",
+            "minimum": 0
+          },
+          "spns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The service principal names the account holds (`DNS/<fqdn>` per node, `HTTP/<fqdn>`\nfor web sign-in); the self-test checks them."
+          }
+        }
+      },
+      "KerberosFinding": {
+        "type": "object",
+        "description": "One finding of the self-test (identity plan section 3.10).",
+        "required": [
+          "code",
+          "detail",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was found."
+          },
+          "code": {
+            "type": "string",
+            "description": "The finding (`dns.gss.clock_skew`, `dns.gss.kvno_unknown`, `dns.gss.spn_missing`,\n...)."
+          },
+          "detail": {
+            "type": "string",
+            "description": "What was seen (the skew measured, the version seen, the SPN), in English."
+          }
+        }
+      },
+      "KerberosImport": {
+        "type": "object",
+        "description": "Body of `POST /dns/kerberos/import`: a keytab made with `ktpass` or `msktutil`.",
+        "required": [
+          "realm",
+          "keytab",
+          "spns"
+        ],
+        "properties": {
+          "kdcs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The KDCs; empty: found through `_kerberos._tcp.<realm>`."
+          },
+          "keytab": {
+            "$ref": "#/components/schemas/SecretString",
+            "description": "The keytab file (MIT format version 2) in base64url without padding (RFC 4648\nsection 5)."
+          },
+          "realm": {
+            "$ref": "#/components/schemas/Realm",
+            "description": "The realm."
+          },
+          "spns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The service principal names the account holds."
+          }
+        }
+      },
+      "KerberosStatus": {
+        "type": "object",
+        "description": "Body of `GET /dns/kerberos` and the answer of `POST /dns/kerberos/check`.",
+        "required": [
+          "contexts"
+        ],
+        "properties": {
+          "account": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/KrbAccount",
+                "description": "The account, metadata only; absent until one is adopted or imported."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contexts": {
+            "$ref": "#/components/schemas/GssContexts",
+            "description": "The contexts of this node."
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KerberosFinding"
+            },
+            "description": "The findings of the last self-test, empty when it passed."
+          }
+        }
+      },
+      "KerberosUpdate": {
+        "type": "object",
+        "description": "The Kerberos settings of a zone's update policy (section 3.5): the realms whose\nprincipals may sign updates with GSS-TSIG, the ownership rule and its hold, the groups\nwhose members are privileged and the group whose members leave names unowned.",
+        "required": [
+          "realms"
+        ],
+        "properties": {
+          "owner_hold_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days the owner of a removed name is held before the name is new again.",
+            "minimum": 0
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/Ownership",
+            "description": "Whether the Windows ownership rules apply."
+          },
+          "privileged": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Sid"
+            },
+            "description": "The privileged groups by SID: Domain Admins (RID 512), Enterprise Admins (519),\nDomain Controllers (516), `DnsAdmins`, and any the operator adds. Membership comes\nfrom the PAC."
+          },
+          "realms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Realm"
+            },
+            "description": "The realms whose tickets the zone accepts (R134: a child domain is its own realm)."
+          },
+          "update_proxy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Sid",
+                "description": "The `DnsUpdateProxy` group: a member that creates a name leaves it unowned."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "KeyCreate": {
         "type": "object",
         "description": "`POST /dns/keys`: generate a TSIG key, or import one with its secret.",
@@ -54082,6 +56496,48 @@
           "removed"
         ]
       },
+      "KeyVersionMeta": {
+        "type": "object",
+        "description": "One key version of the account: the metadata beside the secret, never the key bytes.",
+        "required": [
+          "kvno",
+          "etypes",
+          "state",
+          "created"
+        ],
+        "properties": {
+          "created": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the version was made."
+          },
+          "etypes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EncryptionType"
+            },
+            "description": "The encryption types the version holds keys for."
+          },
+          "kvno": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The key version number the KDC puts in tickets.",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/KeyVersionState",
+            "description": "Current, previous or pending."
+          }
+        }
+      },
+      "KeyVersionState": {
+        "type": "string",
+        "description": "Where a key version stands in the rotation (section 3.1).",
+        "enum": [
+          "current",
+          "previous",
+          "pending"
+        ]
+      },
       "KillSwitchCommand": {
         "type": "object",
         "description": "One probe's kill switch command.",
@@ -54160,6 +56616,79 @@
           "stopped": {
             "type": "boolean",
             "description": "Whether it is on (or asked to be on)."
+          }
+        }
+      },
+      "KrbAccount": {
+        "type": "object",
+        "description": "The AD computer account whose keys Tenko holds (section 3.1): one per realm, with the\nSPN of every node name. Metadata only; the keys are the system secret of purpose\n[`super::KRB_PURPOSE`] in the vault.",
+        "required": [
+          "realm",
+          "name",
+          "spns",
+          "owned"
+        ],
+        "properties": {
+          "kdcs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The KDCs the operator listed; empty: found through `_kerberos._tcp.<realm>`."
+          },
+          "last_check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The last self-test."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_rotation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The last successful rotation."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The account name as the KDC knows it (`TENKO-DNS$` for a computer account, a user\nname for an imported user account)."
+          },
+          "owned": {
+            "type": "boolean",
+            "description": "Whether Tenko owns the password (adopted) or an administrator does (imported\nkeytab)."
+          },
+          "realm": {
+            "$ref": "#/components/schemas/Realm",
+            "description": "The realm."
+          },
+          "rotation_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days between rotations of an owned account; 0 is off (Lab only, TGL-32).",
+            "minimum": 0
+          },
+          "spns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The service principal names (`DNS/<fqdn>`, `HTTP/<fqdn>`)."
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeyVersionMeta"
+            },
+            "description": "The key versions held."
           }
         }
       },
@@ -54381,6 +56910,253 @@
           }
         },
         "additionalProperties": false
+      },
+      "LdapBind": {
+        "type": "object",
+        "description": "The read-only service account that finds users and runs the directory check (ID-Q13).",
+        "required": [
+          "dn",
+          "secret"
+        ],
+        "properties": {
+          "dn": {
+            "type": "string",
+            "description": "The distinguished name (or user principal name) it binds as."
+          },
+          "secret": {
+            "$ref": "#/components/schemas/SecretRef",
+            "description": "Its password in the vault (purpose [`LDAP_PURPOSE`])."
+          }
+        }
+      },
+      "LdapChainRequest": {
+        "type": "object",
+        "description": "Body of `POST /auth/providers/ldap/chain`.",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "transport": {
+            "$ref": "#/components/schemas/LdapTransport",
+            "description": "LDAPS, or `StartTLS` after the LDAP extended request; never plain."
+          },
+          "url": {
+            "type": "string",
+            "description": "The server, an `ldaps://` or `ldap://` URL."
+          }
+        }
+      },
+      "LdapChainResult": {
+        "type": "object",
+        "description": "The answer of `POST /auth/providers/ldap/chain`.",
+        "required": [
+          "certificates",
+          "verifies",
+          "compare_commands"
+        ],
+        "properties": {
+          "certificates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChainCertificate"
+            },
+            "description": "The chain as the server presented it, the server's certificate first."
+          },
+          "compare_commands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The commands that print the fingerprints on a domain controller, for the\ncomparison the administrator makes before confirming."
+          },
+          "verifies": {
+            "type": "boolean",
+            "description": "Whether the chain verifies against the system trust store already."
+          }
+        }
+      },
+      "LdapGroupMode": {
+        "type": "string",
+        "description": "How the groups of a user are read (section 3.13).",
+        "enum": [
+          "token_groups",
+          "member_of",
+          "search"
+        ]
+      },
+      "LdapSettings": {
+        "type": "object",
+        "description": "An LDAP provider (section 3.13): Active Directory or another directory.",
+        "required": [
+          "urls",
+          "trust",
+          "base_dn"
+        ],
+        "properties": {
+          "base_dn": {
+            "type": "string",
+            "description": "Where users are searched."
+          },
+          "bind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LdapBind",
+                "description": "The service account; absent: the user's own bind only, no directory check (allowed\nunder Home, ID-Q13)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "default": {
+            "type": "boolean",
+            "description": "Whether a bare user name without a local account goes to this provider."
+          },
+          "grace_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Minutes a session is kept while the directory cannot be reached; absent: the\nprofile's (TGL-35).",
+            "minimum": 0
+          },
+          "group_mode": {
+            "$ref": "#/components/schemas/LdapGroupMode",
+            "description": "How groups are read."
+          },
+          "recheck_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Minutes between directory checks of a session; absent: the profile's (TGL-35).",
+            "minimum": 0
+          },
+          "suffixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The name suffixes and `NetBIOS` domains that route a user name to this provider\n(`corp.example.test` for `alex@corp.example.test`, `CORP` for `CORP\\alex`)."
+          },
+          "transport": {
+            "$ref": "#/components/schemas/LdapTransport",
+            "description": "LDAPS, `StartTLS` or plain (Lab only)."
+          },
+          "trust": {
+            "$ref": "#/components/schemas/LdapTrust",
+            "description": "What the server's certificate is verified against."
+          },
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The servers, `ldaps://` or `ldap://` URLs tried in order, or one entry\n`srv:<domain>` for `_ldap._tcp.<domain>` discovery."
+          },
+          "user_filter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A filter that narrows the users found, in RFC 4515 syntax, combined with the name\nmatch (`(memberOf=cn=Tenko,...)`)."
+          }
+        }
+      },
+      "LdapTransport": {
+        "type": "string",
+        "description": "How an LDAP provider is reached (ID-Q13, TGL-34).",
+        "enum": [
+          "ldaps",
+          "start_tls",
+          "plain"
+        ]
+      },
+      "LdapTrust": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The system trust store.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "system"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A PEM bundle the administrator pasted or uploaded.",
+            "required": [
+              "certs",
+              "kind"
+            ],
+            "properties": {
+              "certs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The certificates, PEM, one or more."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "pem"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The chain fetched from the server and pinned after the administrator confirmed\nit by its fingerprints; a chain that changes later is refused and shown, never\npinned again silently.",
+            "required": [
+              "certs",
+              "fingerprints",
+              "confirmed_by",
+              "confirmed_at",
+              "kind"
+            ],
+            "properties": {
+              "certs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The certificates confirmed, PEM."
+              },
+              "confirmed_at": {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When."
+              },
+              "confirmed_by": {
+                "$ref": "#/components/schemas/UserId",
+                "description": "The administrator who confirmed them."
+              },
+              "fingerprints": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Their SHA-256 fingerprints, lower-case hexadecimal, in the order of `certs`."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "imported"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What an LDAP provider's TLS connection verifies the server against (the owner's\naddition to ID-Q13, section 3.13). Certificates only, never a key; \"accept whatever is\npresented\" does not exist."
       },
       "LeaderServiceState": {
         "type": "string",
@@ -55779,6 +58555,29 @@
           }
         }
       },
+      "MappedUser": {
+        "type": "object",
+        "description": "A user the mapping gave rights to at a sign-in or a check.",
+        "required": [
+          "user",
+          "display_name",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the mapping last applied to the user."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "The display name."
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The user."
+          }
+        }
+      },
       "Mapping": {
         "type": "object",
         "description": "The mapping of an import: one entry per sheet, and the options.",
@@ -55798,6 +58597,65 @@
             "description": "Sheet mappings, in upload order."
           }
         }
+      },
+      "MappingCreate": {
+        "type": "object",
+        "description": "Body of `POST /access/directory-mappings`.",
+        "required": [
+          "provider",
+          "group",
+          "role"
+        ],
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/GroupMatch",
+            "description": "The group: a SID, a DN or a claim value."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderId",
+            "description": "The provider."
+          },
+          "role": {
+            "$ref": "#/components/schemas/RoleName",
+            "description": "The role."
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScopeRule",
+                "description": "Where the role applies; absent for the whole installation. `admin` and `auditor`\ntake none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MappingId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "MappingItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DirectoryMapping",
+            "description": "The mapping."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "users": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MappedUser"
+                },
+                "description": "The users the mapping applied to at their last sign-in or check."
+              }
+            }
+          }
+        ],
+        "description": "A mapping as the API shows it."
       },
       "MaskSource": {
         "type": "string",
@@ -58848,6 +61706,56 @@
           }
         }
       },
+      "NameOwnerItem": {
+        "type": "object",
+        "description": "The owner of one name (identity plan section 3.6).",
+        "required": [
+          "scope",
+          "name",
+          "principal",
+          "since"
+        ],
+        "properties": {
+          "hold_until": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "Until when the owner is held after the name's last record went; absent while the\nname has records."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The name."
+          },
+          "principal": {
+            "$ref": "#/components/schemas/PrincipalName",
+            "description": "The owner's principal."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeName",
+            "description": "The zone scope."
+          },
+          "sid": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Sid",
+                "description": "The owner's SID, when the ticket carried a PAC."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "since": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Since when."
+          }
+        }
+      },
       "NameSource": {
         "type": "string",
         "description": "A kind of source, as the name authority ranks them.",
@@ -58899,6 +61807,19 @@
           "zone": {
             "$ref": "#/components/schemas/DnsName",
             "description": "The zone; never the root."
+          }
+        }
+      },
+      "NegotiateSettings": {
+        "type": "object",
+        "description": "A Kerberos sign-in provider (section 3.14): the realm whose tickets `GET\n/auth/negotiate` accepts; its mappings are by SID.",
+        "required": [
+          "realm"
+        ],
+        "properties": {
+          "realm": {
+            "$ref": "#/components/schemas/Realm",
+            "description": "The realm."
           }
         }
       },
@@ -60997,6 +63918,115 @@
           }
         }
       },
+      "OidcMfa": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The claim is not trusted: the profile's MFA rule asks for a Tenko factor.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An `amr` value in the list yields the strength of a password with TOTP; `hwk`\nyields a hardware key when the provider is marked as attesting it.",
+            "required": [
+              "values",
+              "kind"
+            ],
+            "properties": {
+              "hardware_key": {
+                "type": "boolean",
+                "description": "Whether `hwk` from this provider counts as a hardware security key."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "trust_amr"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The values that count as a second factor (`mfa`, `hwk`, `otp`, ...)."
+              }
+            }
+          }
+        ],
+        "description": "What an OIDC provider's `amr` claim says about a second factor (ID-Q16)."
+      },
+      "OidcSettings": {
+        "type": "object",
+        "description": "An `OpenID Connect` provider (section 3.12): Entra ID, AD FS, Keycloak, Okta.",
+        "required": [
+          "issuer",
+          "client_id",
+          "client_secret"
+        ],
+        "properties": {
+          "button_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The text of the sign-in button; the provider's name when absent."
+          },
+          "ca": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A PEM bundle the provider's certificate is checked against instead of the system\ntrust store."
+          },
+          "client_id": {
+            "type": "string",
+            "description": "The client id of Tenko at the provider."
+          },
+          "client_secret": {
+            "$ref": "#/components/schemas/SecretRef",
+            "description": "The client secret in the vault (purpose [`OIDC_PURPOSE`])."
+          },
+          "groups_claim": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The claim that lists the groups or app roles (`groups`, `roles`)."
+          },
+          "issuer": {
+            "type": "string",
+            "description": "The issuer, exactly as the ID token names it; discovery reads\n`<issuer>/.well-known/openid-configuration`."
+          },
+          "mfa": {
+            "$ref": "#/components/schemas/OidcMfa",
+            "description": "What the `amr` claim is trusted for."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The scopes asked beyond `openid`."
+          },
+          "username_claim": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The claim that becomes the user name (`preferred_username` by default)."
+          }
+        }
+      },
       "OperatorSecretPatch": {
         "type": "object",
         "description": "A change of an operator secret. Absent members stay; `null` clears `username` and\n`notes`.",
@@ -61925,6 +64955,14 @@
             "description": "The truth the source speaks for."
           }
         }
+      },
+      "Ownership": {
+        "type": "string",
+        "description": "Whether the ownership rules of section 3.6 apply to a zone (ID-Q8).",
+        "enum": [
+          "windows",
+          "none"
+        ]
       },
       "PackInfo": {
         "type": "object",
@@ -64931,6 +67969,52 @@
           }
         }
       },
+      "Page_MappingItem": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/DirectoryMapping",
+                  "description": "The mapping."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "users": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MappedUser"
+                      },
+                      "description": "The users the mapping applied to at their last sign-in or check."
+                    }
+                  }
+                }
+              ],
+              "description": "A mapping as the API shows it."
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
       "Page_MirrorItem": {
         "type": "object",
         "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
@@ -65010,6 +68094,81 @@
                 }
               ],
               "description": "A mirrored source with its freshness (plan section 2.4): the row and what the card shows."
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_NameOwnerItem": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "The owner of one name (identity plan section 3.6).",
+              "required": [
+                "scope",
+                "name",
+                "principal",
+                "since"
+              ],
+              "properties": {
+                "hold_until": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "Until when the owner is held after the name's last record went; absent while the\nname has records."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "name": {
+                  "$ref": "#/components/schemas/DnsName",
+                  "description": "The name."
+                },
+                "principal": {
+                  "$ref": "#/components/schemas/PrincipalName",
+                  "description": "The owner's principal."
+                },
+                "scope": {
+                  "$ref": "#/components/schemas/ScopeName",
+                  "description": "The zone scope."
+                },
+                "sid": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Sid",
+                      "description": "The owner's SID, when the ticket carried a PAC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "since": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "Since when."
+                }
+              }
             },
             "description": "The items of this page, at most `limit` of them."
           },
@@ -67376,6 +70535,13 @@
             "$ref": "#/components/schemas/SecretString",
             "description": "The password or PIN."
           },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The LDAP provider the name and password go to, by id or name; absent: the local\naccount, or the provider the name's suffix or the default routes to (section\n3.18). Read from WP13.6 on."
+          },
           "user_name": {
             "type": "string",
             "description": "The user name."
@@ -69014,6 +72180,10 @@
         ],
         "description": "Who performs an action."
       },
+      "PrincipalName": {
+        "type": "string",
+        "description": "Kerberos principal with its realm (`WS01$@CORP.EXAMPLE.TEST`, `host/dc01.corp.example.test@CORP.EXAMPLE.TEST`)"
+      },
       "ProbeConfigOrigin": {
         "type": "string",
         "description": "Where a stored probe configuration came from.",
@@ -69963,6 +73133,253 @@
           }
         }
       },
+      "ProviderCreate": {
+        "type": "object",
+        "description": "Body of `POST /auth/providers`.",
+        "required": [
+          "name",
+          "provider"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "A unique name, 1 to 64 characters."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/DirectoryProvider",
+            "description": "The settings. A client secret or a service account password is given as a\nsecret value here once and stored in the vault; the answer carries its reference."
+          },
+          "secret": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SecretString",
+                "description": "The client secret of an OIDC provider, or the service account password of an LDAP\nprovider; absent for a negotiate provider or a user-bind-only LDAP provider."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ProviderId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "ProviderItem": {
+        "type": "object",
+        "description": "A sign-in provider as the API shows it.",
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was created."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ProviderId",
+            "description": "The id."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The last error, in English."
+          },
+          "last_success": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The last successful sign-in or test."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The name."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/DirectoryProvider",
+            "description": "The settings; secrets as references, never values."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProviderState",
+            "description": "Draft, verified or disabled."
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "The last change."
+          }
+        }
+      },
+      "ProviderPatch": {
+        "type": "object",
+        "description": "Body of `PATCH /auth/providers/{id}`; absent fields stay.",
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new name."
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryProvider",
+                "description": "New settings of the same kind."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secret": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SecretString",
+                "description": "A new secret, replacing the stored one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderState",
+                "description": "`disabled` to switch the provider off, `draft` to withdraw it from the sign-in page;\n`verified` is set by a completed test sign-in only."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ProviderState": {
+        "type": "string",
+        "description": "Where a provider stands (section 3.12): a provider becomes `verified` only after an\nadministrator completed a test sign-in through it; under Hardened the local person\naccounts step back once one is verified (ID-Q15).",
+        "enum": [
+          "draft",
+          "verified",
+          "disabled"
+        ]
+      },
+      "ProviderTest": {
+        "type": "object",
+        "description": "Body of `POST /auth/providers/{id}/test` (an LDAP provider).",
+        "required": [
+          "user_name",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "$ref": "#/components/schemas/SecretString",
+            "description": "Its password; refused when empty, before any bind."
+          },
+          "user_name": {
+            "type": "string",
+            "description": "The user name to sign in with."
+          }
+        }
+      },
+      "ProviderTestResult": {
+        "type": "object",
+        "description": "The answer of a test sign-in.",
+        "required": [
+          "subject",
+          "display_name",
+          "groups",
+          "roles",
+          "verified"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "The display name."
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The groups found (SIDs, DNs or claim values)."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleName"
+            },
+            "description": "The roles the mappings give the user."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The immutable subject the directory gave (`objectGUID`)."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Whether the provider is now verified."
+          }
+        }
+      },
+      "PublicProvider": {
+        "type": "object",
+        "description": "A provider as the sign-in page sees it (`GET /auth/providers/public`).",
+        "required": [
+          "id",
+          "label",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ProviderId",
+            "description": "The id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`oidc`, `ldap` or `negotiate`."
+          },
+          "label": {
+            "type": "string",
+            "description": "The text of the button."
+          },
+          "suffixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The name suffixes an LDAP provider takes (`@corp.example.test`, `CORP\\`)."
+          }
+        }
+      },
+      "PublicProviders": {
+        "type": "object",
+        "description": "The answer of `GET /auth/providers/public`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicProvider"
+            },
+            "description": "The verified providers, in the order of their names."
+          }
+        }
+      },
       "QueryLogLine": {
         "type": "object",
         "description": "One line of a node's query log.",
@@ -70768,6 +74185,10 @@
             "description": "Always `ready`."
           }
         }
+      },
+      "Realm": {
+        "type": "string",
+        "description": "Kerberos realm in upper case (`CORP.EXAMPLE.TEST`)"
       },
       "ReconcileKind": {
         "type": "string",
@@ -73723,6 +77144,17 @@
             "$ref": "#/components/schemas/Origin",
             "description": "Who owns the RRset (section 2.5 of the Phase 2 plan)."
           },
+          "principal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrincipalName",
+                "description": "The principal of the GSS-TSIG update that wrote it, for [`Origin::Dynamic`]; for\ndisplay and audit, the owner of the name is `dns.name_owners`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "rdata": {
             "type": "array",
             "items": {
@@ -76375,6 +79807,10 @@
             "minimum": 0
           }
         }
+      },
+      "Sid": {
+        "type": "string",
+        "description": "Windows security identifier (`S-1-5-21-1004336348-1177238915-682003330-512`)"
       },
       "Sink": {
         "type": "object",

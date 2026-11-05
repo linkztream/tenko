@@ -192,6 +192,22 @@ pub enum Command {
         action: client::audit::AuditCommand,
     },
 
+    // WP13.0
+    /// Sign-in providers: `OpenID Connect`, LDAP and Kerberos through the browser.
+    Auth {
+        /// The `auth` subcommand to run.
+        #[command(subcommand)]
+        action: client::auth::AuthCommand,
+    },
+
+    // WP13.0
+    /// Directory mappings: directory groups onto roles and scopes.
+    Access {
+        /// The `access` subcommand to run.
+        #[command(subcommand)]
+        action: client::access::AccessCommand,
+    },
+
     /// Download the root certificate of the internal CA, to install on admin clients.
     CaRoot(client::ca_root::CaRootArgs),
 
@@ -314,6 +330,8 @@ impl Command {
             Command::Dns { action } => action.name(),
             Command::Dhcp { action } => action.name(), // WP7.0
             Command::Migrate { action } => action.name(), // WP14.0
+            Command::Auth { action } => action.name(), // WP13.0
+            Command::Access { action } => action.name(), // WP13.0
             Command::Audit {
                 action: client::audit::AuditCommand::Verify(_),
             } => "audit verify",
@@ -451,6 +469,21 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             out,
             err,
             client::migrate::run(action),
+        ),
+        // WP13.0
+        Command::Auth { action } => client_run(
+            name,
+            action.client().json,
+            out,
+            err,
+            client::auth::run(action),
+        ),
+        Command::Access { action } => client_run(
+            name,
+            action.client().json,
+            out,
+            err,
+            client::access::run(action),
         ),
         Command::CaRoot(args) => {
             logging::init_client();

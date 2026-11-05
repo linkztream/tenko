@@ -51,6 +51,7 @@ fn rrset(zone: &Zone, owner: &str, data: &[RecordData]) -> RrSet {
         rdata: data.iter().map(Rdata::from_data).collect(),
         origin: Origin::Manual,
         key: None,
+        principal: None,
         updated: stamp(),
     }
 }

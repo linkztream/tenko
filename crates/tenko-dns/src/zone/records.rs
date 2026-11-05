@@ -399,6 +399,7 @@ pub(crate) fn plan(
             rdata,
             origin: change.origin,
             key: None,
+            principal: None,
             updated: stamp.clone(),
         };
         let next = match change.op {

@@ -422,6 +422,11 @@ describe("aclEntryText", () => {
     expect(aclEntryText({ kind: "key", name: "xfr.example.test", deny: true })).toBe("!key xfr.example.test");
     expect(aclEntryText({ kind: "any" })).toBe("any");
     expect(aclEntryText({ kind: "any", deny: true })).toBe("!any");
+    // WP13.0: the Kerberos entry of secure updates.
+    expect(aclEntryText({ kind: "kerberos", realm: "CORP.EXAMPLE.TEST" })).toBe("kerberos CORP.EXAMPLE.TEST");
+    expect(aclEntryText({ kind: "kerberos", realm: "CORP.EXAMPLE.TEST", principal: "*$", from: "192.0.2.0/24", deny: true })).toBe(
+      "!kerberos CORP.EXAMPLE.TEST principal *$ from 192.0.2.0/24",
+    );
   });
 });
 
@@ -444,8 +449,26 @@ describe("parseAclEntries", () => {
       { kind: "prefix", prefix: "203.0.113.0/24", deny: true },
       { kind: "key", name: "xfr.example.test" },
       { kind: "any" },
+      { kind: "kerberos", realm: "CORP.EXAMPLE.TEST" },
+      { kind: "kerberos", realm: "CORP.EXAMPLE.TEST", principal: "dc*$", from: "192.0.2.0/24", deny: true },
     ];
     expect(parseAclEntries(entries.map(aclEntryText).join("\n"))).toEqual({ ok: true, entries });
+  });
+  // WP13.0: the Kerberos entry.
+  it("parses a kerberos entry with its realm folded to upper case and refuses a bad one", () => {
+    expect(parseAclEntries("kerberos corp.example.test")).toEqual({ ok: true, entries: [{ kind: "kerberos", realm: "CORP.EXAMPLE.TEST" }] });
+    expect(parseAclEntries("!KERBEROS corp.example.test from 192.0.2.0/24 principal *$")).toEqual({
+      ok: true,
+      entries: [{ kind: "kerberos", realm: "CORP.EXAMPLE.TEST", principal: "*$", from: "192.0.2.0/24", deny: true }],
+    });
+    expect(parseAclEntries("kerberos")).toEqual({ ok: false, line: 1 });
+    expect(parseAclEntries("kerberos a@b")).toEqual({ ok: false, line: 1 });
+    expect(parseAclEntries("kerberos CORP.EXAMPLE.TEST from not-a-prefix")).toEqual({ ok: false, line: 1 });
+    expect(parseAclEntries("kerberos CORP.EXAMPLE.TEST principal a@b")).toEqual({ ok: false, line: 1 });
+    expect(parseAclEntries("kerberos CORP.EXAMPLE.TEST from 192.0.2.1")).toEqual({
+      ok: true,
+      entries: [{ kind: "kerberos", realm: "CORP.EXAMPLE.TEST", from: "192.0.2.1/32" }],
+    });
   });
   it("skips blank lines and accepts empty input", () => {
     expect(parseAclEntries("")).toEqual({ ok: true, entries: [] });

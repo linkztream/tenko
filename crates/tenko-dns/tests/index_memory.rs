@@ -85,6 +85,7 @@ fn image(records: u64) -> DnsData {
             rdata: vec![Rdata::from_data(&record)],
             origin: Origin::Manual,
             key: None,
+            principal: None,
             updated: stamp.clone(),
         };
         data.rrsets.insert(set.key(), set);
@@ -218,6 +219,7 @@ fn apex_sets(zone: &Zone, stamp: &Stamp) -> Vec<RrSet> {
         rdata: vec![Rdata::from_data(record)],
         origin: Origin::Ipam,
         key: None,
+        principal: None,
         updated: stamp.clone(),
     })
     .collect()

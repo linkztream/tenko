@@ -485,6 +485,7 @@ fn transfer_rrset(zone: &Zone, name: DnsName, rtype: Rtype, ttl: u32, stamp: &St
         rdata: Vec::new(),
         origin: Origin::Transfer,
         key: None,
+        principal: None,
         updated: stamp.clone(),
     }
 }

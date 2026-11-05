@@ -73,6 +73,9 @@ pub mod blocking;
 #[path = "dns_recursion.rs"]
 pub mod recursion;
 // WP10.0: end.
+// WP13.0: `tenko dns kerberos`.
+#[path = "dns_kerberos.rs"]
+pub mod kerberos;
 
 /// Subcommands of `tenko dns`.
 #[derive(Debug, Clone, Subcommand)]
@@ -171,6 +174,14 @@ pub enum DnsCommand {
         action: recursion::RecursionCommand,
     },
     // WP10.0: end.
+    // WP13.0: the Kerberos account of secure updates (`client/dns_kerberos.rs`).
+    /// The Kerberos account of secure dynamic updates: status, adopt, import, check,
+    /// rotate, delete.
+    Kerberos {
+        /// The `kerberos` subcommand to run.
+        #[command(subcommand)]
+        action: kerberos::KerberosCommand,
+    },
 }
 
 /// Subcommands of `tenko dns list`.
@@ -631,6 +642,8 @@ impl DnsCommand {
             Self::TrustAnchor { action } => action.client(),
             Self::Nta { action } => action.client(),
             Self::Recursion { action } => action.client(),
+            // WP13.0
+            Self::Kerberos { action } => action.client(),
             // WP10.0: end.
         }
     }
@@ -700,6 +713,8 @@ impl DnsCommand {
             Self::TrustAnchor { action } => action.name(),
             Self::Nta { action } => action.name(),
             Self::Recursion { action } => action.name(),
+            // WP13.0
+            Self::Kerberos { action } => action.name(),
             // WP10.0: end.
         }
     }
@@ -1197,6 +1212,8 @@ pub async fn run(command: &DnsCommand) -> Result<Output, Failure> {
         DnsCommand::Nta { action } => recursion::run_nta(&target, action).await,
         DnsCommand::Recursion { action } => recursion::run_recursion(&target, action).await,
         // WP10.0: end.
+        // WP13.0
+        DnsCommand::Kerberos { action } => kerberos::run(&target, action).await,
     }
 }
 

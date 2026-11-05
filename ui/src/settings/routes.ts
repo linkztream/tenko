@@ -69,6 +69,19 @@ const PAGE_ROUTES: readonly AppRoute[] = [
     access: "admin",
     title: "languages.title",
   },
+  // WP13.0: the placeholders of the sign-in providers and the directory mappings.
+  {
+    path: "/settings/providers",
+    component: lazy(withPacks(["settings"], () => import("./providers/ProvidersPage"))),
+    access: "admin",
+    title: "settings.providers.title",
+  },
+  {
+    path: "/settings/access/mappings",
+    component: lazy(withPacks(["settings", "access"], () => import("./access/MappingsPage"))),
+    access: "admin",
+    title: "access.mappings.title",
+  },
 ];
 
 export const routes: AppRoute[] = [

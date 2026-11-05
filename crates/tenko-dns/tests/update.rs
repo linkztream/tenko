@@ -222,6 +222,7 @@ async fn lab_with(follow: bool, settings: UpdateSettings, profile: UpdateProfile
                     require_tsig: true,
                     may_replace_ipam: false,
                     dhcp: None,
+                    kerberos: None,
                 },
                 dnssec: tenko_core::dns::DnssecPolicy::default(),
                 source: None,

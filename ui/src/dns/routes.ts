@@ -25,5 +25,7 @@ export const routes: AppRoute[] = [
   { path: "/dns/cache", component: lazy(withPacks(["dns"], () => import("./cache/CachePage"))), title: "dns.cache.title" },
   // WP10.0: the placeholder of the recursion section.
   { path: "/dns/recursion", component: lazy(withPacks(["dns"], () => import("./recursion/RecursionPage"))), title: "dns.recursion.title" },
+  // WP13.0: the placeholder of the Kerberos account (administrators, the scope `dns.keys`).
+  { path: "/dns/kerberos", component: lazy(withPacks(["dns"], () => import("./kerberos/KerberosPage"))), access: "admin", title: "dns.kerberos.title" },
   { path: "/dns/*rest", component: lazy(withPacks(["dns"], () => import("./DnsPage"))), title: "dns.title" },
 ];

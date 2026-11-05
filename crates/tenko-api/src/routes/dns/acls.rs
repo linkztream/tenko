@@ -36,7 +36,7 @@ use crate::{
 fn named_keys(entries: &[AclEntry]) -> impl Iterator<Item = &KeyName> {
     entries.iter().filter_map(|entry| match entry {
         AclEntry::Key { name, .. } => Some(name),
-        AclEntry::Prefix { .. } | AclEntry::Any { .. } => None,
+        AclEntry::Prefix { .. } | AclEntry::Any { .. } | AclEntry::Kerberos { .. } => None,
     })
 }
 

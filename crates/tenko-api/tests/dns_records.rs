@@ -197,6 +197,7 @@ async fn put_ipam(store: &Arc<MemStore>, zone: &str, name: &str, address: &str) 
         })],
         origin: Origin::Ipam,
         key: None,
+        principal: None,
         updated: Stamp::new(cx.now, cx.principal.clone()),
     };
     let mut write = WriteBatch::for_request(&cx);

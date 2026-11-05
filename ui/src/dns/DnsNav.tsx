@@ -4,6 +4,7 @@ import { A, useLocation } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import { t, type MessageKey } from "../i18n";
 import { mayKeys } from "./access";
+import { KERBEROS_PATH } from "./kerberos/paths";
 import { dnsPaths } from "./paths";
 import { recursionPath } from "./recursion/paths";
 
@@ -30,6 +31,8 @@ const TABS: readonly Tab[] = [
   { id: "blocking", href: dnsPaths.blocking(), label: "dns.nav.blocking", match: (p) => p.startsWith("/dns/blocking"), shown: () => true },
   { id: "acls", href: dnsPaths.acls(), label: "dns.nav.acls", match: (p) => p.startsWith("/dns/acls"), shown: () => true },
   { id: "keys", href: dnsPaths.keys(), label: "dns.nav.keys", match: (p) => p.startsWith("/dns/keys"), shown: mayKeys },
+  // WP13.0: the Kerberos account of secure updates, for holders of `dns.keys` like the TSIG keys.
+  { id: "kerberos", href: KERBEROS_PATH, label: "dns.nav.kerberos", match: (p) => p.startsWith(KERBEROS_PATH), shown: mayKeys },
   // WP10.0
   { id: "recursion", href: recursionPath, label: "dns.nav.recursion", match: (p) => p.startsWith(recursionPath), shown: () => true },
   { id: "log", href: dnsPaths.log(), label: "dns.nav.log", match: (p) => p.startsWith("/dns/log"), shown: () => true },

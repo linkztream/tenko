@@ -462,6 +462,7 @@ fn rrset(name: DnsName, rtype: Rtype, ttl: u32, rdata: Vec<Rdata>) -> RrSet {
         rdata,
         origin: Origin::Manual,
         key: None,
+        principal: None,
         updated: Stamp::new(cx.now, cx.principal),
     }
 }

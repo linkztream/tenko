@@ -158,7 +158,7 @@ describe("the TSIG keys", () => {
 
   it("is in the navigation for administrators only", async () => {
     renderRoute(AclsPage, { url: "/dns/acls", path: "/dns/acls" });
-    expect(screen.queryAllByTestId("dns-nav-link").map((l) => l.dataset.key)).toEqual(["zones", "views", "forwarders", "lists", "blocking", "acls", "keys", "recursion", "log", "cache"]);
+    expect(screen.queryAllByTestId("dns-nav-link").map((l) => l.dataset.key)).toEqual(["zones", "views", "forwarders", "lists", "blocking", "acls", "keys", "kerberos", "recursion", "log", "cache"]);
     await signInWithRoles(["operator"]);
     await waitFor(() => expect(screen.queryAllByTestId("dns-nav-link").map((l) => l.dataset.key)).toEqual(["zones", "views", "forwarders", "lists", "blocking", "acls", "recursion", "log", "cache"]));
   });

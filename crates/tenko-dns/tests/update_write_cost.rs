@@ -397,6 +397,7 @@ async fn warm_lab(with_dnssec: bool) -> Lab {
                     require_tsig: false,
                     may_replace_ipam: false,
                     dhcp: None,
+                    kerberos: None,
                 },
                 dnssec: DnssecPolicy::default(),
                 source: None,

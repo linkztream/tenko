@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::{
-    DnsError, KeyName, Origin, ZoneId,
+    DnsError, KeyName, Origin, PrincipalName, ZoneId,
     name::{DnsName, Rtype, ScopeName},
     rdata::{Rdata, RecordData},
 };
@@ -71,6 +71,14 @@ pub struct RrSet {
     /// The TSIG key of the dynamic update that wrote it, for [`Origin::Dynamic`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<KeyName>,
+    // WP13.0: the signer of a GSS-TSIG update (identity plan section 3.5). A cold field
+    // with a serde default, left out when absent, so a row of 0.0.11 decodes unchanged and
+    // the data format does not move for it (as `granted` in ADR 0031).
+    /// The principal of the GSS-TSIG update that wrote it, for [`Origin::Dynamic`]; for
+    /// display and audit, the owner of the name is `dns.name_owners`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal: Option<PrincipalName>,
+    // WP13.0: end.
     /// The last change.
     pub updated: Stamp,
 }

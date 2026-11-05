@@ -2,6 +2,50 @@
 // Regenerate with `npm run api:types`; do not edit.
 
 export interface paths {
+    "/api/v1/access/directory-mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the directory mappings
+         * @description Reads the settings (administrators and operators). The mappings of every provider, each with the users it applied to at their last sign-in or directory check.
+         */
+        get: operations["list_directory_mappings"];
+        put?: never;
+        /**
+         * Create a directory mapping
+         * @description Administrators, in an interactive session. A group of a provider onto a role, with a scope for `operator` and `viewer`. Audited as `auth.mapping.create`.
+         */
+        post: operations["create_directory_mapping"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/access/directory-mappings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a directory mapping
+         * @description Administrators, in an interactive session. The rights it gave end at the users' next sign-in or directory check. Audited as `auth.mapping.delete`.
+         */
+        delete: operations["delete_directory_mapping"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/access/grants": {
         parameters: {
             query?: never;
@@ -415,6 +459,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/negotiate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sign in with Kerberos through the browser
+         * @description Public. Without a token answers `401` with `WWW-Authenticate: Negotiate`; with a SPNEGO token for `HTTP/<fqdn>` accepts it with the account's keys, answers the AP-REP in the header, maps the PAC's groups through the negotiate provider's mappings and creates the session (RFC 4559; identity plan section 3.14). Offered only while a negotiate provider is verified.
+         */
+        get: operations["negotiate_login"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/{id}/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Finish an OpenID Connect sign-in
+         * @description Public; the provider's redirect target. Matches the state and the flow cookie, exchanges the code with the client secret and the PKCE verifier, verifies the ID token (issuer, audience and `azp`, times, nonce, an algorithm of the allow-list, the key from the provider's JWKS), maps the claims onto roles and scopes, creates the session with the `tenko_session` cookie and answers a small page that moves the browser to the return path. No access or refresh token is kept.
+         */
+        get: operations["finish_oidc_login"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Start an OpenID Connect sign-in
+         * @description Public. Creates the flow (state, nonce, PKCE verifier, the return path; ten minutes, single use), sets the flow cookie `tenko_oidc` (`HttpOnly; Secure; SameSite=Lax`) and redirects the browser to the provider's authorization endpoint (identity plan section 3.12).
+         */
+        get: operations["start_oidc_login"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/password": {
         parameters: {
             query?: never;
@@ -479,6 +583,118 @@ export interface paths {
         post?: never;
         /** Remove one preference of the signed-in person; the table returns to its default */
         delete: operations["delete_preference"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the sign-in providers
+         * @description Reads the settings (administrators and operators). Every provider with its state, its last success and its last error; secrets as references.
+         */
+        get: operations["list_auth_providers"];
+        put?: never;
+        /**
+         * Create a sign-in provider
+         * @description Administrators, in an interactive session. The provider starts as a draft: it is offered on the sign-in page only after a test sign-in completed. An OIDC provider's discovery document is fetched now; plain LDAP is refused outside the Lab profile (TGL-34). Audited as `auth.provider.create`.
+         */
+        post: operations["create_auth_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/providers/ldap/chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetch the certificate chain of an LDAP server
+         * @description Administrators, in an interactive session. Opens a TLS connection to the URL (LDAPS, or StartTLS after the LDAP extended request), reads the chain the server presents, sends no credential and no other request, and answers the certificates with their fingerprints and whether the chain verifies against the system trust store. Stores nothing: the pin is made by the provider's create or update call that carries the confirmed certificates (identity plan section 3.13).
+         */
+        post: operations["fetch_ldap_chain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/providers/public": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The providers the sign-in page offers
+         * @description Public. The verified providers as buttons and name suffixes; nothing of their settings.
+         */
+        get: operations["list_public_auth_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/providers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a sign-in provider
+         * @description Reads the settings (administrators and operators).
+         */
+        get: operations["get_auth_provider"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a sign-in provider
+         * @description Administrators, in an interactive session. Deletes the provider, its mappings and its secret; the sessions signed in through it end at their next request; its users' records stay, disabled for sign-in. Audited as `auth.provider.delete`.
+         */
+        delete: operations["delete_auth_provider"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a sign-in provider
+         * @description Administrators, in an interactive session. New settings, a new secret, a new trust (the confirmed chain of `POST /auth/providers/ldap/chain`, a PEM bundle or the system store), or the state `disabled` or `draft`. A change of the settings withdraws the provider to `draft` until a test sign-in completes again. Audited as `auth.provider.update`.
+         */
+        patch: operations["update_auth_provider"];
+        trace?: never;
+    };
+    "/api/v1/auth/providers/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test an LDAP provider with a user name and password
+         * @description Administrators, in an interactive session. Finds the user with the service account (or binds as the user alone), checks the password with the user's own bind, reads the groups and shows the roles the mappings would give; a completed test verifies the provider. An OIDC provider is tested through its own flow (`GET /auth/oidc/{id}/start?test=1`). The password is used for the bind and forgotten. Audited as `auth.provider.verify`.
+         */
+        post: operations["test_auth_provider"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1828,6 +2044,110 @@ export interface paths {
         patch: operations["update_dns_forwarder"];
         trace?: never;
     };
+    "/api/v1/dns/kerberos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the Kerberos account of secure updates
+         * @description Scope: `dns.keys`. The account's metadata (realm, name, SPNs, key versions with their numbers and states, the last rotation and self-test), the findings of the last self-test and the contexts of this node. Never a key.
+         */
+        get: operations["get_dns_kerberos"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete the Kerberos account from Tenko
+         * @description Scope: `dns.keys`, in an interactive session. Removes the keys from the vault and the metadata; the zones with Kerberos settings fall back to their other lists. The account in the directory is the administrator's to delete. Audited as `dns.krb.account.delete`.
+         */
+        delete: operations["delete_dns_kerberos"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/kerberos/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take over a pre-staged computer account
+         * @description Scope: `dns.keys`, in an interactive session. Tenko obtains a ticket for `kadmin/changepw` with the one-time password, changes the password to a random one only Tenko knows, derives the AES keys, learns the key version from a service ticket for its own SPN, stores the keys in the vault and forgets both passwords (ID-Q4). Audited as `dns.krb.account.adopt`; the self-test runs after it.
+         */
+        post: operations["adopt_dns_kerberos"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/kerberos/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the self-test of the Kerberos account now
+         * @description Scope: `dns.keys`. An AS exchange as the account, a TGS exchange for each SPN and its acceptance by the node's own acceptor, the KDC's time against the node's, the encryption types, a duplicate-SPN check when an LDAP provider of the realm is configured (identity plan section 3.1). Audited as `dns.krb.account.check` on failure or change.
+         */
+        post: operations["check_dns_kerberos"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/kerberos/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a keytab
+         * @description Scope: `dns.keys`, in an interactive session. The AES entries for the principal are stored in the vault; RC4 and DES entries are refused; the file is not kept. The password stays the administrator's, so Tenko does not rotate it (ID-Q5). Audited as `dns.krb.account.import`.
+         */
+        post: operations["import_dns_kerberos"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/kerberos/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the password of the Kerberos account now
+         * @description Scope: `dns.keys`, in an interactive session. A job: the new keys are written as pending, the change-password request is sent, the new key version is read back, the keys move to current and the old ones to previous (ID-Q5). Only for an account Tenko owns. Audited as `dns.krb.account.rotate`.
+         */
+        post: operations["rotate_dns_kerberos"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dns/keys": {
         parameters: {
             query?: never;
@@ -2256,6 +2576,26 @@ export interface paths {
          * @description Scope: `dns.read`. The journal entries of a scope, newest first: the serials before and after, the time and the counts of records added, replaced and removed. The journal is bounded by entries and days; a large import resets it.
          */
         get: operations["list_dns_zone_journal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}/owners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the owners of a zone's names
+         * @description Scope: `dns.read`. One row per name with an owner (identity plan section 3.6): the SID when the ticket carried a PAC, the principal, since when, and the hold after the name's last record went. Empty for a zone without ownership.
+         */
+        get: operations["list_dns_zone_owners"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5860,6 +6200,24 @@ export interface components {
             deny?: boolean;
             /** @enum {string} */
             kind: "any";
+        } | {
+            /** @description The entry refuses instead of allowing. */
+            deny?: boolean;
+            /**
+             * @description Only clients in this prefix.
+             * @example 192.0.2.0/24
+             */
+            from?: string | null;
+            /** @enum {string} */
+            kind: "kerberos";
+            /**
+             * @description A pattern the principal's name (without the realm) must match: `*` is any run
+             *     of characters, so `*$` is every computer account. Absent: every principal of
+             *     the realm.
+             */
+            principal?: string | null;
+            /** @description The realm. */
+            realm: components["schemas"]["Realm"];
         };
         /** Format: uuid */
         AclId: string;
@@ -7057,6 +7415,27 @@ export interface components {
             /** @description Names the certificate is valid for, when known. */
             names: string[];
             not_after?: components["schemas"]["Timestamp"] | null;
+        };
+        /** @description One certificate of a fetched or pasted chain, as the confirmation screen shows it. */
+        ChainCertificate: {
+            /** @description Whether the certificate is a CA (above the server's own). */
+            ca: boolean;
+            /** @description The SHA-256 fingerprint, lower-case hexadecimal. */
+            fingerprint: string;
+            /** @description The issuer. */
+            issuer: string;
+            /** @description The key type (`RSA 2048`, `ECDSA P-256`). */
+            key_type: string;
+            /** @description The subject alternative names. */
+            names: string[];
+            /** @description Valid until. */
+            not_after: components["schemas"]["Timestamp"];
+            /** @description Valid from. */
+            not_before: components["schemas"]["Timestamp"];
+            /** @description The certificate, PEM, to send back as the confirmed trust. */
+            pem: string;
+            /** @description The subject. */
+            subject: string;
         };
         /** @description The verified end of a chain: the last sequence number and its hash. */
         ChainHead: {
@@ -8751,6 +9130,32 @@ export interface components {
              */
             revision: number;
         };
+        /**
+         * @description A mapping of a directory group onto a role and a scope (section 3.16): evaluated at
+         *     sign-in and at each directory check, held on the session, never stored as a grant.
+         */
+        DirectoryMapping: {
+            /** @description The group. */
+            group: components["schemas"]["GroupMatch"];
+            /** @description The id. */
+            id: components["schemas"]["MappingId"];
+            /** @description The provider whose groups this mapping reads. */
+            provider: components["schemas"]["ProviderId"];
+            /** @description The role. */
+            role: components["schemas"]["RoleName"];
+            scope?: components["schemas"]["ScopeRule"] | null;
+        };
+        /** @description A sign-in provider's settings by kind (section 4.1). */
+        DirectoryProvider: (components["schemas"]["OidcSettings"] & {
+            /** @enum {string} */
+            kind: "oidc";
+        }) | (components["schemas"]["LdapSettings"] & {
+            /** @enum {string} */
+            kind: "ldap";
+        }) | (components["schemas"]["NegotiateSettings"] & {
+            /** @enum {string} */
+            kind: "negotiate";
+        });
         /** @description What one run of the actuator did; part of the reconciler's run report. */
         DnsActuation: {
             /**
@@ -8982,6 +9387,7 @@ export interface components {
              *     Home and Lab allow, Standard and Hardened do not until the operator allows it.
              */
             dhcp?: boolean | null;
+            kerberos?: components["schemas"]["KerberosUpdate"] | null;
             /** @description A dynamic update may replace an RRset whose origin is `ipam` (plan section 2.5). */
             may_replace_ipam?: boolean;
             /** @description Updates need a TSIG key (TGL-09). */
@@ -9107,6 +9513,12 @@ export interface components {
             prefix: components["schemas"]["PrefixId"];
             reservation?: components["schemas"]["InterfaceId"] | null;
         };
+        /**
+         * @description The Kerberos encryption types the account holds (RFC 3962): AES only (ID-Q3). RC4, DES
+         *     and 3DES are never accepted (ADR 0026 point 3).
+         * @enum {string}
+         */
+        EncryptionType: "aes128-cts-hmac-sha1" | "aes256-cts-hmac-sha1";
         /** @description One end of a link. */
         Endpoint: {
             /** @description The device, as the source names it. */
@@ -9840,6 +10252,41 @@ export interface components {
          *     network controller (CONN-09): 1 to 128 visible ASCII characters.
          */
         GroupKey: string;
+        /** @description The group a mapping matches (section 3.16). */
+        GroupMatch: {
+            /** @enum {string} */
+            kind: "sid";
+            /** @description The SID. */
+            sid: components["schemas"]["Sid"];
+        } | {
+            /** @description The DN. */
+            dn: string;
+            /** @enum {string} */
+            kind: "dn";
+        } | {
+            /** @enum {string} */
+            kind: "claim";
+            /** @description The value. */
+            value: string;
+        };
+        /** @description The GSS-TSIG contexts of this node (identity plan section 3.3). */
+        GssContexts: {
+            /**
+             * Format: int64
+             * @description Established contexts.
+             */
+            established: number;
+            /**
+             * Format: int64
+             * @description Negotiations in flight.
+             */
+            negotiating: number;
+            /**
+             * Format: int64
+             * @description Negotiations refused in the last hour.
+             */
+            refused_last_hour: number;
+        };
         /** @description Guardrails for network-controller writes (CONN-09), enforced by the host. */
         Guardrails: {
             /** @description Concurrent writes allowed through one controller. */
@@ -11499,6 +11946,87 @@ export interface components {
             provider: string;
             rotation?: components["schemas"]["KekRotationPhase"] | null;
         };
+        /**
+         * @description Body of `POST /dns/kerberos/adopt`: the pre-staged account and its one-time password
+         *     (ID-Q4). Tenko changes the password at once; the one given is used once and forgotten.
+         */
+        KerberosAdopt: {
+            /** @description The KDCs, `host` or `host:port`; empty: found through `_kerberos._tcp.<realm>`. */
+            kdcs?: string[];
+            /** @description The account name as the administrator created it (`TENKO-DNS$`). */
+            name: string;
+            /** @description The one-time password set by `New-ADComputer`. */
+            password: components["schemas"]["SecretString"];
+            /** @description The realm (`CORP.EXAMPLE.TEST`; case does not matter). */
+            realm: components["schemas"]["Realm"];
+            /**
+             * Format: int32
+             * @description Days between password rotations, 0 to 365; absent: 30 (TGL-32; 0 under Lab only).
+             */
+            rotation_days?: number | null;
+            /**
+             * @description The service principal names the account holds (`DNS/<fqdn>` per node, `HTTP/<fqdn>`
+             *     for web sign-in); the self-test checks them.
+             */
+            spns: string[];
+        };
+        /** @description One finding of the self-test (identity plan section 3.10). */
+        KerberosFinding: {
+            /** @description When it was found. */
+            at: components["schemas"]["Timestamp"];
+            /**
+             * @description The finding (`dns.gss.clock_skew`, `dns.gss.kvno_unknown`, `dns.gss.spn_missing`,
+             *     ...).
+             */
+            code: string;
+            /** @description What was seen (the skew measured, the version seen, the SPN), in English. */
+            detail: string;
+        };
+        /** @description Body of `POST /dns/kerberos/import`: a keytab made with `ktpass` or `msktutil`. */
+        KerberosImport: {
+            /** @description The KDCs; empty: found through `_kerberos._tcp.<realm>`. */
+            kdcs?: string[];
+            /**
+             * @description The keytab file (MIT format version 2) in base64url without padding (RFC 4648
+             *     section 5).
+             */
+            keytab: components["schemas"]["SecretString"];
+            /** @description The realm. */
+            realm: components["schemas"]["Realm"];
+            /** @description The service principal names the account holds. */
+            spns: string[];
+        };
+        /** @description Body of `GET /dns/kerberos` and the answer of `POST /dns/kerberos/check`. */
+        KerberosStatus: {
+            account?: components["schemas"]["KrbAccount"] | null;
+            /** @description The contexts of this node. */
+            contexts: components["schemas"]["GssContexts"];
+            /** @description The findings of the last self-test, empty when it passed. */
+            findings?: components["schemas"]["KerberosFinding"][];
+        };
+        /**
+         * @description The Kerberos settings of a zone's update policy (section 3.5): the realms whose
+         *     principals may sign updates with GSS-TSIG, the ownership rule and its hold, the groups
+         *     whose members are privileged and the group whose members leave names unowned.
+         */
+        KerberosUpdate: {
+            /**
+             * Format: int32
+             * @description Days the owner of a removed name is held before the name is new again.
+             */
+            owner_hold_days?: number;
+            /** @description Whether the Windows ownership rules apply. */
+            ownership?: components["schemas"]["Ownership"];
+            /**
+             * @description The privileged groups by SID: Domain Admins (RID 512), Enterprise Admins (519),
+             *     Domain Controllers (516), `DnsAdmins`, and any the operator adds. Membership comes
+             *     from the PAC.
+             */
+            privileged?: components["schemas"]["Sid"][];
+            /** @description The realms whose tickets the zone accepts (R134: a child domain is its own realm). */
+            realms: components["schemas"]["Realm"][];
+            update_proxy?: components["schemas"]["Sid"] | null;
+        };
         /** @description `POST /dns/keys`: generate a TSIG key, or import one with its secret. */
         KeyCreate: {
             algorithm?: components["schemas"]["TsigAlgorithm"] | null;
@@ -11539,6 +12067,25 @@ export interface components {
          * @enum {string}
          */
         KeyState: "generated" | "published" | "active" | "retired" | "removed";
+        /** @description One key version of the account: the metadata beside the secret, never the key bytes. */
+        KeyVersionMeta: {
+            /** @description When the version was made. */
+            created: components["schemas"]["Timestamp"];
+            /** @description The encryption types the version holds keys for. */
+            etypes: components["schemas"]["EncryptionType"][];
+            /**
+             * Format: int32
+             * @description The key version number the KDC puts in tickets.
+             */
+            kvno: number;
+            /** @description Current, previous or pending. */
+            state: components["schemas"]["KeyVersionState"];
+        };
+        /**
+         * @description Where a key version stands in the rotation (section 3.1).
+         * @enum {string}
+         */
+        KeyVersionState: "current" | "previous" | "pending";
         /** @description One probe's kill switch command. */
         KillSwitchCommand: {
             /**
@@ -11575,6 +12122,38 @@ export interface components {
             reason?: string | null;
             /** @description Whether it is on (or asked to be on). */
             stopped: boolean;
+        };
+        /**
+         * @description The AD computer account whose keys Tenko holds (section 3.1): one per realm, with the
+         *     SPN of every node name. Metadata only; the keys are the system secret of purpose
+         *     [`super::KRB_PURPOSE`] in the vault.
+         */
+        KrbAccount: {
+            /** @description The KDCs the operator listed; empty: found through `_kerberos._tcp.<realm>`. */
+            kdcs?: string[];
+            last_check?: components["schemas"]["Timestamp"] | null;
+            last_rotation?: components["schemas"]["Timestamp"] | null;
+            /**
+             * @description The account name as the KDC knows it (`TENKO-DNS$` for a computer account, a user
+             *     name for an imported user account).
+             */
+            name: string;
+            /**
+             * @description Whether Tenko owns the password (adopted) or an administrator does (imported
+             *     keytab).
+             */
+            owned: boolean;
+            /** @description The realm. */
+            realm: components["schemas"]["Realm"];
+            /**
+             * Format: int32
+             * @description Days between rotations of an owned account; 0 is off (Lab only, TGL-32).
+             */
+            rotation_days?: number;
+            /** @description The service principal names (`DNS/<fqdn>`, `HTTP/<fqdn>`). */
+            spns: string[];
+            /** @description The key versions held. */
+            versions?: components["schemas"]["KeyVersionMeta"][];
         };
         /** @description A language the UI offers to everyone (`GET /i18n/languages`). */
         LanguageInfo: {
@@ -11646,6 +12225,107 @@ export interface components {
             column: string;
             /** @description Whether the sort is descending. */
             desc?: boolean;
+        };
+        /** @description The read-only service account that finds users and runs the directory check (ID-Q13). */
+        LdapBind: {
+            /** @description The distinguished name (or user principal name) it binds as. */
+            dn: string;
+            /** @description Its password in the vault (purpose [`LDAP_PURPOSE`]). */
+            secret: components["schemas"]["SecretRef"];
+        };
+        /** @description Body of `POST /auth/providers/ldap/chain`. */
+        LdapChainRequest: {
+            /** @description LDAPS, or `StartTLS` after the LDAP extended request; never plain. */
+            transport?: components["schemas"]["LdapTransport"];
+            /** @description The server, an `ldaps://` or `ldap://` URL. */
+            url: string;
+        };
+        /** @description The answer of `POST /auth/providers/ldap/chain`. */
+        LdapChainResult: {
+            /** @description The chain as the server presented it, the server's certificate first. */
+            certificates: components["schemas"]["ChainCertificate"][];
+            /**
+             * @description The commands that print the fingerprints on a domain controller, for the
+             *     comparison the administrator makes before confirming.
+             */
+            compare_commands: string[];
+            /** @description Whether the chain verifies against the system trust store already. */
+            verifies: boolean;
+        };
+        /**
+         * @description How the groups of a user are read (section 3.13).
+         * @enum {string}
+         */
+        LdapGroupMode: "token_groups" | "member_of" | "search";
+        /** @description An LDAP provider (section 3.13): Active Directory or another directory. */
+        LdapSettings: {
+            /** @description Where users are searched. */
+            base_dn: string;
+            bind?: components["schemas"]["LdapBind"] | null;
+            /** @description Whether a bare user name without a local account goes to this provider. */
+            default?: boolean;
+            /**
+             * Format: int32
+             * @description Minutes a session is kept while the directory cannot be reached; absent: the
+             *     profile's (TGL-35).
+             */
+            grace_minutes?: number | null;
+            /** @description How groups are read. */
+            group_mode?: components["schemas"]["LdapGroupMode"];
+            /**
+             * Format: int32
+             * @description Minutes between directory checks of a session; absent: the profile's (TGL-35).
+             */
+            recheck_minutes?: number | null;
+            /**
+             * @description The name suffixes and `NetBIOS` domains that route a user name to this provider
+             *     (`corp.example.test` for `alex@corp.example.test`, `CORP` for `CORP\alex`).
+             */
+            suffixes?: string[];
+            /** @description LDAPS, `StartTLS` or plain (Lab only). */
+            transport?: components["schemas"]["LdapTransport"];
+            /** @description What the server's certificate is verified against. */
+            trust: components["schemas"]["LdapTrust"];
+            /**
+             * @description The servers, `ldaps://` or `ldap://` URLs tried in order, or one entry
+             *     `srv:<domain>` for `_ldap._tcp.<domain>` discovery.
+             */
+            urls: string[];
+            /**
+             * @description A filter that narrows the users found, in RFC 4515 syntax, combined with the name
+             *     match (`(memberOf=cn=Tenko,...)`).
+             */
+            user_filter?: string | null;
+        };
+        /**
+         * @description How an LDAP provider is reached (ID-Q13, TGL-34).
+         * @enum {string}
+         */
+        LdapTransport: "ldaps" | "start_tls" | "plain";
+        /**
+         * @description What an LDAP provider's TLS connection verifies the server against (the owner's
+         *     addition to ID-Q13, section 3.13). Certificates only, never a key; "accept whatever is
+         *     presented" does not exist.
+         */
+        LdapTrust: {
+            /** @enum {string} */
+            kind: "system";
+        } | {
+            /** @description The certificates, PEM, one or more. */
+            certs: string[];
+            /** @enum {string} */
+            kind: "pem";
+        } | {
+            /** @description The certificates confirmed, PEM. */
+            certs: string[];
+            /** @description When. */
+            confirmed_at: components["schemas"]["Timestamp"];
+            /** @description The administrator who confirmed them. */
+            confirmed_by: components["schemas"]["UserId"];
+            /** @description Their SHA-256 fingerprints, lower-case hexadecimal, in the order of `certs`. */
+            fingerprints: string[];
+            /** @enum {string} */
+            kind: "imported";
         };
         /**
          * @description The state of a leader-only service.
@@ -12199,12 +12879,38 @@ export interface components {
             /** @description The source that names it. */
             source: components["schemas"]["RootSource"];
         };
+        /** @description A user the mapping gave rights to at a sign-in or a check. */
+        MappedUser: {
+            /** @description When the mapping last applied to the user. */
+            at: components["schemas"]["Timestamp"];
+            /** @description The display name. */
+            display_name: string;
+            /** @description The user. */
+            user: components["schemas"]["UserId"];
+        };
         /** @description The mapping of an import: one entry per sheet, and the options. */
         Mapping: {
             /** @description Options. */
             options?: components["schemas"]["ImportOptions"];
             /** @description Sheet mappings, in upload order. */
             sheets: components["schemas"]["SheetMapping"][];
+        };
+        /** @description Body of `POST /access/directory-mappings`. */
+        MappingCreate: {
+            /** @description The group: a SID, a DN or a claim value. */
+            group: components["schemas"]["GroupMatch"];
+            /** @description The provider. */
+            provider: components["schemas"]["ProviderId"];
+            /** @description The role. */
+            role: components["schemas"]["RoleName"];
+            scope?: components["schemas"]["ScopeRule"] | null;
+        };
+        /** Format: uuid */
+        MappingId: string;
+        /** @description A mapping as the API shows it. */
+        MappingItem: components["schemas"]["DirectoryMapping"] & {
+            /** @description The users the mapping applied to at their last sign-in or check. */
+            users?: components["schemas"]["MappedUser"][];
         };
         /**
          * @description Where the network of a sheet comes from.
@@ -13590,6 +14296,19 @@ export interface components {
             /** @description The canonical text of the source (`inventory:<connector id>`). */
             source_key: string;
         };
+        /** @description The owner of one name (identity plan section 3.6). */
+        NameOwnerItem: {
+            hold_until?: components["schemas"]["Timestamp"] | null;
+            /** @description The name. */
+            name: components["schemas"]["DnsName"];
+            /** @description The owner's principal. */
+            principal: components["schemas"]["PrincipalName"];
+            /** @description The zone scope. */
+            scope: components["schemas"]["ScopeName"];
+            sid?: components["schemas"]["Sid"] | null;
+            /** @description Since when. */
+            since: components["schemas"]["Timestamp"];
+        };
         /**
          * @description A kind of source, as the name authority ranks them.
          * @enum {string}
@@ -13612,6 +14331,14 @@ export interface components {
             reason: string;
             /** @description The zone; never the root. */
             zone: components["schemas"]["DnsName"];
+        };
+        /**
+         * @description A Kerberos sign-in provider (section 3.14): the realm whose tickets `GET
+         *     /auth/negotiate` accepts; its mappings are by SID.
+         */
+        NegotiateSettings: {
+            /** @description The realm. */
+            realm: components["schemas"]["Realm"];
         };
         /** @description A neighbor of a node across one edge. */
         Neighbor: {
@@ -14380,6 +15107,45 @@ export interface components {
             /** @description The sources (`dhcp:1`, `probe:2:arp`, `inventory:<connector>`). */
             sources?: string[];
         };
+        /** @description What an OIDC provider's `amr` claim says about a second factor (ID-Q16). */
+        OidcMfa: {
+            /** @enum {string} */
+            kind: "none";
+        } | {
+            /** @description Whether `hwk` from this provider counts as a hardware security key. */
+            hardware_key?: boolean;
+            /** @enum {string} */
+            kind: "trust_amr";
+            /** @description The values that count as a second factor (`mfa`, `hwk`, `otp`, ...). */
+            values: string[];
+        };
+        /** @description An `OpenID Connect` provider (section 3.12): Entra ID, AD FS, Keycloak, Okta. */
+        OidcSettings: {
+            /** @description The text of the sign-in button; the provider's name when absent. */
+            button_label?: string | null;
+            /**
+             * @description A PEM bundle the provider's certificate is checked against instead of the system
+             *     trust store.
+             */
+            ca?: string | null;
+            /** @description The client id of Tenko at the provider. */
+            client_id: string;
+            /** @description The client secret in the vault (purpose [`OIDC_PURPOSE`]). */
+            client_secret: components["schemas"]["SecretRef"];
+            /** @description The claim that lists the groups or app roles (`groups`, `roles`). */
+            groups_claim?: string | null;
+            /**
+             * @description The issuer, exactly as the ID token names it; discovery reads
+             *     `<issuer>/.well-known/openid-configuration`.
+             */
+            issuer: string;
+            /** @description What the `amr` claim is trusted for. */
+            mfa?: components["schemas"]["OidcMfa"];
+            /** @description The scopes asked beyond `openid`. */
+            scopes?: string[];
+            /** @description The claim that becomes the user name (`preferred_username` by default). */
+            username_claim?: string | null;
+        };
         /**
          * @description A change of an operator secret. Absent members stay; `null` clears `username` and
          *     `notes`.
@@ -14694,6 +15460,11 @@ export interface components {
             /** @description The truth the source speaks for. */
             truth: components["schemas"]["Truth"];
         };
+        /**
+         * @description Whether the ownership rules of section 3.6 apply to a zone (ID-Q8).
+         * @enum {string}
+         */
+        Ownership: "windows" | "none";
         /** @description A language and its packs, for administrators (`GET /i18n/packs`). */
         PackInfo: {
             active?: components["schemas"]["PackVersion"] | null;
@@ -15907,6 +16678,25 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_MappingItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["DirectoryMapping"] & {
+                /** @description The users the mapping applied to at their last sign-in or check. */
+                users?: components["schemas"]["MappedUser"][];
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_MirrorItem: {
             /** @description The items of this page, at most `limit` of them. */
             items: (components["schemas"]["Mirror"] & {
@@ -15926,6 +16716,33 @@ export interface components {
                 stale: boolean;
                 token_expires_at?: components["schemas"]["Timestamp"] | null;
             })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_NameOwnerItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                hold_until?: components["schemas"]["Timestamp"] | null;
+                /** @description The name. */
+                name: components["schemas"]["DnsName"];
+                /** @description The owner's principal. */
+                principal: components["schemas"]["PrincipalName"];
+                /** @description The zone scope. */
+                scope: components["schemas"]["ScopeName"];
+                sid?: components["schemas"]["Sid"] | null;
+                /** @description Since when. */
+                since: components["schemas"]["Timestamp"];
+            }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -16912,6 +17729,12 @@ export interface components {
         PasswordLogin: {
             /** @description The password or PIN. */
             password: components["schemas"]["SecretString"];
+            /**
+             * @description The LDAP provider the name and password go to, by id or name; absent: the local
+             *     account, or the provider the name's suffix or the default routes to (section
+             *     3.18). Read from WP13.6 on.
+             */
+            provider?: string | null;
             /** @description The user name. */
             user_name: string;
         };
@@ -17457,6 +18280,8 @@ export interface components {
             /** @enum {string} */
             kind: "node";
         };
+        /** @description Kerberos principal with its realm (`WS01$@CORP.EXAMPLE.TEST`, `host/dc01.corp.example.test@CORP.EXAMPLE.TEST`) */
+        PrincipalName: string;
         /**
          * @description Where a stored probe configuration came from.
          * @enum {string}
@@ -17827,6 +18652,88 @@ export interface components {
             /** @description The majors the node offered in its last handshake. */
             offered?: number[];
         };
+        /** @description Body of `POST /auth/providers`. */
+        ProviderCreate: {
+            /** @description A unique name, 1 to 64 characters. */
+            name: string;
+            /**
+             * @description The settings. A client secret or a service account password is given as a
+             *     secret value here once and stored in the vault; the answer carries its reference.
+             */
+            provider: components["schemas"]["DirectoryProvider"];
+            secret?: components["schemas"]["SecretString"] | null;
+        };
+        /** Format: uuid */
+        ProviderId: string;
+        /** @description A sign-in provider as the API shows it. */
+        ProviderItem: {
+            /** @description When it was created. */
+            created_at: components["schemas"]["Timestamp"];
+            /** @description The id. */
+            id: components["schemas"]["ProviderId"];
+            /** @description The last error, in English. */
+            last_error?: string | null;
+            last_success?: components["schemas"]["Timestamp"] | null;
+            /** @description The name. */
+            name: string;
+            /** @description The settings; secrets as references, never values. */
+            provider: components["schemas"]["DirectoryProvider"];
+            /** @description Draft, verified or disabled. */
+            state: components["schemas"]["ProviderState"];
+            /** @description The last change. */
+            updated_at: components["schemas"]["Timestamp"];
+        };
+        /** @description Body of `PATCH /auth/providers/{id}`; absent fields stay. */
+        ProviderPatch: {
+            /** @description A new name. */
+            name?: string | null;
+            provider?: components["schemas"]["DirectoryProvider"] | null;
+            secret?: components["schemas"]["SecretString"] | null;
+            state?: components["schemas"]["ProviderState"] | null;
+        };
+        /**
+         * @description Where a provider stands (section 3.12): a provider becomes `verified` only after an
+         *     administrator completed a test sign-in through it; under Hardened the local person
+         *     accounts step back once one is verified (ID-Q15).
+         * @enum {string}
+         */
+        ProviderState: "draft" | "verified" | "disabled";
+        /** @description Body of `POST /auth/providers/{id}/test` (an LDAP provider). */
+        ProviderTest: {
+            /** @description Its password; refused when empty, before any bind. */
+            password: components["schemas"]["SecretString"];
+            /** @description The user name to sign in with. */
+            user_name: string;
+        };
+        /** @description The answer of a test sign-in. */
+        ProviderTestResult: {
+            /** @description The display name. */
+            display_name: string;
+            /** @description The groups found (SIDs, DNs or claim values). */
+            groups: string[];
+            /** @description The roles the mappings give the user. */
+            roles: components["schemas"]["RoleName"][];
+            /** @description The immutable subject the directory gave (`objectGUID`). */
+            subject: string;
+            /** @description Whether the provider is now verified. */
+            verified: boolean;
+        };
+        /** @description A provider as the sign-in page sees it (`GET /auth/providers/public`). */
+        PublicProvider: {
+            /** @description The id. */
+            id: components["schemas"]["ProviderId"];
+            /** @description `oidc`, `ldap` or `negotiate`. */
+            kind: string;
+            /** @description The text of the button. */
+            label: string;
+            /** @description The name suffixes an LDAP provider takes (`@corp.example.test`, `CORP\`). */
+            suffixes?: string[];
+        };
+        /** @description The answer of `GET /auth/providers/public`. */
+        PublicProviders: {
+            /** @description The verified providers, in the order of their names. */
+            items: components["schemas"]["PublicProvider"][];
+        };
         /** @description One line of a node's query log. */
         QueryLogLine: {
             /** @description When the query arrived. */
@@ -18159,6 +19066,8 @@ export interface components {
             /** @description Always `ready`. */
             status: string;
         };
+        /** @description Kerberos realm in upper case (`CORP.EXAMPLE.TEST`) */
+        Realm: string;
         /**
          * @description The kinds of rows of the view.
          * @enum {string}
@@ -19466,6 +20375,7 @@ export interface components {
             name: components["schemas"]["DnsName"];
             /** @description Who owns the RRset (section 2.5 of the Phase 2 plan). */
             origin: components["schemas"]["Origin"];
+            principal?: components["schemas"]["PrincipalName"] | null;
             /** @description The data of each record in wire form, without duplicates. */
             rdata: components["schemas"]["Rdata"][];
             /** @description The type. */
@@ -20773,6 +21683,8 @@ export interface components {
             /** @description Rows left out (see the loss report). */
             skipped: number;
         };
+        /** @description Windows security identifier (`S-1-5-21-1004336348-1177238915-682003330-512`) */
+        Sid: string;
         /** @description A sink as stored. */
         Sink: {
             /** @description Whether the sink exports; a disabled sink keeps its cursor. */
@@ -24027,6 +24939,215 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_directory_mappings: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+                /** @description Only the mappings of this provider. */
+                provider?: components["schemas"]["ProviderId"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of mappings by provider and group */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_MappingItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not read the settings */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_directory_mapping: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingCreate"];
+            };
+        };
+        responses: {
+            /** @description The mapping */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) or the mapping is invalid (`auth.directory.mapping_invalid`, parameters `field` and `reason`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not change the settings, or a token tries to */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The provider does not exist (`auth.provider.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The same group, role and scope is mapped already (`auth.directory.mapping_duplicate`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_directory_mapping: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mapping identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The mapping is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not change the settings, or a token tries to */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The mapping does not exist (`auth.directory.mapping_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_grants: {
         parameters: {
             query?: {
@@ -26090,6 +27211,235 @@ export interface operations {
             };
         };
     };
+    negotiate_login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The session is created; the browser is moved to the UI */
+            200: {
+                headers: {
+                    /** @description The session cookie `tenko_session` */
+                    "Set-Cookie"?: string;
+                    /** @description `Negotiate <AP-REP>`, the mutual authentication */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": unknown;
+                };
+            };
+            /** @description No token yet (`WWW-Authenticate: Negotiate`), or the token was refused (`auth.invalid_credentials`) */
+            401: {
+                headers: {
+                    /** @description `Negotiate` */
+                    "WWW-Authenticate"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No mapping matches the principal (`auth.directory.no_mapping`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No verified negotiate provider (`auth.provider.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    finish_oidc_login: {
+        parameters: {
+            query?: {
+                /** @description The authorization code. */
+                code?: string;
+                /** @description The state of the flow. */
+                state?: string;
+                /** @description The provider's error, when it refused. */
+                error?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Provider identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page that moves the browser to the return path, with the session cookie */
+            200: {
+                headers: {
+                    /** @description The session cookie `tenko_session` */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": unknown;
+                };
+            };
+            /** @description No flow matches the callback (`auth.oidc.flow_invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The ID token was refused (`auth.oidc.token_invalid`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No mapping matches the user (`auth.directory.no_mapping`), or the groups came as an overage marker (`auth.directory.overage`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The provider does not exist (`auth.provider.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The provider answered an error (`auth.oidc.provider_error`) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    start_oidc_login: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Where the browser goes after the sign-in: a path of the UI; `/` when absent or
+                 *     not a path.
+                 */
+                next?: string;
+                /**
+                 * @description A test sign-in by an administrator: verifies the provider instead of creating a
+                 *     session.
+                 */
+                test?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Provider identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The redirect to the provider, with the flow cookie */
+            303: {
+                headers: {
+                    /** @description The provider's authorization endpoint */
+                    Location?: string;
+                    /** @description The flow cookie `tenko_oidc` */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The provider does not exist or is not a verified OIDC provider (`auth.provider.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     change_password: {
         parameters: {
             query?: never;
@@ -26368,6 +27718,588 @@ export interface operations {
             };
             /** @description The person has no such key (`auth.preference.not_found`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_auth_providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The providers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderItem"][];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not read the settings */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_auth_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderCreate"];
+            };
+        };
+        responses: {
+            /** @description The provider */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) or the settings are invalid (`auth.provider.invalid`, parameters `field` and `reason`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not change the settings, or a token tries to */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A provider of the name exists (`auth.provider.exists`), or plain LDAP outside Lab (`auth.provider.plain_refused`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The provider's discovery document could not be fetched (`auth.oidc.discovery_failed`) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    fetch_ldap_chain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LdapChainRequest"];
+            };
+        };
+        responses: {
+            /** @description The chain, the server's certificate first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LdapChainResult"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) or the URL is not an LDAP URL (`auth.provider.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not change the settings, or a token tries to */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_public_auth_providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The providers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicProviders"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_auth_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The provider */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not read the settings */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The provider does not exist (`auth.provider.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_auth_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The provider is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not change the settings, or a token tries to */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The provider does not exist (`auth.provider.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_auth_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderPatch"];
+            };
+        };
+        responses: {
+            /** @description The provider */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) or the settings are invalid (`auth.provider.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not change the settings, or a token tries to */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The provider does not exist (`auth.provider.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The name is taken (`auth.provider.exists`), plain LDAP outside Lab (`auth.provider.plain_refused`), or `verified` asked for directly (`auth.provider.unverified`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    test_auth_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderTest"];
+            };
+        };
+        responses: {
+            /** @description The user found, the groups and the roles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderTestResult"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`), or the provider is not an LDAP provider (`auth.provider.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token, or the directory refused the password (`auth.invalid_credentials`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not change the settings, a token tries to, no mapping matches (`auth.directory.no_mapping`), or the account is disabled (`auth.directory.account_disabled`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The provider does not exist (`auth.provider.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The chain the server presents is not the pinned one (`auth.provider.chain_changed`) */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -33196,6 +35128,402 @@ export interface operations {
             };
         };
     };
+    get_dns_kerberos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The status; `account` absent until one is set up */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KerberosStatus"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dns_kerberos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys`, or a token tries to delete */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No account is set up (`dns.krb.account.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    adopt_dns_kerberos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KerberosAdopt"];
+            };
+        };
+        responses: {
+            /** @description The account is Tenko's; the status with its findings */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KerberosStatus"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) or the account settings are invalid (`dns.krb.account.invalid`, parameters `field` and `reason`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys`, or a token tries to change the account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An account exists already for the realm (`dns.krb.account.exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The KDC refused the one-time password (`dns.krb.password.refused`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No KDC of the realm answered (`dns.krb.kdc.unreachable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    check_dns_kerberos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The status with the findings of this run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KerberosStatus"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No account is set up (`dns.krb.account.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No KDC of the realm answered (`dns.krb.kdc.unreachable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    import_dns_kerberos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KerberosImport"];
+            };
+        };
+        responses: {
+            /** @description The keys are held; the status with its findings */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KerberosStatus"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) or the account settings are invalid (`dns.krb.account.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys`, or a token tries to change the account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An account exists already for the realm (`dns.krb.account.exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The keytab does not parse or holds no AES entry for the principal (`dns.krb.keytab.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    rotate_dns_kerberos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rotation job started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsJobStarted"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys`, or a token tries to rotate */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No account is set up (`dns.krb.account.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The account was imported, so its password is not Tenko's (`dns.krb.account.not_owned`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_dns_keys: {
         parameters: {
             query?: {
@@ -35282,6 +37610,87 @@ export interface operations {
             };
             /** @description No such zone (`dns.zone.not_found`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dns_zone_owners: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+                /** @description The zone scope; `default` when absent. */
+                scope?: components["schemas"]["ScopeName"];
+                /** @description Only the names at or below this name. */
+                name?: components["schemas"]["DnsName"];
+                /** @description Only the names of this owner, by SID or principal. */
+                owner?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of owners by scope and name */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_NameOwnerItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone does not exist (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

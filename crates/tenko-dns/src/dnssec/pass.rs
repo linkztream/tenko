@@ -170,6 +170,7 @@ impl Pass<'_> {
             rdata,
             origin: Origin::Dnssec,
             key: None,
+            principal: None,
             updated: self.stamp.clone(),
         }
     }

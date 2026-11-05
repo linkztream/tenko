@@ -238,6 +238,7 @@ mod tests {
             require_tsig: true,
             may_replace_ipam: false,
             dhcp: None,
+            kerberos: None,
         });
         assert!(check(&both, find, UpdateProfile::Standard, client, Some(&key)).is_ok());
         assert!(check(&both, find, UpdateProfile::Standard, outside, Some(&key)).is_ok());
@@ -252,6 +253,7 @@ mod tests {
             require_tsig: false,
             may_replace_ipam: false,
             dhcp: None,
+            kerberos: None,
         });
         assert!(check(&unsigned, find, UpdateProfile::Home, client, None).is_ok());
         assert!(check(&unsigned, find, UpdateProfile::Hardened, client, None).is_err());

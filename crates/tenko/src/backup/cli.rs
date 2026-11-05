@@ -447,6 +447,7 @@ async fn sign_in(
             &PasswordLogin {
                 user_name: user.to_owned(),
                 password: password.to_dto(),
+                provider: None,
             },
             None,
         )

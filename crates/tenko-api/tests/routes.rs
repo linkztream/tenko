@@ -711,6 +711,45 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/migrate/takeovers", "list_takeovers"),
     ("GET", "/migrate/takeovers/{id}", "get_takeover"),
     ("GET", "/ipam/reconcile", "get_ipam_reconcile"),
+    // WP13.0: the Kerberos account, the owners, the sign-in providers, the directory sign-in
+    // flows and the directory mappings.
+    ("GET", "/dns/kerberos", "get_dns_kerberos"),
+    ("DELETE", "/dns/kerberos", "delete_dns_kerberos"),
+    ("POST", "/dns/kerberos/adopt", "adopt_dns_kerberos"),
+    ("POST", "/dns/kerberos/import", "import_dns_kerberos"),
+    ("POST", "/dns/kerberos/check", "check_dns_kerberos"),
+    ("POST", "/dns/kerberos/rotate", "rotate_dns_kerberos"),
+    ("GET", "/dns/zones/{id}/owners", "list_dns_zone_owners"),
+    ("GET", "/auth/providers", "list_auth_providers"),
+    ("POST", "/auth/providers", "create_auth_provider"),
+    (
+        "GET",
+        "/auth/providers/public",
+        "list_public_auth_providers",
+    ),
+    ("POST", "/auth/providers/ldap/chain", "fetch_ldap_chain"),
+    ("GET", "/auth/providers/{id}", "get_auth_provider"),
+    ("PATCH", "/auth/providers/{id}", "update_auth_provider"),
+    ("DELETE", "/auth/providers/{id}", "delete_auth_provider"),
+    ("POST", "/auth/providers/{id}/test", "test_auth_provider"),
+    ("GET", "/auth/oidc/{id}/start", "start_oidc_login"),
+    ("GET", "/auth/oidc/{id}/callback", "finish_oidc_login"),
+    ("GET", "/auth/negotiate", "negotiate_login"),
+    (
+        "GET",
+        "/access/directory-mappings",
+        "list_directory_mappings",
+    ),
+    (
+        "POST",
+        "/access/directory-mappings",
+        "create_directory_mapping",
+    ),
+    (
+        "DELETE",
+        "/access/directory-mappings/{id}",
+        "delete_directory_mapping",
+    ),
 ];
 
 /// The only endpoint that is not a stub.

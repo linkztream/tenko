@@ -8,6 +8,8 @@ import { For } from "solid-js";
 import { paths } from "../app/paths";
 import { t, type MessageKey } from "../i18n";
 import { DNS_SETTINGS_PATH } from "./dns/paths";
+// WP13.0
+import { PROVIDERS_PATH } from "./providers/paths";
 // WP7.4
 import { DHCP_SETTINGS_PATH } from "../dhcp/paths";
 import { CERTIFICATES_PATH } from "./certificates/paths";
@@ -17,7 +19,7 @@ import { SECRETS_PATH } from "../secrets/paths";
 import { UPDATES_PATH } from "../updates/paths";
 
 interface Tab {
-  id: "security" | "users" | "updates" | "secrets" | "access" | "audit-export" | "vault" | "certificates" | "backup" | "reconciler" | "guardrails" | "dns" | "dhcp" | "languages";
+  id: "security" | "users" | "updates" | "secrets" | "access" | "providers" | "audit-export" | "vault" | "certificates" | "backup" | "reconciler" | "guardrails" | "dns" | "dhcp" | "languages";
   href: string;
   label: MessageKey;
 }
@@ -28,6 +30,8 @@ const TABS: readonly Tab[] = [
   { id: "updates", href: UPDATES_PATH, label: "settings.nav.updates" },
   { id: "secrets", href: SECRETS_PATH, label: "settings.nav.secrets" },
   { id: "access", href: paths.settings("access"), label: "settings.nav.access" },
+  // WP13.0: the sign-in providers.
+  { id: "providers", href: PROVIDERS_PATH, label: "settings.nav.providers" },
   { id: "audit-export", href: paths.settings("audit-export"), label: "settings.nav.audit_export" },
   { id: "vault", href: paths.settings("vault"), label: "settings.nav.vault" },
   { id: "certificates", href: CERTIFICATES_PATH, label: "settings.nav.certificates" },

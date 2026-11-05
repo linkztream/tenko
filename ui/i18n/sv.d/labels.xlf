@@ -1202,6 +1202,58 @@
         <notes><note category="description">What the audit action migrate.mirror.update is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Change a mirrored source</source><target>Ändra en speglad källa</target></segment>
       </unit>
+      <unit id="audit.action.auth.directory.revoke">
+        <notes><note category="description">What the audit action auth.directory.revoke is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>End a session or narrow its rights after a directory check</source><target>Avsluta en session eller begränsa dess rättigheter efter en katalogkontroll</target></segment>
+      </unit>
+      <unit id="audit.action.auth.mapping.create">
+        <notes><note category="description">What the audit action auth.mapping.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a directory mapping</source><target>Skapa en katalogmappning</target></segment>
+      </unit>
+      <unit id="audit.action.auth.mapping.delete">
+        <notes><note category="description">What the audit action auth.mapping.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a directory mapping</source><target>Ta bort en katalogmappning</target></segment>
+      </unit>
+      <unit id="audit.action.auth.provider.create">
+        <notes><note category="description">What the audit action auth.provider.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a sign-in provider</source><target>Skapa en inloggningsleverantör</target></segment>
+      </unit>
+      <unit id="audit.action.auth.provider.delete">
+        <notes><note category="description">What the audit action auth.provider.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a sign-in provider</source><target>Ta bort en inloggningsleverantör</target></segment>
+      </unit>
+      <unit id="audit.action.auth.provider.update">
+        <notes><note category="description">What the audit action auth.provider.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a sign-in provider</source><target>Redigera en inloggningsleverantör</target></segment>
+      </unit>
+      <unit id="audit.action.auth.provider.verify">
+        <notes><note category="description">What the audit action auth.provider.verify is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Test the sign-in of a provider</source><target>Testa inloggningen hos en leverantör</target></segment>
+      </unit>
+      <unit id="audit.action.dns.gss.refuse">
+        <notes><note category="description">What the audit action dns.gss.refuse is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refuse a GSS-TSIG negotiation</source><target>Neka en GSS-TSIG-förhandling</target></segment>
+      </unit>
+      <unit id="audit.action.dns.krb.account.adopt">
+        <notes><note category="description">What the audit action dns.krb.account.adopt is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Take over a Kerberos computer account</source><target>Ta över ett Kerberos-datorkonto</target></segment>
+      </unit>
+      <unit id="audit.action.dns.krb.account.check">
+        <notes><note category="description">What the audit action dns.krb.account.check is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Report the self-test of the Kerberos account</source><target>Rapportera självtestet av Kerberos-kontot</target></segment>
+      </unit>
+      <unit id="audit.action.dns.krb.account.delete">
+        <notes><note category="description">What the audit action dns.krb.account.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete the Kerberos account</source><target>Ta bort Kerberos-kontot</target></segment>
+      </unit>
+      <unit id="audit.action.dns.krb.account.import">
+        <notes><note category="description">What the audit action dns.krb.account.import is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Import a Kerberos keytab</source><target>Importera en Kerberos-keytab</target></segment>
+      </unit>
+      <unit id="audit.action.dns.krb.account.rotate">
+        <notes><note category="description">What the audit action dns.krb.account.rotate is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Rotate the password of the Kerberos account</source><target>Rotera lösenordet för Kerberos-kontot</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>

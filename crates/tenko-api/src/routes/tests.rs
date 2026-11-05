@@ -16,7 +16,11 @@ use super::auth::testkit::{Credential, Credential::*, Harness, Reply};
 use crate::{API_BASE, modules::ModuleSet};
 
 /// The operations anybody may call: their handlers take no `Ctx`.
-const PUBLIC: [&str; 14] = [
+const PUBLIC: [&str; 18] = [
+    "GET /auth/negotiate",
+    "GET /auth/oidc/{id}/callback",
+    "GET /auth/oidc/{id}/start",
+    "GET /auth/providers/public",
     "GET /health",
     "GET /health/ready",
     "GET /i18n/languages",
@@ -93,7 +97,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(schemes["token"]["scheme"], "bearer");
 
     let all = operations();
-    assert_eq!(all.len(), 421, "every operation of the document");
+    assert_eq!(all.len(), 442, "every operation of the document");
     let public: BTreeSet<String> = PUBLIC.iter().map(|key| (*key).to_owned()).collect();
     assert_eq!(with(Requirement::Public), public, "the public operations");
     let until_setup: BTreeSet<String> = PUBLIC_UNTIL_SETUP
@@ -103,7 +107,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(with(Requirement::PublicUntilSetup), until_setup);
     assert_eq!(
         with(Requirement::Session).len(),
-        84,
+        95,
         "the session-only operations"
     );
 }
@@ -190,7 +194,7 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
             }
         }
     }
-    assert_eq!(refused, 421 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len());
+    assert_eq!(refused, 442 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len());
 }
 
 /// Every operation without a request body called with a personal token of the

@@ -231,6 +231,7 @@ impl Lab {
                 &PasswordLogin {
                     user_name: name.to_owned(),
                     password: SecretString::new(pin),
+                    provider: None,
                 },
             )
             .await
@@ -1004,6 +1005,7 @@ async fn a_service_account_cannot_sign_in_with_a_password() {
                 &PasswordLogin {
                     user_name: "svc-ipam".to_owned(),
                     password: SecretString::new(password),
+                    provider: None,
                 },
             )
             .await;
@@ -1814,6 +1816,7 @@ async fn lock_account(lab: &Lab, service: &AuthService, id: UserId, name: &str) 
                 &PasswordLogin {
                     user_name: name.to_owned(),
                     password: SecretString::new("0000 not the password"),
+                    provider: None,
                 },
             )
             .await;
@@ -1865,6 +1868,7 @@ async fn login_result(
             &PasswordLogin {
                 user_name: name.to_owned(),
                 password: SecretString::new(pin),
+                provider: None,
             },
         )
         .await

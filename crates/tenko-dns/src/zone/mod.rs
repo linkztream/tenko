@@ -351,6 +351,7 @@ pub(crate) fn soa_rrset(
         })],
         origin: Origin::Manual,
         key: None,
+        principal: None,
         updated: stamp,
     }
 }
@@ -1194,6 +1195,7 @@ fn ns_rrset(
         rdata,
         origin: Origin::Manual,
         key: None,
+        principal: None,
         updated: stamp,
     })
 }

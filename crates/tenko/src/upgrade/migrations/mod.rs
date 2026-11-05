@@ -8,8 +8,10 @@
 //! and format 3 the Phase 2 contract format: empty migrations (`v2.rs`, `v3.rs`) that only
 //! keep an older binary away from new stored values; format 4 is the Phase 3 contract format
 //! (`v4.rs`, WP7.0), empty as well; format 5 (`v5.rs`, WP9.2) the stored role
-//! `dhcp_pd_pool` of IPAM ranges, empty as well; format 6 (`v6.rs`, WP14.0) the Phase 4
-//! contract format, empty as well. Adding format 7 takes three edits:
+//! `dhcp_pd_pool` of IPAM ranges, empty as well; format 6 (`v6.rs`, WP14.0 and WP13.0) the
+//! contract format of Phase 4 and of Slice 13 (the `migrate` namespace, the object kinds
+//! `mirror` and `takeover`, the token scope `mirror:<id>` and the `kerberos` entry of a DNS
+//! access list), empty as well. Adding format 7 takes three edits:
 //!
 //! 1. a file `v7.rs` with a type that implements [`Migration`] (`to()` returns 7);
 //! 2. `mod v7;` here and `&v7::V7` in [`MIGRATIONS`], and a [`FormatInfo`] line in
@@ -34,7 +36,7 @@ mod v3;
 mod v4;
 // WP9.2: the delegation pools.
 mod v5;
-// WP14.0: the Phase 4 contract format.
+// WP14.0 and WP13.0: the Phase 4 and Slice 13 contract format.
 mod v6;
 
 /// The data-directory format this binary writes and reads.
@@ -88,11 +90,16 @@ pub const FORMATS: &[FormatInfo] = &[
         since: "0.1.0",
         summary: "the delegation pools of DHCPv6 prefix delegation (WP9.2), raised so that a format 4                   binary refuses a data directory that may hold an IPAM range of the role                   dhcp_pd_pool, which it cannot decode; the migration changes no row",
     },
-    // WP14.0
+    // WP14.0, WP13.0
     FormatInfo {
         version: 6,
         since: "0.0.12",
-        summary: "the Phase 4 contract format (WP14.0), raised once so that a format 5 binary refuses \n                  a Phase 4 data directory: the migrate namespace of tables, audit actions and error \n                  codes, the object kinds mirror and takeover and the token scope mirror:<id>; the \n                  tables of later Phase 4 packages are additive; the migration changes no row",
+        summary: "the Phase 4 and Slice 13 contract format (WP14.0, WP13.0), raised once so that a \
+                  format 5 binary refuses a data directory that may hold values it cannot decode: \
+                  the migrate namespace of tables, audit actions and error codes, the object kinds \
+                  mirror and takeover, the token scope mirror:<id>, and a DNS access list with a \
+                  kerberos entry (secure dynamic updates); the tables of later Phase 4 packages \
+                  and of the slice are additive; the migration changes no row",
     },
 ];
 

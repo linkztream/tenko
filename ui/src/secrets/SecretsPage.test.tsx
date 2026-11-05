@@ -705,6 +705,7 @@ describe("roles", () => {
       "Updates",
       "Secrets",
       "Access",
+      "Sign-in providers",
       "Audit export",
       "Vault",
       "Certificates",

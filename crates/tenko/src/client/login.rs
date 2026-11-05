@@ -277,6 +277,7 @@ pub async fn login(args: &LoginArgs) -> Result<Output, Failure> {
             &PasswordLogin {
                 user_name: user.clone(),
                 password: password.to_dto(),
+                provider: None,
             },
             None,
         )

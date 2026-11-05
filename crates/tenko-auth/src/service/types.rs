@@ -89,6 +89,13 @@ pub struct PasswordLogin {
     pub user_name: String,
     /// The password or PIN.
     pub password: SecretString,
+    // WP13.0: the provider of a directory sign-in (identity plan section 4.3).
+    /// The LDAP provider the name and password go to, by id or name; absent: the local
+    /// account, or the provider the name's suffix or the default routes to (section
+    /// 3.18). Read from WP13.6 on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    // WP13.0: end.
 }
 
 /// `POST /auth/login/totp` and `POST /auth/login/recovery`.

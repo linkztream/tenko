@@ -23,6 +23,7 @@
 //! | `auth.scoped_tokens` | SHA-256 of the token | [`ScopedTokenRecord`] (IAM-10) |
 //! | `auth.user_scoped_tokens` | ([`UserId`], [`ApiTokenId`]) | SHA-256 of the token |
 //! | `auth.preferences` | ([`UserId`], key) | [`StoredPreference`] (the person's saved table layouts) |
+//! | `auth.providers`, `auth.mappings`, `auth.oidc_flows`, `auth.external_ids` | see [`crate::directory`] | directory sign-in (WP13.0) |
 //!
 //! Scoped grants, role policies and scoped tokens live in tables that builds before
 //! WP3.2 do not read: after a rollback a scoped grant or token grants nothing instead of
@@ -47,8 +48,12 @@ use utoipa::{
 
 pub use crate::preferences::StoredPreference;
 use crate::{
-    password::hash::PasswordHash, recovery::StoredRecoveryCode, roles::RoleName,
-    settings::SecuritySettings, webauthn::AttestationKind,
+    directory::{SessionSource, UserSource},
+    password::hash::PasswordHash,
+    recovery::StoredRecoveryCode,
+    roles::RoleName,
+    settings::SecuritySettings,
+    webauthn::AttestationKind,
 };
 
 /// Users by id.
@@ -442,6 +447,12 @@ pub struct UserRecord {
     /// the account when it sees the change (WP3.2; the throttle is per controller).
     #[serde(default)]
     pub unlocked_at: Option<Timestamp>,
+    // WP13.0: the external identity of a directory user (identity plan section 3.16).
+    /// Where the account comes from: local, or created at the first sign-in through a
+    /// provider, keyed by the immutable subject. Absent in records of 0.0.11: local.
+    #[serde(default, skip_serializing_if = "UserSource::is_local")]
+    pub source: UserSource,
+    // WP13.0: end.
 }
 
 impl UserRecord {
@@ -464,6 +475,7 @@ impl UserRecord {
             kind: UserKind::Person,
             owner: None,
             unlocked_at: None,
+            source: UserSource::Local,
         }
     }
 
@@ -538,6 +550,16 @@ pub struct SessionRecord {
     // Stored sessions of 0.0.11 carry the old name.
     #[serde(default, alias = "mfa_enrolment_required")] // spelling: alias permanently
     pub mfa_enrollment_required: bool,
+    // WP13.0: directory sessions (identity plan section 3.17).
+    /// How the session was signed in: locally, or through a provider. Absent in records
+    /// of 0.0.11: local.
+    #[serde(default, skip_serializing_if = "SessionSource::is_local")]
+    pub source: SessionSource,
+    /// When the directory last confirmed the user and the groups (the check of section
+    /// 3.13); none for a local session or before the first check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory_checked_at: Option<Timestamp>,
+    // WP13.0: end.
 }
 
 /// A personal API token (IAM-10). Stored under the SHA-256 of the token.
@@ -645,7 +667,7 @@ pub struct AlarmRecord {
 mod tests {
     use tenko_core::{AuthStrength, MirrorId, SessionId, Timestamp, UserId};
 
-    use super::{SESSIONS, SessionRecord, TokenScope};
+    use super::{SESSIONS, SessionRecord, SessionSource, TokenScope};
 
     // WP14.0: the wire form `mirror:<id>` of the mirror scope.
     #[test]
@@ -697,6 +719,8 @@ mod tests {
             user_agent: None,
             break_glass: false,
             mfa_enrollment_required: true,
+            source: SessionSource::Local,
+            directory_checked_at: None,
         };
         let new = SESSIONS.encode(&record).expect("cbor").to_vec();
         // The bytes 0.0.11 wrote: the same map with the CBOR text key of the old name

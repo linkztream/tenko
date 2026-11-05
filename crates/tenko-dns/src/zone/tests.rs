@@ -275,6 +275,7 @@ async fn another_origin_needs_a_take_over() {
         })],
         origin: Origin::Ipam,
         key: None,
+        principal: None,
         updated: Stamp::new(cx().now, cx().principal),
     };
     let mut batch = WriteBatch::for_request(&cx());
@@ -528,6 +529,7 @@ async fn a_dhcp_writer_adds_nothing_beside_another_origin_at_a_name_it_does_not_
         })],
         origin: Origin::Ipam,
         key: None,
+        principal: None,
         updated: Stamp::new(cx().now, cx().principal),
     };
     let mut batch = WriteBatch::for_request(&cx());
@@ -1306,4 +1308,48 @@ async fn a_zone_carries_the_prefix_whose_reverse_zone_it_is() {
         .await
         .expect("clear");
     assert_eq!(cleared.zone.reverse_of, None);
+}
+
+// WP13.0: the rules of a Kerberos entry are checked when a list is written.
+#[tokio::test]
+async fn a_kerberos_entry_with_a_bad_pattern_is_refused() {
+    let (service, _) = new_service();
+    let realm = tenko_core::dns::Realm::new("CORP.EXAMPLE.TEST").expect("realm");
+    let error = service
+        .create_acl(
+            &cx(),
+            NewAcl {
+                name: "ad-corp".to_owned(),
+                entries: vec![AclEntry::Kerberos {
+                    realm: realm.clone(),
+                    principal: Some("alex@CORP.EXAMPLE.TEST".to_owned()),
+                    from: None,
+                    deny: false,
+                }],
+                description: None,
+            },
+        )
+        .await
+        .expect_err("a pattern names no realm");
+    assert!(
+        error.is(tenko_core::error::codes::INVALID_VALUE),
+        "{error:?}"
+    );
+    let (acl, _) = service
+        .create_acl(
+            &cx(),
+            NewAcl {
+                name: "ad-corp".to_owned(),
+                entries: vec![AclEntry::Kerberos {
+                    realm,
+                    principal: Some("*$".to_owned()),
+                    from: Some("192.0.2.0/24".parse().expect("prefix")),
+                    deny: false,
+                }],
+                description: None,
+            },
+        )
+        .await
+        .expect("a computer-account entry");
+    assert_eq!(acl.entries.len(), 1);
 }

@@ -87,6 +87,7 @@ describe("the secrets page under Settings", () => {
       "updates",
       "secrets",
       "access",
+      "providers",
       "audit-export",
       "vault",
       "certificates",

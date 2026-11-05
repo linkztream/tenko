@@ -1,0 +1,133 @@
+# The Active Directory lab (identity plan section 3.19, WP13.0): a Samba AD domain controller
+# provisioned without its own DNS, a Linux client with MIT Kerberos, and one Tenko node that
+# serves the domain's zones and takes the controller's and the client's secure dynamic
+# updates. A lab, not a deployment: the realm is LAB.EXAMPLE.TEST, every address is a
+# documentation value (RFC 5737, 198.51.100.0/24), every secret is generated per run, and
+# nothing is published on the host. README.md says what runs and what the later packages
+# fill in.
+#
+# WP13.0 declares the services; nothing in them runs a round yet. WP13.2 adds the round
+# `gss` (E43: the controller's samba_dnsupdate and the client's nsupdate -g against a zone
+# set to secure only), WP13.5 the Keycloak service for OIDC (E47), WP13.6 the LDAP rounds
+# with the private CA of the controller's LDAPS certificate and the five-minute UI test
+# (E48), WP13.7 curl --negotiate against the web UI (E49). The weekly job on hosted runners
+# runs them; the lab is never a pull-request gate (R131).
+#
+# Images are named by variables with a tag default so that the files stand without a
+# registry; the packages that run a round pin each image by digest (section 3.19). Samba is
+# GPL-licensed and Keycloak Apache-2.0; both are run only as containers here, nothing of
+# them is copied into the repository or linked (ADR 0026).
+#
+# Variables (the lab script of each round sets them): LAB_DIR (the work directory with the
+# generated secrets, the certificates of the private CA and tenko.toml, required),
+# TENKO_IMAGE (default tenko:lab), SAMBA_IMAGE, CLIENT_IMAGE.
+
+name: ${COMPOSE_PROJECT_NAME:-tenkoadlab}
+
+services:
+  # The domain controller: `samba-tool domain provision --dns-backend=NONE` for the realm
+  # LAB.EXAMPLE.TEST (domain LAB) at first start, with the administrator password of the
+  # run from LAB_DIR/secrets; its DNS is the Tenko node, so its own samba_dnsupdate
+  # registers the locator records there through nsupdate -g (E43). It also serves LDAP
+  # (389, 636 with a certificate of the lab's private CA from LAB_DIR/tls, WP13.6) and the
+  # KDC (88) and the password service (464) the client and Tenko talk to.
+  samba:
+    image: ${SAMBA_IMAGE:-tenko-lab-samba:local}
+    hostname: dc01.lab.example.test
+    restart: "no"
+    environment:
+      LAB_REALM: LAB.EXAMPLE.TEST
+      LAB_DOMAIN: LAB
+      LAB_DNS: 198.51.100.3
+    dns:
+      - 198.51.100.3
+    expose:
+      - "88/tcp"
+      - "88/udp"
+      - "389/tcp"
+      - "464/tcp"
+      - "464/udp"
+      - "636/tcp"
+    volumes:
+      - "samba-data:/var/lib/samba"
+      - "${LAB_DIR:?set LAB_DIR}/secrets:/lab/secrets:ro"
+      - "${LAB_DIR:?set LAB_DIR}/tls:/lab/tls:ro"
+    networks:
+      lab:
+        ipv4_address: 198.51.100.2
+
+  # One node with the roles controller and dns, the DNS module on and the Lab profile,
+  # primary of lab.example.test and _msdcs.lab.example.test. The DNS role listens on 53
+  # inside the lab network (the container has CAP_NET_BIND_SERVICE for it, as the unit
+  # does); the API is plain HTTP on 8443 (the Lab profile allows it), on the lab network
+  # only. The round's script writes tenko.toml into LAB_DIR; the Kerberos account is
+  # adopted through the API with the one-time password of the run (WP13.3).
+  tenko:
+    image: ${TENKO_IMAGE:-tenko:lab}
+    hostname: ns1.lab.example.test
+    command: ["--roles", "controller,dns", "--config", "/lab/tenko.toml"]
+    restart: "no"
+    stop_grace_period: 30s
+    cap_add:
+      - NET_BIND_SERVICE
+    expose:
+      - "53/tcp"
+      - "53/udp"
+      - "8443/tcp"
+    environment:
+      TENKO_KEK__PROVIDER: file
+      TENKO_KEK__PATH: /run/secrets/kek
+      # The lab has no route out: no breach lookups, no update checks.
+      TENKO_HIBP__ONLINE: "false"
+      TENKO_UPDATES__AIR_GAPPED: "true"
+    secrets:
+      - kek
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/tenko", "health", "--url", "http://127.0.0.1:8443"]
+      interval: 5s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    volumes:
+      - "tenko-data:/var/lib/tenko"
+      - "${LAB_DIR:?set LAB_DIR}/tenko.toml:/lab/tenko.toml:ro"
+    networks:
+      lab:
+        ipv4_address: 198.51.100.3
+
+  # A Linux client with MIT Kerberos (kinit, klist, nsupdate -g from BIND's tools and
+  # curl): the rows of E43 (adds, replaces and deletes over UDP and TCP, the refusals of an
+  # unsigned update, a replay and a second principal) and E49 (curl --negotiate against the
+  # web UI). Its krb5.conf names the realm and the controller as the KDC; its DNS is the
+  # Tenko node.
+  client:
+    image: ${CLIENT_IMAGE:-tenko-lab-client:local}
+    hostname: ws01.lab.example.test
+    restart: "no"
+    dns:
+      - 198.51.100.3
+    environment:
+      LAB_REALM: LAB.EXAMPLE.TEST
+      LAB_KDC: dc01.lab.example.test
+    volumes:
+      - "${LAB_DIR:?set LAB_DIR}/secrets:/lab/secrets:ro"
+      - "${LAB_DIR:?set LAB_DIR}/tls:/lab/tls:ro"
+    networks:
+      lab:
+        ipv4_address: 198.51.100.4
+    command: ["sleep", "infinity"]
+
+secrets:
+  kek:
+    file: "${LAB_DIR:?set LAB_DIR}/secrets/kek"
+
+volumes:
+  samba-data:
+  tenko-data:
+
+networks:
+  lab:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 198.51.100.0/24

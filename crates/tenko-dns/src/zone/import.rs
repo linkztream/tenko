@@ -366,6 +366,7 @@ fn merge_group(
             rdata,
             origin: Origin::Manual,
             key: None,
+            principal: None,
             updated: merge.stamp.clone(),
         };
         let again = previous.is_some_and(|(_, revision)| *revision > merge.start);

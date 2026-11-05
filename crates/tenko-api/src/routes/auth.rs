@@ -108,6 +108,9 @@ use crate::{
 /// Longest `User-Agent` handed to the service, in characters.
 const USER_AGENT_LIMIT: usize = 200;
 
+// WP13.0: the sign-in providers and the directory sign-in flows (`auth/providers.rs`).
+mod providers;
+
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(login_password))
@@ -131,6 +134,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(regenerate_recovery_codes))
         .routes(routes!(list_tokens, create_token))
         .routes(routes!(revoke_token))
+        // WP13.0: the sign-in providers and the directory sign-in flows.
+        .merge(providers::routes())
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1691,7 +1696,8 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 40, "every endpoint of the four areas");
+        // WP13.0: the eleven operations of the providers and the directory sign-in.
+        assert_eq!(checked, 51, "every endpoint of the four areas");
     }
 
     #[tokio::test]
@@ -2757,10 +2763,21 @@ mod tests {
             "login_recovery",
             "webauthn_login_start",
             "webauthn_login_finish",
+            // WP13.0: the sign-in page's buttons and the directory sign-in flows.
+            "list_public_auth_providers",
+            "start_oidc_login",
+            "finish_oidc_login",
+            "negotiate_login",
         ];
         // What acts on the session, mints tokens or changes users, settings or factors needs an
         // interactive session: a personal token is refused.
         let session_only = [
+            // WP13.0: the providers are settings.
+            "create_auth_provider",
+            "update_auth_provider",
+            "delete_auth_provider",
+            "test_auth_provider",
+            "fetch_ldap_chain",
             "logout",
             "get_session",
             "revoke_session",
@@ -2809,8 +2826,12 @@ mod tests {
                 );
                 let responses = operation["responses"].as_object().expect("responses");
                 assert!(responses.contains_key("503"), "{label}: 503");
+                // A redirect counts as the success of the start of an OpenID Connect sign-in
+                // (WP13.0).
                 assert!(
-                    responses.keys().any(|status| status.starts_with('2')),
+                    responses
+                        .keys()
+                        .any(|status| status.starts_with('2') || status.starts_with('3')),
                     "{label}: a success"
                 );
                 // The operation's own requirement, else the document's.
@@ -2842,9 +2863,10 @@ mod tests {
                     assert!(security.contains(&vec!["token"]), "{label}: token");
                     assert!(responses.contains_key("401"), "{label}: 401");
                 }
-                // Every error response is problem details.
+                // Every error response is problem details; a redirect (WP13.0: the start
+                // of an OpenID Connect sign-in) has no body.
                 for (status, response) in responses {
-                    if status.starts_with('2') {
+                    if status.starts_with('2') || status.starts_with('3') {
                         continue;
                     }
                     assert_eq!(
@@ -2856,7 +2878,8 @@ mod tests {
                 schema_refs(operation, &mut refs);
             }
         }
-        assert_eq!(operations, 40);
+        // WP13.0: the eleven operations of the providers and the directory sign-in.
+        assert_eq!(operations, 51);
         // Every schema the operations name exists, and so does everything those name.
         let mut pending: Vec<String> = refs.iter().cloned().collect();
         while let Some(name) = pending.pop() {

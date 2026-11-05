@@ -59,3 +59,14 @@ GET /api/v1/openapi.json
 # operations of the document, so the walk does not send them; web.ui_baseline scans them.
 GET /
 GET /assets/{file}
+
+# Directory sign-in (identity plan sections 3.12 to 3.14, WP13.0; the operations answer 501
+# until WP13.5 and WP13.7 build them). The sign-in page lists the verified providers before
+# anyone is signed in; the OpenID Connect start and callback are the browser's redirects to
+# and from the provider, which carry no session yet; the Negotiate exchange is how the
+# browser presents a Kerberos ticket, before a session exists. They give out nothing of a
+# provider's settings, only its name and kind.
+GET /api/v1/auth/providers/public
+GET /api/v1/auth/oidc/{id}/start
+GET /api/v1/auth/oidc/{id}/callback
+GET /api/v1/auth/negotiate

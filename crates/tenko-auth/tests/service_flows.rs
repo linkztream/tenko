@@ -48,6 +48,7 @@ async fn password_login(
             &PasswordLogin {
                 user_name: user.to_owned(),
                 password: SecretString::new(password),
+                provider: None,
             },
         )
         .await

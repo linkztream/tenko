@@ -370,6 +370,7 @@ fn index_lookups_do_not_allocate() {
             rdata: vec![Rdata::from_data(&data)],
             origin: Origin::Manual,
             key: None,
+            principal: None,
             updated: stamp(),
         };
         image.rrsets.insert(set.key(), set);
@@ -467,6 +468,7 @@ fn full_image() -> DnsData {
             rdata: vec![Rdata::from_data(&data)],
             origin: Origin::Manual,
             key: None,
+            principal: None,
             updated: stamp(),
         };
         image.rrsets.insert(set.key(), set);
@@ -1074,6 +1076,7 @@ fn rrset_of(zone: &Zone, owner: &str, data: &RecordData) -> RrSet {
         rdata: vec![Rdata::from_data(data)],
         origin: Origin::Manual,
         key: None,
+        principal: None,
         updated: stamp(),
     }
 }

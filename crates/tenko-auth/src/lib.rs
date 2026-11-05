@@ -20,6 +20,7 @@
 //! | [`grants`] | scoped grants: grantable roles and rules, containment of rules |
 //! | [`settings`] | security profiles and TGL-01 to TGL-07 |
 //! | [`model`] | stored records and the `auth.*` tables |
+//! | [`directory`] | directory sign-in: providers, the LDAP trust, mappings, external identities, OIDC flows (WP13.0) |
 //! | [`secret`] | session secrets, personal tokens and the setup token |
 //! | [`challenge`] | pending ceremonies, in memory |
 //! | [`encoding`] | base64url, base32, hexadecimal |
@@ -32,6 +33,8 @@ pub mod audit_export;
 pub mod authz;
 pub mod challenge;
 pub mod clock;
+// WP13.0: the contracts of directory sign-in (identity plan section 4.1).
+pub mod directory;
 pub mod encoding;
 pub mod error;
 pub mod grants;

@@ -50,6 +50,9 @@ use crate::{
     API_BASE, dto::Page, extract::Ctx, list::Filters, problem::ProblemDetails, state::AppState,
 };
 
+// WP13.0: the directory mappings (`access/mappings.rs`).
+mod mappings;
+
 /// The routes of the area.
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -64,6 +67,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(revoke_service_account_token))
         .routes(routes!(list_role_policies))
         .routes(routes!(set_role_policy, clear_role_policy))
+        // WP13.0: the directory mappings.
+        .merge(mappings::routes())
 }
 
 /// A `201 Created` JSON answer with `Location`.

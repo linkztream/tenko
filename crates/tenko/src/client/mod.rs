@@ -25,7 +25,11 @@
 //! with the time since the controller lost contact and the revision of its copy
 //! ([`warn_if_stale`]).
 
+// WP13.0: `tenko access mapping ...`.
+pub mod access;
 pub mod audit;
+// WP13.0: `tenko auth provider ...`.
+pub mod auth;
 pub mod ca_root;
 pub mod dhcp; // WP7.0
 pub mod dns;

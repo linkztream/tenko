@@ -568,6 +568,80 @@ pub fn register(registry: &Registry) {
     registry.register(&crate::pool::UPSTREAM_HEALTH_FAMILY);
 }
 
+// WP13.0: the families of GSS-TSIG (identity plan section 3.11), declared so that WP13.2
+// registers the same names; nothing counts into them before the TKEY handler exists. The
+// label `auth` (`none`, `tsig`, `gss`) on `tenko_dns_updates` is WP13.2's change of
+// `update::UPDATES`, since it moves the series of a family the role serves today.
+
+/// TKEY negotiations, by outcome: `established`, `continue`, `deleted`, `mechanism` (no
+/// Kerberos offered), `token` (a token that does not verify), `skew`, `kvno` (a key
+/// version Tenko does not hold), `limit` (the table full), `unknown_context`.
+pub const TKEY: Desc =
+    Desc::counter("tenko_dns_tkey", "DNS TKEY negotiations (GSS-TSIG)").labels(&["outcome"]);
+
+/// The `outcome` values of [`TKEY`], in the order of the fixed series.
+pub const TKEY_OUTCOMES: [&str; 9] = [
+    "established",
+    "continue",
+    "deleted",
+    "mechanism",
+    "token",
+    "skew",
+    "kvno",
+    "limit",
+    "unknown_context",
+];
+
+/// The GSS-TSIG contexts a node holds, by state (`negotiating`, `established`); set
+/// before a scrape.
+pub const GSS_CONTEXTS: Desc = Desc::gauge(
+    "tenko_dns_gss_contexts",
+    "GSS-TSIG security contexts held by the node",
+)
+.labels(&["state"]);
+
+/// Time from a TKEY query's arrival to the established context.
+pub const GSS_ESTABLISH: Desc = Desc::histogram(
+    "tenko_dns_gss_establish_seconds",
+    "Time to establish a GSS-TSIG security context",
+    LATENCY_BUCKETS_US,
+    1_000_000,
+);
+
+/// [`TKEY`] by outcome.
+pub static TKEY_COUNTER: CounterVec = CounterVec::fixed(
+    TKEY,
+    &[
+        &["established"],
+        &["continue"],
+        &["deleted"],
+        &["mechanism"],
+        &["token"],
+        &["skew"],
+        &["kvno"],
+        &["limit"],
+        &["unknown_context"],
+    ],
+);
+
+/// [`GSS_CONTEXTS`] by state.
+pub static GSS_CONTEXT_GAUGE: GaugeVec =
+    GaugeVec::fixed(GSS_CONTEXTS, &[&["negotiating"], &["established"]]);
+
+/// [`GSS_ESTABLISH`].
+pub static GSS_ESTABLISH_HISTOGRAM: Histogram = Histogram::new(GSS_ESTABLISH);
+
+/// Registers the GSS-TSIG families with `registry` (the role, when a zone takes secure
+/// updates; WP13.2 calls it), and uses the counter once so that its first use is off the
+/// query path.
+pub fn register_gss(registry: &Registry) {
+    TKEY_COUNTER.add(0, 0);
+    registry.register(&TKEY_COUNTER);
+    registry.register(&GSS_CONTEXT_GAUGE);
+    registry.register(&GSS_ESTABLISH_HISTOGRAM);
+}
+// WP13.0: end.
+
 #[cfg(test)]
 mod tests {
     use tenko_core::metrics::{check, encode};
@@ -647,5 +721,35 @@ mod tests {
         assert_eq!(validation_index(SecurityState::Unvalidated, None), None);
         let names: Vec<&str> = RECURSION_ALL.iter().map(|desc| desc.name).collect();
         assert!(names.iter().all(|name| name.starts_with("tenko_dns_")));
+    }
+
+    // WP13.0: the GSS-TSIG families encode and check.
+    #[test]
+    fn the_gss_families_encode_and_check() {
+        let registry = Registry::new();
+        register_gss(&registry);
+        TKEY_COUNTER.inc(0);
+        TKEY_COUNTER.inc(7);
+        GSS_CONTEXT_GAUGE.set(1, 3.0);
+        GSS_ESTABLISH_HISTOGRAM.observe(2_500);
+        let mut text = String::new();
+        encode(&registry.snapshot(), &mut text);
+        check(&text).expect("valid OpenMetrics");
+        for line in [
+            "tenko_dns_tkey_total{outcome=\"established\"} 1",
+            "tenko_dns_tkey_total{outcome=\"limit\"} 1",
+            "tenko_dns_gss_contexts{state=\"established\"} 3",
+            "tenko_dns_gss_establish_seconds_bucket{le=\"0.0025\"} 1",
+        ] {
+            assert!(text.contains(line), "{line}\n{text}");
+        }
+        assert_eq!(TKEY_COUNTER.len(), TKEY_OUTCOMES.len());
+        for (name, desc) in [
+            ("tenko_dns_tkey", TKEY),
+            ("tenko_dns_gss_contexts", GSS_CONTEXTS),
+            ("tenko_dns_gss_establish_seconds", GSS_ESTABLISH),
+        ] {
+            assert_eq!(desc.name, name);
+        }
     }
 }

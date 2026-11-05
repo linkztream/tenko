@@ -46,6 +46,8 @@ use tenko_vault::kek::{CredsKey, DEFAULT_CREDENTIAL, DpapiScope, KekConfig, KekO
 
 // WP7.5: the `[dhcp]` section.
 mod dhcp;
+// WP13.0: `[dns.gss]`, the TKEY contexts of GSS-TSIG.
+pub mod gss;
 pub use dhcp::{
     DhcpDdnsSection, DhcpDeclineSection, DhcpHistorySection, DhcpListen, DhcpListenMode,
     DhcpProbeSection, DhcpSection,
@@ -552,6 +554,10 @@ pub struct DnsSection {
     /// The recursive resolver.
     pub recursion: DnsRecursionSection,
     // WP10.0: end.
+    // WP13.0: the GSS-TSIG keys; nothing reads them before WP13.2.
+    /// The TKEY contexts of GSS-TSIG.
+    pub gss: gss::DnsGssSection,
+    // WP13.0: end.
 }
 
 impl Default for DnsSection {
@@ -576,6 +582,8 @@ impl Default for DnsSection {
             egress_allow: Vec::new(),
             // WP10.0
             recursion: DnsRecursionSection::default(),
+            // WP13.0
+            gss: gss::DnsGssSection::default(),
         }
     }
 }
@@ -3374,6 +3382,8 @@ impl Config {
         self.backup.validate()?;
         self.audit_export.validate()?;
         self.dns.validate()?;
+        // WP13.0
+        self.dns.gss.validate()?;
         // WP10.0: the keys of `[dns.recursion]` that depend on the profile.
         self.dns.recursion.check_profile(self.profile.name)?;
         // WP10.0: end.

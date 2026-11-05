@@ -77,6 +77,7 @@ async fn password_login(
             &PasswordLogin {
                 user_name: user.to_owned(),
                 password: SecretString::new(password),
+                provider: None,
             },
         )
         .await
@@ -2420,6 +2421,7 @@ async fn concurrent_logins_of_one_account_both_succeed() {
                     &PasswordLogin {
                         user_name: ADMIN.to_owned(),
                         password: SecretString::new(ADMIN_PIN),
+                        provider: None,
                     },
                 )
                 .await

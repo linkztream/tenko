@@ -192,6 +192,7 @@ impl Builder {
             rdata: vec![Rdata::from_data(data)],
             origin: Origin::Manual,
             key: None,
+            principal: None,
             updated: self.stamp.clone(),
         };
         self.image.rrsets.insert(set.key(), set);

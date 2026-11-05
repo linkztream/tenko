@@ -616,6 +616,26 @@ max_upload = 64
 # days. Allowed under the Lab profile only.
 # rfc5011_hold_down_secs = 3600
 
+# WP13.0: the TKEY contexts of GSS-TSIG (secure dynamic updates from Windows, docs/dns.md
+# section 13.10). The keys are read and checked at start; nothing uses them until the TKEY
+# handler arrives (WP13.2). Keys that are not set follow the profile in force when the role
+# starts.
+# [dns.gss]
+# Seconds an established context lives at most (60 to 86400); the ticket's end time cuts it
+# shorter, and the client negotiates again.
+# context_max_secs = 3600
+# Established contexts per node at most (100 to 1000000); the oldest idle one leaves first.
+# Not set: 10000, 2000 under the Home profile.
+# contexts_max = 10000
+# Negotiations in flight per node at most (10 to 100000); one not completed within 30 s is
+# dropped. Not set: 1000, 200 under the Home profile.
+# negotiating_max = 1000
+# Negotiations in flight per client address at most (1 to 1024).
+# per_client_max = 32
+# Seconds of clock skew the acceptor allows between a client's authenticator and the node
+# (1 to 900; RFC 4120's five minutes).
+# skew_secs = 300
+
 # WP7.5: the dhcp role.
 [dhcp]
 # The dhcp role of this node. It runs when "dhcp" is in roles (on a controller node, in the
