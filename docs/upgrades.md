@@ -1217,12 +1217,17 @@ cp -a /etc/tenko/tenko.toml /srv/backup/tenko-20261009.toml
 
 **4. Check with the new binary.** Run it as the service account, so that nothing it
 creates in the data directory belongs to root, and name the data directory: the unit sets
-`TENKO_DATA_DIR`, a shell does not.
+`TENKO_DATA_DIR`, a shell does not. A process of the service account runs in a session of
+its own, detached from root's terminal (`setsid`), with `/dev/null` as its standard input
+and its output read from a file, never shown to the terminal directly. The same holds for
+every command run as the account from root's prompt in this document ([ADR
+0023](adr/0023-no-root-after-installation.md), I1 and I2).
 
 ```
-sudo -u tenko /usr/local/bin/tenko-0.2.0 upgrade check \
-  --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko
+setsid -w runuser -u tenko -- /usr/local/bin/tenko-0.2.0 upgrade check \
+  --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko </dev/null >/root/upgrade-check.txt 2>&1
 echo "exit status $?"
+tr -cd '\n[:print:]' </root/upgrade-check.txt
 ```
 
 Status 0 and 10 mean go on (section 5.3). Anything else means stop: read the message,
@@ -1240,8 +1245,9 @@ the new binary copies it to `/var/lib/tenko/updates/0.2.0/tenko`, points `previo
 version that ran and `current` at the new one:
 
 ```
-sudo -u tenko /usr/local/bin/tenko-0.2.0 upgrade layout \
-  --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko
+setsid -w runuser -u tenko -- /usr/local/bin/tenko-0.2.0 upgrade layout \
+  --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko </dev/null >/root/upgrade-layout.txt 2>&1
+tr -cd '\n[:print:]' </root/upgrade-layout.txt
 ```
 
 ```
@@ -1287,9 +1293,10 @@ trust it. The staged file `/usr/local/bin/tenko-0.2.0` can be deleted.
 **The installer does steps 1, 2, 4, 5 and 6.** On a node installed with `deploy/install.sh`
 (deploy/README.md, "Install in one command"), running the same command again with a newer
 release, `--version 0.2.0` or `--binary tenko-0.2.0-linux-x86_64` is this procedure: it
-verifies a download against `SHA256SUMS`, stops the unit, runs `tenko upgrade check` with
-the new binary as the account `tenko` (0 and 10 go on; any other status starts the running
-version again, changes nothing and ends with status 8), installs the new binary as
+verifies a download against `SHA256SUMS` (over HTTPS only), stops the unit, runs `tenko
+upgrade check` with the new binary as the account `tenko` in a session of its own, without
+root's terminal, and shows its report through a filter (0 and 10 go on; any other status
+starts the running version again, changes nothing and ends with status 8), installs the new binary as
 `/usr/local/bin/tenko` and starts the unit, whose `ExecStartPre=` switches the layout as in
 step 5, then waits for `tenko health`. It never touches the data directory, the key or
 `tenko.toml`, and the same version changes nothing. Step 3, the backup, and step 7 stay
@@ -2107,14 +2114,18 @@ When a new version cannot read the attempt record, it cannot switch back, and th
 manager eventually stops restarting it (section 8.6). The recovery is a move of the link.
 The previous version is named by the link `previous` and by `from` in the attempt record.
 
-On Linux, as root:
+On Linux, as root. Root reads the link with `readlink` (which follows nothing) and changes
+nothing inside the data directory itself: the link and the attempt record are the service
+account's, so the account moves the one and removes the other, in a session of its own
+with `/dev/null` as standard input ([ADR 0023](adr/0023-no-root-after-installation.md),
+I2; the pattern of section 7.3).
 
 ```
 systemctl stop tenko                                    # if it is still restarting
 readlink /var/lib/tenko/updates/previous                # the version to go back to, 0.1.0
 systemctl reset-failed tenko                            # clears the start limit
-sudo -u tenko ln -sfn 0.1.0 /var/lib/tenko/updates/current
-rm /var/lib/tenko/updates/attempt.json
+setsid -w runuser -u tenko -- ln -sfn 0.1.0 /var/lib/tenko/updates/current </dev/null
+setsid -w runuser -u tenko -- rm -f /var/lib/tenko/updates/attempt.json </dev/null
 systemctl start tenko
 ```
 

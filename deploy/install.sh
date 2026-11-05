@@ -10,9 +10,22 @@
 #   bash install.sh --binary ./tenko-0.2.0-linux-x86_64   # a local binary instead of a download
 #   bash install.sh --check                           # what the roles need: report only
 #   bash install.sh --prepare                         # set up what the roles miss, nothing else
+#   bash install.sh --setup-token                     # print the setup token of this node
 #   bash install.sh --uninstall [--purge]
 # Download it first and run the file (`curl -fsSLO <url>/install.sh && bash install.sh`);
 # piped into bash it cannot ask questions. `bash install.sh --help` lists every option.
+#
+# Root and the service account (docs/adr/0023-no-root-after-installation.md): root runs
+# nothing the account can write and never opens a path inside the data directory. What must
+# happen there (tenko upgrade check, tenko setup token, the copy of the CA root, the removal
+# of the updates layout) is run as the account in a session of its own, without root's
+# terminal and with /dev/null as standard input (as_tenko); what root prints of such output
+# passes through `clean`, which keeps printable ASCII only, and a setup token is kept only
+# in the token's own shape. An existing --data-dir is taken only when it is empty or already
+# the account's own (owner tenko, mode 0700). Release files travel over HTTPS only (plain
+# http is accepted for a loopback address, a test server); every curl call restricts the
+# protocol of the request and of every redirect. A GitHub token comes from
+# TENKO_INSTALL_TOKEN, GITHUB_TOKEN or --token-stdin, never from an argument.
 #
 # What it does: checks the host (root, x86_64, systemd and its version, the tools, free
 # ports 8443, 53 and, with the dhcp role, UDP 67), gets the binary (the GitHub release asset
@@ -109,7 +122,7 @@ OPT_YES=0 OPT_DRY=0 OPT_NO_START=0 OPT_RECONFIGURE=0 OPT_UNINSTALL=0 OPT_PURGE=0
 OPT_ROLES="" OPT_MODULES="" OPT_PROFILE="" OPT_HOST="" OPT_DNS_ADDRESS="" OPT_FORWARDERS=""
 OPT_DATA_DIR="" OPT_VERSION="" OPT_LANGUAGE="" OPT_ADMIN="" OPT_PASSWORD_STDIN=0
 OPT_BINARY="" OPT_TOKEN="" OPT_REPO="" OPT_RELEASE_URL="" OPT_KEK="" OPT_KEEP_STUB=0 OPT_USE_SELF=0
-OPT_CHECK=0 OPT_PREPARE=0
+OPT_CHECK=0 OPT_PREPARE=0 OPT_TOKEN_STDIN=0 OPT_SETUP_TOKEN=0 TOKEN_FLAG=0
 SET_ROLES=0 SET_MODULES=0 SET_FORWARDERS=0 SET_DNS_ADDRESS=0 SET_ADMIN=0
 
 usage() {
@@ -144,7 +157,9 @@ Answers (asked when --yes is not given; the default is in brackets):
   --dns-address all|<addr>[,<addr>]   where the dns role answers, port 53 unless given [all]
   --forwarders <addr>[,<addr>]        upstream resolvers for names outside the zones, or
                                       none [the host's resolvers, loopback excluded]
-  --data-dir <path>                   the data directory, on SSD or NVMe [/var/lib/tenko]
+  --data-dir <path>                   the data directory, on SSD or NVMe [/var/lib/tenko]. An
+                                      existing directory is taken only when it is empty or
+                                      already the account's own (owner tenko, mode 0700)
   --version latest|<x.y.z>            the release to install [latest]
   --language en|sv                    default UI language, for --admin [en]
   --admin <name>                      complete first-run setup with this administrator; the
@@ -154,10 +169,16 @@ Answers (asked when --yes is not given; the default is in brackets):
 
 The binary:
   --binary <file>                     install this file instead of downloading a release
-  --token <token>                     GitHub token for a private repository (or GITHUB_TOKEN)
+  --token-stdin                       read the GitHub token for a private repository from
+                                      standard input (its first line; with --password-stdin
+                                      the password follows on the next line). Without it the
+                                      token comes from TENKO_INSTALL_TOKEN or GITHUB_TOKEN
+  --token <token>                     deprecated: the token in an argument is visible to every
+                                      process on the host; use --token-stdin or the variables
   --repo <owner/name>                 the GitHub repository [linkztream/tenko]
-  --release-url <url>                 a directory URL with SHA256SUMS and the binary, instead of
-                                      GitHub (a mirror)
+  --release-url <url>                 an https directory URL with SHA256SUMS and the binary,
+                                      instead of GitHub (a mirror); plain http only for an
+                                      address of this host's loopback interface
 
 Behavior:
   -y, --yes                           unattended: no questions, defaults for what is not given
@@ -176,6 +197,10 @@ Behavior:
   --use-self                          with the dns role: point this host's own resolver at Tenko
                                       (127.0.0.1) once the node listens; --uninstall restores
                                       the previous resolver [asked in interactive mode, default no]
+  --setup-token                       print the one-time setup token of this node and nothing
+                                      else (read as the service account, in a session of its
+                                      own); exit 1 when there is none (setup is complete, or
+                                      the server has not started)
   --reconfigure                       change /etc/tenko/tenko.toml by the answers you give: every
                                       other value of the file (listen addresses, [tls], [kek],
                                       [dns.recursion], ...) is carried over; the old file is
@@ -254,15 +279,97 @@ put() {
   return 0
 }
 
-# as_tenko <command>...: runs the command as the service account.
+# ── The service account's processes ─────────────────────────────────────────────────────────
+# Root runs nothing the account can influence (docs/adr/0023-no-root-after-installation.md,
+# I1 and I2), and what it runs as the account gets no hold on root's session: as_tenko starts
+# the command in a session of its own, with no controlling terminal and /dev/null as standard
+# input. Its standard output and error are the caller's, which are never the terminal: every
+# caller sends them to a file of TMP or reads them into a variable, and prints what it needs
+# through `clean`.
+
+# as_tenko <command>...: runs the command as the service account, in a session of its own.
 as_tenko() {
+  have setsid || die "$E_HOST" "setsid is missing (the util-linux package)"
   if have runuser; then
-    runuser -u tenko -- "$@"
+    setsid -w runuser -u tenko -- "$@" </dev/null
   elif have setpriv; then
-    setpriv --reuid=tenko --regid=tenko --init-groups -- "$@"
+    setsid -w setpriv --reuid=tenko --regid=tenko --init-groups -- "$@" </dev/null
   else
-    su -s /bin/sh tenko -c "$(printf '%q ' "$@")"
+    setsid -w su -s /bin/sh tenko -c "$(printf '%q ' "$@")" </dev/null
   fi
+}
+
+# clean [<lines>]: standard input reduced to what root prints of an account process's output:
+# printable ASCII and newlines only, at most 40 lines (or <lines>) of 400 characters each.
+# Control characters, escape sequences and bytes outside ASCII are dropped.
+clean() { LC_ALL=C tr -cd '\n[:print:]' | cut -c1-400 | head -n "${1:-40}"; }
+
+# valid_setup_token <text>: the shape of a setup token, four groups of five base32 characters.
+valid_setup_token() { [[ "$1" =~ ^[A-Z2-7]{5}(-[A-Z2-7]{5}){3}$ ]]; }
+valid_fingerprint() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
+
+# read_setup_token: the setup token the running server wrote, read by the account with
+# `tenko setup token` and kept only in a token's shape; nothing when setup is complete or the
+# server has not started on the data directory yet.
+read_setup_token() {
+  local token
+  token="$(as_tenko "$BIN" setup token --config "$CONFIG" --data-dir "$DATA_DIR" 2>/dev/null | clean 1 || true)"
+  valid_setup_token "$token" && printf '%s' "$token"
+  return 0
+}
+
+# ca_copy: a root-owned copy of the node's CA root in TMP, written from what the account
+# reads out of the data directory (root opens no path under it), kept only when it is a PEM
+# certificate; CA_COPY names it. False until the server has written the certificate.
+CA_COPY=""
+ca_copy() {
+  [[ -n "$CA_COPY" && -f "$CA_COPY" ]] && return 0
+  local part="${TMP}/ca-root.part"
+  as_tenko cat "${DATA_DIR}/tls/ca-root.pem" 2>/dev/null | clean 200 >"$part" || true
+  if grep -qx -- '-----BEGIN CERTIFICATE-----' "$part" && grep -qx -- '-----END CERTIFICATE-----' "$part"; then
+    mv -f "$part" "${TMP}/ca-root.pem"
+    CA_COPY="${TMP}/ca-root.pem"
+    return 0
+  fi
+  rm -f "$part"
+  return 1
+}
+
+# ca_fingerprint: the SHA-256 fingerprint of the CA root, computed by the account with
+# openssl (root parses nothing of the data directory); nothing when it cannot be computed.
+ca_fingerprint() {
+  local fp
+  have openssl || return 0
+  fp="$(as_tenko openssl x509 -in "${DATA_DIR}/tls/ca-root.pem" -noout -fingerprint -sha256 2>/dev/null |
+    clean 1 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f' || true)"
+  valid_fingerprint "$fp" && printf '%s' "$fp"
+  return 0
+}
+
+# account_pids: the processes of the service account, one pid per line; nothing when the
+# account does not exist. Root reads /proc, which the kernel writes.
+account_pids() {
+  local uid p
+  uid="$(id -u tenko 2>/dev/null)" || return 0
+  if have pgrep; then
+    pgrep -u "$uid" 2>/dev/null || true
+    return 0
+  fi
+  for p in /proc/[0-9]*; do
+    [[ "$(awk '/^Uid:/ {print $2; exit}' "${p}/status" 2>/dev/null)" == "$uid" ]] && echo "${p##*/}"
+  done
+  return 0
+}
+
+# wait_account_gone: true once no process of the account runs, waiting up to 15 seconds for
+# the processes of a stopped service to end.
+wait_account_gone() {
+  local _
+  for _ in $(seq 1 15); do
+    [[ -z "$(account_pids)" ]] && return 0
+    sleep 1
+  done
+  [[ -z "$(account_pids)" ]]
 }
 
 # ── Questions ───────────────────────────────────────────────────────────────────────────────
@@ -387,6 +494,48 @@ valid_repo() { [[ "$1" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; }
 valid_data_dir() {
   [[ "$1" == /* && "$1" != / && "$1" =~ ^[A-Za-z0-9/._-]+$ && "$1" != *..* ]] || return 1
   [[ "$1" != /home/* && "$1" != /root/* && "$1" != /run/* && "$1" != /tmp/* && "$1" != /etc/* && "$1" != /usr/* ]]
+}
+
+# url_host <url>: the host of an http or https URL, without user, brackets and port.
+url_host() {
+  local h="${1#*://}"
+  h="${h%%/*}" h="${h%%\?*}" h="${h##*@}"
+  if [[ "$h" == \[* ]]; then
+    h="${h#[}" h="${h%%]*}"
+  else
+    h="${h%%:*}"
+  fi
+  printf '%s' "$h"
+}
+
+# loopback_host <host>: an address of this host's loopback interface, or localhost.
+loopback_host() { [[ "$1" =~ ^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ || "${1,,}" == ::1 || "${1,,}" == localhost ]]; }
+
+# valid_url <url>: https, or http to a loopback address (a test server on this host) and
+# nowhere else: a release file is run as root, so it travels authenticated or not at all.
+valid_url() {
+  [[ "$1" =~ ^https://[^/]+ ]] && return 0
+  [[ "$1" =~ ^http://[^/]+ ]] && loopback_host "$(url_host "$1")"
+}
+
+# url_proto <url>: the value of curl's --proto for a URL valid_url admitted: https, and
+# plain http only when the URL itself is http (loopback). Every curl call also carries
+# --proto-redir '=https', so no redirect leaves TLS.
+url_proto() { if [[ "$1" == http://* ]]; then printf '=http,https'; else printf '=https'; fi; }
+
+# check_data_dir: an existing data directory is taken only when it is empty (it becomes the
+# account's, 0700) or already the account's own (owner tenko, mode 0700, kept as it is).
+# Anything else is refused with the reason: root changes the owner of nothing that holds
+# files, and follows no link into a directory the account can write.
+check_data_dir() {
+  local owner mode
+  [[ -L "$DATA_DIR" ]] && die "$E_USAGE" "--data-dir ${DATA_DIR} is a symbolic link; give the directory itself"
+  [[ -e "$DATA_DIR" ]] || return 0
+  [[ -d "$DATA_DIR" ]] || die "$E_USAGE" "--data-dir ${DATA_DIR} exists and is not a directory"
+  owner="$(stat -c %U "$DATA_DIR")" mode="$(stat -c %a "$DATA_DIR")"
+  [[ "$owner" == tenko && "$mode" == 700 ]] && return 0
+  [[ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]] && return 0
+  die "$E_USAGE" "--data-dir ${DATA_DIR} exists, is not empty, and is not the account's data directory (owner ${owner}, mode ${mode}; a data directory is owned by tenko with mode 0700). Give an empty directory or another path. A data directory of an earlier Tenko installation is taken as it is once its owner and mode are set, as root, before this script runs: chown tenko:tenko ${DATA_DIR} && chmod 0700 ${DATA_DIR}"
 }
 
 # dns_listen <answer>: the [dns] listen entries as TOML strings, comma separated, or fails.
@@ -662,19 +811,24 @@ version_cmp() {
 # ── GitHub releases ─────────────────────────────────────────────────────────────────────────
 # The token goes to curl on standard input (-H @-): it is in no argument list. curl does not
 # send it on to the storage host that an asset download redirects to. TENKO_GITHUB_API
-# points the calls at a test server.
+# points the calls at a test server (https, or http on a loopback address). Every call
+# restricts the protocol of the request (url_proto) and of every redirect to https.
 GITHUB_API="${TENKO_GITHUB_API:-https://api.github.com}"
 gh_api() {
   printf 'Authorization: Bearer %s\n' "$OPT_TOKEN" |
-    curl -fsSL --retry 2 --connect-timeout 10 -H @- -H 'Accept: application/vnd.github+json' \
-      "${GITHUB_API}/repos/${OPT_REPO}/$1"
+    curl -fsSL --proto "$(url_proto "$GITHUB_API")" --proto-redir '=https' --retry 2 --connect-timeout 10 \
+      -H @- -H 'Accept: application/vnd.github+json' "${GITHUB_API}/repos/${OPT_REPO}/$1"
 }
 gh_asset() {
   printf 'Authorization: Bearer %s\n' "$OPT_TOKEN" |
-    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 -H @- -H 'Accept: application/octet-stream' \
+    curl -fsSL --proto "$(url_proto "$GITHUB_API")" --proto-redir '=https' --retry 3 --retry-delay 2 \
+      --connect-timeout 10 -H @- -H 'Accept: application/octet-stream' \
       -o "$2" "${GITHUB_API}/repos/${OPT_REPO}/releases/assets/$1"
 }
-fetch() { curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 -o "$2" "$1"; }
+fetch() {
+  curl -fsSL --proto "$(url_proto "$1")" --proto-redir '=https' --retry 3 --retry-delay 2 \
+    --connect-timeout 10 -o "$2" "$1"
+}
 
 # release_tag: the tag_name of the release JSON on standard input.
 release_tag() {
@@ -1445,9 +1599,14 @@ step_dirs() {
   if [[ ! -d "$ETC" ]] || [[ "$(stat -c '%a %U:%G' "$ETC")" != "750 root:tenko" ]]; then
     run install -d -m 0750 -o root -g tenko "$ETC"
   fi
+  # check_data_dir admitted the directory: absent, empty, or the account's own already.
   if [[ ! -d "$DATA_DIR" ]]; then
     run install -d -m 0700 -o tenko -g tenko "$DATA_DIR"
     ok "Created the data directory ${DATA_DIR}"
+  elif [[ "$(stat -c '%U %a' "$DATA_DIR")" != "tenko 700" ]]; then
+    run chown tenko:tenko "$DATA_DIR"
+    run chmod 0700 "$DATA_DIR"
+    ok "Took the empty directory ${DATA_DIR} as the data directory (owner tenko, mode 0700)"
   fi
   [[ -d "$LOG_DIR" ]] || run install -d -m 0750 -o tenko -g tenko "$LOG_DIR"
 }
@@ -1490,7 +1649,10 @@ step_upgrade() {
     else
       install -m 0755 "$NEW_BIN" "${TMP}/tenko-check"
       chmod 0711 "$TMP"
-      as_tenko "${TMP}/tenko-check" upgrade check --config "$CONFIG" --data-dir "$DATA_DIR" || rc=$?
+      # The account's report lands in a file of root's and is shown through the filter.
+      as_tenko "${TMP}/tenko-check" upgrade check --config "$CONFIG" --data-dir "$DATA_DIR" \
+        >"${TMP}/check.out" 2>&1 || rc=$?
+      clean 60 <"${TMP}/check.out" | sed 's/^/      /'
       if ((rc != 0 && rc != 10)); then
         ((was_active)) && systemctl start tenko || true
         die "$E_UPGRADE" "tenko upgrade check refused the data directory (exit ${rc}); ${OLD_VERSION} keeps running and nothing was changed. See docs/upgrades.md, section 5.3"
@@ -2547,8 +2709,11 @@ step_start() {
   wait_ready
 }
 
+# wait_ready: until `tenko health` answers. Root talks to the node over loopback with the
+# CA root's copy of ca_copy (the account reads the certificate out of the data directory;
+# root opens nothing there), and shows the node's answer and the journal through `clean`.
 wait_ready() {
-  local deadline=$((SECONDS + ${TENKO_READY_SECONDS:-180})) ca="${DATA_DIR}/tls/ca-root.pem" state status
+  local deadline=$((SECONDS + ${TENKO_READY_SECONDS:-180})) state status
   info "Waiting for the node to become ready (tenko health)"
   while ((SECONDS < deadline)); do
     state="$(systemctl show -p ActiveState --value tenko 2>/dev/null || true)"
@@ -2557,15 +2722,21 @@ wait_ready() {
       start_failed "$status"
       return 0
     fi
-    if [[ "$state" == active && -f "$ca" ]] &&
-      "$BIN" health --url "https://localhost:${API_PORT}" --ca-file "$ca" >/dev/null 2>&1; then
-      ok "The node is ready: $("$BIN" health --live --url "https://localhost:${API_PORT}" --ca-file "$ca" 2>/dev/null | head -n 1)"
+    if [[ "$state" == active ]] && ca_copy &&
+      "$BIN" health --url "https://localhost:${API_PORT}" --ca-file "$CA_COPY" >/dev/null 2>&1; then
+      ok "The node is ready: $("$BIN" health --live --url "https://localhost:${API_PORT}" --ca-file "$CA_COPY" 2>/dev/null | clean 1)"
       return 0
     fi
     sleep 2
   done
-  journalctl -u tenko -n 30 --no-pager 2>/dev/null | sed 's/^/      /' >&2 || true
+  show_journal
   die "$E_START" "The node did not become ready in ${TENKO_READY_SECONDS:-180} s; see journalctl -u tenko"
+}
+
+# show_journal: the last lines of the unit's journal on standard error, through the filter
+# (the service, the account, writes them).
+show_journal() {
+  journalctl -u tenko -n 30 --no-pager 2>/dev/null | clean 30 | sed 's/^/      /' >&2 || true
 }
 
 # start_failed <status>: a fresh sealed key that never reaches the server (status 243,
@@ -2597,34 +2768,75 @@ start_failed() {
     wait_ready
     return 0
   fi
-  journalctl -u tenko -n 30 --no-pager 2>/dev/null | sed 's/^/      /' >&2 || true
+  show_journal
   if [[ "$status" == 226 || "$status" == 218 ]] && [[ -n "$IN_CONTAINER" ]]; then
     err "The unit's sandbox needs privileges this container lacks (status ${status}); deploy/README.md, LXC, has the drop-in that relaxes only the failing options"
   fi
   die "$E_START" "tenko failed to start (status ${status:-unknown}); see journalctl -u tenko"
 }
 
+# step_setup: the setup token, read as the account (read_setup_token: nothing when setup is
+# complete already), and with --admin first-run setup by root's binary over loopback, with
+# the CA root's copy; the command's output is shown through the filter.
 SETUP_TOKEN="" SETUP_DONE=0
 step_setup() {
   ((OPT_NO_START || OPT_DRY)) && return 0
-  [[ -f "${DATA_DIR}/setup-token" ]] || return 0
-  SETUP_TOKEN="$(as_tenko "$BIN" setup token --config "$CONFIG" --data-dir "$DATA_DIR" 2>/dev/null || true)"
-  [[ -n "$ADMIN" ]] || return 0
+  SETUP_TOKEN="$(read_setup_token)"
+  [[ -n "$SETUP_TOKEN" && -n "$ADMIN" ]] || return 0
   info "Completing first-run setup with the administrator ${ADMIN}"
   local rc=0
-  printf '%s\n' "$PASSWORD" | TENKO_SETUP_TOKEN="$SETUP_TOKEN" "$BIN" setup \
-    --url "https://localhost:${API_PORT}" --ca-file "${DATA_DIR}/tls/ca-root.pem" \
-    --admin "$ADMIN" --host-name "$HOST_NAME" --profile "$PROFILE" --language "$LANGUAGE" \
-    --password-stdin >"${TMP}/setup.log" 2>&1 || rc=$?
+  if ca_copy; then
+    printf '%s\n' "$PASSWORD" | TENKO_SETUP_TOKEN="$SETUP_TOKEN" "$BIN" setup \
+      --url "https://localhost:${API_PORT}" --ca-file "$CA_COPY" \
+      --admin "$ADMIN" --host-name "$HOST_NAME" --profile "$PROFILE" --language "$LANGUAGE" \
+      --password-stdin >"${TMP}/setup.log" 2>&1 || rc=$?
+  else
+    rc=1
+    echo "the node's CA root could not be read" >"${TMP}/setup.log"
+  fi
   PASSWORD=""
   if ((rc != 0)); then
-    sed 's/^/      /' "${TMP}/setup.log" >&2
+    clean <"${TMP}/setup.log" | sed 's/^/      /' >&2
     SETUP_FAILED="$rc"
     err "tenko setup failed (exit ${rc}); the node runs, complete setup in the browser with the token below"
     return 0
   fi
   SETUP_DONE=1 SETUP_TOKEN=""
   ok "First-run setup is complete: ${ADMIN} is the administrator, profile ${PROFILE}"
+}
+
+# print_setup_token: --setup-token: the token of this node on standard output and nothing
+# else, for a script or an operator at root's prompt; exit 1 with the reason when there is
+# none. The token is read as the account in a session of its own and kept only in its shape.
+print_setup_token() {
+  local token
+  [[ "$(id -u)" == 0 ]] || die "$E_HOST" "Run as root (sudo bash install.sh --setup-token)"
+  [[ -x "$BIN" && -f "$CONFIG" ]] || die "$E_USAGE" "Tenko is not installed here (${BIN}, ${CONFIG})"
+  TMP="$(mktemp -d)"
+  data_dir_from_dropin
+  token="$(read_setup_token)"
+  [[ -n "$token" ]] ||
+    die "$E_FAIL" "No setup token in ${DATA_DIR}: first-run setup is complete, or the server has not started on it yet (journalctl -u tenko)"
+  printf '%s\n' "$token"
+  exit 0
+}
+
+# data_dir_from_dropin: an installation with another data directory names it in its drop-in.
+data_dir_from_dropin() {
+  if [[ -z "$OPT_DATA_DIR" && -f "$DROPIN_DATA" ]]; then
+    DATA_DIR="$(sed -n 's/^Environment=TENKO_DATA_DIR=//p' "$DROPIN_DATA" | tail -n 1)"
+    DATA_DIR="${DATA_DIR:-$DEFAULT_DATA_DIR}"
+  fi
+}
+
+# token_command: how an operator prints the setup token again, at root's prompt: this script,
+# or the same pattern by hand (the account in a session of its own, no terminal, the output
+# filtered).
+token_command() {
+  printf 'bash install.sh --setup-token'
+}
+token_command_by_hand() {
+  printf "setsid -w runuser -u tenko -- tenko setup token --config %s </dev/null 2>&1 | tr -cd '\\\\n[:print:]'" "$CONFIG"
 }
 
 summary() {
@@ -2644,9 +2856,8 @@ summary() {
   else
     bold "  Tenko ${SHOWN_VERSION} is installed"
   fi
-  if [[ -f "${DATA_DIR}/tls/ca-root.pem" ]] && have openssl; then
-    fp="$(openssl x509 -in "${DATA_DIR}/tls/ca-root.pem" -noout -fingerprint -sha256 2>/dev/null | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f')"
-  fi
+  # The fingerprint is the account's computation (ca_fingerprint), shown in its shape only.
+  ((OPT_NO_START)) || fp="$(ca_fingerprint)"
   printf '    %-14s %s\n' "Web UI:" "$url"
   [[ -n "$ip" ]] && printf '    %-14s %s\n' "" "https://${ip}:${API_PORT}/"
   [[ -n "$fp" ]] && printf '    %-14s %s\n' "CA root:" "${DATA_DIR}/tls/ca-root.pem (SHA-256 ${fp})"
@@ -2655,9 +2866,9 @@ summary() {
   elif [[ -n "$SETUP_TOKEN" ]]; then
     # round2: the token is shown once here; say so and where it comes from again.
     printf '    %-14s %s\n' "Setup token:" "$SETUP_TOKEN" "" "(a one-time token, valid while setup is open; it changes at every start)" \
-      "" "(print it again: runuser -u tenko -- tenko setup token --config ${CONFIG})"
+      "" "(print it again: $(token_command), or by hand:" "" " $(token_command_by_hand))"
   elif ((OPT_NO_START)); then
-    printf '    %-14s %s\n' "Setup:" "after the first start: runuser -u tenko -- tenko setup token --config ${CONFIG}"
+    printf '    %-14s %s\n' "Setup:" "after the first start: $(token_command), or by hand:" "" " $(token_command_by_hand)"
   fi
   printf '    %-14s %s\n' "Next:" "docs/QUICKSTART.md in the repository: the roles, a first network, the firewall ports."
   printf '    %-14s %s\n' "Data:" "$DATA_DIR" "Configuration:" "$CONFIG"
@@ -2758,12 +2969,14 @@ uninstall() {
   close_firewall_ports
   # The record describes the drop-ins and the ports, which are gone now.
   [[ -f "$PREPARED_FILE" ]] && run rm -f "$PREPARED_FILE"
-  # round2: updates/ holds binaries (one per version, plus the links current and previous), not
-  # data; the next install's `tenko upgrade layout` recreates it from the installed binary.
-  if [[ -d "${DATA_DIR}/updates" ]] && ((!OPT_PURGE)); then
-    run rm -rf "${DATA_DIR}/updates"
-    ok "Removed ${DATA_DIR}/updates (the binaries of the installed versions; a reinstall starts the layout afresh, so going back to the previous version is not possible after an uninstall)"
+  # From here on nothing of the account's may still run: a process of it could change the
+  # data directory while it is removed, and userdel refuses while one exists. The stopped
+  # service gets a few seconds to end.
+  local pids=""
+  if ((!OPT_DRY)) && ! wait_account_gone; then
+    pids="$(account_pids | paste -sd, -)"
   fi
+  ((OPT_PURGE)) || remove_updates "$pids"
   if [[ "$(state_get resolved_stub_off)" == 1 ]]; then
     run rm -f "$RESOLVED_DROPIN"
     link="$(state_get resolv_conf_link)"
@@ -2771,15 +2984,49 @@ uninstall() {
     ((SYSTEMD)) && run systemctl restart systemd-resolved
     ok "systemd-resolved listens on 127.0.0.53 again"
   fi
-  if ((OPT_PURGE)); then
-    [[ -d "$DATA_DIR" ]] && run rm -rf "$DATA_DIR"
-    [[ -d "$ETC" ]] && run rm -rf "$ETC"
-    [[ -d "$LOG_DIR" ]] && run rm -rf "$LOG_DIR"
+  if ((OPT_PURGE)) && [[ -n "$pids" ]]; then
+    warn "Processes of the account tenko are still running (pid ${pids}); ${DATA_DIR}, ${ETC}, ${LOG_DIR} and the account are kept. Stop them (systemctl stop tenko; pkill -u tenko) and run bash install.sh --uninstall --purge again"
+    PURGE_LEFT=1
+  elif ((OPT_PURGE)); then
+    # The unit is gone and the account runs nothing: the directories go as root, each on
+    # its own file system (a mount inside them is left), and a link is removed, not followed.
+    [[ -d "$DATA_DIR" ]] && run rm -rf --one-file-system "$DATA_DIR"
+    [[ -d "$ETC" ]] && run rm -rf --one-file-system "$ETC"
+    [[ -d "$LOG_DIR" ]] && run rm -rf --one-file-system "$LOG_DIR"
     id -u tenko >/dev/null 2>&1 && run userdel tenko
     ok "Purged ${DATA_DIR}, ${ETC}, ${LOG_DIR} and the account tenko"
   else
     [[ -f "$STATE_FILE" ]] && run rm -f "$STATE_FILE"
     ok "Kept ${DATA_DIR}, ${ETC} (configuration and key) and the account tenko; --purge removes them"
+  fi
+}
+
+# remove_updates <pids>: <data_dir>/updates holds binaries (one per version, plus the links
+# current and previous), not data; the next install's `tenko upgrade layout` recreates it. It
+# is the account's directory, so the account removes it (root deletes nothing inside the
+# data directory); a directory that is not the account's own, or one a running process of
+# the account may still use, is left as it is.
+PURGE_LEFT=0
+remove_updates() {
+  local dir="${DATA_DIR}/updates" pids="$1"
+  [[ -e "$dir" || -L "$dir" ]] || return 0
+  if [[ -n "$pids" ]]; then
+    warn "Processes of the account tenko are still running (pid ${pids}); ${dir} is left as it is"
+    return 0
+  fi
+  if [[ -L "$dir" ]] || [[ "$(stat -c %U "$dir" 2>/dev/null)" != tenko ]]; then
+    warn "${dir} is not the account's own directory (a link, or another owner); left as it is"
+    return 0
+  fi
+  CHANGED=$((CHANGED + 1))
+  if ((OPT_DRY)); then
+    printf '  [dry-run] rm -rf --one-file-system %s (as tenko)\n' "$dir"
+    return 0
+  fi
+  if as_tenko rm -rf --one-file-system "$dir" >"${TMP}/rm.out" 2>&1; then
+    ok "Removed ${dir} (the binaries of the installed versions; a reinstall starts the layout afresh, so going back to the previous version is not possible after an uninstall)"
+  else
+    warn "Could not remove ${dir} as the account: $(clean 3 <"${TMP}/rm.out" | tr '\n' ' ')"
   fi
 }
 
@@ -2818,7 +3065,9 @@ parse_args() {
     --language) need "$@"; OPT_LANGUAGE="$2"; shift ;;
     --admin) need "$@"; OPT_ADMIN="$2" SET_ADMIN=1; shift ;;
     --binary) need "$@"; OPT_BINARY="$2"; shift ;;
-    --token) need "$@"; OPT_TOKEN="$2"; shift ;;
+    --token) need "$@"; OPT_TOKEN="$2" TOKEN_FLAG=1; shift ;;
+    --token-stdin) OPT_TOKEN_STDIN=1 ;;
+    --setup-token) OPT_SETUP_TOKEN=1 ;;
     --repo) need "$@"; OPT_REPO="$2"; shift ;;
     --release-url) need "$@"; OPT_RELEASE_URL="$2"; shift ;;
     --kek) need "$@"; OPT_KEK="$2"; shift ;;
@@ -2831,14 +3080,31 @@ parse_args() {
   ((OPT_CHECK && OPT_PREPARE)) && die "$E_USAGE" "--check reports and --prepare sets up; give one of them"
   ((OPT_UNINSTALL && (OPT_CHECK || OPT_PREPARE))) && die "$E_USAGE" "--check and --prepare do not go with --uninstall"
   ((OPT_RECONFIGURE && (OPT_CHECK || OPT_PREPARE))) && die "$E_USAGE" "--check and --prepare change no configuration; --reconfigure goes without them"
+  ((OPT_SETUP_TOKEN && (OPT_UNINSTALL || OPT_CHECK || OPT_PREPARE || OPT_RECONFIGURE || OPT_DRY))) &&
+    die "$E_USAGE" "--setup-token prints the token and does nothing else; give it alone"
   OPT_VERSION="${OPT_VERSION:-latest}"
   OPT_REPO="${OPT_REPO:-${TENKO_REPO:-linkztream/tenko}}"
-  OPT_TOKEN="${OPT_TOKEN:-${GITHUB_TOKEN:-}}"
+  # The token, in this order: --token (deprecated), the first line of standard input with
+  # --token-stdin, TENKO_INSTALL_TOKEN, GITHUB_TOKEN. It is never printed, and the variables
+  # are dropped from the environment of everything this script runs.
+  local line
+  if ((OPT_TOKEN_STDIN)); then
+    IFS= read -r line || true
+    [[ -n "$line" ]] || die "$E_USAGE" "--token-stdin: standard input has no token"
+    [[ -n "$OPT_TOKEN" ]] || OPT_TOKEN="$line"
+    line=""
+  fi
+  OPT_TOKEN="${OPT_TOKEN:-${TENKO_INSTALL_TOKEN:-${GITHUB_TOKEN:-}}}"
+  unset TENKO_INSTALL_TOKEN
+  export -n GITHUB_TOKEN 2>/dev/null || true
   check_or_die valid_version "$OPT_VERSION" --version
   check_or_die valid_repo "$OPT_REPO" --repo
   [[ -z "$OPT_KEK" ]] || check_or_die valid_kek "$OPT_KEK" --kek
   [[ -z "$OPT_ADMIN" ]] || check_or_die valid_admin "$OPT_ADMIN" --admin
-  [[ -z "$OPT_RELEASE_URL" || "$OPT_RELEASE_URL" =~ ^https?:// ]] || die "$E_USAGE" "--release-url: an http or https URL"
+  [[ -z "$OPT_RELEASE_URL" ]] || valid_url "$OPT_RELEASE_URL" ||
+    die "$E_USAGE" "--release-url: an https URL (plain http only to an address of this host's loopback interface), not '${OPT_RELEASE_URL}'"
+  valid_url "$GITHUB_API" ||
+    die "$E_USAGE" "TENKO_GITHUB_API: an https URL (plain http only to an address of this host's loopback interface), not '${GITHUB_API}'"
   DATA_DIR="${OPT_DATA_DIR:-$DEFAULT_DATA_DIR}"
   if ((OPT_PASSWORD_STDIN)); then
     IFS= read -r PASSWORD || true
@@ -2847,11 +3113,11 @@ parse_args() {
     PASSWORD="$TENKO_ADMIN_PASSWORD"
   fi
   unset TENKO_ADMIN_PASSWORD
-  export -n GITHUB_TOKEN 2>/dev/null || true
 }
 
 main() {
   parse_args "$@"
+  ((OPT_SETUP_TOKEN)) && print_setup_token
   # --check asks nothing.
   if ((!OPT_YES && !OPT_CHECK)); then
     if { : >/dev/tty; } 2>/dev/null; then
@@ -2863,19 +3129,19 @@ main() {
   echo
   bold "  Tenko DDI installer"
   echo
+  if ((TOKEN_FLAG)); then
+    warn "--token is deprecated: a token in an argument is visible to every process on this host. Pass it with --token-stdin, or in TENKO_INSTALL_TOKEN or GITHUB_TOKEN"
+  fi
   if [[ "$(id -u)" != 0 ]]; then
     ((OPT_DRY || OPT_CHECK)) || die "$E_HOST" "Run as root (sudo bash install.sh ...)"
     warn "Not root: $( ((OPT_CHECK)) && echo "a check only" || echo "a dry run only"), some checks are skipped"
   fi
   TMP="$(mktemp -d)"
   detect_host
-  # An installation with another data directory names it in its drop-in.
-  if [[ -z "$OPT_DATA_DIR" && -f "$DROPIN_DATA" ]]; then
-    DATA_DIR="$(sed -n 's/^Environment=TENKO_DATA_DIR=//p' "$DROPIN_DATA" | tail -n 1)"
-    DATA_DIR="${DATA_DIR:-$DEFAULT_DATA_DIR}"
-  fi
+  data_dir_from_dropin
   if ((OPT_UNINSTALL)); then
     uninstall
+    ((PURGE_LEFT)) && exit "$E_FAIL"
     exit 0
   fi
   detect_installed
@@ -2890,6 +3156,7 @@ main() {
     prepare_only
   fi
   answers
+  check_data_dir
   warn_roles_in_store
   setup_answers
   get_binary

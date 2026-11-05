@@ -113,23 +113,58 @@ pub fn remove(path: &Path) -> io::Result<()> {
     remove_file(path)
 }
 
+/// The most bytes `read` takes from the file: a token is 23 characters and a newline.
+const MAX_FILE_BYTES: usize = 256;
+
+/// Whether `text` has the shape of a setup token: four groups of five characters of the
+/// token's alphabet (`A`-`Z`, `2`-`7`), joined by hyphens.
+fn is_token(text: &str) -> bool {
+    let groups: Vec<&str> = text.split('-').collect();
+    groups.len() == 4
+        && groups.iter().all(|group| {
+            group.len() == 5
+                && group
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || (b'2'..=b'7').contains(&byte))
+        })
+}
+
 /// Reads the token from `path`: the first line, without the newline. `None` when the file
 /// does not exist.
 ///
+/// What the file holds is accepted only in the token's own shape, so that what a caller
+/// prints (`tenko setup token`, an installer) is the token and nothing else: the file lies
+/// in the data directory, which the service account writes.
+///
 /// # Errors
 ///
-/// The I/O error of reading the file, or `InvalidData` when it holds no token.
+/// The I/O error of reading the file, or `InvalidData` when it holds no token, more than
+/// a token, or a line that is not a token.
 pub fn read(path: &Path) -> io::Result<Option<String>> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
+    if bytes.len() > MAX_FILE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the file is larger than a setup token",
+        ));
+    }
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "the file is not text"))?;
     let token = text.lines().next().unwrap_or_default().trim();
     if token.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "the file holds no setup token",
+        ));
+    }
+    if !is_token(token) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the file does not hold a setup token",
         ));
     }
     Ok(Some(token.to_owned()))
@@ -296,10 +331,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("setup-token");
         write(&path, TOKEN).expect("first");
-        write(&path, "11111-22222-33333-44444").expect("second");
+        write(&path, "22222-33333-44444-55555").expect("second");
         assert_eq!(
             read(&path).expect("read").as_deref(),
-            Some("11111-22222-33333-44444")
+            Some("22222-33333-44444-55555")
         );
         let names: Vec<_> = std::fs::read_dir(dir.path())
             .expect("list")
@@ -337,6 +372,48 @@ mod tests {
         std::fs::write(&path, "\n").expect("write");
         let error = read(&path).expect_err("no token");
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn read_accepts_only_the_shape_of_a_token() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("setup-token");
+        for text in [
+            "ABCDE-FGHIJ-KLMNO-PQRST\n",
+            "22222-77777-ZZZZZ-AAAAA\n",
+            "  ABCDE-FGHIJ-KLMNO-PQRST  \n",
+            "ABCDE-FGHIJ-KLMNO-PQRST\nsecond line\n",
+            "ABCDE-FGHIJ-KLMNO-PQRST\r\n",
+        ] {
+            std::fs::write(&path, text).expect("write");
+            let token = read(&path).expect("a token").expect("some token");
+            assert!(is_token(&token), "{token}");
+            assert_eq!(token.len(), 23);
+        }
+        for text in [
+            "abcde-fghij-klmno-pqrst\n",
+            "ABCDE-FGHIJ-KLMNO-PQRS\n",
+            "ABCDE-FGHIJ-KLMNO-PQRST-UVWXY\n",
+            "ABCDE FGHIJ KLMNO PQRST\n",
+            "ABCD1-FGHIJ-KLMNO-PQRST\n",
+            "ABCDE-FGHIJ-KLMNO-PQRST\u{1b}[31m\n",
+            "ABCDÉ-FGHIJ-KLMNO-PQRST\n",
+            "not a token at all\n",
+        ] {
+            std::fs::write(&path, text).expect("write");
+            let error = read(&path).expect_err(text);
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{text:?}");
+        }
+        std::fs::write(&path, [0xff, 0xfe, b'\n']).expect("write");
+        assert_eq!(
+            read(&path).expect_err("not text").kind(),
+            io::ErrorKind::InvalidData
+        );
+        std::fs::write(&path, "A".repeat(MAX_FILE_BYTES + 1)).expect("write");
+        assert_eq!(
+            read(&path).expect_err("too large").kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 
     #[cfg(unix)]

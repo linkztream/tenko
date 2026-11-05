@@ -206,7 +206,22 @@ lacks "$out" "TENKO_INSTALL_BINARY=" "no binary pushed"
 lacks "$out" "/root/tenko-binary" "nothing pushed as the binary"
 has "$out" "(standard input: $((${#release_token} + 2)) bytes, not shown)" "the token went to standard input"
 lacks "$out" "$release_token" "the token appears nowhere in the output"
-has "$out" "Setup token:   pct exec 100 -- runuser -u tenko -- tenko setup token" "final line: how to read the setup token"
+has "$out" "[dry-run] pct exec 100 -- bash /root/install.sh --setup-token" "the setup token is read by the installer in the container"
+has "$out" "[dry-run] pct exec 100 -- rm -f /root/install.sh" "the installer pushed for the token is removed again"
+lacks "$out" "runuser -u tenko" "no runuser at root's prompt"
+has "$out" "Setup token:   bash deploy/proxmox/ct/tenko.sh --setup-token 100" "final line: how to read the setup token"
+
+echo "== 7b. ct/tenko.sh --setup-token: the token of an existing container"
+rc=0
+out="$(tdry -- --setup-token 120)" || rc=$?
+((rc == 0)) && pass "exit 0" || fail "exit ${rc}: $(tail -n 5 <<<"$out")"
+has "$out" "[dry-run] pct push 120 $(dirname "$root")/install.sh /root/install.sh" "install.sh is pushed"
+has "$out" "[dry-run] pct exec 120 -- bash /root/install.sh --setup-token" "the installer reads the token"
+has "$out" "[dry-run] pct exec 120 -- rm -f /root/install.sh" "and is removed again"
+lacks "$out" "pct create" "nothing created"
+rc=0
+out="$(tdry -- --setup-token abc)" || rc=$?
+((rc == 2)) && pass "--setup-token needs a container ID" || fail "--setup-token abc: exit ${rc}"
 
 echo "== 8. ct/tenko.sh: refusals"
 rc=0

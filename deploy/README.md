@@ -108,25 +108,26 @@ sudo bash install.sh --prepare --roles controller,dns,probe    # Hardened: these
 | `--host-name <name>` | `hostname -f` | The name clients use: the certificate and the passkey ID; not an address |
 | `--dns-address all\|<addr>,...` | `all` | Where the dns role answers; port 53 unless given (`192.0.2.53`, `[2001:db8::53]:5353`) |
 | `--forwarders <addr>,...\|none` | the host's resolvers, loopback excluded | Upstream resolvers for names outside the zones |
-| `--data-dir <path>` | `/var/lib/tenko` | The data directory, on SSD or NVMe (OPS-19); another path gets a drop-in |
+| `--data-dir <path>` | `/var/lib/tenko` | The data directory, on SSD or NVMe (OPS-19); another path gets a drop-in. An existing directory is taken only when it is empty (it becomes the account's, mode 0700) or already the account's own (owner `tenko`, mode 0700, kept as it is); anything else is refused with the reason, exit 2 |
 | `--version latest\|<x.y.z>` | `latest` | The release to install |
 | `--language en\|sv` | `en` | The default UI language, with `--admin` |
 | `--admin <name>` | none | Complete first-run setup with this administrator |
 | `--password-stdin` | | The administrator's password or PIN from standard input (or `TENKO_ADMIN_PASSWORD`) |
 | `--binary <file>` | | Install this file instead of a download |
-| `--token <token>` | `GITHUB_TOKEN` | Token for the private repository (the variable keeps it out of the process list) |
+| `--token-stdin` | `TENKO_INSTALL_TOKEN`, else `GITHUB_TOKEN` | The token for the private repository from the first line of standard input (with `--password-stdin` the password follows on the next line); the variables do the same. The token is never printed, and it reaches curl on its standard input, in no argument list. `--token <token>` still works but is deprecated with a warning: an argument is visible to every process on the host |
 | `--repo <owner/name>` | `linkztream/tenko` | The GitHub repository |
-| `--release-url <url>` | | A directory with `SHA256SUMS` and the binary instead of GitHub (a mirror) |
+| `--release-url <url>` | | An https directory URL with `SHA256SUMS` and the binary instead of GitHub (a mirror). Plain http is accepted only for an address of this host's loopback interface (a test server); every download restricts the protocol of the request and of every redirect to HTTPS |
 | `--kek auto\|sealed\|file` | `auto` | The key-encryption key, see below; `sealed` fails where sealing does not work |
 | `--keep-resolved-stub` | | Never turn off the stub listener of systemd-resolved; remembered in `/etc/tenko/installer.state` for later runs |
 | `--check` | | The dependency check only: the drop-ins, `CAP_NET_RAW` of the running service, the firewall ports, the resolved stub and the record of the prepared roles; changes nothing, exit 11 when something is missing |
 | `--prepare` | | Set up what the prepared roles miss (asked once, yes by default) and nothing else: no download, no change to `tenko.toml`; restarts the service when its unit changed. Under Hardened, `--roles` names the roles to prepare |
 | `--use-self` | no (asked in interactive mode, default no) | With the dns role, point this host's own resolver at Tenko (`127.0.0.1`) once the node listens there; `--uninstall` restores the previous resolver |
+| `--setup-token` | | Print the one-time setup token of this node and nothing else, read as the service account in a session of its own and shown only in the token's shape; exit 1 when there is none (setup is complete, or the server has not started). The way to read the token at root's prompt, see "First-run setup" below |
 | `--reconfigure` | | Change `tenko.toml` by the answers you give; every other value of the file (`[dns] listen`, `[dhcp]`, `[server]`, `[tls]`, `[kek]`, `[dns.recursion]`, the profile, comments) is carried over, one output line per section; the old file stays as `tenko.toml.<time>.bak` |
 | `--yes` | | No questions; the defaults for what no flag gives |
 | `--no-start` | | Everything except enabling and starting the service (containers without systemd) |
 | `--dry-run` | | Print every step, change nothing |
-| `--uninstall [--purge]` | | Remove the service and the binary, the role drop-ins, the firewall ports the installer opened and `/etc/tenko/prepared-roles`; `--purge` also the data, `/etc/tenko` and the account |
+| `--uninstall [--purge]` | | Remove the service and the binary, the role drop-ins, the firewall ports the installer opened and `/etc/tenko/prepared-roles`; `--purge` also the data, `/etc/tenko` and the account. Both wait for the account's processes to end first and leave the data in place while one still runs |
 
 What it does, in this order:
 
@@ -172,7 +173,12 @@ What it does, in this order:
    waits until `tenko health` reports the node ready.
 6. With `--admin`, completes first-run setup with `tenko setup`; otherwise it reads the
    setup token. The closing lines name the URL, the CA root and its SHA-256, the setup
-   token or the administrator, the data directory, the key and how to back it up.
+   token or the administrator, the data directory, the key and how to back it up. Root
+   opens no path under the data directory for any of it: the account reads the CA root
+   out and computes its fingerprint, root keeps a copy of the certificate in its own
+   temporary directory for `tenko health` and `tenko setup` over loopback, the token is
+   read with `tenko setup token` as the account, and each value is shown through a filter
+   that keeps printable characters only (the token only in the token's shape).
 7. With `--use-self` (or a yes to the question in interactive mode) and the dns role
    answering on `127.0.0.1`, once the node accepts connections there: points the host's
    resolver at Tenko. With systemd-resolved running, `DNS=127.0.0.1` and `Domains=~.` go
@@ -226,8 +232,9 @@ shred -u /etc/tenko/kek.key          # once the offline copy of the key is safe
 
 **Run again: the upgrade.** With a newer binary (or `--version`, or a newer `latest`) the
 script stops the service, runs `tenko upgrade check` with the new binary on the stopped
-node as the account `tenko` (status 0 or 10 goes on; anything else starts the old version
-again and stops with status 8, nothing changed), installs the new binary as
+node as the account `tenko`, in a session of its own without root's terminal, with its
+report read from a file and shown through a filter (status 0 or 10 goes on; anything else
+starts the old version again and stops with status 8, nothing changed), installs the new binary as
 `/usr/local/bin/tenko` and starts the unit, whose `ExecStartPre=` (`tenko upgrade layout`)
 switches `updates/current` to it ([../docs/upgrades.md](../docs/upgrades.md) section 7.3).
 The data, the key and the configuration are not touched. The same version changes nothing
@@ -241,8 +248,14 @@ the key) and the account, so the same command installs it again with its data. I
 `<data directory>/updates`, which holds binaries and not data (one per installed version and
 the links `current` and `previous`): the next install recreates it from the installed binary
 and starts the layout afresh, so after an uninstall there is no previous version to roll back
-to.
-`--uninstall --purge` also deletes those; without `--yes` it asks you to type `purge`.
+to. That directory is the account's, so the account removes it (`rm --one-file-system`, in a
+session of its own); one that is not the account's own is left with a warning, and so is
+everything while a process of the account still runs (the script waits a few seconds for the
+stopped service to end).
+`--uninstall --purge` also deletes the data directory, `/etc/tenko` and the log directory, as
+root, each on its own file system and without following links, only once the unit is gone
+and no process of the account runs (otherwise everything is kept, with the reason, and the
+script exits 1); without `--yes` it asks you to type `purge`.
 
 **Exit statuses** of `install.sh`: 0 done or nothing to change, 1 an unexpected failure, 2
 usage, 3 an unsupported host, 4 a port taken by another program, 5 the download or the
@@ -405,11 +418,17 @@ keeps it out of the log: the log only says that first-run setup is open and name
 that prints the token. The file holds the token and a newline and is readable by the service
 account only (mode 0600 on Linux; on Windows it inherits the access control list of the data
 directory, which `tenko service install` restricts to the service account, Administrators and
-SYSTEM). The token changes at every start, and the file is removed when setup completes. Print
-the token on the node, as the account that runs the server:
+SYSTEM). The token changes at every start, and the file is removed when setup completes.
+`tenko setup token` accepts the file only in the token's own shape (four groups of five
+characters of `A`-`Z` and `2`-`7`) and prints the token alone. Print it on the node, as the
+account that runs the server. On a systemd node the account's process runs in a session of
+its own, detached from root's terminal (`setsid`), with `/dev/null` as its standard input,
+and what it printed passes through a filter before it reaches the terminal; the installer
+does exactly that with `--setup-token`:
 
 ```
-sudo -u tenko tenko setup token --data-dir /var/lib/tenko    # systemd; or --config /etc/tenko/tenko.toml
+bash install.sh --setup-token                                # systemd, as root: the installer's way
+setsid -w runuser -u tenko -- tenko setup token --config /etc/tenko/tenko.toml </dev/null 2>&1 | tr -cd '\n[:print:]'
 docker exec tenko tenko setup token                          # container; docker compose exec tenko tenko setup token
 tenko setup token --data-dir C:\ProgramData\Tenko             # Windows, in an administrator shell
 ```

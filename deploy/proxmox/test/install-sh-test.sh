@@ -442,6 +442,124 @@ CFG_END
     deps_check
     lacks "$(printf '%s\n' "${TODO_TEXT[@]}")" "stub listener off" "stub: a dns role on the host's own address does not need it off"
     expect "--help names --check and --prepare" "yes" "$(bash "$installer" --help | grep -q -- '--prepare' && bash "$installer" --help | grep -q -- '--check' && echo yes)"
+
+    echo "== (1d) root and the service account: the filter, the URLs, the data directory, the token"
+    expect "--help names --setup-token and --token-stdin" "yes" \
+      "$(bash "$installer" --help | grep -q -- '--setup-token' && bash "$installer" --help | grep -q -- '--token-stdin' && echo yes)"
+    # clean keeps printable ASCII and newlines, at most the given lines, and 400 characters a line.
+    expect "clean drops control characters, escapes and non-ASCII" "[31mred[0m linetab" \
+      "$(printf '\033[31mred\033[0m line\ttab\001\n' | clean | tr -d '\n'; printf 'ä' | clean)"
+    expect "clean keeps at most the given lines" "2" "$(printf 'a\nb\nc\n' | clean 2 | wc -l | tr -d ' ')"
+    expect "clean cuts a line at 400 characters" "400" "$(head -c 1000 /dev/zero | tr '\0' x | clean | tr -d '\n' | wc -c | tr -d ' ')"
+    expect "valid_setup_token: a token" 0 "$(valid_setup_token ABCDE-FGHIJ-KLMNO-PQRST; echo $?)"
+    for v in abcde-fghij-klmno-pqrst ABCDE-FGHIJ-KLMNO-PQRS "ABCDE FGHIJ KLMNO PQRST" "ABCD1-FGHIJ-KLMNO-PQRST" "" "rm -rf /"; do
+      expect "valid_setup_token refuses '${v}'" 1 "$(valid_setup_token "$v"; echo $?)"
+    done
+    expect "valid_fingerprint" 0 "$(valid_fingerprint "$(printf '%064d' 0 | tr 0 a)"; echo $?)"
+    expect "valid_fingerprint refuses a short one" 1 "$(valid_fingerprint abc; echo $?)"
+    # The URLs: https anywhere, http on loopback only; every curl call restricts the protocol.
+    expect "url_host of a bracketed IPv6 URL" "::1" "$(url_host 'http://[::1]:8080/x/SHA256SUMS')"
+    expect "url_host of a URL with a port and a user" "127.0.0.1" "$(url_host 'http://user@127.0.0.1:8080/x')"
+    for v in https://github.com/x https://198.51.100.7/x http://127.0.0.1:8080/rel http://localhost/rel 'http://[::1]:8080/rel' http://127.4.5.6/rel; do
+      expect "valid_url ${v}" 0 "$(valid_url "$v"; echo $?)"
+    done
+    for v in http://198.51.100.7/x http://releases.example.test/x ftp://127.0.0.1/x http://127.0.0.1.example.test/x file:///tmp/x "" https://; do
+      expect "valid_url refuses '${v}'" 1 "$(valid_url "$v"; echo $?)"
+    done
+    expect "url_proto of https" "=https" "$(url_proto https://github.com/x)"
+    expect "url_proto of loopback http" "=http,https" "$(url_proto http://127.0.0.1:8080/x)"
+    parse_case() { # <args>...: parse_args in a subshell, its output and status
+      (parse_args "$@" 2>&1)
+      echo "rc=$?"
+    }
+    out="$(parse_case --yes --release-url http://198.51.100.7/rel)"
+    has "$out" "rc=2" "--release-url over plain http to another host: exit 2"
+    has "$out" "--release-url: an https URL (plain http only to an address of this host's loopback interface)" "and says why"
+    out="$(parse_case --yes --release-url http://127.0.0.1:8080/rel)"
+    has "$out" "rc=0" "--release-url over plain http to loopback: accepted"
+    out="$(TENKO_GITHUB_API=http://api.example.test parse_case --yes)"
+    has "$out" "rc=0" "TENKO_GITHUB_API is read when the script starts, not by parse_args"
+    out="$(GITHUB_API=http://api.example.test parse_case --yes)"
+    has "$out" "rc=2" "a plain http API URL to another host: exit 2"
+    has "$out" "TENKO_GITHUB_API: an https URL" "and names the variable"
+    # The token: --token-stdin (the first line; the password next), the variables, --token.
+    out="$(printf 'tok-from-stdin\npw-from-stdin\n' | (parse_args --yes --token-stdin --password-stdin 2>&1; printf 'token=%s password=%s flag=%s\n' "$OPT_TOKEN" "$PASSWORD" "$TOKEN_FLAG"))"
+    has "$out" "token=tok-from-stdin password=pw-from-stdin flag=0" "--token-stdin: the first line is the token, the second the password"
+    out="$(printf '\n' | parse_case --yes --token-stdin)"
+    has "$out" "rc=2" "--token-stdin without a line: exit 2"
+    out="$(export TENKO_INSTALL_TOKEN=tok-from-env GITHUB_TOKEN=other; parse_args --yes 2>&1; printf 'token=%s env=%s\n' "$OPT_TOKEN" "${TENKO_INSTALL_TOKEN:-unset}")"
+    has "$out" "token=tok-from-env env=unset" "TENKO_INSTALL_TOKEN beats GITHUB_TOKEN and is dropped from the environment"
+    out="$(export GITHUB_TOKEN=tok-from-gh; parse_args --yes 2>&1; printf 'token=%s\n' "$OPT_TOKEN")"
+    has "$out" "token=tok-from-gh" "GITHUB_TOKEN still works"
+    out="$( (parse_args --yes --token tok-from-arg 2>&1; printf 'token=%s flag=%s\n' "$OPT_TOKEN" "$TOKEN_FLAG"))"
+    has "$out" "token=tok-from-arg flag=1" "--token is taken and marked for the deprecation warning"
+    out="$(parse_case --yes --setup-token --uninstall)"
+    has "$out" "rc=2" "--setup-token goes alone"
+    # The data directory: absent or empty is taken, the account's own is kept, the rest refused.
+    data_case() { # <path>: check_data_dir in a subshell, its output and status
+      (DATA_DIR="$1"; check_data_dir 2>&1)
+      echo "rc=$?"
+    }
+    mkdir -p "${work}/dd/empty" "${work}/dd/full"
+    echo x >"${work}/dd/full/file"
+    ln -s "${work}/dd/full" "${work}/dd/link"
+    : >"${work}/dd/file"
+    has "$(data_case "${work}/dd/absent")" "rc=0" "data dir: an absent directory is fine"
+    has "$(data_case "${work}/dd/empty")" "rc=0" "data dir: an empty directory is taken"
+    out="$(data_case "${work}/dd/full")"
+    has "$out" "rc=2" "data dir: a directory with files that is not the account's: exit 2"
+    has "$out" "exists, is not empty, and is not the account's data directory" "data dir: says why"
+    has "$out" "chown tenko:tenko ${work}/dd/full && chmod 0700 ${work}/dd/full" "data dir: says what to do"
+    out="$(data_case "${work}/dd/link")"
+    has "$out" "rc=2" "data dir: a symbolic link: exit 2"
+    has "$out" "is a symbolic link" "data dir: says so"
+    has "$(data_case "${work}/dd/file")" "exists and is not a directory" "data dir: a file is refused"
+    # What root reads of the account's output: the token in its shape, the CA root as a copy
+    # in TMP made from what the account printed, the fingerprint the account computed.
+    # The account's process is stood in for: whatever `tenko setup token` printed.
+    TOKEN_FILE="${work}/token.txt"
+    as_tenko() { cat "$TOKEN_FILE"; }
+    printf 'ABCDE-FGHIJ-KLMNO-PQRST\n' >"$TOKEN_FILE"
+    expect "read_setup_token: a token" "ABCDE-FGHIJ-KLMNO-PQRST" "$(read_setup_token)"
+    printf 'ABCDE-FGHIJ-KLMNO-PQRST\nsecond line\n' >"$TOKEN_FILE"
+    expect "read_setup_token: the first line only" "ABCDE-FGHIJ-KLMNO-PQRST" "$(read_setup_token)"
+    printf '\033[31mABCDE-FGHIJ-KLMNO-PQRST\033[0m\n' >"$TOKEN_FILE"
+    expect "read_setup_token: a token wrapped in escape sequences is nothing" "" "$(read_setup_token)"
+    printf 'not a token\n' >"$TOKEN_FILE"
+    expect "read_setup_token: anything else is nothing" "" "$(read_setup_token)"
+    printf 'ABCDE-FGHIJ-KLMNO-PQRST and more\n' >"$TOKEN_FILE"
+    expect "read_setup_token: a token with a tail is nothing" "" "$(read_setup_token)"
+    as_tenko() { "$@"; }
+    DATA_DIR="${work}/data"
+    mkdir -p "${DATA_DIR}/tls"
+    CA_COPY=""
+    expect "ca_copy: nothing before the certificate exists" 1 "$(ca_copy; echo $?)"
+    printf 'junk\n' >"${DATA_DIR}/tls/ca-root.pem"
+    expect "ca_copy: not a PEM certificate: refused" 1 "$(ca_copy; echo $?)"
+    expect "ca_copy: no copy of junk" "none" "$(test -e "${TMP}/ca-root.pem" && echo copy || echo none)"
+    if command -v openssl >/dev/null 2>&1; then
+      openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj /CN=tenko.example.test \
+        -keyout "${work}/ca.key" -out "${DATA_DIR}/tls/ca-root.pem" -days 1 >/dev/null 2>&1
+      expect "ca_copy: a PEM certificate" 0 "$(ca_copy; echo $?)"
+      ca_copy
+      expect "ca_copy: the copy is in TMP" "${TMP}/ca-root.pem" "$CA_COPY"
+      expect "ca_copy: the copy is the certificate" "same" "$(cmp -s "$CA_COPY" "${DATA_DIR}/tls/ca-root.pem" && echo same || echo differs)"
+      want="$(openssl x509 -in "${DATA_DIR}/tls/ca-root.pem" -noout -fingerprint -sha256 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f')"
+      expect "ca_fingerprint: the account's computation, lower-case hex" "$want" "$(ca_fingerprint)"
+      as_tenko() { echo "sha256 Fingerprint=not:a:fingerprint"; }
+      expect "ca_fingerprint: anything else is nothing" "" "$(ca_fingerprint)"
+    else
+      echo "SKIP  openssl is not installed here: the CA root copy and the fingerprint"
+    fi
+    # The updates layout goes as the account, and only when it is the account's own.
+    DATA_DIR="${work}/data2"
+    mkdir -p "${DATA_DIR}/updates/0.0.1"
+    OPT_DRY=0
+    out="$(remove_updates "" 2>&1)"
+    has "$out" "is not the account's own directory" "remove_updates: a directory of another owner is left"
+    expect "remove_updates: and stays" "present" "$(test -d "${DATA_DIR}/updates" && echo present)"
+    out="$(remove_updates "4242" 2>&1)"
+    has "$out" "Processes of the account tenko are still running (pid 4242)" "remove_updates: a running process of the account leaves it"
     rm -rf "$work"
     exit "$failures"
   )
@@ -482,6 +600,22 @@ cp "$binary" "${work}/tenko"
 cp "$unit" "${work}/tenko.service"
 [[ -n "$newer" ]] && cp "$newer" "${work}/tenko-next"
 
+# Run under a pseudo terminal (script) in the container: the installer's as_tenko must give
+# the account's process a session of its own, no controlling terminal and /dev/null as its
+# standard input, while root's own shell has the terminal.
+cat >"${work}/tty-check.sh" <<'TTY_END'
+#!/bin/bash
+source /i/install.sh
+set +eE
+trap - ERR
+TMP="$(mktemp -d)"
+# Fields of /proc/<pid>/stat: 6 the session id, 7 the controlling terminal (0: none).
+parent_sid="$(awk '{print $6}' /proc/self/stat)"
+printf 'parent tty=%s\n' "$(awk '{print $7}' /proc/self/stat)"
+as_tenko /bin/sh -c 'set -- $(cat /proc/$$/stat); printf "child tty=%s stdin=%s sid=%s\n" "$7" "$(readlink /proc/$$/fd/0)" "$6"' 2>&1 |
+  sed "s/ sid=${parent_sid}\$/ session=inherited/; s/ sid=[0-9]*\$/ session=own/"
+TTY_END
+
 # The script that runs in each container: POSIX tools only (the minimal images lack most).
 cat >"${work}/inside.sh" <<'INSIDE_END'
 #!/bin/bash
@@ -497,6 +631,17 @@ as_tenko() {
 }
 cd /tmp
 install_args=(--yes --no-start --binary /i/tenko --host-name tenko.example.test --forwarders 192.0.2.1)
+
+echo "-- an existing --data-dir is taken only when it is empty or the account's own"
+mkdir -p /srv/taken /srv/empty
+echo x >/srv/taken/file
+out="$(bash /i/install.sh "${install_args[@]}" --data-dir /srv/taken 2>&1)"; rc=$?
+[ "$rc" = 2 ] && pass "a directory with files that is not the account's: exit 2" || { fail "taken: exit ${rc}"; printf '%s\n' "$out" | sed 's/^/      /'; }
+printf '%s\n' "$out" | grep -q 'exists, is not empty, and is not the account' && pass "says why" || fail "no reason given"
+check "nothing was installed" test ! -e /etc/tenko/tenko.toml
+out="$(bash /i/install.sh "${install_args[@]}" --dry-run --data-dir /srv/empty 2>&1)"; rc=$?
+[ "$rc" = 0 ] && pass "an empty directory is taken (dry run)" || { fail "empty: exit ${rc}"; printf '%s\n' "$out" | sed 's/^/      /'; }
+printf '%s\n' "$out" | grep -q 'chown tenko:tenko /srv/empty' && pass "and becomes the account's" || fail "no chown line"
 
 echo "-- install"
 out="$(bash /i/install.sh "${install_args[@]}" 2>&1)"; rc=$?
@@ -543,6 +688,18 @@ grep -q 'dns role answering' /tmp/serve.log && pass "the dns role answers on por
 grep -q 'THE KEY-ENCRYPTION KEY IS A PLAIN FILE' /tmp/serve.log && pass "the file provider warns, as documented" || fail "no file-provider warning"
 token="$(as_tenko /usr/local/bin/tenko setup token --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko 2>/dev/null)"
 [ -n "$token" ] && pass "tenko setup token prints a token" || fail "no setup token"
+printf '%s' "$token" | grep -Eq '^[A-Z2-7]{5}(-[A-Z2-7]{5}){3}$' && pass "the token has the token's shape" || fail "token shape: ${token}"
+out="$(bash /i/install.sh --setup-token 2>&1)"; rc=$?
+[ "$rc" = 0 ] && [ "$out" = "$token" ] && pass "install.sh --setup-token prints the same token, alone" || fail "--setup-token: exit ${rc}: ${out}"
+if command -v script >/dev/null 2>&1; then
+  out="$(script -qec 'bash /i/tty-check.sh' /dev/null 2>&1)"
+  printf '%s\n' "$out" | grep -q 'parent tty=[1-9]' && pass "under a pseudo terminal, root's shell has a controlling terminal" || fail "no tty for the parent: ${out}"
+  printf '%s\n' "$out" | grep -q 'child tty=0 ' && pass "as_tenko: the account's process has no controlling terminal" || fail "the account's process has a tty: ${out}"
+  printf '%s\n' "$out" | grep -q 'stdin=/dev/null' && pass "as_tenko: standard input is /dev/null" || fail "stdin: ${out}"
+  printf '%s\n' "$out" | grep -q 'session=own' && pass "as_tenko: the account's process is in a session of its own" || fail "session: ${out}"
+else
+  echo "SKIP  script is not installed here: the terminal check"
+fi
 kill -TERM "$pid"; status=0; wait "$pid" || status=$?
 [ "$status" = 0 ] && pass "SIGTERM: exit 0" || fail "serve exit ${status}"
 
@@ -559,13 +716,23 @@ check "[dns] stays for the prepared dns role" grep -q "^\[dns\]" /etc/tenko/tenk
 check "the old file is kept as .bak" sh -c 'ls /etc/tenko/tenko.toml.*.bak'
 check "the key is unchanged" sh -c '[ "$(sha256sum </etc/tenko/kek.key)" = "'"$key_before"'" ]'
 
-echo "-- --uninstall keeps the data and the key, removes the updates layout"
-# round2: a layout as a running node leaves it (binaries and the two links), next to the store.
-mkdir -p /var/lib/tenko/updates/0.0.1 /var/lib/tenko/updates/0.0.2
+echo "-- --uninstall leaves an updates directory that is not the account's own"
+mkdir -p /var/lib/tenko/updates/0.0.1
 printf 'binary' >/var/lib/tenko/updates/0.0.1/tenko
-printf 'binary' >/var/lib/tenko/updates/0.0.2/tenko
-ln -sfn /var/lib/tenko/updates/0.0.2 /var/lib/tenko/updates/current
-ln -sfn /var/lib/tenko/updates/0.0.1 /var/lib/tenko/updates/previous
+out="$(bash /i/install.sh --yes --uninstall 2>&1)"; rc=$?
+[ "$rc" = 0 ] && pass "uninstall exit 0" || { fail "uninstall exit ${rc}"; printf '%s\n' "$out" | sed 's/^/      /'; }
+check "a root-owned updates/ stays" test -f /var/lib/tenko/updates/0.0.1/tenko
+printf '%s\n' "$out" | grep -q "is not the account's own directory" && pass "and the closing lines say so" || fail "no line about the owner"
+rm -rf /var/lib/tenko/updates
+out="$(bash /i/install.sh "${install_args[@]}" 2>&1)"; rc=$?
+[ "$rc" = 0 ] && pass "reinstall exit 0" || { fail "reinstall exit ${rc}"; printf '%s\n' "$out" | sed 's/^/      /'; }
+
+echo "-- --uninstall keeps the data and the key, removes the updates layout as the account"
+# round2: a layout as a running node leaves it (binaries and the two links), next to the store.
+as_tenko sh -c 'mkdir -p /var/lib/tenko/updates/0.0.1 /var/lib/tenko/updates/0.0.2 &&
+  printf binary >/var/lib/tenko/updates/0.0.1/tenko && printf binary >/var/lib/tenko/updates/0.0.2/tenko &&
+  ln -sfn /var/lib/tenko/updates/0.0.2 /var/lib/tenko/updates/current &&
+  ln -sfn /var/lib/tenko/updates/0.0.1 /var/lib/tenko/updates/previous'
 out="$(bash /i/install.sh --yes --uninstall 2>&1)"; rc=$?
 [ "$rc" = 0 ] && pass "uninstall exit 0" || { fail "uninstall exit ${rc}"; printf '%s\n' "$out" | sed 's/^/      /'; }
 check "updates/ removed" test ! -e /var/lib/tenko/updates
@@ -581,6 +748,22 @@ out="$(bash /i/install.sh "${install_args[@]}" 2>&1)"; rc=$?
 [ "$rc" = 0 ] && pass "reinstall exit 0" || { fail "reinstall exit ${rc}"; printf '%s\n' "$out" | sed 's/^/      /'; }
 printf '%s\n' "$out" | grep -q 'Keeping the key-encryption key file' && pass "the key file is kept" || fail "key not kept"
 check "the key is unchanged" sh -c '[ "$(sha256sum </etc/tenko/kek.key)" = "'"$key_before"'" ]'
+
+echo "-- --uninstall --purge leaves everything while a process of the account runs"
+if command -v setpriv >/dev/null 2>&1; then
+  setpriv --reuid=tenko --regid=tenko --init-groups -- sleep 300 &
+else
+  runuser -u tenko -- sleep 300 &
+fi
+sleeper=$!
+sleep 1
+out="$(bash /i/install.sh --yes --uninstall --purge 2>&1)"; rc=$?
+[ "$rc" = 1 ] && pass "purge with a running process of the account: exit 1" || { fail "purge exit ${rc}"; printf '%s\n' "$out" | sed 's/^/      /'; }
+printf '%s\n' "$out" | grep -q 'Processes of the account tenko are still running' && pass "says why" || fail "no reason given"
+check "data kept" test -d /var/lib/tenko/store
+check "key kept" test -f /etc/tenko/kek.key
+check "account kept" id tenko
+kill -TERM "$sleeper" 2>/dev/null; wait "$sleeper" 2>/dev/null
 
 echo "-- --uninstall --purge"
 out="$(bash /i/install.sh --yes --uninstall --purge 2>&1)"; rc=$?
@@ -687,12 +870,28 @@ echo "GOOD_EXIT=$?"
 grep -o 'SHA-256 verified against SHA256SUMS' /tmp/good.log
 /usr/local/bin/tenko --version
 bash /i/install.sh --yes --uninstall --purge >/dev/null 2>&1
-echo "-- the GitHub API with a token"
-TENKO_GITHUB_API="${base}/api" GITHUB_TOKEN="$token" bash /i/install.sh --yes --no-start --host-name tenko.example.test >/tmp/api.log 2>&1
+echo "-- a release URL over plain http to another host is refused"
+bash /i/install.sh --yes --no-start --release-url http://198.51.100.7/rel --host-name tenko.example.test >/tmp/http.log 2>&1
+echo "HTTP_EXIT=$?"
+grep -o 'plain http only to an address of this host.s loopback interface' /tmp/http.log | head -n 1
+echo "-- the GitHub API with the token in TENKO_INSTALL_TOKEN"
+TENKO_GITHUB_API="${base}/api" TENKO_INSTALL_TOKEN="$token" bash /i/install.sh --yes --no-start --host-name tenko.example.test >/tmp/api.log 2>&1
 echo "API_EXIT=$?"
 grep -o 'SHA-256 verified against SHA256SUMS' /tmp/api.log
+bash /i/install.sh --yes --uninstall --purge >/dev/null 2>&1
+echo "-- the GitHub API with the token on standard input"
+printf '%s\n' "$token" | TENKO_GITHUB_API="${base}/api" bash /i/install.sh --yes --no-start --token-stdin --host-name tenko.example.test >/tmp/stdin.log 2>&1
+echo "STDIN_EXIT=$?"
+grep -o 'SHA-256 verified against SHA256SUMS' /tmp/stdin.log
+bash /i/install.sh --yes --uninstall --purge >/dev/null 2>&1
+echo "-- --token still works and warns"
+TENKO_GITHUB_API="${base}/api" bash /i/install.sh --yes --no-start --token "$token" --host-name tenko.example.test >/tmp/flag.log 2>&1
+echo "FLAG_EXIT=$?"
+grep -o -- '--token is deprecated' /tmp/flag.log | head -n 1
 grep -c . /tmp/curl-args.log | sed 's/^/CURL_CALLS=/'
-grep -qF "$token" /tmp/curl-args.log /tmp/api.log && echo "TOKEN_LEAKED"
+grep -vc -- '--proto-redir =https' /tmp/curl-args.log | sed 's/^/CURL_WITHOUT_PROTO_REDIR=/'
+grep -vc -- '--proto =http,https' /tmp/curl-args.log | sed 's/^/CURL_WITHOUT_PROTO=/'
+grep -qF "$token" /tmp/curl-args.log /tmp/api.log /tmp/stdin.log /tmp/flag.log && echo "TOKEN_LEAKED"
 true
 EOF
 out="$(docker run --rm --network host -v "${work}:/i:ro" ubuntu:24.04 bash /i/download.sh "$url" "$token" "$version" 2>&1)"
@@ -702,7 +901,14 @@ has "$out" "does not match SHA256SUMS" "a wrong checksum: the message"
 lacks "$out" "BAD_INSTALLED" "a wrong checksum: nothing installed"
 has "$out" "GOOD_EXIT=0" "release directory: exit 0"
 has "$out" "tenko ${version}" "release directory: the binary installed"
-has "$out" "API_EXIT=0" "GitHub API with a token: exit 0"
+has "$out" "HTTP_EXIT=2" "a release URL over plain http to another host: exit 2"
+has "$out" "plain http only to an address of this host" "and says why"
+has "$out" "API_EXIT=0" "GitHub API with the token in TENKO_INSTALL_TOKEN: exit 0"
+has "$out" "STDIN_EXIT=0" "GitHub API with the token on standard input: exit 0"
+has "$out" "FLAG_EXIT=0" "GitHub API with --token: exit 0"
+has "$out" "--token is deprecated" "--token warns"
+has "$out" "CURL_WITHOUT_PROTO_REDIR=0" "every curl call restricts the protocol of a redirect to https"
+has "$out" "CURL_WITHOUT_PROTO=0" "every curl call restricts the protocol of the request (loopback: http and https)"
 lacks "$out" "TOKEN_LEAKED" "the token is in no curl argument list and not in the output"
 for path in /api/repos/linkztream/tenko/releases/latest /api/repos/linkztream/tenko/releases/assets/101 /api/repos/linkztream/tenko/releases/assets/102; do
   grep -q "^${path} authorization=matching" "${work}/auth.log" && pass "GET ${path} with the Authorization header" ||

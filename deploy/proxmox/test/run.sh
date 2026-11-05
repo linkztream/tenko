@@ -43,8 +43,11 @@ syntax_and_shellcheck() {
   for f in "${files[@]}"; do
     if bash -n "$f"; then echo "bash -n ok: $f"; else echo "bash -n FAIL: $f"; rc=1; fi
   done
-  if docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable -x -P SCRIPTDIR -S warning "${files[@]}"; then
-    echo "shellcheck -x -P SCRIPTDIR -S warning: clean (${#files[@]} files)"
+  # The installed shellcheck where there is one, else the image.
+  local shellcheck=(docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable)
+  if command -v shellcheck >/dev/null 2>&1; then shellcheck=(shellcheck); fi
+  if "${shellcheck[@]}" -x -P SCRIPTDIR -S warning "${files[@]}"; then
+    echo "shellcheck -x -P SCRIPTDIR -S warning: clean (${#files[@]} files, ${shellcheck[0]})"
   else
     rc=1
   fi

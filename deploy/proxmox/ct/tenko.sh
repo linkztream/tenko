@@ -12,8 +12,9 @@
 #   bash -c "$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
 #     https://raw.githubusercontent.com/linkztream/tenko/main/deploy/proxmox/ct/tenko.sh)"
 # Options: --binary <file> (pushed into the container instead of a download), --update
-# <ctid>, --ip <a.b.c.d/nn|dhcp>, --gw <a.b.c.d>, --ctid <n>, --storage <name>,
-# --hostname <name>, --admin <name>, --version <x.y.z>, --yes (no dialogs), --dry-run.
+# <ctid>, --setup-token <ctid> (print the node's setup token and nothing else), --ip
+# <a.b.c.d/nn|dhcp>, --gw <a.b.c.d>, --ctid <n>, --storage <name>, --hostname <name>,
+# --admin <name>, --version <x.y.z>, --yes (no dialogs), --dry-run.
 # Settings: the var_* of lib/host.sh and below; GITHUB_TOKEN (the one-command form, and
 # the download in the container while the repository is private); TENKO_ADMIN_PASSWORD;
 # TENKO_SCRIPTS_URL; TENKO_DRY_RUN=1.
@@ -46,8 +47,9 @@ else
   for tenko_file in lib/common.sh lib/host.sh lib/container.sh "install/${TENKO_INSTALL}.sh" ../install.sh; do
     tenko_url="${TENKO_SCRIPTS_URL}/${tenko_file}"
     [[ "$tenko_file" == ../install.sh ]] && tenko_url="${TENKO_SCRIPTS_URL%/proxmox}/install.sh"
+    # https only, on the request and on every redirect: the files fetched here run as root.
     if ! printf 'Authorization: Bearer %s\n' "${GITHUB_TOKEN:-}" |
-      curl -fsSL --retry 2 --connect-timeout 10 "${tenko_auth[@]}" \
+      curl -fsSL --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 "${tenko_auth[@]}" \
         -o "${TENKO_BOOTSTRAP_TMP}/proxmox/${tenko_file}" "$tenko_url" ||
       [[ ! -s "${TENKO_BOOTSTRAP_TMP}/proxmox/${tenko_file}" ]]; then
       printf '\nCould not fetch %s\n' "$tenko_url" >&2
@@ -66,11 +68,12 @@ fi
 # <<< bootstrap
 
 # ── Options: shorthands for the settings below ────────────────────────────────────────────
-TENKO_UPDATE_CTID=""
+TENKO_UPDATE_CTID="" TENKO_TOKEN_CTID=""
 while (($#)); do
   case "$1" in
   --binary) var_binary="${2:-}" ;;
   --update) TENKO_UPDATE_CTID="${2:-}" ;;
+  --setup-token) TENKO_TOKEN_CTID="${2:-}" ;;
   --ip) var_ip="${2:-}" ;;
   --gw) var_gateway="${2:-}" ;;
   --ctid) var_ctid="${2:-}" ;;
@@ -155,7 +158,8 @@ prepare() {
   # repository: ask once whether the latest release answers without one.
   TENKO_RELEASES_PUBLIC=0
   if [[ -z "$var_binary" && -z "$TENKO_RELEASE_TOKEN" ]] && ! tenko_dry &&
-    curl -fsSL -o /dev/null --connect-timeout 10 "${TENKO_PROJECT_URL}/releases/latest/download/SHA256SUMS" 2>/dev/null; then
+    curl -fsSL --proto '=https' --proto-redir '=https' -o /dev/null --connect-timeout 10 \
+      "${TENKO_PROJECT_URL}/releases/latest/download/SHA256SUMS" 2>/dev/null; then
     TENKO_RELEASES_PUBLIC=1
   fi
 }
@@ -227,27 +231,38 @@ install_stdin() { printf '%s\n%s\n' "${TENKO_RELEASE_TOKEN:-}" "$TENKO_ADMIN_PAS
 
 after_install() {
   TENKO_RELEASE_TOKEN="" TENKO_ADMIN_PASSWORD=""
-  TENKO_SETUP_TOKEN="$(pve pct exec "$var_ctid" -- sh -c \
-    'test -f /var/lib/tenko/setup-token && runuser -u tenko -- tenko setup token --config /etc/tenko/tenko.toml' \
-    </dev/null 2>/dev/null || true)"
+  TENKO_SETUP_TOKEN="$(tenko_setup_token_of "$var_ctid")"
   [[ "${TENKO_INSTALL_RC:-0}" == 9 ]] && msg_warn "The node runs, but first-run setup failed; complete it in the browser"
   return 0
 }
 
+# tenko_setup_token_of <ctid>: the setup token of the node in the container, or nothing
+# (setup is complete, or the node has not started). The installer reads it there (`bash
+# install.sh --setup-token`: as the service account, in a session of its own, reduced to
+# printable characters), and what comes back is kept only in the token's own shape: four
+# groups of five base32 characters.
+tenko_setup_token_of() {
+  local token=""
+  pve pct push "$1" "$TENKO_INSTALL_SH" /root/install.sh </dev/null || return 0
+  token="$(pve pct exec "$1" -- bash /root/install.sh --setup-token </dev/null 2>/dev/null || true)"
+  pve pct exec "$1" -- rm -f /root/install.sh </dev/null || true
+  [[ "$token" =~ ^[A-Z2-7]{5}(-[A-Z2-7]{5}){3}$ ]] && printf '%s' "$token"
+  return 0
+}
+
 final_lines() {
-  local address="${TENKO_CT_ADDRESS:-<address>}"
+  local address="${TENKO_CT_ADDRESS:-<address>}" again="bash deploy/proxmox/ct/tenko.sh --setup-token ${var_ctid}"
   msg_bold "  Tenko DDI"
   printf '    %-14s %s\n' "Container:" "$var_ctid (pct enter ${var_ctid})" "Address:" "$address" \
     "Web UI:" "https://${address}:8443/  (https://${var_tenko_host:-$var_hostname}:8443/ once the name resolves)"
   if [[ -n "${TENKO_UPDATING:-}" && -z "${TENKO_SETUP_TOKEN:-}" ]]; then
     :
   elif [[ -n "${TENKO_SETUP_TOKEN:-}" ]]; then
-    printf '    %-14s %s\n' "Setup token:" "$TENKO_SETUP_TOKEN" \
-      "" "(changes at every start; again: pct exec ${var_ctid} -- runuser -u tenko -- tenko setup token --config /etc/tenko/tenko.toml)"
+    printf '    %-14s %s\n' "Setup token:" "$TENKO_SETUP_TOKEN" "" "(changes at every start; again: ${again})"
   elif [[ -n "$var_admin" ]]; then
     printf '    %-14s %s\n' "Administrator:" "$var_admin"
   else
-    printf '    %-14s %s\n' "Setup token:" "pct exec ${var_ctid} -- runuser -u tenko -- tenko setup token --config /etc/tenko/tenko.toml"
+    printf '    %-14s %s\n' "Setup token:" "${again}   (prints it; the node writes a new one at every start while setup is open)"
   fi
   printf '    %-14s %s\n' "Upgrade:" "bash deploy/proxmox/ct/tenko.sh --update ${var_ctid} [--binary <file>]" \
     "Snapshot:" "pct snapshot ${var_ctid} installed   (before every upgrade, too)"
@@ -304,8 +319,37 @@ tenko_update_host() {
   final_lines
 }
 
+# tenko_token_host <ctid>: --setup-token from the host: the setup token of the node in the
+# container on standard output, alone; exit 9 with the reason when there is none.
+tenko_token_host() {
+  set -Eeuo pipefail
+  exec 3>&1
+  trap 'tenko_on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+  trap tenko_on_exit EXIT
+  : "${var_verbose:=no}"
+  tenko_set_std
+  var_ctid="$1"
+  tenko_valid_int "$var_ctid" 100 999999999 || die "$TENKO_E_USAGE" "--setup-token: a container ID, not '${var_ctid}'"
+  [[ -f "${TENKO_INSTALL_SH}" ]] || die "$TENKO_E_USAGE" "install.sh not found at ${TENKO_INSTALL_SH}"
+  require_pve
+  if ! tenko_dry && [[ "$(pve pct status "$var_ctid" 2>/dev/null)" != "status: running" ]]; then
+    die "$TENKO_E_USAGE" "Container ${var_ctid} is not running (pct start ${var_ctid})"
+  fi
+  local token
+  token="$(tenko_setup_token_of "$var_ctid")"
+  if [[ -z "$token" ]]; then
+    tenko_dry && exit 0
+    die "$TENKO_E_POST_INSTALL" "No setup token in container ${var_ctid}: first-run setup is complete, or the node has not started (pct exec ${var_ctid} -- journalctl -u tenko -n 20)"
+  fi
+  printf '%s\n' "$token"
+}
+
 if [[ -n "$TENKO_UPDATE_CTID" ]]; then
   tenko_update_host "$TENKO_UPDATE_CTID"
+  exit 0
+fi
+if [[ -n "$TENKO_TOKEN_CTID" ]]; then
+  tenko_token_host "$TENKO_TOKEN_CTID"
   exit 0
 fi
 tenko_main "$@"
