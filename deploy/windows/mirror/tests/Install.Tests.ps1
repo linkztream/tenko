@@ -6,6 +6,7 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingUsernameAndPasswordParams', '', Justification = 'Register-ScheduledTask takes -User and -Password')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '', Justification = 'Register-ScheduledTask takes -Password as text')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'stubs of the New-ScheduledTask* cmdlets')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'the stubs carry the names of the ScheduledTasks cmdlets so the installer can be exercised without the module; on Windows PowerShell the rule counts them as built in')]
 param()
 
 BeforeAll {
