@@ -333,6 +333,103 @@ async fn serves_the_api_and_the_ui_with_security_headers() {
     stop(server).await;
 }
 
+/// Every response carries the full set of security headers (ADR 0008 decision 3): the
+/// document, a hashed asset, the paths a crawler asks for (`/robots.txt` and
+/// `/sitemap.xml` fall back to the document), a problem+json refusal and an API answer
+/// alike, through the one middleware. ZAP's site-wide rules 10063 (Permissions-Policy) and
+/// 90004 (site isolation) fail the security round when one is missing anywhere.
+fn assert_security_headers(reply: &Reply, path: &str) {
+    for (name, value) in [
+        ("x-content-type-options", "nosniff"),
+        ("referrer-policy", "no-referrer"),
+        ("x-frame-options", "DENY"),
+        (
+            "content-security-policy",
+            tenko_api::middleware::headers::CSP,
+        ),
+        (
+            "permissions-policy",
+            tenko_api::middleware::headers::PERMISSIONS_POLICY,
+        ),
+        ("cross-origin-opener-policy", "same-origin"),
+        ("cross-origin-resource-policy", "same-origin"),
+        ("cross-origin-embedder-policy", "require-corp"),
+    ] {
+        assert_eq!(reply.header(name), Some(value), "{name} on {path}");
+    }
+    assert!(
+        reply.header("strict-transport-security").is_none(),
+        "no HSTS over plain HTTP on {path}"
+    );
+}
+
+/// The path of the first stylesheet or script under `/assets/` that the document links,
+/// whichever build is embedded (the placeholder page links `/assets/tenko-stub.css`).
+fn first_asset_path(html: &str) -> String {
+    let start = html
+        .find("\"/assets/")
+        .expect("the document links an asset")
+        + 1;
+    let end = html[start..].find('"').expect("closing quote") + start;
+    html[start..end].to_owned()
+}
+
+#[tokio::test]
+async fn every_response_carries_the_isolation_and_permissions_headers() {
+    let (server, addr) = start(lab_config(), AppState::default()).await;
+
+    let document = get(addr, "/", &[]).await;
+    assert_eq!(document.status, 200);
+    assert_eq!(
+        document.header("content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    assert_security_headers(&document, "/");
+
+    let asset_path = first_asset_path(&document.text());
+    let asset = get(addr, &asset_path, &[]).await;
+    assert_eq!(asset.status, 200, "{asset_path}");
+    assert_eq!(
+        asset.header("cache-control"),
+        Some("public, max-age=31536000, immutable")
+    );
+    assert_security_headers(&asset, &asset_path);
+
+    for path in ["/robots.txt", "/sitemap.xml"] {
+        let fallback = get(addr, path, &[]).await;
+        assert_eq!(fallback.status, 200, "{path} is the single-page fallback");
+        assert_eq!(
+            fallback.header("content-type"),
+            Some("text/html; charset=utf-8"),
+            "{path}"
+        );
+        assert_security_headers(&fallback, path);
+    }
+
+    let missing = get(addr, "/api/v1/nope", &[]).await;
+    assert_eq!(missing.status, 404);
+    assert_eq!(
+        missing.header("content-type"),
+        Some("application/problem+json")
+    );
+    assert_eq!(missing.json()["code"], "sys.route_not_found");
+    assert_security_headers(&missing, "/api/v1/nope");
+
+    let wrong_method = send(addr, "DELETE", "/api/v1/health", &[], "").await;
+    assert_eq!(wrong_method.status, 405);
+    assert_security_headers(&wrong_method, "DELETE /api/v1/health");
+
+    let api = get(addr, "/api/v1/health", &[]).await;
+    assert_eq!(api.status, 200);
+    assert_security_headers(&api, "/api/v1/health");
+
+    let openapi = get(addr, "/api/v1/openapi.json", &[]).await;
+    assert_eq!(openapi.status, 200);
+    assert_security_headers(&openapi, "/api/v1/openapi.json");
+
+    stop(server).await;
+}
+
 #[tokio::test]
 async fn plain_http_is_refused_outside_trusted_proxies() {
     // Mode c, the test client (127.0.0.1) is not a trusted proxy.
@@ -348,8 +445,10 @@ async fn plain_http_is_refused_outside_trusted_proxies() {
         Some("application/problem+json")
     );
     assert_eq!(refused.json()["code"], "sys.proxy_only");
+    assert_security_headers(&refused, "/api/v1/health");
     let ui = get(addr, "/", &[]).await;
     assert_eq!(ui.status, 403, "the UI is refused as well");
+    assert_security_headers(&ui, "/");
     stop(server).await;
 }
 

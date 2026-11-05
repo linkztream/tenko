@@ -15,8 +15,9 @@
 # (scan/zap-ui/rules-default.tsv), for checking this file against a new version.
 
 # FAIL: the response headers every answer carries (crates/tenko-api/src/middleware/headers.rs:
-# CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, HSTS over HTTPS) and the
-# session cookie's flags (HttpOnly, Secure, SameSite=Strict).
+# CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, the
+# three cross-origin policies, HSTS over HTTPS) and the session cookie's flags (HttpOnly,
+# Secure, SameSite=Strict).
 10010	FAIL	(Cookie No HttpOnly Flag)
 10011	FAIL	(Cookie Without Secure Flag)
 10054	FAIL	(Cookie without SameSite Attribute)
@@ -24,6 +25,13 @@
 10021	FAIL	(X-Content-Type-Options Header Missing)
 10035	FAIL	(Strict-Transport-Security Header)
 10038	FAIL	(Content Security Policy (CSP) Header Not Set)
+# FAIL 10063 and 90004 since the fix of SF-0008 and SF-0009 (the report of 0.0.10): every
+# answer carries Permissions-Policy (the features the interface never uses denied, the
+# clipboard and the passkey ceremonies allowed to its own origin only) and
+# Cross-Origin-Opener-Policy, Cross-Origin-Resource-Policy and Cross-Origin-Embedder-Policy,
+# so a missing one anywhere is a regression of the middleware, not a finding to triage.
+10063	FAIL	(Permissions Policy Header Not Set)
+90004	FAIL	(Insufficient Site Isolation Against Spectre Vulnerability)
 
 # FAIL: what a single-origin application with no third-party script and no server banner
 # never shows.
@@ -43,8 +51,7 @@
 10098	FAIL	(Cross-Domain Misconfiguration)
 10115	FAIL	(Script Served From Malicious Domain (polyfill))
 
-# WARN: findings the triage reads and decides; some are expected on today's node (no
-# Permissions-Policy and no Cross-Origin-Embedder-Policy header are sent).
+# WARN: findings the triage reads and decides.
 2	WARN	(Private IP Disclosure)
 10015	WARN	(Re-examine Cache-control Directives)
 10019	WARN	(Content-Type Header Missing)
@@ -54,7 +61,6 @@
 10049	WARN	(Storable and Cacheable Content)
 10055	WARN	(CSP)
 10062	WARN	(PII Disclosure)
-10063	WARN	(Permissions Policy Header Not Set)
 10096	WARN	(Timestamp Disclosure)
 10097	WARN	(Hash Disclosure)
 10099	WARN	(Source Code Disclosure)
@@ -62,7 +68,6 @@
 10110	WARN	(Dangerous JS Functions)
 10202	WARN	(Absence of Anti-CSRF Tokens)
 90003	WARN	(Sub Resource Integrity Attribute Missing)
-90004	WARN	(Insufficient Site Isolation Against Spectre Vulnerability)
 90011	WARN	(Charset Mismatch)
 90022	WARN	(Application Error Disclosure)
 90033	WARN	(Loosely Scoped Cookie)
