@@ -289,7 +289,19 @@ mod tests {
         let addr = listener.local_addr().expect("addr");
         tokio::spawn(async move {
             while let Ok((mut stream, _)) = listener.accept().await {
+                // Read the request first and hold the connection until the client closes
+                // it: a close with unread data resets the connection, and on Windows the
+                // reset reaches the client before the length does.
+                let mut prefix = [0_u8; 4];
+                if stream.read_exact(&mut prefix).await.is_err() {
+                    continue;
+                }
+                let mut request =
+                    vec![0_u8; usize::try_from(u32::from_be_bytes(prefix)).expect("len")];
+                let _ = stream.read_exact(&mut request).await;
                 let _ = stream.write_all(&0x7fff_ffff_u32.to_be_bytes()).await;
+                let mut rest = Vec::new();
+                let _ = stream.read_to_end(&mut rest).await;
             }
         });
         let large = |_: IpAddr| Ok(vec![0_u8; 2000]);
