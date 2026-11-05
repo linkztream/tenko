@@ -8,13 +8,14 @@
 //! nothing, so blackout windows do not hold it, and its batch is never complete.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     net::{IpAddr, Ipv4Addr},
     time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
 use tenko_cluster::probe::SightingSubject;
+use tenko_core::MacAddr;
 
 use super::RawSupport;
 use crate::{
@@ -32,6 +33,14 @@ use crate::{
 
 /// Most note lines kept, so a busy segment does not fill the status.
 const MAX_NOTES: usize = 32;
+
+/// Most host names one listen window reports for one address. A client that renames itself
+/// shows both names; further names for the same address are dropped and counted.
+pub const MAX_NAMES_PER_ADDRESS: usize = 2;
+
+/// Most sightings one listen window reports. A segment of 4,096 clients, each with an
+/// address, a name, an OS hint and a vendor, fits.
+pub const MAX_SIGHTINGS: usize = 16_384;
 
 /// Parses a DHCPv4 message carried in an Ethernet/IPv4/UDP frame to or from ports 67/68.
 fn dhcp_in(frame: &[u8]) -> Option<Dhcp> {
@@ -109,9 +118,7 @@ impl Method for DhcpSnoop {
             .open(&ctx.scope, self.interface.as_deref())
             .await?;
         let mut output = MethodOutput::default();
-        let mut seen_clients: BTreeSet<(Option<String>, Ipv4Addr)> = BTreeSet::new();
-        let mut vendors = BTreeSet::new();
-        let mut noted = BTreeSet::new();
+        let mut window = Window::new(MAX_SIGHTINGS);
         let deadline = Instant::now() + self.window;
         while Instant::now() < deadline && !ctx.cancel.is_canceled() {
             let Ok(Some(frame)) = link.recv(Duration::from_millis(200)).await else {
@@ -120,84 +127,158 @@ impl Method for DhcpSnoop {
             let Some(message) = dhcp_in(&frame) else {
                 continue;
             };
-            record(
-                &message,
-                ctx,
-                &mut output,
-                &mut seen_clients,
-                &mut vendors,
-                &mut noted,
-            );
+            window.record(&message, ctx, &mut output);
         }
+        output.notes.extend(window.notes());
         output.covered_all = !ctx.cancel.is_canceled();
         Ok(output)
     }
 }
 
-/// Turns one DHCP message into facts and notes.
-fn record(
-    message: &Dhcp,
-    ctx: &RunContext,
-    output: &mut MethodOutput,
-    seen_clients: &mut BTreeSet<(Option<String>, Ipv4Addr)>,
-    vendors: &mut BTreeSet<[u8; 6]>,
-    noted: &mut BTreeSet<String>,
-) {
-    output.probes += 1;
-    let client_mac = message.client_mac.filter(|mac| usable_mac(*mac));
-    // The vendor of the client, from its MAC OUI.
-    if let Some(mac) = client_mac
-        && vendors.insert(mac.octets())
-        && let Some(vendor) = oui::vendor(mac)
-    {
-        output.found.push(Found::now(SightingSubject::Vendor {
-            mac,
-            vendor: vendor.to_owned(),
-        }));
+/// What one listen window has seen, within its bounds: at most [`MAX_NAMES_PER_ADDRESS`] host
+/// names per address and `max_sightings` sightings in all, with a count of what was dropped.
+#[derive(Debug)]
+struct Window {
+    /// The host names (or none) reported for each address.
+    clients: BTreeMap<Ipv4Addr, Vec<Option<String>>>,
+    /// The client MACs whose vendor was reported.
+    vendors: BTreeSet<[u8; 6]>,
+    /// The notes written, to write each once.
+    noted: BTreeSet<String>,
+    max_sightings: usize,
+    /// Host names beyond the bound of their address.
+    dropped_names: usize,
+    /// Sightings beyond the bound of the window.
+    dropped_sightings: usize,
+}
+
+impl Window {
+    fn new(max_sightings: usize) -> Self {
+        Self {
+            clients: BTreeMap::new(),
+            vendors: BTreeSet::new(),
+            noted: BTreeSet::new(),
+            max_sightings,
+            dropped_names: 0,
+            dropped_sightings: 0,
+        }
     }
-    // The offered or acknowledged address, when present and in scope.
-    let yiaddr = message.your_ip;
-    if !yiaddr.is_unspecified() && ctx.scope.contains(IpAddr::V4(yiaddr)) {
-        let dedup = (message.host_name.clone(), yiaddr);
-        if seen_clients.insert(dedup) {
-            output.found.push(Found::now(SightingSubject::Address {
-                ip: IpAddr::V4(yiaddr),
-                mac: client_mac,
+
+    /// Whether `count` more sightings fit; counts them as dropped when they do not.
+    fn room_for(&mut self, output: &MethodOutput, count: usize) -> bool {
+        if output.found.len() + count <= self.max_sightings {
+            true
+        } else {
+            self.dropped_sightings += count;
+            false
+        }
+    }
+
+    /// Turns one DHCP message into facts and notes.
+    fn record(&mut self, message: &Dhcp, ctx: &RunContext, output: &mut MethodOutput) {
+        output.probes += 1;
+        let client_mac = message.client_mac.filter(|mac| usable_mac(*mac));
+        // The vendor of the client, from its MAC OUI.
+        if let Some(mac) = client_mac
+            && !self.vendors.contains(&mac.octets())
+            && let Some(vendor) = oui::vendor(mac)
+            && self.room_for(output, 1)
+        {
+            self.vendors.insert(mac.octets());
+            output.found.push(Found::now(SightingSubject::Vendor {
+                mac,
+                vendor: vendor.to_owned(),
             }));
-            if let Some(name) = &message.host_name {
-                output.found.push(Found::now(SightingSubject::Name {
-                    ip: IpAddr::V4(yiaddr),
-                    name: name.clone(),
-                }));
-            }
-            if let Some((guess, confidence)) = message
-                .vendor_class
-                .as_deref()
-                .and_then(os_from_vendor_class)
-            {
-                output.found.push(Found::now(SightingSubject::Os {
-                    ip: IpAddr::V4(yiaddr),
-                    guess,
-                    confidence,
-                }));
+        }
+        // The offered or acknowledged address, when present and in scope.
+        let yiaddr = message.your_ip;
+        if !yiaddr.is_unspecified() && ctx.scope.contains(IpAddr::V4(yiaddr)) {
+            self.record_client(message, yiaddr, client_mac, output);
+        }
+        // The client id and the server go into the notes only.
+        if output.notes.len() < MAX_NOTES {
+            let kind = message.message_type.map_or("DHCP", dhcp::MessageType::name);
+            let mac = client_mac.map_or_else(|| "?".to_owned(), |m| m.to_string());
+            let note = match (&message.client_id, message.server_id) {
+                (Some(id), Some(server)) => {
+                    format!("{kind} from {mac}: client-id {id}, server {server}")
+                }
+                (Some(id), None) => format!("{kind} from {mac}: client-id {id}"),
+                (None, Some(server)) => format!("{kind} from {mac}: server {server}"),
+                (None, None) => format!("{kind} from {mac}"),
+            };
+            if self.noted.insert(note.clone()) {
+                output.notes.push(note);
             }
         }
     }
-    // The client id and the server go into the notes only.
-    if output.notes.len() < MAX_NOTES {
-        let kind = message.message_type.map_or("DHCP", dhcp::MessageType::name);
-        let mac = client_mac.map_or_else(|| "?".to_owned(), |m| m.to_string());
-        let note = match (&message.client_id, message.server_id) {
-            (Some(id), Some(server)) => {
-                format!("{kind} from {mac}: client-id {id}, server {server}")
-            }
-            (Some(id), None) => format!("{kind} from {mac}: client-id {id}"),
-            (None, Some(server)) => format!("{kind} from {mac}: server {server}"),
-            (None, None) => format!("{kind} from {mac}"),
-        };
-        if noted.insert(note.clone()) {
-            output.notes.push(note);
+
+    /// The address, name and OS sightings of a client the first time its address is seen with
+    /// this host name, within the bounds of the window.
+    fn record_client(
+        &mut self,
+        message: &Dhcp,
+        yiaddr: Ipv4Addr,
+        client_mac: Option<MacAddr>,
+        output: &mut MethodOutput,
+    ) {
+        let names = self.clients.get(&yiaddr);
+        if names.is_some_and(|names| names.contains(&message.host_name)) {
+            return;
         }
+        if names.is_some_and(|names| names.len() >= MAX_NAMES_PER_ADDRESS) {
+            self.dropped_names += 1;
+            return;
+        }
+        let os = message
+            .vendor_class
+            .as_deref()
+            .and_then(os_from_vendor_class);
+        let count = 1 + usize::from(message.host_name.is_some()) + usize::from(os.is_some());
+        if !self.room_for(output, count) {
+            return;
+        }
+        self.clients
+            .entry(yiaddr)
+            .or_default()
+            .push(message.host_name.clone());
+        output.found.push(Found::now(SightingSubject::Address {
+            ip: IpAddr::V4(yiaddr),
+            mac: client_mac,
+        }));
+        if let Some(name) = &message.host_name {
+            output.found.push(Found::now(SightingSubject::Name {
+                ip: IpAddr::V4(yiaddr),
+                name: name.clone(),
+            }));
+        }
+        if let Some((guess, confidence)) = os {
+            output.found.push(Found::now(SightingSubject::Os {
+                ip: IpAddr::V4(yiaddr),
+                guess,
+                confidence,
+            }));
+        }
+    }
+
+    /// The notes of a window that reached a bound, written after the per-message notes and
+    /// outside their limit.
+    fn notes(&self) -> Vec<String> {
+        let mut notes = Vec::new();
+        if self.dropped_names > 0 {
+            notes.push(format!(
+                "host names were cut to {MAX_NAMES_PER_ADDRESS} per address; {} more were \
+                 dropped",
+                self.dropped_names
+            ));
+        }
+        if self.dropped_sightings > 0 {
+            notes.push(format!(
+                "the window was cut to {} sightings; {} more were dropped",
+                self.max_sightings, self.dropped_sightings
+            ));
+        }
+        notes
     }
 }
 
@@ -206,7 +287,6 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use tenko_core::MacAddr;
 
     const MAGIC_COOKIE: [u8; 4] = [0x63, 0x82, 0x53, 0x63];
 
@@ -313,5 +393,108 @@ mod tests {
             SightingSubject::Os { guess, .. } if guess == "Windows"
         )));
         assert!(output.notes.iter().any(|n| n.contains("server 192.0.2.1")));
+    }
+
+    /// An ACK for `yiaddr` with `host_name`, from a client with an RFC 7042 MAC.
+    fn ack(yiaddr: Ipv4Addr, last: u8, host_name: Option<&str>) -> Dhcp {
+        Dhcp {
+            op: dhcp::OP_REPLY,
+            xid: 1,
+            client_mac: Some(MacAddr::new([0x00, 0x00, 0x5e, 0x00, 0x53, last])),
+            your_ip: yiaddr,
+            message_type: Some(dhcp::MessageType::Ack),
+            host_name: host_name.map(str::to_owned),
+            vendor_class: Some("MSFT 5.0".to_owned()),
+            client_id: None,
+            requested_ip: None,
+            server_id: None,
+        }
+    }
+
+    fn names_of(output: &MethodOutput, ip: Ipv4Addr) -> Vec<String> {
+        output
+            .found
+            .iter()
+            .filter_map(|f| match &f.subject {
+                SightingSubject::Name { ip: at, name } if *at == IpAddr::V4(ip) => {
+                    Some(name.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_names_of_an_address_are_capped_and_counted() {
+        let ctx = ctx();
+        let ip = Ipv4Addr::new(192, 0, 2, 60);
+        let mut window = Window::new(MAX_SIGHTINGS);
+        let mut output = MethodOutput::default();
+        for n in 0..10 {
+            window.record(
+                &ack(ip, 0x10, Some(&format!("host-{n}"))),
+                &ctx,
+                &mut output,
+            );
+        }
+        // A repeat of a kept name is neither a sighting nor a drop.
+        window.record(&ack(ip, 0x10, Some("host-0")), &ctx, &mut output);
+        assert_eq!(names_of(&output, ip), vec!["host-0", "host-1"]);
+        assert_eq!(window.dropped_names, 8);
+        let notes = window.notes();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("2 per address; 8 more"), "{notes:?}");
+    }
+
+    #[test]
+    fn the_sightings_of_a_window_are_capped_and_counted() {
+        let ctx = ctx();
+        let mut window = Window::new(20);
+        let mut output = MethodOutput::default();
+        for host in 1..=50u8 {
+            window.record(
+                &ack(Ipv4Addr::new(192, 0, 2, host), host, Some("client")),
+                &ctx,
+                &mut output,
+            );
+        }
+        assert!(output.found.len() <= 20, "{}", output.found.len());
+        assert!(window.dropped_sightings > 0);
+        let notes = window.notes();
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.contains("cut to 20 sightings") && n.contains("more were dropped")),
+            "{notes:?}"
+        );
+        // The per-message notes keep their own limit.
+        assert!(output.notes.len() <= MAX_NOTES);
+    }
+
+    #[test]
+    fn a_window_below_its_bounds_reports_everything_and_notes_nothing() {
+        let ctx = ctx();
+        let mut window = Window::new(MAX_SIGHTINGS);
+        let mut output = MethodOutput::default();
+        let ip = Ipv4Addr::new(192, 0, 2, 61);
+        window.record(&ack(ip, 0x11, Some("laptop")), &ctx, &mut output);
+        window.record(&ack(ip, 0x11, Some("laptop")), &ctx, &mut output);
+        window.record(&ack(ip, 0x11, Some("laptop-renamed")), &ctx, &mut output);
+        assert_eq!(names_of(&output, ip), vec!["laptop", "laptop-renamed"]);
+        let addresses = output
+            .found
+            .iter()
+            .filter(|f| matches!(f.subject, SightingSubject::Address { .. }))
+            .count();
+        assert_eq!(addresses, 2);
+        assert_eq!(window.notes(), Vec::<String>::new());
+        assert_eq!(window.dropped_names + window.dropped_sightings, 0);
+    }
+
+    #[test]
+    fn the_default_bounds_hold_a_full_segment() {
+        // An address, a name, an OS hint and a vendor for each of 4,096 clients.
+        const _: () = assert!(4096 * 4 <= MAX_SIGHTINGS);
+        assert_eq!(MAX_NAMES_PER_ADDRESS, 2);
     }
 }

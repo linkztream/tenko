@@ -647,7 +647,7 @@ fn dns_merge_keeps_first_names_and_guesses_and_unites_the_sets() {
             (b, ("macOS".to_string(), 70)),
         ]),
     };
-    first.merge(second);
+    assert_eq!(first.merge(second, |_| true), 0);
     assert_eq!(first.addresses, set([a, b]));
     assert_eq!(first.names[&a], "first.local");
     assert_eq!(first.names[&b], "b.local");
@@ -658,9 +658,9 @@ fn dns_merge_keeps_first_names_and_guesses_and_unites_the_sets() {
 
     let mut empty = NameFindings::default();
     assert!(empty.is_empty());
-    empty.merge(NameFindings::default());
+    assert_eq!(empty.merge(NameFindings::default(), |_| true), 0);
     assert!(empty.is_empty());
-    empty.merge(first.clone());
+    assert_eq!(empty.merge(first.clone(), |_| true), 0);
     assert_eq!(empty, first);
 }
 

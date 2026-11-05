@@ -250,7 +250,7 @@ fn method_line(out: &mut String, method: &MethodStatus) {
         let _ = writeln!(out, "{:<15} switched off in [scan]", "");
     }
     if let Some(error) = method.last_run.as_ref().and_then(|run| run.error.as_ref()) {
-        let _ = writeln!(out, "{:<15} last run: {error}", "");
+        let _ = writeln!(out, "{:<15} last run: {}", "", shown(error));
     }
     if let Some(error) = method
         .last_run
@@ -344,6 +344,22 @@ pub fn render_status(status: &ScanStatus, live: bool, enabled: bool) -> String {
     out
 }
 
+/// `text` with every character a terminal would act on or hide escaped (`\u{1b}`): a
+/// control character or an invisible direction or format mark
+/// ([`tenko_scan::text::is_unsafe_char`]). Names and descriptions come from the network, and
+/// whatever a parser let through is shown, never executed by the terminal.
+fn shown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if tenko_scan::text::is_unsafe_char(c) {
+            out.extend(c.escape_default());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn subject_line(subject: &SightingSubject) -> String {
     match subject {
         SightingSubject::Address { ip, mac } => match mac {
@@ -371,25 +387,26 @@ fn subject_line(subject: &SightingSubject) -> String {
             ip,
             guess,
             confidence,
-        } => format!("os       {ip} {guess} ({confidence}%)"),
-        SightingSubject::Name { ip, name } => format!("name     {ip} {name}"),
-        SightingSubject::Vendor { mac, vendor } => format!("vendor   {mac} {vendor}"),
+        } => format!("os       {ip} {} ({confidence}%)", shown(guess)),
+        SightingSubject::Name { ip, name } => format!("name     {ip} {}", shown(name)),
+        SightingSubject::Vendor { mac, vendor } => format!("vendor   {mac} {}", shown(vendor)),
         SightingSubject::Attachment {
             mac,
             device,
             port,
             vlan,
         } => format!(
-            "attached {mac} {device} port {} vlan {}",
-            port.as_deref().unwrap_or("-"),
+            "attached {mac} {} port {} vlan {}",
+            shown(device),
+            shown(port.as_deref().unwrap_or("-")),
             vlan.map_or_else(|| "-".to_owned(), |vlan| vlan.to_string())
         ),
         SightingSubject::Link { a, b, kind } => format!(
             "link     {} {} <-> {} {} ({kind:?})",
-            a.device,
-            a.port.as_deref().unwrap_or("-"),
-            b.device,
-            b.port.as_deref().unwrap_or("-")
+            shown(&a.device),
+            shown(a.port.as_deref().unwrap_or("-")),
+            shown(&b.device),
+            shown(b.port.as_deref().unwrap_or("-"))
         ),
     }
 }
@@ -480,10 +497,10 @@ fn run_text(kind: MethodKind, record: &RunRecord, batches: &[ProbeBatch], dry_ru
         record.probes
     );
     if let Some(error) = &record.error {
-        let _ = writeln!(text, "  {error}");
+        let _ = writeln!(text, "  {}", shown(error));
     }
     for note in &record.notes {
-        let _ = writeln!(text, "  {note}");
+        let _ = writeln!(text, "  {}", shown(note));
     }
     if dry_run {
         for batch in batches {
@@ -553,5 +570,44 @@ mod tests {
             tls_tcp: vec![443],
         });
         assert_eq!(line, "services 192.0.2.10 22 443/tls");
+    }
+
+    #[test]
+    fn text_from_the_network_cannot_reach_the_terminal_raw() {
+        let name_line = subject_line(&SightingSubject::Name {
+            ip: "192.0.2.10".parse().expect("ip"),
+            name: "host\u{1b}[2J\u{7}\u{7f}\u{202e}-a".to_owned(),
+        });
+        assert_eq!(
+            name_line,
+            "name     192.0.2.10 host\\u{1b}[2J\\u{7}\\u{7f}\\u{202e}-a"
+        );
+        assert!(!name_line.chars().any(tenko_scan::text::is_unsafe_char));
+        let link_line = subject_line(&SightingSubject::Link {
+            a: tenko_core::observe::Endpoint {
+                device: "00:00:5e:00:53:05".to_owned(),
+                port: Some("test0".to_owned()),
+            },
+            b: tenko_core::observe::Endpoint {
+                device: "switch\r\n-b".to_owned(),
+                port: Some("Gi0/\u{9b}1".to_owned()),
+            },
+            kind: tenko_core::observe::LinkKind::Lldp,
+        });
+        assert!(
+            link_line.contains("switch\\r\\n-b Gi0/\\u{9b}1"),
+            "{link_line}"
+        );
+        assert!(!link_line.chars().any(tenko_scan::text::is_unsafe_char));
+    }
+
+    #[test]
+    fn clean_names_print_unchanged() {
+        assert_eq!(shown("Café Printer"), "Café Printer");
+        let line = subject_line(&SightingSubject::Name {
+            ip: "192.0.2.10".parse().expect("ip"),
+            name: "printer.local".to_owned(),
+        });
+        assert_eq!(line, "name     192.0.2.10 printer.local");
     }
 }

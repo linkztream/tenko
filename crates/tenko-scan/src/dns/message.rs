@@ -10,7 +10,8 @@
 //! * at most [`MAX_RECORDS`] records and [`MAX_QUESTIONS`] questions are read, the rest is
 //!   ignored;
 //! * names, TXT strings and HINFO strings are converted lossily to UTF-8, lose control
-//!   characters and invisible direction marks, and are cut to [`MAX_TEXT_CHARS`] characters;
+//!   characters and invisible direction marks, are trimmed and are cut to [`MAX_TEXT_CHARS`]
+//!   characters ([`crate::text::clean_text`]);
 //! * a record whose data does not parse is skipped, and so is every record of another class
 //!   than IN (the mDNS cache-flush bit in the class is split off first);
 //! * a header that does not parse is an error.
@@ -31,7 +32,7 @@ pub const MAX_RECORDS: usize = 256;
 /// The most questions read from one message.
 pub const MAX_QUESTIONS: usize = 32;
 /// The longest name or text kept, in characters.
-pub const MAX_TEXT_CHARS: usize = 255;
+pub use crate::text::MAX_TEXT_CHARS;
 /// The most strings kept from one TXT record.
 const MAX_TXT_STRINGS: usize = 64;
 
@@ -448,29 +449,10 @@ fn render_name(name: &ParsedName<&[u8]>) -> String {
     out
 }
 
-/// Bytes as text: lossy UTF-8, without control characters and invisible direction marks, cut
-/// to [`MAX_TEXT_CHARS`] characters.
+/// Bytes as text through the crate's one cleaning ([`crate::text::clean_text`]); empty when
+/// nothing is left.
 fn clean_text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes)
-        .chars()
-        .filter(|c| !is_unsafe_char(*c))
-        .take(MAX_TEXT_CHARS)
-        .collect()
-}
-
-fn is_unsafe_char(c: char) -> bool {
-    c.is_control()
-        || matches!(
-            c,
-            '\u{200b}'
-                | '\u{200e}'
-                | '\u{200f}'
-                | '\u{2028}'
-                | '\u{2029}'
-                | '\u{202a}'..='\u{202e}'
-                | '\u{2066}'..='\u{2069}'
-                | '\u{feff}'
-        )
+    crate::text::clean_text(bytes).unwrap_or_default()
 }
 
 /// The targets of the PTR records in the answer section whose owner is the reverse name of

@@ -56,6 +56,45 @@ fn key(neighbor: &Neighbor) -> String {
     )
 }
 
+/// The most neighbors one listen window keeps. A probe's segment has a few switches and
+/// access points on its link, a few hundred at the very most; frames of further neighbors are
+/// dropped and counted.
+pub const MAX_NEIGHBORS: usize = 512;
+
+/// The neighbors of one listen window, at most [`MAX_NEIGHBORS`], and how many frames of
+/// further neighbors were dropped.
+#[derive(Debug, Default)]
+struct Neighbors {
+    by_key: BTreeMap<String, Neighbor>,
+    dropped: usize,
+}
+
+impl Neighbors {
+    /// Keeps the first frame of each neighbor while the window has room.
+    fn add(&mut self, neighbor: Neighbor) {
+        let key = key(&neighbor);
+        if self.by_key.contains_key(&key) {
+            return;
+        }
+        if self.by_key.len() >= MAX_NEIGHBORS {
+            self.dropped += 1;
+            return;
+        }
+        self.by_key.insert(key, neighbor);
+    }
+
+    /// The note of a full window, `None` when nothing was dropped.
+    fn note(&self) -> Option<String> {
+        (self.dropped > 0).then(|| {
+            format!(
+                "the neighbors were cut to {MAX_NEIGHBORS}; {} frame(s) of further neighbors \
+                 were dropped",
+                self.dropped
+            )
+        })
+    }
+}
+
 /// The `lldp` method (with CDP folded in).
 #[derive(Debug, Clone)]
 pub struct LldpListen {
@@ -104,24 +143,25 @@ impl Method for LldpListen {
             .await?;
         let own_mac = link.interface().mac;
         let if_name = link.interface().name.clone();
-        let mut neighbors: BTreeMap<String, Neighbor> = BTreeMap::new();
+        let mut neighbors = Neighbors::default();
         let deadline = Instant::now() + self.window;
         while Instant::now() < deadline && !ctx.cancel.is_canceled() {
             if let Ok(Some(frame)) = link.recv(Duration::from_millis(200)).await
                 && let Some(neighbor) = neighbor_in(&frame, self.cdp)
             {
-                neighbors.entry(key(&neighbor)).or_insert(neighbor);
+                neighbors.add(neighbor);
             }
         }
         let mut output = MethodOutput {
             covered_all: !ctx.cancel.is_canceled(),
+            notes: neighbors.note().into_iter().collect(),
             ..MethodOutput::default()
         };
         let local = Endpoint {
             device: own_mac.to_string(),
             port: Some(if_name),
         };
-        for neighbor in neighbors.values() {
+        for neighbor in neighbors.by_key.values() {
             let switch = neighbor
                 .system_name
                 .clone()
@@ -208,6 +248,10 @@ mod tests {
     }
 
     fn lldp_frame() -> Vec<u8> {
+        lldp_frame_named(b"switch-a.example.test")
+    }
+
+    fn lldp_frame_named(system_name: &[u8]) -> Vec<u8> {
         // Destination 01:80:c2:00:00:0e (LLDP multicast), source the switch.
         let mut frame = vec![0x01, 0x80, 0xc2, 0x00, 0x00, 0x0e];
         frame.extend_from_slice(&[0x00, 0x00, 0x5e, 0x00, 0x53, 0x02]);
@@ -222,7 +266,7 @@ mod tests {
         frame.extend(tlv(1, &[4, 0x00, 0x00, 0x5e, 0x00, 0x53, 0x02])); // chassis MAC
         frame.extend(tlv(2, &[5, b'G', b'i', b'0', b'/', b'1'])); // port Gi0/1
         frame.extend(tlv(3, &[0x00, 0x78])); // TTL
-        frame.extend(tlv(5, b"switch-a.example.test")); // system name
+        frame.extend(tlv(5, system_name)); // system name
         frame.extend(tlv(8, &[5, 1, 192, 0, 2, 2, 2, 0, 0, 0, 1, 0])); // mgmt 192.0.2.2
         frame.extend(tlv(127, &[0x00, 0x80, 0xc2, 1, 0x00, 0x64])); // PVID 100
         frame.extend(tlv(0, &[]));
@@ -258,5 +302,67 @@ mod tests {
             )
         });
         assert!(mgmt, "the management address in scope");
+    }
+
+    fn named(n: usize) -> Neighbor {
+        Neighbor {
+            system_name: Some(format!("switch-{n}.example.test")),
+            port_id: Some("Gi0/1".to_owned()),
+            ..Neighbor::default()
+        }
+    }
+
+    #[test]
+    fn the_window_keeps_at_most_the_cap_and_counts_the_rest() {
+        let mut neighbors = Neighbors::default();
+        for n in 0..MAX_NEIGHBORS + 5 {
+            neighbors.add(named(n));
+        }
+        // A repeated frame of a kept neighbor is not a drop.
+        neighbors.add(named(0));
+        assert_eq!(neighbors.by_key.len(), MAX_NEIGHBORS);
+        assert_eq!(neighbors.dropped, 5);
+        let note = neighbors.note().expect("a note");
+        assert!(note.contains("cut to 512"), "{note}");
+        assert!(note.contains("5 frame(s)"), "{note}");
+    }
+
+    #[test]
+    fn neighbors_below_the_cap_are_kept_unchanged_and_not_noted() {
+        let mut neighbors = Neighbors::default();
+        neighbors.add(named(1));
+        neighbors.add(named(2));
+        neighbors.add(named(1));
+        assert_eq!(neighbors.by_key.len(), 2);
+        assert_eq!(neighbors.dropped, 0);
+        assert_eq!(neighbors.note(), None);
+        assert!(neighbors.by_key.values().any(|n| *n == named(2)));
+    }
+
+    #[tokio::test]
+    async fn a_full_window_is_noted_in_the_run() {
+        let frames: Vec<Vec<u8>> = (0..MAX_NEIGHBORS + 3)
+            .map(|n| lldp_frame_named(format!("switch-{n}.example.test").as_bytes()))
+            .collect();
+        let link = Arc::new(MockLink::new(frames));
+        let factory = Arc::new(MockLinkFactory::new(link));
+        let method = LldpListen {
+            support: RawSupport::mock(factory),
+            window: Duration::from_millis(300),
+            cdp: true,
+            interface: None,
+        };
+        let output = method.run(&ctx()).await.expect("run");
+        let links = output
+            .found
+            .iter()
+            .filter(|f| matches!(&f.subject, SightingSubject::Link { .. }))
+            .count();
+        assert_eq!(links, MAX_NEIGHBORS);
+        assert!(
+            output.notes.iter().any(|n| n.contains("3 frame(s)")),
+            "{:?}",
+            output.notes
+        );
     }
 }

@@ -8,6 +8,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tenko_core::MacAddr;
 
 use super::{Neighbor, NeighborCapabilities, NeighborSource};
+use crate::text::clean_text;
 
 /// The 802.1 organizationally specific OUI (VLAN TLVs).
 const OUI_8021: [u8; 3] = [0x00, 0x80, 0xc2];
@@ -44,19 +45,14 @@ fn network_address(value: &[u8]) -> Option<IpAddr> {
     }
 }
 
-/// Printable bytes as a trimmed string, else lowercase hex.
+/// Printable bytes as text, cleaned like every text a peer sends, else lowercase hex.
 fn as_text(value: &[u8]) -> String {
     if value
         .iter()
         .all(|&b| b == 0 || b.is_ascii_graphic() || b == b' ')
+        && let Some(text) = clean_text(value)
     {
-        let text = String::from_utf8_lossy(value)
-            .trim_end_matches('\0')
-            .trim()
-            .to_owned();
-        if !text.is_empty() {
-            return text;
-        }
+        return text;
     }
     super::hex(value)
 }

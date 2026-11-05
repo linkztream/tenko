@@ -12,7 +12,7 @@ use super::NameFindings;
 /// The most addresses one message can contribute.
 pub(super) const MAX_ADDRESSES: usize = 256;
 /// The most service ports kept per address.
-const MAX_PORTS_PER_ADDRESS: usize = 64;
+pub(super) const MAX_PORTS_PER_ADDRESS: usize = 64;
 
 /// An address a host can have: not unspecified, not loopback, not multicast and not the IPv4
 /// broadcast address.

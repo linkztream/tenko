@@ -21,8 +21,8 @@ use tokio::{net::UdpSocket, time::Instant};
 
 use crate::{
     dns::{
-        NameFindings, QueryOptions, QueryType, build_query, llmnr, mdns, parse_response,
-        reverse_name,
+        MAX_WINDOW_ADDRESSES, MAX_WINDOW_PORTS, NameFindings, QueryOptions, QueryType, build_query,
+        llmnr, mdns, parse_response, reverse_name,
     },
     error::ScanError,
     method::{Availability, Found, Method, MethodKind, MethodOutput, RunContext},
@@ -135,8 +135,10 @@ fn passive_socket(group: SocketAddr) -> Option<UdpSocket> {
     UdpSocket::from_std(std::net::UdpSocket::from(socket)).ok()
 }
 
-/// Collects datagrams on `sockets` until `deadline`, interpreting each answer; with
-/// `types`, also the service types of DNS-SD browse answers (mDNS).
+/// Collects datagrams on `sockets` until `deadline`, interpreting each answer and keeping
+/// what it says about addresses in the scope, within the bounds of the window
+/// ([`NameFindings::merge`]); with `types`, also the service types of DNS-SD browse answers
+/// (mDNS). Returns how many entries the full window dropped.
 async fn collect(
     sockets: &[&UdpSocket],
     protocol: Protocol,
@@ -144,11 +146,12 @@ async fn collect(
     ctx: &RunContext,
     findings: &mut NameFindings,
     mut types: Option<&mut Vec<String>>,
-) {
+) -> usize {
+    let mut dropped = 0;
     let mut buffers: Vec<Vec<u8>> = sockets.iter().map(|_| vec![0u8; MAX_DATAGRAM]).collect();
     loop {
         if ctx.cancel.is_canceled() {
-            return;
+            return dropped;
         }
         let received = {
             let listeners = sockets
@@ -163,8 +166,8 @@ async fn collect(
             let any = futures::future::select_all(listeners);
             tokio::select! {
                 (received, _, _) = any => received,
-                () = tokio::time::sleep_until(deadline) => return,
-                () = ctx.cancel.canceled() => return,
+                () = tokio::time::sleep_until(deadline) => return dropped,
+                () = ctx.cancel.canceled() => return dropped,
             }
         };
         let Some((bytes, from)) = received else {
@@ -178,7 +181,7 @@ async fn collect(
         }
         if let Some(types) = types.as_deref_mut() {
             for service in mdns::service_types(&response) {
-                if !types.contains(&service) {
+                if types.len() < MAX_SERVICE_TYPES && !types.contains(&service) {
                     types.push(service);
                 }
             }
@@ -188,8 +191,18 @@ async fn collect(
             Protocol::Mdns => mdns::interpret(source, &response),
             Protocol::Llmnr => llmnr::interpret(source, &response),
         };
-        findings.merge(found);
+        dropped += findings.merge(found, |ip| ctx.scope.contains(ip));
     }
+}
+
+/// The note of a run whose window was full, `None` when nothing was dropped.
+fn window_note(dropped: usize) -> Option<String> {
+    (dropped > 0).then(|| {
+        format!(
+            "the answers were cut to {MAX_WINDOW_ADDRESSES} addresses and {MAX_WINDOW_PORTS} \
+             ports per address; {dropped} more were dropped"
+        )
+    })
 }
 
 /// The sightings of `findings` inside `scope`: an address per responder, a name, the TCP
@@ -276,6 +289,7 @@ impl Method for NameQuery {
         sockets.extend(passive.as_ref());
         let mut id: u16 = 0x2a00;
         let mut sent_all = true;
+        let mut dropped = 0;
 
         // The browse and the service types (mDNS).
         if let (Protocol::Mdns, Some(group)) = (self.protocol, self.group) {
@@ -289,17 +303,15 @@ impl Method for NameQuery {
             }
             let mut types = Vec::new();
             let deadline = Instant::now() + self.window / 2;
-            let mut browse_findings = NameFindings::default();
-            collect(
+            dropped += collect(
                 &sockets,
                 Protocol::Mdns,
                 deadline,
                 ctx,
-                &mut browse_findings,
+                &mut findings,
                 Some(&mut types),
             )
             .await;
-            findings.merge(browse_findings);
             types.truncate(MAX_SERVICE_TYPES);
             for service in &types {
                 if ctx.cancel.is_canceled() {
@@ -350,9 +362,23 @@ impl Method for NameQuery {
 
         // Answers and announcements until the window closes.
         let deadline = Instant::now() + self.window;
-        collect(&sockets, self.protocol, deadline, ctx, &mut findings, None).await;
+        dropped += collect(&sockets, self.protocol, deadline, ctx, &mut findings, None).await;
+        output.notes.extend(window_note(dropped));
         output.found = to_found(&findings, &ctx.scope);
         output.covered_all = sent_all && !ctx.cancel.is_canceled();
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_full_window_is_noted_and_an_open_one_is_not() {
+        assert_eq!(window_note(0), None);
+        let note = window_note(7).expect("a note");
+        assert!(note.contains("4096 addresses"), "{note}");
+        assert!(note.contains("7 more were dropped"), "{note}");
     }
 }

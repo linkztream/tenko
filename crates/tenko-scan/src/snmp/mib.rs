@@ -26,7 +26,7 @@ use super::{
     ber::{Oid, Value, VarBind},
     client::Client,
 };
-use crate::error::ScanError;
+use crate::{error::ScanError, text::clean_text};
 
 /// A column of a table: the arcs of the table entry and the column number.
 type Column = (&'static [u32], u32);
@@ -84,15 +84,6 @@ pub(crate) fn column_arcs(column: Column) -> Vec<u32> {
 /// The object identifier of a column.
 pub(crate) fn column_oid(column: Column) -> Oid {
     Oid(column_arcs(column))
-}
-
-/// The text of an `OCTET STRING`: lossy UTF-8, control characters removed, trimmed, cut to
-/// 255 characters; `None` when nothing is left.
-pub(crate) fn clean_text(bytes: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(bytes);
-    let without_controls: String = text.chars().filter(|c| !c.is_control()).collect();
-    let cut: String = without_controls.trim().chars().take(255).collect();
-    (!cut.is_empty()).then_some(cut)
 }
 
 fn value_text(value: &Value) -> Option<String> {

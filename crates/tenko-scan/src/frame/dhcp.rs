@@ -12,6 +12,8 @@ use std::net::Ipv4Addr;
 
 use tenko_core::MacAddr;
 
+use crate::text::clean_text;
+
 /// The DHCP magic cookie that precedes the options (RFC 2131).
 const MAGIC_COOKIE: [u8; 4] = [0x63, 0x82, 0x53, 0x63];
 /// BOOTREQUEST, a message from a client.
@@ -88,18 +90,11 @@ pub struct Dhcp {
     pub server_id: Option<Ipv4Addr>,
 }
 
+/// A text option up to its first NUL (some clients terminate the host name with one), cleaned
+/// like every text a peer sends.
 fn text(bytes: &[u8]) -> Option<String> {
-    if bytes.is_empty() {
-        return None;
-    }
-    let trimmed: Vec<u8> = bytes
-        .iter()
-        .take_while(|&&b| b != 0)
-        .copied()
-        .filter(|&b| b != b'\r' && b != b'\n')
-        .collect();
-    let text = String::from_utf8_lossy(&trimmed).trim().to_owned();
-    (!text.is_empty()).then_some(text)
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    clean_text(&bytes[..end])
 }
 
 fn client_id(bytes: &[u8]) -> Option<String> {
@@ -240,6 +235,44 @@ mod tests {
         assert_eq!(dhcp.message_type, Some(MessageType::Ack));
         assert_eq!(dhcp.your_ip, Ipv4Addr::new(192, 0, 2, 50));
         assert_eq!(dhcp.server_id, Some(Ipv4Addr::new(192, 0, 2, 1)));
+    }
+
+    #[test]
+    fn text_options_lose_control_and_direction_characters() {
+        let chaddr = [0x00, 0x00, 0x5e, 0x00, 0x53, 0x0b];
+        let mut options = vec![53, 1, 3]; // REQUEST
+        let host = "lap\u{1b}[31mtop\u{7}\u{7f}\u{202e}1".as_bytes();
+        options.push(12);
+        options.push(u8::try_from(host.len()).expect("test option fits a u8"));
+        options.extend_from_slice(host);
+        let vendor = b"MSFT\x1b 5.0\x00trailing";
+        options.push(60);
+        options.push(u8::try_from(vendor.len()).expect("test option fits a u8"));
+        options.extend_from_slice(vendor);
+        let dhcp = parse(&message(
+            OP_REQUEST,
+            1,
+            Ipv4Addr::UNSPECIFIED,
+            chaddr,
+            &options,
+        ))
+        .expect("dhcp");
+        assert_eq!(dhcp.host_name.as_deref(), Some("lap[31mtop1"));
+        assert_eq!(dhcp.vendor_class.as_deref(), Some("MSFT 5.0"));
+    }
+
+    #[test]
+    fn a_host_name_of_only_control_characters_is_none() {
+        let options = [12, 3, 0x1b, 0x07, 0x7f];
+        let dhcp = parse(&message(
+            OP_REQUEST,
+            1,
+            Ipv4Addr::UNSPECIFIED,
+            [0x00, 0x00, 0x5e, 0x00, 0x53, 0x0c],
+            &options,
+        ))
+        .expect("dhcp");
+        assert_eq!(dhcp.host_name, None);
     }
 
     #[test]

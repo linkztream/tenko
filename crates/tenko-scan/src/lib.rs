@@ -20,6 +20,7 @@
 //! | [`status`] | the status file, the known addresses and the kill switch in `<data_dir>/scan/` |
 //! | [`capability`] | raw sockets and ICMP on this host |
 //! | [`sys`] | commands and files of the operating system, replayable in tests |
+//! | [`text`] | the cleaning of text a peer sent, shared by every parser |
 //!
 //! docs/scanning.md describes the methods, what they need and what they report.
 
@@ -42,6 +43,7 @@ pub mod secrets;
 pub mod snmp;
 pub mod status;
 pub mod sys;
+pub mod text;
 
 pub use error::ScanError;
 
