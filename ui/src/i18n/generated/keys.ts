@@ -551,6 +551,7 @@ export type MessageKey =
   | "audit.action.sys.audit_export.test"
   | "audit.action.sys.audit_export.update"
   | "audit.action.sys.backup.create"
+  | "audit.action.sys.backup.prune"
   | "audit.action.sys.backup.restore"
   | "audit.action.sys.backup.settings"
   | "audit.action.sys.diagnostics"
@@ -9971,6 +9972,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.sys.audit_export.test",
   "audit.action.sys.audit_export.update",
   "audit.action.sys.backup.create",
+  "audit.action.sys.backup.prune",
   "audit.action.sys.backup.restore",
   "audit.action.sys.backup.settings",
   "audit.action.sys.diagnostics",
