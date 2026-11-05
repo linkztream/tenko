@@ -7,6 +7,12 @@
 //! forwarders` of the configuration. One rule per suffix and view. Every change is an
 //! inline job with its `dns.forwarder.*` audit record; the role's catalog follows the rows
 //! through the feed.
+//!
+//! A rule with `validate = false` relays its upstreams' answers unvalidated (TGL-12). It is
+//! gated as a negative trust anchor is: the root rule never has it, the Hardened profile
+//! refuses it at the write, the audit record of the write says `validate: off`, and the
+//! caller (the API) requires the right a negative trust anchor requires. A stored rule that
+//! the rules refuse now is reported by [`forward_rule_problems`] in the node's DNS status.
 
 use tenko_core::{
     ObjectRef, RequestCtx, Revision,
@@ -98,10 +104,51 @@ fn trimmed(text: Option<String>) -> Option<String> {
         .filter(|text| !text.is_empty())
 }
 
+/// Why a rule with `validate = false` is refused under the Hardened profile (TGL-12 "On").
+const HARDENED_VALIDATES: &str = "the Hardened profile validates every answer";
+
+/// The checks of a rule's `validate = false` beyond [`ForwardRule::validate`]: the
+/// Hardened profile refuses it (TGL-12).
+fn check_validation(rule: &ForwardRule, hardened: bool) -> ZoneResult<()> {
+    if hardened && !rule.validate {
+        return Err(invalid("validate", HARDENED_VALIDATES));
+    }
+    Ok(())
+}
+
+/// The stored rules that the rules of `validate = false` refuse now, one line each, for
+/// the problems of the node's DNS status: a root rule with validation off, or any rule
+/// with validation off under the Hardened profile. A rule listed here was written before
+/// the rule that refuses it; the operator changes or deletes it.
+pub fn forward_rule_problems<'a>(
+    rules: impl IntoIterator<Item = &'a ForwardRule>,
+    hardened: bool,
+) -> Vec<String> {
+    rules
+        .into_iter()
+        .filter(|rule| !rule.validate)
+        .filter_map(|rule| {
+            let reason = if rule.suffix.is_root() {
+                "the root rule always validates"
+            } else if hardened {
+                HARDENED_VALIDATES
+            } else {
+                return None;
+            };
+            Some(format!(
+                "forwarding rule {} ({}) has `validate: false`: {reason}; change or delete \
+                 the rule",
+                rule.suffix, rule.id
+            ))
+        })
+        .collect()
+}
+
 /// The rule's own checks and the ones against other rows: its view exists, no other rule
-/// has its suffix and view.
-fn check(view: &dyn ReadView, rule: &ForwardRule) -> ZoneResult<()> {
+/// has its suffix and view; `validate = false` is refused under Hardened.
+fn check(view: &dyn ReadView, rule: &ForwardRule, hardened: bool) -> ZoneResult<()> {
     rule.validate()?;
+    check_validation(rule, hardened)?;
     if rule
         .description
         .as_deref()
@@ -127,6 +174,20 @@ fn check(view: &dyn ReadView, rule: &ForwardRule) -> ZoneResult<()> {
         ));
     }
     Ok(())
+}
+
+/// The audit record of a write with the rule's suffix and, as a negative trust anchor's
+/// record carries its zone and reason, the rule's id and `validate: off` when the rule
+/// relays answers unvalidated (TGL-12).
+fn audited(draft: AuditDraft, rule: &ForwardRule) -> AuditDraft {
+    let draft = draft.with_context("suffix", rule.suffix.to_string());
+    if rule.validate {
+        draft
+    } else {
+        draft
+            .with_context("id", rule.id.to_string())
+            .with_context("validate", "off")
+    }
 }
 
 fn nothing_written() -> ZoneError {
@@ -172,7 +233,8 @@ impl ZoneService {
         Ok(RuleRow { rule, revision })
     }
 
-    /// Creates a forwarding rule.
+    /// Creates a forwarding rule; `hardened` says whether the Hardened profile is in force,
+    /// which refuses `validate = false` (TGL-12).
     ///
     /// # Errors
     ///
@@ -181,6 +243,7 @@ impl ZoneService {
         &self,
         cx: &RequestCtx,
         new: NewRule,
+        hardened: bool,
     ) -> ZoneResult<(ForwardRule, Written)> {
         let rule = ForwardRule {
             id: ForwardRuleId::generate(),
@@ -197,15 +260,15 @@ impl ZoneService {
         };
         let (rule, written) = self
             .execute(cx, |view| {
-                check(view, &rule)?;
+                check(view, &rule, hardened)?;
                 let mut batch = WriteBatch::for_request(cx);
                 batch.expect_typed(&FORWARDERS, &rule.id, None);
                 batch.put_typed(&FORWARDERS, &rule.id, &rule)?;
-                batch.audit(
+                batch.audit(audited(
                     AuditDraft::success(audit::FORWARDER_CREATE, vec![ObjectRef::from(rule.id)])
-                        .with_source_ip(cx.source_ip)
-                        .with_context("suffix", rule.suffix.to_string()),
-                );
+                        .with_source_ip(cx.source_ip),
+                    &rule,
+                ));
                 Ok(Planned::write(
                     rule.clone(),
                     batch,
@@ -217,7 +280,9 @@ impl ZoneService {
         Ok((rule, written.ok_or_else(nothing_written)?))
     }
 
-    /// Changes a forwarding rule; with `expect`, only the row at that revision.
+    /// Changes a forwarding rule; with `expect`, only the row at that revision. `hardened`
+    /// says whether the Hardened profile is in force, which refuses a rule left with
+    /// `validate = false` (TGL-12).
     ///
     /// # Errors
     ///
@@ -228,6 +293,7 @@ impl ZoneService {
         cx: &RequestCtx,
         id: ForwardRuleId,
         change: RuleChange,
+        hardened: bool,
         expect: Option<Revision>,
     ) -> ZoneResult<(ForwardRule, Option<Written>)> {
         self.execute(cx, |view| {
@@ -267,15 +333,15 @@ impl ZoneService {
             if rule == before {
                 return Ok(Planned::nothing(rule));
             }
-            check(view, &rule)?;
+            check(view, &rule, hardened)?;
             let mut batch = WriteBatch::for_request(cx);
             batch.expect_typed(&FORWARDERS, &id, Some(revision));
             batch.put_typed(&FORWARDERS, &id, &rule)?;
-            batch.audit(
+            batch.audit(audited(
                 AuditDraft::success(audit::FORWARDER_UPDATE, vec![ObjectRef::from(id)])
-                    .with_source_ip(cx.source_ip)
-                    .with_context("suffix", rule.suffix.to_string()),
-            );
+                    .with_source_ip(cx.source_ip),
+                &rule,
+            ));
             Ok(Planned::write(
                 rule.clone(),
                 batch,

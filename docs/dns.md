@@ -265,7 +265,7 @@ tenko dns acl create secondaries --entry 192.0.2.0/24 --entry key:transfer.examp
 
 ### TSIG keys
 
-A TSIG key (RFC 8945) has a name (a DNS name, as the peers know it), an algorithm (`hmac-sha256` by default, `hmac-sha384`, `hmac-sha512`, `hmac-sha1` for peers that know nothing better) and a description. Its secret is generated with the length of the algorithm's hash (32, 48, 64 or 20 octets) or imported from base64 (16 to 1,024 octets), and stored in the vault as a system secret (purpose `dns.tsig`, owned by the key); the row in `dns.keys.meta` holds only its reference. The secret appears once, in the answer of the create, and is never shown again: Tenko uses it to sign and verify transfers, NOTIFY and updates. In Phase 5 a `dns` node receives it through node sync under the role purpose `tsig`.
+A TSIG key (RFC 8945) has a name (a DNS name, as the peers know it), an algorithm (`hmac-sha256` by default, `hmac-sha384`, `hmac-sha512`, `hmac-sha1` for peers that know nothing better) and a description. A key is an object of its own ([ADR 0017](adr/0017-dns-data-model-and-serving-path.md)): a zone or an access list that names one (`source.primaries[].key`, `transfer.notify[].key`, a `key` entry) is written only by a principal with `dns.keys`, and the key must exist (403 `auth.forbidden` and 404 `dns.key.not_found`, as the key routes answer them); `dns.write` alone writes zones and lists that name no key. Its secret is generated with the length of the algorithm's hash (32, 48, 64 or 20 octets) or imported from base64 (16 to 1,024 octets), and stored in the vault as a system secret (purpose `dns.tsig`, owned by the key); the row in `dns.keys.meta` holds only its reference. The secret appears once, in the answer of the create, and is never shown again: Tenko uses it to sign and verify transfers, NOTIFY and updates. In Phase 5 a `dns` node receives it through node sync under the role purpose `tsig`.
 
 Every action on keys needs `dns.keys` (the administrator's role); creating and deleting a key also needs an interactive session, so a personal API token cannot change keys. Deleting a key deletes its secret; an access list or a zone that still names the key matches nothing for it.
 
@@ -559,7 +559,7 @@ It applies to primary zones and to secondary zones: a copy that changed notifies
 
 ### 10.6 Secondary zones
 
-A zone of kind `secondary` is a copy of a zone on one or more primaries, named in `source.primaries` (`address`, `port`, `key`, `xot`, `tls_name`) and tried in order. The leader service `dns.transfer` keeps it fresh on the timers of the SOA it holds:
+A zone of kind `secondary` is a copy of a zone on one or more primaries, named in `source.primaries` (`address`, `port`, `key`, `xot`, `tls_name`) and tried in order. A primary's address passes the egress policy of server-side fetches (NEVER-01; `tenko_core::egress`, [dns-resolver.md](dns-resolver.md) section 5.4): no loopback, link-local, multicast, unspecified or metadata service address unless `[dns] egress_allow` lists its prefix (400 `dns.zone.invalid`, field `source.primaries`), and a `key` needs `dns.keys` (section 6). The leader service `dns.transfer` keeps it fresh on the timers of the SOA it holds:
 
 | Moment | When |
 |---|---|

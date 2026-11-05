@@ -1,4 +1,8 @@
 //! `GET|POST /dns/acls`, `GET|PATCH|DELETE /dns/acls/{id}`: access lists.
+//!
+//! A `key` entry names a TSIG key, an object of its own (`dns.keys`, ADR 0017): a write
+//! with one needs Read on `DnsKey`, and the key must exist, answered 403 and 404 as the
+//! key routes answer them (`zones::check_key_references`).
 
 use axum::{
     Json,
@@ -7,13 +11,18 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tenko_auth::authz::anywhere;
-use tenko_core::{Action, ObjectKind, ObjectRef, dns::AclId};
+use tenko_core::{
+    Action, ObjectKind, ObjectRef,
+    dns::{AclEntry, AclId, KeyName},
+};
 use tenko_dns::zone::{
     ZoneService,
     acl::{AclChange, AclRow, NewAcl},
 };
 
-use super::{AclCreate, AclItem, AclPatch, Zones, parse_id, with_etag};
+use super::{
+    AclCreate, AclItem, AclPatch, Zones, parse_id, with_etag, zones::check_key_references,
+};
 use crate::{
     dto::Page,
     extract::Ctx,
@@ -22,6 +31,14 @@ use crate::{
     routes::auth::{ApiJson, if_match},
     state::AppState,
 };
+
+/// The keys the entries name.
+fn named_keys(entries: &[AclEntry]) -> impl Iterator<Item = &KeyName> {
+    entries.iter().filter_map(|entry| match entry {
+        AclEntry::Key { name, .. } => Some(name),
+        AclEntry::Prefix { .. } | AclEntry::Any { .. } => None,
+    })
+}
 
 fn item(row: AclRow) -> AclItem {
     AclItem {
@@ -82,13 +99,14 @@ pub(super) async fn list_dns_acls(
     tag = "dns",
     operation_id = "create_dns_acl",
     summary = "Create a DNS access list",
-    description = "Scope: `dns.write`. The first entry that matches decides; no match refuses.",
+    description = "Scope: `dns.write`. The first entry that matches decides; no match refuses. A `key` entry needs `dns.keys`, and the key must exist.",
     request_body(content = AclCreate, content_type = "application/json"),
     responses(
         (status = 201, description = "The access list", body = AclItem),
         (status = 400, description = "The request is malformed or the name is invalid or taken (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "A named TSIG key does not exist (`dns.key.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn create_dns_acl(
@@ -99,6 +117,7 @@ pub(super) async fn create_dns_acl(
 ) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::DnsAcl))?;
     let service = zones.get()?;
+    check_key_references(&app, &cx, &service, named_keys(&body.entries)).await?;
     let (acl, written) = service
         .create_acl(
             &cx,
@@ -162,8 +181,8 @@ pub(super) async fn get_dns_acl(
         (status = 200, description = "The changed access list", body = AclItem),
         (status = 400, description = "The request is malformed or the name is invalid or taken (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such access list (`dns.acl.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such access list (`dns.acl.not_found`), or a named TSIG key does not exist (`dns.key.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "The access list changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -178,6 +197,13 @@ pub(super) async fn update_dns_acl(
     let id = parse_id::<AclId>(&id)?;
     app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
     let service = zones.get()?;
+    let named: Vec<&KeyName> = body
+        .entries
+        .as_deref()
+        .map(named_keys)
+        .map(Iterator::collect)
+        .unwrap_or_default();
+    check_key_references(&app, &cx, &service, named).await?;
     let expect = if_match(&headers)?;
     let (_, written) = service
         .update_acl(

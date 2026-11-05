@@ -608,11 +608,14 @@ fn a_fetched_block_list_blocks_its_names_with_the_extended_error() {
     );
     let port = free_port();
     let dns: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
+    // The list server of the test listens on loopback, which the egress policy of
+    // server-side fetches refuses unless `[dns] egress_allow` lists it.
     let mut node = Node::new()
         .with_args(&["--roles", "controller,dns"])
         .with_config(&format!(
             "[dns]\nlisten = [\"{dns}\"]\nworkers = 1\nforwarders = [\"{upstream}\"]\n\
-             forward_timeout_ms = 1000\n[dns.recursion]\nenabled = false\n"
+             forward_timeout_ms = 1000\negress_allow = [\"127.0.0.0/8\"]\n\
+             [dns.recursion]\nenabled = false\n"
         ));
     let mut server = node.start();
     server

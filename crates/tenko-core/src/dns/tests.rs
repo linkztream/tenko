@@ -429,6 +429,41 @@ fn forward_rules_validate_their_transport() {
 }
 
 #[test]
+fn the_root_rule_never_switches_validation_off() {
+    let mut rule = ForwardRule {
+        id: ForwardRuleId::generate(),
+        suffix: DnsName::root(),
+        upstreams: vec![Upstream {
+            address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            port: None,
+            path: None,
+        }],
+        transport: ForwardTransport::Plain,
+        tls_name: None,
+        view: None,
+        mode: RuleMode::Forward,
+        validate: false,
+        description: None,
+    };
+    let error = rule.validate().expect_err("the root validates");
+    assert_eq!(code(&error), codes::FORWARDER_INVALID);
+    assert_eq!(
+        error
+            .as_coded_error()
+            .params
+            .get("field")
+            .map(String::as_str),
+        Some("validate")
+    );
+    rule.suffix = name("example.net");
+    rule.validate()
+        .expect("a suffix below the root may switch it off");
+    rule.validate = true;
+    rule.suffix = DnsName::root();
+    rule.validate().expect("the root with validation on");
+}
+
+#[test]
 fn acls_decide_by_the_first_match() {
     let key = name("update-key");
     let acl = Acl {
@@ -514,6 +549,28 @@ fn keys_and_lists_round_trip() {
         serde_json::to_value(&list).expect("json")["action"]["kind"],
         "redirect"
     );
+    for bad in [
+        "https://user:secret@lists.example.net/hosts",
+        "https://user@lists.example.net/hosts",
+        "https:///hosts",
+        "https://",
+        "lists.example.net/hosts",
+    ] {
+        list.source = ListSource::Url {
+            url: bad.to_owned(),
+        };
+        let error = list.validate().expect_err(bad);
+        assert_eq!(code(&error), codes::LIST_INVALID, "{bad}");
+        assert_eq!(
+            error
+                .as_coded_error()
+                .params
+                .get("field")
+                .map(String::as_str),
+            Some("source.url"),
+            "{bad}"
+        );
+    }
     list.source = ListSource::Url {
         url: "ftp://lists.example.net".to_owned(),
     };

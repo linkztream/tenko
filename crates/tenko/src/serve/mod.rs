@@ -1377,10 +1377,20 @@ async fn start(
     // The block lists (WP5.2) add the step of their compile job, with the HTTP fetcher and
     // the staging of uploaded files.
     let list_staging = Arc::new(tenko_dns::lists::ListStaging::default());
+    // The egress policy of server-side fetches (the URL of a block list, the primaries of a
+    // secondary zone): the refused classes, with `[dns] egress_allow` let through.
+    let egress = Arc::new(tenko_core::egress::EgressPolicy::with_allowed(
+        resolved
+            .config
+            .dns
+            .egress_allow_prefixes()
+            .map_err(|error| StartError::new("jobs", "config.invalid", error.to_string()))?,
+    ));
     let zones = modules.contains(crate::modules::Module::Dns).then(|| {
         let staging = Arc::new(tenko_dns::zone::ImportStaging::default());
         tenko_dns::zone::register_steps(&mut engine, &staging);
-        let fetcher = match lists::HttpFetcher::new(&resolved.config.dns.lists) {
+        let fetcher = match lists::HttpFetcher::new(&resolved.config.dns.lists, Arc::clone(&egress))
+        {
             Ok(fetcher) => Some(Arc::new(fetcher) as Arc<dyn tenko_dns::lists::ListFetcher>),
             Err(error) => {
                 tracing::warn!(%error, "block lists cannot be fetched");
@@ -1781,6 +1791,7 @@ async fn start(
                     server.extensions.insert(transfers.secondaries().clone());
                 }
                 server.extensions.insert(Arc::clone(&list_staging));
+                server.extensions.insert(Arc::clone(&egress));
                 server
                     .extensions
                     .insert(tenko_api::routes::dns::ListUploadLimit(

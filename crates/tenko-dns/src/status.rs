@@ -38,7 +38,7 @@ use tenko_store::WriteBatch;
 
 use crate::{
     catalog::CatalogHandle,
-    forward::{ForwardStats, Forwarder, UpstreamGroup},
+    forward::{ForwardStats, Forwarder, RecursionDefault, UpstreamGroup},
     querylog::{
         self, FileLog, LogFigures, LogFilter, LogPage,
         stats::{BlockingStats, StatsArgs},
@@ -1040,6 +1040,13 @@ impl DnsNode for LocalNode {
                 }
             }
             problems.extend(forwarder.recursion_problems());
+            // A forwarding rule stored before the rules of `validate: false` (TGL-12): the
+            // Hardened profile is the one whose recursion default allows nobody.
+            let hardened = forwarder.recursion().default_rule() == RecursionDefault::Nobody;
+            problems.extend(crate::forwarders::forward_rule_problems(
+                catalog.forward_rules(),
+                hardened,
+            ));
         }
         // WP10.1: the recursive resolver and its problems.
         let mut recursion = self.recursion_report(&mut problems);

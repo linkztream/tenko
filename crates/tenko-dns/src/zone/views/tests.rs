@@ -524,6 +524,7 @@ async fn the_recursion_list_is_in_use_and_a_view_of_a_rule_stays() {
                 validate: None,
                 mode: None,
             },
+            false,
         )
         .await
         .expect("rule");

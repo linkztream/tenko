@@ -4,6 +4,12 @@
 //!
 //! The list and a read carry each rule's upstreams with their round-trip times and state on
 //! the node that answers, when it runs the DNS role (`upstream_status`).
+//!
+//! A rule with `validate: false` relays its upstreams' answers unvalidated (TGL-12,
+//! DNS-13). A request that sets it is gated as a negative trust anchor is: it needs
+//! `dns.keys` in an interactive session (the authorizer refuses a token the Create right on
+//! keys), the Hardened profile refuses it, the root rule never has it, and the audit record
+//! of the write says `validate: off`.
 
 use std::collections::HashMap;
 
@@ -20,6 +26,9 @@ use tenko_dns::{
     zone::ZoneService,
 };
 
+use tenko_auth::settings::Profile;
+use tenko_store::ReadViewExt as _;
+
 use super::{ForwarderCreate, ForwarderItem, ForwarderPatch, Zones, parse_id, with_etag};
 // dns-visibility: the upstreams' figures.
 use super::{
@@ -34,6 +43,30 @@ use crate::{
     routes::auth::{ApiJson, if_match},
     state::AppState,
 };
+
+/// Whether the Hardened profile is in force, from the settings row (Standard before
+/// setup), as the negative trust anchor routes read it.
+async fn hardened(service: &ZoneService) -> Result<bool, ApiError> {
+    let view = service.view(None).await?;
+    Ok(view
+        .as_ref()
+        .get_typed(&tenko_auth::model::SETTINGS, &())?
+        .is_some_and(|(settings, _)| settings.profile == Profile::Hardened))
+}
+
+/// The gate of `validate: false`: the right a negative trust anchor needs, Create on
+/// `DnsKey` (`dns.keys`, interactive only), checked after the rule's own right so that a
+/// caller without `dns.write` is answered for that first.
+fn gate_validation_off(
+    app: &AppState,
+    cx: &tenko_core::RequestCtx,
+    validate: Option<bool>,
+) -> Result<(), ApiError> {
+    if validate == Some(false) {
+        app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::DnsKey))?;
+    }
+    Ok(())
+}
 
 fn item(row: RuleRow) -> ForwarderItem {
     ForwarderItem {
@@ -143,13 +176,16 @@ pub(super) async fn list_dns_forwarders(
                    (the default) or `recurse`, a rule that names no upstream, no transport \
                    and no `tls_name` and resolves the names under its suffix from the root \
                    servers; `validate` (default `true`) switches DNSSEC validation of the \
-                   upstreams' answers and stays on for a recurse rule.",
+                   upstreams' answers and stays on for a recurse rule. `validate: false` \
+                   is gated as a negative trust anchor is: it needs `dns.keys` in an \
+                   interactive session, the Hardened profile refuses it, the root rule \
+                   never has it, and the audit record says `validate: off`.",
     request_body(content = ForwarderCreate, content_type = "application/json"),
     responses(
         (status = 201, description = "The rule", body = ForwarderItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`, parameters `field` and `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`, parameters `field` and `reason`; `validate` on the root rule or under the Hardened profile)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `dns.write`, or `validate: false` without `dns.keys` or from a token", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn create_dns_forwarder(
@@ -163,7 +199,9 @@ pub(super) async fn create_dns_forwarder(
         Action::Create,
         &anywhere(ObjectKind::DnsForwarder),
     )?;
+    gate_validation_off(&app, &cx, body.validate)?;
     let service = zones.get()?;
+    let hardened = hardened(&service).await?;
     let (rule, written) = service
         .create_forward_rule(
             &cx,
@@ -179,6 +217,7 @@ pub(super) async fn create_dns_forwarder(
                 // WP10.4: the rule's mode.
                 mode: body.mode,
             },
+            hardened,
         )
         .await?;
     let view = service.view(Some(written.revision)).await?;
@@ -232,7 +271,9 @@ pub(super) async fn get_dns_forwarder(
     description = "Scope: `dns.write`. An empty `tls_name` or `description` clears it; \
                    `all_views` makes the rule apply in every view. A rule \
                    turned to `mode: recurse` drops its upstreams and its `tls_name` in the \
-                   same change (`upstreams: []`, `tls_name: \"\"`, `transport: plain`).",
+                   same change (`upstreams: []`, `tls_name: \"\"`, `transport: plain`). \
+                   `validate: false` is gated as on a create: `dns.keys` in an interactive \
+                   session, refused under the Hardened profile and on the root rule.",
     params(
         ("id" = String, Path, description = "Forwarding rule identifier (UUID)"),
         ("If-Match" = Option<String>, Header, description = "The revision the client read; a stale revision is refused with 412")
@@ -242,7 +283,7 @@ pub(super) async fn get_dns_forwarder(
         (status = 200, description = "The changed rule", body = ForwarderItem),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.write`, or `validate: false` without `dns.keys` or from a token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such rule (`dns.forwarder.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "The rule changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -257,8 +298,10 @@ pub(super) async fn update_dns_forwarder(
 ) -> Result<Response, ApiError> {
     let id = parse_id::<ForwardRuleId>(&id)?;
     app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
+    gate_validation_off(&app, &cx, body.validate)?;
     let service = zones.get()?;
     let expect = if_match(&headers)?;
+    let hardened = hardened(&service).await?;
     let (_, written) = service
         .update_forward_rule(
             &cx,
@@ -276,6 +319,7 @@ pub(super) async fn update_dns_forwarder(
                 // WP10.4: the rule's mode.
                 mode: body.mode,
             },
+            hardened,
             expect,
         )
         .await?;

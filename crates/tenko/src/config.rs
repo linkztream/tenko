@@ -543,6 +543,11 @@ pub struct DnsSection {
     pub update: DnsUpdateSection,
     /// The fetch and the upload of block lists.
     pub lists: DnsListsSection,
+    /// Prefixes that server-side fetches (the URL of a block list, the primaries of a
+    /// secondary zone) may reach although the egress policy refuses their class:
+    /// loopback, link-local, multicast, unspecified and metadata service addresses
+    /// (`tenko_core::egress`). Empty by default.
+    pub egress_allow: Vec<String>,
     // WP10.0: the recursive resolver's keys; nothing reads them before WP10.1.
     /// The recursive resolver.
     pub recursion: DnsRecursionSection,
@@ -568,6 +573,7 @@ impl Default for DnsSection {
             limits: DnsLimitsSection::default(),
             update: DnsUpdateSection::default(),
             lists: DnsListsSection::default(),
+            egress_allow: Vec::new(),
             // WP10.0
             recursion: DnsRecursionSection::default(),
         }
@@ -2075,6 +2081,28 @@ impl DnsLogSection {
 }
 
 impl DnsSection {
+    /// The prefixes of `egress_allow` (an address is its host prefix), for the egress
+    /// policy of server-side fetches.
+    ///
+    /// # Errors
+    ///
+    /// `config.invalid` for an entry that is no prefix.
+    pub fn egress_allow_prefixes(&self) -> Result<Vec<ipnet::IpNet>, ConfigError> {
+        self.egress_allow
+            .iter()
+            .map(|text| {
+                text.parse::<ipnet::IpNet>()
+                    .or_else(|_| text.parse::<IpAddr>().map(ipnet::IpNet::from))
+                    .map(|prefix| prefix.trunc())
+                    .map_err(|_| {
+                        ConfigError::invalid(format!(
+                            "dns.egress_allow: `{text}` is not a prefix such as 192.0.2.0/24"
+                        ))
+                    })
+            })
+            .collect()
+    }
+
     /// The listen addresses.
     ///
     /// # Errors
@@ -2217,6 +2245,7 @@ impl DnsSection {
         )?;
         self.limits.validate()?;
         self.lists.validate()?;
+        self.egress_allow_prefixes()?;
         // WP10.0
         self.recursion.validate()?;
         // WP10.0: end.

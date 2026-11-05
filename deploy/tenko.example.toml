@@ -393,6 +393,15 @@ cookies = "on"
 # upstream's certificate. No upstream is built in: choose the resolvers your network uses.
 # Environment: TENKO_DNS__FORWARDERS=192.0.2.1,192.0.2.2 (plain upstreams only)
 forwarders = []
+# Prefixes that this node's own fetches may reach although the egress policy of server-side
+# fetches refuses their class (docs/dns-resolver.md section 5.4): the URL of a block list
+# and the primaries of a secondary zone are never loopback, link-local, multicast,
+# unspecified or a metadata service address (169.254.169.254, fd00:ec2::254) unless a
+# prefix listed here holds the address. A host name is judged by the addresses it resolves
+# to, at every fetch and after every redirect. Empty by default; list a prefix only for a
+# source you run yourself on such an address.
+# Environment: TENKO_DNS__EGRESS_ALLOW=127.0.0.0/8
+egress_allow = []
 # Milliseconds an upstream has for one attempt (100 to 30000).
 forward_timeout_ms = 2000
 # Attempts after the first (0 to 5); each goes to another upstream.

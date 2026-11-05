@@ -92,9 +92,13 @@ struct Side {
 
 fn start() -> Side {
     let dns: SocketAddr = (Ipv4Addr::LOCALHOST, free_port()).into();
+    // The primaries of the test's secondary zones are on loopback, which the egress
+    // policy of server-side fetches refuses unless `[dns] egress_allow` lists it.
     let mut node = Node::new()
         .with_args(&["--roles", "controller,dns"])
-        .with_config(&format!("[dns]\nlisten = [\"{dns}\"]\nworkers = 1\n"));
+        .with_config(&format!(
+            "[dns]\nlisten = [\"{dns}\"]\nworkers = 1\negress_allow = [\"127.0.0.0/8\"]\n"
+        ));
     let server = node.start();
     server
         .wait_stdout_line(Duration::from_secs(10), |line| {

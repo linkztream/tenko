@@ -1415,8 +1415,9 @@ const fn validate_default() -> bool {
 
 impl ForwardRule {
     /// Checks a rule: a `forward` rule has 1 to 16 upstreams, a `recurse` rule none and
-    /// neither a transport other than plain, a TLS name nor `validate = false`; DoT and DoH
-    /// name the TLS name; a path only for DoH, starting with `/`.
+    /// neither a transport other than plain, a TLS name nor `validate = false`; the root
+    /// rule never has `validate = false`; DoT and DoH name the TLS name; a path only for
+    /// DoH, starting with `/`.
     ///
     /// # Errors
     ///
@@ -1442,6 +1443,12 @@ impl ForwardRule {
             return Ok(());
         }
         // WP10.0: end.
+        // The root rule is the default forwarder of every name: it never relays answers
+        // unvalidated, so that no single rule turns validation off for the whole tree
+        // (TGL-12, DNS-13).
+        if !self.validate && self.suffix.is_root() {
+            return invalid("validate", "the root rule always validates");
+        }
         if self.upstreams.is_empty() || self.upstreams.len() > 16 {
             return invalid("upstreams", "a rule has 1 to 16 upstreams");
         }
@@ -1800,8 +1807,9 @@ const fn default_interval() -> u16 {
 }
 
 impl BlockList {
-    /// Checks a list: the name, an `http` or `https` URL, an interval of 1 to 168 hours, at
-    /// most 1,000 exempt prefixes.
+    /// Checks a list: the name, an `http` or `https` URL that names a host and carries no
+    /// credentials (the secret of a fetch is never stored in a row; see
+    /// [`crate::egress`]), an interval of 1 to 168 hours, at most 1,000 exempt prefixes.
     ///
     /// # Errors
     ///
@@ -1809,12 +1817,12 @@ impl BlockList {
     pub fn validate(&self) -> Result<(), DnsError> {
         check_object_name(codes::LIST_INVALID, &self.name)?;
         if let ListSource::Url { url } = &self.source
-            && !(url.starts_with("https://") || url.starts_with("http://"))
+            && let Err(refusal) = crate::egress::url_host(url)
         {
             return Err(DnsError::invalid(
                 codes::LIST_INVALID,
                 "source.url",
-                "an http or https URL",
+                &refusal.reason(),
             ));
         }
         if !(1..=168).contains(&self.interval_hours) {

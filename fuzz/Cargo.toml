@@ -330,6 +330,13 @@ path = "fuzz_targets/dns_trust_anchor_xml.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "dns_trust_anchor_text"
+path = "fuzz_targets/dns_trust_anchor_text.rs"
+test = false
+doc = false
+bench = false
 # WP10.2: end.
 
 # WP9.2: the router advertisement parser's target (marked block).

@@ -52,6 +52,7 @@ pub mod codec;
 // WP7.0: the DHCP model (Phase 3).
 pub mod dhcp;
 pub mod dns;
+pub mod egress;
 pub mod error;
 pub mod i18n;
 pub mod id;

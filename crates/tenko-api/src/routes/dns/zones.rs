@@ -3,6 +3,13 @@
 //! A zone is read with its served SOA serial, its RRset counts per origin and its row
 //! revision as the `ETag`; `PATCH` and `DELETE` take `If-Match`. Creating a primary or
 //! RPZ zone writes its apex SOA and NS set in every scope.
+//!
+//! A TSIG key a zone names (`source.primaries[].key`, `transfer.notify[].key`) is an
+//! object of its own (`dns.keys`, ADR 0017): the principal needs Read on `DnsKey` for a
+//! write that names one, and the key must exist, answered 403 and 404 as the key routes
+//! answer them. The primaries of a secondary zone are checked against the egress policy of
+//! server-side fetches (`tenko_core::egress`, `[dns] egress_allow`): the server opens the
+//! transfers to them.
 
 use axum::{
     Json,
@@ -13,14 +20,20 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tenko_auth::authz::anywhere;
 use tenko_core::{
-    Action, ObjectKind, ObjectRef, Revision, Timestamp,
-    dns::{JournalEntry, ScopeName, Zone, ZoneId},
+    Action, ObjectKind, ObjectRef, RequestCtx, Revision, Timestamp,
+    dns::{
+        DnsError, JournalEntry, KeyName, ScopeName, SecondarySource, TransferPolicy, Zone, ZoneId,
+        codes,
+    },
+    egress::EgressPolicy,
 };
 use tenko_dns::zone::{NewZone, ZoneChange, ZoneRow, ZoneService, journal};
 use tenko_store::ReadViewExt as _;
 use utoipa::{IntoParams, ToSchema};
 
-use super::{OriginCount, ZoneCreate, ZoneItem, ZonePatch, Zones, parse_id, with_etag};
+use super::{
+    OriginCount, ZoneCreate, ZoneItem, ZonePatch, Zones, lists::Egress, parse_id, with_etag,
+};
 use crate::{
     dto::Page,
     extract::Ctx,
@@ -29,6 +42,69 @@ use crate::{
     routes::auth::{ApiJson, if_match},
     state::AppState,
 };
+
+/// The gate of the TSIG keys a request names: with any key named, the principal needs
+/// Read on `DnsKey` (`dns.keys`, 403 as the key routes answer it), and each named key
+/// must exist (404 `dns.key.not_found`). A request that names no key asks nothing.
+pub(super) async fn check_key_references<'a>(
+    app: &AppState,
+    cx: &RequestCtx,
+    service: &ZoneService,
+    names: impl IntoIterator<Item = &'a KeyName>,
+) -> Result<(), ApiError> {
+    let mut names = names.into_iter().peekable();
+    if names.peek().is_none() {
+        return Ok(());
+    }
+    app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::DnsKey))?;
+    let view = service.view(None).await?;
+    for name in names {
+        ZoneService::key(view.as_ref(), name)?;
+    }
+    Ok(())
+}
+
+/// The keys a zone's source and transfer policy name.
+fn named_keys<'a>(
+    source: Option<&'a SecondarySource>,
+    transfer: Option<&'a TransferPolicy>,
+) -> impl Iterator<Item = &'a KeyName> {
+    source
+        .into_iter()
+        .flat_map(|source| {
+            source
+                .primaries
+                .iter()
+                .filter_map(|primary| primary.key.as_ref())
+        })
+        .chain(transfer.into_iter().flat_map(|transfer| {
+            transfer
+                .notify
+                .iter()
+                .filter_map(|target| target.key.as_ref())
+        }))
+}
+
+/// Checks the primaries of a source against the egress policy (`dns.zone.invalid`, field
+/// `source.primaries`).
+fn check_primaries(
+    policy: &EgressPolicy,
+    source: Option<&SecondarySource>,
+) -> Result<(), ApiError> {
+    if let Some(source) = source {
+        for primary in &source.primaries {
+            if let Err(refusal) = policy.check(primary.address) {
+                return Err(DnsError::invalid(
+                    codes::ZONE_INVALID,
+                    "source.primaries",
+                    &format!("a primary is {refusal}"),
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
 
 /// The item of a zone row.
 pub(crate) fn zone_item(
@@ -104,13 +180,14 @@ pub(super) async fn list_dns_zones(
     tag = "dns",
     operation_id = "create_dns_zone",
     summary = "Create a DNS zone",
-    description = "Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only.",
+    description = "Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only. A TSIG key named in `source.primaries[].key` or `transfer.notify[].key` needs `dns.keys` and must exist; a primary's address passes the egress policy of server-side fetches (no loopback, link-local, multicast, unspecified or metadata service address unless `[dns] egress_allow` lists its prefix).",
     request_body(content = ZoneCreate, content_type = "application/json"),
     responses(
         (status = 201, description = "The zone, with its SOA and NS set; the `ETag` is its revision", body = ZoneItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dns.zone.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dns.zone.invalid`; `source.primaries` for an address the egress policy refuses)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "A named TSIG key does not exist (`dns.key.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "A zone of this name exists (`dns.zone.exists`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -118,10 +195,19 @@ pub(super) async fn create_dns_zone(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
     zones: Zones,
+    Egress(policy): Egress,
     ApiJson(body): ApiJson<ZoneCreate>,
 ) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::Zone))?;
     let service = zones.get()?;
+    check_key_references(
+        &app,
+        &cx,
+        &service,
+        named_keys(body.source.as_ref(), body.transfer.as_ref()),
+    )
+    .await?;
+    check_primaries(&policy, body.source.as_ref())?;
     // WP6.3: without a policy in the request, the signing default of the profile (TGL-13).
     let dnssec = if let Some(policy) = body.dnssec {
         policy
@@ -201,7 +287,7 @@ pub(super) async fn get_dns_zone(
     tag = "dns",
     operation_id = "update_dns_zone",
     summary = "Change a DNS zone",
-    description = "Scope: `dns.write`. A change of `soa` rewrites the SOA of every scope with the next serial; a new scope gets an SOA and a copy of the default scope's NS set; a removed scope loses its RRsets and journal.",
+    description = "Scope: `dns.write`. A change of `soa` rewrites the SOA of every scope with the next serial; a new scope gets an SOA and a copy of the default scope's NS set; a removed scope loses its RRsets and journal. A TSIG key named in a new `source` or `transfer` needs `dns.keys` and must exist; a new primary's address passes the egress policy of server-side fetches.",
     params(
         ("id" = String, Path, description = "Zone identifier (UUID)"),
         ("If-Match" = Option<String>, Header, description = "The revision the client read, as in the `ETag`; a stale revision is refused with 412")
@@ -211,8 +297,8 @@ pub(super) async fn get_dns_zone(
         (status = 200, description = "The changed zone", body = ZoneItem),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dns.zone.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such zone (`dns.zone.not_found`), or a named TSIG key does not exist (`dns.key.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "A view names a scope the change removes (`dns.view.in_use`, parameters `scope` and `by`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "The zone changed since it was read (`If-Match`, `sys.store.precondition_failed`)", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -221,6 +307,7 @@ pub(super) async fn update_dns_zone(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
     zones: Zones,
+    Egress(policy): Egress,
     Path(id): Path<String>,
     headers: HeaderMap,
     ApiJson(body): ApiJson<ZonePatch>,
@@ -228,6 +315,14 @@ pub(super) async fn update_dns_zone(
     let id = parse_id::<ZoneId>(&id)?;
     app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
     let service = zones.get()?;
+    check_key_references(
+        &app,
+        &cx,
+        &service,
+        named_keys(body.source.as_ref(), body.transfer.as_ref()),
+    )
+    .await?;
+    check_primaries(&policy, body.source.as_ref())?;
     let expect = if_match(&headers)?;
     let written = service
         .update(

@@ -1029,3 +1029,53 @@ async fn without_the_list_staging_the_jobs_are_disabled() {
     // The rows are still served.
     assert_eq!(read(&router, &url).await.body["name"], "hosts");
 }
+
+/// A URL the egress policy of server-side fetches refuses is invalid at the write: a host
+/// written as a loopback, link-local, multicast, unspecified or metadata service address,
+/// and a URL with credentials. A host name passes here and is judged when it resolves.
+#[tokio::test]
+async fn a_url_the_egress_policy_refuses_is_invalid() {
+    let App { router, .. } = app();
+    for url in [
+        "http://127.0.0.1/hosts.txt",
+        "http://[::1]:8080/hosts.txt",
+        "http://169.254.169.254/latest/meta-data",
+        "http://[fd00:ec2::254]/hosts.txt",
+        "http://224.0.0.1/hosts.txt",
+        "http://0.0.0.0/hosts.txt",
+        "https://user:secret@lists.example.test/hosts.txt",
+        "https://lists.example.test:notaport@/hosts.txt",
+    ] {
+        let mut list = url_list("refused");
+        list["source"] = json!({"kind": "url", "url": url});
+        let reply = create(&router, list).await;
+        reply.assert_invalid("source.url");
+        assert!(
+            !reply.body["detail"]
+                .as_str()
+                .unwrap_or("")
+                .contains("secret"),
+            "{url}"
+        );
+    }
+    let list = created(&router, url_list("named")).await;
+    let id = list.body["id"].as_str().expect("id").to_owned();
+    let reply = send(
+        &router,
+        "PATCH",
+        &list_path(&id),
+        Some(json!({"source": {"kind": "url", "url": "http://127.0.0.1/hosts.txt"}})),
+    )
+    .await;
+    reply.assert_invalid("source.url");
+    let unchanged = read(&router, &id).await;
+    assert_eq!(unchanged.body["source"]["url"], URL);
+    let moved = send(
+        &router,
+        "PATCH",
+        &list_path(&id),
+        Some(json!({"source": {"kind": "url", "url": "http://192.0.2.10/hosts.txt"}})),
+    )
+    .await;
+    assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
+}

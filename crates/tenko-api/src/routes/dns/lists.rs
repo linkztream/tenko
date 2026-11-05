@@ -6,6 +6,11 @@
 //! Both run the compile job `dns.list.compile` (202 with the job); the role's catalog
 //! follows the versions through the feed. A list read carries its newest version and the
 //! outcome of its last fetch or compile on this controller.
+//!
+//! A URL is checked against the egress policy of server-side fetches
+//! (`tenko_core::egress`, `[dns] egress_allow`) when the list is written: an `http` or
+//! `https` URL without credentials whose host, when it is an address, the policy allows. A
+//! host name is judged by the addresses it resolves to when the list is fetched.
 
 use std::sync::Arc;
 
@@ -20,7 +25,8 @@ use ipnet::IpNet;
 use tenko_auth::authz::anywhere;
 use tenko_core::{
     Action, CodedError, ObjectKind, ObjectRef,
-    dns::{BlockListId, ListKind, codes},
+    dns::{BlockListId, DnsError, ListKind, ListSource, codes},
+    egress::{self, EgressPolicy},
 };
 use tenko_dns::{
     lists::{ListChange, ListRow, ListStaging, NewList, fetch_status, job::Trigger},
@@ -69,6 +75,38 @@ impl<S: Send + Sync> FromRequestParts<S> for Uploads {
                 .map_or(DEFAULT_UPLOAD, |limit| limit.0),
         }))
     }
+}
+
+/// The egress policy of server-side fetches, from the request extensions; the policy
+/// without allowed prefixes when the server set none (tests, a router without the role).
+pub(crate) struct Egress(pub(crate) Arc<EgressPolicy>);
+
+impl<S: Send + Sync> FromRequestParts<S> for Egress {
+    type Rejection = std::convert::Infallible;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        std::future::ready(Ok(Egress(
+            parts
+                .extensions
+                .get::<Arc<EgressPolicy>>()
+                .cloned()
+                .unwrap_or_default(),
+        )))
+    }
+}
+
+/// Checks the URL of a list against the egress policy (`dns.list.invalid`, field
+/// `source.url`).
+fn check_source(policy: &EgressPolicy, source: Option<&ListSource>) -> Result<(), ApiError> {
+    if let Some(ListSource::Url { url }) = source
+        && let Err(refusal) = egress::check_url(policy, url)
+    {
+        return Err(DnsError::invalid(codes::LIST_INVALID, "source.url", &refusal.reason()).into());
+    }
+    Ok(())
 }
 
 impl Uploads {
@@ -203,11 +241,15 @@ pub(super) async fn list_dns_lists(
                    and the names under them with its action and the extended error `Blocked`; \
                    an `allow` list keeps them from being blocked, and exempts its `exempt` \
                    clients from every list and RPZ zone. A URL list is fetched within a minute; \
-                   an uploaded list waits for its file (`PUT /dns/lists/{id}/file`).",
+                   an uploaded list waits for its file (`PUT /dns/lists/{id}/file`). The URL \
+                   is `http` or `https`, carries no credentials, and names no address the \
+                   egress policy of server-side fetches refuses (loopback, link-local, \
+                   multicast, unspecified or a metadata service, unless `[dns] egress_allow` \
+                   lists its prefix); a host name is judged by its addresses at each fetch.",
     request_body(content = ListCreate, content_type = "application/json"),
     responses(
         (status = 201, description = "The block list", body = ListItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`, parameters `field` and `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`, parameters `field` and `reason`; `source.url` for a URL the egress policy refuses)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -216,6 +258,7 @@ pub(super) async fn create_dns_list(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
     zones: Zones,
+    Egress(policy): Egress,
     ApiJson(body): ApiJson<ListCreate>,
 ) -> Result<Response, ApiError> {
     app.authorize(
@@ -224,6 +267,7 @@ pub(super) async fn create_dns_list(
         &anywhere(ObjectKind::DnsList),
     )?;
     let service = zones.get()?;
+    check_source(&policy, Some(&body.source))?;
     let exempt = prefixes(&body.exempt)?;
     let (list, written) = service
         .create_block_list(
@@ -286,7 +330,8 @@ pub(super) async fn get_dns_list(
     summary = "Change a block list",
     description = "Scope: `dns.write`. A new `source` or `format` drops the list's versions: a \
                    URL list is fetched again within a minute, an uploaded list waits for its \
-                   next file. `exempt` replaces the prefixes; an empty `description` clears it.",
+                   next file. `exempt` replaces the prefixes; an empty `description` clears it. \
+                   A new URL is checked against the egress policy as on a create.",
     params(
         ("id" = String, Path, description = "Block list identifier (UUID)"),
         ("If-Match" = Option<String>, Header, description = "The revision the client read; a stale revision is refused with 412")
@@ -305,6 +350,7 @@ pub(super) async fn update_dns_list(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
     zones: Zones,
+    Egress(policy): Egress,
     Path(id): Path<String>,
     headers: HeaderMap,
     ApiJson(body): ApiJson<ListPatch>,
@@ -312,6 +358,7 @@ pub(super) async fn update_dns_list(
     let id = parse_id::<BlockListId>(&id)?;
     app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
     let service = zones.get()?;
+    check_source(&policy, body.source.as_ref())?;
     let expect = if_match(&headers)?;
     let exempt = body.exempt.as_deref().map(prefixes).transpose()?;
     let (_, written) = service

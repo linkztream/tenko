@@ -10,6 +10,9 @@ use axum::{
 };
 use serde_json::{Value, json};
 use tenko_api::state::AppState;
+use tenko_core::{
+    Action, Authorizer, Denied, DenyReason, ObjectKind, ObjectRef, Principal, ScopeFilter,
+};
 use tenko_dns::zone::{ZoneConfig, ZoneService};
 use tenko_store::{MemStore, Store};
 use tower::ServiceExt;
@@ -47,7 +50,33 @@ impl Reply {
     }
 }
 
-fn app() -> Router {
+/// An authorizer of an operator with every DNS right but `dns.keys`: every action on a
+/// `DnsKey` is refused, everything else allowed.
+struct WithoutKeys;
+
+impl Authorizer for WithoutKeys {
+    fn check(&self, _: &Principal, action: Action, object: &ObjectRef) -> Result<(), Denied> {
+        if object.kind == ObjectKind::DnsKey {
+            Err(Denied {
+                action,
+                object: *object,
+                reason: DenyReason::MissingPermission,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    fn scope(&self, _: &Principal, _: Action, kind: ObjectKind) -> ScopeFilter {
+        if kind == ObjectKind::DnsKey {
+            ScopeFilter::Nothing
+        } else {
+            ScopeFilter::All
+        }
+    }
+}
+
+fn app_with(authorizer: Option<Arc<dyn Authorizer>>) -> Router {
     let store = Arc::new(MemStore::default());
     let vault = Arc::new(tenko_vault::MemVault::with_store(Arc::clone(&store)));
     let service = ZoneService::with_direct_jobs(
@@ -55,8 +84,14 @@ fn app() -> Router {
         Some(vault as Arc<dyn tenko_vault::Vault>),
         ZoneConfig::default(),
     );
-    let (router, _) = tenko_api::api(AppState::default());
+    let mut state = AppState::default();
+    state.authorizer = authorizer;
+    let (router, _) = tenko_api::api(state);
     router.layer(axum::Extension(service))
+}
+
+fn app() -> Router {
+    app_with(None)
 }
 
 async fn send(router: &Router, method: &str, path: &str, body: Option<Value>) -> Reply {
@@ -470,4 +505,223 @@ async fn without_the_zone_service_the_routes_answer_module_disabled() {
     send(&router, "GET", "/dns/acls", None)
         .await
         .assert_problem(409, "dns.module.disabled");
+}
+
+/// A secondary zone of `primaries`, each `(address, key)`.
+fn secondary_body(name: &str, primaries: &[(&str, Option<&str>)]) -> Value {
+    let primaries: Vec<Value> = primaries
+        .iter()
+        .map(|(address, key)| match key {
+            Some(key) => json!({"address": address, "key": key}),
+            None => json!({"address": address}),
+        })
+        .collect();
+    json!({
+        "name": name,
+        "kind": "secondary",
+        "soa": {"mname": format!("ns1.{name}"), "rname": format!("hostmaster.{name}")},
+        "source": {"primaries": primaries},
+    })
+}
+
+/// A TSIG key a zone or an access list names needs `dns.keys` (403, as the key routes
+/// answer it); a request that names no key asks nothing of the keys.
+#[tokio::test]
+async fn a_named_tsig_key_needs_the_key_right() {
+    // Without `dns.keys`: zones and access lists without a key are written, any key named
+    // in the primaries, the NOTIFY targets or a `key` entry is refused.
+    let router = app_with(Some(Arc::new(WithoutKeys)));
+    create_zone(&router, "plain.example.test").await;
+    let acl = send(&router, "POST", "/dns/acls", Some(acl_body("plain"))).await;
+    assert_eq!(acl.status, StatusCode::CREATED, "{}", acl.body);
+    let acl_id = acl.body["id"].as_str().expect("id").to_owned();
+    let secondary = send(
+        &router,
+        "POST",
+        "/dns/zones",
+        Some(secondary_body("copy.example.test", &[("192.0.2.10", None)])),
+    )
+    .await;
+    assert_eq!(secondary.status, StatusCode::CREATED, "{}", secondary.body);
+    let secondary_id = secondary.body["id"].as_str().expect("id").to_owned();
+    send(
+        &router,
+        "POST",
+        "/dns/zones",
+        Some(secondary_body(
+            "keyed.example.test",
+            &[("192.0.2.10", Some("transfer-key"))],
+        )),
+    )
+    .await
+    .assert_problem(403, "auth.forbidden");
+    let mut notified = zone_body("notified.example.test");
+    notified["transfer"] = json!({"notify": [{"address": "192.0.2.54", "key": "transfer-key"}]});
+    send(&router, "POST", "/dns/zones", Some(notified))
+        .await
+        .assert_problem(403, "auth.forbidden");
+    send(
+        &router,
+        "PATCH",
+        &format!("/dns/zones/{secondary_id}"),
+        Some(json!({"source": {"primaries": [{"address": "192.0.2.10", "key": "transfer-key"}]}})),
+    )
+    .await
+    .assert_problem(403, "auth.forbidden");
+    send(
+        &router,
+        "PATCH",
+        &format!("/dns/zones/{secondary_id}"),
+        Some(json!({"transfer": {"notify": [{"address": "192.0.2.54", "key": "transfer-key"}]}})),
+    )
+    .await
+    .assert_problem(403, "auth.forbidden");
+    send(
+        &router,
+        "POST",
+        "/dns/acls",
+        Some(json!({"name": "signers", "entries": [{"kind": "key", "name": "transfer-key"}]})),
+    )
+    .await
+    .assert_problem(403, "auth.forbidden");
+    send(
+        &router,
+        "PATCH",
+        &format!("/dns/acls/{acl_id}"),
+        Some(json!({"entries": [{"kind": "key", "name": "transfer-key"}]})),
+    )
+    .await
+    .assert_problem(403, "auth.forbidden");
+    // A change that names no key still goes through.
+    let described = send(
+        &router,
+        "PATCH",
+        &format!("/dns/acls/{acl_id}"),
+        Some(json!({"description": "no key"})),
+    )
+    .await;
+    assert_eq!(described.status, StatusCode::OK, "{}", described.body);
+}
+
+/// With `dns.keys`: a key that does not exist is 404, an existing one is accepted.
+#[tokio::test]
+async fn a_named_tsig_key_must_exist() {
+    let router = app();
+    send(
+        &router,
+        "POST",
+        "/dns/zones",
+        Some(secondary_body(
+            "keyed.example.test",
+            &[("192.0.2.10", Some("missing-key"))],
+        )),
+    )
+    .await
+    .assert_problem(404, "dns.key.not_found");
+    send(
+        &router,
+        "POST",
+        "/dns/acls",
+        Some(json!({"name": "signers", "entries": [{"kind": "key", "name": "missing-key"}]})),
+    )
+    .await
+    .assert_problem(404, "dns.key.not_found");
+    let key = send(
+        &router,
+        "POST",
+        "/dns/keys",
+        Some(json!({"name": "transfer-key"})),
+    )
+    .await;
+    assert_eq!(key.status, StatusCode::CREATED, "{}", key.body);
+    let keyed = send(
+        &router,
+        "POST",
+        "/dns/zones",
+        Some(secondary_body(
+            "keyed.example.test",
+            &[("192.0.2.10", Some("transfer-key"))],
+        )),
+    )
+    .await;
+    assert_eq!(keyed.status, StatusCode::CREATED, "{}", keyed.body);
+    let mut notified = zone_body("notified.example.test");
+    notified["transfer"] = json!({"notify": [{"address": "192.0.2.54", "key": "transfer-key"}]});
+    let notified = send(&router, "POST", "/dns/zones", Some(notified)).await;
+    assert_eq!(notified.status, StatusCode::CREATED, "{}", notified.body);
+    let signers = send(
+        &router,
+        "POST",
+        "/dns/acls",
+        Some(json!({"name": "signers", "entries": [{"kind": "key", "name": "transfer-key"}]})),
+    )
+    .await;
+    assert_eq!(signers.status, StatusCode::CREATED, "{}", signers.body);
+    let keyed_id = keyed.body["id"].as_str().expect("id").to_owned();
+    send(
+        &router,
+        "PATCH",
+        &format!("/dns/zones/{keyed_id}"),
+        Some(json!({"source": {"primaries": [{"address": "192.0.2.11", "key": "missing-key"}]}})),
+    )
+    .await
+    .assert_problem(404, "dns.key.not_found");
+}
+
+/// The primaries of a secondary zone pass the egress policy of server-side fetches: no
+/// loopback, link-local, multicast, unspecified or metadata service address.
+#[tokio::test]
+async fn a_primary_on_a_refused_address_is_invalid() {
+    let router = app();
+    for address in [
+        "127.0.0.1",
+        "::1",
+        "169.254.169.254",
+        "fd00:ec2::254",
+        "224.0.0.251",
+        "0.0.0.0",
+        "fe80::1",
+    ] {
+        let reply = send(
+            &router,
+            "POST",
+            "/dns/zones",
+            Some(secondary_body(
+                "copy.example.test",
+                &[("192.0.2.10", None), (address, None)],
+            )),
+        )
+        .await;
+        reply.assert_problem(400, "dns.zone.invalid");
+        assert_eq!(
+            reply.body["params"]["field"], "source.primaries",
+            "{address}"
+        );
+    }
+    let copy = send(
+        &router,
+        "POST",
+        "/dns/zones",
+        Some(secondary_body(
+            "copy.example.test",
+            &[("192.0.2.10", None), ("2001:db8::53", None)],
+        )),
+    )
+    .await;
+    assert_eq!(copy.status, StatusCode::CREATED, "{}", copy.body);
+    let id = copy.body["id"].as_str().expect("id").to_owned();
+    let reply = send(
+        &router,
+        "PATCH",
+        &format!("/dns/zones/{id}"),
+        Some(json!({"source": {"primaries": [{"address": "127.0.0.1"}]}})),
+    )
+    .await;
+    reply.assert_problem(400, "dns.zone.invalid");
+    assert_eq!(reply.body["params"]["field"], "source.primaries");
+    let unchanged = send(&router, "GET", &format!("/dns/zones/{id}"), None).await;
+    assert_eq!(
+        unchanged.body["source"]["primaries"][0]["address"],
+        "192.0.2.10"
+    );
 }

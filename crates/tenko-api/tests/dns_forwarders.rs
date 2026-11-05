@@ -10,8 +10,13 @@ use axum::{
 };
 use serde_json::{Value, json};
 use tenko_api::state::AppState;
+use tenko_auth::settings::Profile;
+use tenko_core::{
+    Action, Authorizer, Denied, DenyReason, ObjectKind, ObjectRef, Principal, RequestCtx,
+    ScopeFilter, SystemComponent,
+};
 use tenko_dns::zone::{ZoneConfig, ZoneService};
-use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadViewExt, Store};
+use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadViewExt, Store, WriteBatch};
 use tower::ServiceExt;
 
 const API: &str = "/api/v1";
@@ -52,6 +57,59 @@ impl Reply {
         self.assert_problem(400, "dns.forwarder.invalid");
         assert_eq!(self.body["params"]["field"], field, "{}", self.body);
     }
+}
+
+/// An authorizer of an operator with every DNS right but `dns.keys`: every action on a
+/// `DnsKey` is refused, everything else allowed.
+struct WithoutKeys;
+
+impl Authorizer for WithoutKeys {
+    fn check(&self, _: &Principal, action: Action, object: &ObjectRef) -> Result<(), Denied> {
+        if object.kind == ObjectKind::DnsKey {
+            Err(Denied {
+                action,
+                object: *object,
+                reason: DenyReason::MissingPermission,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    fn scope(&self, _: &Principal, _: Action, kind: ObjectKind) -> ScopeFilter {
+        if kind == ObjectKind::DnsKey {
+            ScopeFilter::Nothing
+        } else {
+            ScopeFilter::All
+        }
+    }
+}
+
+/// The router over a zone service on an in-memory store, with `authorizer` (none: every
+/// action allowed) and the settings row of `profile` when one is given.
+async fn app_with(
+    authorizer: Option<Arc<dyn Authorizer>>,
+    profile: Option<Profile>,
+) -> (Router, Arc<MemStore>) {
+    let store = Arc::new(MemStore::default());
+    if let Some(profile) = profile {
+        let ctx = RequestCtx::system(SystemComponent::Setup);
+        let mut batch = WriteBatch::for_request(&ctx);
+        batch
+            .put_typed(&tenko_auth::model::SETTINGS, &(), &profile.defaults())
+            .expect("settings");
+        store.propose(batch).await.expect("the profile");
+    }
+    let vault = Arc::new(tenko_vault::MemVault::with_store(Arc::clone(&store)));
+    let service = ZoneService::with_direct_jobs(
+        Arc::clone(&store) as Arc<dyn Store>,
+        Some(vault as Arc<dyn tenko_vault::Vault>),
+        ZoneConfig::default(),
+    );
+    let mut state = AppState::default();
+    state.authorizer = authorizer;
+    let (router, _) = tenko_api::api(state);
+    (router.layer(axum::Extension(service)), store)
 }
 
 fn app() -> (Router, Arc<MemStore>) {
@@ -416,4 +474,78 @@ async fn without_the_zone_service_the_module_is_disabled() {
     send(&bare, "GET", "/dns/forwarders", None)
         .await
         .assert_problem(409, "dns.module.disabled");
+}
+
+/// `validate: false` is gated as a negative trust anchor is: it needs the Create right on
+/// keys, the root rule never has it, and the Hardened profile refuses it.
+#[tokio::test]
+async fn validation_off_needs_the_key_right_and_is_refused_on_the_root_and_under_hardened() {
+    let unvalidated = |suffix: &str| json!({"suffix": suffix, "upstreams": [{"address": "192.0.2.53"}], "validate": false});
+    // An operator with `dns.write` but not `dns.keys` creates rules, but none that
+    // switches validation off, and cannot switch it off on an existing rule.
+    let (router, _) = app_with(Some(Arc::new(WithoutKeys)), None).await;
+    let plain = create_plain(&router, "example.net").await;
+    let id = plain.body["id"].as_str().expect("id").to_owned();
+    create(&router, unvalidated("stripped.example.net"))
+        .await
+        .assert_problem(403, "auth.forbidden");
+    send(
+        &router,
+        "PATCH",
+        &format!("/dns/forwarders/{id}"),
+        Some(json!({"validate": false})),
+    )
+    .await
+    .assert_problem(403, "auth.forbidden");
+    // Turning it on, or leaving it as it is, needs no key right.
+    let on = send(
+        &router,
+        "PATCH",
+        &format!("/dns/forwarders/{id}"),
+        Some(json!({"validate": true, "description": "kept"})),
+    )
+    .await;
+    assert_eq!(on.status, StatusCode::OK, "{}", on.body);
+    assert!(
+        send(&router, "GET", "/dns/forwarders", None).await.body["items"]
+            .as_array()
+            .is_some_and(|items| items.len() == 1)
+    );
+
+    // With the right: the root rule never relays answers unvalidated, another suffix
+    // may under the Standard profile.
+    let (router, _) = app_with(None, Some(Profile::Standard)).await;
+    create(&router, unvalidated("."))
+        .await
+        .assert_invalid("validate");
+    let created = create(&router, unvalidated("stripped.example.net")).await;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
+    assert_eq!(created.body["validate"], false);
+    let id = created.body["id"].as_str().expect("id").to_owned();
+    send(
+        &router,
+        "PATCH",
+        &format!("/dns/forwarders/{id}"),
+        Some(json!({"suffix": "."})),
+    )
+    .await
+    .assert_invalid("validate");
+
+    // The Hardened profile refuses it on every suffix, on a create and on a change.
+    let (router, _) = app_with(None, Some(Profile::Hardened)).await;
+    create(&router, unvalidated("stripped.example.net"))
+        .await
+        .assert_invalid("validate");
+    let plain = create_plain(&router, "example.net").await;
+    let id = plain.body["id"].as_str().expect("id").to_owned();
+    send(
+        &router,
+        "PATCH",
+        &format!("/dns/forwarders/{id}"),
+        Some(json!({"validate": false})),
+    )
+    .await
+    .assert_invalid("validate");
+    let still = send(&router, "GET", &format!("/dns/forwarders/{id}"), None).await;
+    assert_eq!(still.body["validate"], true);
 }

@@ -18,15 +18,29 @@ fn invalid(reason: &str) -> DnsError {
     DnsError::invalid(codes::TRUST_ANCHOR_INVALID, "keys", reason)
 }
 
-fn hex(text: &str) -> Option<Vec<u8>> {
-    let text: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-    if !text.len().is_multiple_of(2) {
-        return None;
+/// The value of one hexadecimal digit; `None` for any other octet (a sign, a letter
+/// outside `a` to `f`, an octet of a character outside ASCII).
+const fn nibble(octet: u8) -> Option<u8> {
+    match octet {
+        b'0'..=b'9' => Some(octet - b'0'),
+        b'a'..=b'f' => Some(octet - b'a' + 10),
+        b'A'..=b'F' => Some(octet - b'A' + 10),
+        _ => None,
     }
-    (0..text.len())
-        .step_by(2)
-        .map(|at| u8::from_str_radix(&text[at..at + 2], 16).ok())
-        .collect()
+}
+
+/// The octets of a hexadecimal text, white space between digits allowed. Reads the text
+/// octet by octet, so that a character of several octets is refused rather than cut.
+fn hex(text: &str) -> Option<Vec<u8>> {
+    let mut digits = text.bytes().filter(|octet| !octet.is_ascii_whitespace());
+    let mut octets = Vec::with_capacity(text.len() / 2);
+    while let Some(high) = digits.next() {
+        let low = digits.next()?;
+        octets.push((nibble(high)? << 4) | nibble(low)?);
+    }
+    // White space of a character outside ASCII is not ASCII white space, so a text that
+    // holds such a character reaches `nibble` and is refused there.
+    Some(octets)
 }
 
 /// A DS record's data from its presentation form: the key tag, the algorithm, the digest
@@ -194,7 +208,15 @@ mod tests {
         let key = dnskey_key(dnskey, Timestamp::now());
         assert_eq!(key.key_tag, 3613);
         key.validate().expect("a valid key");
-        for bad in ["", "x 8 2 ab", "1 8 2", "1 8 2 zz", "1 8 2 abcd"] {
+        for bad in [
+            "",
+            "x 8 2 ab",
+            "1 8 2",
+            "1 8 2 zz",
+            "1 8 2 abcd",
+            "1 8 2 +f+f",
+            "1 8 2 ab\u{a0}cd",
+        ] {
             let error = parse_ds(bad).expect_err(bad);
             assert!(
                 format!("{error:?}").contains(codes::TRUST_ANCHOR_INVALID),
@@ -204,5 +226,29 @@ mod tests {
         for bad in ["", "257 3", "257 2 15 AA==", "257 3 15 !!"] {
             assert!(parse_dnskey(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_digest_with_a_character_outside_ascii_is_refused_not_cut() {
+        // An accented letter is two octets in UTF-8; the digest is read octet by octet
+        // and refuses it instead of cutting the text inside the character.
+        for text in [
+            "20326 8 2 E06D44B80B8F1D39A95C0B0D7C65D084é",
+            "20326 8 2 éE06D44B80B8F1D39A95C0B0D7C65D084",
+            "20326 8 2 E06D44B80B8F1D39A95C0B0D7C65D08458E880409BBC683457104237C7F8ECé",
+            "20326 8 2 E06D44B80B8F1D39A95C0B0D7C65D08458E880409BBC683457104237C7F8EC8DÄ",
+            "20326 8 2 \u{ff21}\u{ff22}",
+        ] {
+            let error = parse_ds(text).expect_err(text);
+            assert!(
+                format!("{error:?}").contains(codes::TRUST_ANCHOR_INVALID),
+                "{error:?}"
+            );
+        }
+        assert_eq!(hex("ab cd\tef\n01"), Some(vec![0xab, 0xcd, 0xef, 0x01]));
+        assert_eq!(hex(""), Some(Vec::new()));
+        assert_eq!(hex("abc"), None);
+        assert_eq!(hex("+1"), None);
+        assert_eq!(hex("é"), None);
     }
 }

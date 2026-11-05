@@ -1675,7 +1675,7 @@ export interface paths {
         put?: never;
         /**
          * Create a DNS access list
-         * @description Scope: `dns.write`. The first entry that matches decides; no match refuses.
+         * @description Scope: `dns.write`. The first entry that matches decides; no match refuses. A `key` entry needs `dns.keys`, and the key must exist.
          */
         post: operations["create_dns_acl"];
         delete?: never;
@@ -1791,7 +1791,7 @@ export interface paths {
         put?: never;
         /**
          * Create a forwarding rule
-         * @description Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates. `mode` is `forward` (the default) or `recurse`, a rule that names no upstream, no transport and no `tls_name` and resolves the names under its suffix from the root servers; `validate` (default `true`) switches DNSSEC validation of the upstreams' answers and stays on for a recurse rule.
+         * @description Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates. `mode` is `forward` (the default) or `recurse`, a rule that names no upstream, no transport and no `tls_name` and resolves the names under its suffix from the root servers; `validate` (default `true`) switches DNSSEC validation of the upstreams' answers and stays on for a recurse rule. `validate: false` is gated as a negative trust anchor is: it needs `dns.keys` in an interactive session, the Hardened profile refuses it, the root rule never has it, and the audit record says `validate: off`.
          */
         post: operations["create_dns_forwarder"];
         delete?: never;
@@ -1823,7 +1823,7 @@ export interface paths {
         head?: never;
         /**
          * Change a forwarding rule
-         * @description Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view. A rule turned to `mode: recurse` drops its upstreams and its `tls_name` in the same change (`upstreams: []`, `tls_name: ""`, `transport: plain`).
+         * @description Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view. A rule turned to `mode: recurse` drops its upstreams and its `tls_name` in the same change (`upstreams: []`, `tls_name: ""`, `transport: plain`). `validate: false` is gated as on a create: `dns.keys` in an interactive session, refused under the Hardened profile and on the root rule.
          */
         patch: operations["update_dns_forwarder"];
         trace?: never;
@@ -1891,7 +1891,7 @@ export interface paths {
         put?: never;
         /**
          * Create a block list
-         * @description Scope: `dns.write`. A `block` list (the default) answers the names it holds and the names under them with its action and the extended error `Blocked`; an `allow` list keeps them from being blocked, and exempts its `exempt` clients from every list and RPZ zone. A URL list is fetched within a minute; an uploaded list waits for its file (`PUT /dns/lists/{id}/file`).
+         * @description Scope: `dns.write`. A `block` list (the default) answers the names it holds and the names under them with its action and the extended error `Blocked`; an `allow` list keeps them from being blocked, and exempts its `exempt` clients from every list and RPZ zone. A URL list is fetched within a minute; an uploaded list waits for its file (`PUT /dns/lists/{id}/file`). The URL is `http` or `https`, carries no credentials, and names no address the egress policy of server-side fetches refuses (loopback, link-local, multicast, unspecified or a metadata service, unless `[dns] egress_allow` lists its prefix); a host name is judged by its addresses at each fetch.
          */
         post: operations["create_dns_list"];
         delete?: never;
@@ -1923,7 +1923,7 @@ export interface paths {
         head?: never;
         /**
          * Change a block list
-         * @description Scope: `dns.write`. A new `source` or `format` drops the list's versions: a URL list is fetched again within a minute, an uploaded list waits for its next file. `exempt` replaces the prefixes; an empty `description` clears it.
+         * @description Scope: `dns.write`. A new `source` or `format` drops the list's versions: a URL list is fetched again within a minute, an uploaded list waits for its next file. `exempt` replaces the prefixes; an empty `description` clears it. A new URL is checked against the egress policy as on a create.
          */
         patch: operations["update_dns_list"];
         trace?: never;
@@ -2147,7 +2147,7 @@ export interface paths {
         put?: never;
         /**
          * Create a DNS zone
-         * @description Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only.
+         * @description Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only. A TSIG key named in `source.primaries[].key` or `transfer.notify[].key` needs `dns.keys` and must exist; a primary's address passes the egress policy of server-side fetches (no loopback, link-local, multicast, unspecified or metadata service address unless `[dns] egress_allow` lists its prefix).
          */
         post: operations["create_dns_zone"];
         delete?: never;
@@ -2179,7 +2179,7 @@ export interface paths {
         head?: never;
         /**
          * Change a DNS zone
-         * @description Scope: `dns.write`. A change of `soa` rewrites the SOA of every scope with the next serial; a new scope gets an SOA and a copy of the default scope's NS set; a removed scope loses its RRsets and journal.
+         * @description Scope: `dns.write`. A change of `soa` rewrites the SOA of every scope with the next serial; a new scope gets an SOA and a copy of the default scope's NS set; a removed scope loses its RRsets and journal. A TSIG key named in a new `source` or `transfer` needs `dns.keys` and must exist; a new primary's address passes the egress policy of server-side fetches.
          */
         patch: operations["update_dns_zone"];
         trace?: never;
@@ -31141,8 +31141,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `dns.write` */
+            /** @description The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys` */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A named TSIG key does not exist (`dns.key.not_found`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -31335,7 +31344,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `dns.write` */
+            /** @description The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys` */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -31344,7 +31353,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such access list (`dns.acl.not_found`) */
+            /** @description No such access list (`dns.acl.not_found`), or a named TSIG key does not exist (`dns.key.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -31686,7 +31695,7 @@ export interface operations {
                     "application/json": components["schemas"]["ForwarderItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`, parameters `field` and `reason`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`, parameters `field` and `reason`; `validate` on the root rule or under the Hardened profile) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -31704,7 +31713,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `dns.write` */
+            /** @description The principal lacks the scope `dns.write`, or `validate: false` without `dns.keys` or from a token */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -31889,7 +31898,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `dns.write` */
+            /** @description The principal lacks the scope `dns.write`, or `validate: false` without `dns.keys` or from a token */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -32224,7 +32233,7 @@ export interface operations {
                     "application/json": components["schemas"]["ListItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`, parameters `field` and `reason`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the list is invalid (`dns.list.invalid`, parameters `field` and `reason`; `source.url` for a URL the egress policy refuses) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -33467,7 +33476,7 @@ export interface operations {
                     "application/json": components["schemas"]["ZoneItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dns.zone.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dns.zone.invalid`; `source.primaries` for an address the egress policy refuses) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -33485,8 +33494,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `dns.write` */
+            /** @description The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys` */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A named TSIG key does not exist (`dns.key.not_found`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -33688,7 +33706,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `dns.write` */
+            /** @description The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys` */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -33697,7 +33715,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such zone (`dns.zone.not_found`) */
+            /** @description No such zone (`dns.zone.not_found`), or a named TSIG key does not exist (`dns.key.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
