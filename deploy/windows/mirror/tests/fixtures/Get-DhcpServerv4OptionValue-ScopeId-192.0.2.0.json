@@ -1,0 +1,80 @@
+[
+  {
+    "OptionId": 51,
+    "Name": "Lease",
+    "Type": "DWord",
+    "Value": [
+      "691200"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  },
+  {
+    "OptionId": 3,
+    "Name": "Router",
+    "Type": "IPv4Address",
+    "Value": [
+      "192.0.2.1"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  },
+  {
+    "OptionId": 6,
+    "Name": "DNS Servers",
+    "Type": "IPv4Address",
+    "Value": [
+      "192.0.2.5",
+      "192.0.2.6"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  },
+  {
+    "OptionId": 15,
+    "Name": "DNS Domain Name",
+    "Type": "String",
+    "Value": [
+      "corp.example.test"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  },
+  {
+    "OptionId": 1,
+    "Name": "Microsoft Disable Netbios Option",
+    "Type": "DWord",
+    "Value": [
+      "2"
+    ],
+    "VendorClass": "Microsoft Windows 2000 Options",
+    "UserClass": "",
+    "PolicyName": ""
+  },
+  {
+    "OptionId": 6,
+    "Name": "DNS Servers",
+    "Type": "IPv4Address",
+    "Value": [
+      "198.51.100.53"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": "guests"
+  },
+  {
+    "OptionId": 58,
+    "Name": "Renewal (T1) Time Value",
+    "Type": "DWord",
+    "Value": [
+      "345600"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  }
+]

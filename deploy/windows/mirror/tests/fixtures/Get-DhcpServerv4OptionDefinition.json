@@ -1,0 +1,103 @@
+[
+  {
+    "OptionId": 3,
+    "Name": "Router",
+    "Description": "Array of router addresses ordered by preference",
+    "Type": "IPv4Address",
+    "MultiValued": true,
+    "VendorClass": "",
+    "DefaultValue": null
+  },
+  {
+    "OptionId": 6,
+    "Name": "DNS Servers",
+    "Description": "Array of DNS server addresses, by preference",
+    "Type": "IPv4Address",
+    "MultiValued": true,
+    "VendorClass": "",
+    "DefaultValue": null
+  },
+  {
+    "OptionId": 15,
+    "Name": "DNS Domain Name",
+    "Description": "Domain name for client resolutions (DNS)",
+    "Type": "String",
+    "MultiValued": false,
+    "VendorClass": "",
+    "DefaultValue": null
+  },
+  {
+    "OptionId": 42,
+    "Name": "NTP Servers",
+    "Description": "Addresses of Network Time Protocol servers",
+    "Type": "IPv4Address",
+    "MultiValued": true,
+    "VendorClass": "",
+    "DefaultValue": null
+  },
+  {
+    "OptionId": 51,
+    "Name": "Lease",
+    "Description": "Client IP address lease time in seconds",
+    "Type": "DWord",
+    "MultiValued": false,
+    "VendorClass": "",
+    "DefaultValue": null
+  },
+  {
+    "OptionId": 66,
+    "Name": "Boot Server Host Name",
+    "Description": "TFTP boot server host name",
+    "Type": "String",
+    "MultiValued": false,
+    "VendorClass": "",
+    "DefaultValue": null
+  },
+  {
+    "OptionId": 1,
+    "Name": "Microsoft Disable Netbios Option",
+    "Description": "Option for enabling or disabling Netbios",
+    "Type": "DWord",
+    "MultiValued": false,
+    "VendorClass": "Microsoft Windows 2000 Options",
+    "DefaultValue": null
+  },
+  {
+    "OptionId": 128,
+    "Name": "Tenko test option",
+    "Description": "A site-specific text option",
+    "Type": "String",
+    "MultiValued": false,
+    "VendorClass": "",
+    "DefaultValue": null
+  },
+  {
+    "OptionId": 129,
+    "Name": "Site pair",
+    "Description": "",
+    "Type": "DWordDword",
+    "MultiValued": false,
+    "VendorClass": "",
+    "DefaultValue": null
+  },
+  {
+    "OptionId": 150,
+    "Name": "TFTP Server Address",
+    "Description": "Cisco TFTP servers",
+    "Type": "IPv4Address",
+    "MultiValued": true,
+    "VendorClass": "",
+    "DefaultValue": [
+      "192.0.2.7"
+    ]
+  },
+  {
+    "OptionId": 241,
+    "Name": "Phone configuration",
+    "Description": "Configuration URL of the phones",
+    "Type": "String",
+    "MultiValued": false,
+    "VendorClass": "Example Phones",
+    "DefaultValue": null
+  }
+]

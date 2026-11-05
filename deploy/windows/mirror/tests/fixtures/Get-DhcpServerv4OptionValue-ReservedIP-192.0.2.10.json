@@ -1,0 +1,24 @@
+[
+  {
+    "OptionId": 3,
+    "Name": "Router",
+    "Type": "IPv4Address",
+    "Value": [
+      "192.0.2.1"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  },
+  {
+    "OptionId": 42,
+    "Name": "NTP Servers",
+    "Type": "IPv4Address",
+    "Value": [
+      "192.0.2.6"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  }
+]

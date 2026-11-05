@@ -1,0 +1,902 @@
+[
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 167903424,
+      "IPAddressToString": "192.0.2.10"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-0A",
+    "Name": "printer01",
+    "Type": "Dhcp",
+    "Description": "Lobby printer"
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 184680640,
+      "IPAddressToString": "192.0.2.11"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-0B",
+    "Name": "NAS01",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 201457856,
+      "IPAddressToString": "192.0.2.12"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-0C",
+    "Name": "pxe.corp.example.test",
+    "Type": "Dhcp",
+    "Description": "PXE server"
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 218235072,
+      "IPAddressToString": "192.0.2.13"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-0D",
+    "Name": "PRINTER02.CORP.EXAMPLE.TEST",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 235012288,
+      "IPAddressToString": "192.0.2.14"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-0E",
+    "Name": "nas02.corp.example.test.",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 251789504,
+      "IPAddressToString": "192.0.2.15"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-0F",
+    "Name": "ESP_3A1F2B",
+    "Type": "Dhcp",
+    "Description": "Sensor, factory name"
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 268566720,
+      "IPAddressToString": "192.0.2.16"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-10",
+    "Name": "android-5f2c9e01d4a6b7c8",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 285343936,
+      "IPAddressToString": "192.0.2.17"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-11",
+    "Name": "living room tv",
+    "Type": "Dhcp",
+    "Description": "TV"
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 302121152,
+      "IPAddressToString": "192.0.2.18"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-12",
+    "Name": "Anna's iPad",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 318898368,
+      "IPAddressToString": "192.0.2.19"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-13",
+    "Name": "backup.other.example",
+    "Type": "Dhcp",
+    "Description": "Outside the zone"
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 335675584,
+      "IPAddressToString": "192.0.2.20"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-14",
+    "Name": "",
+    "Type": "Dhcp",
+    "Description": "No name"
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 352452800,
+      "IPAddressToString": "192.0.2.21"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-15",
+    "Name": "-switch01",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 369230016,
+      "IPAddressToString": "192.0.2.22"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-16",
+    "Name": "ap01",
+    "Type": "Both",
+    "Description": "Access point"
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 386007232,
+      "IPAddressToString": "192.0.2.23"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-17",
+    "Name": "legacy-terminal",
+    "Type": "Bootp",
+    "Description": "BOOTP only"
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 402784448,
+      "IPAddressToString": "192.0.2.24"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "ff-00-00-5e-00-53-24-00-01-00-01-2a-3b-4c-5d-00-00-5e-00-53-24",
+    "Name": "camera01",
+    "Type": "Dhcp",
+    "Description": "RFC 4361 identifier"
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 419561664,
+      "IPAddressToString": "192.0.2.25"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-19",
+    "Name": "switch01",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 436338880,
+      "IPAddressToString": "192.0.2.26"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-1A",
+    "Name": "switch02",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 453116096,
+      "IPAddressToString": "192.0.2.27"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-1B",
+    "Name": "ap02",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 469893312,
+      "IPAddressToString": "192.0.2.28"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-1C",
+    "Name": "ap03",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 486670528,
+      "IPAddressToString": "192.0.2.29"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-1D",
+    "Name": "camera02",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 503447744,
+      "IPAddressToString": "192.0.2.30"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-1E",
+    "Name": "camera03",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 520224960,
+      "IPAddressToString": "192.0.2.31"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-1F",
+    "Name": "printer03",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 537002176,
+      "IPAddressToString": "192.0.2.32"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-20",
+    "Name": "nas03",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 553779392,
+      "IPAddressToString": "192.0.2.33"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-21",
+    "Name": "server01.corp.example.test",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 570556608,
+      "IPAddressToString": "192.0.2.34"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-22",
+    "Name": "Server02",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 587333824,
+      "IPAddressToString": "192.0.2.35"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-23",
+    "Name": "iot-hub",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 604111040,
+      "IPAddressToString": "192.0.2.36"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-24",
+    "Name": "ESP_7C2D11",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 620888256,
+      "IPAddressToString": "192.0.2.37"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-25",
+    "Name": "android-0a1b2c3d4e5f6071",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 637665472,
+      "IPAddressToString": "192.0.2.38"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-26",
+    "Name": "Küche-TV",
+    "Type": "Dhcp",
+    "Description": ""
+  },
+  {
+    "IPAddress": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 654442688,
+      "IPAddressToString": "192.0.2.39"
+    },
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "ClientId": "00-00-5E-00-53-27",
+    "Name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "Type": "Dhcp",
+    "Description": "A label of 64 characters"
+  }
+]

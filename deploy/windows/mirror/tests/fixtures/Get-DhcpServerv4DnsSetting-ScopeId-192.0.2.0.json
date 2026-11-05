@@ -1,0 +1,10 @@
+[
+  {
+    "DynamicUpdates": "OnClientRequest",
+    "DeleteDnsRROnLeaseExpiry": true,
+    "UpdateDnsRRForOlderClients": true,
+    "NameProtection": true,
+    "DisableDnsPtrRRUpdate": false,
+    "DnsSuffix": ""
+  }
+]

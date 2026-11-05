@@ -1,0 +1,65 @@
+[
+  {
+    "Name": "Microsoft Windows 2000 Options",
+    "Type": "Vendor",
+    "Data": [
+      77,
+      83,
+      70,
+      84,
+      32,
+      53,
+      46,
+      48
+    ],
+    "AsciiData": "MSFT 5.0",
+    "Description": "Microsoft vendor-specific options for Windows 2000 Clients"
+  },
+  {
+    "Name": "Default BOOTP Class",
+    "Type": "User",
+    "Data": [
+      66,
+      79,
+      79,
+      84,
+      80
+    ],
+    "AsciiData": "BOOTP",
+    "Description": "User class for BOOTP clients"
+  },
+  {
+    "Name": "guests",
+    "Type": "User",
+    "Data": [
+      103,
+      117,
+      101,
+      115,
+      116,
+      115
+    ],
+    "AsciiData": "guests",
+    "Description": "Guest devices"
+  },
+  {
+    "Name": "Example Phones",
+    "Type": "Vendor",
+    "Data": [
+      69,
+      120,
+      97,
+      109,
+      112,
+      108,
+      101,
+      80,
+      104,
+      111,
+      110,
+      101
+    ],
+    "AsciiData": "ExamplePhone",
+    "Description": ""
+  }
+]

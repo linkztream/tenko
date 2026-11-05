@@ -1,0 +1,78 @@
+[
+  {
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "StartRange": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 1677852864,
+      "IPAddressToString": "192.0.2.100"
+    },
+    "EndRange": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 1828847808,
+      "IPAddressToString": "192.0.2.109"
+    }
+  },
+  {
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "StartRange": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 3187802304,
+      "IPAddressToString": "192.0.2.190"
+    },
+    "EndRange": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 3338797248,
+      "IPAddressToString": "192.0.2.199"
+    }
+  }
+]

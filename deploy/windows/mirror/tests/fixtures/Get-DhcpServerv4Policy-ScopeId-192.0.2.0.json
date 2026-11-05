@@ -1,0 +1,33 @@
+[
+  {
+    "Name": "guests",
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "Enabled": true,
+    "ProcessingOrder": 1,
+    "Condition": "Or",
+    "VendorClass": [],
+    "UserClass": [
+      "guests"
+    ],
+    "MacAddress": [],
+    "ClientId": [],
+    "RelayAgent": [],
+    "CircuitId": [],
+    "RemoteId": [],
+    "SubscriberId": [],
+    "Fqdn": [],
+    "LeaseDuration": null,
+    "Description": "Guest devices get the guest resolver"
+  }
+]

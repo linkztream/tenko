@@ -1,0 +1,47 @@
+[
+  {
+    "OptionId": 6,
+    "Name": "DNS Servers",
+    "Type": "IPv4Address",
+    "Value": [
+      "192.0.2.5",
+      "192.0.2.6"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  },
+  {
+    "OptionId": 15,
+    "Name": "DNS Domain Name",
+    "Type": "String",
+    "Value": [
+      "corp.example.test"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  },
+  {
+    "OptionId": 42,
+    "Name": "NTP Servers",
+    "Type": "IPv4Address",
+    "Value": [
+      "192.0.2.5"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  },
+  {
+    "OptionId": 6,
+    "Name": "DNS Servers",
+    "Type": "IPv4Address",
+    "Value": [
+      "198.51.100.53"
+    ],
+    "VendorClass": "",
+    "UserClass": "guests",
+    "PolicyName": ""
+  }
+]

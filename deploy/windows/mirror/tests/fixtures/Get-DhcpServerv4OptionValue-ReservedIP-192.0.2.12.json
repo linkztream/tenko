@@ -1,0 +1,13 @@
+[
+  {
+    "OptionId": 66,
+    "Name": "Boot Server Host Name",
+    "Type": "String",
+    "Value": [
+      "pxe.corp.example.test"
+    ],
+    "VendorClass": "",
+    "UserClass": "",
+    "PolicyName": ""
+  }
+]

@@ -1,0 +1,75 @@
+[
+  {
+    "ScopeId": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 131264,
+      "IPAddressToString": "192.0.2.0"
+    },
+    "SubnetMask": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 16777215,
+      "IPAddressToString": "255.255.255.0"
+    },
+    "Name": "Clients",
+    "Description": "The client network",
+    "StartRange": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 1677852864,
+      "IPAddressToString": "192.0.2.100"
+    },
+    "EndRange": {
+      "AddressFamily": 2,
+      "ScopeId": null,
+      "IsIPv6Multicast": false,
+      "IsIPv6LinkLocal": false,
+      "IsIPv6SiteLocal": false,
+      "IsIPv6Teredo": false,
+      "IsIPv6UniqueLocal": false,
+      "IsIPv4MappedToIPv6": false,
+      "Address": 3338797248,
+      "IPAddressToString": "192.0.2.199"
+    },
+    "LeaseDuration": {
+      "Ticks": 6912000000000,
+      "Days": 8,
+      "Hours": 0,
+      "Milliseconds": 0,
+      "Minutes": 0,
+      "Seconds": 0,
+      "TotalDays": 8.0,
+      "TotalHours": 192.0,
+      "TotalMilliseconds": 691200000.0,
+      "TotalMinutes": 11520.0,
+      "TotalSeconds": 691200.0
+    },
+    "State": "Active",
+    "Type": "Dhcp",
+    "Delay": 0,
+    "SuperscopeName": "campus",
+    "ActivatePolicies": true,
+    "NapEnable": false,
+    "NapProfile": "",
+    "MaxBootpClients": 4294967295
+  }
+]
