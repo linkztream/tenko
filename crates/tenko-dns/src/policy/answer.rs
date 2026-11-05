@@ -287,14 +287,8 @@ impl ForwardSink for PolicySink {
             ) else {
                 return;
             };
-            match reply {
-                ReplyPath::Udp(socket) => {
-                    let _ = socket.send_to(&message, client);
-                }
-                ReplyPath::Tcp(sender) => {
-                    let _ = sender.send(message).await;
-                }
-            }
+            // Handed over without waiting on the client's connection.
+            let _ = reply.deliver(client, message);
         });
         self.inner.submit(query);
     }

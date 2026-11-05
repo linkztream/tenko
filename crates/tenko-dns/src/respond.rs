@@ -28,7 +28,10 @@
 
 use std::{
     net::SocketAddr,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -40,6 +43,7 @@ use crate::{
     cookie::{CookieMode, CookieSecret},
     log::{NullLog, QueryLogEntry, QueryLogSink},
     metrics,
+    rate::RateDecision,
     resolver::{QueryContext, Resolution, Resolver},
     wire::{self, MAX_MESSAGE_LEN, SERVER_UDP_PAYLOAD},
 };
@@ -250,6 +254,37 @@ pub enum ReplyPath {
     Udp(Arc<std::net::UdpSocket>),
     /// Into the client's TCP connection (the octets of one message, without the length).
     Tcp(tokio::sync::mpsc::Sender<Vec<u8>>),
+}
+
+/// Answers to a stream connection that were dropped because the connection's channel was
+/// full or the connection had closed ([`ReplyPath::deliver`]).
+static REPLIES_DROPPED: AtomicU64 = AtomicU64::new(0);
+
+/// How many answers [`ReplyPath::deliver`] dropped since the process started.
+pub fn replies_dropped() -> u64 {
+    REPLIES_DROPPED.load(Ordering::Relaxed)
+}
+
+impl ReplyPath {
+    /// Hands an answer to the client without waiting: a UDP answer is sent from the
+    /// worker's socket to `client`; a stream answer is put into the connection's channel
+    /// when the channel has room and the connection is open, else it is dropped and
+    /// counted ([`replies_dropped`]). The caller never waits on a client's connection, so a
+    /// client that stops reading holds nothing but its own connection. Returns whether the
+    /// answer was handed over.
+    pub fn deliver(&self, client: SocketAddr, message: Vec<u8>) -> bool {
+        match self {
+            ReplyPath::Udp(socket) => socket.send_to(&message, client).is_ok(),
+            ReplyPath::Tcp(sender) => {
+                if sender.try_send(message).is_ok() {
+                    true
+                } else {
+                    REPLIES_DROPPED.fetch_add(1, Ordering::Relaxed);
+                    false
+                }
+            }
+        }
+    }
 }
 
 /// A query handed to the forwarder.
@@ -490,12 +525,76 @@ impl<R: Resolver> Responder<R> {
             batch,
         } = scratch;
         // WP6.2: an UPDATE leaves the query path; the path answers it through the reply
-        // path of the transport.
+        // path of the transport. Over UDP it first passes the admission every query
+        // passes (DNS-07, DNS-17): the parse, the cookie where the profile requires one,
+        // and the rate limiter, so that an unverified source gets at most what a query
+        // gets.
         if self.updates.is_some() && crate::update::message::is_update(message) {
-            return Reply::Forward {
+            let forward = Reply::Forward {
                 view: None,
                 rule: None,
             };
+            if conn.transport != QueryTransport::Udp {
+                return forward;
+            }
+            let query = match self.codec.parse(message, request) {
+                Ok(query) => query,
+                Err(CodecError::NotAQuery) => return Reply::Drop,
+                Err(_) => {
+                    if !wire::write_formerr(message, out) {
+                        return Reply::Drop;
+                    }
+                    self.finish(
+                        batch,
+                        conn,
+                        None,
+                        None,
+                        rcode::FORMERR,
+                        None,
+                        false,
+                        None,
+                        false,
+                        clock,
+                        now,
+                    );
+                    return Reply::Send;
+                }
+            };
+            answer.clear();
+            answer.udp_payload = self.udp_size;
+            let max_len = request.udp_len(self.udp_size);
+            let client = conn.client.ip();
+            let cookie = match self.cookie_mode {
+                CookieMode::Off => None,
+                _ => request.edns.and_then(|edns| edns.cookie),
+            };
+            if request.edns.is_some_and(|edns| edns.version != 0) {
+                answer.rcode = rcode::BADVERS;
+            } else if let Some(cookie) = &cookie
+                && self.cookie_mode == CookieMode::Required
+                && !self.cookies.verify(cookie, client, clock.unix_secs)
+            {
+                answer.rcode = rcode::BADCOOKIE;
+            } else {
+                match self.resolver.admit(conn.client, conn.transport, now) {
+                    RateDecision::Send => return forward,
+                    RateDecision::Drop => return Reply::Drop,
+                    RateDecision::Slip => answer.truncated = true,
+                }
+            }
+            return self.build(
+                batch,
+                conn,
+                request,
+                None,
+                &query,
+                max_len,
+                cookie.as_ref(),
+                clock,
+                now,
+                answer,
+                out,
+            );
         }
         // WP6.1: NOTIFY, IXFR (the SOA only) and signed SOA queries over UDP.
         if conn.transport == QueryTransport::Udp
@@ -722,16 +821,12 @@ impl<R: Resolver> Responder<R> {
     /// Allocates the copy of the query: the forwarder runs off the query path. The cookie
     /// option of the answer is computed here, from the query's client cookie.
     pub fn forward(&self, message: &[u8], conn: &Conn, reply: Reply, path: ReplyPath) {
-        // WP6.2: an UPDATE goes to the update path.
+        // WP6.2: an UPDATE goes to the update path, which copies it only once it has a
+        // place for it.
         if let Some(updates) = &self.updates
             && crate::update::message::is_update(message)
         {
-            updates.submit(crate::update::UpdateQuery {
-                message: message.to_vec(),
-                conn: *conn,
-                reply: path,
-                at: Instant::now(),
-            });
+            updates.submit(message, conn, path);
             return;
         }
         if let (Some(sink), Reply::Forward { view, rule }) = (&self.forward, reply) {
@@ -932,6 +1027,119 @@ mod tests {
         );
         assert_eq!(reply, Reply::Send);
         assert_eq!(counted(QueryTransport::Tcp), tcp_before + 1);
+    }
+
+    /// An UPDATE over UDP passes what a query passes before it leaves the query path
+    /// (DNS-07, DNS-17): a cookie the profile requires, the rate limiter's decision, and
+    /// the parse; over a stream it goes to the update path as it is.
+    #[test]
+    fn a_udp_update_passes_the_cookie_check_and_the_rate_limiter() {
+        struct Sink;
+        impl crate::update::UpdateSink for Sink {
+            fn submit(&self, _: &[u8], _: &Conn, _: ReplyPath) {}
+        }
+        /// A resolver whose rate limiter says what the test sets.
+        struct Gate(Arc<std::sync::Mutex<RateDecision>>);
+        impl Resolver for Gate {
+            fn resolve(&self, _: &QueryContext<'_>, answer: &mut AnswerBuf) -> Resolution {
+                answer.rcode = rcode::NOTIMP;
+                Resolution::Answered { view: None }
+            }
+            fn admit(&self, _: SocketAddr, _: QueryTransport, _: Instant) -> RateDecision {
+                *self
+                    .0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            }
+        }
+        let decision = Arc::new(std::sync::Mutex::new(RateDecision::Send));
+        let decide = |next| {
+            *decision
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = next;
+        };
+        let responder = Responder::new(
+            Gate(Arc::clone(&decision)),
+            CookieSecret::with_secret([5; 16]),
+        )
+        .with_cookie_mode(CookieMode::Required)
+        .with_updates(Arc::new(Sink))
+        .with_metrics(false);
+        let mut update = Vec::new();
+        crate::update::message::write_request(
+            &mut update,
+            0x2136,
+            b"\x07example\x04test\x00",
+            (0, &[]),
+            (0, &[]),
+        );
+        let conn = |transport| Conn {
+            client: "192.0.2.77:40000".parse().expect("client"),
+            local: "192.0.2.53:53".parse().expect("local"),
+            transport,
+        };
+        let udp = conn(QueryTransport::Udp);
+        let clock = Clock::now();
+        let mut scratch = Scratch::new();
+        let forward = Reply::Forward {
+            view: None,
+            rule: None,
+        };
+        let ask = |message: &[u8], conn: &Conn, scratch: &mut Scratch| {
+            responder.respond(message, conn, &clock, Instant::now(), scratch)
+        };
+
+        // Without a cookie, admitted: it leaves the query path as before.
+        assert_eq!(ask(&update, &udp, &mut scratch), forward);
+
+        // A client cookie without a valid server cookie: BADCOOKIE with a fresh cookie, as
+        // for a query; the update path never sees the message.
+        let mut with_cookie = update.clone();
+        with_cookie[11] = 1;
+        with_cookie.extend_from_slice(&[0, 0, 41, 4, 208, 0, 0, 0, 0, 0, 12, 0, 10, 0, 8]);
+        with_cookie.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(ask(&with_cookie, &udp, &mut scratch), Reply::Send);
+        let header = wire::parse_header(&scratch.out).expect("header");
+        assert_eq!(
+            (
+                header.id,
+                header.qr,
+                header.opcode,
+                u16::from(header.rcode),
+                header.arcount
+            ),
+            (0x2136, true, 5, rcode::BADCOOKIE & 0x0f, 1)
+        );
+        // Over a stream the cookie is not required: forwarded as it is.
+        assert_eq!(
+            ask(&with_cookie, &conn(QueryTransport::Tcp), &mut scratch),
+            forward
+        );
+
+        // The rate limiter's slip is an empty truncated answer, its drop is silence.
+        decide(RateDecision::Slip);
+        assert_eq!(ask(&update, &udp, &mut scratch), Reply::Send);
+        let header = wire::parse_header(&scratch.out).expect("header");
+        assert!(header.tc && header.rcode == 0 && header.ancount == 0);
+        decide(RateDecision::Drop);
+        assert_eq!(ask(&update, &udp, &mut scratch), Reply::Drop);
+        assert_eq!(
+            ask(&update, &conn(QueryTransport::Tcp), &mut scratch),
+            forward,
+            "the response rate limiter applies to UDP"
+        );
+        decide(RateDecision::Send);
+
+        // A message that does not parse gets the header-only FORMERR of a query.
+        let mut two_zones = update.clone();
+        two_zones[5] = 2;
+        assert_eq!(ask(&two_zones, &udp, &mut scratch), Reply::Send);
+        assert_eq!(scratch.out.len(), wire::HEADER_LEN);
+        assert_eq!(
+            wire::parse_header(&scratch.out).expect("header").rcode,
+            1,
+            "FORMERR"
+        );
     }
 
     #[test]

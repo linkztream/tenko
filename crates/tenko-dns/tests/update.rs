@@ -26,11 +26,11 @@ use tenko_core::{
 use tenko_dns::{
     catalog::{self, CatalogHandle},
     index::{DefaultScopes, Index as _, Lookup},
-    respond::Conn,
+    respond::{Conn, ReplyPath},
     store_feed,
     tsig::{self, Signer, TsigKey, Verifier},
     update::{
-        UpdatePath, UpdateSettings,
+        UpdatePath, UpdateSettings, UpdateSink as _,
         message::{CLASS_ANY, CLASS_IN, CLASS_NONE, TYPE_ANY, push_record, rcode, write_request},
         policy::{ProfileCell, UpdateProfile},
     },
@@ -931,4 +931,94 @@ async fn cname_rules_and_the_soa_are_kept() {
             .is_some()
     );
     assert!(lab.rrset("alias.example.test", Rtype::A).await.is_none());
+}
+
+/// DNS-11: the sink admits an UPDATE before it copies it. Over the node's bound or the
+/// client's, the answer is a header-only SERVFAIL written at once on the caller's thread
+/// (the runtime of this test runs no task until it is awaited, so nothing was started for
+/// it), and the places come back when the admitted updates are answered. A client is an
+/// IPv4 address or an IPv6 /64.
+#[tokio::test]
+async fn updates_over_the_admission_bounds_are_refused_before_they_are_copied() {
+    let settings = UpdateSettings {
+        index_wait: Duration::from_millis(300),
+        in_flight: 2,
+        per_source: 1,
+        ..UpdateSettings::default()
+    };
+    // The index does not follow: every admitted update holds its place for the index wait.
+    let lab = lab_with(false, settings, UpdateProfile::Standard).await;
+    let signed = |id: u16| {
+        let mut message = Msg::default()
+            .add("new.example.test", 1, 60, &A_9)
+            .bytes(id);
+        message.extend_from_slice(&[0, 0, 41, 4, 208, 0, 0, 0, 0, 0, 0]);
+        message[11] = 1;
+        let mut signer = Signer::request(Arc::clone(&lab.key));
+        assert!(signer.sign(&mut message, now(), 0, &[], MAX_MESSAGE_LEN));
+        message
+    };
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(8);
+    let reply = ReplyPath::Tcp(sender);
+    let refusal = |receiver: &mut tokio::sync::mpsc::Receiver<Vec<u8>>, id: u16| {
+        let answer = receiver.try_recv().expect("answered at once");
+        let header = wire::parse_header(&answer).expect("header");
+        assert_eq!(
+            (
+                header.id,
+                header.qr,
+                header.opcode,
+                header.rcode,
+                answer.len()
+            ),
+            (id, true, 5, 2, wire::HEADER_LEN),
+            "a header-only SERVFAIL"
+        );
+    };
+
+    lab.path
+        .submit(&signed(1), &client("192.0.2.10"), reply.clone());
+    assert_eq!((lab.path.in_flight(), lab.path.refused()), (1, 0));
+    // The same client's second update is over its bound.
+    lab.path
+        .submit(&signed(2), &client("192.0.2.10"), reply.clone());
+    assert_eq!((lab.path.in_flight(), lab.path.refused()), (1, 1));
+    refusal(&mut receiver, 2);
+    // Another client fits under the node's bound; a third client does not.
+    lab.path
+        .submit(&signed(3), &client("192.0.2.11"), reply.clone());
+    assert_eq!((lab.path.in_flight(), lab.path.refused()), (2, 1));
+    lab.path
+        .submit(&signed(4), &client("192.0.2.12"), reply.clone());
+    assert_eq!((lab.path.in_flight(), lab.path.refused()), (2, 2));
+    refusal(&mut receiver, 4);
+
+    // The admitted updates are answered and give their places back.
+    for _ in 0..2 {
+        let answer = tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+            .await
+            .expect("in time")
+            .expect("an answer");
+        let header = wire::parse_header(&answer).expect("header");
+        assert!(header.id == 1 || header.id == 3);
+        assert_eq!(header.rcode, 2, "SERVFAIL: the index did not follow");
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while lab.path.in_flight() > 0 && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(lab.path.in_flight(), 0);
+
+    // Two addresses of one IPv6 /64 are one client.
+    lab.path
+        .submit(&signed(5), &client("2001:db8:1:2::1"), reply.clone());
+    assert_eq!((lab.path.in_flight(), lab.path.refused()), (1, 2));
+    lab.path
+        .submit(&signed(6), &client("2001:db8:1:2:ffff::6"), reply.clone());
+    assert_eq!((lab.path.in_flight(), lab.path.refused()), (1, 3));
+    refusal(&mut receiver, 6);
+    lab.path
+        .submit(&signed(7), &client("2001:db8:1:3::1"), reply.clone());
+    assert_eq!((lab.path.in_flight(), lab.path.refused()), (2, 3));
+    lab.stop.cancel();
 }

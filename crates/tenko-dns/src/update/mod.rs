@@ -10,7 +10,13 @@
 //! The listeners hand an UPDATE to the path off the query path: the responder answers it
 //! [`crate::respond::Reply::Forward`], and [`crate::respond::Responder::forward`] gives it
 //! to the [`UpdateSink`] with the transport's reply path. An ordinary query costs one
-//! octet compare and allocates nothing more. The path then, on the runtime:
+//! octet compare and allocates nothing more; an UPDATE over UDP first passes the admission
+//! of a query (the parse, the cookie where required, the rate limiter). The sink admits the
+//! message before it copies it: at most [`UpdateSettings::in_flight`] updates are in
+//! flight on the node and [`UpdateSettings::per_source`] from one client (an IPv4 address
+//! or an IPv6 /64); one over a bound is answered a header-only SERVFAIL, counted, with
+//! nothing copied and nothing started. Its answer is handed to the client's connection
+//! without waiting ([`ReplyPath::deliver`]). The path then, on the runtime:
 //!
 //! 1. reads the TSIG record and verifies it (BADKEY, BADSIG, BADTIME are answered NOTAUTH
 //!    with the TSIG error, a truncated MAC FORMERR), then parses the message (FORMERR,
@@ -44,7 +50,10 @@ pub mod prereq;
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -66,31 +75,20 @@ use self::{
 use crate::{
     catalog::{CatalogHandle, ViewQuery, ViewScopes},
     index::ScopeOf as _,
+    rate::limiter::prefix_bits,
     respond::{Conn, ReplyPath},
     tsig::{self, Signer, Verified},
-    wire::{self, CLASSIC_UDP_LEN, MAX_MESSAGE_LEN, SERVER_UDP_PAYLOAD},
+    wire::{self, CLASSIC_UDP_LEN, HEADER_LEN, MAX_MESSAGE_LEN, SERVER_UDP_PAYLOAD},
     xfr::{Directory, TransferAudit, out::unix_now},
     zone::ZoneService,
 };
 
-/// An UPDATE handed over by a listener.
-#[derive(Debug)]
-pub struct UpdateQuery {
-    /// The message's octets.
-    pub message: Vec<u8>,
-    /// Where it came from.
-    pub conn: Conn,
-    /// Where the answer goes.
-    pub reply: ReplyPath,
-    /// When it arrived.
-    pub at: Instant,
-}
-
 /// The update path the responder hands UPDATE messages to (`server::Hooks::updates`).
 /// `submit` runs on a listener's thread (a UDP worker): it must not block.
 pub trait UpdateSink: Send + Sync {
-    /// Takes one UPDATE.
-    fn submit(&self, query: UpdateQuery);
+    /// Takes one UPDATE as the listener read it, from `conn`, answered through `reply`.
+    /// The sink decides on the message before it copies it.
+    fn submit(&self, message: &[u8], conn: &Conn, reply: ReplyPath);
 }
 
 /// The limits of the update path.
@@ -105,6 +103,12 @@ pub struct UpdateSettings {
     pub queue: usize,
     /// How long the task of a zone without updates stays.
     pub idle: Duration,
+    /// UPDATE messages in flight at once on the node, admitted before a message is copied;
+    /// one over the bound is answered SERVFAIL (`update.in_flight`).
+    pub in_flight: usize,
+    /// UPDATE messages in flight at once from one client, an IPv4 address or an IPv6 /64
+    /// (`update.per_source`).
+    pub per_source: usize,
 }
 
 impl Default for UpdateSettings {
@@ -114,6 +118,8 @@ impl Default for UpdateSettings {
             max_group: 256,
             queue: 4096,
             idle: Duration::from_secs(300),
+            in_flight: 256,
+            per_source: 16,
         }
     }
 }
@@ -262,6 +268,38 @@ struct Inner {
     settings: UpdateSettings,
     queues: Mutex<HashMap<ZoneId, mpsc::Sender<Pending>>>,
     stop: CancellationToken,
+    /// The updates in flight on the node, and per client prefix.
+    in_flight: AtomicUsize,
+    sources: Mutex<HashMap<Source, usize>>,
+    /// The updates refused by the admission bounds.
+    refused: AtomicU64,
+}
+
+/// A client of the admission: the address family and the bits of its prefix, a /32 for
+/// IPv4 and a /64 for IPv6 (the grouping of the rate limiter and the connection caps).
+type Source = (u8, u128);
+
+/// An update admitted under the bounds; its place is given back when it is dropped.
+struct Admitted {
+    inner: Arc<Inner>,
+    source: Source,
+}
+
+impl Drop for Admitted {
+    fn drop(&mut self) {
+        let mut sources = self
+            .inner
+            .sources
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = sources.get_mut(&self.source) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                sources.remove(&self.source);
+            }
+        }
+        self.inner.in_flight.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 impl UpdatePath {
@@ -317,37 +355,51 @@ impl UpdatePath {
                 settings,
                 queues: Mutex::new(HashMap::new()),
                 stop,
+                in_flight: AtomicUsize::new(0),
+                sources: Mutex::new(HashMap::new()),
+                refused: AtomicU64::new(0),
             }),
         }
     }
 
     /// Answers one UPDATE: the octets of the answer, or `None` for no answer. What
-    /// [`UpdateSink::submit`] runs for each message, for tests and tools.
+    /// [`UpdateSink::submit`] runs for each admitted message, for tests and tools.
     pub async fn answer(&self, message: &[u8], conn: &Conn) -> Option<Vec<u8>> {
         Arc::clone(&self.inner).answer(message, conn).await
+    }
+
+    /// The updates in flight on the node right now.
+    pub fn in_flight(&self) -> usize {
+        self.inner.in_flight.load(Ordering::Relaxed)
+    }
+
+    /// The updates the admission bounds refused since the path started.
+    pub fn refused(&self) -> u64 {
+        self.inner.refused.load(Ordering::Relaxed)
     }
 }
 
 impl UpdateSink for UpdatePath {
-    fn submit(&self, query: UpdateQuery) {
+    fn submit(&self, message: &[u8], conn: &Conn, reply: ReplyPath) {
+        let at = Instant::now();
+        let Some(admitted) = self.inner.admit(conn.client.ip()) else {
+            // Over a bound: a header-only SERVFAIL (no larger than the request), nothing
+            // copied and nothing started.
+            let mut out = Vec::with_capacity(HEADER_LEN);
+            if message::write_answer(message, None, rcode::SERVFAIL, None, &mut out) {
+                UPDATE_COUNTER.inc(MetricOutcome::Failed as u16);
+                let _ = reply.deliver(conn.client, out);
+            }
+            return;
+        };
         let inner = Arc::clone(&self.inner);
+        let message = message.to_vec();
+        let conn = *conn;
         self.inner.runtime.spawn(async move {
-            let UpdateQuery {
-                message,
-                conn,
-                reply,
-                at,
-            } = query;
-            let answer = inner.answer(&message, &conn).await;
-            if let Some(answer) = answer {
-                match reply {
-                    ReplyPath::Udp(socket) => {
-                        let _ = socket.send_to(&answer, conn.client);
-                    }
-                    ReplyPath::Tcp(sender) => {
-                        let _ = sender.send(answer).await;
-                    }
-                }
+            let _admitted = admitted;
+            if let Some(answer) = inner.answer(&message, &conn).await {
+                // Handed over without waiting on the client's connection.
+                let _ = reply.deliver(conn.client, answer);
             }
             let micros = u64::try_from(at.elapsed().as_micros()).unwrap_or(u64::MAX);
             UPDATE_LATENCY.observe(micros);
@@ -392,6 +444,29 @@ fn finish(
 }
 
 impl Inner {
+    /// A place under the admission bounds for an update from `client`, or `None` (counted)
+    /// over the node's or the client's bound.
+    fn admit(self: &Arc<Self>, client: IpAddr) -> Option<Admitted> {
+        let source = prefix_bits(client, 32, 64);
+        let mut sources = self.sources.lock().unwrap_or_else(PoisonError::into_inner);
+        let count = sources.entry(source).or_insert(0);
+        if self.in_flight.load(Ordering::Relaxed) >= self.settings.in_flight
+            || *count >= self.settings.per_source
+        {
+            if *count == 0 {
+                sources.remove(&source);
+            }
+            self.refused.fetch_add(1, Ordering::Relaxed);
+            return None;
+        }
+        *count += 1;
+        self.in_flight.fetch_add(1, Ordering::Relaxed);
+        Some(Admitted {
+            inner: Arc::clone(self),
+            source,
+        })
+    }
+
     async fn answer(self: Arc<Self>, request: &[u8], conn: &Conn) -> Option<Vec<u8>> {
         let header = wire::parse_header(request)?;
         if header.qr {

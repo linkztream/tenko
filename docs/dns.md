@@ -422,7 +422,8 @@ The `[dns]` section of `tenko.toml` ([`deploy/tenko.example.toml`](../deploy/ten
 | `cookies` | `on` | DNS cookies: `on`, `required` or `off` (section 12.5) |
 | `udp.socket` | `auto` | `reuseport` (a socket per worker, Linux only), `shared` (one socket per address), or `auto` (`reuseport` on Linux, `shared` elsewhere) |
 | `udp.recv_buffer`, `udp.send_buffer` | 8388608 | Socket buffers in octets; 0 keeps the system's |
-| `tcp.max_connections`, `tcp.per_client`, `tcp.idle_secs` | 1000, 10, 10 | The TCP limits of section 12.6 |
+| `tcp.max_connections`, `tcp.per_client`, `tcp.idle_secs`, `tcp.write_timeout_secs` | 1000, 10, 10, 5 | The TCP limits of section 12.6 |
+| `update.in_flight`, `update.per_source` | 256, 16 | The admission of dynamic updates, section 13.5 |
 | `edns.udp_size` | 1232 | The server's EDNS UDP size, 512 to 4096 |
 | `forwarders`, `forward_timeout_ms`, `forward_retries`, `upstream_ca` | none, 2000, 2, none | The default forwarder and the upstreams' budget and CA ([dns-resolver.md](dns-resolver.md) section 4.5) |
 | `cache.*` | | The cache ([dns-resolver.md](dns-resolver.md) section 3) |
@@ -884,7 +885,7 @@ The order of one query (plan sections 2.2 and 2.3):
 
 ### 12.6 TCP
 
-DNS over TCP follows RFC 7766 on the tokio runtime: each message is preceded by its two-octet length; a client may pipeline queries, which are answered in arrival order, and the answers are written together when no further query is buffered (or 32 KiB of answers wait). A connection is closed after the idle time without a query (10 seconds), when a message is cut, or when the server stops. The node accepts at most 1,000 open connections and 10 from one client address; a connection over either cap is closed at once and counted. TCP never answers BADCOOKIE. The query buffers are kept per runtime thread, so a TCP query allocates nothing either.
+DNS over TCP follows RFC 7766 on the tokio runtime: each message is preceded by its two-octet length; a client may pipeline queries, which are answered in arrival order, and the answers are written together when no further query is buffered (or 32 KiB of answers wait). A connection is closed after the idle time without a query (10 seconds), when a message is cut, or when the server stops. A write of answers that takes longer than `tcp.write_timeout_secs` (5 seconds) closes the connection, so a client that stops reading its answers loses its connection and holds nothing else of the node; the kernel's own deadline on unacknowledged data (`TCP_USER_TIMEOUT` on Linux) and keepalive probes are set to match. The node accepts at most 1,000 open connections and 10 from one client, where a client is an IPv4 address or an IPv6 /64 (`tcp.per_client`, the grouping of the rate limiter); a connection over either cap is closed at once and counted. The forwarder hands a connection its answers without waiting: an answer a connection has no room for (64 waiting) is dropped and counted (`tenko_dns::respond::replies_dropped`), and the forwarder's in-flight permits are never held on a client's connection. TCP never answers BADCOOKIE. The query buffers are kept per runtime thread, so a TCP query allocates nothing either.
 
 ### 12.7 Settings and limits
 
@@ -899,6 +900,7 @@ The `[dns]` keys of the configuration (`deploy/tenko.example.toml`, [section 8](
 | `tcp.max_connections` | `tcp.max_connections` | 1000 | Open TCP connections per node, 1 to 100,000 |
 | `tcp.per_client` | `tcp.per_client` | 10 | Open TCP connections per client address, 1 to 1,000 |
 | `tcp.idle_secs` | `tcp.idle` | 10 | Seconds without a query before a TCP connection is closed, 1 to 300 |
+| `tcp.write_timeout_secs` | `tcp.write_timeout` | 5 | Seconds a write of answers to a client may take before its connection is closed, 1 to 60 |
 | `edns.udp_size` | `edns_udp_size` | 1232 | The server's EDNS UDP size, 512 to 4096 |
 | `cookies` | `cookies` | `on` | `on`, `required` or `off` (section 12.5) |
 
@@ -950,7 +952,7 @@ Clients change the records of a primary zone with RFC 2136 updates: `nsupdate`, 
 
 ### 13.1 The message
 
-An UPDATE is a message with opcode 5 over UDP or TCP on the `[dns] listen` ports (also over DoT and DoH, which carry the same messages). The listeners hand it to the update path before the resolver sees it, off the query path: an ordinary query pays one comparison of its opcode and allocates nothing more (section 12.9). The four sections are the zone (one record of type SOA naming the zone, class IN), the prerequisites, the updates and the additional records (OPT and TSIG; anything else is ignored). The format rules of RFC 2136 sections 2.4, 3.2 and 3.4.1 apply:
+An UPDATE is a message with opcode 5 over UDP or TCP on the `[dns] listen` ports (also over DoT and DoH, which carry the same messages). The listeners hand it to the update path before the resolver sees it, off the query path: an ordinary query pays one comparison of its opcode and allocates nothing more (section 12.9). Over UDP an UPDATE first passes what a query passes: a message that does not parse gets the header-only FORMERR of a query, a client cookie without a valid server cookie gets BADCOOKIE under `cookies = "required"` (section 12.5), and the response rate limiter decides as for an error response (DNS-17: a limited client gets the slip or nothing). The four sections are the zone (one record of type SOA naming the zone, class IN), the prerequisites, the updates and the additional records (OPT and TSIG; anything else is ignored). The format rules of RFC 2136 sections 2.4, 3.2 and 3.4.1 apply:
 
 | Answer | When |
 |---|---|
@@ -1033,6 +1035,9 @@ The updates of one zone are serialized: one task per zone takes what waits for t
 
 - **NOERROR** only once the index the node answers from holds the commit, so that a client's next query, or the prerequisites of its next update, see the change. The wait is at most 2 seconds; an update still not served then is answered SERVFAIL with the extended error 14 (Not Ready), and the node logs it. The change is committed and is served shortly after.
 - **SERVFAIL** when the store refuses the write: no quorum (OPS-26), a refused batch. The extended error names the store's code (`the store refused the write (sys.store.no_quorum)`), nothing is written, and the client retries as RFC 2136 clients do. The health view says why the store refuses. More than 4,096 updates waiting for one zone are answered SERVFAIL as well.
+- **SERVFAIL, header only**, before anything else, for an update over the admission bounds: at most `update.in_flight` updates (256) are in flight on the node and `update.per_source` (16) from one client, an IPv4 address or an IPv6 /64; one over a bound is answered at once with nothing copied and no task started, and counted as `failed`. The extended error text of any refusal is at most 64 octets, so an answer stays close to the size of its request.
+
+The answer reaches the client through the transport's reply path without waiting on the connection: an answer a stream connection has no room for is dropped and counted (section 12.6).
 
 The metrics:
 
@@ -1081,4 +1086,4 @@ The round `update` of [`deploy/compose/lab-dns`](../deploy/compose/lab-dns/READM
 - An update of the SOA is ignored rather than applied: the SOA follows the zone settings.
 - The prerequisites of an update read the RRsets of its names as the store holds them under the commit, and the write expects those RRsets unchanged; an RRset of another type that a concurrent write of the API creates at a name that should not be in use, in the same moment, is not caught by that expectation.
 - The `dns` role serves updates when it runs in the controller's process (Phase 2); the `Dns.Update` message of a remote node is Phase 5.
-- No per-client rate limit applies to updates beyond the queue of 4,096 per zone; a storm from one client is bounded by its access list and its key.
+- Beyond the admission bounds of section 13.5 (`update.in_flight`, `update.per_source`), the queue of 4,096 per zone and the rate limiter over UDP, no per-client rate limit applies to updates; a storm from one client is bounded by its access list and its key.

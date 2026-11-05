@@ -802,3 +802,40 @@ fn names_are_matched_against_suffixes_by_label() {
         &suffix("example.test")
     ));
 }
+
+/// An answer to a connection whose channel is full is dropped and counted; the forwarder
+/// never waits on a client's connection, so it keeps answering every other client.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_answer_to_a_full_connection_channel_is_dropped_and_counted() {
+    let upstream = udp_upstream(Behavior::Answer(60));
+    let (forwarder, stop) = start(vec![upstream.spec()]);
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
+    sender.try_send(vec![0u8; 12]).expect("fills the channel");
+    let before = crate::respond::replies_dropped();
+    for id in 0..3 {
+        forwarder.submit(ForwardQuery {
+            message: query(id, None),
+            client: "127.0.0.1:5000".parse().expect("address"),
+            transport: QueryTransport::Tcp,
+            view: None,
+            rule: None,
+            cookie: None,
+            reply: ReplyPath::Tcp(sender.clone()),
+        });
+    }
+    // Another client is answered meanwhile.
+    let peer = Arc::new(Peer::new());
+    let answer = peer.ask(&forwarder, query(9, None)).await;
+    assert_eq!(wire::parse_header(&answer).expect("header").id, 9);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while crate::respond::replies_dropped() < before + 3 && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        crate::respond::replies_dropped() >= before + 3,
+        "three answers dropped and counted"
+    );
+    assert_eq!(receiver.try_recv().expect("the filler"), vec![0u8; 12]);
+    assert!(receiver.try_recv().is_err(), "nothing waited behind it");
+    stop.cancel();
+}

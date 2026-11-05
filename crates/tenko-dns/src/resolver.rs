@@ -16,7 +16,10 @@ use std::{net::SocketAddr, time::Instant};
 
 use tenko_core::dns::{ForwardRuleId, QueryTransport, ViewId};
 
-use crate::codec::{AnswerBuf, Request};
+use crate::{
+    codec::{AnswerBuf, Request},
+    rate::RateDecision,
+};
 
 /// What the resolver knows about a query besides its content.
 #[derive(Debug, Clone, Copy)]
@@ -62,4 +65,14 @@ pub trait Resolver: Send + Sync {
     /// lock that a writer holds for long and allocates nothing (ADR 0009); an answer that
     /// does not fit the buffer is SERVFAIL.
     fn resolve(&self, query: &QueryContext<'_>, answer: &mut AnswerBuf) -> Resolution;
+
+    /// What the rate limiter says about a message that leaves the query path before the
+    /// resolver sees it (an UPDATE over UDP, answered later by the update path): the
+    /// per-client query limit and the response rate limiter, applied as to an error
+    /// response over `transport` (DNS-17). Allocates nothing. The default admits every
+    /// message.
+    fn admit(&self, client: SocketAddr, transport: QueryTransport, now: Instant) -> RateDecision {
+        let _ = (client, transport, now);
+        RateDecision::Send
+    }
 }

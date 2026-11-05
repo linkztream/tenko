@@ -318,8 +318,9 @@ pub fn parse(message: &[u8]) -> Result<UpdateMessage, ParseError> {
         Ok((record, name))
     };
 
-    // The prerequisite section (section 3.2).
-    let mut prerequisites: Vec<Prerequisite> = Vec::with_capacity(usize::from(header.ancount));
+    // The prerequisite section (section 3.2). The counts are the sender's claim: the
+    // vectors grow as records parse, so a short message that claims many reserves nothing.
+    let mut prerequisites: Vec<Prerequisite> = Vec::new();
     for _ in 0..header.ancount {
         let (record, name) = read(pos)?;
         pos = record.end();
@@ -380,7 +381,7 @@ pub fn parse(message: &[u8]) -> Result<UpdateMessage, ParseError> {
     }
 
     // The update section (the prescan of section 3.4.1).
-    let mut updates = Vec::with_capacity(usize::from(header.nscount));
+    let mut updates = Vec::new();
     for _ in 0..header.nscount {
         let (record, name) = read(pos)?;
         pos = record.end();
@@ -544,9 +545,10 @@ fn decompress(message: &[u8], rtype: u16, start: usize, end: usize) -> Option<Ve
     (pos == end).then_some(out)
 }
 
-/// The longest extended error text an answer carries, so that a signed answer fits in
-/// 512 octets.
-pub const MAX_EDE_TEXT: usize = 200;
+/// The longest extended error text an answer carries: a refusal says why in a few words
+/// and stays close to the size of the request it answers, and a signed answer fits in 512
+/// octets.
+pub const MAX_EDE_TEXT: usize = 64;
 
 /// The OPT record of an answer: the server's UDP size and an extended error.
 #[derive(Debug, Clone, Copy)]
@@ -728,6 +730,33 @@ mod tests {
         assert_eq!(parse(&message).unwrap_err().rcode(), Some(rcode::FORMERR));
         message[2] |= 0x80;
         assert_eq!(parse(&message).unwrap_err(), ParseError::NotUpdate);
+    }
+
+    /// A refusal says why in a few words: the extended error text is cut at the bound, so
+    /// that an answer stays close to the size of the request.
+    #[test]
+    fn the_extended_error_text_is_short() {
+        let mut message = Vec::new();
+        write_request(&mut message, 0x1234, ZONE, (0, &[]), (0, &[]));
+        let parsed = parse(&message).expect("update");
+        let long = "x".repeat(300);
+        let mut out = Vec::new();
+        assert!(write_answer(
+            &message,
+            Some(parsed.zone_end),
+            rcode::REFUSED,
+            Some(AnswerEdns {
+                udp_size: 1232,
+                error: Some((ede::PROHIBITED, &long)),
+            }),
+            &mut out
+        ));
+        let end = wire::questions_end(&out, 1).expect("zone");
+        let opt = wire::read_record(&out, end).expect("opt");
+        let (_, value) = wire::options(opt.data(&out)).next().expect("option");
+        assert_eq!(value.len(), 2 + MAX_EDE_TEXT);
+        const { assert!(MAX_EDE_TEXT <= 64) }
+        assert!(out.len() < message.len() + 100);
     }
 
     #[test]

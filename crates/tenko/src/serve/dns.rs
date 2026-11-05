@@ -222,6 +222,7 @@ fn server_config(section: &DnsSection, listen: Vec<SocketAddr>) -> ServerConfig 
             max_connections: section.tcp.max_connections,
             per_client: section.tcp.per_client,
             idle: Duration::from_secs(section.tcp.idle_secs),
+            write_timeout: Duration::from_secs(section.tcp.write_timeout_secs),
         }),
         metrics: true,
         cookies: match section.cookies {
@@ -340,6 +341,8 @@ fn encrypted(
             per_client: section.per_client,
             idle: Duration::from_secs(section.idle_secs),
             handshake_timeout: Duration::from_secs(section.handshake_timeout_secs),
+            write_timeout: Duration::from_secs(section.write_timeout_secs),
+            request_timeout: Duration::from_secs(section.request_timeout_secs),
             doh_streams: section.doh_streams,
         },
         certificates,
@@ -925,13 +928,18 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
             .as_ref()
             .zip(transfers.as_ref())
             .map(|((_, _, directory), transfers)| {
-                Arc::new(tenko_dns::update::UpdatePath::new(
+                Arc::new(tenko_dns::update::UpdatePath::with_settings(
                     handle.clone(),
                     Arc::clone(directory),
                     Arc::clone(&transfers.zones),
                     Arc::clone(&update_profile),
                     Arc::new(tenko_dns::xfr::StoreAudit::new(Arc::clone(&store))),
                     stop.child_token(),
+                    tenko_dns::update::UpdateSettings {
+                        in_flight: section.update.in_flight,
+                        per_source: section.update.per_source,
+                        ..tenko_dns::update::UpdateSettings::default()
+                    },
                 )) as Arc<dyn tenko_dns::update::UpdateSink>
             });
     let hooks = Hooks {

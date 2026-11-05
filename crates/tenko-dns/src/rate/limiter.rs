@@ -202,7 +202,7 @@ impl std::fmt::Debug for Limiter {
     }
 }
 
-fn prefix_bits(client: IpAddr, v4: u8, v6: u8) -> (u8, u128) {
+pub(crate) fn prefix_bits(client: IpAddr, v4: u8, v6: u8) -> (u8, u128) {
     match client.to_canonical() {
         IpAddr::V4(address) => {
             let bits = u128::from(address.to_bits());

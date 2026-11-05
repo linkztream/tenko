@@ -417,7 +417,8 @@ Both transports are off by default. `[dns.tls] dot = true` and `doh = true` turn
 | `POST` with another media type | `415` |
 | a body over 65,535 octets | `413` |
 | a missing or undecodable `dns` parameter, a message shorter than a header, a response, or a query the resolver drops | `400` |
-| a forwarded query whose answer does not come within 15 s | `504` |
+| a `POST` whose body has not arrived at the request deadline (`request_timeout_secs`, 10 s) | `408` |
+| a forwarded query whose answer does not come within 15 s, or by the request deadline | `504` |
 
 A DNS answer is always `200`, whatever its RCODE (RFC 8484 section 4.2.1). Its `Cache-Control` is `max-age=` the smallest TTL of the answer and authority sections. A negative answer therefore carries the TTL of its SOA, which the resolver has already capped at the SOA minimum (RFC 2308). An answer without records gets `max-age=0`. The answer keeps the query's ID; clients that send ID 0, as RFC 8484 recommends, get 0 back. Nothing else of HTTP is used: no cookies, no redirects, no content negotiation (the `Accept` header is not read), no server push.
 
@@ -449,9 +450,11 @@ Each transport counts its own connections, separately from TCP's. A burst of enc
 | Limit | Default | What happens |
 |---|---|---|
 | `max_connections` | 1,000 per node and transport | A connection over the cap is closed at accept and counted as refused |
-| `per_client` | 10 per client address and transport | The same. Behind a proxy only the node cap applies, because every connection comes from the proxy |
+| `per_client` | 10 per client and transport | The same; a client is an IPv4 address or an IPv6 /64, as for TCP and the rate limiter. Behind a proxy only the node cap applies, because every connection comes from the proxy |
 | `handshake_timeout_secs` | 5 | A TLS handshake or PROXY header that fails or takes longer closes the connection; counted as a handshake failure |
-| `idle_secs` | 30 | A DoT connection with no query for this long is closed with a TLS `close_notify`. A DoH connection with no request in progress for this long is closed: HTTP/2 `GOAWAY`, or the end of the HTTP/1.1 keep-alive |
+| `idle_secs` | 30 | A DoT connection with no query for this long is closed with a TLS `close_notify`. A DoH connection with no request that makes progress for this long is closed: HTTP/2 `GOAWAY`, or the end of the HTTP/1.1 keep-alive (a request counts as progress when it starts and when it ends, and for no longer than the request deadline in between) |
+| `write_timeout_secs` | 5 | A write of answers to a client that takes longer closes the connection, as on TCP (`docs/dns.md` section 12.6); a forwarded answer the connection has no room for is dropped and counted |
+| `request_timeout_secs` | 10 | A DoH request has this long from its headers to its answer, the body read included: a body still missing then is answered `408`, a forwarded answer still missing `504` |
 | `doh_streams` | 100 | Concurrent requests on one HTTP/2 connection (`SETTINGS_MAX_CONCURRENT_STREAMS`) |
 | fixed | 65,535 octets | The largest message on either transport |
 
@@ -475,6 +478,8 @@ The `[dns.tls]` section of `tenko.toml` ([`deploy/tenko.example.toml`](../deploy
 | `per_client` | 10 | 1 to 1,000 per client address and transport |
 | `idle_secs` | 30 | 1 to 3,600 |
 | `handshake_timeout_secs` | 5 | 1 to 60 |
+| `write_timeout_secs` | 5 | 1 to 60: seconds a write of answers may take before the connection is closed |
+| `request_timeout_secs` | 10 | 1 to 60: seconds a DoH request may take from its headers to its answer |
 | `doh_streams` | 100 | 1 to 1,000 |
 
 The configuration check refuses the following:

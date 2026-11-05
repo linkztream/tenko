@@ -440,6 +440,8 @@ max_connections = 1000
 per_client = 10
 # Seconds without a query before a connection is closed (1 to 300).
 idle_secs = 10
+# Seconds a write of answers to a client may take before the connection is closed (1 to 60).
+write_timeout_secs = 5
 
 [dns.edns]
 # The EDNS UDP size of the server, 512 to 4096 (1232: DNS flag day 2020).
@@ -502,8 +504,19 @@ per_client = 10
 idle_secs = 30
 # Seconds for the TLS handshake and the PROXY header (1 to 60).
 handshake_timeout_secs = 5
+# Seconds a write of answers to a client may take before the connection is closed (1 to 60).
+write_timeout_secs = 5
+# Seconds a DoH request may take from its headers to its answer, the body included (1 to 60).
+request_timeout_secs = 10
 # Concurrent requests on one HTTP/2 connection (1 to 1000).
 doh_streams = 100
+
+[dns.update]
+# Dynamic updates (RFC 2136) in flight at once on the node (1 to 100000) and from one
+# client, an IPv4 address or an IPv6 /64 (1 to 10000); an update over a bound is answered
+# SERVFAIL before it is copied.
+in_flight = 256
+per_source = 16
 
 [dns.limits]
 # Response rate limiting and the per-client query limit (docs/dns-resolver.md section 6),

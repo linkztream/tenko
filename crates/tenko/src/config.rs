@@ -539,6 +539,8 @@ pub struct DnsSection {
     pub tls: DnsTlsSection,
     /// Response rate limiting and the per-client query limit.
     pub limits: DnsLimitsSection,
+    /// The admission of dynamic updates.
+    pub update: DnsUpdateSection,
     /// The fetch and the upload of block lists.
     pub lists: DnsListsSection,
     // WP10.0: the recursive resolver's keys; nothing reads them before WP10.1.
@@ -564,6 +566,7 @@ impl Default for DnsSection {
             log: DnsLogSection::default(),
             tls: DnsTlsSection::default(),
             limits: DnsLimitsSection::default(),
+            update: DnsUpdateSection::default(),
             lists: DnsListsSection::default(),
             // WP10.0
             recursion: DnsRecursionSection::default(),
@@ -906,6 +909,12 @@ pub struct DnsTlsSection {
     pub idle_secs: u64,
     /// Seconds for the TLS handshake and the PROXY header, 1 to 60 (default 5).
     pub handshake_timeout_secs: u64,
+    /// Seconds a write of answers to a client may take before the connection is closed,
+    /// 1 to 60 (default 5).
+    pub write_timeout_secs: u64,
+    /// Seconds a DoH request may take from its headers to its answer, the body included,
+    /// 1 to 60 (default 10).
+    pub request_timeout_secs: u64,
     /// Concurrent requests on one HTTP/2 connection, 1 to 1,000 (default 100).
     pub doh_streams: u32,
 }
@@ -925,6 +934,8 @@ impl Default for DnsTlsSection {
             per_client: 10,
             idle_secs: 30,
             handshake_timeout_secs: 5,
+            write_timeout_secs: 5,
+            request_timeout_secs: 10,
             doh_streams: 100,
         }
     }
@@ -1596,6 +1607,14 @@ impl DnsTlsSection {
             "dns.tls.handshake_timeout_secs must be between 1 and 60",
         )?;
         check(
+            (1..=60).contains(&self.write_timeout_secs),
+            "dns.tls.write_timeout_secs must be between 1 and 60",
+        )?;
+        check(
+            (1..=60).contains(&self.request_timeout_secs),
+            "dns.tls.request_timeout_secs must be between 1 and 60",
+        )?;
+        check(
             (1..=1_000).contains(&self.doh_streams),
             "dns.tls.doh_streams must be between 1 and 1000",
         )
@@ -1717,6 +1736,9 @@ pub struct DnsTcpSection {
     pub per_client: usize,
     /// Seconds without a query before a connection is closed, 1 to 300 (default 10).
     pub idle_secs: u64,
+    /// Seconds a write of answers to a client may take before the connection is closed,
+    /// 1 to 60 (default 5).
+    pub write_timeout_secs: u64,
 }
 
 impl Default for DnsTcpSection {
@@ -1725,7 +1747,49 @@ impl Default for DnsTcpSection {
             max_connections: 1_000,
             per_client: 10,
             idle_secs: 10,
+            write_timeout_secs: 5,
         }
+    }
+}
+
+/// `[dns.update]`: the admission of dynamic updates (DNS-11), before a message is copied
+/// or a task started for it; an UPDATE over a bound is answered SERVFAIL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DnsUpdateSection {
+    /// UPDATE messages in flight at once on the node, 1 to 100,000 (default 256).
+    pub in_flight: usize,
+    /// UPDATE messages in flight at once from one client (an IPv4 address or an IPv6
+    /// /64), 1 to 10,000 (default 16).
+    pub per_source: usize,
+}
+
+impl Default for DnsUpdateSection {
+    fn default() -> Self {
+        Self {
+            in_flight: 256,
+            per_source: 16,
+        }
+    }
+}
+
+impl DnsUpdateSection {
+    fn validate(&self) -> Result<(), ConfigError> {
+        fn check(ok: bool, message: &str) -> Result<(), ConfigError> {
+            if ok {
+                Ok(())
+            } else {
+                Err(ConfigError::invalid(message.to_owned()))
+            }
+        }
+        check(
+            (1..=100_000).contains(&self.in_flight),
+            "dns.update.in_flight must be between 1 and 100000",
+        )?;
+        check(
+            (1..=10_000).contains(&self.per_source),
+            "dns.update.per_source must be between 1 and 10000",
+        )
     }
 }
 
@@ -2085,6 +2149,11 @@ impl DnsSection {
             (1..=300).contains(&self.tcp.idle_secs),
             "dns.tcp.idle_secs must be between 1 and 300",
         )?;
+        check(
+            (1..=60).contains(&self.tcp.write_timeout_secs),
+            "dns.tcp.write_timeout_secs must be between 1 and 60",
+        )?;
+        self.update.validate()?;
         check(
             (512..=4_096).contains(&self.edns.udp_size),
             "dns.edns.udp_size must be between 512 and 4096",
@@ -4455,6 +4524,62 @@ days = 400
             "the API serves no certificate",
         );
         refused("[dns.tls]\ndot = true\nidle_secs = 0\n", "idle_secs");
+        refused(
+            "[dns.tls]\ndot = true\nwrite_timeout_secs = 0\n",
+            "dns.tls.write_timeout_secs",
+        );
+        refused(
+            "[dns.tls]\ndoh = true\nrequest_timeout_secs = 61\n",
+            "dns.tls.request_timeout_secs",
+        );
+    }
+
+    #[test]
+    fn the_dns_write_deadline_and_update_bounds_are_checked() {
+        for (text, needle) in [
+            (
+                "[dns.tcp]\nwrite_timeout_secs = 0\n",
+                "dns.tcp.write_timeout_secs",
+            ),
+            (
+                "[dns.tcp]\nwrite_timeout_secs = 61\n",
+                "dns.tcp.write_timeout_secs",
+            ),
+            ("[dns.update]\nin_flight = 0\n", "dns.update.in_flight"),
+            (
+                "[dns.update]\nper_source = 10001\n",
+                "dns.update.per_source",
+            ),
+        ] {
+            let error = dns_tls(text, &[]).expect_err(text);
+            assert!(error.message.contains(needle), "{text}: {error}");
+        }
+        let resolved = dns_tls(
+            "[dns.tcp]\nwrite_timeout_secs = 2\n[dns.tls]\nwrite_timeout_secs = 3\n\
+             request_timeout_secs = 4\n[dns.update]\nin_flight = 10\nper_source = 3\n",
+            &[],
+        )
+        .expect("valid");
+        let dns = &resolved.config.dns;
+        assert_eq!(dns.tcp.write_timeout_secs, 2);
+        assert_eq!(
+            (dns.tls.write_timeout_secs, dns.tls.request_timeout_secs),
+            (3, 4)
+        );
+        assert_eq!((dns.update.in_flight, dns.update.per_source), (10, 3));
+        let defaults = DnsSection::default();
+        assert_eq!(defaults.tcp.write_timeout_secs, 5);
+        assert_eq!(
+            (
+                defaults.tls.write_timeout_secs,
+                defaults.tls.request_timeout_secs
+            ),
+            (5, 10)
+        );
+        assert_eq!(
+            (defaults.update.in_flight, defaults.update.per_source),
+            (256, 16)
+        );
     }
 
     #[test]

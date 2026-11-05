@@ -37,8 +37,11 @@
 //! connection over a cap, or from an address that is not a trusted proxy, is closed at once
 //! and counted as refused. The TLS handshake and the PROXY header have
 //! [`TlsListen::handshake_timeout`]; a failed or late one is counted. A connection is
-//! closed after [`TlsListen::idle`] without a query, and an HTTP/2 connection carries at
-//! most [`TlsListen::doh_streams`] requests at a time.
+//! closed after [`TlsListen::idle`] without a query, when a write of answers takes longer
+//! than [`TlsListen::write_timeout`], and, for DoH, when a request takes longer than
+//! [`TlsListen::request_timeout`] from its headers to its answer; an HTTP/2 connection
+//! carries at most [`TlsListen::doh_streams`] requests at a time. A client is an IPv4
+//! address or an IPv6 /64, as on TCP.
 
 pub mod doh;
 mod dot;
@@ -115,6 +118,12 @@ pub struct TlsListen {
     pub idle: Duration,
     /// Time for the TLS handshake and the PROXY header.
     pub handshake_timeout: Duration,
+    /// Time a write of answers to a client may take before the connection is closed
+    /// (`write_timeout_secs`).
+    pub write_timeout: Duration,
+    /// Time a DoH request may take from its headers to its answer, the body read included
+    /// (`request_timeout_secs`).
+    pub request_timeout: Duration,
     /// Concurrent requests per HTTP/2 connection.
     pub doh_streams: u32,
 }
@@ -129,6 +138,8 @@ impl Default for TlsListen {
             per_client: 10,
             idle: Duration::from_secs(30),
             handshake_timeout: Duration::from_secs(5),
+            write_timeout: Duration::from_secs(5),
+            request_timeout: Duration::from_secs(10),
             doh_streams: 100,
         }
     }
@@ -436,6 +447,7 @@ impl Prepared {
                 settings.per_client
             },
             idle: settings.idle,
+            write_timeout: settings.write_timeout,
         };
         let running = Running {
             behind_proxy: trusted.is_some(),
@@ -458,6 +470,7 @@ impl Prepared {
                 proxy_protocol,
                 trusted: trusted.clone(),
                 doh_streams: settings.doh_streams,
+                request_timeout: settings.request_timeout,
             });
             for listener in listeners {
                 tasks.push(tokio::spawn(accept(
@@ -510,6 +523,7 @@ struct Shared<R> {
     proxy_protocol: bool,
     trusted: Option<Vec<IpNet>>,
     doh_streams: u32,
+    request_timeout: Duration,
 }
 
 fn trusted(networks: &[IpNet], address: IpAddr) -> bool {
@@ -574,7 +588,7 @@ async fn connection<R: Resolver + 'static>(
     stop: CancellationToken,
     _opened: Opened,
 ) {
-    let _ = stream.set_nodelay(true);
+    tcp::tune(&stream, &shared.caps);
     let mut client = peer;
     if shared.proxy_protocol {
         match tokio::time::timeout(shared.handshake, proxy::read_v2(&mut stream)).await {
@@ -618,7 +632,7 @@ where
                 stream,
                 conn,
                 Arc::clone(&shared.responder),
-                shared.caps.idle,
+                shared.caps,
                 stop,
                 // WP6.1: XoT only where this node ends TLS, never behind a proxy.
                 shared.acceptor.is_some(),
@@ -631,6 +645,7 @@ where
                 conn,
                 doh::Options {
                     idle: shared.caps.idle,
+                    request_timeout: shared.request_timeout,
                     streams: shared.doh_streams,
                     forwarded_for: shared.trusted.is_some() && !shared.proxy_protocol,
                 },

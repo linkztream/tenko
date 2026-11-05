@@ -111,6 +111,7 @@ async fn udp_and_tcp_answer_and_the_server_stops() {
         max_connections: 100,
         per_client: 2,
         idle: Duration::from_millis(400),
+        ..TcpSettings::default()
     };
     let server = start_on_free_port(|port| config(loopback(port, ipv6), settings), &handle).await;
     let udp = server.udp_addresses().to_vec();

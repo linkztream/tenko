@@ -586,6 +586,73 @@ async fn the_limits_and_the_handshake_timeout_hold() {
     server.stop().await;
 }
 
+/// A request body that never completes: the stream stays open without an end.
+struct NeverEnds;
+
+impl hyper::body::Body for NeverEnds {
+    type Data = Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, Self::Error>>> {
+        std::task::Poll::Pending
+    }
+}
+
+/// DNS-14: a DoH `POST` whose body never arrives is answered 408 at the request deadline
+/// instead of holding its stream, and the connection keeps serving.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_doh_body_that_never_completes_ends_at_the_request_deadline() {
+    let pki = Pki::new();
+    let service = pki.service();
+    let settings = TlsListen {
+        request_timeout: Duration::from_millis(300),
+        idle: Duration::from_secs(5),
+        ..listen(Termination::Tls { tls13_only: true })
+    };
+    let server = start(settings, Some(service.resolver()), None).await;
+    let tls = dot(&pki.client(&[b"h2"]), server.doh_addresses()[0])
+        .await
+        .expect("a handshake");
+    let (mut sender, connection) =
+        http2::handshake::<_, _, NeverEnds>(TokioExecutor::new(), TokioIo::new(tls))
+            .await
+            .expect("an HTTP/2 connection");
+    tokio::spawn(connection);
+    let request = Request::post("https://localhost/dns-query")
+        .header(hyper::header::CONTENT_TYPE, tls::doh::MEDIA_TYPE)
+        .body(NeverEnds)
+        .expect("a request");
+    let started = Instant::now();
+    let response = tokio::time::timeout(Duration::from_secs(5), sender.send_request(request))
+        .await
+        .expect("the request ends at the deadline")
+        .expect("a response");
+    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_millis(250) && took < Duration::from_secs(3),
+        "{took:?}"
+    );
+    // The connection is still served: the next request on it is answered.
+    let tls = dot(&pki.client(&[b"h2"]), server.doh_addresses()[0])
+        .await
+        .expect("a handshake");
+    let mut plain = h2(tls).await;
+    let message = query("www.example.test", 1).bytes(0);
+    let got = collect(
+        plain
+            .send_request(get(&format!("/dns-query?dns={}", base64url(&message))))
+            .await
+            .expect("an answer"),
+    )
+    .await;
+    assert_eq!(got.status, StatusCode::OK);
+    server.stop().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_imported_certificate_reloads_without_dropping_the_listener() {
     let pki = Pki::new();

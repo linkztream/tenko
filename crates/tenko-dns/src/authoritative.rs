@@ -34,7 +34,11 @@
 //! Nothing here allocates: the catalog is read through its swap, names synthesized from a
 //! DNAME live in fixed buffers, and every record goes into the caller's [`AnswerBuf`].
 
-use std::{net::IpAddr, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Instant,
+};
 
 use tenko_core::dns::{QueryTransport, Rdata, Rtype, ViewId, ZoneKind};
 
@@ -350,6 +354,24 @@ impl Resolver for Authoritative {
             RateDecision::Drop => return Resolution::Drop,
         }
         Resolution::Answered { view: view_id }
+    }
+
+    /// An UPDATE over UDP passes the per-client query limit and the response rate limiter
+    /// as an error response does (DNS-17): the update path's refusals are then limited
+    /// per client prefix like every other error, and a limited client gets the slip
+    /// (an empty truncated answer, so that a real client retries over TCP).
+    fn admit(&self, client: SocketAddr, transport: QueryTransport, now: Instant) -> RateDecision {
+        let client = client.ip();
+        if !self.rate.admit_query(client, now) {
+            return RateDecision::Drop;
+        }
+        let key = ResponseKey {
+            kind: ResponseKind::Error,
+            name: &[0],
+            qtype: 0,
+            udp: transport == QueryTransport::Udp,
+        };
+        self.rate.admit_response(client, &key, now)
     }
 }
 

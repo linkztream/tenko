@@ -1998,14 +1998,9 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
         }
         rcode::SERVFAIL
     };
-    match &query.reply {
-        ReplyPath::Udp(socket) => {
-            let _ = socket.send_to(&out, query.client);
-        }
-        ReplyPath::Tcp(sender) => {
-            let _ = sender.send(out).await;
-        }
-    }
+    // The answer is handed over without waiting: a client's connection that does not take
+    // it loses this answer, never an in-flight permit of the dispatcher.
+    let _ = ReplyPath::deliver(&query.reply, query.client, out);
     let micros = u64::try_from(at.elapsed().as_micros()).unwrap_or(u64::MAX);
     if shared.settings.metrics {
         metrics::QUERY_COUNTER.inc(metrics::query_index(

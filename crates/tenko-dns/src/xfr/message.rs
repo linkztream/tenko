@@ -334,7 +334,9 @@ pub fn read_answer(message: &[u8]) -> Result<Answer, ReadError> {
         return Err(ReadError::Malformed);
     }
     let mut pos = wire::questions_end(message, header.qdcount).ok_or(ReadError::Malformed)?;
-    let mut answers = Vec::with_capacity(usize::from(header.ancount));
+    // The count is the sender's claim: the vector grows as records parse, so a short
+    // message that claims many records reserves nothing.
+    let mut answers = Vec::new();
     let mut owner = NameBuf::root();
     for _ in 0..header.ancount {
         let record = wire::read_record(message, pos).ok_or(ReadError::Malformed)?;

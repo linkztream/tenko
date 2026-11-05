@@ -10,10 +10,14 @@
 //! parameter or a message that is no query (or that the resolver drops), `504` when the
 //! forwarder did not answer in time. One DNS message in, one out: no other HTTP semantics.
 //!
-//! A connection is closed (HTTP/2 `GOAWAY`, or the end of the HTTP/1.1 keep-alive) after
-//! the idle time without a request in progress, and when the server stops. Each request
-//! allocates (hyper's request and answer, the body, the answer's copy); the query itself
-//! runs on the runtime thread's buffers like TCP.
+//! A request has [`Options::request_timeout`] from its headers to its answer, the body
+//! read included: a `POST` whose body does not arrive in time gets `408`, a forwarded
+//! query whose answer does not come in time `504`. A connection is closed (HTTP/2
+//! `GOAWAY`, or the end of the HTTP/1.1 keep-alive) after the idle time without a
+//! request that makes progress (a request counts as activity when it starts, when it
+//! ends, and for no longer than the request deadline in between), and when the server
+//! stops. Each request allocates (hyper's request and answer, the body, the answer's
+//! copy); the query itself runs on the runtime thread's buffers like TCP.
 
 use std::{
     convert::Infallible,
@@ -68,6 +72,8 @@ const DRAIN: Duration = Duration::from_secs(2);
 pub(super) struct Options {
     /// Time without a request before the connection is closed.
     pub(super) idle: Duration,
+    /// Time a request may take from its headers to its answer.
+    pub(super) request_timeout: Duration,
     /// Concurrent HTTP/2 streams.
     pub(super) streams: u32,
     /// Take the client from `X-Forwarded-For` (behind a proxy without the PROXY protocol).
@@ -102,13 +108,16 @@ impl Activity {
         Busy(Arc::clone(self))
     }
 
-    /// Time since the last request ended; zero while one runs.
-    fn idle_for(&self) -> Duration {
-        if self.running.load(Ordering::Relaxed) > 0 {
+    /// Time since a request last started or ended. A request in progress counts as
+    /// activity for at most `request_timeout` after that, so a request that never
+    /// completes does not keep the connection open.
+    fn idle_for(&self, request_timeout: Duration) -> Duration {
+        let last = Duration::from_millis(self.last_millis.load(Ordering::Relaxed));
+        let since = self.opened.elapsed().saturating_sub(last);
+        if self.running.load(Ordering::Relaxed) > 0 && since < request_timeout {
             return Duration::ZERO;
         }
-        let last = Duration::from_millis(self.last_millis.load(Ordering::Relaxed));
-        self.opened.elapsed().saturating_sub(last)
+        since
     }
 }
 
@@ -139,7 +148,7 @@ pub(super) async fn connection<R, S>(
         let responder = Arc::clone(&responder);
         let busy = requests.begin();
         async move {
-            let answer = handle(request, conn, options.forwarded_for, &responder).await;
+            let answer = handle(request, conn, &options, &responder).await;
             drop(busy);
             Ok::<_, Infallible>(answer)
         }
@@ -169,7 +178,7 @@ pub(super) async fn connection<R, S>(
             _ = ticks.tick() => match closing {
                 // Requests that do not finish in time are cut with the connection.
                 Some(since) if since.elapsed() >= DRAIN => return,
-                None if activity.idle_for() >= options.idle => {
+                None if activity.idle_for(options.request_timeout) >= options.idle => {
                     connection.as_mut().graceful_shutdown();
                     closing = Some(Instant::now());
                 }
@@ -204,17 +213,19 @@ fn is_dns_message(value: Option<&HeaderValue>) -> bool {
         .is_some_and(|media| media.trim().eq_ignore_ascii_case(MEDIA_TYPE))
 }
 
-/// Answers one request.
+/// Answers one request within [`Options::request_timeout`] of its headers: the body read
+/// and the wait for the forwarder's answer both end at that deadline.
 async fn handle<R: Resolver>(
     request: Request<Incoming>,
     mut conn: Conn,
-    forwarded_for: bool,
+    options: &Options,
     responder: &Responder<R>,
 ) -> Response<Full<Bytes>> {
+    let deadline = tokio::time::Instant::now() + options.request_timeout;
     if request.uri().path() != PATH {
         return status(StatusCode::NOT_FOUND);
     }
-    if forwarded_for
+    if options.forwarded_for
         && let Some(client) = request
             .headers()
             .get_all("x-forwarded-for")
@@ -237,15 +248,20 @@ async fn handle<R: Resolver>(
             if !is_dns_message(request.headers().get(CONTENT_TYPE)) {
                 return status(StatusCode::UNSUPPORTED_MEDIA_TYPE);
             }
-            match Limited::new(request.into_body(), MAX_MESSAGE_LEN)
-                .collect()
-                .await
-            {
-                Ok(body) => body.to_bytes().to_vec(),
-                Err(error) if error.downcast_ref::<LengthLimitError>().is_some() => {
+            // A body that has not arrived at the deadline ends the request with 408, so
+            // that a stream that never completes holds nothing.
+            let body = tokio::time::timeout_at(
+                deadline,
+                Limited::new(request.into_body(), MAX_MESSAGE_LEN).collect(),
+            )
+            .await;
+            match body {
+                Ok(Ok(body)) => body.to_bytes().to_vec(),
+                Ok(Err(error)) if error.downcast_ref::<LengthLimitError>().is_some() => {
                     return status(StatusCode::PAYLOAD_TOO_LARGE);
                 }
-                Err(_) => return status(StatusCode::BAD_REQUEST),
+                Ok(Err(_)) => return status(StatusCode::BAD_REQUEST),
+                Err(_) => return status(StatusCode::REQUEST_TIMEOUT),
             }
         }
         _ => {
@@ -275,7 +291,8 @@ async fn handle<R: Resolver>(
         (Reply::Forward { .. }, _) => {
             let (sender, mut receiver) = mpsc::channel(1);
             responder.forward(&message, &conn, reply, ReplyPath::Tcp(sender));
-            match tokio::time::timeout(FORWARD_WAIT, receiver.recv()).await {
+            let wait = deadline.min(tokio::time::Instant::now() + FORWARD_WAIT);
+            match tokio::time::timeout_at(wait, receiver.recv()).await {
                 Ok(Some(answer)) => dns_answer(answer),
                 _ => status(StatusCode::GATEWAY_TIMEOUT),
             }
