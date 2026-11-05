@@ -131,13 +131,25 @@ jobs:
       # The commit of the tag; every later job checks this out instead of the tag name.
       sha: ${{ steps.tag.outputs.sha }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: A manual run uses the workflow file of main
+        # A dispatch runs the workflow file of the ref it was started from; only main's
+        # file releases. The pushed-tag path never reaches this step with another ref kind.
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::A manual release runs from main only (dispatched from ${REF})."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Every branch and tag with the whole history: the tag is resolved below by its
           # full ref name and its commit is checked against main.
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           package-manager-cache: false
@@ -190,13 +202,13 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
       # No npm cache in a release: the packages come from the registry, checked against
       # package-lock.json, as the Rust build below has no cache either.
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           package-manager-cache: false
@@ -233,7 +245,7 @@ jobs:
         run: npm run test
       - name: Build
         run: npm run build
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-dist
           path: ui/dist
@@ -266,7 +278,7 @@ jobs:
       PLATFORM: ${{ matrix.platform }}
       EXE: ${{ matrix.exe }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
@@ -292,7 +304,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends musl-tools
       # No Rust cache here: a release is built from a clean state. TENKO_UI_STUB is not set,
       # so the build embeds the real UI and refuses the placeholder page.
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ui-dist
           path: ui/dist
@@ -337,7 +349,7 @@ jobs:
           # the provenance of the `attest` job; the owner's hardware key signs SHA256SUMS, which
           # lists this file, after the security round. Windows: Authenticode in `sign-binary`,
           # not here, where the build scripts of every dependency have just run.
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact }}
           path: dist/tenko-${{ needs.verify.outputs.version }}-${{ matrix.platform }}${{ matrix.exe }}
@@ -363,11 +375,11 @@ jobs:
       VERSION: ${{ needs.verify.outputs.version }}
       SMOKE_IMAGE: ${{ matrix.image }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binary-linux-x86_64
           path: dist
@@ -492,14 +504,14 @@ jobs:
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
           # The signing script alone.
           sparse-checkout: deploy/windows/sign.ps1
           sparse-checkout-cone-mode: false
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binary-windows-x86_64-unsigned
           path: bin
@@ -510,7 +522,7 @@ jobs:
           SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
           SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
         run: ./deploy/windows/sign.ps1 -File "bin/tenko-$env:VERSION-windows-x86_64.exe"
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: binary-windows-x86_64
           path: bin/tenko-${{ needs.verify.outputs.version }}-windows-x86_64.exe
@@ -531,12 +543,12 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
       # The runner image has the .NET SDK; the WiX version comes from .config/dotnet-tools.json.
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binary-windows-x86_64
           path: bin
@@ -549,13 +561,13 @@ jobs:
           if ($env:VERSION -notmatch '^(\d+)\.(\d+)\.(\d+)') { throw "unexpected version $env:VERSION" }
           $next = "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
           ./deploy/windows/build-msi.ps1 -Binary "bin/tenko-$env:VERSION-windows-x86_64.exe" -Version $env:VERSION -MsiVersion $next -Out upgrade-test
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-windows-x86_64-unsigned
           path: dist/tenko-${{ needs.verify.outputs.version }}-windows-x86_64.msi
           if-no-files-found: error
           retention-days: 1
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: msi-upgrade-test
           path: upgrade-test/tenko-${{ needs.verify.outputs.version }}-windows-x86_64.msi
@@ -571,13 +583,13 @@ jobs:
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
           sparse-checkout: deploy/windows/sign.ps1
           sparse-checkout-cone-mode: false
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: installer-windows-x86_64-unsigned
           path: dist
@@ -588,7 +600,7 @@ jobs:
           SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
           SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
         run: ./deploy/windows/sign.ps1 -File "dist/tenko-$env:VERSION-windows-x86_64.msi"
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-windows-x86_64
           path: dist/tenko-${{ needs.verify.outputs.version }}-windows-x86_64.msi
@@ -608,21 +620,21 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: installer-windows-x86_64
           path: dist
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: msi-upgrade-test
           path: upgrade-test
       - name: Smoke test the MSI
         run: ./deploy/windows/msi-smoke.ps1 -Msi "dist/tenko-$env:VERSION-windows-x86_64.msi" -UpgradeMsi "upgrade-test/tenko-$env:VERSION-windows-x86_64.msi" -LogDir $env:RUNNER_TEMP
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: msi-smoke-logs
@@ -647,16 +659,16 @@ jobs:
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binary-linux-x86_64
           path: dist
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: deploy/Dockerfile
@@ -679,7 +691,7 @@ jobs:
           test "$(tar -xOf "$RUNNER_TEMP/image.tar" "blobs/sha256/${digest#sha256:}" | sha256sum | cut -d' ' -f1)" = "${digest#sha256:}"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "Image ${IMAGE}@${digest} (not pushed yet)"
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-oci
           path: ${{ runner.temp }}/image.tar
@@ -703,7 +715,7 @@ jobs:
       SYFT_SHA256: bb65249542db5fedeeb4d3f9b018b75e7264dbfbbb10486f044581a92f90490d
       SYFT_CHECK_FOR_APP_UPDATE: "false"
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
@@ -717,7 +729,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           package-manager-cache: false
@@ -785,7 +797,7 @@ jobs:
           ' "../sbom/tenko-${VERSION}-ui.cdx.json" package-lock.json
           jq -e '.bomFormat == "CycloneDX" and .specVersion != null and (.serialNumber | startswith("urn:uuid:"))' \
             "../sbom/tenko-${VERSION}-ui.cdx.json" > /dev/null
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: image-oci
           path: ${{ runner.temp }}/image
@@ -807,7 +819,7 @@ jobs:
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
           test "$(find sbom -name '*.cdx.json' | wc -l)" -eq 4
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom
           path: sbom/*.cdx.json
@@ -826,30 +838,30 @@ jobs:
       VERSION: ${{ needs.verify.outputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           package-manager-cache: false
       # The two binaries by name: the unsigned Windows binary of `build` is an artifact of
       # this run too and must not land here.
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binary-linux-x86_64
           path: dist
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binary-windows-x86_64
           path: dist
       # WP6.7: the signed MSI; release-manifest.mjs lists it under `installers` and in SHA256SUMS.
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: installer-windows-x86_64
           path: dist
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sbom
           path: sbom
@@ -873,12 +885,22 @@ jobs:
         # not count a pre-release as the latest release, so a pre-release is merged into the
         # manifest of the last stable release.)
         run: |
+          set -euo pipefail
           mkdir -p prev
-          gh release download --repo "$GITHUB_REPOSITORY" --pattern releases.json --dir prev || true
+          # Only a missing release or a release without the asset means "no earlier
+          # manifest"; a network or authentication failure stops the run, so the manifest
+          # never silently restarts with this release alone.
+          if ! out="$(gh release download --repo "$GITHUB_REPOSITORY" --pattern releases.json --dir prev 2>&1)"; then
+            case "$out" in
+              *"release not found"*|*"no assets match"*|*"no release"*)
+                echo "::notice::No earlier releases.json found; the manifest starts with this release." ;;
+              *)
+                echo "::error::Could not download the latest release's releases.json: $out"
+                exit 1 ;;
+            esac
+          fi
           if [ -f prev/releases.json ]; then
             echo "Merging into the releases.json of the latest release."
-          else
-            echo "::notice::No earlier releases.json found; the manifest starts with this release."
           fi
       - name: Build releases.json and SHA256SUMS
         # SHA256SUMS lists releases.json by the digest of the final text, written by the
@@ -926,7 +948,7 @@ jobs:
           test "$(grep -c . dist/SHA256SUMS)" -eq "$(find dist -type f ! -name SHA256SUMS | wc -l)"
           cat dist/SHA256SUMS
           ls -l dist
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release
           path: dist/*
@@ -951,7 +973,7 @@ jobs:
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
           path: dist
@@ -1015,7 +1037,7 @@ jobs:
     env:
       DIGEST: ${{ needs.image-build.outputs.digest }}
     steps:
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: image-oci
           path: ${{ runner.temp }}/image
@@ -1063,7 +1085,7 @@ jobs:
       attestations: write
       packages: write
     steps:
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sbom
           path: sbom
@@ -1103,26 +1125,42 @@ jobs:
       contents: write
       packages: write
     env:
+      SHA: ${{ needs.verify.outputs.sha }}
       VERSION: ${{ needs.verify.outputs.version }}
       PRERELEASE: ${{ needs.verify.outputs.prerelease }}
       DIGEST: ${{ needs.image.outputs.digest }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           package-manager-cache: false
       # The files of `manifest`, which `attest` attested.
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
           path: dist
       - name: Release notes
         run: node scripts/changelog.mjs notes "$VERSION" > notes.md
+      - name: Create the release
+        run: |
+          set -euo pipefail
+          # The tag still names the commit verify resolved: a tag moved during the run is
+          # not published under its new commit.
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)" = "$SHA"
+          ls -l dist
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Tenko DDI ${VERSION}" \
+            --notes-file notes.md \
+            --verify-tag \
+            "${flags[@]}"
       - name: Tag the image
         # The tags point at the attested digest, unchanged (skopeo copies the manifest as it
         # is). A pre-release never becomes latest (S3-Q9).
@@ -1144,15 +1182,3 @@ jobs:
             echo "${IMAGE}:${tag} -> ${DIGEST}"
           done
           skopeo logout ghcr.io || true
-      - name: Create the release
-        run: |
-          set -euo pipefail
-          ls -l dist
-          flags=()
-          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
-          gh release create "$TAG" dist/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Tenko DDI ${VERSION}" \
-            --notes-file notes.md \
-            --verify-tag \
-            "${flags[@]}"
