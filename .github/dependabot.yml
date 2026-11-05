@@ -46,6 +46,13 @@ updates:
       base-images:
         patterns:
           - "*"
+    # The Node line is chosen on purpose: 22 is LTS until April 2027, and the odd-numbered
+    # lines never become LTS and get about eight months of support. The digest of the
+    # chosen line moves here; a new major is a deliberate change made together with
+    # ci.yml's setup-node and the tooling's requirements (next: 24 LTS, before April 2027).
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: build
     open-pull-requests-limit: 5
