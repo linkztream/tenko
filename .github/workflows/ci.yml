@@ -815,7 +815,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
-          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
+          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -Scope CurrentUser
       - name: Pester
         run: |
           $ErrorActionPreference = 'Stop'
@@ -826,14 +826,15 @@ jobs:
           $config.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $config
       - name: PSScriptAnalyzer
-        # The analyzer runs on PowerShell 7 only: on Windows PowerShell 5.1 version 1.25.0
-        # fails inside one of its rules with a null reference on the exporter (RULE_ERROR),
-        # which is the analyzer's defect and not a finding. The compatibility rules of the
-        # settings file still target 5.1 and 7.0; the 5.1 row runs the Pester suites.
+        # The analyzer runs on PowerShell 7 only, at version 1.24.0: version 1.25.0 fails
+        # with a null reference on the exporter, on Windows PowerShell 5.1 inside one of its
+        # rules (RULE_ERROR) and on PowerShell 7 in about one run of two before any rule
+        # reports, which is the analyzer's defect and not a finding. The compatibility rules
+        # of the settings file still target 5.1 and 7.0; the 5.1 row runs the Pester suites.
         if: matrix.shell == 'pwsh'
         run: |
           $ErrorActionPreference = 'Stop'
-          Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0
           Invoke-ScriptAnalyzer -Path deploy/windows/mirror -Recurse -Settings deploy/windows/mirror/PSScriptAnalyzerSettings.psd1 -EnableExit -ReportSummary
 
   # Changelog rule (OPS-23). Every change to the product adds an entry under
