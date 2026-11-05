@@ -1,6 +1,6 @@
 # Windows takeover plan: DNS zones and DHCP off the domain controllers, step by step and reversible
 
-- Status: Accepted on 2026-11-01 for the decisions of section 6 that the owner took that day (WT-Q1 to WT-Q7); WT-Q8 to WT-Q12 are open and carry a recommendation. The plan binds and changes only through rule 2.8 of the execution plan. The owner's standing direction, single node first and cluster-aware (section 2.10 of [phase-2-plan.md](phase-2-plan.md)), binds this work; section 2.14 says how
+- Status: Accepted on 2026-11-01 for the decisions of section 6 that the owner took that day (WT-Q1 to WT-Q7); WT-Q8 to WT-Q12 decided by the owner on 2026-11-05 as recommended. The plan binds and changes only through rule 2.8 of the execution plan. The owner's standing direction, single node first and cluster-aware (section 2.10 of [phase-2-plan.md](phase-2-plan.md)), binds this work; section 2.14 says how
 - Date: 2026-11-01
 - Scope: Slice 14, Phase 4's first slice. An operator moves the DNS zones and the DHCP service of a small Active Directory domain from the domain controllers to Tenko with no client noticing, each step reversible, rehearsed first on a throwaway domain. DNS data arrives by zone transfer; DHCP data arrives by a mirror that a scheduled script on a controller pushes to Tenko's API; a takeover action per scope turns the mirror into Tenko's own leases and records. Written against `main` at `8e4f4112`. Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md). Exit criteria, measurements and risks continue the project's series: E72 onward, M69 onward and R137 onward (the high-availability plan ends at E71 and M68, the identity plan at R136)
 
@@ -387,7 +387,7 @@ WP14.0 first. Then three lines in parallel: the script line of WP14.1, the serve
 
 ## 6. Owner decisions
 
-Each question lists its options, the trade-offs and the recommendation. The owner decided WT-Q1 to WT-Q7 on 2026-11-01; each ends with the decision. WT-Q8 to WT-Q12 came up while writing the plan and are open.
+Each question lists its options, the trade-offs and the recommendation. The owner decided WT-Q1 to WT-Q7 on 2026-11-01 and WT-Q8 to WT-Q12 on 2026-11-05; each ends with the decision.
 
 **WT-Q1. How does the Windows DHCP data reach Tenko?**
 - Options: (a) a scheduled PowerShell script on a controller pushes to Tenko's API over HTTPS with a token scoped to write one mirror; (b) Tenko pulls over WinRM with PowerShell remoting, as MIGRATION.md's design said; (c) a Tenko component installed on the controller that Tenko instructs; (d) a periodic `Export-DhcpServer` file copied to Tenko by hand.
@@ -431,30 +431,35 @@ Each question lists its options, the trade-offs and the recommendation. The owne
 - **Recommendation: (a).**
 - **Decided (2026-11-01): (a).**
 
-**WT-Q8. Does the takeover adopt `dynamic` names besides `transfer` ones? (open)**
+**WT-Q8. Does the takeover adopt `dynamic` names besides `transfer` ones?**
 - Options: (a) `transfer` only, as WT-Q3's text says; (b) `transfer`, and `dynamic` names that carry a DHCID and the mirrored lease's address; (c) also `manual` names with a DHCID.
 - Trade-offs: under (a), a name Windows DHCP wrote after the flip (a client new to Windows in the window) or during a reverted takeover is `dynamic` and is refused at the first renewal, which brings step 10's gap back for those names; (b) closes that with the same proof as WT-Q3 (a DHCID at the name means a DHCP server wrote it, and the controllers' access list means only the controllers' services write `dynamic` records); (c) would let a takeover change records an operator made.
 - **Recommendation: (b).**
+- **Decided (2026-11-05): (b), `transfer` names and `dynamic` names that carry a DHCID and the mirrored lease's address.**
 
-**WT-Q9. What origin do the other transferred records get at the flip? (open)**
+**WT-Q9. What origin do the other transferred records get at the flip?**
 - Options: (a) `ad`; (b) `manual`; (c) `transfer` kept on every RRset.
 - Trade-offs: (c) refuses Netlogon's hourly registration of every locator record (event 5774 every hour, a changed controller address never registered); (b) is updatable but loses the mark that the record came from AD, which Slice 13's claim rule needs (identity plan section 3.6); (a) is updatable from the access list today and governed by the claim rule later.
 - **Recommendation: (a).**
+- **Decided (2026-11-05): (a), origin `ad`, updatable from the access list and governed by the claim rule later.**
 
-**WT-Q10. What does "a factory name is kept as it is" mean for a name that is not a valid host name? (open)**
+**WT-Q10. What does "a factory name is kept as it is" mean for a name that is not a valid host name?**
 - Options: (a) a valid label gets the zone like any bare name; an invalid one is kept as the IPAM host's name, with no record derived and a loss entry; (b) an invalid one is tidied (`ESP_3A1F2B` to `esp-3a1f2b`) and gets the zone; (c) a factory name is recognized by its pattern and never gets the zone.
 - Trade-offs: (b) invents a name nobody chose, and the client keeps registering its own under DDNS anyway; (c) guesses at patterns that change by vendor; (a) is decidable by syntax alone and changes nothing the owner typed.
 - **Recommendation: (a), the reading section 2.9 writes.**
+- **Decided (2026-11-05): (a).**
 
-**WT-Q11. How long does the mirror token live? (open)**
+**WT-Q11. How long does the mirror token live?**
 - Options: (a) within TGL-05 (365 days under Home), with the finding `migrate.mirror.token_expiring` 14 days ahead and a replacement from the mirror card; (b) non-expiring for mirror tokens as an exception to TGL-05.
 - Trade-offs: (b) avoids a yearly chore but makes one token class an exception to a never-relaxed rule; (a) keeps the rule and makes the chore visible in time.
 - **Recommendation: (a).**
+- **Decided (2026-11-05): (a), within TGL-05, with `migrate.mirror.token_expiring` 14 days ahead.**
 
-**WT-Q12. What happens to the DNS Server role on the controllers after the flip? (open)**
+**WT-Q12. What happens to the DNS Server role on the controllers after the flip?**
 - Options: (a) it stays, the controllers holding secondary copies of Tenko's zones (the clients' second DNS server) until a second Tenko node exists; (b) it is removed after the parallel period, as today's runbook does; (c) the AD-integrated zones stay frozen as today's runbook does, without becoming secondaries.
 - Trade-offs: (b) leaves one Tenko node as the only server of the AD zones until Phase 5; (c) keeps a stale copy that grows staler; (a) keeps a current copy that answers when the node is down and makes the DNS rollback a conversion with current data (section 2.10), at the cost of keeping the role and converting AD-integrated zones to secondaries (R142).
 - **Recommendation: (a).**
+- **Decided (2026-11-05): (a), the controllers keep the DNS Server role as secondaries of Tenko's zones until a second Tenko node exists.**
 
 ## 7. Requirement rows touched
 
@@ -492,7 +497,7 @@ ROADMAP: the Phase 4 deliverables gain the line for this slice (written with thi
 
 | When | Action |
 |---|---|
-| Before WP14.0 | Read the plan; answer WT-Q8 to WT-Q12 (WT-Q1 to WT-Q7 decided on 2026-11-01) |
+| Before WP14.0 | Read the plan (WT-Q1 to WT-Q7 decided on 2026-11-01, WT-Q8 to WT-Q12 on 2026-11-05) |
 | Before the rehearsal | The throwaway domain: one controller with the DNS and DHCP roles and one Windows client on an isolated network of the hypervisor, and a lab Tenko node; the lead gives the steps |
 | Before the rehearsal | The DHCP read account in the real domain: a member of `DHCP Users` and of no privileged group, with the right to log on as a batch job on the DHCP server; the exporter's task on the real server for the afternoon |
 | Before the rehearsal | The transfer permission of the real AD zones to the lab node's address for the afternoon, removed at its end |
