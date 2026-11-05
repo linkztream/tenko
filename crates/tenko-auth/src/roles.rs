@@ -9,7 +9,9 @@
 use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
-use tenko_core::{Action, AuthStrength, ObjectKind, dhcp::DhcpScope, dns::DnsScope};
+use tenko_core::{
+    Action, AuthStrength, ObjectKind, dhcp::DhcpScope, dns::DnsScope, migrate::MigrateScope,
+};
 use utoipa::ToSchema;
 
 use crate::{
@@ -84,15 +86,30 @@ impl RoleName {
         }
     }
 
-    /// Whether the role grants `action` on objects of `kind`. An action on a DNS or DHCP
-    /// kind is granted by the scope it needs ([`DnsScope::required`],
-    /// [`DhcpScope::required`]).
+    // WP14.0
+    /// The scopes of the migration module the role carries (Windows takeover plan section
+    /// 3.2): the administrator manages mirrors and runs the scope actions, the operator
+    /// reads; the viewer and the auditor have none.
+    pub const fn migrate_scopes(self) -> &'static [MigrateScope] {
+        match self {
+            Self::Admin => &MigrateScope::ALL,
+            Self::Operator => &[MigrateScope::Read],
+            Self::Viewer | Self::Auditor => &[],
+        }
+    }
+
+    /// Whether the role grants `action` on objects of `kind`. An action on a DNS, DHCP or
+    /// migration kind is granted by the scope it needs ([`DnsScope::required`],
+    /// [`DhcpScope::required`], [`MigrateScope::required`]).
     pub fn allows(self, action: Action, kind: ObjectKind) -> bool {
         if let Some(scope) = DnsScope::required(action, kind) {
             return self.dns_scopes().contains(&scope);
         }
         if let Some(scope) = DhcpScope::required(action, kind) {
             return self.dhcp_scopes().contains(&scope);
+        }
+        if let Some(scope) = MigrateScope::required(action, kind) {
+            return self.migrate_scopes().contains(&scope);
         }
         match self {
             Self::Admin => true,
@@ -203,7 +220,10 @@ fn operator_allows(action: Action, kind: ObjectKind) -> bool {
 }
 
 /// Administrative kinds that a personal token may never administer: changing users,
-/// settings, tokens, sessions or the system needs an interactive session.
+/// settings, tokens, sessions or the system needs an interactive session. Managing a
+/// mirrored source (which mints a token) and recording a takeover (which changes the
+/// serving state of a network) are interactive too (WP14.0, plan section 3.2); the push of a
+/// mirror is an `Execute` on the mirror, which its own token reaches.
 pub(crate) fn interactive_only(action: Action, kind: ObjectKind) -> bool {
     matches!(action, Action::Administer | Action::Reveal)
         || (matches!(action, Action::Create | Action::Update | Action::Delete)
@@ -216,6 +236,8 @@ pub(crate) fn interactive_only(action: Action, kind: ObjectKind) -> bool {
                     | ObjectKind::Session
                     | ObjectKind::Secret
                     | ObjectKind::DnsKey
+                    | ObjectKind::Mirror
+                    | ObjectKind::Takeover
             ))
 }
 

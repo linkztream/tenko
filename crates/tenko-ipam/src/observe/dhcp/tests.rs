@@ -64,6 +64,7 @@ fn lease(vrf: VrfId, last: u8, cltt: Timestamp, state: BindingState) -> Lease {
         relay: None,
         observed_at: None,
         granted: None,
+        adopted: None,
     }
 }
 

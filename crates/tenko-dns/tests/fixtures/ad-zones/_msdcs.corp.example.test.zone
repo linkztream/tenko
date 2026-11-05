@@ -1,0 +1,25 @@
+; The forest-wide zone _msdcs.corp.example.test: the DSA GUID aliases and the locator records.
+$ORIGIN _msdcs.corp.example.test.
+$TTL 3600
+@ 3600 IN SOA dc1.corp.example.test. hostmaster.corp.example.test. 2026110105 900 600 86400 3600
+@ 3600 IN NS dc1.corp.example.test.
+@ 3600 IN NS dc2.corp.example.test.
+gc 600 IN A 192.0.2.5
+gc 600 IN A 192.0.2.6
+_ldap._tcp.dc 600 IN SRV 0 100 389 dc1.corp.example.test.
+_ldap._tcp.dc 600 IN SRV 0 100 389 dc2.corp.example.test.
+_kerberos._tcp.dc 600 IN SRV 0 100 88 dc1.corp.example.test.
+_kerberos._tcp.dc 600 IN SRV 0 100 88 dc2.corp.example.test.
+_ldap._tcp.default-first-site-name._sites.dc 600 IN SRV 0 100 389 dc1.corp.example.test.
+_ldap._tcp.default-first-site-name._sites.dc 600 IN SRV 0 100 389 dc2.corp.example.test.
+_kerberos._tcp.default-first-site-name._sites.dc 600 IN SRV 0 100 88 dc1.corp.example.test.
+_kerberos._tcp.default-first-site-name._sites.dc 600 IN SRV 0 100 88 dc2.corp.example.test.
+_ldap._tcp.gc 600 IN SRV 0 100 3268 dc1.corp.example.test.
+_ldap._tcp.gc 600 IN SRV 0 100 3268 dc2.corp.example.test.
+_ldap._tcp.default-first-site-name._sites.gc 600 IN SRV 0 100 3268 dc1.corp.example.test.
+_ldap._tcp.default-first-site-name._sites.gc 600 IN SRV 0 100 3268 dc2.corp.example.test.
+_ldap._tcp.0d9e7f2a-4b1c-4e63-9a8d-2f5c6b7e8a90.domains 600 IN SRV 0 100 389 dc1.corp.example.test.
+_ldap._tcp.0d9e7f2a-4b1c-4e63-9a8d-2f5c6b7e8a90.domains 600 IN SRV 0 100 389 dc2.corp.example.test.
+_ldap._tcp.pdc 600 IN SRV 0 100 389 dc1.corp.example.test.
+6f1c2e3d-8a9b-4c5d-9e0f-1a2b3c4d5e6f 600 IN CNAME dc1.corp.example.test.
+7a2d3f4e-9b0c-4d6e-8f1a-2b3c4d5e6f70 600 IN CNAME dc2.corp.example.test.

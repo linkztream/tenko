@@ -49,6 +49,7 @@
 //! | [`scans`] | scan jobs, probe scan configuration, kill switch (Discovery module) | WP3.10 |
 //! | [`dns`] | zones, records, views, forwarders, access lists, keys, lists, the DNS role of a node (DNS module) | WP4.0 (contracts) |
 //! | [`dhcp`] | server settings, scopes, shared networks, pools, options, classes, policies, filters, reservations, leases, history, export, the DHCP role of a node (DHCP module; `/ipam/reconcile` with the IPAM module) | WP7.0 (contracts) |
+//! | [`migrate`] | mirrored sources, their snapshots and losses, the diff, the prepare, the takeover and the revert of a scope, the takeover records (DHCP module) | WP14.0 (contracts) |
 //!
 //! The Slice 3 modules were created empty by WP3.0 with their tags registered, so each
 //! package adds its operations in its own file. The quorum gate of WP3.9 sits in the API
@@ -99,6 +100,8 @@ pub mod import;
 pub mod jobs;
 pub mod kek;
 pub mod metrics;
+// WP14.0: mirrored sources and takeovers.
+pub mod migrate;
 pub mod moves;
 // node-roles: the stored role set of a node.
 pub mod node_roles;
@@ -170,6 +173,8 @@ pub mod vlans;
         (name = "dns", description = "DNS: zones and records, views, forwarders, access lists, TSIG keys, block lists and the DNS role of a node"),
         // WP7.0: the DHCP tag.
         (name = "dhcp", description = "DHCP: server settings, scopes, shared networks, pools and exclusions, options, classes, policies, MAC filters, reservations, leases, history, export and the DHCP role of a node"),
+        // WP14.0: the migration tag.
+        (name = "migrate", description = "Migration: mirrored sources pushed by an exporter, their snapshots and loss reports, the diff, the prepare, the takeover and the revert of a scope, and the takeover records"),
     ),
     components(schemas(ProblemDetails, crate::dto::SortOrder, tenko_ipam::query::Deleted)),
     security(("session" = []), ("token" = [])),
@@ -283,7 +288,10 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
     }
     // WP7.0: the DHCP module.
     if modules.contains(Module::Dhcp) {
-        router = router.merge(dhcp::routes());
+        router = router
+            .merge(dhcp::routes())
+            // WP14.0: the mirrored sources and the takeovers of their scopes.
+            .merge(migrate::routes());
     }
     router
 }

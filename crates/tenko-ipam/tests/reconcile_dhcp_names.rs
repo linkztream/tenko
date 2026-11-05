@@ -356,6 +356,7 @@ async fn lease_facts_alone_make_a_light_run() {
             relay: None,
             observed_at: None,
             granted: None,
+            adopted: None,
         };
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
         batch
@@ -437,6 +438,7 @@ async fn a_group_commit_of_lease_rows_makes_a_light_run() {
             relay: None,
             observed_at: None,
             granted: None,
+            adopted: None,
         };
         flush
             .put_typed(&dhcp_tables::LEASES, &(lease.vrf, lease.addr), &lease)

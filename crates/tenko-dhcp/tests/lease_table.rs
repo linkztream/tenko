@@ -461,6 +461,7 @@ fn whole(vrf: VrfId, scope: PrefixId, last: u8, cold: Cold) -> Lease {
             }),
         observed_at: time(observed_at),
         granted: time(granted),
+        adopted: None,
     }
 }
 
@@ -677,6 +678,7 @@ fn the_grant_time_round_trips_through_the_table() {
     // A row of an earlier version has none; it reads as granted at its client time.
     let old = Lease {
         granted: None,
+        adopted: None,
         ..renewal
     };
     index.apply(Lease {

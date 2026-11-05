@@ -97,6 +97,7 @@ fn lease() -> Lease {
         }),
         observed_at: None,
         granted: None,
+        adopted: None,
     }
 }
 

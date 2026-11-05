@@ -288,6 +288,7 @@ impl World {
             relay: None,
             observed_at: None,
             granted: None,
+            adopted: None,
         };
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), cltt);
         batch

@@ -33,14 +33,17 @@
 //! its default layout until the person changes it again. Its changes are not routed to the
 //! event stream (`tenko_api::sse`): a person's layout is nobody else's event.
 
-use std::net::IpAddr;
+use std::{fmt, net::IpAddr, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    ApiTokenId, AuthStrength, MessageKey, ScopeRule, SessionId, Timestamp, UserId,
-    secret::SecretRef, table::TableDef,
+    ApiTokenId, AuthStrength, MessageKey, MirrorId, ScopeRule, SessionId, Timestamp, UserId,
+    error::InvalidValue, secret::SecretRef, table::TableDef,
 };
-use utoipa::ToSchema;
+use utoipa::{
+    PartialSchema, ToSchema,
+    openapi::{ObjectBuilder, RefOr, Schema, Type},
+};
 
 pub use crate::preferences::StoredPreference;
 use crate::{
@@ -192,28 +195,118 @@ pub struct RolePolicy {
     pub updated_by: Option<UserId>,
 }
 
-/// A special scope of a scoped token, beyond its grants (IAM-10, S3-Q7).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
-)]
+/// A special scope of a scoped token, beyond its grants (IAM-10, S3-Q7). On the wire and
+/// in the store it is a string: `metrics`, `audit:read`, or `mirror:<id>` for the token of
+/// a mirrored source (WP14.0, Windows takeover plan section 2.1).
+///
+/// The mirror scope carries the mirror's identifier as its payload. `MirrorId` is a
+/// sixteen-octet UUID, so the enum keeps `Copy` and the scope stays a value that is passed
+/// and compared by value, as before; the alternative, a field of its own on the token
+/// record beside `scopes`, would have put the mirror's right outside the list every check
+/// reads and would have needed a second rule for "no other scope with a mirror scope".
+/// The mirror scope is never requested through the token API: the creation of a mirror
+/// mints it (`AuthService::validate_token_grants` refuses it in a request).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TokenScope {
     /// Reads the metrics endpoint (OPS-05).
-    #[serde(rename = "metrics")]
     Metrics,
     /// Reads the audit log (IAM-18).
-    #[serde(rename = "audit:read")]
     AuditRead,
+    /// Pushes the snapshots of one mirrored source, and nothing else (WP14.0).
+    Mirror(MirrorId),
 }
 
 impl TokenScope {
-    /// The stable name.
-    pub const fn as_str(self) -> &'static str {
+    /// The prefix of the wire form of a mirror scope.
+    pub const MIRROR_PREFIX: &'static str = "mirror:";
+
+    /// The stable name of a scope without a payload; the mirror scope's wire form is
+    /// [`TokenScope::to_string`] (`mirror:<id>`).
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Metrics => "metrics",
             Self::AuditRead => "audit:read",
+            Self::Mirror(_) => "mirror",
+        }
+    }
+
+    /// The mirror a mirror scope names.
+    pub const fn mirror(self) -> Option<MirrorId> {
+        match self {
+            Self::Mirror(id) => Some(id),
+            Self::Metrics | Self::AuditRead => None,
+        }
+    }
+
+    /// Parses the wire form.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidValue`] for anything but `metrics`, `audit:read` and `mirror:<uuid>`.
+    pub fn parse(text: &str) -> Result<Self, InvalidValue> {
+        match text {
+            "metrics" => Ok(Self::Metrics),
+            "audit:read" => Ok(Self::AuditRead),
+            _ => text
+                .strip_prefix(Self::MIRROR_PREFIX)
+                .and_then(|id| id.parse::<MirrorId>().ok())
+                .map(Self::Mirror)
+                .ok_or_else(|| {
+                    InvalidValue::new(
+                        "token scope",
+                        text,
+                        "one of metrics, audit:read, mirror:<id>",
+                    )
+                }),
         }
     }
 }
+
+impl fmt::Display for TokenScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Mirror(id) => write!(f, "{}{id}", Self::MIRROR_PREFIX),
+            other => f.write_str(other.label()),
+        }
+    }
+}
+
+impl FromStr for TokenScope {
+    type Err = InvalidValue;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl Serialize for TokenScope {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for TokenScope {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Self::parse(&text).map_err(serde::de::Error::custom)
+    }
+}
+
+impl PartialSchema for TokenScope {
+    fn schema() -> RefOr<Schema> {
+        RefOr::T(Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .description(Some(
+                    "A special scope of a scoped token: `metrics`, `audit:read`, or                      `mirror:<id>` (the push of one mirrored source; minted when the                      mirror is created, never requested here)",
+                ))
+                .examples(["metrics", "audit:read"])
+                .build(),
+        ))
+    }
+}
+
+impl ToSchema for TokenScope {}
 
 /// One grant of a scoped token: a role, globally or over one scope rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -550,9 +643,43 @@ pub struct AlarmRecord {
 
 #[cfg(test)]
 mod tests {
-    use tenko_core::{AuthStrength, SessionId, Timestamp, UserId};
+    use tenko_core::{AuthStrength, MirrorId, SessionId, Timestamp, UserId};
 
-    use super::{SESSIONS, SessionRecord};
+    use super::{SESSIONS, SessionRecord, TokenScope};
+
+    // WP14.0: the wire form `mirror:<id>` of the mirror scope.
+    #[test]
+    fn token_scopes_round_trip_through_their_wire_form() {
+        let mirror = MirrorId::generate();
+        for scope in [
+            TokenScope::Metrics,
+            TokenScope::AuditRead,
+            TokenScope::Mirror(mirror),
+        ] {
+            let text = scope.to_string();
+            assert_eq!(text.parse::<TokenScope>(), Ok(scope));
+            let json = serde_json::to_string(&scope).expect("json");
+            assert_eq!(json, format!("\"{text}\""));
+            assert_eq!(
+                serde_json::from_str::<TokenScope>(&json).expect("json"),
+                scope
+            );
+            let cbor = tenko_core::codec::to_cbor(&scope).expect("cbor");
+            assert_eq!(
+                tenko_core::codec::from_cbor::<TokenScope>(&cbor).expect("cbor"),
+                scope
+            );
+        }
+        assert_eq!(
+            TokenScope::Mirror(mirror).to_string(),
+            format!("mirror:{mirror}")
+        );
+        assert_eq!(TokenScope::Mirror(mirror).mirror(), Some(mirror));
+        assert_eq!(TokenScope::Metrics.mirror(), None);
+        for bad in ["mirror", "mirror:", "mirror:not-a-uuid", "Metrics", ""] {
+            assert!(bad.parse::<TokenScope>().is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn a_session_stored_by_0_0_11_keeps_its_enrollment_restriction() {

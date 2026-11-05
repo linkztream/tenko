@@ -11,8 +11,9 @@
 //! - **the rest**, one boxed byte string per row ([`Row::blob`]): the client (hardware
 //!   type, `chaddr`, client identifier) first, then only the fields the row has of the
 //!   partner times, the pool share, the names, the option 81 flags, the DDNS policy and
-//!   outcome, the fingerprint, the relay, the observation time of earlier versions and the
-//!   grant time (ADR 0031), in a compact encoding of this module.
+//!   outcome, the fingerprint, the relay, the observation time of earlier versions, the
+//!   grant time (ADR 0031) and the adoption mark of a takeover (WP14.0), in a compact
+//!   encoding of this module.
 //!
 //! The DORA path reads the client from the start of the byte string without allocating
 //! ([`ClientView`]); everything else is decoded only when a whole [`Lease`] is wanted (the
@@ -25,9 +26,10 @@
 use std::net::Ipv4Addr;
 
 use tenko_core::{
-    NodeId, PrefixId, Revision, Timestamp, VrfId,
+    MirrorId, NodeId, PrefixId, Revision, Timestamp, VrfId,
     dhcp::{
-        BindingState, ClientKey, DdnsPolicy, DdnsState, Fingerprint, Lease, PoolShare, RelayInfo,
+        Adopted, BindingState, ClientKey, DdnsPolicy, DdnsState, Fingerprint, Lease, PoolShare,
+        RelayInfo,
         lease::{MAX_IDENTITY, write_identity},
     },
     dns::DnsName,
@@ -265,6 +267,7 @@ impl Row {
             relay: None,
             observed_at: None,
             granted: None,
+            adopted: None,
         };
         decode_cold(&mut reader, &mut lease);
         debug_assert!(reader.ok && reader.at == self.blob.len(), "a row decodes");
@@ -287,6 +290,8 @@ const RELAY: u32 = 1 << 10;
 const OBSERVED_AT: u32 = 1 << 11;
 // ADR 0031: the grant time of the binding.
 const GRANTED: u32 = 1 << 12;
+// WP14.0: the adoption mark of a takeover (the mirror, the sequence, the guess).
+const ADOPTED: u32 = 1 << 13;
 
 /// The encoding: the hardware type, `chaddr` with its length, the client identifier's
 /// length plus one (zero: none) and its octets, the presence mask of the cold fields, then
@@ -327,6 +332,7 @@ fn encode(lease: &Lease, out: &mut Vec<u8>) {
         (RELAY, lease.relay.is_some()),
         (OBSERVED_AT, lease.observed_at.is_some()),
         (GRANTED, lease.granted.is_some()),
+        (ADOPTED, lease.adopted.is_some()),
     ]
     .iter()
     .filter(|(_, present)| *present)
@@ -367,6 +373,11 @@ fn encode(lease: &Lease, out: &mut Vec<u8>) {
     }
     if let Some(time) = lease.granted {
         put_time(out, time);
+    }
+    if let Some(adopted) = lease.adopted {
+        out.extend_from_slice(adopted.mirror.0.as_bytes());
+        put_varint(out, u128::from(adopted.sequence));
+        out.push(u8::from(adopted.guessed));
     }
 }
 
@@ -475,6 +486,9 @@ fn decode_cold(reader: &mut Reader<'_>, lease: &mut Lease) {
     }
     if has(GRANTED) {
         lease.granted = Some(reader.time());
+    }
+    if has(ADOPTED) {
+        lease.adopted = Some(reader.adopted());
     }
 }
 
@@ -647,6 +661,27 @@ impl<'a> Reader<'a> {
         }
     }
 
+    fn adopted(&mut self) -> Adopted {
+        let octets = self.take(16);
+        let mirror = <[u8; 16]>::try_from(octets).map_or_else(
+            |_| {
+                self.ok = false;
+                MirrorId::from_uuid(uuid::Uuid::nil())
+            },
+            |bytes| MirrorId::from_uuid(uuid::Uuid::from_bytes(bytes)),
+        );
+        let sequence = u64::try_from(self.varint()).unwrap_or_else(|_| {
+            self.ok = false;
+            0
+        });
+        let guessed = self.byte() != 0;
+        Adopted {
+            mirror,
+            sequence,
+            guessed,
+        }
+    }
+
     fn addr(&mut self) -> Ipv4Addr {
         let octets = self.take(4);
         <[u8; 4]>::try_from(octets).map_or_else(
@@ -710,6 +745,7 @@ mod tests {
             relay: None,
             observed_at: None,
             granted: None,
+            adopted: None,
         }
     }
 
@@ -777,8 +813,41 @@ mod tests {
         lease.observed_at = Some(now);
         // ADR 0031: the grant time of the binding.
         lease.granted = Timestamp::from_unix_nanos(now.unix_nanos() - 3_600_000_000_000).ok();
+        // WP14.0: the adoption mark of a takeover.
+        lease.adopted = Some(Adopted {
+            mirror: MirrorId::generate(),
+            sequence: 1 << 40,
+            guessed: true,
+        });
         let (back, _) = round_trip(&lease);
         assert_eq!(back, lease);
+    }
+
+    // WP14.0: a row with and without the adoption mark decodes in both directions, and the
+    // mark costs the row its 16 octets of mirror id, the sequence and one flag octet.
+    #[test]
+    fn the_adoption_mark_is_a_cold_field() {
+        let mut lease = lease();
+        let (back, bare) = round_trip(&lease);
+        assert_eq!(back, lease);
+        assert!(back.adopted.is_none());
+        lease.adopted = Some(Adopted {
+            mirror: MirrorId::generate(),
+            sequence: 7,
+            guessed: false,
+        });
+        let (back, marked) = round_trip(&lease);
+        assert_eq!(back, lease);
+        assert!(back.is_adopted());
+        assert_eq!(
+            marked,
+            bare + 1 + 16 + 1 + 1,
+            "a second mask octet, the mirror, a short sequence, the flag"
+        );
+        lease.adopted = None;
+        let (back, len) = round_trip(&lease);
+        assert_eq!(back, lease);
+        assert_eq!(len, bare);
     }
 
     #[test]

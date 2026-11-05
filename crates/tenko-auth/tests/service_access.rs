@@ -1464,6 +1464,30 @@ async fn the_special_scopes_read_the_metrics_or_the_audit_log_and_nothing_else()
     assert_eq!(lab.code(&both, Action::Read, AUDIT_OBJECT), "ok");
 }
 
+// WP14.0: the mirror scope is minted by the creation of a mirror, never requested.
+#[tokio::test]
+async fn a_mirror_scope_cannot_be_requested_through_the_token_api() {
+    let lab = Lab::new().await;
+    let account = service_account(&lab, "svc-mirror", &[]).await;
+    let scope = TokenScope::Mirror(tenko_core::MirrorId::generate());
+    let result = lab
+        .env
+        .service
+        .create_account_token(&lab.admin().await, account.id, &with_scopes(&[scope]))
+        .await;
+    let error = result.expect_err("the mirror scope is refused");
+    assert_eq!(error.code(), "auth.invalid_request");
+    assert!(error.to_string().contains("mirror"), "{error}");
+    lab.user("mona", Some(PIN_DANA), &[RoleName::Admin]).await;
+    let ctx = lab.sign_in("mona", PIN_DANA).await;
+    let result = lab
+        .env
+        .service
+        .create_token_with(&ctx, &with_scopes(&[TokenScope::Metrics, scope]))
+        .await;
+    assert!(result.is_err(), "refused beside another scope too");
+}
+
 #[tokio::test]
 async fn special_scopes_need_an_owner_who_reads_the_system_or_a_service_account() {
     let lab = Lab::new().await;

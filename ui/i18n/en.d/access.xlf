@@ -435,6 +435,10 @@
         <notes><note category="description">A special token scope.</note></notes>
         <segment><source>Read the audit log</source></segment>
       </unit>
+      <unit id="access.token_scope.mirror">
+        <notes><note category="description">A special token scope: the token of a mirrored source, which pushes its snapshots and reaches nothing else (WP14.0).</note></notes>
+        <segment><source>Push the snapshots of the mirrored source {id}</source></segment>
+      </unit>
       <unit id="access.token_scope.metrics_help">
         <segment><source>For a metrics scraper: /api/v1/metrics and nothing else.</source></segment>
       </unit>

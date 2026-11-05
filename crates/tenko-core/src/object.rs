@@ -12,8 +12,8 @@ use crate::{
     error::InvalidValue,
     id::{
         AddressId, ApiTokenId, ConnectorId, CustomFieldId, HostId, ImportId, InterfaceId, JobId,
-        NodeId, ObservationId, PrefixId, ProposalId, RangeId, SecretId, SessionId, SiteId,
-        TenantId, UserId, VlanId, VrfId,
+        MirrorId, NodeId, ObservationId, PrefixId, ProposalId, RangeId, SecretId, SessionId,
+        SiteId, TakeoverId, TenantId, UserId, VlanId, VrfId,
     },
 };
 
@@ -122,6 +122,11 @@ object_kinds! {
     DhcpOptionDef => "dhcp_option_def",
     /// A DHCP MAC filter entry.
     DhcpFilter => "dhcp_filter",
+    // WP14.0: the Windows takeover (Phase 4).
+    /// A mirrored source (a pushed migration source, MIG-08).
+    Mirror => "mirror",
+    /// A recorded takeover of a scope from a mirrored source.
+    Takeover => "takeover",
 }
 
 impl PartialOrd for ObjectKind {
@@ -237,6 +242,8 @@ object_ref_from! {
     ImportId => Import,
     ConnectorId => Connector,
     SecretId => Secret,
+    MirrorId => Mirror,
+    TakeoverId => Takeover,
 }
 
 #[cfg(test)]

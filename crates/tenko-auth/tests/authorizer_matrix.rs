@@ -56,7 +56,7 @@ const fn row(kind: ObjectKind, viewer_reads: bool, operator: &'static str) -> Ro
     }
 }
 
-const TABLE: [Row; 33] = [
+const TABLE: [Row; 35] = [
     row(ObjectKind::Tenant, true, "RCUD"),
     row(ObjectKind::Vrf, true, "RCUD"),
     row(ObjectKind::Site, true, "RCUD"),
@@ -95,6 +95,10 @@ const TABLE: [Row; 33] = [
     row(ObjectKind::DhcpPolicy, true, "RCUDX"),
     row(ObjectKind::DhcpOptionDef, true, "RCUDX"),
     row(ObjectKind::DhcpFilter, true, "RCUDX"),
+    // WP14.0: the migration module (Windows takeover plan section 3.2): migrate.read for
+    // operators, migrate.read and migrate.write for administrators; viewers nothing.
+    row(ObjectKind::Mirror, false, "R"),
+    row(ObjectKind::Takeover, false, "R"),
 ];
 
 /// The table letter of an action; administration belongs to administrators only.

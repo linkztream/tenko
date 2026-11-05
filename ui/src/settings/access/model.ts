@@ -28,8 +28,11 @@ export const ROLES: readonly RoleName[] = ["admin", "operator", "viewer", "audit
 export const GRANTABLE_ROLES: readonly RoleName[] = ["operator", "viewer"];
 /** The MFA requirements from the weakest to the strongest. */
 export const MFA_LEVELS: readonly RoleMfa[] = ["optional", "totp_or_stronger", "passkey"];
-/** The special scopes of a scoped token. */
-export const TOKEN_SCOPES: readonly TokenScope[] = ["metrics", "audit:read"];
+/**
+ * The special scopes a scoped token can be asked for. The third scope, `mirror:<id>`, is
+ * minted when a mirrored source is created and is never requested here (WP14.0).
+ */
+export const TOKEN_SCOPES = ["metrics", "audit:read"] as const satisfies readonly TokenScope[];
 /** The rule kinds a grant can name in Phase 1. */
 export type GrantableKind = "vrf" | "site" | "prefix";
 export const GRANTABLE_KINDS: readonly GrantableKind[] = ["vrf", "site", "prefix"];
@@ -56,7 +59,11 @@ export function mfaText(mfa: RoleMfa): string {
 
 /** The words of a special token scope. */
 export function tokenScopeText(scope: TokenScope): string {
-  return scope === "metrics" ? t("access.token_scope.metrics") : t("access.token_scope.audit_read");
+  if (scope === "metrics") return t("access.token_scope.metrics");
+  if (scope === "audit:read") return t("access.token_scope.audit_read");
+  // WP14.0: `mirror:<id>`, the push of one mirrored source; minted with the mirror, never here.
+  if (scope.startsWith("mirror:")) return t("access.token_scope.mirror", { id: scope.slice("mirror:".length) });
+  return scope;
 }
 
 /** Where the names of the objects a scope rule names come from. */

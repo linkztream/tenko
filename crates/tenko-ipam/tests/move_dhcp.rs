@@ -274,6 +274,7 @@ impl Moving {
             relay: None,
             observed_at: None,
             granted: None,
+            adopted: None,
         };
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
         batch
@@ -528,6 +529,7 @@ async fn a_lease_of_the_mac_in_the_target_network_confirms_the_move() {
             relay: None,
             observed_at: None,
             granted: None,
+            adopted: None,
         }
     };
 

@@ -192,6 +192,11 @@ id_type! {
     SecretId,
     /// Identifier of one API request, carried into write batches and audit records.
     RequestId,
+    // WP14.0: the Windows takeover (Phase 4).
+    /// Identifier of a mirrored source (MIG-08; `docs/plans/windows-takeover-plan.md`).
+    MirrorId,
+    /// Identifier of a recorded takeover of a scope.
+    TakeoverId,
 }
 
 /// Raft node identifier, assigned at enrollment.

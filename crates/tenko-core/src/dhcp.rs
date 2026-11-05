@@ -56,9 +56,9 @@ pub use class::{
 };
 pub use history::{HistoryNames, HistoryRow, LeanEvent};
 pub use lease::{
-    BindingState, ClientKey, DdnsState, Fingerprint, Lease, Lease6, Lease6Event, Lease6Kind,
-    LeaseEvent, LeaseEventKind, LeaseRef, MovingClient, MovingLease, PoolShare, Relay6Info,
-    RelayInfo, write_identity, write_identity6,
+    Adopted, BindingState, ClientKey, DdnsState, Fingerprint, Lease, Lease6, Lease6Event,
+    Lease6Kind, LeaseEvent, LeaseEventKind, LeaseRef, MovingClient, MovingLease, PoolShare,
+    Relay6Info, RelayInfo, write_identity, write_identity6,
 };
 pub use option::{
     CATALOG_V4, CATALOG_V6, Catalog6Entry, CatalogEntry, OptionData, OptionDef, OptionKind,
@@ -1305,9 +1305,17 @@ pub mod audit {
     pub const EXPORT: AuditAction = AuditAction::from_static("dhcp.export");
     /// The retention service purged lease history (P3-Q13).
     pub const HISTORY_PURGE: AuditAction = AuditAction::from_static("dhcp.history.purge");
+    // WP14.0: the scope actions of the Windows takeover (plan section 2.12).
+    /// The prepare job made Tenko's disabled scope equal to a mirrored scope.
+    pub const SCOPE_PREPARE: AuditAction = AuditAction::from_static("dhcp.scope.prepare");
+    /// The takeover job adopted a mirrored scope's leases and names and enabled the scope,
+    /// with its counts.
+    pub const SCOPE_TAKEOVER: AuditAction = AuditAction::from_static("dhcp.scope.takeover");
+    /// The reverse of a takeover: the scope disabled, its leases and records kept.
+    pub const SCOPE_REVERT: AuditAction = AuditAction::from_static("dhcp.scope.revert");
 
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 29] = [
+    pub const ALL: [&AuditAction; 32] = [
         &SETTINGS_UPDATE,
         &SCOPE_CREATE,
         &SCOPE_UPDATE,
@@ -1337,6 +1345,9 @@ pub mod audit {
         &DECLINE,
         &EXPORT,
         &HISTORY_PURGE,
+        &SCOPE_PREPARE,
+        &SCOPE_TAKEOVER,
+        &SCOPE_REVERT,
     ];
 }
 

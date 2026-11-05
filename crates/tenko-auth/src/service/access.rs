@@ -670,6 +670,14 @@ impl AuthService {
         let mut scopes: Vec<TokenScope> = request.scopes.clone();
         scopes.sort();
         scopes.dedup();
+        // WP14.0: the mirror scope is minted when a mirror is created, by the mirror
+        // service for its own service account; no request asks for it.
+        if scopes.iter().any(|scope| scope.mirror().is_some()) {
+            return Err(AuthError::invalid(
+                "scopes",
+                "a mirror scope is minted when the mirror is created, not requested",
+            ));
+        }
         if !scopes.is_empty()
             && !owner.is_service()
             && !owner
@@ -757,7 +765,7 @@ impl AuthService {
             record
                 .scopes
                 .iter()
-                .map(|scope| scope.as_str())
+                .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(","),
         );

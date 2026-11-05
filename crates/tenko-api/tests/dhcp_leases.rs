@@ -74,6 +74,7 @@ fn lease4(vrf: VrfId, scope: PrefixId, addr: &str) -> Lease {
         relay: None,
         observed_at: None,
         granted: None,
+        adopted: None,
     }
 }
 

@@ -37,6 +37,12 @@ pub struct DhcpIr {
     /// Server-level option values.
     #[serde(default)]
     pub server_options: Vec<IrOption>,
+    // WP14.0: the server-level DNS settings, which a mirrored source reads beside each
+    // scope's (Windows takeover plan section 2.2); additive, with a serde default.
+    /// The server-level DDNS settings, mapped (`Get-DhcpServerv4DnsSetting` without a
+    /// scope); a scope without its own settings inherits them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_ddns: Option<DdnsPolicy>,
     /// Custom option definitions.
     #[serde(default)]
     pub option_defs: Vec<IrOptionDef>,
@@ -67,6 +73,7 @@ impl DhcpIr {
     /// Whether the IR holds nothing.
     pub fn is_empty(&self) -> bool {
         self.server_options.is_empty()
+            && self.server_ddns.is_none()
             && self.option_defs.is_empty()
             && self.classes.is_empty()
             && self.scopes.is_empty()
@@ -188,6 +195,13 @@ pub struct IrReservation {
     /// The name, as a host name when it parses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<HostName>,
+    // WP14.0: the name a source writes that is not a host name (Windows takeover plan
+    // section 2.9, WT-Q10); additive, with a serde default.
+    /// The name as the source writes it when it does not parse as a host name (`Living
+    /// Room TV`); the prepare keeps it as the IPAM host's name and derives no record from
+    /// it. Absent when [`IrReservation::name`] holds the name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_name: Option<String>,
     /// Free text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -463,6 +477,7 @@ mod tests {
                         client_id: None,
                     },
                     name: Some(HostName::new("printer01").expect("name")),
+                    source_name: None,
                     description: None,
                     bootp: false,
                     options: Vec::new(),

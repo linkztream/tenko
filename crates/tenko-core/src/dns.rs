@@ -198,6 +198,17 @@ pub mod codes {
     /// The node's query log is off, so the blocking view has nothing to count (409).
     /// Params: `node`.
     pub const BLOCKING_LOG_OFF: &str = "dns.blocking.log_off";
+    // WP14.0: the flip and the release of a zone (Windows takeover plan sections 2.6 and
+    // 3.2, ADR 0034).
+    /// A flip to primary was asked of a zone that is not a secondary zone (409). Params:
+    /// `zone`, `kind`.
+    pub const ZONE_FLIP_NOT_SECONDARY: &str = "dns.zone.flip.not_secondary";
+    /// A flip to secondary or a release was asked of a zone that is not a primary zone
+    /// (409). Params: `zone`, `kind`.
+    pub const ZONE_FLIP_NOT_PRIMARY: &str = "dns.zone.flip.not_primary";
+    /// A flip or a release was asked of a catalog zone, which keeps its own rule (409).
+    /// Params: `zone`.
+    pub const ZONE_FLIP_CATALOG: &str = "dns.zone.flip.catalog";
 
     // WP10.0: the recursive resolver (recursion plan section 3.4).
     /// The trust anchor of the zone does not exist (404). Params: `zone`.
@@ -219,7 +230,7 @@ pub mod codes {
     // WP10.0: end.
 
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 36] = [
+    pub const ALL: [&str; 39] = [
         ZONE_NOT_FOUND,
         ZONE_EXISTS,
         ZONE_INVALID,
@@ -260,6 +271,10 @@ pub mod codes {
         NTA_NOT_FOUND,
         NTA_INVALID,
         RECURSION_DISABLED,
+        // WP14.0
+        ZONE_FLIP_NOT_SECONDARY,
+        ZONE_FLIP_NOT_PRIMARY,
+        ZONE_FLIP_CATALOG,
     ];
 }
 
@@ -2021,6 +2036,12 @@ pub mod audit {
     pub const ZONE_DELETE: AuditAction = AuditAction::from_static("dns.zone.delete");
     /// A zone file was exported (MIG-15).
     pub const ZONE_EXPORT: AuditAction = AuditAction::from_static("dns.zone.export");
+    // WP14.0: the flip and the release of a zone (ADR 0034).
+    /// A zone flipped between secondary and primary in place, with the counts by origin.
+    pub const ZONE_FLIP: AuditAction = AuditAction::from_static("dns.zone.flip");
+    /// The remaining frozen (`transfer`) names of a primary zone were released to `manual`
+    /// or deleted, with the counts.
+    pub const ZONE_RELEASE: AuditAction = AuditAction::from_static("dns.zone.release");
     /// RRsets changed through the API or the UI (one batch).
     pub const RECORD_CHANGE: AuditAction = AuditAction::from_static("dns.record.change");
     /// RRsets were imported from a zone file.
@@ -2140,11 +2161,14 @@ pub mod audit {
     // WP10.0: end.
 
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 54] = [
+    pub const ALL: [&AuditAction; 56] = [
         &ZONE_CREATE,
         &ZONE_UPDATE,
         &ZONE_DELETE,
         &ZONE_EXPORT,
+        // WP14.0
+        &ZONE_FLIP,
+        &ZONE_RELEASE,
         &RECORD_CHANGE,
         &RECORD_IMPORT,
         &RECORD_ACTUATE,
@@ -2248,6 +2272,150 @@ pub mod findings {
     ];
 }
 // WP10.0: end.
+
+// ---------------------------------------------------------------------------------------
+// WP14.0: the flip and the release of a zone (Windows takeover plan section 2.6, ADR 0034)
+
+/// `POST /dns/zones/{id}/flip`: turn a secondary zone into a primary zone in place, or a
+/// primary zone back into a secondary of the named primaries (WP14.0 declares it; WP14.2
+/// builds it). The body carries `to` and the values of the target kind:
+/// `{"to": "primary", "soa": {...}, "ns": [...]}` or
+/// `{"to": "secondary", "primaries": [...]}`.
+///
+/// A flip to primary keeps every record with its provenance: the A, AAAA and DHCID RRsets
+/// at a name that holds a DHCID RRset, and a PTR whose target is such a name, stay
+/// `transfer` (frozen for the takeover); the apex SOA and NS become the operator's values;
+/// every other RRset becomes `ad` (WT-Q9). A flip to secondary makes the next transfer
+/// replace every record with the copy's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "to", rename_all = "snake_case")]
+pub enum ZoneFlip {
+    /// To a primary zone.
+    Primary {
+        /// The SOA values of the primary zone: `mname` and `rname` are the operator's; the
+        /// serial continues from the copy's.
+        soa: SoaDefaults,
+        /// The apex NS set of the primary zone, at least one name.
+        ns: Vec<DnsName>,
+    },
+    /// To a secondary zone of these primaries.
+    Secondary {
+        /// The primaries, at least one.
+        primaries: Vec<PrimaryServer>,
+    },
+}
+
+impl ZoneFlip {
+    /// The kind the zone has after the flip.
+    pub const fn target(&self) -> ZoneKind {
+        match self {
+            Self::Primary { .. } => ZoneKind::Primary,
+            Self::Secondary { .. } => ZoneKind::Secondary,
+        }
+    }
+
+    /// Checks the request: a flip to primary names at least one NS and valid SOA values; a
+    /// flip to secondary names at least one primary.
+    ///
+    /// # Errors
+    ///
+    /// `dns.zone.invalid` naming the field.
+    pub fn validate(&self) -> Result<(), DnsError> {
+        match self {
+            Self::Primary { soa, ns } => {
+                soa.validate()?;
+                if ns.is_empty() {
+                    return Err(DnsError::invalid(
+                        codes::ZONE_INVALID,
+                        "ns",
+                        "a primary zone names at least one name server",
+                    ));
+                }
+                for (index, name) in ns.iter().enumerate() {
+                    if ns[..index].contains(name) {
+                        return Err(DnsError::invalid(
+                            codes::ZONE_INVALID,
+                            "ns",
+                            "a name server appears twice",
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            Self::Secondary { primaries } => {
+                if primaries.is_empty() {
+                    return Err(DnsError::invalid(
+                        codes::ZONE_INVALID,
+                        "primaries",
+                        "a secondary zone names at least one primary",
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// How many RRsets of a zone one origin owns after a flip, for the report and the audit
+/// record `dns.zone.flip`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct FlipOriginCount {
+    /// The origin.
+    pub origin: Origin,
+    /// Its RRsets in every scope of the zone.
+    pub rrsets: u32,
+}
+
+/// The answer of a flip: the zone's kind afterwards, the serial it continues at, and the
+/// RRsets by origin.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ZoneFlipReport {
+    /// The zone.
+    pub zone: ZoneId,
+    /// The kind after the flip.
+    pub kind: ZoneKind,
+    /// The serial after the flip.
+    pub serial: u32,
+    /// The RRsets by origin after the flip.
+    #[serde(default)]
+    pub origins: Vec<FlipOriginCount>,
+    /// The revision that committed the flip.
+    pub revision: Revision,
+}
+
+/// `POST /dns/zones/{id}/release`: turn every remaining `transfer` RRset of a primary zone
+/// into `manual`, or delete them, after listing them in a dry run (plan section 2.6). For
+/// the names a takeover did not adopt because no mirrored lease or reservation stands
+/// behind them. A catalog zone is refused (`dns.zone.flip.catalog`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ZoneRelease {
+    /// Delete the frozen RRsets instead of releasing them to `manual`.
+    #[serde(default)]
+    pub delete: bool,
+    /// List what would change and change nothing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// The answer of a release: the names that were (or, in a dry run, would be) released or
+/// deleted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ZoneReleaseReport {
+    /// The zone.
+    pub zone: ZoneId,
+    /// Whether the RRsets were deleted rather than released to `manual`.
+    pub deleted: bool,
+    /// Whether nothing was changed.
+    pub dry_run: bool,
+    /// The owner names whose frozen RRsets the release touches.
+    #[serde(default)]
+    pub names: Vec<DnsName>,
+    /// How many RRsets the release touches.
+    pub rrsets: u32,
+    /// The revision that committed the change; none for a dry run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<Revision>,
+}
 
 #[cfg(test)]
 mod tests;

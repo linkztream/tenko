@@ -270,6 +270,7 @@ fn foreign_lease(vrf: VrfId, scope: PrefixId, addr: Ipv4Addr) -> Lease {
         relay: None,
         observed_at: None,
         granted: None,
+        adopted: None,
     }
 }
 

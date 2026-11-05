@@ -1,0 +1,1451 @@
+{
+  "format": 1,
+  "sequence": 2,
+  "taken_at": "2026-11-01T08:01:00Z",
+  "source": {
+    "kind": "windows-dhcp",
+    "server": "dc1.corp.example.test",
+    "adapter": "Tenko-DhcpMirror.ps1",
+    "adapter_version": "0.1.0"
+  },
+  "dhcp": {
+    "server_options": [
+      {
+        "code": 6,
+        "values": [
+          "192.0.2.5",
+          "192.0.2.6"
+        ],
+        "origin": {
+          "sheet": "Get-DhcpServerv4OptionValue",
+          "column": "OptionId=6"
+        }
+      },
+      {
+        "code": 15,
+        "values": [
+          "corp.example.test"
+        ],
+        "origin": {
+          "sheet": "Get-DhcpServerv4OptionValue",
+          "column": "OptionId=15"
+        }
+      },
+      {
+        "code": 252,
+        "values": [
+          "http://wpad.corp.example.test/wpad.dat"
+        ],
+        "origin": {
+          "sheet": "Get-DhcpServerv4OptionValue",
+          "column": "OptionId=252"
+        }
+      }
+    ],
+    "server_ddns": {
+      "enabled": true,
+      "reverse": true,
+      "conflict": "protect",
+      "client_may_update_a": false,
+      "legacy_clients": true,
+      "refuse_foreign": false
+    },
+    "option_defs": [
+      {
+        "code": 252,
+        "name": "WPAD",
+        "kind": "string",
+        "array": false,
+        "description": "Web proxy auto-discovery URL",
+        "origin": {
+          "sheet": "Get-DhcpServerv4OptionDefinition",
+          "column": "OptionId=252"
+        }
+      }
+    ],
+    "classes": [],
+    "scopes": [
+      {
+        "cidr": "192.0.2.0/24",
+        "name": "Office",
+        "description": "Clients of the office network",
+        "active": false,
+        "lease_secs": 691200,
+        "ranges": [
+          {
+            "first": "192.0.2.100",
+            "last": "192.0.2.199"
+          }
+        ],
+        "exclusions": [
+          {
+            "first": "192.0.2.100",
+            "last": "192.0.2.109"
+          }
+        ],
+        "reservations": [
+          {
+            "ip": "192.0.2.10",
+            "client": {
+              "mac": "00:00:5e:00:53:0a"
+            },
+            "name": "printer01",
+            "bootp": false,
+            "options": [
+              {
+                "code": 3,
+                "values": [
+                  "192.0.2.254"
+                ],
+                "origin": {
+                  "sheet": "Get-DhcpServerv4OptionValue",
+                  "column": "OptionId=3"
+                }
+              }
+            ],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.10"
+            }
+          },
+          {
+            "ip": "192.0.2.11",
+            "client": {
+              "mac": "00:00:5e:00:53:0b"
+            },
+            "name": "printer02",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.11"
+            }
+          },
+          {
+            "ip": "192.0.2.12",
+            "client": {
+              "mac": "00:00:5e:00:53:0c"
+            },
+            "name": "nas01",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.12"
+            }
+          },
+          {
+            "ip": "192.0.2.13",
+            "client": {
+              "mac": "00:00:5e:00:53:0d"
+            },
+            "name": "nas02",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.13"
+            }
+          },
+          {
+            "ip": "192.0.2.14",
+            "client": {
+              "mac": "00:00:5e:00:53:0e"
+            },
+            "name": "switch01",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.14"
+            }
+          },
+          {
+            "ip": "192.0.2.15",
+            "client": {
+              "mac": "00:00:5e:00:53:0f"
+            },
+            "name": "ap01",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.15"
+            }
+          },
+          {
+            "ip": "192.0.2.16",
+            "client": {
+              "mac": "00:00:5e:00:53:10"
+            },
+            "name": "ap02",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.16"
+            }
+          },
+          {
+            "ip": "192.0.2.17",
+            "client": {
+              "mac": "00:00:5e:00:53:11"
+            },
+            "name": "cam01",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.17"
+            }
+          },
+          {
+            "ip": "192.0.2.18",
+            "client": {
+              "mac": "00:00:5e:00:53:12"
+            },
+            "name": "cam02",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.18"
+            }
+          },
+          {
+            "ip": "192.0.2.19",
+            "client": {
+              "mac": "00:00:5e:00:53:13"
+            },
+            "name": "tv01",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.19"
+            }
+          },
+          {
+            "ip": "192.0.2.20",
+            "client": {
+              "mac": "00:00:5e:00:53:14"
+            },
+            "name": "scanner01.corp.example.test",
+            "bootp": false,
+            "options": [
+              {
+                "code": 66,
+                "values": [
+                  "boot.corp.example.test"
+                ],
+                "origin": {
+                  "sheet": "Get-DhcpServerv4OptionValue",
+                  "column": "OptionId=66"
+                }
+              },
+              {
+                "code": 67,
+                "values": [
+                  "lpxelinux.0"
+                ],
+                "origin": {
+                  "sheet": "Get-DhcpServerv4OptionValue",
+                  "column": "OptionId=67"
+                }
+              }
+            ],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.20"
+            }
+          },
+          {
+            "ip": "192.0.2.21",
+            "client": {
+              "mac": "00:00:5e:00:53:15"
+            },
+            "name": "plotter01.corp.example.test",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.21"
+            }
+          },
+          {
+            "ip": "192.0.2.22",
+            "client": {
+              "mac": "00:00:5e:00:53:16"
+            },
+            "name": "nvr01.corp.example.test",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.22"
+            }
+          },
+          {
+            "ip": "192.0.2.23",
+            "client": {
+              "mac": "00:00:5e:00:53:17"
+            },
+            "name": "ups01.corp.example.test",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.23"
+            }
+          },
+          {
+            "ip": "192.0.2.24",
+            "client": {
+              "mac": "00:00:5e:00:53:18"
+            },
+            "name": "pdu01.corp.example.test",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.24"
+            }
+          },
+          {
+            "ip": "192.0.2.25",
+            "client": {
+              "mac": "00:00:5e:00:53:19"
+            },
+            "name": "media01.corp.example.test",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.25"
+            }
+          },
+          {
+            "ip": "192.0.2.26",
+            "client": {
+              "mac": "00:00:5e:00:53:1a"
+            },
+            "name": "thermostat01.corp.example.test",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.26"
+            }
+          },
+          {
+            "ip": "192.0.2.27",
+            "client": {
+              "mac": "00:00:5e:00:53:1b"
+            },
+            "name": "doorbell01.corp.example.test",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.27"
+            }
+          },
+          {
+            "ip": "192.0.2.28",
+            "client": {
+              "mac": "00:00:5e:00:53:1c"
+            },
+            "name": "backup01.lab.example.test",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.28"
+            }
+          },
+          {
+            "ip": "192.0.2.29",
+            "client": {
+              "mac": "00:00:5e:00:53:1d"
+            },
+            "name": "router01.example.net",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.29"
+            }
+          },
+          {
+            "ip": "192.0.2.30",
+            "client": {
+              "mac": "00:00:5e:00:53:1e"
+            },
+            "name": "kiosk01.other.example.test",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.30"
+            }
+          },
+          {
+            "ip": "192.0.2.31",
+            "client": {
+              "mac": "00:00:5e:00:53:1f"
+            },
+            "name": "esp_3a1f2b",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.31"
+            }
+          },
+          {
+            "ip": "192.0.2.32",
+            "client": {
+              "mac": "00:00:5e:00:53:20"
+            },
+            "name": "android-5f2c9e01d4a6b7c8",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.32"
+            }
+          },
+          {
+            "ip": "192.0.2.33",
+            "client": {
+              "mac": "00:00:5e:00:53:21"
+            },
+            "name": "rpi-4b",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.33"
+            }
+          },
+          {
+            "ip": "192.0.2.34",
+            "client": {
+              "mac": "00:00:5e:00:53:22"
+            },
+            "name": "desktop-7q2m9k1",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.34"
+            }
+          },
+          {
+            "ip": "192.0.2.35",
+            "client": {
+              "client_id": "ff00000001000100012e5a1c4000005e005323"
+            },
+            "source_name": "Living Room TV",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.35"
+            }
+          },
+          {
+            "ip": "192.0.2.36",
+            "client": {
+              "client_id": "ff00000001000100012e5a1c4000005e005324"
+            },
+            "source_name": "Bob's iPad",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.36"
+            }
+          },
+          {
+            "ip": "192.0.2.37",
+            "client": {
+              "client_id": "ff00000001000100012e5a1c4000005e005325"
+            },
+            "source_name": "cam 03",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.37"
+            }
+          },
+          {
+            "ip": "192.0.2.38",
+            "client": {
+              "client_id": "ff00000001000100012e5a1c4000005e005326"
+            },
+            "description": "Guest printer",
+            "bootp": false,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.38"
+            }
+          },
+          {
+            "ip": "192.0.2.39",
+            "client": {
+              "client_id": "ff00000001000100012e5a1c4000005e005327"
+            },
+            "description": "BOOTP terminal",
+            "bootp": true,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "column": "IPAddress=192.0.2.39"
+            }
+          }
+        ],
+        "options": [
+          {
+            "code": 3,
+            "values": [
+              "192.0.2.1"
+            ],
+            "origin": {
+              "sheet": "Get-DhcpServerv4OptionValue",
+              "column": "OptionId=3"
+            }
+          },
+          {
+            "code": 6,
+            "values": [
+              "192.0.2.5",
+              "192.0.2.6"
+            ],
+            "origin": {
+              "sheet": "Get-DhcpServerv4OptionValue",
+              "column": "OptionId=6"
+            }
+          },
+          {
+            "code": 15,
+            "values": [
+              "corp.example.test"
+            ],
+            "origin": {
+              "sheet": "Get-DhcpServerv4OptionValue",
+              "column": "OptionId=15"
+            }
+          },
+          {
+            "code": 42,
+            "values": [
+              "192.0.2.5"
+            ],
+            "origin": {
+              "sheet": "Get-DhcpServerv4OptionValue",
+              "column": "OptionId=42"
+            }
+          },
+          {
+            "code": 1,
+            "vendor_class": "Microsoft Windows 2000 Options",
+            "values": [
+              "1"
+            ],
+            "origin": {
+              "sheet": "Get-DhcpServerv4OptionValue",
+              "column": "OptionId=1,VendorClass=Microsoft Windows 2000 Options"
+            }
+          }
+        ],
+        "ddns": {
+          "enabled": true,
+          "reverse": true,
+          "conflict": "protect",
+          "client_may_update_a": false,
+          "legacy_clients": true,
+          "refuse_foreign": false
+        },
+        "restricted": false,
+        "delay_ms": 0,
+        "origin": {
+          "sheet": "Get-DhcpServerv4Scope",
+          "column": "ScopeId=192.0.2.0"
+        }
+      }
+    ],
+    "superscopes": [],
+    "policies": [],
+    "filters": [],
+    "failover": [],
+    "leases": [
+      {
+        "ip": "192.0.2.110",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:40"
+        },
+        "hostname": "LAPTOP-01.corp.example.test",
+        "expires": "2026-11-02T08:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.110"
+        }
+      },
+      {
+        "ip": "192.0.2.111",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:41"
+        },
+        "hostname": "LAPTOP-02.corp.example.test",
+        "expires": "2026-11-02T10:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.111"
+        }
+      },
+      {
+        "ip": "192.0.2.112",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:42"
+        },
+        "hostname": "LAPTOP-03.corp.example.test",
+        "expires": "2026-11-02T13:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.112"
+        }
+      },
+      {
+        "ip": "192.0.2.113",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:43"
+        },
+        "hostname": "LAPTOP-04.corp.example.test",
+        "expires": "2026-11-02T15:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.113"
+        }
+      },
+      {
+        "ip": "192.0.2.114",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:44"
+        },
+        "hostname": "LAPTOP-05.corp.example.test",
+        "expires": "2026-11-02T18:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.114"
+        }
+      },
+      {
+        "ip": "192.0.2.115",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:45"
+        },
+        "hostname": "LAPTOP-06.corp.example.test",
+        "expires": "2026-11-02T20:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.115"
+        }
+      },
+      {
+        "ip": "192.0.2.116",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:46"
+        },
+        "hostname": "LAPTOP-07.corp.example.test",
+        "expires": "2026-11-02T23:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.116"
+        }
+      },
+      {
+        "ip": "192.0.2.117",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:47"
+        },
+        "hostname": "LAPTOP-08.corp.example.test",
+        "expires": "2026-11-03T01:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.117"
+        }
+      },
+      {
+        "ip": "192.0.2.118",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:48"
+        },
+        "hostname": "LAPTOP-09.corp.example.test",
+        "expires": "2026-11-03T04:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.118"
+        }
+      },
+      {
+        "ip": "192.0.2.119",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:49"
+        },
+        "hostname": "LAPTOP-10.corp.example.test",
+        "expires": "2026-11-03T06:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.119"
+        }
+      },
+      {
+        "ip": "192.0.2.120",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:4a"
+        },
+        "hostname": "LAPTOP-11.corp.example.test",
+        "expires": "2026-11-03T09:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.120"
+        }
+      },
+      {
+        "ip": "192.0.2.121",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:4b"
+        },
+        "hostname": "LAPTOP-12.corp.example.test",
+        "expires": "2026-11-03T11:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.121"
+        }
+      },
+      {
+        "ip": "192.0.2.122",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:4c"
+        },
+        "hostname": "LAPTOP-13.corp.example.test",
+        "expires": "2026-11-03T14:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.122"
+        }
+      },
+      {
+        "ip": "192.0.2.123",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:4d"
+        },
+        "hostname": "LAPTOP-14.corp.example.test",
+        "expires": "2026-11-03T16:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.123"
+        }
+      },
+      {
+        "ip": "192.0.2.124",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:4e"
+        },
+        "hostname": "LAPTOP-15.corp.example.test",
+        "expires": "2026-11-03T19:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.124"
+        }
+      },
+      {
+        "ip": "192.0.2.125",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:4f"
+        },
+        "hostname": "LAPTOP-16.corp.example.test",
+        "expires": "2026-11-03T21:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.125"
+        }
+      },
+      {
+        "ip": "192.0.2.126",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:50"
+        },
+        "hostname": "desk-01.corp.example.test",
+        "expires": "2026-11-04T00:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.126"
+        }
+      },
+      {
+        "ip": "192.0.2.127",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:51"
+        },
+        "hostname": "desk-02.corp.example.test",
+        "expires": "2026-11-04T02:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.127"
+        }
+      },
+      {
+        "ip": "192.0.2.128",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:52"
+        },
+        "hostname": "desk-03.corp.example.test",
+        "expires": "2026-11-04T05:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.128"
+        }
+      },
+      {
+        "ip": "192.0.2.129",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:53"
+        },
+        "hostname": "desk-04.corp.example.test",
+        "expires": "2026-11-04T07:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.129"
+        }
+      },
+      {
+        "ip": "192.0.2.130",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:54"
+        },
+        "hostname": "desk-05.corp.example.test",
+        "expires": "2026-11-04T10:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.130"
+        }
+      },
+      {
+        "ip": "192.0.2.131",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:55"
+        },
+        "hostname": "desk-06.corp.example.test",
+        "expires": "2026-11-04T12:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.131"
+        }
+      },
+      {
+        "ip": "192.0.2.132",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:56"
+        },
+        "hostname": "desk-07.corp.example.test",
+        "expires": "2026-11-04T15:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.132"
+        }
+      },
+      {
+        "ip": "192.0.2.133",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:57"
+        },
+        "hostname": "desk-08.corp.example.test",
+        "expires": "2026-11-04T17:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.133"
+        }
+      },
+      {
+        "ip": "192.0.2.134",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:58"
+        },
+        "hostname": "desk-09.corp.example.test",
+        "expires": "2026-11-04T20:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.134"
+        }
+      },
+      {
+        "ip": "192.0.2.135",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:59"
+        },
+        "hostname": "desk-10.corp.example.test",
+        "expires": "2026-11-04T22:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.135"
+        }
+      },
+      {
+        "ip": "192.0.2.136",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:5a"
+        },
+        "hostname": "desk-11.corp.example.test",
+        "expires": "2026-11-05T01:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.136"
+        }
+      },
+      {
+        "ip": "192.0.2.137",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:5b"
+        },
+        "hostname": "desk-12.corp.example.test",
+        "expires": "2026-11-05T03:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.137"
+        }
+      },
+      {
+        "ip": "192.0.2.138",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:5c"
+        },
+        "hostname": "desk-13.corp.example.test",
+        "expires": "2026-11-05T06:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.138"
+        }
+      },
+      {
+        "ip": "192.0.2.139",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:5d"
+        },
+        "hostname": "desk-14.corp.example.test",
+        "expires": "2026-11-05T08:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.139"
+        }
+      },
+      {
+        "ip": "192.0.2.140",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:5e"
+        },
+        "hostname": "desk-15.corp.example.test",
+        "expires": "2026-11-05T11:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.140"
+        }
+      },
+      {
+        "ip": "192.0.2.141",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:5f"
+        },
+        "hostname": "desk-16.corp.example.test",
+        "expires": "2026-11-05T13:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.141"
+        }
+      },
+      {
+        "ip": "192.0.2.142",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e005360"
+        },
+        "hostname": "phone-01",
+        "expires": "2026-11-05T16:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.142"
+        }
+      },
+      {
+        "ip": "192.0.2.143",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e005361"
+        },
+        "hostname": "phone-02",
+        "expires": "2026-11-05T18:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.143"
+        }
+      },
+      {
+        "ip": "192.0.2.144",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e005362"
+        },
+        "hostname": "phone-03",
+        "expires": "2026-11-05T21:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.144"
+        }
+      },
+      {
+        "ip": "192.0.2.145",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e005363"
+        },
+        "hostname": "phone-04",
+        "expires": "2026-11-05T23:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.145"
+        }
+      },
+      {
+        "ip": "192.0.2.146",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e005364"
+        },
+        "hostname": "phone-05",
+        "expires": "2026-11-06T02:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.146"
+        }
+      },
+      {
+        "ip": "192.0.2.147",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e005365"
+        },
+        "hostname": "phone-06",
+        "expires": "2026-11-06T04:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.147"
+        }
+      },
+      {
+        "ip": "192.0.2.148",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e005366"
+        },
+        "hostname": "phone-07",
+        "expires": "2026-11-06T07:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.148"
+        }
+      },
+      {
+        "ip": "192.0.2.149",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e005367"
+        },
+        "hostname": "phone-08",
+        "expires": "2026-11-06T09:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.149"
+        }
+      },
+      {
+        "ip": "192.0.2.150",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e005368"
+        },
+        "hostname": "phone-09",
+        "expires": "2026-11-06T12:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.150"
+        }
+      },
+      {
+        "ip": "192.0.2.151",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e005369"
+        },
+        "hostname": "phone-10",
+        "expires": "2026-11-06T14:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.151"
+        }
+      },
+      {
+        "ip": "192.0.2.152",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e00536a"
+        },
+        "hostname": "phone-11",
+        "expires": "2026-11-06T17:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.152"
+        }
+      },
+      {
+        "ip": "192.0.2.153",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e00536b"
+        },
+        "hostname": "phone-12",
+        "expires": "2026-11-06T19:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.153"
+        }
+      },
+      {
+        "ip": "192.0.2.154",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e00536c"
+        },
+        "hostname": "phone-13",
+        "expires": "2026-11-06T22:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.154"
+        }
+      },
+      {
+        "ip": "192.0.2.155",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e00536d"
+        },
+        "hostname": "phone-14",
+        "expires": "2026-11-07T00:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.155"
+        }
+      },
+      {
+        "ip": "192.0.2.156",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e00536e"
+        },
+        "hostname": "phone-15",
+        "expires": "2026-11-07T03:00:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.156"
+        }
+      },
+      {
+        "ip": "192.0.2.157",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "client_id": "ff00000001000100012e5a1c4000005e00536f"
+        },
+        "hostname": "phone-16",
+        "expires": "2026-11-07T05:30:00Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.157"
+        }
+      },
+      {
+        "ip": "192.0.2.10",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:0a"
+        },
+        "hostname": "printer01.corp.example.test",
+        "state": "active_reservation",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.10"
+        }
+      },
+      {
+        "ip": "192.0.2.11",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:0b"
+        },
+        "hostname": "printer02.corp.example.test",
+        "state": "active_reservation",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.11"
+        }
+      },
+      {
+        "ip": "192.0.2.12",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:0c"
+        },
+        "hostname": "nas01.corp.example.test",
+        "state": "active_reservation",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.12"
+        }
+      },
+      {
+        "ip": "192.0.2.13",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:0d"
+        },
+        "hostname": "nas02.corp.example.test",
+        "state": "active_reservation",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.13"
+        }
+      },
+      {
+        "ip": "192.0.2.14",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:0e"
+        },
+        "hostname": "switch01.corp.example.test",
+        "state": "active_reservation",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.14"
+        }
+      },
+      {
+        "ip": "192.0.2.15",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:0f"
+        },
+        "hostname": "ap01.corp.example.test",
+        "state": "active_reservation",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.15"
+        }
+      },
+      {
+        "ip": "192.0.2.16",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:10"
+        },
+        "hostname": "ap02.corp.example.test",
+        "state": "active_reservation",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.16"
+        }
+      },
+      {
+        "ip": "192.0.2.17",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:11"
+        },
+        "hostname": "cam01.corp.example.test",
+        "state": "active_reservation",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.17"
+        }
+      },
+      {
+        "ip": "192.0.2.18",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:12"
+        },
+        "hostname": "cam02.corp.example.test",
+        "state": "active_reservation",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.18"
+        }
+      },
+      {
+        "ip": "192.0.2.19",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:13"
+        },
+        "hostname": "tv01.corp.example.test",
+        "state": "active_reservation",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.19"
+        }
+      },
+      {
+        "ip": "192.0.2.158",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:70"
+        },
+        "expires": "2026-11-01T09:00:00Z",
+        "state": "declined",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.158"
+        }
+      },
+      {
+        "ip": "192.0.2.159",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:71"
+        },
+        "expires": "2026-11-01T09:00:00Z",
+        "state": "declined",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.159"
+        }
+      }
+    ]
+  },
+  "losses": {
+    "entries": [
+      {
+        "location": {
+          "sheet": "Get-DhcpServerv4Policy",
+          "column": "Name=Printers"
+        },
+        "code": "migrate.loss.policy",
+        "detail": "the policy `Printers` of scope 192.0.2.0 (enabled, vendor class `HP Printers`) is not carried; policies go to the loss report"
+      },
+      {
+        "location": {
+          "sheet": "Get-DhcpServerv4Filter",
+          "column": "MacAddress=00-00-5E-00-53-F0"
+        },
+        "code": "migrate.loss.filter",
+        "detail": "the deny filter for `00-00-5E-00-53-F0` (`Rogue AP`) is not carried; filters go to the loss report"
+      },
+      {
+        "location": {
+          "sheet": "Get-DhcpServerv4Superscope",
+          "column": "SuperscopeName=Campus"
+        },
+        "code": "migrate.loss.superscope",
+        "detail": "the superscope `Campus` over 192.0.2.0 is not carried; superscopes go to the loss report"
+      },
+      {
+        "location": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "column": "IPAddress=192.0.2.198"
+        },
+        "code": "migrate.loss.lease_state",
+        "detail": "the lease of 192.0.2.198 is in the state `Offered`, which the mirror does not carry"
+      }
+    ]
+  }
+}

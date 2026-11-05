@@ -2224,6 +2224,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dns/zones/{id}/flip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Flip a zone between secondary and primary in place
+         * @description Scope: `dns.write`, an interactive session. `{"to": "primary", "soa": {...}, "ns": [...]}` turns a secondary zone into a primary zone: the transfer service stops refreshing it, the SOA `mname` and `rname` and the apex NS set become the given values, the serial continues from the copy's, and the records stay with their provenance (the A, AAAA and DHCID RRsets at a name with a DHCID RRset, and the PTR records pointing at such names, stay `transfer`, frozen for the takeover; every other RRset becomes `ad`, WT-Q9). `{"to": "secondary", "primaries": [...]}` turns a primary zone back into a secondary of the named primaries; the next transfer replaces every record. One change set per zone; audited as `dns.zone.flip` with the counts by origin. A catalog zone is refused.
+         */
+        post: operations["flip_dns_zone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dns/zones/{id}/journal": {
         parameters: {
             query?: never;
@@ -2318,6 +2338,26 @@ export interface paths {
          * @description Scope: `dns.write`. `$ORIGIN` and `$TTL` are honored, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).
          */
         post: operations["import_dns_zone_file"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release the frozen names of a primary zone
+         * @description Scope: `dns.write`. Turns every remaining `transfer` RRset of a primary zone into `manual`, or deletes them with `delete`, after listing them with `dry_run`: the names a takeover did not adopt because no mirrored lease or reservation stands behind them. Audited as `dns.zone.release` with the counts. A catalog zone is refused.
+         */
+        post: operations["release_dns_zone"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3136,6 +3176,262 @@ export interface paths {
         };
         /** Metrics in the OpenMetrics text format; needs a token with the metrics scope */
         get: operations["metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/mirrors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List mirrored sources
+         * @description Scope: `migrate.read`. Mirrors by name, each with its freshness, the counts of its latest snapshot and its open losses (the card of the connectors page).
+         */
+        get: operations["list_mirrors"];
+        put?: never;
+        /**
+         * Create a mirrored source
+         * @description Scope: `migrate.write`, an interactive session. Creates the mirror, the service account `mirror-<name>` with no grants, and one scoped token whose only scope is `mirror:<id>`, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). Audited as `migrate.mirror.create`.
+         */
+        post: operations["create_mirror"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/mirrors/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a mirrored source
+         * @description Scope: `migrate.read`. The mirror with its freshness; a `mirror:` token does not reach it (a stolen token gives neither data nor reach).
+         */
+        get: operations["get_mirror"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a mirrored source
+         * @description Scope: `migrate.write`, an interactive session. Deletes the mirror, its snapshot and its loss acknowledgments, and with them its service account and token; the takeover records stay. Audited as `migrate.mirror.delete`.
+         */
+        delete: operations["delete_mirror"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a mirrored source
+         * @description Scope: `migrate.write`, an interactive session. The name, whether pushes are accepted, the expected interval. Audited as `migrate.mirror.update`.
+         */
+        patch: operations["update_mirror"];
+        trace?: never;
+    };
+    "/api/v1/migrate/mirrors/{id}/losses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The loss report of a mirrored source
+         * @description Scope: `migrate.read`. The entries of the latest snapshot's loss report, each with its key and the acknowledgment that holds for it; an acknowledgment lapses when the entry changes.
+         */
+        get: operations["list_mirror_losses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/mirrors/{id}/losses/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge loss entries of a mirrored source
+         * @description Scope: `migrate.write`, an interactive session. An acknowledgment holds while the entry recurs unchanged; the prepare and the takeover refuse a scope with an unacknowledged entry. Audited as `migrate.mirror.losses_ack`.
+         */
+        post: operations["ack_mirror_losses"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/mirrors/{id}/scopes/{cidr}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The diff of a mirrored scope against Tenko's scope
+         * @description Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings and the IPAM prefix of the network, each row saying what the prepare would do (plan section 2.5).
+         */
+        get: operations["get_mirror_scope_diff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/mirrors/{id}/scopes/{cidr}/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepare Tenko's scope from a mirrored scope
+         * @description Scope: `migrate.write`, an interactive session. Starts the prepare job of plan section 2.5: the IPAM prefix, the disabled scope, the pool, the exclusions, the option sets, the DDNS settings and the reservations as IPAM hosts named by section 2.9. Refused while a loss entry of the scope is unacknowledged or a diff row needs a decision. Audited as `dhcp.scope.prepare` when the job completes.
+         */
+        post: operations["prepare_mirror_scope"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/mirrors/{id}/scopes/{cidr}/revert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revert the takeover of a mirrored scope
+         * @description Scope: `migrate.write`, an interactive session. Starts the reverse action of plan section 2.10: Tenko's scope disabled, its leases and records kept; the operator activates the source's scope again. Audited as `dhcp.scope.revert`.
+         */
+        post: operations["revert_mirror_scope"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/mirrors/{id}/scopes/{cidr}/takeover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take over a mirrored scope
+         * @description Scope: `migrate.write`, an interactive session. Starts the takeover job of plan section 2.7: the checks, the task that waits for a push showing the source's scope inactive, the adoption of the records and the leases (section 2.8), the scope enabled, the record in `migrate.takeovers`. A failure rolls the job back from the before-images. Audited as `dhcp.scope.takeover` with its counts.
+         */
+        post: operations["take_over_mirror_scope"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/mirrors/{id}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the latest snapshot of a mirrored source
+         * @description Scope: `migrate.read`. The envelope as stored, with its sequence, hash and the time it was accepted.
+         */
+        get: operations["get_mirror_snapshot"];
+        /**
+         * Push a snapshot of a mirrored source
+         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only right it has: `Action::Execute` on the mirror. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 1,000 scopes, 10,000 reservations and 100,000 leases, with a `sequence` above the last accepted one and at most one push per 10 s per mirror. A push whose envelope hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored.
+         */
+        put: operations["push_mirror_snapshot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/mirrors/{id}/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace the token of a mirrored source
+         * @description An administrator's interactive session (`Action::Administer` on the mirror). Mints a new scoped token with the scope `mirror:<id>` for the mirror's service account and revokes the old one at once; the new token is shown once. Audited as `migrate.mirror.token`.
+         */
+        post: operations["replace_mirror_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/takeovers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List takeover records
+         * @description Scope: `migrate.read`. The records of plan section 2.7, step 6, newest first, without their before-images.
+         */
+        get: operations["list_takeovers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/takeovers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a takeover record
+         * @description Scope: `migrate.read`. The record with the before-images of every RRset the takeover changed.
+         */
+        get: operations["get_takeover"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5680,6 +5976,27 @@ export interface components {
             interface_detail?: components["schemas"]["InterfaceSummary"] | null;
         };
         /**
+         * @description Where an adopted lease row came from (WP14.0, plan section 2.8): the mirror and the
+         *     snapshot the takeover used, and whether the client's identity was guessed. A row carries
+         *     it from the takeover until the client's first REQUEST, whatever key the request uses;
+         *     the engine's rekey rule reads it on a RENEWING, REBINDING or INIT-REBOOT request whose
+         *     `chaddr` equals the row's MAC address while another identity keys the row.
+         */
+        Adopted: {
+            /**
+             * @description Whether the identity of the row was guessed (option 61 of type 1 with the MAC
+             *     address, chosen because no DHCID told which key the client presents).
+             */
+            guessed?: boolean;
+            /** @description The mirrored source the lease came from. */
+            mirror: components["schemas"]["MirrorId"];
+            /**
+             * Format: int64
+             * @description The sequence of the snapshot the takeover used.
+             */
+            sequence: number;
+        };
+        /**
          * @description What a prefix's policy adopts without a person (IPAM-15 "auto-adopt in network Z").
          * @enum {string}
          */
@@ -7738,6 +8055,28 @@ export interface components {
             /** @description The VRF. */
             vrf: components["schemas"]["VrfId"];
         };
+        /** @description The DHCP content of a migration source. */
+        DhcpIr: {
+            /** @description Vendor and user classes. */
+            classes?: components["schemas"]["IrClass"][];
+            /** @description Failover relationships (kept for the Phase 5 pairing; the secret is never carried). */
+            failover?: components["schemas"]["IrFailover"][];
+            /** @description MAC filters. */
+            filters?: components["schemas"]["IrFilter"][];
+            /** @description Leases. */
+            leases?: components["schemas"]["IrLease"][];
+            /** @description Custom option definitions. */
+            option_defs?: components["schemas"]["IrOptionDef"][];
+            /** @description Server-level and scope policies. */
+            policies?: components["schemas"]["IrPolicy"][];
+            /** @description Scopes with their pools, exclusions, reservations and options. */
+            scopes?: components["schemas"]["IrScope"][];
+            server_ddns?: components["schemas"]["DdnsPolicy"] | null;
+            /** @description Server-level option values. */
+            server_options?: components["schemas"]["IrOption"][];
+            /** @description Superscopes (shared networks). */
+            superscopes?: components["schemas"]["IrSuperscope"][];
+        };
         /** @description The number of leases in one state. */
         DhcpLeaseCount: {
             /**
@@ -7759,6 +8098,7 @@ export interface components {
              */
             addr: string;
             address_lease?: components["schemas"]["DhcpLeasePeer"] | null;
+            adopted?: components["schemas"]["Adopted"] | null;
             atsfp?: components["schemas"]["Timestamp"] | null;
             client?: components["schemas"]["ClientKey"] | null;
             /** @description The client's last transaction time. */
@@ -8320,6 +8660,11 @@ export interface components {
             /** @description How serious it is. */
             severity: components["schemas"]["FindingSeverity"];
         };
+        /**
+         * @description What the prepare would do about a row.
+         * @enum {string}
+         */
+        DiffAction: "create" | "update" | "remove" | "attach" | "keep" | "decide";
         /** @description The counts of one fact type. */
         DiffCounts: {
             /**
@@ -8367,6 +8712,29 @@ export interface components {
             source: string;
             /** @description The subject key. */
             subject: string;
+        };
+        /**
+         * @description What a row of the diff is about (plan section 2.5).
+         * @enum {string}
+         */
+        DiffKind: "prefix" | "pool" | "exclusion" | "lease_time" | "option" | "reservation" | "ddns";
+        /** @description One row of the diff of a mirrored scope against Tenko's scope of the same network. */
+        DiffRow: {
+            /** @description What the prepare would do. */
+            action: components["schemas"]["DiffAction"];
+            /**
+             * @description The item: a range (`192.0.2.100-192.0.2.199`), an option (`scope:6`), a reservation
+             *     (`192.0.2.10`), a setting.
+             */
+            item: string;
+            /** @description What the row is about. */
+            kind: components["schemas"]["DiffKind"];
+            /** @description The mirror's value, as text. */
+            mirror?: string | null;
+            /** @description Why the operator must decide, for `decide`. */
+            reason?: string | null;
+            /** @description Tenko's value, as text. */
+            tenko?: string | null;
         };
         /** @description SHA-256 digest as 64 lowercase hexadecimal characters */
         Digest: string;
@@ -9307,6 +9675,19 @@ export interface components {
             user_class?: boolean;
             /** @description Option 60. */
             vendor_class?: string | null;
+        };
+        /**
+         * @description How many RRsets of a zone one origin owns after a flip, for the report and the audit
+         *     record `dns.zone.flip`.
+         */
+        FlipOriginCount: {
+            /** @description The origin. */
+            origin: components["schemas"]["Origin"];
+            /**
+             * Format: int32
+             * @description Its RRsets in every scope of the zone.
+             */
+            rrsets: number;
         };
         /** @description A voter that keeps a migration from running. */
         FormatBlocker: {
@@ -10516,6 +10897,280 @@ export interface components {
             /** @enum {string} */
             kind: "custom_field";
         };
+        /** @description A vendor or user class. */
+        IrClass: {
+            /**
+             * @description Whether the source marks it as a built-in default class (Windows' Microsoft
+             *     classes), which the import skips.
+             */
+            builtin?: boolean;
+            /** @description The class data the client sends. */
+            data: components["schemas"]["HexBytes"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Vendor or user. */
+            kind: components["schemas"]["IrClassKind"];
+            /** @description The name (the natural key options and policies refer to). */
+            name: string;
+            /** @description Origin in the source. */
+            origin?: components["schemas"]["SourceLocation"];
+        };
+        /**
+         * @description Whether a source class matches option 60 or option 77.
+         * @enum {string}
+         */
+        IrClassKind: "vendor" | "user";
+        /**
+         * @description How a client is identified in the source: a MAC address, or other client identifier
+         *     octets (Windows writes either in `ClientId`).
+         */
+        IrClientId: {
+            client_id?: components["schemas"]["HexBytes"] | null;
+            mac?: components["schemas"]["MacAddr"] | null;
+        };
+        /** @description One condition of a policy: a criterion, equal or not equal, to any of the values. */
+        IrCondition: {
+            /** @description The criterion. */
+            criterion: components["schemas"]["IrCriterion"];
+            /** @description Whether the condition is negated (`NotEquals`). */
+            negate?: boolean;
+            /** @description The values in the source's text form (class names, MAC patterns, hexadecimal). */
+            values: string[];
+        };
+        /**
+         * @description What a policy condition looks at (the Windows criteria).
+         * @enum {string}
+         */
+        IrCriterion: "vendor_class" | "user_class" | "mac" | "client_id" | "relay_agent" | "circuit_id" | "remote_id" | "subscriber_id" | "fqdn";
+        /** @description A failover relationship (Phase 5 builds the pairing; Phase 4 keeps it for the report). */
+        IrFailover: {
+            /**
+             * Format: int32
+             * @description The local server's share in load balance, in percent.
+             */
+            load_balance_percent?: number | null;
+            /**
+             * Format: int32
+             * @description The maximum client lead time in seconds.
+             */
+            mclt_secs?: number | null;
+            /** @description The mode. */
+            mode: components["schemas"]["IrFailoverMode"];
+            /** @description The relationship's name. */
+            name: string;
+            /** @description Origin in the source. */
+            origin?: components["schemas"]["SourceLocation"];
+            /** @description The partner server, as the source names it (a placeholder in tests). */
+            partner: string;
+            /**
+             * Format: int32
+             * @description The reserve of the standby in hot standby, in percent.
+             */
+            reserve_percent?: number | null;
+            /** @description The scopes of the relationship, by network. */
+            scopes?: string[];
+        };
+        /**
+         * @description The mode of a failover relationship.
+         * @enum {string}
+         */
+        IrFailoverMode: "load_balance" | "hot_standby";
+        /** @description A MAC filter entry. */
+        IrFilter: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Allow or deny. */
+            kind: components["schemas"]["FilterKind"];
+            /** @description The addresses. */
+            mac: components["schemas"]["MacPattern"];
+            /** @description Origin in the source. */
+            origin?: components["schemas"]["SourceLocation"];
+        };
+        /** @description A lease. */
+        IrLease: {
+            /** @description The client. */
+            client: components["schemas"]["IrClientId"];
+            expires?: components["schemas"]["Timestamp"] | null;
+            /** @description The host name the client registered. */
+            hostname?: string | null;
+            /**
+             * @description The address.
+             * @example 192.0.2.50
+             */
+            ip: string;
+            /** @description Origin in the source. */
+            origin?: components["schemas"]["SourceLocation"];
+            /**
+             * @description The scope, by network.
+             * @example 192.0.2.0/24
+             */
+            scope: string;
+            /** @description The state. */
+            state: components["schemas"]["IrLeaseState"];
+        };
+        /**
+         * @description The state of a source lease.
+         * @enum {string}
+         */
+        IrLeaseState: "active" | "active_reservation" | "declined" | "expired" | "other";
+        /** @description One option value, in the source's text form. */
+        IrOption: {
+            /**
+             * Format: int32
+             * @description The option code.
+             */
+            code: number;
+            /** @description Origin in the source. */
+            origin?: components["schemas"]["SourceLocation"];
+            /**
+             * @description The user class it is set for (Windows sets options per user class; Tenko maps this
+             *     to a policy on the class).
+             */
+            user_class?: string | null;
+            /** @description The values as the source writes them, one per element. */
+            values?: string[];
+            /** @description The vendor class it is set for (vendor options travel in option 43). */
+            vendor_class?: string | null;
+        };
+        /** @description A custom option definition. */
+        IrOptionDef: {
+            /** @description Whether it holds a list. */
+            array?: boolean;
+            /**
+             * Format: int32
+             * @description The code.
+             */
+            code: number;
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The type, mapped from the source's type name. */
+            kind: components["schemas"]["OptionKind"];
+            /** @description The name in the source. */
+            name: string;
+            /** @description Origin in the source. */
+            origin?: components["schemas"]["SourceLocation"];
+            /** @description The vendor class of a vendor option. */
+            vendor_class?: string | null;
+        };
+        /** @description A policy. */
+        IrPolicy: {
+            /** @description The conditions. */
+            conditions?: components["schemas"]["IrCondition"][];
+            ddns?: components["schemas"]["DdnsPolicy"] | null;
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Whether the policy is enabled. */
+            enabled?: boolean;
+            /** @description How the conditions are joined. */
+            join: components["schemas"]["Join"];
+            /**
+             * Format: int32
+             * @description The lease time in seconds.
+             */
+            lease_secs?: number | null;
+            /** @description The name. */
+            name: string;
+            /** @description The options the policy sets. */
+            options?: components["schemas"]["IrOption"][];
+            /**
+             * Format: int32
+             * @description The processing order.
+             */
+            order: number;
+            /** @description Origin in the source. */
+            origin?: components["schemas"]["SourceLocation"];
+            /** @description The address ranges the policy restricts its clients to. */
+            ranges?: components["schemas"]["IrRange"][];
+            /** @description The scope, by network; none for a server-level policy. */
+            scope?: string | null;
+        };
+        /** @description An inclusive address range. */
+        IrRange: {
+            /**
+             * @description The first address.
+             * @example 192.0.2.100
+             */
+            first: string;
+            /**
+             * @description The last address.
+             * @example 192.0.2.199
+             */
+            last: string;
+        };
+        /** @description A reservation. */
+        IrReservation: {
+            /** @description Whether the reservation also answers BOOTP (Windows `Type` `Both` or `Bootp`). */
+            bootp?: boolean;
+            /** @description The client. */
+            client: components["schemas"]["IrClientId"];
+            /** @description Free text. */
+            description?: string | null;
+            /**
+             * @description The address.
+             * @example 192.0.2.10
+             */
+            ip: string;
+            name?: components["schemas"]["HostName"] | null;
+            /** @description Reservation-level options. */
+            options?: components["schemas"]["IrOption"][];
+            /** @description Origin in the source. */
+            origin?: components["schemas"]["SourceLocation"];
+            /**
+             * @description The name as the source writes it when it does not parse as a host name (`Living
+             *     Room TV`); the prepare keeps it as the IPAM host's name and derives no record from
+             *     it. Absent when [`IrReservation::name`] holds the name.
+             */
+            source_name?: string | null;
+        };
+        /** @description A scope. */
+        IrScope: {
+            /** @description Whether the scope serves clients in the source. */
+            active?: boolean;
+            /**
+             * @description The network (the natural key; becomes the IPAM prefix).
+             * @example 192.0.2.0/24
+             */
+            cidr: string;
+            ddns?: components["schemas"]["DdnsPolicy"] | null;
+            /**
+             * Format: int32
+             * @description The offer delay in milliseconds (Windows `Delay`, for split scopes); Tenko has no
+             *     delay and reports it as a loss when not zero.
+             */
+            delay_ms?: number;
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The exclusion ranges. */
+            exclusions?: components["schemas"]["IrRange"][];
+            /**
+             * Format: int32
+             * @description The lease time in seconds.
+             */
+            lease_secs?: number | null;
+            /** @description The name. */
+            name?: string | null;
+            /** @description The scope's options. */
+            options?: components["schemas"]["IrOption"][];
+            /** @description Origin in the source. */
+            origin?: components["schemas"]["SourceLocation"];
+            /** @description The pools (Windows has one start and end range per scope). */
+            ranges?: components["schemas"]["IrRange"][];
+            /** @description The reservations. */
+            reservations?: components["schemas"]["IrReservation"][];
+            /** @description Whether only clients of the allow filter are served (the scope is restricted). */
+            restricted?: boolean;
+            /** @description The superscope it belongs to, by name. */
+            superscope?: string | null;
+        };
+        /** @description A superscope: several scopes on one link. */
+        IrSuperscope: {
+            /** @description The name. */
+            name: string;
+            /** @description Origin in the source. */
+            origin?: components["schemas"]["SourceLocation"];
+            /** @description The member scopes, by network. */
+            scopes: string[];
+        };
         /**
          * @description What reconciling did to an item.
          * @enum {string}
@@ -11043,6 +11698,7 @@ export interface components {
              * @example 192.0.2.50
              */
             addr: string;
+            adopted?: components["schemas"]["Adopted"] | null;
             atsfp?: components["schemas"]["Timestamp"] | null;
             /** @description The client. */
             client: components["schemas"]["ClientKey"];
@@ -11380,6 +12036,35 @@ export interface components {
             /** @enum {string} */
             status: "second_factor";
         };
+        /**
+         * @description An acknowledged loss entry (`migrate.loss_acks`, section 2.3): the entry's key within the
+         *     mirror and the hash of the entry when it was acknowledged. The acknowledgment holds while
+         *     the entry recurs with the same hash and lapses when the entry changes.
+         */
+        LossAck: {
+            /** @description When. */
+            at: components["schemas"]["Timestamp"];
+            /** @description Who acknowledged it. */
+            by: components["schemas"]["UserId"];
+            /** @description The SHA-256 of the entry in canonical CBOR when it was acknowledged. */
+            entry_hash: components["schemas"]["HexBytes"];
+            /** @description The entry's key: its location and code (`LossEntry::key`). */
+            key: string;
+            /** @description The mirror. */
+            mirror: components["schemas"]["MirrorId"];
+        };
+        /** @description `POST /migrate/mirrors/{id}/losses/ack`. */
+        LossAckRequest: {
+            /** @description The keys of the entries to acknowledge, as `GET .../losses` lists them. */
+            keys: string[];
+        };
+        /** @description The answer of an acknowledgment. */
+        LossAckResult: {
+            /** @description The acknowledgments written. */
+            acks: components["schemas"]["LossAck"][];
+            /** @description The revision that committed them. */
+            revision: components["schemas"]["Revision"];
+        };
         /** @description Loss report entries by severity. */
         LossCounts: {
             /** @description Errors (values or rows not imported). */
@@ -11413,6 +12098,11 @@ export interface components {
             row?: number | null;
             /** @description How serious it is. */
             severity: components["schemas"]["Severity"];
+        };
+        /** @description What a source adapter could not map (MIG-01). */
+        LossReport: {
+            /** @description One entry per lost or transformed item. */
+            entries?: components["schemas"]["LossEntry"][];
         };
         /** @description MAC address, lowercase and colon-separated (00:00:5e:00:53:01) */
         MacAddr: string;
@@ -12285,6 +12975,182 @@ export interface components {
          * @enum {string}
          */
         MfaRequirement: "optional" | "administrators" | "everyone";
+        /**
+         * @description A mirrored source (section 2.1): one row per source, with the freshness the leader
+         *     writes at most every [`FRESHNESS_WRITE_SECS`].
+         */
+        Mirror: {
+            /** @description The service account `mirror-<name>` that owns the token; it holds no grants. */
+            account: components["schemas"]["UserId"];
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /**
+             * @description Whether pushes are accepted; a disabled mirror refuses them with 403 and raises no
+             *     staleness finding.
+             */
+            enabled?: boolean;
+            /** @description Identifier. */
+            id: components["schemas"]["MirrorId"];
+            /**
+             * Format: int32
+             * @description The expected interval between pushes, in seconds.
+             */
+            interval_secs?: number;
+            /** @description The kind of source (`windows-dhcp`). */
+            kind: components["schemas"]["SourceKindLabel"];
+            last_change?: components["schemas"]["Timestamp"] | null;
+            last_hash?: components["schemas"]["HexBytes"] | null;
+            last_push?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int64
+             * @description The sequence of the last accepted push; a push must carry a higher one.
+             */
+            last_sequence?: number | null;
+            /** @description The name an administrator gave it, unique among mirrors. */
+            name: string;
+            /** @description The scoped token whose only special scope is `mirror:<id>` (section 2.1, rule 2). */
+            token: components["schemas"]["ApiTokenId"];
+            /** @description Last change of the row. */
+            updated: components["schemas"]["Stamp"];
+        };
+        /** @description `POST /migrate/mirrors`. */
+        MirrorCreate: {
+            /**
+             * Format: int32
+             * @description The expected interval between pushes, in seconds; 60 when absent.
+             */
+            interval_secs?: number | null;
+            /** @description The kind of source (`windows-dhcp`). */
+            kind: components["schemas"]["SourceKindLabel"];
+            /** @description The name, unique among mirrors; the service account is `mirror-<name>`. */
+            name: string;
+            /**
+             * Format: int32
+             * @description The token's lifetime in days; the TGL-05 maximum when absent (WT-Q11).
+             */
+            token_expires_in_days?: number | null;
+        };
+        /**
+         * @description A mirror with the token the exporter needs, shown once (`POST /migrate/mirrors`,
+         *     `POST /migrate/mirrors/{id}/token`).
+         */
+        MirrorCreated: {
+            /**
+             * @description The SHA-256 fingerprint of this installation's certificate authority root, for the
+             *     exporter's pin (plan section 2.1, rule 5).
+             */
+            ca_fingerprint: string;
+            /** @description The mirror. */
+            mirror: components["schemas"]["MirrorItem"];
+            /** @description The token, for the exporter's `Install-TenkoDhcpMirror.ps1`; never shown again. */
+            token: string;
+            token_expires_at?: components["schemas"]["Timestamp"] | null;
+        };
+        /** Format: uuid */
+        MirrorId: string;
+        /** @description A mirrored source with its freshness (plan section 2.4): the row and what the card shows. */
+        MirrorItem: components["schemas"]["Mirror"] & {
+            /**
+             * Format: int64
+             * @description Seconds since the last accepted push; none before the first push.
+             */
+            age_secs?: number | null;
+            counts?: components["schemas"]["SnapshotCounts"] | null;
+            /**
+             * Format: int32
+             * @description How many loss entries of the latest snapshot are not acknowledged.
+             */
+            losses_open: number;
+            source?: components["schemas"]["MirrorOrigin"] | null;
+            /** @description Whether the mirror is stale: no push for three intervals. */
+            stale: boolean;
+            token_expires_at?: components["schemas"]["Timestamp"] | null;
+        };
+        /** @description One entry of the loss report with its acknowledgment (`GET /migrate/mirrors/{id}/losses`). */
+        MirrorLossItem: {
+            ack?: components["schemas"]["LossAck"] | null;
+            /** @description The entry. */
+            entry: components["schemas"]["LossEntry"];
+            /** @description The entry's key, for the acknowledgment. */
+            key: string;
+            /** @description The scope the entry belongs to, when its location names one. */
+            scope?: string | null;
+        };
+        /** @description The loss report of the latest snapshot. */
+        MirrorLosses: {
+            /** @description The entries. */
+            entries: components["schemas"]["MirrorLossItem"][];
+            /** @description The mirror. */
+            mirror: components["schemas"]["MirrorId"];
+            /**
+             * Format: int64
+             * @description The snapshot's sequence.
+             */
+            sequence: number;
+        };
+        /**
+         * @description Where a snapshot comes from: the kind of source, the server it was read from and the
+         *     adapter that produced it.
+         */
+        MirrorOrigin: {
+            /** @description The adapter's name (`Tenko-DhcpMirror.ps1`). */
+            adapter: string;
+            /** @description The adapter's version. */
+            adapter_version: string;
+            /** @description The kind of source (`windows-dhcp`). */
+            kind: components["schemas"]["SourceKindLabel"];
+            /** @description The server the adapter read, as it names itself (a host name). */
+            server: string;
+        };
+        /** @description `PATCH /migrate/mirrors/{id}`. */
+        MirrorPatch: {
+            /** @description Whether pushes are accepted. */
+            enabled?: boolean | null;
+            /**
+             * Format: int32
+             * @description The expected interval between pushes, in seconds.
+             */
+            interval_secs?: number | null;
+            /** @description A new name. */
+            name?: string | null;
+        };
+        /**
+         * @description One push of a mirrored source: the IR of the whole source at `taken_at`, with the loss
+         *     report of what the adapter could not map (plan section 3.1).
+         *
+         *     `sequence` increases strictly from push to push of one mirror; an older or equal one is
+         *     a replay (409 `migrate.mirror.sequence`). `taken_at` is the source host's clock when the
+         *     data was read: a lease's remaining time is computed against it, so clock skew between the
+         *     source and the node shortens or lengthens no lease.
+         */
+        MirrorSnapshot: {
+            /** @description The DHCP content of the source. */
+            dhcp: components["schemas"]["DhcpIr"];
+            /**
+             * Format: int32
+             * @description The envelope format; this build reads [`FORMAT`].
+             */
+            format: number;
+            /** @description What the adapter could not map. */
+            losses: components["schemas"]["LossReport"];
+            /**
+             * Format: int64
+             * @description The push sequence, from 1, strictly increasing per mirror.
+             */
+            sequence: number;
+            /** @description Where the snapshot comes from. */
+            source: components["schemas"]["MirrorOrigin"];
+            /** @description When the adapter read the source, by the source host's clock, in UTC. */
+            taken_at: components["schemas"]["Timestamp"];
+        };
+        /** @description `POST /migrate/mirrors/{id}/token`. */
+        MirrorTokenRequest: {
+            /**
+             * Format: int32
+             * @description The token's lifetime in days; the TGL-05 maximum when absent (WT-Q11).
+             */
+            expires_in_days?: number | null;
+        };
         /** @description A refused handshake. */
         MismatchRecord: components["schemas"]["VersionMismatch"] & {
             /** @description When it happened. */
@@ -13214,7 +14080,7 @@ export interface components {
          *     follows the name, so it matches the key encoding.
          * @enum {string}
          */
-        ObjectKind: "tenant" | "vrf" | "site" | "vlan" | "prefix" | "range" | "address" | "host" | "interface" | "custom_field" | "user" | "session" | "api_token" | "job" | "observation" | "proposal" | "import" | "connector" | "secret" | "node" | "settings" | "system" | "zone" | "dns_view" | "dns_forwarder" | "dns_acl" | "dns_key" | "dns_list" | "dhcp_scope" | "dhcp_class" | "dhcp_policy" | "dhcp_option_def" | "dhcp_filter";
+        ObjectKind: "tenant" | "vrf" | "site" | "vlan" | "prefix" | "range" | "address" | "host" | "interface" | "custom_field" | "user" | "session" | "api_token" | "job" | "observation" | "proposal" | "import" | "connector" | "secret" | "node" | "settings" | "system" | "zone" | "dns_view" | "dns_forwarder" | "dns_acl" | "dns_key" | "dns_list" | "dhcp_scope" | "dhcp_class" | "dhcp_policy" | "dhcp_option_def" | "dhcp_filter" | "mirror" | "takeover";
         /** @description A typed reference to one object. */
         ObjectRef: {
             /**
@@ -14236,6 +15102,7 @@ export interface components {
                  */
                 addr: string;
                 address_lease?: components["schemas"]["DhcpLeasePeer"] | null;
+                adopted?: components["schemas"]["Adopted"] | null;
                 atsfp?: components["schemas"]["Timestamp"] | null;
                 client?: components["schemas"]["ClientKey"] | null;
                 /** @description The client's last transaction time. */
@@ -15040,6 +15907,38 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_MirrorItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["Mirror"] & {
+                /**
+                 * Format: int64
+                 * @description Seconds since the last accepted push; none before the first push.
+                 */
+                age_secs?: number | null;
+                counts?: components["schemas"]["SnapshotCounts"] | null;
+                /**
+                 * Format: int32
+                 * @description How many loss entries of the latest snapshot are not acknowledged.
+                 */
+                losses_open: number;
+                source?: components["schemas"]["MirrorOrigin"] | null;
+                /** @description Whether the mirror is stale: no push for three intervals. */
+                stale: boolean;
+                token_expires_at?: components["schemas"]["Timestamp"] | null;
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_NodeView: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
@@ -15678,6 +16577,57 @@ export interface components {
                 /** @description Name. */
                 name: string;
                 parent?: components["schemas"]["SiteId"] | null;
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_TakeoverItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The adopted addresses. */
+                adopted_leases?: string[];
+                /** @description The adopted names. */
+                adopted_names?: components["schemas"]["DnsName"][];
+                /** @description When the state was reached. */
+                at: components["schemas"]["Timestamp"];
+                /** @description The before-images of every RRset the takeover changed (only on `GET .../{id}`). */
+                before?: components["schemas"]["RrSetImage"][];
+                /** @description Who started the job. */
+                by: components["schemas"]["UserId"];
+                /** @description The counts. */
+                counts: components["schemas"]["TakeoverCounts"];
+                /** @description The names left frozen. */
+                frozen_names?: components["schemas"]["DnsName"][];
+                /** @description Identifier. */
+                id: components["schemas"]["TakeoverId"];
+                /** @description The job that ran it. */
+                job: components["schemas"]["JobId"];
+                /** @description The mirror. */
+                mirror: components["schemas"]["MirrorId"];
+                /**
+                 * @description The scope.
+                 * @example 192.0.2.0/24
+                 */
+                scope: string;
+                /**
+                 * Format: int64
+                 * @description The snapshot's sequence.
+                 */
+                sequence: number;
+                /** @description What was skipped, with the reasons. */
+                skipped?: components["schemas"]["SkippedItem"][];
+                /** @description Where it ended. */
+                state: components["schemas"]["TakeoverState"];
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -17200,6 +18150,8 @@ export interface components {
          * @enum {string}
          */
         RangeRole: "dhcp_pool" | "dhcp_pd_pool" | "reserved" | "infrastructure";
+        /** @description Record data in uncompressed wire form, lowercase hexadecimal */
+        Rdata: string;
         /** @description Body of `GET /health/ready` when the node serves requests. */
         Readiness: {
             /** @description Store revision the node has applied. */
@@ -18504,6 +19456,41 @@ export interface components {
             /** @description A human-readable name. */
             name: string;
         };
+        /**
+         * @description The records of one owner name and type in one scope of a zone: the unit of storage,
+         *     change and signing.
+         */
+        RrSet: {
+            key?: components["schemas"]["DnsName"] | null;
+            /** @description The owner name, at or below the zone apex. */
+            name: components["schemas"]["DnsName"];
+            /** @description Who owns the RRset (section 2.5 of the Phase 2 plan). */
+            origin: components["schemas"]["Origin"];
+            /** @description The data of each record in wire form, without duplicates. */
+            rdata: components["schemas"]["Rdata"][];
+            /** @description The type. */
+            rtype: components["schemas"]["Rtype"];
+            /** @description The zone scope (DNS-20). */
+            scope: components["schemas"]["ScopeName"];
+            /**
+             * Format: int32
+             * @description The TTL in seconds, 0 to 2^31 - 1.
+             */
+            ttl: number;
+            /** @description The last change. */
+            updated: components["schemas"]["Stamp"];
+            /** @description The zone. */
+            zone: components["schemas"]["ZoneId"];
+        };
+        /**
+         * @description The before-image of one RRset a takeover changed: the key and the RRset as it was, none
+         *     when the takeover created it (section 2.7, step 6). The rollback restores these.
+         */
+        RrSetImage: {
+            before?: components["schemas"]["RrSet"] | null;
+            /** @description The RRset. */
+            key: components["schemas"]["RrSetKey"];
+        };
         /** @description An RRset as the API reads and writes it: the records typed. */
         RrSetItem: {
             key?: components["schemas"]["DnsName"] | null;
@@ -18524,6 +19511,17 @@ export interface components {
             type: components["schemas"]["Rtype"];
             /** @description The last change. */
             updated: components["schemas"]["Stamp"];
+        };
+        /** @description The key of an RRset in `dns.rrsets`: zone, scope, owner name, type. */
+        RrSetKey: {
+            /** @description The owner name. */
+            name: components["schemas"]["DnsName"];
+            /** @description The type. */
+            rtype: components["schemas"]["Rtype"];
+            /** @description The zone scope (DNS-20). */
+            scope: components["schemas"]["ScopeName"];
+            /** @description The zone. */
+            zone: components["schemas"]["ZoneId"];
         };
         /** @description Record type: a mnemonic (`AAAA`) or the RFC 3597 form (`TYPE65280`) */
         Rtype: string;
@@ -19239,6 +20237,45 @@ export interface components {
              */
             rapid_commit?: boolean | null;
         };
+        /** @description The diff of a mirrored scope (`GET /migrate/mirrors/{id}/scopes/{cidr}/diff`). */
+        ScopeDiff: {
+            /**
+             * Format: int32
+             * @description How many loss entries of the scope are not acknowledged.
+             */
+            losses_open: number;
+            /** @description The mirror. */
+            mirror: components["schemas"]["MirrorId"];
+            /** @description The rows; empty when the two agree. */
+            rows: components["schemas"]["DiffRow"][];
+            /**
+             * @description The scope.
+             * @example 192.0.2.0/24
+             */
+            scope: string;
+            /**
+             * Format: int64
+             * @description The snapshot's sequence.
+             */
+            sequence: number;
+            /** @description Whether the source's scope is active in the snapshot. */
+            source_active: boolean;
+            /** @description Whether Tenko's scope is enabled. */
+            tenko_enabled: boolean;
+            tenko_scope?: components["schemas"]["PrefixId"] | null;
+        };
+        /** @description The answer of the prepare, the takeover and the revert: the job that runs it. */
+        ScopeJobStarted: {
+            /** @description The job. */
+            job: components["schemas"]["JobId"];
+            /** @description The mirror. */
+            mirror: components["schemas"]["MirrorId"];
+            /**
+             * @description The scope.
+             * @example 192.0.2.0/24
+             */
+            scope: string;
+        };
         /** @description Zone scope name ([a-z0-9][a-z0-9_-]{0,62}); `default` for the default scope */
         ScopeName: string;
         /**
@@ -19865,6 +20902,65 @@ export interface components {
             /** @description Replaces the tags. */
             tags?: components["schemas"]["Tag"][] | null;
         };
+        /** @description One item a takeover skipped, with the reason (section 2.8). */
+        SkippedItem: {
+            /** @description The stable reason code, one of [`codes::SKIP_CODES`]. */
+            code: string;
+            /** @description The item: an address (`192.0.2.50`) or a name (`laptop.corp.example.test`). */
+            item: string;
+        };
+        /** @description The answer of a push: `200 {"sequence", "changed"}`. */
+        SnapshotAccepted: {
+            /**
+             * @description Whether the snapshot differs from the stored one (a changed push writes a row and an
+             *     audit record; an unchanged one writes nothing).
+             */
+            changed: boolean;
+            /**
+             * Format: int64
+             * @description The accepted sequence.
+             */
+            sequence: number;
+        };
+        /** @description What the latest snapshot of a mirror holds, in numbers. */
+        SnapshotCounts: {
+            /**
+             * Format: int32
+             * @description Leases.
+             */
+            leases: number;
+            /**
+             * Format: int32
+             * @description Loss entries.
+             */
+            losses: number;
+            /**
+             * Format: int32
+             * @description Reservations over every scope.
+             */
+            reservations: number;
+            /**
+             * Format: int32
+             * @description Scopes.
+             */
+            scopes: number;
+        };
+        /** @description The stored snapshot of a mirror (`GET /migrate/mirrors/{id}/snapshot`). */
+        SnapshotItem: {
+            /** @description The envelope as pushed. */
+            envelope: components["schemas"]["MirrorSnapshot"];
+            /** @description The SHA-256 of the envelope in canonical CBOR. */
+            hash: components["schemas"]["HexBytes"];
+            /** @description The mirror. */
+            mirror: components["schemas"]["MirrorId"];
+            /** @description When the push was accepted. */
+            received: components["schemas"]["Timestamp"];
+            /**
+             * Format: int64
+             * @description The sequence.
+             */
+            sequence: number;
+        };
         /**
          * @description SNMPv3 authentication protocols.
          * @enum {string}
@@ -20022,19 +21118,21 @@ export interface components {
          * @enum {string}
          */
         SourceFormat: "csv" | "xlsx" | "xls" | "ods";
+        /** @description The label of a source kind: lowercase letters, digits and hyphens, 1 to 32 characters (windows-dhcp) */
+        SourceKindLabel: string;
         /**
          * @description Where in the source an item came from: sheet, row and column for spreadsheets, a path or
          *     object name for other sources.
          */
         SourceLocation: {
-            /** @description Column letter or header. */
+            /** @description Column letter or header; the object's key for a mirrored source (`ScopeId=192.0.2.0`). */
             column?: string | null;
             /**
              * Format: int32
              * @description Row number, 1-based as shown by spreadsheet programs.
              */
             row?: number | null;
-            /** @description Sheet, file or object collection. */
+            /** @description Sheet, file or object collection; the cmdlet for a mirrored source (WP14.0). */
             sheet?: string | null;
         };
         /** @description The SSH hand-off: the URI for the operating system's SSH handler, without a secret. */
@@ -20640,6 +21738,96 @@ export interface components {
             /** @description The tag. */
             tag: string;
         };
+        /** @description What a takeover counted (section 2.7, step 6; the audit record carries the same). */
+        TakeoverCounts: {
+            /**
+             * Format: int32
+             * @description Mirrored leases that became `dhcp.leases` rows.
+             */
+            leases_adopted?: number;
+            /**
+             * Format: int32
+             * @description Declined leases that became `abandoned` rows.
+             */
+            leases_declined?: number;
+            /**
+             * Format: int32
+             * @description Mirrored leases whose identity was guessed (section 2.8).
+             */
+            leases_guessed?: number;
+            /**
+             * Format: int32
+             * @description Mirrored leases skipped, each listed in [`Takeover::skipped`].
+             */
+            leases_skipped?: number;
+            /**
+             * Format: int32
+             * @description Forward names (A and DHCID) adopted as `dhcp` records.
+             */
+            names_adopted?: number;
+            /**
+             * Format: int32
+             * @description Names with a DHCID that no mirrored lease or reservation explains, left frozen.
+             */
+            names_frozen?: number;
+            /**
+             * Format: int32
+             * @description Names skipped for another reason, each listed in [`Takeover::skipped`].
+             */
+            names_skipped?: number;
+            /**
+             * Format: int32
+             * @description PTR records adopted as `dhcp` records.
+             */
+            ptrs_adopted?: number;
+        };
+        /** Format: uuid */
+        TakeoverId: string;
+        /**
+         * @description A takeover record (`GET /migrate/takeovers`, `GET /migrate/takeovers/{id}`), without the
+         *     before-images; `GET .../{id}` adds them.
+         */
+        TakeoverItem: {
+            /** @description The adopted addresses. */
+            adopted_leases?: string[];
+            /** @description The adopted names. */
+            adopted_names?: components["schemas"]["DnsName"][];
+            /** @description When the state was reached. */
+            at: components["schemas"]["Timestamp"];
+            /** @description The before-images of every RRset the takeover changed (only on `GET .../{id}`). */
+            before?: components["schemas"]["RrSetImage"][];
+            /** @description Who started the job. */
+            by: components["schemas"]["UserId"];
+            /** @description The counts. */
+            counts: components["schemas"]["TakeoverCounts"];
+            /** @description The names left frozen. */
+            frozen_names?: components["schemas"]["DnsName"][];
+            /** @description Identifier. */
+            id: components["schemas"]["TakeoverId"];
+            /** @description The job that ran it. */
+            job: components["schemas"]["JobId"];
+            /** @description The mirror. */
+            mirror: components["schemas"]["MirrorId"];
+            /**
+             * @description The scope.
+             * @example 192.0.2.0/24
+             */
+            scope: string;
+            /**
+             * Format: int64
+             * @description The snapshot's sequence.
+             */
+            sequence: number;
+            /** @description What was skipped, with the reasons. */
+            skipped?: components["schemas"]["SkippedItem"][];
+            /** @description Where it ended. */
+            state: components["schemas"]["TakeoverState"];
+        };
+        /**
+         * @description Where a takeover ended (section 2.7, step 6, and section 2.10).
+         * @enum {string}
+         */
+        TakeoverState: "done" | "rolled_back" | "reverted";
         /**
          * @description Import target: `ignore`, `address`, `prefix`, `mask`, `host`, `dns_name`, `description`, `status`, `mode`, `lock`, `mac`, `duid`, `client_id`, `interface`, `interfaces`, `vlan`, `vlan_name`, `site`, `vrf`, `tenant`, `role`, `alloc`, `alarm_warn`, `alarm_crit`, `tags`, `login`, `password` or `custom.<key>`
          * @example address
@@ -20961,10 +22149,11 @@ export interface components {
             days: number;
         } | "unlimited";
         /**
-         * @description A special scope of a scoped token, beyond its grants (IAM-10, S3-Q7).
-         * @enum {string}
+         * @description A special scope of a scoped token: `metrics`, `audit:read`, or                      `mirror:<id>` (the push of one mirrored source; minted when the                      mirror is created, never requested here)
+         * @example metrics
+         * @example audit:read
          */
-        TokenScope: "metrics" | "audit:read";
+        TokenScope: string;
         /** @description The enrollment a token was used for. */
         TokenUse: {
             /** @description When. */
@@ -22700,6 +23889,54 @@ export interface components {
             /** @description The records the file brings per type, sorted by type. */
             types: components["schemas"]["ImportTypeCount"][];
         };
+        /**
+         * @description `POST /dns/zones/{id}/flip`: turn a secondary zone into a primary zone in place, or a
+         *     primary zone back into a secondary of the named primaries (WP14.0 declares it; WP14.2
+         *     builds it). The body carries `to` and the values of the target kind:
+         *     `{"to": "primary", "soa": {...}, "ns": [...]}` or
+         *     `{"to": "secondary", "primaries": [...]}`.
+         *
+         *     A flip to primary keeps every record with its provenance: the A, AAAA and DHCID RRsets
+         *     at a name that holds a DHCID RRset, and a PTR whose target is such a name, stay
+         *     `transfer` (frozen for the takeover); the apex SOA and NS become the operator's values;
+         *     every other RRset becomes `ad` (WT-Q9). A flip to secondary makes the next transfer
+         *     replace every record with the copy's.
+         */
+        ZoneFlip: {
+            /** @description The apex NS set of the primary zone, at least one name. */
+            ns: components["schemas"]["DnsName"][];
+            /**
+             * @description The SOA values of the primary zone: `mname` and `rname` are the operator's; the
+             *     serial continues from the copy's.
+             */
+            soa: components["schemas"]["SoaDefaults"];
+            /** @enum {string} */
+            to: "primary";
+        } | {
+            /** @description The primaries, at least one. */
+            primaries: components["schemas"]["PrimaryServer"][];
+            /** @enum {string} */
+            to: "secondary";
+        };
+        /**
+         * @description The answer of a flip: the zone's kind afterwards, the serial it continues at, and the
+         *     RRsets by origin.
+         */
+        ZoneFlipReport: {
+            /** @description The kind after the flip. */
+            kind: components["schemas"]["ZoneKind"];
+            /** @description The RRsets by origin after the flip. */
+            origins?: components["schemas"]["FlipOriginCount"][];
+            /** @description The revision that committed the flip. */
+            revision: components["schemas"]["Revision"];
+            /**
+             * Format: int32
+             * @description The serial after the flip.
+             */
+            serial: number;
+            /** @description The zone. */
+            zone: components["schemas"]["ZoneId"];
+        };
         /** Format: uuid */
         ZoneId: string;
         /** @description A zone as the API reads it. */
@@ -22741,6 +23978,38 @@ export interface components {
             source?: components["schemas"]["SecondarySource"] | null;
             transfer?: components["schemas"]["TransferPolicy"] | null;
             update?: components["schemas"]["DnsUpdatePolicy"] | null;
+        };
+        /**
+         * @description `POST /dns/zones/{id}/release`: turn every remaining `transfer` RRset of a primary zone
+         *     into `manual`, or delete them, after listing them in a dry run (plan section 2.6). For
+         *     the names a takeover did not adopt because no mirrored lease or reservation stands
+         *     behind them. A catalog zone is refused (`dns.zone.flip.catalog`).
+         */
+        ZoneRelease: {
+            /** @description Delete the frozen RRsets instead of releasing them to `manual`. */
+            delete?: boolean;
+            /** @description List what would change and change nothing. */
+            dry_run?: boolean;
+        };
+        /**
+         * @description The answer of a release: the names that were (or, in a dry run, would be) released or
+         *     deleted.
+         */
+        ZoneReleaseReport: {
+            /** @description Whether the RRsets were deleted rather than released to `manual`. */
+            deleted: boolean;
+            /** @description Whether nothing was changed. */
+            dry_run: boolean;
+            /** @description The owner names whose frozen RRsets the release touches. */
+            names?: components["schemas"]["DnsName"][];
+            revision?: components["schemas"]["Revision"] | null;
+            /**
+             * Format: int32
+             * @description How many RRsets the release touches.
+             */
+            rrsets: number;
+            /** @description The zone. */
+            zone: components["schemas"]["ZoneId"];
         };
         /** @description A scope of a zone (DNS-20): one version of the zone's data that views choose. */
         ZoneScope: {
@@ -33875,6 +35144,87 @@ export interface operations {
             };
         };
     };
+    flip_dns_zone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZoneFlip"];
+            };
+        };
+        responses: {
+            /** @description The zone's kind, serial and RRsets by origin after the flip */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZoneFlipReport"];
+                };
+            };
+            /** @description The request is malformed, or the values are invalid (`sys.invalid_request`, `dns.zone.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write`, or a token was used (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone is not of the kind the flip starts from, or is a catalog zone (`dns.zone.flip.not_secondary`, `dns.zone.flip.not_primary`, `dns.zone.flip.catalog`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_dns_zone_journal: {
         parameters: {
             query?: {
@@ -34225,6 +35575,87 @@ export interface operations {
             };
             /** @description The zone file does not parse or uses `$INCLUDE` (`dns.zonefile.invalid`, parameters `line` and `reason`) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    release_dns_zone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZoneRelease"];
+            };
+        };
+        responses: {
+            /** @description The names and RRsets released, deleted or (in a dry run) listed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZoneReleaseReport"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such zone (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone is not a primary zone, or is a catalog zone (`dns.zone.flip.not_primary`, `dns.zone.flip.catalog`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -38075,6 +39506,1183 @@ export interface operations {
             };
             /** @description The token lacks the metrics scope */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_mirrors: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of mirrors by name */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_MirrorItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_mirror: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MirrorCreate"];
+            };
+        };
+        responses: {
+            /** @description The mirror and its token */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MirrorCreated"];
+                };
+            };
+            /** @description The request is malformed, or the settings are invalid (`migrate.mirror.invalid_settings`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A mirror of this name exists (`migrate.mirror.exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_mirror: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The mirror */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MirrorItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror (`migrate.mirror.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_mirror: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror (`migrate.mirror.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_mirror: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MirrorPatch"];
+            };
+        };
+        responses: {
+            /** @description The mirror after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MirrorItem"];
+                };
+            };
+            /** @description The request is malformed, or the settings are invalid (`migrate.mirror.invalid_settings`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror (`migrate.mirror.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A mirror of the new name exists (`migrate.mirror.exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_mirror_losses: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The loss report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MirrorLosses"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    ack_mirror_losses: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LossAckRequest"];
+            };
+        };
+        responses: {
+            /** @description The acknowledgments written */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LossAckResult"];
+                };
+            };
+            /** @description The request is malformed, or a key names no entry of the latest snapshot (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_mirror_scope_diff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+                /** @description The scope's network with its length, the slash percent-encoded (`192.0.2.0%2F24`) */
+                cidr: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The diff */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopeDiff"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror, no push yet, or the snapshot holds no such scope (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    prepare_mirror_scope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+                /** @description The scope's network with its length, the slash percent-encoded (`192.0.2.0%2F24`) */
+                cidr: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopeJobStarted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror, no push yet, or no such scope (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The scope is not ready (`migrate.takeover.losses`, `migrate.takeover.diff`, `migrate.takeover.scope_enabled`, `migrate.takeover.running`, `migrate.mirror.stale`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    revert_mirror_scope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+                /** @description The scope's network with its length, the slash percent-encoded (`192.0.2.0%2F24`) */
+                cidr: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopeJobStarted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror or no completed takeover of the scope (`migrate.mirror.not_found`, `migrate.takeover.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A job of the scope runs already (`migrate.takeover.running`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    take_over_mirror_scope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+                /** @description The scope's network with its length, the slash percent-encoded (`192.0.2.0%2F24`) */
+                cidr: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopeJobStarted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror, no push yet, or no such scope (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A check of step 1 failed (`migrate.takeover.not_fresh`, `migrate.takeover.losses`, `migrate.takeover.diff`, `migrate.takeover.zone`, `migrate.takeover.scope_enabled`, `migrate.takeover.running`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_mirror_snapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    push_mirror_snapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MirrorSnapshot"];
+            };
+        };
+        responses: {
+            /** @description The accepted sequence and whether the snapshot changed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotAccepted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The token is not this mirror's, or the mirror is disabled (`auth.forbidden`, `migrate.mirror.disabled`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror (`migrate.mirror.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is above the bound (`migrate.mirror.too_large`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The envelope does not validate; `path` names the first error (`migrate.mirror.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A push came faster than the floor (`migrate.mirror.rate`) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    replace_mirror_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mirror identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MirrorTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The mirror and its new token */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MirrorCreated"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal is not an administrator, or a token was used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such mirror (`migrate.mirror.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_takeovers: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+                /** @description Only the takeovers of this mirror. */
+                mirror?: components["schemas"]["MirrorId"];
+                /** @description Only the takeovers of this scope. */
+                scope?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of takeovers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_TakeoverItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_takeover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Takeover identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The takeover */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TakeoverItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such takeover (`migrate.takeover.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -480,6 +480,9 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
         "/dns/zones/{id}/transfer",
         "trigger_dns_zone_transfer",
     ),
+    // WP14.0: the flip and the release of a zone (stubs).
+    ("POST", "/dns/zones/{id}/flip", "flip_dns_zone"),
+    ("POST", "/dns/zones/{id}/release", "release_dns_zone"),
     ("GET", "/dns/views", "list_dns_views"),
     ("POST", "/dns/views", "create_dns_view"),
     ("GET", "/dns/views/{id}", "get_dns_view"),
@@ -658,6 +661,55 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
         "release_node_dhcp_lease",
     ),
     ("GET", "/nodes/{id}/dhcp/history", "read_node_dhcp_history"),
+    // WP14.0: the mirrored sources and the takeovers of their scopes (stubs).
+    (
+        "PUT",
+        "/migrate/mirrors/{id}/snapshot",
+        "push_mirror_snapshot",
+    ),
+    ("GET", "/migrate/mirrors", "list_mirrors"),
+    ("POST", "/migrate/mirrors", "create_mirror"),
+    ("GET", "/migrate/mirrors/{id}", "get_mirror"),
+    ("PATCH", "/migrate/mirrors/{id}", "update_mirror"),
+    ("DELETE", "/migrate/mirrors/{id}", "delete_mirror"),
+    (
+        "POST",
+        "/migrate/mirrors/{id}/token",
+        "replace_mirror_token",
+    ),
+    (
+        "GET",
+        "/migrate/mirrors/{id}/snapshot",
+        "get_mirror_snapshot",
+    ),
+    ("GET", "/migrate/mirrors/{id}/losses", "list_mirror_losses"),
+    (
+        "POST",
+        "/migrate/mirrors/{id}/losses/ack",
+        "ack_mirror_losses",
+    ),
+    (
+        "GET",
+        "/migrate/mirrors/{id}/scopes/{cidr}/diff",
+        "get_mirror_scope_diff",
+    ),
+    (
+        "POST",
+        "/migrate/mirrors/{id}/scopes/{cidr}/prepare",
+        "prepare_mirror_scope",
+    ),
+    (
+        "POST",
+        "/migrate/mirrors/{id}/scopes/{cidr}/takeover",
+        "take_over_mirror_scope",
+    ),
+    (
+        "POST",
+        "/migrate/mirrors/{id}/scopes/{cidr}/revert",
+        "revert_mirror_scope",
+    ),
+    ("GET", "/migrate/takeovers", "list_takeovers"),
+    ("GET", "/migrate/takeovers/{id}", "get_takeover"),
     ("GET", "/ipam/reconcile", "get_ipam_reconcile"),
 ];
 
@@ -682,6 +734,8 @@ fn concrete(template: &str) -> String {
         .replace("{addr}", "192.0.2.50")
         // WP10.0: the zone of a trust anchor.
         .replace("{zone}", "example.test")
+        // WP14.0: the scope of a mirrored source, its slash percent-encoded.
+        .replace("{cidr}", "192.0.2.0%2F24")
 }
 
 fn request(method: &str, uri: &str) -> Request<Body> {
@@ -873,7 +927,8 @@ fn operations_have_a_declared_tag_and_a_summary() {
     // dns (WP4.0).
     // dhcp (WP7.0).
     // findings (U1).
-    assert_eq!(tags.len(), 36, "one tag per area");
+    // migrate (WP14.0).
+    assert_eq!(tags.len(), 37, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();

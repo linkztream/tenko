@@ -175,6 +175,14 @@ pub enum Command {
         action: client::dhcp::DhcpCommand,
     },
 
+    // WP14.0
+    /// Migration: mirrored sources and the takeover of their scopes.
+    Migrate {
+        /// The `migrate` subcommand to run.
+        #[command(subcommand)]
+        action: client::migrate::MigrateCommand,
+    },
+
     /// Audit log commands.
     Audit {
         /// The `audit` subcommand to run.
@@ -303,6 +311,7 @@ impl Command {
             Command::Export(_) => "export",
             Command::Dns { action } => action.name(),
             Command::Dhcp { action } => action.name(), // WP7.0
+            Command::Migrate { action } => action.name(), // WP14.0
             Command::Audit {
                 action: client::audit::AuditCommand::Verify(_),
             } => "audit verify",
@@ -322,11 +331,24 @@ impl Command {
     }
 }
 
+/// Runs a client command with the client's logging: warnings to standard error.
+fn client_run(
+    name: &str,
+    json: bool,
+    out: &mut impl Write,
+    err: &mut impl Write,
+    future: impl std::future::Future<Output = Result<client::Output, client::Failure>>,
+) -> u8 {
+    logging::init_client();
+    client::block_on(name, json, out, err, future)
+}
+
 /// Runs a parsed command, writing regular output to `out` and diagnostics to `err`, and
 /// returns the exit status of [`exit`].
 ///
 /// `tenko serve` and `tenko service run` install their own logging from the
 /// configuration; every other command logs warnings to standard error.
+#[allow(clippy::too_many_lines, reason = "one arm per command of the binary")]
 pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
     let name = cli.command.name();
     match &cli.command {
@@ -390,28 +412,44 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
                 client::login::logout(args),
             )
         }
-        Command::Prefix { action } => {
-            logging::init_client();
-            let json = action.client().json;
-            client::block_on(name, json, out, err, client::prefix::run(action))
-        }
+        Command::Prefix { action } => client_run(
+            name,
+            action.client().json,
+            out,
+            err,
+            client::prefix::run(action),
+        ),
         // WP8.2
-        Command::Ipam { action } => {
-            logging::init_client();
-            let json = action.client().json;
-            client::block_on(name, json, out, err, client::ipam::run(action))
-        }
-        Command::Dns { action } => {
-            logging::init_client();
-            let json = action.client().json;
-            client::block_on(name, json, out, err, client::dns::run(action))
-        }
+        Command::Ipam { action } => client_run(
+            name,
+            action.client().json,
+            out,
+            err,
+            client::ipam::run(action),
+        ),
+        Command::Dns { action } => client_run(
+            name,
+            action.client().json,
+            out,
+            err,
+            client::dns::run(action),
+        ),
         // WP7.0
-        Command::Dhcp { action } => {
-            logging::init_client();
-            let json = action.client().json;
-            client::block_on(name, json, out, err, client::dhcp::run(action))
-        }
+        Command::Dhcp { action } => client_run(
+            name,
+            action.client().json,
+            out,
+            err,
+            client::dhcp::run(action),
+        ),
+        // WP14.0
+        Command::Migrate { action } => client_run(
+            name,
+            action.client().json,
+            out,
+            err,
+            client::migrate::run(action),
+        ),
         Command::CaRoot(args) => {
             logging::init_client();
             client::block_on(name, args.client.json, out, err, client::ca_root::run(args))
@@ -689,7 +727,7 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 41] = [
+        let cases: [(&[&str], &str); 45] = [
             (&["audit", "export"], "audit export"),
             (&["audit", "export", "--from", "7"], "audit export"),
             (
@@ -750,6 +788,33 @@ mod tests {
             (&["import", "file.csv"], "import"),
             (&["export", "prefixes"], "export"),
             (&["dns", "zone", "list"], "dns zone list"),
+            // WP14.0
+            (
+                &[
+                    "dns",
+                    "zone",
+                    "flip",
+                    "z.test",
+                    "--to",
+                    "primary",
+                    "--ns",
+                    "ns1",
+                    "--mname",
+                    "ns1",
+                    "--rname",
+                    "hostmaster@z.test",
+                ],
+                "dns zone flip",
+            ),
+            (
+                &["dns", "zone", "release", "z.test", "--dry-run"],
+                "dns zone release",
+            ),
+            (&["migrate", "mirror", "list"], "migrate mirror list"),
+            (
+                &["migrate", "takeover", "dc1", "192.0.2.0/24"],
+                "migrate takeover",
+            ),
             (
                 &["dns", "record", "add", "z.test", "www", "A", "192.0.2.1"],
                 "dns record add",

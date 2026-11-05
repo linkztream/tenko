@@ -246,6 +246,7 @@ impl Lab {
                 relay: None,
                 observed_at: None,
                 granted: None,
+                adopted: None,
             },
         );
     }

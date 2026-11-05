@@ -5876,6 +5876,14 @@
       <unit id="audit.kind.dhcp_option_def">
         <segment><source>DHCP option definition</source></segment>
       </unit>
+      <unit id="audit.kind.mirror">
+        <notes><note category="description">The kind of an object in an audit record (WP14.0).</note></notes>
+        <segment><source>Mirrored source</source></segment>
+      </unit>
+      <unit id="audit.kind.takeover">
+        <notes><note category="description">The kind of an object in an audit record (WP14.0).</note></notes>
+        <segment><source>Takeover</source></segment>
+      </unit>
       <unit id="audit.kind.dhcp_filter">
         <segment><source>DHCP MAC filter</source></segment>
       </unit>

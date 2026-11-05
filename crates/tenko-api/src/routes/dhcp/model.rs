@@ -858,6 +858,11 @@ pub struct DhcpLeaseItem {
     /// When the current binding was first granted (a renewal keeps it); the client
     /// transaction time for a row written before ADR 0031.
     pub granted: Timestamp,
+    // WP14.0: the adoption mark of a takeover.
+    /// Set on a DHCPv4 row a takeover made from a mirrored lease until the client's first
+    /// REQUEST: the mirror, the snapshot's sequence and whether the identity was guessed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adopted: Option<tenko_core::dhcp::Adopted>,
     /// The host IPAM knows for the client, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<HostId>,

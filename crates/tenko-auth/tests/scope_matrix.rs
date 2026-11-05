@@ -81,7 +81,8 @@ const SCOPED_KINDS: [ObjectKind; 14] = [
 /// Kinds no scope reaches, whatever role the grant carries. The DNS kinds are global-only in
 /// Phase 2 (ADR 0017); zones become a scope kind with the DNS grants of a later package.
 // WP7.0: the DHCP kinds other than scopes are global-only (plan section 3.4).
-const GLOBAL_ONLY_KINDS: [ObjectKind; 19] = [
+// WP14.0: mirrors and takeovers are global-only.
+const GLOBAL_ONLY_KINDS: [ObjectKind; 21] = [
     ObjectKind::DhcpClass,
     ObjectKind::DhcpPolicy,
     ObjectKind::DhcpOptionDef,
@@ -101,6 +102,8 @@ const GLOBAL_ONLY_KINDS: [ObjectKind; 19] = [
     ObjectKind::DnsAcl,
     ObjectKind::DnsKey,
     ObjectKind::DnsList,
+    ObjectKind::Mirror,
+    ObjectKind::Takeover,
 ];
 
 /// Kinds every scoped principal may read, wherever the object lies.

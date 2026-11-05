@@ -84,3 +84,5 @@ The date is the date the ADR was written or last changed status.
 | [0030](0030-durability-classes-of-the-lease-path.md) | Durability classes of the lease path: the lease row before the ACK, its history and facts within a second; group commit with a bound, snapshots by entries, compression on disk | Accepted (points 1 to 5 amended by ADR 0031) | 2026-10-30 |
 | [0031](0031-the-lease-table-is-the-observation-source.md) | The lease table is the DHCP observation source: no fact rows from DHCP, the reconciler reads the leases through a view, a lean history row, the grant time in the lease row | Accepted | 2026-10-31 |
 | [0032](0032-plugins-as-processes.md) | Plugins as processes from the `tenko-plugins` repository: the HTTP API as the contract, one transient user per plugin, scoped tokens from a manifest, verified, community and local tiers | Proposed | 2026-11-01 |
+| [0033](0033-mirrored-sources.md) | Mirrored sources: a pushed migration source with a token that writes one mirror and nothing else | Proposed | 2026-11-05 |
+| [0034](0034-zone-flip-and-adoption.md) | The flip of a zone in place and the adoption of mirrored leases and names | Proposed | 2026-11-05 |

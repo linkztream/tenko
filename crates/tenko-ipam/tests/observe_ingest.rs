@@ -584,6 +584,7 @@ async fn the_lease_view_stands_for_a_stored_fact_of_an_older_version() {
         relay: None,
         observed_at: None,
         granted: Some(granted),
+        adopted: None,
     };
     let mut write = WriteBatch::new(Principal::system(SystemComponent::Dhcp), at("12:00"));
     write

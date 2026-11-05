@@ -29,7 +29,8 @@
 //! | [`ipam`] | the IPAM model |
 //! | [`dns`] | the DNS model: zones, RRsets, record data, views, forwarders, keys, lists, tables, scopes, codes |
 //! | [`dhcp`] | the DHCP model: scopes, pools, options, classes, policies, filters, leases, tables, scopes, codes |
-//! | [`ir`] | migration IR and loss reports |
+//! | [`ir`] | migration IR and loss reports; the mirror envelope [`ir::MirrorSnapshot`] (WP14.0) |
+//! | [`migrate`] | mirrored sources, their snapshots, takeovers and loss acknowledgments (WP14.0) |
 //! | [`metrics`] | counters, histograms and gauges on striped atomics, the registry, the `OpenMetrics` encoder |
 //! | [`observe`] | observations and proposals |
 //! | [`audit`] | audit drafts, records, the hash chain and its verifier |
@@ -59,6 +60,8 @@ pub mod id;
 pub mod ipam;
 pub mod ir;
 pub mod metrics;
+// WP14.0: mirrored sources and takeovers (Phase 4).
+pub mod migrate;
 pub mod names;
 pub mod net;
 pub mod object;
@@ -74,8 +77,8 @@ pub use auth::{AuthFailure, AuthFlags, Authenticated, Authenticator, Credentials
 pub use error::{Coded, CodedError, FieldError, InvalidValue};
 pub use id::{
     AddressId, ApiTokenId, AuditSeq, ConnectorId, CustomFieldId, HostId, ImportId, InterfaceId,
-    JobId, NodeId, ObservationId, PrefixId, ProposalId, RangeId, RequestId, Revision, SecretId,
-    SessionId, SiteId, TenantId, UserId, VlanId, VrfId,
+    JobId, MirrorId, NodeId, ObservationId, PrefixId, ProposalId, RangeId, RequestId, Revision,
+    SecretId, SessionId, SiteId, TakeoverId, TenantId, UserId, VlanId, VrfId,
 };
 pub use names::{CounterKey, IdempotencyKey, MessageKey, TableName};
 pub use net::MacAddr;

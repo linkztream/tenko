@@ -468,6 +468,9 @@ impl PendingChange {
             // ADR 0031: the lease row is the observation; nothing records a fact's write.
             observed_at: None,
             granted: Some(self.granted(previous.filter(|_| same_client))),
+            // WP14.0: the first REQUEST of an adopted client clears the adoption mark,
+            // whatever key it uses (Windows takeover plan section 2.8).
+            adopted: None,
         }
     }
 

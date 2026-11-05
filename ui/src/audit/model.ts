@@ -40,6 +40,9 @@ const KINDS: Record<ObjectKind, true> = {
   dhcp_policy: true,
   dhcp_option_def: true,
   dhcp_filter: true,
+  // WP14.0: the Windows takeover.
+  mirror: true,
+  takeover: true,
 };
 
 export const OBJECT_KINDS = Object.keys(KINDS) as ObjectKind[];

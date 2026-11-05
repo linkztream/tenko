@@ -15,7 +15,7 @@ use tenko_core::{
     NodeId, Timestamp,
     codec::{decode_key, encode_key, from_cbor, to_cbor},
     dhcp::{
-        AddressRange, BindingState, Class, Condition, DdnsConflict, DdnsPolicy, DdnsState,
+        AddressRange, Adopted, BindingState, Class, Condition, DdnsConflict, DdnsPolicy, DdnsState,
         DhcpSettings, Filter, FilterKind, FilterVerdict, Fingerprint, Join, Lease, LeaseTimes,
         MacPattern, Match, OptionData, OptionKind, OptionOwner, OptionSet, OptionSpace,
         OptionValue, Policy, PolicyAction, PoolShare, RelayInfo, ReservationCandidate,
@@ -24,7 +24,7 @@ use tenko_core::{
         merge, write_identity,
     },
     dns::{DnsName, ZoneId},
-    id::{HostId, InterfaceId, PrefixId, RangeId, VrfId},
+    id::{HostId, InterfaceId, MirrorId, PrefixId, RangeId, VrfId},
     ipam::Stamp,
     principal::{Principal, SystemComponent},
     serde_util::HexBytes,
@@ -956,6 +956,16 @@ fn lease() -> impl Strategy<Value = Lease> {
         maybe(relay()),
         maybe(timestamp()),
         maybe(timestamp()),
+        // WP14.0: the adoption mark of a takeover.
+        maybe(
+            (id(MirrorId::from_uuid), any::<u64>(), any::<bool>()).prop_map(
+                |(mirror, sequence, guessed)| Adopted {
+                    mirror,
+                    sequence,
+                    guessed,
+                },
+            ),
+        ),
     );
     (
         ipv4(),
@@ -984,7 +994,7 @@ fn lease() -> impl Strategy<Value = Lease> {
                 (node, share),
                 (hostname, fqdn),
                 ddns,
-                (fingerprint, relay, observed_at, granted),
+                (fingerprint, relay, observed_at, granted, adopted),
             )| Lease {
                 addr,
                 vrf,
@@ -1007,6 +1017,7 @@ fn lease() -> impl Strategy<Value = Lease> {
                 relay,
                 observed_at,
                 granted,
+                adopted,
             },
         )
 }

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="migrate">
+      <unit id="migrate.mirror.title">
+        <notes><note category="description">Title of the page of one mirrored source (a source pushed by an exporter) and its entry in the browser tab.</note></notes>
+        <segment><source>Mirrored source</source><target>Speglad källa</target></segment>
+      </unit>
+      <unit id="migrate.mirror.tabs">
+        <notes><note category="description">Accessible name of the tab list of a mirrored source's page.</note></notes>
+        <segment><source>Mirror tabs</source><target>Spegelns flikar</target></segment>
+      </unit>
+      <unit id="migrate.mirror.tab.scopes">
+        <notes><note category="description">Tab of a mirrored source's page: its scopes with the diff and the actions.</note></notes>
+        <segment><source>Scopes</source><target>Scope</target></segment>
+      </unit>
+      <unit id="migrate.mirror.tab.losses">
+        <notes><note category="description">Tab of a mirrored source's page: the loss report with its acknowledgments.</note></notes>
+        <segment><source>Losses</source><target>Förluster</target></segment>
+      </unit>
+      <unit id="migrate.mirror.tab.settings">
+        <notes><note category="description">Tab of a mirrored source's page: name, token, fingerprint, deletion.</note></notes>
+        <segment><source>Settings</source><target>Inställningar</target></segment>
+      </unit>
+      <unit id="migrate.coming.title">
+        <notes><note category="description">Heading of the notice on a migration page whose content a later work package builds.</note></notes>
+        <segment><source>Coming in a later package</source><target>Kommer i ett senare paket</target></segment>
+      </unit>
+      <unit id="migrate.coming.body">
+        <segment><source>The scopes of the mirrored source with their diff and actions, the loss report and the settings arrive with the next packages of the Windows takeover.</source><target>Den speglade källans scope med sina skillnader och åtgärder, förlustrapporten och inställningarna kommer med de nästa paketen i Windows-övertagandet.</target></segment>
+      </unit>
+      <unit id="migrate.coming.connectors">
+        <notes><note category="description">Link back to the connectors page from a mirrored source's page.</note></notes>
+        <segment><source>Back to connectors</source><target>Tillbaka till anslutningarna</target></segment>
+      </unit>
+      <unit id="migrate.coming.zone">
+        <notes><note category="description">Link back to the zone page from a zone action's page.</note></notes>
+        <segment><source>Back to the zone</source><target>Tillbaka till zonen</target></segment>
+      </unit>
+      <unit id="migrate.flip.title">
+        <notes><note category="description">Title of the page that flips a zone between secondary and primary, and its entry in the browser tab.</note></notes>
+        <segment><source>Flip zone</source><target>Växla zon</target></segment>
+      </unit>
+      <unit id="migrate.flip.body">
+        <segment><source>The flip turns a secondary zone into a primary zone in place with the SOA and NS values you give, and back; it arrives with a later package of the Windows takeover.</source><target>Växlingen gör en sekundär zon till en primär zon på plats med de SOA- och NS-värden du anger, och tillbaka; den kommer med ett senare paket i Windows-övertagandet.</target></segment>
+      </unit>
+      <unit id="migrate.release.title">
+        <notes><note category="description">Title of the page that releases the frozen (transferred) names of a primary zone, and its entry in the browser tab.</note></notes>
+        <segment><source>Release frozen names</source><target>Släpp frusna namn</target></segment>
+      </unit>
+      <unit id="migrate.release.body">
+        <segment><source>The release turns the frozen names a takeover did not adopt into manual records, or deletes them; it arrives with a later package of the Windows takeover.</source><target>Släppningen gör de frusna namn som ett övertagande inte tog över till manuella poster, eller tar bort dem; den kommer med ett senare paket i Windows-övertagandet.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

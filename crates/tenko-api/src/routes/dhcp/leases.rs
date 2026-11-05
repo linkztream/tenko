@@ -481,6 +481,7 @@ fn item(row: role::LeaseRow) -> DhcpLeaseItem {
         relay,
         observed_at,
         granted,
+        adopted,
     } = row.lease;
     DhcpLeaseItem {
         family: DhcpFamily::V4,
@@ -514,6 +515,7 @@ fn item(row: role::LeaseRow) -> DhcpLeaseItem {
         relay6: None,
         observed_at,
         granted: granted.map_or(cltt, |granted| granted.min(cltt)),
+        adopted,
         host: row.host,
         reserved: row.reserved,
         revision: row.revision,
@@ -580,6 +582,7 @@ fn item6(row: role::Lease6Row) -> DhcpLeaseItem {
         relay6: relay,
         observed_at,
         granted: granted.map_or(cltt, |granted| granted.min(cltt)),
+        adopted: None,
         host: row.host,
         reserved: row.reserved,
         revision: row.revision,

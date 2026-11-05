@@ -521,6 +521,12 @@ pub enum ZoneCommand {
     Update(ZoneUpdateArgs),
     /// Delete a zone and its records.
     Delete(ZoneRefArgs),
+    // WP14.0
+    /// Flip a zone between secondary and primary in place (an interactive session only).
+    Flip(ZoneFlipArgs),
+    /// Release the frozen (transferred) names of a primary zone to manual records, or
+    /// delete them.
+    Release(ZoneReleaseArgs),
 }
 
 /// Subcommands of `tenko dns record`.
@@ -576,6 +582,8 @@ impl DnsCommand {
                 ZoneCommand::Create(a) => &a.client,
                 ZoneCommand::Get(a) | ZoneCommand::Delete(a) => &a.client,
                 ZoneCommand::Update(a) => &a.client,
+                ZoneCommand::Flip(a) => &a.client,
+                ZoneCommand::Release(a) => &a.client,
             },
             Self::Record { action } => match action {
                 RecordCommand::List(a) => &a.client,
@@ -636,6 +644,8 @@ impl DnsCommand {
                 ZoneCommand::Get(_) => "dns zone get",
                 ZoneCommand::Update(_) => "dns zone update",
                 ZoneCommand::Delete(_) => "dns zone delete",
+                ZoneCommand::Flip(_) => "dns zone flip",
+                ZoneCommand::Release(_) => "dns zone release",
             },
             Self::Record { action } => match action {
                 RecordCommand::List(_) => "dns record list",
@@ -814,6 +824,76 @@ pub struct ZoneRefArgs {
     /// Refuse the change when the zone is no longer at this revision.
     #[arg(long, value_name = "REV")]
     pub if_match: Option<u64>,
+}
+
+// WP14.0: the flip and the release of a zone (Windows takeover plan section 2.6).
+/// The kind a zone flips to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum FlipToArg {
+    /// A primary zone: the records stay, the SOA and NS set become the given values.
+    Primary,
+    /// A secondary zone of the given primaries: the next transfer replaces the records.
+    Secondary,
+}
+
+/// Arguments of `tenko dns zone flip`.
+#[derive(Debug, Clone, Args)]
+pub struct ZoneFlipArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The zone: its identifier or its name.
+    #[arg(value_name = "ZONE")]
+    pub zone: String,
+    /// The kind to flip to.
+    #[arg(long, value_enum)]
+    pub to: FlipToArg,
+    /// A name server of the apex NS set after a flip to primary; repeat for more.
+    #[arg(long = "ns", value_name = "HOST")]
+    pub name_servers: Vec<String>,
+    /// The primary name server of the SOA record after a flip to primary.
+    #[arg(long, value_name = "HOST")]
+    pub mname: Option<String>,
+    /// The mailbox of the responsible person after a flip to primary, for example
+    /// hostmaster@example.test.
+    #[arg(long, value_name = "MAILBOX")]
+    pub rname: Option<String>,
+    /// TTL of the SOA record and the default TTL of new RRsets, in seconds.
+    #[arg(long, value_name = "N")]
+    pub ttl: Option<u32>,
+    /// SOA refresh interval in seconds.
+    #[arg(long, value_name = "N")]
+    pub refresh: Option<u32>,
+    /// SOA retry interval in seconds.
+    #[arg(long, value_name = "N")]
+    pub retry: Option<u32>,
+    /// SOA expiry in seconds.
+    #[arg(long, value_name = "N")]
+    pub expire: Option<u32>,
+    /// TTL of negative answers in seconds.
+    #[arg(long, value_name = "N")]
+    pub minimum: Option<u32>,
+    /// A primary to transfer from after a flip to secondary, as `ADDRESS` or
+    /// `ADDRESS:PORT` (`[2001:db8::53]:53` for IPv6 with a port); repeat for more.
+    #[arg(long = "primary", value_name = "SERVER")]
+    pub primaries: Vec<String>,
+}
+
+/// Arguments of `tenko dns zone release`.
+#[derive(Debug, Clone, Args)]
+pub struct ZoneReleaseArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The zone: its identifier or its name.
+    #[arg(value_name = "ZONE")]
+    pub zone: String,
+    /// Delete the frozen RRsets instead of releasing them to manual records.
+    #[arg(long)]
+    pub delete: bool,
+    /// List what would change and change nothing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// Arguments of `tenko dns zone update`.
@@ -1062,6 +1142,9 @@ pub async fn run(command: &DnsCommand) -> Result<Output, Failure> {
             ZoneCommand::Get(args) => zone_get(&target, args).await,
             ZoneCommand::Update(args) => zone_update(&target, args).await,
             ZoneCommand::Delete(args) => zone_delete(&target, args).await,
+            // WP14.0
+            ZoneCommand::Flip(args) => zone_flip(&target, args).await,
+            ZoneCommand::Release(args) => zone_release(&target, args).await,
         },
         DnsCommand::Record { action } => match action {
             RecordCommand::List(args) => record_list(&target, args).await,
@@ -1382,6 +1465,163 @@ async fn zone_get(target: &Target, args: &ZoneRefArgs) -> Result<Output, Failure
         return Ok(Output::json(&zone));
     }
     Ok(Output::text(describe_zone(&zone)))
+}
+
+// WP14.0
+/// A primary of a flip to secondary: `ADDRESS` or `ADDRESS:PORT`.
+fn primary_server(text: &str) -> Result<Value, Failure> {
+    let text = text.trim();
+    let bad = || {
+        usage(format!(
+            "`{text}` is not an address or an address with a port"
+        ))
+    };
+    if let Ok(address) = text.parse::<IpAddr>() {
+        return Ok(json!({ "address": address }));
+    }
+    let socket: std::net::SocketAddr = text.parse().map_err(|_| bad())?;
+    Ok(json!({ "address": socket.ip(), "port": socket.port() }))
+}
+
+async fn zone_flip(target: &Target, args: &ZoneFlipArgs) -> Result<Output, Failure> {
+    let client = target.connect().await?;
+    let zone = resolve_zone(&client, &args.zone).await?;
+    let apex = text(&zone, &["name"]).to_owned();
+    let body = match args.to {
+        FlipToArg::Primary => {
+            let (Some(mname), Some(rname)) = (&args.mname, &args.rname) else {
+                return Err(usage(
+                    "a flip to primary needs --mname and --rname, and at least one --ns",
+                ));
+            };
+            if args.name_servers.is_empty() {
+                return Err(usage("a flip to primary needs at least one --ns"));
+            }
+            if !args.primaries.is_empty() {
+                return Err(usage("--primary belongs to a flip to secondary"));
+            }
+            let mut soa = Map::new();
+            soa.insert("mname".to_owned(), json!(qualify_data(mname, &apex)));
+            soa.insert("rname".to_owned(), json!(mailbox_name(rname)));
+            for (key, value) in [
+                ("refresh", args.refresh),
+                ("retry", args.retry),
+                ("expire", args.expire),
+                ("minimum", args.minimum),
+                ("ttl", args.ttl),
+            ] {
+                if let Some(value) = value {
+                    soa.insert(key.to_owned(), json!(value));
+                }
+            }
+            let ns: Vec<String> = args
+                .name_servers
+                .iter()
+                .map(|name| qualify_data(name, &apex))
+                .collect();
+            json!({ "to": "primary", "soa": soa, "ns": ns })
+        }
+        FlipToArg::Secondary => {
+            if args.primaries.is_empty() {
+                return Err(usage("a flip to secondary needs at least one --primary"));
+            }
+            if args.mname.is_some() || args.rname.is_some() || !args.name_servers.is_empty() {
+                return Err(usage(
+                    "--mname, --rname and --ns belong to a flip to primary",
+                ));
+            }
+            let primaries = args
+                .primaries
+                .iter()
+                .map(|server| primary_server(server))
+                .collect::<Result<Vec<_>, _>>()?;
+            json!({ "to": "secondary", "primaries": primaries })
+        }
+    };
+    let answer: Value = client
+        .post(&format!("{}/flip", zone_path(&zone)), &body, Some(&key()))
+        .await?;
+    if target.json {
+        return Ok(Output::json(&answer));
+    }
+    let mut out = format!(
+        "{} is now a {} zone at serial {}
+",
+        text(&zone, &["name"]),
+        text(&answer, &["kind"]),
+        answer
+            .get("serial")
+            .and_then(Value::as_u64)
+            .map_or_else(|| "-".to_owned(), |serial| serial.to_string())
+    );
+    let rows: Vec<Vec<String>> = answer
+        .get("origins")
+        .and_then(Value::as_array)
+        .map(|origins| {
+            origins
+                .iter()
+                .map(|count| {
+                    vec![
+                        text(count, &["origin"]).to_owned(),
+                        count
+                            .get("rrsets")
+                            .and_then(Value::as_u64)
+                            .map_or_else(|| "-".to_owned(), |n| n.to_string()),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if !rows.is_empty() {
+        out.push_str(&table(&["ORIGIN", "RRSETS"], &rows));
+    }
+    Ok(Output::text(out))
+}
+
+async fn zone_release(target: &Target, args: &ZoneReleaseArgs) -> Result<Output, Failure> {
+    let client = target.connect().await?;
+    let zone = resolve_zone(&client, &args.zone).await?;
+    let answer: Value = client
+        .post(
+            &format!("{}/release", zone_path(&zone)),
+            &json!({ "delete": args.delete, "dry_run": args.dry_run }),
+            Some(&key()),
+        )
+        .await?;
+    if target.json {
+        return Ok(Output::json(&answer));
+    }
+    let names: Vec<String> = answer
+        .get("names")
+        .and_then(Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let verb = match (args.dry_run, args.delete) {
+        (true, true) => "would be deleted",
+        (true, false) => "would be released to manual records",
+        (false, true) => "deleted",
+        (false, false) => "released to manual records",
+    };
+    let mut out = format!(
+        "{} frozen RRsets at {} names of {} {verb}
+",
+        answer
+            .get("rrsets")
+            .and_then(Value::as_u64)
+            .map_or_else(|| "-".to_owned(), |n| n.to_string()),
+        names.len(),
+        text(&zone, &["name"])
+    );
+    for name in names {
+        let _ = writeln!(out, "  {name}");
+    }
+    Ok(Output::text(out))
 }
 
 async fn zone_update(target: &Target, args: &ZoneUpdateArgs) -> Result<Output, Failure> {

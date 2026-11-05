@@ -7,7 +7,8 @@
 //! (CIDR, VLAN id, host name), because the source has no Tenko identifiers.
 //!
 //! The DHCP part (Phase 3, WP7.0) is [`dhcp::DhcpIr`], produced beside the [`Ir`] by DHCP
-//! sources.
+//! sources. A mirrored source (Phase 4, WP14.0) pushes a [`DhcpIr`](dhcp::DhcpIr) and a
+//! [`LossReport`] in one envelope, [`MirrorSnapshot`] ([`mirror`]).
 
 use std::{borrow::Cow, collections::BTreeMap, fmt, net::IpAddr};
 
@@ -17,6 +18,10 @@ use utoipa::ToSchema;
 
 // WP7.0: the DHCP part of the IR.
 pub mod dhcp;
+// WP14.0: the envelope of a mirrored source.
+pub mod mirror;
+
+pub use mirror::{MirrorOrigin, MirrorSnapshot, SnapshotInvalid, SourceKindLabel};
 
 use crate::{
     ipam::{AssignmentMode, Status},
@@ -29,14 +34,14 @@ use crate::{
     Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
 )]
 pub struct SourceLocation {
-    /// Sheet, file or object collection.
-    #[serde(default)]
+    /// Sheet, file or object collection; the cmdlet for a mirrored source (WP14.0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sheet: Option<String>,
     /// Row number, 1-based as shown by spreadsheet programs.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub row: Option<u32>,
-    /// Column letter or header.
-    #[serde(default)]
+    /// Column letter or header; the object's key for a mirrored source (`ScopeId=192.0.2.0`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column: Option<String>,
 }
 
@@ -237,6 +242,15 @@ pub struct LossEntry {
     pub code: Cow<'static, str>,
     /// English explanation with the offending value.
     pub detail: String,
+}
+
+impl LossEntry {
+    /// The key of the entry within one source: its location and its code, so that an
+    /// acknowledgment (`migrate.loss_acks`, WP14.0) names the entry whatever its detail
+    /// says, and holds while the entry recurs.
+    pub fn key(&self) -> String {
+        format!("{}|{}", self.location, self.code)
+    }
 }
 
 #[cfg(test)]

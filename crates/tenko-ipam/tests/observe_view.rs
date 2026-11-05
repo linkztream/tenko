@@ -1627,6 +1627,7 @@ fn lease_row(address: &str, client: u8, vrf: VrfId) -> tenko_core::dhcp::Lease {
         relay: None,
         observed_at: None,
         granted: Some(time("08:00:00")),
+        adopted: None,
     }
 }
 

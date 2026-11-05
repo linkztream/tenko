@@ -141,6 +141,7 @@ export type MessageKey =
   | "access.token_scope.audit_read_help"
   | "access.token_scope.metrics"
   | "access.token_scope.metrics_help"
+  | "access.token_scope.mirror"
   | "access.user.kind"
   | "access.user.service"
   | "account.codes.lede"
@@ -649,6 +650,7 @@ export type MessageKey =
   | "audit.kind.import"
   | "audit.kind.interface"
   | "audit.kind.job"
+  | "audit.kind.mirror"
   | "audit.kind.node"
   | "audit.kind.observation"
   | "audit.kind.prefix"
@@ -659,6 +661,7 @@ export type MessageKey =
   | "audit.kind.settings"
   | "audit.kind.site"
   | "audit.kind.system"
+  | "audit.kind.takeover"
   | "audit.kind.tenant"
   | "audit.kind.user"
   | "audit.kind.vlan"
@@ -5812,6 +5815,19 @@ export type MessageKey =
   | "metrics.unit.per_second"
   | "metrics.unit.percent"
   | "metrics.waiting"
+  | "migrate.coming.body"
+  | "migrate.coming.connectors"
+  | "migrate.coming.title"
+  | "migrate.coming.zone"
+  | "migrate.flip.body"
+  | "migrate.flip.title"
+  | "migrate.mirror.tab.losses"
+  | "migrate.mirror.tab.scopes"
+  | "migrate.mirror.tab.settings"
+  | "migrate.mirror.tabs"
+  | "migrate.mirror.title"
+  | "migrate.release.body"
+  | "migrate.release.title"
   | "move.checklist"
   | "move.checklist_foot"
   | "move.checklist_sum"
@@ -7892,6 +7908,7 @@ export interface MessageArgs {
   "access.token.revoke_body": { account: string | number };
   "access.token.revoke_named": { name: string | number };
   "access.token.revoke_title": { name: string | number };
+  "access.token_scope.mirror": { id: string | number };
   "account.methods.requires": { method: string | number; profile: string | number };
   "account.methods.signed_in_with": { method: string | number };
   "account.passkey.created": { date: string | number };
@@ -9532,6 +9549,7 @@ export const messageKeys: readonly MessageKey[] = [
   "access.token_scope.audit_read_help",
   "access.token_scope.metrics",
   "access.token_scope.metrics_help",
+  "access.token_scope.mirror",
   "access.user.kind",
   "access.user.service",
   "account.codes.lede",
@@ -10040,6 +10058,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.kind.import",
   "audit.kind.interface",
   "audit.kind.job",
+  "audit.kind.mirror",
   "audit.kind.node",
   "audit.kind.observation",
   "audit.kind.prefix",
@@ -10050,6 +10069,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.kind.settings",
   "audit.kind.site",
   "audit.kind.system",
+  "audit.kind.takeover",
   "audit.kind.tenant",
   "audit.kind.user",
   "audit.kind.vlan",
@@ -15203,6 +15223,19 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.unit.per_second",
   "metrics.unit.percent",
   "metrics.waiting",
+  "migrate.coming.body",
+  "migrate.coming.connectors",
+  "migrate.coming.title",
+  "migrate.coming.zone",
+  "migrate.flip.body",
+  "migrate.flip.title",
+  "migrate.mirror.tab.losses",
+  "migrate.mirror.tab.scopes",
+  "migrate.mirror.tab.settings",
+  "migrate.mirror.tabs",
+  "migrate.mirror.title",
+  "migrate.release.body",
+  "migrate.release.title",
   "move.checklist",
   "move.checklist_foot",
   "move.checklist_sum",

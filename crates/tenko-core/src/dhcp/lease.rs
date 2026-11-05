@@ -20,7 +20,7 @@ use utoipa::ToSchema;
 
 use crate::{
     dns::DnsName,
-    id::{JobId, NodeId, PrefixId, VrfId},
+    id::{JobId, MirrorId, NodeId, PrefixId, VrfId},
     net::{Duid, MacAddr},
     serde_util::HexBytes,
     timestamp::Timestamp,
@@ -275,9 +275,38 @@ pub struct Lease {
     /// `cltt` ([`Lease::granted_at`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub granted: Option<Timestamp>,
+    // WP14.0: the adoption of a mirrored lease (Windows takeover plan section 2.8, ADR
+    // 0034). A cold field with a serde default, as `granted`: the data format stays.
+    /// Set by a takeover on a row it made from a mirrored lease, cleared by the client's
+    /// first REQUEST; while set, the engine's rekey rule lets a request from the row's MAC
+    /// address claim the row under the identity it presents ([`Adopted`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adopted: Option<Adopted>,
+}
+
+/// Where an adopted lease row came from (WP14.0, plan section 2.8): the mirror and the
+/// snapshot the takeover used, and whether the client's identity was guessed. A row carries
+/// it from the takeover until the client's first REQUEST, whatever key the request uses;
+/// the engine's rekey rule reads it on a RENEWING, REBINDING or INIT-REBOOT request whose
+/// `chaddr` equals the row's MAC address while another identity keys the row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+pub struct Adopted {
+    /// The mirrored source the lease came from.
+    pub mirror: MirrorId,
+    /// The sequence of the snapshot the takeover used.
+    pub sequence: u64,
+    /// Whether the identity of the row was guessed (option 61 of type 1 with the MAC
+    /// address, chosen because no DHCID told which key the client presents).
+    #[serde(default)]
+    pub guessed: bool,
 }
 
 impl Lease {
+    /// Whether the row was made by a takeover and the client has not asked for it yet.
+    pub const fn is_adopted(&self) -> bool {
+        self.adopted.is_some()
+    }
+
     /// Whether the lease holds its address for the client at `now`.
     pub fn is_bound(&self, now: Timestamp) -> bool {
         self.state == BindingState::Active && self.ends > now
