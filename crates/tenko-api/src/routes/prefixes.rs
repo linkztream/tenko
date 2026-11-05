@@ -3764,4 +3764,189 @@ mod tests {
             assert!(names.contains(&expected), "{expected}: {names:?}");
         }
     }
+
+    // ----- scoped writes around foreign prefixes (IAM-01) --------------------------------
+
+    /// An authorizer whose grants reach every IPAM kind through `rules` only, as the
+    /// authorizer of `tenko-auth` decides with the anchors index: an `anywhere` check
+    /// passes, an object passes when a rule covers its anchors.
+    struct Scoped {
+        rules: Vec<tenko_core::ScopeRule>,
+        index: Arc<tenko_ipam::scope::ScopeIndex>,
+    }
+
+    impl Authorizer for Scoped {
+        fn check(
+            &self,
+            _principal: &Principal,
+            action: Action,
+            object: &ObjectRef,
+        ) -> Result<(), Denied> {
+            let filter = ScopeFilter::Only(self.rules.clone());
+            if object.id == tenko_auth::authz::ANYWHERE
+                || filter.admits(
+                    &self.index.anchors(object),
+                    tenko_auth::authz::mode_of(action),
+                )
+            {
+                Ok(())
+            } else {
+                Err(Denied {
+                    action,
+                    object: *object,
+                    reason: DenyReason::OutOfScope,
+                })
+            }
+        }
+
+        fn scope(&self, _principal: &Principal, _action: Action, _kind: ObjectKind) -> ScopeFilter {
+            ScopeFilter::Only(self.rules.clone())
+        }
+    }
+
+    /// The service over a store with the anchors index; an administrator without an
+    /// authorizer; T (10.0.0.0/16, a supernet), S (10.0.0.0/25, a supernet at `site`) and
+    /// Q (10.0.0.128/25) with an address in it.
+    struct Siblings {
+        admin: Api,
+        ipam: Arc<IpamService>,
+        index: Arc<tenko_ipam::scope::ScopeIndex>,
+        site: String,
+        s: String,
+        q: String,
+    }
+
+    impl Siblings {
+        async fn new() -> Self {
+            let store: Arc<dyn Store> = Arc::new(MemStore::default());
+            let index = Arc::new(tenko_ipam::scope::ScopeIndex::new());
+            store
+                .register_index(Arc::clone(&index) as _)
+                .expect("register the anchors index");
+            let ipam = IpamService::with_direct_jobs(store).expect("service");
+            let admin = Self::api(&ipam, &index, None);
+            let site = admin.site("lab").await;
+            admin
+                .prefix(&json!({ "cidr": "10.0.0.0/16", "role": "supernet" }))
+                .await;
+            let s = admin
+                .prefix(&json!({ "cidr": "10.0.0.0/25", "role": "supernet", "site": site }))
+                .await["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            let q = admin
+                .prefix(&json!({ "cidr": "10.0.0.128/25", "role": "network" }))
+                .await["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            admin.address("10.0.0.130").await;
+            Self {
+                admin,
+                ipam,
+                index,
+                site,
+                s,
+                q,
+            }
+        }
+
+        fn api(
+            ipam: &Arc<IpamService>,
+            index: &Arc<tenko_ipam::scope::ScopeIndex>,
+            authorizer: Option<Arc<dyn Authorizer>>,
+        ) -> Api {
+            let router = bare_router(authorizer)
+                .layer(Extension(Arc::clone(ipam)))
+                .layer(Extension(Arc::clone(index)));
+            Api {
+                router,
+                ipam: Arc::clone(ipam),
+            }
+        }
+
+        fn scoped(&self, rules: Vec<tenko_core::ScopeRule>) -> Api {
+            let authorizer = Scoped {
+                rules,
+                index: Arc::clone(&self.index),
+            };
+            Self::api(&self.ipam, &self.index, Some(Arc::new(authorizer)))
+        }
+
+        fn prefix_rule(&self) -> tenko_core::ScopeRule {
+            tenko_core::ScopeRule::Prefix {
+                id: self.s.parse().expect("prefix id"),
+                subtree: true,
+            }
+        }
+
+        async fn cidr(&self, id: &str) -> String {
+            let reply = self.admin.get(&format!("/prefixes/{id}")).await;
+            reply.assert_status(StatusCode::OK);
+            reply.body["cidr"].as_str().expect("cidr").to_owned()
+        }
+    }
+
+    #[tokio::test]
+    async fn widening_a_prefix_around_a_sibling_outside_the_scope_is_refused() {
+        let lab = Siblings::new().await;
+        let operator = lab.scoped(vec![lab.prefix_rule()]);
+        let widen = json!({ "cidr": "10.0.0.0/24", "role": "supernet" });
+        let path = format!("/prefixes/{}", lab.s);
+        operator
+            .patch(&path, &widen, None)
+            .await
+            .assert_problem(403, "auth.out_of_scope");
+        // The dry run is refused the same way.
+        operator
+            .patch(&format!("{path}?dry_run=true"), &widen, None)
+            .await
+            .assert_problem(403, "auth.out_of_scope");
+        // A network around Q would be an overlap; the answer names nothing of Q.
+        let refused = operator
+            .patch(
+                &path,
+                &json!({ "cidr": "10.0.0.0/24", "role": "network" }),
+                None,
+            )
+            .await;
+        refused.assert_problem(403, "auth.out_of_scope");
+        assert!(
+            !refused.body.to_string().contains("10.0.0.128"),
+            "{}",
+            refused.body
+        );
+        assert_eq!(lab.cidr(&lab.s).await, "10.0.0.0/25");
+        // Q stays outside the operator's reach.
+        operator
+            .get(&format!("/prefixes/{}", lab.q))
+            .await
+            .assert_problem(403, "auth.out_of_scope");
+        // The administrator may widen around Q.
+        lab.admin
+            .patch(&path, &widen, None)
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(lab.cidr(&lab.s).await, "10.0.0.0/24");
+    }
+
+    #[tokio::test]
+    async fn creating_a_supernet_in_a_held_site_around_a_prefix_outside_it_is_refused() {
+        let lab = Siblings::new().await;
+        let operator = lab.scoped(vec![tenko_core::ScopeRule::Site {
+            id: lab.site.parse().expect("site id"),
+            subtree: true,
+        }]);
+        let around = json!({ "cidr": "10.0.0.0/24", "role": "supernet", "site": lab.site });
+        operator
+            .post("/prefixes", &around)
+            .await
+            .assert_problem(403, "auth.out_of_scope");
+        operator
+            .get(&format!("/prefixes/{}", lab.q))
+            .await
+            .assert_problem(403, "auth.out_of_scope");
+        lab.admin.prefix(&around).await;
+    }
 }

@@ -780,14 +780,83 @@ async fn history(
     ))
 }
 
-/// Releases a lease through the role, records and audits it.
+/// The VRF of the lease that `addr` names, once the principal may release it (IAM-01):
+/// `execute` on the DHCP scope that holds the lease, as for every write in
+/// [`AnchorMode::All`](tenko_core::AnchorMode::All). A lease in a scope the principal may
+/// not read is answered as missing, as the read answers it. A principal whose grants reach
+/// every scope releases by the address as given.
+async fn release_vrf(
+    app: &AppState,
+    cx: &RequestCtx,
+    role: &Arc<dyn DhcpNode>,
+    addr: IpAddr,
+    vrf: Option<VrfId>,
+) -> Result<Option<VrfId>, ApiError> {
+    let everywhere = app.authorizer.as_ref().is_none_or(|authorizer| {
+        authorizer
+            .scope(&cx.principal, Action::Execute, ObjectKind::DhcpScope)
+            .is_all()
+    });
+    if everywhere {
+        return Ok(vrf);
+    }
+    let args = role::LeaseListArgs {
+        vrf,
+        exact: match addr {
+            IpAddr::V4(addr) => Some(addr),
+            IpAddr::V6(_) => None,
+        },
+        exact6: match addr {
+            IpAddr::V6(addr) => Some(addr),
+            IpAddr::V4(_) => None,
+        },
+        limit: 2,
+        ..role::LeaseListArgs::default()
+    };
+    let result = role.execute(role::LEASES_LIST, &to_cbor(&args)?).await;
+    let Output::Leases(page) = result.output else {
+        return Err(command_failed(role::LEASES_LIST, &result));
+    };
+    let held: Vec<(VrfId, tenko_core::PrefixId)> = page
+        .items
+        .iter()
+        .map(|row| (row.lease.vrf, row.lease.scope))
+        .chain(
+            page.items6
+                .iter()
+                .map(|row| (row.lease.vrf, row.lease.scope)),
+        )
+        .filter(|(_, scope)| may_read_scope(app, &cx.principal, *scope))
+        .collect();
+    match held.as_slice() {
+        [] => Err(ApiError::new(
+            dhcp_codes::LEASE_NOT_FOUND,
+            404,
+            format!("no lease holds {addr}"),
+        )
+        .with_param("addr", addr.to_string())),
+        [(vrf, scope)] => {
+            app.authorize(&cx.principal, Action::Execute, &scope_object(*scope))?;
+            Ok(Some(*vrf))
+        }
+        _ => Err(invalid(
+            "vrf",
+            format!("{addr} has leases in several VRFs; name the VRF"),
+        )),
+    }
+}
+
+/// Releases a lease through the role, records and audits it; the principal must be allowed
+/// to release it in its scope first ([`release_vrf`]).
 async fn release(
+    app: &AppState,
     cx: &RequestCtx,
     configs: Configs,
     role: Arc<dyn DhcpNode>,
     addr: IpAddr,
-    body: DhcpLeaseRelease,
+    mut body: DhcpLeaseRelease,
 ) -> Result<(CommandRecord, DhcpLeaseItem), ApiError> {
+    body.vrf = release_vrf(app, cx, &role, addr, body.vrf).await?;
     let node = role.node();
     let reason = body
         .reason
@@ -1104,7 +1173,7 @@ pub(super) async fn release_dhcp_lease(
         &anywhere(ObjectKind::DhcpScope),
     )?;
     let role = this_role(&app, slot)?;
-    let (_, item) = release(&cx, configs, role, addr, body).await?;
+    let (_, item) = release(&app, &cx, configs, role, addr, body).await?;
     Ok(Json(item).into_response())
 }
 
@@ -1258,7 +1327,7 @@ pub(super) async fn release_node_dhcp_lease(
         &anywhere(ObjectKind::DhcpScope),
     )?;
     let role = local_role(&app, slot, registry, node).await?;
-    let (record, _) = release(&cx, configs, role, addr, body).await?;
+    let (record, _) = release(&app, &cx, configs, role, addr, body).await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(DhcpCommandAccepted {

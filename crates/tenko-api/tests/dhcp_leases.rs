@@ -9,8 +9,11 @@ use std::{sync::Arc, time::Duration};
 use dhcp_support::{App, Reply, send};
 use serde_json::{Value, json};
 use tenko_api::routes::dhcp::DhcpNodeSlot;
+use tenko_api::state::AppState;
+use tenko_auth::authz;
 use tenko_core::{
-    NodeId, PrefixId, Principal, SystemComponent, Timestamp, VrfId,
+    Action, Authorizer, Denied, DenyReason, NodeId, ObjectKind, ObjectRef, PrefixId, Principal,
+    ScopeFilter, ScopeRule, SystemComponent, Timestamp, VrfId,
     dhcp::{
         BindingState, ClientKey, DdnsState, HistoryRow, Lease, Lease6, Lease6Event, Lease6Kind,
         LeaseEvent, LeaseEventKind, tables,
@@ -24,7 +27,8 @@ use tenko_dhcp::{
     server::ServerConfig,
     v6::server::Server6Config,
 };
-use tenko_store::{Store, WriteBatch};
+use tenko_ipam::scope::ScopeIndex;
+use tenko_store::{DerivedIndex, Store, WriteBatch};
 
 const MAC: [u8; 6] = [0x00, 0x00, 0x5e, 0x00, 0x53, 0x01];
 /// A DUID-LL of hardware type 1 over [`MAC`].
@@ -467,6 +471,105 @@ async fn a_dhcpv6_lease_is_released_and_audited() {
         "{actions:?}"
     );
     assert!(actions.iter().any(|action| action == "dhcp.lease.read"));
+    world.role.stop().await;
+}
+
+/// An authorizer whose grants reach everything through `rules` only, deciding with the
+/// anchors index as the authorizer of `tenko-auth` does: an `anywhere` check passes, an
+/// object passes when a rule covers its anchors.
+struct Scoped {
+    rules: Vec<ScopeRule>,
+    index: Arc<ScopeIndex>,
+}
+
+impl Authorizer for Scoped {
+    fn check(
+        &self,
+        _principal: &Principal,
+        action: Action,
+        object: &ObjectRef,
+    ) -> Result<(), Denied> {
+        let filter = ScopeFilter::Only(self.rules.clone());
+        if object.id == authz::ANYWHERE
+            || filter.admits(&self.index.anchors(object), authz::mode_of(action))
+        {
+            Ok(())
+        } else {
+            Err(Denied {
+                action,
+                object: *object,
+                reason: DenyReason::OutOfScope,
+            })
+        }
+    }
+
+    fn scope(&self, _principal: &Principal, _action: Action, _kind: ObjectKind) -> ScopeFilter {
+        ScopeFilter::Only(self.rules.clone())
+    }
+}
+
+/// The routes of `world` for a principal that holds `prefix` and its subtree only.
+fn scoped_router(world: &World, prefix: &str) -> axum::Router {
+    let index = Arc::new(ScopeIndex::new());
+    world
+        .app
+        .store
+        .register_index(Arc::clone(&index) as Arc<dyn DerivedIndex>)
+        .expect("register the anchors index");
+    let mut state = AppState::default();
+    state.authorizer = Some(Arc::new(Scoped {
+        rules: vec![ScopeRule::Prefix {
+            id: prefix.parse().expect("prefix id"),
+            subtree: true,
+        }],
+        index,
+    }));
+    let slot = DhcpNodeSlot::default();
+    slot.set(world.role.node() as Arc<dyn DhcpNode>);
+    tenko_api::api(state)
+        .0
+        .layer(axum::Extension(Arc::clone(&world.app.config)))
+        .layer(axum::Extension(slot))
+}
+
+#[tokio::test]
+async fn a_lease_is_released_only_in_a_scope_the_principal_holds() {
+    let world = world().await;
+    let elsewhere = world.app.prefix("198.51.100.0/24").await;
+    let outsider = scoped_router(&world, &elsewhere);
+    for addr in ["192.0.2.100", "2001:db8:1::101"] {
+        let refused = send(
+            &outsider,
+            "POST",
+            &format!("/dhcp/leases/{addr}/release"),
+            Some(json!({})),
+            &[],
+        )
+        .await;
+        refused.assert_problem(404, "dhcp.lease.not_found");
+        assert!(refused.body.get("mac").is_none(), "{}", refused.body);
+    }
+    let still = world.get("/dhcp/leases/192.0.2.100").await;
+    still.assert_status(200);
+    assert_eq!(still.body["state"], "active");
+    // A principal holding the scope's prefix releases there, and the administrator
+    // releases anywhere.
+    let holder = scoped_router(&world, &world.v6);
+    let released = send(
+        &holder,
+        "POST",
+        "/dhcp/leases/2001:db8:1::101/release",
+        Some(json!({})),
+        &[],
+    )
+    .await;
+    released.assert_status(200);
+    assert_eq!(released.body["state"], "released");
+    let released = world
+        .post("/dhcp/leases/192.0.2.100/release", json!({}))
+        .await;
+    released.assert_status(200);
+    assert_eq!(released.body["state"], "released");
     world.role.stop().await;
 }
 

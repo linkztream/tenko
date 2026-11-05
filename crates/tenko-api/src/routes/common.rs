@@ -254,8 +254,9 @@ impl IpamHandle {
 /// Where the addresses and networks a write names land, checked before planning: a
 /// principal whose scope does not cover the place gets `auth.out_of_scope` at once, so a
 /// planning error (an overlap, a taken address) never describes an object outside its
-/// scope (R24). The plan check after planning stays the authority; this check only
-/// refuses early.
+/// scope (R24). A prefix's new network is checked whole: every existing prefix inside it
+/// must lie inside the scope as well, since the network would hold it. The plan check
+/// after planning stays the authority; this check only refuses early.
 fn precheck(
     authorizer: &dyn Authorizer,
     index: &ScopeIndex,
@@ -263,22 +264,37 @@ fn precheck(
     commands: &[IpamCommand],
 ) -> Result<(), ApiError> {
     for command in commands {
-        let (action, kind, vrf, ip) = match command {
+        let (action, kind, vrf, ip, network) = match command {
             IpamCommand::CreatePrefix(input) => (
                 Action::Create,
                 ObjectKind::Prefix,
                 input.vrf,
                 input.cidr.network(),
+                Some((input.cidr, input.vrf, None)),
             ),
-            IpamCommand::CreateAddress(input) => {
-                (Action::Create, ObjectKind::Address, input.vrf, input.ip)
-            }
+            IpamCommand::CreateAddress(input) => (
+                Action::Create,
+                ObjectKind::Address,
+                input.vrf,
+                input.ip,
+                None,
+            ),
             IpamCommand::UpdatePrefix(update) => match update.patch.cidr {
-                Some(cidr) => (Action::Update, ObjectKind::Prefix, None, cidr.network()),
+                Some(cidr) => (
+                    Action::Update,
+                    ObjectKind::Prefix,
+                    None,
+                    cidr.network(),
+                    Some((
+                        cidr,
+                        index.anchors(&ObjectRef::from(update.id)).vrf,
+                        Some(update.id),
+                    )),
+                ),
                 None => continue,
             },
             IpamCommand::UpdateAddress(update) => match update.patch.ip {
-                Some(ip) => (Action::Update, ObjectKind::Address, None, ip),
+                Some(ip) => (Action::Update, ObjectKind::Address, None, ip, None),
                 None => continue,
             },
             _ => continue,
@@ -288,13 +304,28 @@ fn precheck(
             continue;
         }
         let object = new_of(kind);
+        let refused = Denied {
+            action,
+            object,
+            reason: DenyReason::OutOfScope,
+        };
         if !scope.admits(&index.anchors_of_ip(object, vrf, ip), AnchorMode::All) {
-            return Err(Denied {
-                action,
-                object,
-                reason: DenyReason::OutOfScope,
+            return Err(refused.into());
+        }
+        if let Some((cidr, vrf, except)) = network {
+            // A prefix already below the one that changes keeps its place.
+            let below = |anchors: &Anchors| {
+                except.is_some_and(|id| anchors.prefixes.iter().any(|chain| chain.contains(&id)))
+            };
+            let held = authorizer.scope(&cx.principal, Action::Update, ObjectKind::Prefix);
+            if !held.is_all()
+                && !index
+                    .anchors_within(vrf, &cidr, except)
+                    .iter()
+                    .all(|anchors| below(anchors) || held.admits(anchors, AnchorMode::All))
+            {
+                return Err(refused.into());
             }
-            .into());
         }
     }
     Ok(())

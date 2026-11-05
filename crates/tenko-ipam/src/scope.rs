@@ -32,9 +32,11 @@
 //! the principal does not hold. The anchors after the change come from an overlay of the
 //! plan's objects on the index, so a host created with its interfaces or a prefix created
 //! inside a new parent anchors correctly. Interfaces and addresses also need the right to
-//! change their host. [`ScopeIndex::execute_checked`] plans, checks and applies with the
-//! retries of [`IpamService::execute`], which it delegates to for principals without a
-//! scoped reach.
+//! change their host. A prefix created, resized or restored around existing prefixes
+//! changes their chains, so each existing prefix whose anchors it changes is checked as a
+//! change of its own, before and after. [`ScopeIndex::execute_checked`] plans, checks and
+//! applies with the retries of [`IpamService::execute`], which it delegates to for
+//! principals without a scoped reach.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -194,6 +196,21 @@ impl Image {
             }
             self.prefixes.insert(id, prefix);
         }
+    }
+
+    /// The live prefixes of `vrf` inside `net`, `net` itself included.
+    fn within(&self, vrf: VrfId, net: &IpNet) -> Vec<PrefixId> {
+        let ((family_index, (first, len)), family) = net_key(net);
+        let (_, last) = bounds(net);
+        self.nets
+            .get(&(vrf, family_index))
+            .map(|nets| {
+                nets.range((first, len)..=(last, family.bits()))
+                    .filter(|((_, inner), _)| *inner >= len)
+                    .map(|(_, id)| *id)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Recomputes the parents of every live prefix of one VRF and family.
@@ -907,6 +924,36 @@ impl ScopeIndex {
         self.with(|image| anchors_with(image, *object))
     }
 
+    /// The anchors of every live prefix inside `net` (`net` itself included) other than
+    /// `except`, in `vrf` or in every VRF when it is not known: the prefixes a prefix
+    /// created or resized to `net` would hold.
+    pub fn anchors_within(
+        &self,
+        vrf: Option<VrfId>,
+        net: &IpNet,
+        except: Option<PrefixId>,
+    ) -> Vec<Anchors> {
+        self.with(|image| {
+            let family = Family::of_net(net).index();
+            let mut vrfs: Vec<VrfId> = match vrf {
+                Some(vrf) => vec![vrf],
+                None => image
+                    .nets
+                    .keys()
+                    .filter(|(_, index)| *index == family)
+                    .map(|(vrf, _)| *vrf)
+                    .collect(),
+            };
+            vrfs.sort();
+            vrfs.dedup();
+            vrfs.into_iter()
+                .flat_map(|vrf| image.within(vrf, net))
+                .filter(|id| Some(*id) != except)
+                .map(|id| anchors_with(image, ObjectRef::from(id)))
+                .collect()
+        })
+    }
+
     /// The anchors of an object that stands for its targets (a job): the targets' anchors
     /// merged ([`merge`]).
     pub fn anchors_of_targets(&self, object: ObjectRef, targets: &[ObjectRef]) -> Anchors {
@@ -1085,6 +1132,35 @@ impl ScopeIndex {
                     return Err(refuse(action, object, DenyReason::OutOfScope));
                 }
                 hosts.extend(owning_host(&overlay, change.after.as_ref()));
+            }
+            // A prefix created, resized or restored around existing prefixes changes their
+            // chains: each of them is changed as well, so it must lie inside the scope
+            // where it is and where it goes.
+            if let Some(IpamObject::Prefix(prefix)) = &change.after
+                && !prefix.meta.is_deleted()
+            {
+                let scope = filter(Action::Update, ObjectKind::Prefix);
+                if !scope.is_all() {
+                    for inner in image.within(prefix.vrf, &prefix.cidr) {
+                        if inner == prefix.id || overlay.changes_prefix(inner) {
+                            continue;
+                        }
+                        let inner = ObjectRef::from(inner);
+                        let before = anchors_with(&*image, inner);
+                        let after = anchors_with(&overlay, inner);
+                        if before == after {
+                            continue;
+                        }
+                        if matches!(scope, ScopeFilter::Nothing) {
+                            return Err(refuse(action, object, DenyReason::MissingPermission));
+                        }
+                        if !scope.admits(&before, AnchorMode::All)
+                            || !scope.admits(&after, AnchorMode::All)
+                        {
+                            return Err(refuse(action, object, DenyReason::OutOfScope));
+                        }
+                    }
+                }
             }
             // Binding an interface or an address changes its host too.
             for host in hosts {
@@ -1382,8 +1458,8 @@ mod tests {
     use super::*;
     use crate::{
         command::{
-            AddressInput, AddressPatch, HostInput, InterfaceInput, PrefixInput, RangeInput,
-            SiteInput, TenantInput, UpdateAddress, VlanInput, VrfInput,
+            AddressInput, AddressPatch, HostInput, InterfaceInput, PrefixInput, PrefixPatch,
+            RangeInput, SiteInput, TenantInput, UpdateAddress, UpdatePrefix, VlanInput, VrfInput,
         },
         observe::model::FactSubject,
         proposals::model::{
@@ -2321,6 +2397,112 @@ mod tests {
         let elsewhere = FakeAuthorizer::only(vec![rule(world.p1)]);
         assert_eq!(
             denied(world.check(&elsewhere, &plan)).reason,
+            DenyReason::OutOfScope
+        );
+    }
+
+    /// T (10.0.0.0/16, a supernet), S (10.0.0.0/25) and Q (10.0.0.128/25) in the world's
+    /// VRF, S at the child site, with an address in Q.
+    async fn siblings(world: &World) -> (PrefixId, PrefixId, PrefixId) {
+        let (t, t_input) = prefix_input(world.vrf, "10.0.0.0/16", None);
+        let (s, s_input) = prefix_input(world.vrf, "10.0.0.0/25", Some(world.child_site));
+        let (q, mut q_input) = prefix_input(world.vrf, "10.0.0.128/25", None);
+        q_input.role = Some(PrefixRole::Network);
+        let (_, address) = new_address(world.vrf, "10.0.0.130", None);
+        world
+            .run(vec![
+                IpamCommand::CreatePrefix(t_input),
+                IpamCommand::CreatePrefix(s_input),
+                IpamCommand::CreatePrefix(q_input),
+                IpamCommand::CreateAddress(address),
+            ])
+            .await;
+        (t, s, q)
+    }
+
+    fn resize(id: PrefixId, cidr: &str) -> IpamCommand {
+        IpamCommand::UpdatePrefix(UpdatePrefix {
+            id,
+            expected: None,
+            patch: PrefixPatch {
+                cidr: Some(cidr.parse().expect("cidr")),
+                role: Some(PrefixRole::Supernet),
+                ..PrefixPatch::default()
+            },
+        })
+    }
+
+    #[tokio::test]
+    async fn widening_a_prefix_around_a_prefix_outside_the_scope_is_refused() {
+        let world = World::new().await;
+        let (t, s, q) = siblings(&world).await;
+        let plan = world.plan(vec![resize(s, "10.0.0.0/24")]).await;
+        // Q is not written by the plan, but its chain would run through S.
+        assert!(
+            plan.changes
+                .iter()
+                .all(|change| change.object != ObjectRef::from(q))
+        );
+        let auth = FakeAuthorizer::only(vec![rule(s)]);
+        let refused = denied(world.check(&auth, &plan));
+        assert_eq!(refused.reason, DenyReason::OutOfScope);
+        assert_eq!(refused.action, Action::Update);
+        assert_eq!(refused.object, ObjectRef::from(s));
+        // A scope that holds Q as well, or the parent of both, and an unrestricted one pass.
+        world
+            .check(&FakeAuthorizer::only(vec![rule(s), rule(q)]), &plan)
+            .expect("both held");
+        world
+            .check(&FakeAuthorizer::only(vec![rule(t)]), &plan)
+            .expect("the parent held");
+        world
+            .check(&FakeAuthorizer::uniform(ScopeFilter::All), &plan)
+            .expect("unrestricted");
+        // Widening into free space still passes.
+        let plan = world.plan(vec![resize(world.p2, "198.51.100.0/23")]).await;
+        world
+            .check(&FakeAuthorizer::only(vec![rule(world.p2)]), &plan)
+            .expect("nothing absorbed");
+    }
+
+    #[tokio::test]
+    async fn creating_a_supernet_in_a_held_site_around_a_prefix_outside_it_is_refused() {
+        let world = World::new().await;
+        let (_, s, q) = siblings(&world).await;
+        let (_, around) = prefix_input(world.vrf, "10.0.0.0/24", Some(world.child_site));
+        let plan = world.plan(vec![IpamCommand::CreatePrefix(around)]).await;
+        let site = ScopeRule::Site {
+            id: world.site,
+            subtree: true,
+        };
+        let refused = denied(world.check(&FakeAuthorizer::only(vec![site.clone()]), &plan));
+        assert_eq!(refused.reason, DenyReason::OutOfScope);
+        assert_eq!(refused.action, Action::Create);
+        // S, which the site holds, is absorbed too; with Q held as well the create passes.
+        assert!(world.anchors(s).sites.contains(&world.site));
+        world
+            .check(&FakeAuthorizer::only(vec![site, rule(q)]), &plan)
+            .expect("Q held as well");
+    }
+
+    #[tokio::test]
+    async fn restoring_a_supernet_around_a_prefix_outside_the_scope_is_refused() {
+        let world = World::new().await;
+        let (_, s, _) = siblings(&world).await;
+        let (around, around_input) = prefix_input(world.vrf, "10.0.0.0/24", None);
+        world
+            .run(vec![IpamCommand::CreatePrefix(around_input)])
+            .await;
+        world.run(vec![delete(around)]).await;
+        let plan = world
+            .plan(vec![IpamCommand::Restore {
+                object: around.into(),
+                expected: None,
+            }])
+            .await;
+        let auth = FakeAuthorizer::only(vec![rule(s), ScopeRule::Object(around.into())]);
+        assert_eq!(
+            denied(world.check(&auth, &plan)).reason,
             DenyReason::OutOfScope
         );
     }
