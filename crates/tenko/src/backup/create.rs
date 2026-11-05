@@ -186,6 +186,8 @@ fn work_dir(parent: &Path) -> Result<WorkDir, BackupError> {
 /// existing path (a link or a directory already there fails with `AlreadyExists`, so
 /// nothing planted under the name is followed).
 pub(crate) fn create_private_dir(dir: &Path) -> Result<(), BackupError> {
+    // Only the Unix mode mutates the builder.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
