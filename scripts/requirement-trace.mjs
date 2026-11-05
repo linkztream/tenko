@@ -585,11 +585,16 @@ export function listCell(refs) {
 }
 
 /**
+ * Text as one Markdown table cell: backslashes are escaped first, then pipes, and every
+ * line break (LF, CRLF or CR) becomes a space, so no part of the text can end a cell or a row.
  * @param {string} text
  * @returns {string}
  */
-function cell(text) {
-  return text.replace(/\|/g, "\\|").replace(/\n/g, " ");
+export function cell(text) {
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .replace(/\r\n|\r|\n/g, " ");
 }
 
 /**

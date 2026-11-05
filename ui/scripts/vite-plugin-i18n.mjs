@@ -36,6 +36,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   formatDiagnostics,
+  jsLiteral,
   languageFiles,
   loadCatalog,
   renderKeysTs,
@@ -58,7 +59,7 @@ const PARSER_ID = "parser";
 function renderParserModule() {
   const entry = fileURLToPath(import.meta.resolve("@formatjs/icu-messageformat-parser")).split(path.sep).join("/");
   return [
-    `import { parse as parseIcu } from ${JSON.stringify(entry)};`,
+    `import { parse as parseIcu } from ${jsLiteral(entry)};`,
     "/** @param {string} message */",
     "export function parse(message) {",
     "  return parseIcu(message, { ignoreTag: true });",

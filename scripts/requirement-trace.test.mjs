@@ -17,6 +17,7 @@ import {
   PHASES,
   TRACE_PATH,
   buildTrace,
+  cell,
   checkTrace,
   compareIds,
   exitIdsInText,
@@ -353,6 +354,19 @@ describe("scan rules", () => {
       assert.equal(scan(`docs/${dir}/x.md`, "OPS-15\n").length, 0, dir);
       assert.equal(scan(`crates/a/${dir}/src/x.rs`, "/// OPS-15\npub fn f() {}\n").length, 0, dir);
     }
+  });
+});
+
+describe("table cells", () => {
+  test("cell escapes backslashes first, then pipes, and folds every kind of line break", () => {
+    assert.equal(cell("plain text"), "plain text");
+    assert.equal(cell("a|b"), "a\\|b");
+    assert.equal(cell("a\\b"), "a\\\\b");
+    // Backslashes first: the backslash of a pipe escape added later is never doubled.
+    assert.equal(cell("a\\|b"), "a\\\\\\|b");
+    assert.equal(cell("|"), "\\|");
+    assert.equal(cell("a\nb\r\nc\rd"), "a b c d");
+    assert.equal(cell("\n"), " ");
   });
 });
 

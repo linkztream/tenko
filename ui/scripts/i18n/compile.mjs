@@ -1015,6 +1015,47 @@ function toMessage(unit, text, compiled) {
 // Rendering
 // ---------------------------------------------------------------------------------------
 
+/** A JavaScript identifier, ASCII only: the names the generated modules use as they are. */
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/**
+ * `value` as a JavaScript literal. JSON is JavaScript, except for three sequences that
+ * `JSON.stringify` leaves in a string: U+2028 and U+2029, line terminators that a tool or an
+ * older engine may read as a line break, and `</script`, which ends an inline script. They are
+ * written as escapes. Every string the generated modules embed goes through this function.
+ * @param {unknown} value a value `JSON.stringify` accepts
+ * @returns {string}
+ */
+export function jsLiteral(value) {
+  return JSON.stringify(value)
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029")
+    .replace(/<\/script/gi, (match) => `<\\/${match.slice(2)}`);
+}
+
+/**
+ * `name` as the name of a property or an interface member in the generated modules: an
+ * identifier, written as it is. Any other name throws, so that no name reaches a module as
+ * unescaped code.
+ * @param {string} name
+ * @returns {string}
+ */
+export function propertyName(name) {
+  if (!IDENTIFIER.test(name)) throw new Error(`${JSON.stringify(name)} is not a JavaScript identifier`);
+  return name;
+}
+
+/**
+ * `name` as the key of an object literal or an interface member when it need not be an
+ * identifier: an identifier is written as it is (`sv`), any other name as a string literal
+ * (`"sv-SE"`, the positional argument `"0"`).
+ * @param {string} name
+ * @returns {string}
+ */
+function propertyKey(name) {
+  return IDENTIFIER.test(name) ? name : jsLiteral(name);
+}
+
 /**
  * @param {Catalog} catalog
  * @param {string} code
@@ -1041,18 +1082,11 @@ export function renderLocaleModule(catalog, code, options = {}) {
     const message = /** @type {Message} */ (messages.get(key));
     const plain = message.ast.every((el) => el.type === TYPE.literal);
     const value = plain
-      ? JSON.stringify(message.ast.map((el) => (el.type === TYPE.literal ? el.value : "")).join(""))
-      : JSON.stringify(message.ast);
-    return `  ${JSON.stringify(key)}: ${value},`;
+      ? jsLiteral(message.ast.map((el) => (el.type === TYPE.literal ? el.value : "")).join(""))
+      : jsLiteral(message.ast);
+    return `  ${jsLiteral(key)}: ${value},`;
   });
   return `export default {\n${lines.join("\n")}${lines.length > 0 ? "\n" : ""}};\n`;
-}
-
-/**
- * @param {string} code
- */
-function propertyName(code) {
-  return /^[A-Za-z_$][\w$]*$/.test(code) ? code : JSON.stringify(code);
 }
 
 /**
@@ -1067,20 +1101,20 @@ function propertyName(code) {
  */
 export function renderMetaModule(catalog, { importPrefix = "virtual:tenko-i18n/", packs } = {}) {
   const locales = catalog.locales.map((l) =>
-    JSON.stringify({ code: l.code, name: l.name, author: l.author, version: l.version }),
+    jsLiteral({ code: l.code, name: l.name, author: l.author, version: l.version }),
   );
   const loaders = catalog.locales
     .filter((l) => l.code !== catalog.sourceLocale)
-    .map((l) => `  ${propertyName(l.code)}: () => import(${JSON.stringify(importPrefix + l.code)}),`);
+    .map((l) => `  ${propertyKey(l.code)}: () => import(${jsLiteral(importPrefix + l.code)}),`);
   const lines = [
-    `export const sourceLocale = ${JSON.stringify(catalog.sourceLocale)};`,
+    `export const sourceLocale = ${jsLiteral(catalog.sourceLocale)};`,
     `export const locales = [${locales.map((l) => `\n  ${l},`).join("")}${locales.length > 0 ? "\n" : ""}];`,
     `export const loaders = {${loaders.length > 0 ? `\n${loaders.join("\n")}\n` : ""}};`,
   ];
   if (packs !== undefined) {
     const entries = [...packs].sort(compareText).map((pack) => {
       const perLocale = catalog.locales.map(
-        (l) => `    ${propertyName(l.code)}: () => import(${JSON.stringify(`${importPrefix}${l.code}/${pack}`)}),`,
+        (l) => `    ${propertyKey(l.code)}: () => import(${jsLiteral(`${importPrefix}${l.code}/${pack}`)}),`,
       );
       return `  ${propertyName(pack)}: {\n${perLocale.join("\n")}\n  },`;
     });
@@ -1125,7 +1159,7 @@ export function renderKeysTs(catalog) {
 
   out.push(
     keys.length > 0
-      ? `export type MessageKey =\n${keys.map((k) => `  | ${JSON.stringify(k)}`).join("\n")};`
+      ? `export type MessageKey =\n${keys.map((k) => `  | ${jsLiteral(k)}`).join("\n")};`
       : "export type MessageKey = never;",
   );
 
@@ -1138,15 +1172,15 @@ export function renderKeysTs(catalog) {
       const args = /** @type {Message} */ (messages.get(key)).args;
       const fields = [...args.keys()]
         .sort(compareText)
-        .map((name) => `${propertyName(name)}: ${argTsType(/** @type {ArgType} */ (args.get(name)))}`);
-      return `  ${JSON.stringify(key)}: { ${fields.join("; ")} };`;
+        .map((name) => `${propertyKey(name)}: ${argTsType(/** @type {ArgType} */ (args.get(name)))}`);
+      return `  ${jsLiteral(key)}: { ${fields.join("; ")} };`;
     });
     out.push(`export interface MessageArgs {\n${members.join("\n")}\n}`);
   }
 
   out.push(
     keys.length > 0
-      ? `export const messageKeys: readonly MessageKey[] = [\n${keys.map((k) => `  ${JSON.stringify(k)},`).join("\n")}\n];`
+      ? `export const messageKeys: readonly MessageKey[] = [\n${keys.map((k) => `  ${jsLiteral(k)},`).join("\n")}\n];`
       : "export const messageKeys: readonly MessageKey[] = [];",
   );
   return out.join("\n") + "\n";

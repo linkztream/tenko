@@ -9,8 +9,10 @@ import {
   FRAGMENT_NAME_PATTERN,
   KEY_PATTERN,
   formatDiagnostics,
+  jsLiteral,
   languageFiles,
   loadCatalog,
+  propertyName,
   renderKeysTs,
   renderLocaleModule,
   renderMergedXliff,
@@ -856,6 +858,59 @@ describe("renderMetaModule", () => {
   it("renders an empty loader table for a source-only catalog", () => {
     const catalog = load({ "en.xlf": xliff({ units: unit("a.b", "x") }) });
     expect(renderMetaModule(catalog)).toContain("export const loaders = {};");
+  });
+});
+
+describe("generated code", () => {
+  it("propertyName accepts an identifier and refuses every other name", () => {
+    for (const name of ["sv", "_x", "$y", "a1", "import"]) expect(propertyName(name)).toBe(name);
+    for (const name of ["sv-SE", "1x", "a b", "", "a.b", "a\u2028", "\"", "\u00e5"]) {
+      expect(() => propertyName(name), name).toThrow(`${JSON.stringify(name)} is not a JavaScript identifier`);
+    }
+  });
+
+  it("jsLiteral is JSON with the line separators and </script escaped", async () => {
+    expect(jsLiteral("sv")).toBe('"sv"');
+    expect(jsLiteral({ code: "sv", name: "Svenska" })).toBe('{"code":"sv","name":"Svenska"}');
+    expect(jsLiteral(["a", 1])).toBe('["a",1]');
+    expect(jsLiteral("a\u2028b\u2029c")).toBe('"a\\u2028b\\u2029c"');
+    expect(jsLiteral("</script><script>")).toBe('"<\\/script><script>"');
+    expect(jsLiteral("</SCRIPT>")).toBe('"<\\/SCRIPT>"');
+    expect(jsLiteral({ "</script": "\u2028" })).toBe('{"<\\/script":"\\u2028"}');
+    for (const value of ["a\u2028b\u2029c", "</script></SCRIPT>", "line\nfeed \"quoted\" \\ slash", { "</script": ["\u2029"] }]) {
+      const mod = await evaluateModule(`export default ${jsLiteral(value)};`);
+      expect(mod["default"]).toEqual(value);
+    }
+  });
+
+  it("escapes a language name, an import path and a message the same way", async () => {
+    const name = "Svenska\u2028</script>";
+    const catalog = load({
+      "en.xlf": xliff({ units: unit("a.b", "x\u2029y") }),
+      "sv.xlf": sv(unit("a.b", "x\u2029y", "&lt;/script&gt;"), { meta: meta("Svenska\u2028&lt;/script&gt;") }),
+    });
+    expect(catalog.errors, describeErrors(catalog)).toEqual([]);
+    const metaText = renderMetaModule(catalog, { importPrefix: "</script>/" });
+    expect(metaText).toContain('"name":"Svenska\\u2028<\\/script>"');
+    expect(metaText).toContain('sv: () => import("<\\/script>/sv")');
+    expect(metaText).not.toMatch(/[\u2028\u2029]|<\/script/);
+    const metaModule = await evaluateModule(metaText);
+    expect(metaModule["locales"][1].name).toBe(name);
+
+    const en = renderLocaleModule(catalog, "en");
+    expect(en).toContain('"a.b": "x\\u2029y"');
+    expect((await evaluateModule(en))["default"]["a.b"]).toBe("x\u2029y");
+    const svText = renderLocaleModule(catalog, "sv");
+    expect(svText).toContain('"a.b": "<\\/script>"');
+    expect((await evaluateModule(svText))["default"]["a.b"]).toBe("</script>");
+  });
+
+  it("refuses a pack name that is not an identifier", () => {
+    const catalog = load(validPair());
+    expect(() => renderMetaModule(catalog, { packs: ["dhcp-boot"] })).toThrow(
+      '"dhcp-boot" is not a JavaScript identifier',
+    );
+    expect(renderMetaModule(catalog, { packs: ["dhcp"] })).toContain("  dhcp: {\n");
   });
 });
 
