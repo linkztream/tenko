@@ -7,7 +7,7 @@ use tokio::{fs, io::AsyncWriteExt};
 use super::Transport;
 use crate::audit_export::{
     error::{FailureKind, SinkError},
-    model::FileTarget,
+    model::{FileTarget, valid_file_name},
 };
 
 /// A file in the export directory.
@@ -42,10 +42,23 @@ async fn open_append(path: &Path) -> Result<fs::File, SinkError> {
 impl FileTransport {
     /// Opens `<dir>/<file>` for appending, creating the directory and the file.
     ///
+    /// The settings refuse a file name that is not a plain name when they are saved
+    /// ([`valid_file_name`]); the sink checks the name again, so that the file it opens
+    /// lies in `dir` by this function alone.
+    ///
     /// # Errors
     ///
-    /// [`SinkError`] with [`FailureKind::File`].
+    /// [`SinkError`] with [`FailureKind::Config`] for a name that is not a plain file name
+    /// (empty, a separator, `..`, a leading dot, more than 128 bytes), else with
+    /// [`FailureKind::File`].
     pub async fn open(dir: &Path, target: &FileTarget) -> Result<Self, SinkError> {
+        if !valid_file_name(&target.file) {
+            return Err(SinkError::new(
+                FailureKind::Config,
+                "the file name of the sink is not a plain file name (letters, digits, `-`, \
+                 `_` and `.`, not starting with a dot, at most 128 bytes)",
+            ));
+        }
         let existed = fs::try_exists(dir).await.unwrap_or(false);
         fs::create_dir_all(dir)
             .await
@@ -247,6 +260,33 @@ mod tests {
         transport.send(&lines("x")).await.expect("send");
         let text = std::fs::read_to_string(dir.path().join("audit.log")).expect("read");
         assert_eq!(text, "0123456789\nx\n");
+    }
+
+    #[tokio::test]
+    async fn refuses_a_name_that_is_not_a_plain_file_name() {
+        let dir = tempfile::tempdir().expect("dir");
+        let sub = dir.path().join("export");
+        let long = "a".repeat(129);
+        for name in [
+            "",
+            "..",
+            "../audit.log",
+            "/etc/audit.log",
+            "sub/audit.log",
+            "sub\\audit.log",
+            ".audit.log",
+            long.as_str(),
+        ] {
+            let target = FileTarget {
+                file: name.to_owned(),
+                max_bytes: 1000,
+                keep: 1,
+            };
+            let error = FileTransport::open(&sub, &target).await.expect_err(name);
+            assert_eq!(error.kind, FailureKind::Config, "{name:?}");
+        }
+        // A refused name creates nothing, not even the directory.
+        assert!(!sub.exists());
     }
 
     #[cfg(unix)]
