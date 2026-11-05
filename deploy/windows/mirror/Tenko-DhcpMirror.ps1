@@ -286,7 +286,13 @@ function Write-JsonValue {
         $Value -is [System.Numerics.BigInteger]) {
         [void]$Builder.Append($Value.ToString([System.Globalization.CultureInfo]::InvariantCulture)); return
     }
-    if ($Value -is [double] -or $Value -is [single] -or $Value -is [decimal]) {
+    if ($Value -is [decimal]) {
+        # Windows PowerShell 5.1 parses a JSON number outside Int64, and every fraction, as a
+        # decimal; written as a decimal it keeps its digits, where a cast to double would
+        # round it and print an exponent.
+        [void]$Builder.Append(([decimal]$Value).ToString([System.Globalization.CultureInfo]::InvariantCulture)); return
+    }
+    if ($Value -is [double] -or $Value -is [single]) {
         [void]$Builder.Append(([double]$Value).ToString('R', [System.Globalization.CultureInfo]::InvariantCulture)); return
     }
     if ($Value -is [System.Collections.IDictionary]) {
