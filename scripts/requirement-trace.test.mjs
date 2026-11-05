@@ -601,7 +601,11 @@ describe("phases", () => {
       "docs/plans/ha-plan.md",
     ]);
     assert.equal(PHASES[3]?.exits, "E22 to E42 and E60 to E71");
-    assert.throws(() => phaseConfig(4), /phase 4 is not traced/);
+    // WP13.0: Phase 4 has two plans, the identity plan and the Windows takeover plan.
+    assert.equal(PHASES[4]?.trace, "docs/plans/phase-4-trace.md");
+    assert.deepEqual(PHASES[4]?.plans, ["docs/plans/identity-plan.md", "docs/plans/windows-takeover-plan.md"]);
+    assert.equal(PHASES[4]?.exits, "E43 to E52 and E72 to E80");
+    assert.throws(() => phaseConfig(5), /phase 5 is not traced/);
   });
 
   test("the Phase 2 trace lists the Phase 2 rows and E13 to E21 of the Phase 2 plan", () => {
@@ -759,7 +763,7 @@ describe("phases", () => {
 
   test("an unknown or malformed phase exits 2", () => {
     const root = makeTree(PHASE_2_TREE);
-    for (const phase of ["4", "0", "x", "2.5", ""]) {
+    for (const phase of ["5", "0", "x", "2.5", ""]) {
       const r = run("--phase", phase, "--root", root);
       assert.equal(r.code, 2, phase);
       assert.match(r.err, /is not a traced phase/);

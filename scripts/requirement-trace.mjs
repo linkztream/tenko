@@ -12,8 +12,9 @@
 // E1 to E12 in section 1.2 of docs/plans/phase-1-execution.md for Phase 1, E13 to E21 in
 // section 1.2 of docs/plans/phase-2-plan.md for Phase 2, E22 to E32 in section 1.2 of
 // docs/plans/phase-3-plan.md, E33 to E42 in section 1.2 of docs/plans/dns-recursion-plan.md
-// and E60 to E71 in section 1.3 of docs/plans/ha-plan.md for Phase 3 (PHASES; a phase may
-// name several plans). Without --phase the script
+// and E60 to E71 in section 1.3 of docs/plans/ha-plan.md for Phase 3, and E43 to E52 in
+// section 1.2 of docs/plans/identity-plan.md and E72 to E80 in section 1.2 of
+// docs/plans/windows-takeover-plan.md for Phase 4 (PHASES; a phase may name several plans). Without --phase the script
 // traces Phase 1. scripts/README.md lists the scan rules.
 // Node's standard library only. The output is deterministic: sorted, no timestamps,
 // `/`-separated repository-relative paths, LF line endings.
@@ -52,6 +53,13 @@ export const PHASES = Object.freeze({
     trace: "docs/plans/phase-3-trace.md",
     plans: ["docs/plans/phase-3-plan.md", "docs/plans/dns-recursion-plan.md", "docs/plans/ha-plan.md"],
     exits: "E22 to E42 and E60 to E71",
+  },
+  // WP13.0: Phase 4 is traced from the identity plan (E43 to E52, Slice 13) and the Windows
+  // takeover plan (E72 to E80, Slice 14).
+  4: {
+    trace: "docs/plans/phase-4-trace.md",
+    plans: ["docs/plans/identity-plan.md", "docs/plans/windows-takeover-plan.md"],
+    exits: "E43 to E52 and E72 to E80",
   },
 });
 
