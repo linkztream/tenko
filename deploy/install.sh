@@ -1133,7 +1133,7 @@ answers() {
   DNS_ADDRESS="${OPT_DNS_ADDRESS:-all}"
   FORWARDERS="${OPT_FORWARDERS:-${forwarders_default:-none}}"
   read_record
-  seed_from_config
+  seed_from_config "$CONFIG"
   LANGUAGE="${OPT_LANGUAGE:-en}"
   ADMIN="$OPT_ADMIN"
 
@@ -1814,7 +1814,7 @@ step_config() {
     return 0
   fi
   if ((HAVE_CONFIG)); then
-    config_carry
+    config_carry "$CONFIG"
     if same_file "$CARRY_FILE" "$CONFIG"; then
       ok "${CONFIG} needs no change"
       return 0
@@ -2425,7 +2425,7 @@ step_unit() {
 # Hardened probe.conf with the probe role, dhcp-direct.conf with a direct listener.
 wanted_dropins() {
   in_set probe "$PREPARE_ROLES" && echo probe.conf
-  if in_set dhcp "$PREPARE_ROLES" && { [[ "$PROFILE" != hardened ]] || dhcp_direct_wanted; }; then
+  if in_set dhcp "$PREPARE_ROLES" && { [[ "$PROFILE" != hardened ]] || dhcp_direct_wanted "$CONFIG"; }; then
     echo dhcp-direct.conf
   fi
   return 0
