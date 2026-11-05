@@ -4,11 +4,14 @@
 
 .DESCRIPTION
   Installs the MSI unattended with the controller and dns roles (DNS on a high loopback
-  port), checks the running service, the health probe, the setup token, the layout and the
-  firewall rules, upgrades to a second package of a higher version (or reinstalls the same
-  package when -UpgradeMsi is not given), checks that the service runs again with the data
-  kept, uninstalls and checks that the configuration and the data stay, installs once more
-  over the kept data and finally uninstalls with TENKO_PURGE=1.
+  port), checks the running service, the health probe, the setup token, the layout, the
+  privileges of the service token (sc.exe qprivs: SeChangeNotifyPrivilege alone), the
+  firewall rules and that they are bound to the service, upgrades to a second package of a
+  higher version (or reinstalls the same package when -UpgradeMsi is not given), checks that
+  the installer ran nothing against the data directory, that the service looked at the new
+  tenko.exe at its start and runs again with the data kept, uninstalls and checks that the
+  configuration and the data stay, installs once more over the kept data (the installer
+  leaves the directory's access list as it is) and finally uninstalls with TENKO_PURGE=1.
 
   It changes the machine: it installs the product for real, under its real name, with
   the configuration at %ProgramData%\Tenko\tenko.toml. Run it on a throw-away machine or a
@@ -122,6 +125,29 @@ function Get-FirewallPorts([string]$DisplayName) {
     return (($rule | Get-NetFirewallPortFilter).LocalPort -join ',')
 }
 
+# The service a firewall rule is bound to ('Any' when it is not bound to one).
+function Get-FirewallService([string]$DisplayName) {
+    $rule = Get-NetFirewallRule -DisplayName $DisplayName -ErrorAction SilentlyContinue
+    if ($null -eq $rule) { return $null }
+    return [string](($rule | Get-NetFirewallServiceFilter).Service)
+}
+
+# The privileges the service token keeps, from `sc.exe qprivs`: the first one follows
+# "PRIVILEGES :", every further one stands on a line of its own after a colon.
+function Get-ServicePrivileges {
+    $lines = sc.exe qprivs $ServiceName | Out-String -Stream
+    return @($lines | ForEach-Object {
+        if ($_ -match '^\s*(PRIVILEGES\s*)?:\s*(Se\w+)\s*$') { $Matches[2] }
+    })
+}
+
+# The privileges are exactly the list `tenko service install` sets.
+function Assert-Privileges([string]$When) {
+    $privileges = Get-ServicePrivileges
+    Assert-That (($privileges -join ',') -eq 'SeChangeNotifyPrivilege') "the service token keeps '$($privileges -join ',')' ($When); expected SeChangeNotifyPrivilege alone"
+    Write-Host "privileges: $($privileges -join ',')"
+}
+
 # The service runs, answers the liveness probe and runs from the version layout.
 function Assert-Running([string]$When) {
     Wait-Until -TimeoutSec 120 -What "service $ServiceName running ($When)" -Test { (Get-ServiceState) -eq 'Running' } | Out-Null
@@ -134,6 +160,7 @@ function Assert-Running([string]$When) {
     Write-Host $health
     $image = (Get-CimInstance -ClassName Win32_Service -Filter "Name='$ServiceName'").PathName
     Assert-That ($image -like "*$DataDir\updates\current\tenko.exe*") "the service runs '$image', not the version layout of $DataDir"
+    Assert-That ($image -like "*--payload*$Exe*") "the image path '$image' does not name $Exe as the installer's file"
     $listening = Get-NetTCPConnection -LocalPort $DnsPort -State Listen -ErrorAction SilentlyContinue
     Assert-That ($null -ne $listening) "nothing listens on TCP $DnsPort (the dns role)"
 }
@@ -208,6 +235,11 @@ try {
     # start a DHCP server on the runner's port 67, which a smoke test must not do.)
     Assert-That ((Get-FirewallPorts 'Tenko DDI DHCP (UDP)') -eq '67') 'the firewall rule for UDP 67 is missing outside Hardened'
     Assert-That ((Get-FirewallPorts 'Tenko DDI DHCPv6 (UDP)') -eq '547') 'the firewall rule for UDP 547 is missing outside Hardened'
+    foreach ($rule in 'Tenko DDI web UI and API (TCP 8443)', 'Tenko DDI DNS (UDP)', 'Tenko DDI DNS (TCP)', 'Tenko DDI DHCP (UDP)', 'Tenko DDI DHCPv6 (UDP)') {
+        Assert-That ((Get-FirewallService $rule) -eq $ServiceName) "the firewall rule '$rule' is bound to '$(Get-FirewallService $rule)', not to the service $ServiceName"
+    }
+    Write-Host 'firewall rules: bound to the service'
+    Assert-Privileges 'after the install'
     $record = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $ConfigFile) 'prepared-roles') -Raw
     Assert-That ($record -match 'roles=controller,dns,dhcp,probe') "prepared-roles does not name every role: $record"
 
@@ -232,6 +264,17 @@ try {
         $current = $Msi
     }
     Assert-Running 'after the upgrade'
+    # The installer runs nothing against the data directory: no check and no layout switch
+    # as SYSTEM. The service looked at the new tenko.exe at its start and, the binary being
+    # the same version, left the layout alone.
+    $upgradeLog = Get-Content -LiteralPath $script:LastLog -Raw
+    Assert-That ($upgradeLog -notmatch 'upgrade check|upgrade layout|TenkoUpgradeCheck|TenkoUpgradeLayout') 'the installer ran upgrade check or upgrade layout as SYSTEM'
+    $serviceLog = Join-Path $DataDir 'logs\tenko.log'
+    [void](Wait-Until -TimeoutSec 60 -What 'the service to report the installer file in tenko.log' -Test {
+        (Select-String -LiteralPath $serviceLog -Pattern 'nothing to adopt|adopted the installer' -Quiet)
+    })
+    Write-Host 'the service looked at the installer file at its start'
+    Assert-Privileges 'after the upgrade'
     Assert-That (Test-Path -LiteralPath $Marker) 'the data directory lost its marker file in the upgrade'
     Assert-That ((Get-FileHash -LiteralPath $ConfigFile).Hash -eq $configHash) 'the upgrade changed tenko.toml'
     Assert-That ((Get-FirewallPorts 'Tenko DDI DNS (UDP)') -eq "$DnsPort") 'the upgrade lost the DNS firewall rule'
@@ -255,6 +298,12 @@ try {
     Invoke-MsiexecOk 'reinstall-kept' @('/i', "`"$current`"")
     Assert-Running 'over the kept data'
     Assert-That ((Get-FileHash -LiteralPath $ConfigFile).Hash -eq $configHash) 'the install replaced the kept tenko.toml'
+    # The directory holds data under the list `service install` sets: the installer
+    # changes nothing in it, and says so.
+    $keptLog = Get-Content -LiteralPath $script:LastLog -Raw
+    Assert-That ($keptLog -match 'left as it is') 'service install did not report the kept data directory as left as it is'
+    Assert-That ($keptLog -notmatch 'icacls') 'service install ran icacls on a data directory that holds data'
+    Assert-Privileges 'over the kept data'
 
     # -----------------------------------------------------------------------------------
     Write-Step '6/7 silent uninstall with TENKO_PURGE=1'

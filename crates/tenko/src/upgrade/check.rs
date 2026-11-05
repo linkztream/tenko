@@ -22,7 +22,7 @@ use std::{
 };
 
 use clap::Args;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tenko_core::NodeId;
 use tenko_store::{
     format::{self, FormatError},
@@ -66,7 +66,7 @@ pub struct CheckArgs {
 }
 
 /// The verdict of a check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
     /// No store yet; it is created at this binary's format.
@@ -94,7 +94,7 @@ impl Verdict {
 }
 
 /// One migration of the dry run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Step {
     /// The format the step produces.
     pub to: u32,
@@ -103,7 +103,7 @@ pub struct Step {
 }
 
 /// Why a check refused or failed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Problem {
     /// The stable code, for example `upgrade.format_newer`.
     pub code: String,
@@ -111,8 +111,10 @@ pub struct Problem {
     pub message: String,
 }
 
-/// The report of `tenko upgrade check`, printed as text or as JSON.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// The report of `tenko upgrade check`, printed as text or as JSON. The JSON is read back by
+/// the service when it runs the check with the installer's file at its start
+/// ([`super::adopt_payload`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Report {
     /// The verdict.
     pub verdict: Verdict,

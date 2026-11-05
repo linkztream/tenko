@@ -2,6 +2,7 @@
 //! (`Type=notify`, OPS-13) and the Windows Service Control Manager (`tenko service`,
 //! OPS-10).
 
+pub mod service_policy;
 #[cfg(target_os = "linux")]
 mod systemd;
 #[cfg(windows)]
@@ -116,7 +117,8 @@ pub struct InstallArgs {
     pub data_dir: Option<PathBuf>,
 
     /// The account the service runs as; default the virtual account `NT SERVICE\<name>`,
-    /// whose profile holds the DPAPI-sealed key-encryption key.
+    /// whose profile holds the DPAPI-sealed key-encryption key. Another virtual account is
+    /// accepted; `LocalSystem`, `LocalService` and `NetworkService` are refused.
     #[arg(long, value_name = "ACCOUNT")]
     pub account: Option<String>,
 
@@ -125,7 +127,8 @@ pub struct InstallArgs {
     pub manual: bool,
 
     /// Register this executable itself instead of `<data_dir>/updates/current/tenko.exe`;
-    /// installing new versions from the UI then stays off (OPS-24).
+    /// installing new versions from the UI then stays off (OPS-24), and the service adopts
+    /// no newer version of this file at its start.
     #[arg(long)]
     pub no_update_layout: bool,
 }
@@ -144,6 +147,11 @@ pub struct RunArgs {
     /// The data directory, when the configuration file does not name one.
     #[arg(long, value_name = "PATH")]
     pub data_dir: Option<PathBuf>,
+
+    /// The installer's file (the executable that ran `service install`); the service adopts
+    /// a newer version of it at its start, as its own account.
+    #[arg(long, value_name = "FILE")]
+    pub payload: Option<PathBuf>,
 }
 
 /// Runs `tenko service …`.

@@ -8,14 +8,23 @@
 
     tenko config init       writes %ProgramData%\Tenko\tenko.toml from the TENKO_* properties
                             (kept when it exists, replaced with TENKO_RECONFIGURE=1)
-    tenko service install   registers the service exactly as by hand (the version layout,
-                            the data-directory permissions, the Event Log source)
-    tenko service start     TENKO_START=1
-    tenko upgrade check     on a major upgrade, with the service stopped; any answer other
-                            than 0 or 10 aborts and rolls the upgrade back
-    tenko upgrade layout    on a major upgrade: the new version becomes updates\current
+    tenko service install   on a fresh install: registers the service exactly as by hand
+                            (the required privileges, the version layout in a new or empty
+                            data directory, the data-directory permissions, the Event Log
+                            source)
+    tenko service start     TENKO_START=1; on an upgrade it waits through the restart with
+                            which the service adopts the new tenko.exe, and fails when the
+                            service did not adopt it
     tenko service uninstall on removal; the configuration, the data and the remembered
                             answers stay unless TENKO_PURGE=1
+
+  Nothing the installer runs as SYSTEM reads, writes or executes a file under the data
+  directory once the service account controls it (ADR 0023, item 11). An upgrade therefore
+  stops the service, replaces tenko.exe in Program Files and starts the service again; the
+  service, as NT SERVICE\tenko, runs the store check with the new file, copies it into its
+  layout, switches updates\current and restarts into it. A store the new version refuses
+  leaves the old version running; `tenko service start` then fails, the installer rolls its
+  files back and reports the failure, and the Application log (source tenko) has the reason.
 
   The unattended path and the wizard set the same properties; the wizard only shows them.
 -->
@@ -34,9 +43,10 @@
     <SummaryInformation Description="Tenko DDI $(var.Version): DNS, DHCP and IPAM" />
 
     <!-- The new version is installed first and the old one removed afterwards, so the
-         service is stopped only for the time it takes to copy one file and check the data
-         directory. Builds of the same version (a release candidate and its release, the
-         smoke test's second package) upgrade each other. -->
+         service is stopped only for the time it takes to copy one file. Builds of the same
+         version (a release candidate and its release, the smoke test's second package)
+         upgrade each other; the service adopts only a newer version, so such an upgrade
+         leaves the running version alone. -->
     <MajorUpgrade Schedule="afterInstallExecute"
                   AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first; the configuration and the data directory stay." />
@@ -192,19 +202,25 @@
            TENKO_ROLES says, and a role switched on later from the Nodes page finds its ports;
            under Hardened only the rules of the roles in TENKO_ROLES. Removed with the product.
            Transitive: a reinstall (REINSTALL=ALL) with another profile or role list adds or
-           removes them. -->
+           removes them.
+
+           Every rule is bound to the service (Service="tenko", the service SID), not to a
+           program path: the service runs <data_dir>\updates\current\tenko.exe, a file its own
+           account writes, and a rule by that path would open the port for whatever runs
+           there. The service SID follows the service through updates and names nothing the
+           account can change. No other program on the host gets the ports. -->
       <Component Id="FirewallApi" Directory="INSTALLFOLDER" Condition="TENKO_FIREWALL = &quot;1&quot;" Transitive="yes">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="FirewallApi" Value="1" Type="integer" KeyPath="yes" />
         <fw:FirewallException Id="FirewallApiTcp" Name="Tenko DDI web UI and API (TCP 8443)" Description="Tenko DDI: the web UI and the API"
-                              Port="8443" Protocol="tcp" Scope="any" Profile="all" />
+                              Service="tenko" Port="8443" Protocol="tcp" Scope="any" Profile="all" />
       </Component>
       <Component Id="FirewallDns" Directory="INSTALLFOLDER" Transitive="yes"
                  Condition="TENKO_FIREWALL = &quot;1&quot; AND (TENKO_PROFILE &lt;&gt; &quot;hardened&quot; OR TENKO_ROLES &gt;&lt; &quot;dns&quot; OR TENKO_ROLES = &quot;all&quot;)">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="FirewallDns" Value="1" Type="integer" KeyPath="yes" />
         <fw:FirewallException Id="FirewallDnsUdp" Name="Tenko DDI DNS (UDP)" Description="Tenko DDI: the dns role"
-                              Port="[TENKO_DNS_PORT]" Protocol="udp" Scope="any" Profile="all" />
+                              Service="tenko" Port="[TENKO_DNS_PORT]" Protocol="udp" Scope="any" Profile="all" />
         <fw:FirewallException Id="FirewallDnsTcp" Name="Tenko DDI DNS (TCP)" Description="Tenko DDI: the dns role"
-                              Port="[TENKO_DNS_PORT]" Protocol="tcp" Scope="any" Profile="all" />
+                              Service="tenko" Port="[TENKO_DNS_PORT]" Protocol="tcp" Scope="any" Profile="all" />
       </Component>
       <!-- WP7.5: DHCP with the dhcp role, UDP 67 (the server port of the node's [dhcp]
            section; relay agents and direct clients both send to it), and UDP 547 for DHCPv6
@@ -213,9 +229,9 @@
                  Condition="TENKO_FIREWALL = &quot;1&quot; AND (TENKO_PROFILE &lt;&gt; &quot;hardened&quot; OR TENKO_ROLES &gt;&lt; &quot;dhcp&quot; OR TENKO_ROLES = &quot;all&quot;)">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="FirewallDhcp" Value="1" Type="integer" KeyPath="yes" />
         <fw:FirewallException Id="FirewallDhcpUdp" Name="Tenko DDI DHCP (UDP)" Description="Tenko DDI: the dhcp role"
-                              Port="67" Protocol="udp" Scope="any" Profile="all" />
+                              Service="tenko" Port="67" Protocol="udp" Scope="any" Profile="all" />
         <fw:FirewallException Id="FirewallDhcp6Udp" Name="Tenko DDI DHCPv6 (UDP)" Description="Tenko DDI: the dhcp role, DHCPv6"
-                              Port="547" Protocol="udp" Scope="any" Profile="all" />
+                              Service="tenko" Port="547" Protocol="udp" Scope="any" Profile="all" />
       </Component>
 
       <!-- The record of what this machine is prepared for, beside tenko.toml
@@ -260,13 +276,9 @@
                  Value='--profile "[TENKO_PROFILE]" --host-name "[TENKO_HOSTNAME]" --dns-address "[TENKO_DNS_ADDRESS]" --dns-port "[TENKO_DNS_PORT]"' />
     <SetProperty Id="TenkoConfigInit" Before="TenkoConfigInit" Sequence="execute"
                  Value='"[#TenkoExe]" config init [TENKO_CONFIG_ARGS1] [TENKO_CONFIG_ARGS2] [TENKO_CONFIG_MODE]' />
-    <!-- `upgrade check` answers 0 (nothing to do) or 10 (a migration is needed and its dry
-         run passed) when it is safe to go on; cmd turns 10 into 0 and keeps every other
-         status, so the action fails on 11 (refused) and 1 (could not check). -->
-    <SetProperty Id="TenkoUpgradeCheck" Before="TenkoUpgradeCheck" Sequence="execute"
-                 Value='"[System64Folder]cmd.exe" /d /s /c ""[#TenkoExe]" upgrade check --config "[CONFIGFOLDER]tenko.toml" &amp; if errorlevel 11 (exit 11) else if errorlevel 10 (exit 0)"' />
-    <SetProperty Id="TenkoUpgradeLayout" Before="TenkoUpgradeLayout" Sequence="execute"
-                 Value='"[#TenkoExe]" upgrade layout --config "[CONFIGFOLDER]tenko.toml"' />
+    <!-- No action of the installer names the data directory: `service install` creates it
+         on a fresh install from the configuration, and an upgrade leaves the service to
+         adopt the new file at its start. -->
     <SetProperty Id="TenkoServiceInstall" Before="TenkoServiceInstall" Sequence="execute"
                  Value='"[#TenkoExe]" service install --config "[CONFIGFOLDER]tenko.toml"' />
     <SetProperty Id="TenkoServiceInstallRollback" Before="TenkoServiceInstallRollback" Sequence="execute"
@@ -289,13 +301,14 @@
                  Value='"[System64Folder]reg.exe" delete "HKLM\SOFTWARE\Tenko" /f /reg:64' />
 
     <CustomAction Id="TenkoConfigInit" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="TenkoUpgradeCheck" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="TenkoUpgradeLayout" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="TenkoServiceInstallRollback" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="TenkoServiceInstall" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
     <!-- Belt and braces: Users may read the folder already. Ignored when it fails, so a
          repair after the service was removed by hand still completes. -->
     <CustomAction Id="TenkoGrantConfig" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
+    <!-- On an upgrade `service start` waits through the restart with which the service adopts
+         the new tenko.exe and fails when the layout still runs the older version; the
+         installer then rolls its files back and the old version keeps running. -->
     <CustomAction Id="TenkoServiceStart" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="TenkoServiceStop" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="TenkoServiceStopRollback" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="rollback" Impersonate="no" Return="ignore" />
@@ -318,14 +331,11 @@
       <Custom Action="TenkoPurgeRegistry" After="TenkoPurge"
               Condition="REMOVE ~= &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND TENKO_PURGE = &quot;1&quot;" />
 
-      <!-- After the files. -->
+      <!-- After the files. On an upgrade nothing runs between the files and the start: the
+           service adopts the new tenko.exe itself. -->
       <Custom Action="TenkoConfigInit" After="InstallFiles"
               Condition="NOT (REMOVE ~= &quot;ALL&quot;)" />
-      <Custom Action="TenkoUpgradeCheck" After="TenkoConfigInit"
-              Condition="WIX_UPGRADE_DETECTED AND NOT (REMOVE ~= &quot;ALL&quot;)" />
-      <Custom Action="TenkoUpgradeLayout" After="TenkoUpgradeCheck"
-              Condition="WIX_UPGRADE_DETECTED AND NOT (REMOVE ~= &quot;ALL&quot;)" />
-      <Custom Action="TenkoServiceInstallRollback" After="TenkoUpgradeLayout"
+      <Custom Action="TenkoServiceInstallRollback" After="TenkoConfigInit"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
       <Custom Action="TenkoServiceInstall" After="TenkoServiceInstallRollback"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
@@ -340,10 +350,8 @@
       <ProgressText Action="TenkoServiceUninstall" Message="Removing the Tenko service" />
       <ProgressText Action="TenkoPurge" Message="Removing the configuration and the data directory" />
       <ProgressText Action="TenkoConfigInit" Message="Writing the configuration" />
-      <ProgressText Action="TenkoUpgradeCheck" Message="Checking the data directory with the new version" />
-      <ProgressText Action="TenkoUpgradeLayout" Message="Switching the service to the new version" />
       <ProgressText Action="TenkoServiceInstall" Message="Registering the Tenko service" />
-      <ProgressText Action="TenkoServiceStart" Message="Starting the Tenko service" />
+      <ProgressText Action="TenkoServiceStart" Message="Starting the Tenko service (an upgrade is adopted by the service and restarts it once)" />
     </UI>
 
     <!-- The wizard (TenkoUI.wxs) and its license page. -->

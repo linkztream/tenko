@@ -1,13 +1,23 @@
 //! The Windows service (OPS-10): `tenko service install|uninstall|start|stop` and the
 //! service entry point the Service Control Manager (SCM) starts.
 //!
-//! `service install` checks the configuration first, so a bad file is refused before
-//! anything is registered. It then registers the service, creates the data directory and
-//! restricts it with `icacls`. Every Windows call goes through the `windows-service` crate
-//! or an external tool, which keeps this crate free of `unsafe` code.
+//! `service install` checks the account and the configuration first, so a shared account or
+//! a bad file is refused before anything is registered. It then registers the service, cuts
+//! the privileges of its token down to [`service_policy::REQUIRED_PRIVILEGES`] with
+//! `sc.exe privs`, and sets up the data directory: a new or empty directory is restricted
+//! to Administrators and SYSTEM with `icacls`, the version layout is written into it while
+//! the service account cannot write it yet, and the account is granted last; a directory
+//! that holds data is left alone when its owner and its list are already the ones this
+//! command sets, and refused otherwise (ADR 0023, item 11, [`service_policy`]). Every
+//! Windows call goes through the `windows-service` crate or an external tool, which keeps
+//! this crate free of `unsafe` code.
 //!
 //! The SCM starts the image path `tenko service run --name <name> --config <file>
-//! [--data-dir <dir>]`. `run_dispatcher` hands the process to the service dispatcher,
+//! [--data-dir <dir>] [--payload <file>]`. At its start the service looks at the installer's
+//! file named by `--payload` and, when it is a newer version, adopts it as its own account
+//! ([`crate::upgrade::adopt_payload`]): the store check, the copy into the layout and the
+//! switch of `current`, followed by exit status 12 so that the SCM starts the new version.
+//! `run_dispatcher` hands the process to the service dispatcher,
 //! which calls `ffi_service_main` on a thread of its own. That function is written by hand
 //! because the `define_windows_service!` macro expands to an `unsafe` block. It reads the
 //! arguments that `run_dispatcher` stored (the arguments the SCM passes carry nothing this
@@ -50,12 +60,16 @@ use windows_service::{
     service_manager::{ServiceManager, ServiceManagerAccess},
 };
 
-use super::{InstallArgs, NameArgs, RunArgs, ServiceCommand};
+use super::{
+    InstallArgs, NameArgs, RunArgs, ServiceCommand,
+    service_policy::{self, DataDirFound, DataDirPlan},
+};
 use crate::{
     config::{self, Config, ConfigError, Resolved, Sources},
     exit,
     logging::{self, Sink},
     serve::{self, Hooks, Ready, Shutdown},
+    upgrade::{self, Adoption, layout::Layout},
 };
 
 /// The description shown in the Services console.
@@ -82,11 +96,9 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(60);
 /// The interval between two queries of the service state.
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
-/// The well-known SID of the local Administrators group, in the form `icacls` takes.
-const ADMINISTRATORS_SID: &str = "*S-1-5-32-544";
-
-/// The well-known SID of the `SYSTEM` account, in the form `icacls` takes.
-const SYSTEM_SID: &str = "*S-1-5-18";
+/// How long `service start` waits, after the service stopped with exit status 12, for the
+/// SCM to start it again (the failure actions wait [`RESTART_DELAY`] first).
+const RESTART_WAIT: Duration = Duration::from_secs(40);
 
 /// Windows error: access is denied (the prompt is not elevated).
 const ERROR_ACCESS_DENIED: i32 = 5;
@@ -357,8 +369,14 @@ fn default_account(name: &str) -> String {
 }
 
 /// The arguments the SCM appends to the executable path: `service run` with the paths the
-/// service reads its configuration from.
-fn launch_arguments(name: &str, config: &Path, data_dir: Option<&Path>) -> Vec<OsString> {
+/// service reads its configuration from and, with the layout, the installer's file it
+/// adopts newer versions of.
+fn launch_arguments(
+    name: &str,
+    config: &Path,
+    data_dir: Option<&Path>,
+    payload: Option<&Path>,
+) -> Vec<OsString> {
     let mut arguments: Vec<OsString> = vec![
         "service".into(),
         "run".into(),
@@ -370,6 +388,10 @@ fn launch_arguments(name: &str, config: &Path, data_dir: Option<&Path>) -> Vec<O
     if let Some(dir) = data_dir {
         arguments.push("--data-dir".into());
         arguments.push(dir.into());
+    }
+    if let Some(payload) = payload {
+        arguments.push("--payload".into());
+        arguments.push(payload.into());
     }
     arguments
 }
@@ -466,6 +488,9 @@ fn require_absolute_paths(config: &Config) -> Outcome {
 /// `tenko service install`.
 fn install_service(args: &InstallArgs, out: &mut impl Write, err: &mut impl Write) -> Outcome {
     let name = args.name.as_str();
+    let account = account(args);
+    service_policy::check_account(&account)
+        .map_err(|message| Failure::new(exit::USAGE, message))?;
     let config = absolute(&args.config)?;
     let data_dir = args.data_dir.as_deref().map(absolute).transpose()?;
     let resolved = load_config(&config, data_dir.as_deref())
@@ -475,50 +500,219 @@ fn install_service(args: &InstallArgs, out: &mut impl Write, err: &mut impl Writ
         Failure::general(format!("cannot find the path of this executable: {error}"))
     })?;
     // The `current` link layout (OPS-24): the service runs the version that `current` points
-    // at, so that an update installed from the UI is a switch of the link and a restart.
-    let layout = crate::upgrade::layout::Layout::new(&resolved.data_dir);
-    let executable = if args.no_update_layout {
-        own.clone()
-    } else {
+    // at, so that an update installed from the UI is a switch of the link and a restart, and
+    // adopts a newer version of this file, the installer's, at its start (ADR 0023, item 11).
+    let with_layout = !args.no_update_layout;
+    let layout = Layout::new(&resolved.data_dir);
+    let executable = if with_layout {
         layout.current_binary()
+    } else {
+        own.clone()
     };
-    let account = account(args);
+    let payload = with_layout.then_some(own.as_path());
+    // What the data directory holds decides before anything is registered.
+    let found = inspect_data_dir(&resolved.data_dir, &account, &layout, err)?;
+    let plan = service_policy::data_dir_plan(&resolved.data_dir, &found, with_layout);
+    if let DataDirPlan::Refuse(message) = &plan {
+        return Err(Failure::general(message.clone()));
+    }
     let info = service_info(
         args,
         executable.clone(),
-        launch_arguments(name, &config, data_dir.as_deref()),
+        launch_arguments(name, &config, data_dir.as_deref(), payload),
         &account,
     );
     register(&info, out, err)?;
+    let registered = |failure: Failure| Failure {
+        message: format!(
+            "{}; the service is registered, remove it with `tenko service uninstall --name \
+             {name}` or fix it by hand",
+            failure.message
+        ),
+        ..failure
+    };
+    set_required_privileges(name, out).map_err(registered)?;
     register_event_source(name, out, err);
     let _ = writeln!(out, "  account:       {account}");
     let _ = writeln!(out, "  executable:    {}", executable.display());
     let _ = writeln!(out, "  configuration: {}", config.display());
-    secure_data_dir(&resolved.data_dir, &account, out).map_err(|failure| Failure {
-        message: format!(
-            "{}; the service is registered, remove it with `tenko service uninstall --name \
-             {name}` or fix the directory by hand",
-            failure.message
-        ),
-        ..failure
-    })?;
-    if !args.no_update_layout {
-        let note = crate::upgrade::ensure_layout(
-            &resolved.data_dir,
-            &own,
-            &crate::upgrade::running_version(),
-        )
-        .map_err(|error| {
-            Failure::general(format!(
-                "cannot set up the version layout in {}: {error}; the service is registered \
-                 but cannot start, remove it with `tenko service uninstall --name {name}` or \
-                 register it again with --no-update-layout",
-                layout.root().display()
-            ))
-        })?;
-        let _ = writeln!(out, "  versions:      {note}");
+    if let Some(payload) = payload {
+        let _ = writeln!(out, "  installer file: {}", payload.display());
+        if let Some(note) = service_policy::payload_location_note(payload, &program_files()) {
+            let _ = writeln!(err, "tenko service install: warning: {note}");
+        }
+    }
+    match plan {
+        DataDirPlan::Create | DataDirPlan::Restrict => {
+            if plan == DataDirPlan::Create {
+                std::fs::create_dir_all(&resolved.data_dir)
+                    .map_err(|error| {
+                        Failure::general(format!(
+                            "cannot create the data directory {}: {error}",
+                            resolved.data_dir.display()
+                        ))
+                    })
+                    .map_err(registered)?;
+            }
+            restrict_data_dir(&resolved.data_dir, out).map_err(registered)?;
+            if with_layout {
+                let note =
+                    upgrade::ensure_layout(&resolved.data_dir, &own, &upgrade::running_version())
+                        .map_err(|error| {
+                            Failure::general(format!(
+                                "cannot set up the version layout in {}: {error}; the service \
+                             cannot start",
+                                layout.root().display()
+                            ))
+                        })
+                        .map_err(registered)?;
+                let _ = writeln!(out, "  versions:      {note}");
+            }
+            grant_data_dir(&resolved.data_dir, &account, out).map_err(registered)?;
+        }
+        DataDirPlan::Keep => {
+            let _ = writeln!(
+                out,
+                "data directory {}: holds data under the access list of {account}, \
+                 Administrators and SYSTEM; left as it is",
+                resolved.data_dir.display()
+            );
+        }
+        DataDirPlan::Refuse(message) => return Err(registered(Failure::general(message))),
     }
     let _ = writeln!(out, "start it with: tenko service start --name {name}");
+    Ok(())
+}
+
+/// Looks at the data directory path without changing or following anything: missing, a
+/// link or a junction, an empty directory, or a directory with entries, whose owner and
+/// access list are then compared with the ones this command sets for `account`. A
+/// comparison that cannot be made is reported on `err` and leaves `matching` unset.
+fn inspect_data_dir(
+    dir: &Path,
+    account: &str,
+    layout: &Layout,
+    err: &mut impl Write,
+) -> Result<DataDirFound, Failure> {
+    let metadata = match std::fs::symlink_metadata(dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(DataDirFound::Missing),
+        Err(error) => {
+            return Err(Failure::general(format!(
+                "cannot read the data directory {}: {error}",
+                dir.display()
+            )));
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(DataDirFound::Link);
+    }
+    if !metadata.is_dir() {
+        return Err(Failure::general(format!(
+            "the data directory {} is not a directory",
+            dir.display()
+        )));
+    }
+    let mut entries = std::fs::read_dir(dir).map_err(|error| {
+        Failure::general(format!(
+            "cannot list the data directory {}: {error}",
+            dir.display()
+        ))
+    })?;
+    if entries.next().is_none() {
+        return Ok(DataDirFound::Empty);
+    }
+    // `current` is read as a link, never followed: the version it names must have its
+    // binary under its own directory.
+    let layout_present = layout
+        .current()
+        .is_some_and(|version| layout.binary(&version).is_file());
+    let matching = match account_sid(account).and_then(|sid| {
+        read_descriptor(dir)
+            .map(|descriptor| service_policy::matches_secured_list(&descriptor, &sid))
+    }) {
+        Ok(matching) => Some(matching),
+        Err(reason) => {
+            let _ = writeln!(
+                err,
+                "tenko service install: warning: cannot compare the access list of {}: {reason}",
+                dir.display()
+            );
+            None
+        }
+    };
+    Ok(DataDirFound::InUse {
+        matching,
+        layout_present,
+    })
+}
+
+/// Runs a system tool and returns what it printed; a failure is the tool's output.
+fn run_tool(tool: &str, arguments: &[OsString]) -> Result<String, String> {
+    let output = Command::new(system_tool(tool))
+        .args(arguments)
+        .output()
+        .map_err(|error| format!("cannot run {tool}: {error}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(format!("{tool}: {}", tool_output(&output)))
+    }
+}
+
+/// The SID of a virtual service account, from `sc.exe showsid`.
+fn account_sid(account: &str) -> Result<String, String> {
+    let service = service_policy::virtual_account_service(account)
+        .ok_or_else(|| format!("{account} is not a virtual service account"))?;
+    let output = run_tool("sc.exe", &service_policy::sc_showsid_arguments(service))?;
+    service_policy::parse_showsid(&output)
+        .ok_or_else(|| format!("sc.exe showsid printed no service SID for {service}"))
+}
+
+/// The owner and the access list of `dir`, read with PowerShell's `Get-Acl`.
+fn read_descriptor(dir: &Path) -> Result<service_policy::Descriptor, String> {
+    let powershell = system_root()
+        .join("System32")
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
+    let output = Command::new(powershell)
+        .args(service_policy::powershell_sddl_arguments(dir))
+        .output()
+        .map_err(|error| format!("cannot run powershell.exe: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("Get-Acl: {}", tool_output(&output)));
+    }
+    let sddl = String::from_utf8_lossy(&output.stdout);
+    service_policy::parse_sddl(&sddl).ok_or_else(|| {
+        format!(
+            "Get-Acl printed `{}`, which is not an SDDL string",
+            sddl.trim()
+        )
+    })
+}
+
+/// The Program Files directories of this machine, where only administrators write.
+fn program_files() -> Vec<PathBuf> {
+    ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Cuts the privileges of the service token down to [`service_policy::REQUIRED_PRIVILEGES`].
+fn set_required_privileges(name: &str, out: &mut impl Write) -> Outcome {
+    run_tool("sc.exe", &service_policy::sc_privs_arguments(name)).map_err(|reason| {
+        Failure::general(format!(
+            "cannot set the required privileges of service `{name}`: {reason}"
+        ))
+    })?;
+    let _ = writeln!(
+        out,
+        "  privileges:    {}",
+        service_policy::REQUIRED_PRIVILEGES.join(", ")
+    );
     Ok(())
 }
 
@@ -657,38 +851,6 @@ fn remove_event_source(name: &str, out: &mut impl Write) {
     }
 }
 
-/// The principal `icacls` takes for an account name.
-fn principal(account: &str) -> String {
-    if account.eq_ignore_ascii_case("LocalSystem") {
-        SYSTEM_SID.to_owned()
-    } else {
-        account.to_owned()
-    }
-}
-
-/// The `icacls` arguments that leave the account, Administrators and `SYSTEM` full control
-/// of the directory and everything created in it, and nobody else.
-fn icacls_arguments(dir: &Path, account: &str) -> Vec<OsString> {
-    let mut principals = vec![principal(account)];
-    for sid in [ADMINISTRATORS_SID, SYSTEM_SID] {
-        if !principals.iter().any(|known| known == sid) {
-            principals.push(sid.to_owned());
-        }
-    }
-    let mut arguments: Vec<OsString> = vec![dir.into(), "/inheritance:r".into(), "/grant:r".into()];
-    arguments.extend(
-        principals
-            .iter()
-            .map(|principal| OsString::from(format!("{principal}:(OI)(CI)F"))),
-    );
-    arguments
-}
-
-/// The path of `icacls.exe` in the system directory.
-fn icacls_path() -> PathBuf {
-    system_tool("icacls.exe")
-}
-
 /// The text a tool printed, on one line.
 fn tool_output(output: &std::process::Output) -> String {
     let text = format!(
@@ -704,25 +866,36 @@ fn tool_output(output: &std::process::Output) -> String {
     }
 }
 
-/// Creates the data directory and restricts access to it.
-fn secure_data_dir(dir: &Path, account: &str, out: &mut impl Write) -> Outcome {
-    std::fs::create_dir_all(dir).map_err(|error| {
+/// The first step on a new or empty data directory: the inherited list goes, and
+/// Administrators and SYSTEM alone have access, so that what the installer writes next is
+/// written into a directory the service account cannot write.
+fn restrict_data_dir(dir: &Path, out: &mut impl Write) -> Outcome {
+    run_tool(
+        "icacls.exe",
+        &service_policy::icacls_restrict_arguments(dir),
+    )
+    .map_err(|reason| Failure::general(format!("cannot restrict {}: {reason}", dir.display())))?;
+    let _ = writeln!(
+        out,
+        "data directory {}: access limited to Administrators and SYSTEM",
+        dir.display()
+    );
+    Ok(())
+}
+
+/// The last step: the service account gets full control of the directory and of everything
+/// in it, which everything created in it later inherits.
+fn grant_data_dir(dir: &Path, account: &str, out: &mut impl Write) -> Outcome {
+    run_tool(
+        "icacls.exe",
+        &service_policy::icacls_grant_arguments(dir, account),
+    )
+    .map_err(|reason| {
         Failure::general(format!(
-            "cannot create the data directory {}: {error}",
+            "cannot grant {account} access to {}: {reason}",
             dir.display()
         ))
     })?;
-    let output = Command::new(icacls_path())
-        .args(icacls_arguments(dir, account))
-        .output()
-        .map_err(|error| Failure::general(format!("cannot run icacls: {error}")))?;
-    if !output.status.success() {
-        return Err(Failure::general(format!(
-            "icacls could not restrict {}: {}",
-            dir.display(),
-            tool_output(&output)
-        )));
-    }
     let _ = writeln!(
         out,
         "data directory {}: access limited to {account}, Administrators and SYSTEM",
@@ -762,14 +935,17 @@ fn uninstall_service(args: &NameArgs, out: &mut impl Write) -> Outcome {
     Ok(())
 }
 
-/// `tenko service start`: starts the service and waits until it runs.
+/// `tenko service start`: starts the service and waits until it runs, through the restart
+/// that follows an adopted installer's file (exit status 12). It then says which version the
+/// layout runs, and fails when the layout runs an older version than this binary: the
+/// installer's file was not adopted, and the Application log names the reason.
 fn start_service(args: &NameArgs, out: &mut impl Write) -> Outcome {
     let name = args.name.as_str();
     let manager = connect(ServiceManagerAccess::CONNECT)?;
     let service = open(
         &manager,
         name,
-        ServiceAccess::QUERY_STATUS | ServiceAccess::START,
+        ServiceAccess::QUERY_STATUS | ServiceAccess::START | ServiceAccess::QUERY_CONFIG,
     )?;
     match service.start::<&str>(&[]) {
         Ok(()) => {}
@@ -781,33 +957,87 @@ fn start_service(args: &NameArgs, out: &mut impl Write) -> Outcome {
             ));
         }
     }
+    wait_started(
+        || service.query_status(),
+        name,
+        START_TIMEOUT,
+        RESTART_WAIT,
+        POLL_INTERVAL,
+    )?;
+    let _ = writeln!(out, "service `{name}` is running");
+    let registered = service.query_config().map_err(|error| {
+        Failure::scm(
+            &format!("cannot read the configuration of `{name}`"),
+            &error,
+        )
+    })?;
+    let executable =
+        service_policy::registered_executable(&registered.executable_path.to_string_lossy());
+    if let Some(data_dir) = service_policy::layout_data_dir(&executable) {
+        let current = Layout::new(&data_dir).current();
+        let line = service_policy::adoption_outcome(&upgrade::running_version(), current.as_ref())
+            .map_err(|message| Failure::new(exit::UPGRADE_REFUSED, message))?;
+        let _ = writeln!(out, "{line}");
+    }
+    Ok(())
+}
+
+/// Waits until the service runs. A stop with exit status 12 while it starts is a restart
+/// the service asked for (an adopted installer's file, a switch back): the wait goes on
+/// through the SCM's restart delay, up to three times, as the failure actions allow.
+fn wait_started(
+    mut query: impl FnMut() -> Result<ServiceStatus, ScmError>,
+    name: &str,
+    timeout: Duration,
+    restart_wait: Duration,
+    interval: Duration,
+) -> Outcome {
+    let query_failed = |error: &ScmError| Failure::scm(&format!("cannot query `{name}`"), error);
     let settled = |status: &ServiceStatus| {
         matches!(
             status.current_state,
             ServiceState::Running | ServiceState::Stopped
         )
     };
-    let waited = wait_for(
-        || service.query_status(),
-        settled,
-        START_TIMEOUT,
-        POLL_INTERVAL,
-    )
-    .map_err(|error| Failure::scm(&format!("cannot query `{name}`"), &error))?;
-    match waited {
-        Wait::Done(status) if status.current_state == ServiceState::Running => {
-            let _ = writeln!(out, "service `{name}` is running");
-            Ok(())
+    let restart = ServiceExitCode::ServiceSpecific(u32::from(exit::RESTART));
+    let mut restarts = 0;
+    loop {
+        let waited = wait_for(&mut query, settled, timeout, interval)
+            .map_err(|error| query_failed(&error))?;
+        match waited {
+            Wait::Done(status) if status.current_state == ServiceState::Running => return Ok(()),
+            Wait::Done(status) if status.exit_code == restart && restarts < 3 => {
+                restarts += 1;
+                let left_stopped =
+                    |status: &ServiceStatus| status.current_state != ServiceState::Stopped;
+                match wait_for(&mut query, left_stopped, restart_wait, interval)
+                    .map_err(|error| query_failed(&error))?
+                {
+                    Wait::Done(_) => {}
+                    Wait::TimedOut(_) => {
+                        return Err(Failure::general(format!(
+                            "service `{name}` stopped to be started again (exit status 12) \
+                             but the SCM did not start it within {} s; check its failure \
+                             actions",
+                            restart_wait.as_secs()
+                        )));
+                    }
+                }
+            }
+            Wait::Done(status) => {
+                return Err(Failure::general(format!(
+                    "service `{name}` stopped while starting ({})",
+                    describe_exit(status.exit_code)
+                )));
+            }
+            Wait::TimedOut(status) => {
+                return Err(Failure::general(format!(
+                    "service `{name}` is still {} after {} s",
+                    state_name(status.current_state),
+                    timeout.as_secs()
+                )));
+            }
         }
-        Wait::Done(status) => Err(Failure::general(format!(
-            "service `{name}` stopped while starting ({})",
-            describe_exit(status.exit_code)
-        ))),
-        Wait::TimedOut(status) => Err(Failure::general(format!(
-            "service `{name}` is still {} after {} s",
-            state_name(status.current_state),
-            START_TIMEOUT.as_secs()
-        ))),
     }
 }
 
@@ -1050,6 +1280,9 @@ fn serve_until_stopped(
         log = %path.display(),
         "tenko service starting"
     );
+    if adopts_installer_file(args, &resolved, handle) {
+        return exit::RESTART;
+    }
     if let Some(status) = check_roles(&resolved) {
         return status;
     }
@@ -1069,6 +1302,86 @@ fn serve_until_stopped(
         Err(error) => {
             tracing::error!(%error, "tenko service ended with an error");
             error.exit_code()
+        }
+    }
+}
+
+/// With `--payload`, looks at the installer's file and returns whether the service must stop
+/// to be started again as the adopted version.
+fn adopts_installer_file(args: &RunArgs, resolved: &Resolved, handle: ServiceStatusHandle) -> bool {
+    let Some(path) = args.payload.as_deref() else {
+        return false;
+    };
+    // The check copies the closed store and may take a while: a fresh wait hint first.
+    report(handle, start_pending());
+    let payload = upgrade::Payload {
+        path,
+        config: Some(&args.config),
+        data_dir: args.data_dir.as_deref(),
+        deadline_secs: resolved.config.updates.ready_timeout_secs,
+    };
+    adopt_installer_file(resolved, &payload)
+}
+
+/// Looks at the installer's file at the start of the service (ADR 0023, item 11) and logs
+/// the outcome, the lines that matter in the Application log too. Returns whether the layout
+/// was switched, in which case the service stops with exit status 12 and the SCM starts the
+/// adopted version. A file that refuses the store or cannot be read leaves the running
+/// version running; it is looked at again at the next start.
+fn adopt_installer_file(resolved: &Resolved, payload: &upgrade::Payload<'_>) -> bool {
+    let running = upgrade::running_version();
+    let file = payload.path.display().to_string();
+    match upgrade::adopt_payload(&resolved.data_dir, &running, payload) {
+        Adoption::Adopted { from, to, report } => {
+            tracing::warn!(
+                target: logging::event_log::SERVICE_TARGET,
+                %file,
+                %from,
+                %to,
+                migrations = report.steps.len(),
+                "adopted the installer's file: the store check passed and the layout now \
+                 runs the new version; stopping to be started again"
+            );
+            true
+        }
+        Adoption::Refused { version, report } => {
+            tracing::error!(
+                target: logging::event_log::SERVICE_TARGET,
+                %file,
+                %version,
+                %running,
+                reason = %upgrade::problem_text(&report),
+                "the installer's file was not adopted: its version refuses the store; the \
+                 running version keeps running"
+            );
+            false
+        }
+        Adoption::Failed(error) => {
+            tracing::error!(
+                target: logging::event_log::SERVICE_TARGET,
+                %file,
+                %running,
+                error,
+                "the installer's file was not adopted; the running version keeps running"
+            );
+            false
+        }
+        Adoption::NotNewer { payload, running } => {
+            tracing::info!(
+                %file,
+                version = %payload,
+                %running,
+                "the installer's file is not newer than the running version; nothing to adopt"
+            );
+            false
+        }
+        Adoption::Busy => {
+            tracing::info!(
+                %file,
+                "an install attempt is under way; the installer's file is looked at again at \
+                 a later start"
+            );
+            false
         }
     }
 }
@@ -1186,8 +1499,12 @@ mod tests {
 
     #[test]
     fn launch_arguments_without_a_data_directory() {
-        let arguments =
-            launch_arguments("tenko", Path::new(r"C:\ProgramData\Tenko\tenko.toml"), None);
+        let arguments = launch_arguments(
+            "tenko",
+            Path::new(r"C:\ProgramData\Tenko\tenko.toml"),
+            None,
+            None,
+        );
         assert_eq!(
             text(&arguments),
             [
@@ -1202,11 +1519,12 @@ mod tests {
     }
 
     #[test]
-    fn launch_arguments_with_a_data_directory() {
+    fn launch_arguments_with_a_data_directory_and_the_installer_file() {
         let arguments = launch_arguments(
             "tenko",
             Path::new(r"C:\ProgramData\Tenko\tenko.toml"),
             Some(Path::new(r"D:\Tenko Data")),
+            Some(Path::new(r"C:\Program Files\Tenko\tenko.exe")),
         );
         assert_eq!(
             text(&arguments),
@@ -1218,7 +1536,9 @@ mod tests {
                 "--config",
                 r"C:\ProgramData\Tenko\tenko.toml",
                 "--data-dir",
-                r"D:\Tenko Data"
+                r"D:\Tenko Data",
+                "--payload",
+                r"C:\Program Files\Tenko\tenko.exe"
             ]
         );
     }
@@ -1229,6 +1549,7 @@ mod tests {
             "tenko-b",
             Path::new(r"C:\Program Data\Tenko\tenko.toml"),
             Some(Path::new(r"D:\Tenko Data")),
+            Some(Path::new(r"C:\Program Files\Tenko\tenko.exe")),
         );
         let cli =
             crate::Cli::try_parse_from(std::iter::once(OsString::from("tenko")).chain(arguments))
@@ -1242,6 +1563,10 @@ mod tests {
         assert_eq!(run.name, "tenko-b");
         assert_eq!(run.config, Path::new(r"C:\Program Data\Tenko\tenko.toml"));
         assert_eq!(run.data_dir.as_deref(), Some(Path::new(r"D:\Tenko Data")));
+        assert_eq!(
+            run.payload.as_deref(),
+            Some(Path::new(r"C:\Program Files\Tenko\tenko.exe"))
+        );
     }
 
     #[test]
@@ -1250,8 +1575,29 @@ mod tests {
         let mut args = install_args(PathBuf::from("tenko.toml"));
         args.name = "tenko-lab".to_owned();
         assert_eq!(account(&args), r"NT SERVICE\tenko-lab");
-        args.account = Some(r"NT AUTHORITY\LocalService".to_owned());
-        assert_eq!(account(&args), r"NT AUTHORITY\LocalService");
+        args.account = Some(r"NT SERVICE\other".to_owned());
+        assert_eq!(account(&args), r"NT SERVICE\other");
+        service_policy::check_account(&account(&args)).expect("a virtual account");
+    }
+
+    #[test]
+    fn install_refuses_the_shared_accounts_before_anything_else() {
+        for shared in [
+            "LocalSystem",
+            r"NT AUTHORITY\LocalService",
+            "NetworkService",
+        ] {
+            let mut args = install_args(PathBuf::from(r"C:\does\not\exist\tenko.toml"));
+            args.account = Some(shared.to_owned());
+            let (status, out, err) = run_command(&ServiceCommand::Install(args));
+            assert_eq!(status, exit::USAGE, "{shared}: {err}");
+            assert_eq!(out, "", "{shared}");
+            assert!(
+                err.contains(service_policy::ACCOUNT_SHARED),
+                "{shared}: {err}"
+            );
+            assert!(err.contains(shared), "{shared}: {err}");
+        }
     }
 
     #[test]
@@ -1291,22 +1637,6 @@ mod tests {
     }
 
     #[test]
-    fn icacls_arguments_restrict_the_directory() {
-        let arguments = icacls_arguments(Path::new(r"C:\ProgramData\Tenko"), r"NT SERVICE\tenko");
-        assert_eq!(
-            text(&arguments),
-            [
-                r"C:\ProgramData\Tenko",
-                "/inheritance:r",
-                "/grant:r",
-                r"NT SERVICE\tenko:(OI)(CI)F",
-                "*S-1-5-32-544:(OI)(CI)F",
-                "*S-1-5-18:(OI)(CI)F"
-            ]
-        );
-    }
-
-    #[test]
     fn the_event_source_is_registered_in_the_application_log() {
         let file =
             PathBuf::from(r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll");
@@ -1341,21 +1671,6 @@ mod tests {
             ]
         );
         assert_eq!(event_source_arguments("other", None).len(), 1);
-    }
-
-    #[test]
-    fn icacls_arguments_do_not_repeat_the_system_account() {
-        let arguments = icacls_arguments(Path::new(r"C:\Tenko"), "localsystem");
-        assert_eq!(
-            text(&arguments),
-            [
-                r"C:\Tenko",
-                "/inheritance:r",
-                "/grant:r",
-                "*S-1-5-18:(OI)(CI)F",
-                "*S-1-5-32-544:(OI)(CI)F"
-            ]
-        );
     }
 
     #[test]
@@ -1506,12 +1821,92 @@ mod tests {
         );
     }
 
+    fn scripted(
+        states: Vec<(ServiceState, ServiceExitCode)>,
+    ) -> impl FnMut() -> Result<ServiceStatus, ScmError> {
+        let mut states = states.into_iter();
+        let mut last = None;
+        move || {
+            let next = states.next().or(last).expect("a state");
+            last = Some(next);
+            Ok(make_status(
+                next.0,
+                ServiceControlAccept::empty(),
+                next.1,
+                Duration::ZERO,
+            ))
+        }
+    }
+
+    #[test]
+    fn a_start_waits_through_the_restart_an_update_asks_for() {
+        let restart = ServiceExitCode::ServiceSpecific(u32::from(exit::RESTART));
+        let query = scripted(vec![
+            (ServiceState::StartPending, ServiceExitCode::NO_ERROR),
+            (ServiceState::Stopped, restart),
+            (ServiceState::Stopped, restart),
+            (ServiceState::StartPending, ServiceExitCode::NO_ERROR),
+            (ServiceState::Running, ServiceExitCode::NO_ERROR),
+        ]);
+        wait_started(
+            query,
+            "tenko",
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+            Duration::ZERO,
+        )
+        .expect("running after the restart");
+    }
+
+    #[test]
+    fn a_start_that_ends_with_another_status_or_without_a_restart_fails() {
+        let failed = scripted(vec![(
+            ServiceState::Stopped,
+            ServiceExitCode::ServiceSpecific(u32::from(exit::START)),
+        )]);
+        let error = wait_started(
+            failed,
+            "tenko",
+            Duration::from_secs(5),
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .expect_err("a failed start");
+        assert!(
+            error.message.contains("stopped while starting"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("a start step failed"),
+            "{}",
+            error.message
+        );
+
+        let restart = ServiceExitCode::ServiceSpecific(u32::from(exit::RESTART));
+        let never_restarted = scripted(vec![(ServiceState::Stopped, restart)]);
+        let error = wait_started(
+            never_restarted,
+            "tenko",
+            Duration::from_secs(5),
+            Duration::from_millis(20),
+            Duration::from_millis(5),
+        )
+        .expect_err("no restart");
+        assert!(
+            error.message.contains("did not start it"),
+            "{}",
+            error.message
+        );
+    }
+
     #[test]
     fn service_run_from_a_console_is_a_usage_error() {
         let args = RunArgs {
             name: "tenko-test-console".to_owned(),
             config: PathBuf::from(r"C:\does\not\exist\tenko.toml"),
             data_dir: None,
+            payload: None,
         };
         let (status, out, err) = run_command(&ServiceCommand::Run(args));
         assert_eq!(status, exit::USAGE, "{err}");

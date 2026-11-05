@@ -379,7 +379,23 @@ ready_timeout_secs = 60
     $expectedImage = Join-Path $DataDir 'updates\current\tenko.exe'
     $imageOk = ([string]$record.PathName).IndexOf($expectedImage, [StringComparison]::OrdinalIgnoreCase) -ge 0
     Assert-That $imageOk "the image path does not run $expectedImage : $($record.PathName)"
+    $payloadOk = ([string]$record.PathName).IndexOf("--payload", [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+        ([string]$record.PathName).IndexOf($Binary, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    Assert-That $payloadOk "the image path does not name $Binary as the installer's file: $($record.PathName)"
     Write-Host "image path: $($record.PathName)"
+    # The token keeps SeChangeNotifyPrivilege and nothing else (ADR 0023, item 11).
+    $privileges = @(sc.exe qprivs $Name | Out-String -Stream | ForEach-Object {
+        if ($_ -match '^\s*(PRIVILEGES\s*)?:\s*(Se\w+)\s*$') { $Matches[2] }
+    })
+    Assert-That (($privileges -join ',') -eq 'SeChangeNotifyPrivilege') "the service token keeps '$($privileges -join ',')'; expected SeChangeNotifyPrivilege alone"
+    Write-Host "privileges: $($privileges -join ',')"
+    # LocalSystem and the shared accounts are refused before anything is registered.
+    foreach ($shared in 'LocalSystem', 'NT AUTHORITY\LocalService', 'NT AUTHORITY\NetworkService') {
+        $refused = Invoke-Tenko @('service', 'install', '--name', "$Name-shared", '--config', $ConfigPath, '--account', $shared)
+        Assert-That ($refused.Code -eq 2 -and $refused.Output.Contains('service.account_shared')) "service install --account '$shared' was not refused (status $($refused.Code)): $($refused.Output)"
+        Assert-That ($null -eq (Get-Service -Name "$Name-shared" -ErrorAction SilentlyContinue)) "a service $Name-shared was registered for the refused account $shared"
+    }
+    Write-Host 'LocalSystem, LocalService and NetworkService: refused'
 
     # 3 ----------------------------------------------------------------------------------
     Write-Step '3/9 set TENKO_TEST_VERSION_FROM_LAYOUT=1 in the service environment'
@@ -422,6 +438,13 @@ ready_timeout_secs = 60
     }
     Write-Host "$LogPath has $($logItem.Length) bytes"
     Get-Content -LiteralPath $LogPath -Tail 3 | Out-Host
+
+    # The data directory holds data now, under the access list for NT SERVICE\$Name: a
+    # second service with another account is refused, and nothing in the directory changes.
+    $other = Invoke-Tenko @('service', 'install', '--name', "$Name-b", '--config', $ConfigPath)
+    Assert-That ($other.Code -ne 0 -and $other.Output.Contains('service.data_dir_in_use')) "service install --name $Name-b over the data directory in use was not refused (status $($other.Code)): $($other.Output)"
+    Assert-That ($null -eq (Get-Service -Name "$Name-b" -ErrorAction SilentlyContinue)) "a service $Name-b was registered over a data directory in use"
+    Write-Host 'a second service over the data directory in use: refused'
 
     # 7 ----------------------------------------------------------------------------------
     Write-Step "7/9 upgrade to $NewVersion through the update API (exit status 12, restart by the SCM)"
@@ -593,6 +616,14 @@ ready_timeout_secs = 60
     [void](Wait-Until -TimeoutSec 30 -What "service $Name to be gone" -Test { $null -eq (Get-ServiceRecord) })
     Assert-That (-not [System.Diagnostics.EventLog]::SourceExists($Name)) "the Event Log source $Name is still registered after uninstall"
     Write-Host 'the service and the Event Log source are gone'
+    # Installed again over the kept data directory: its list already names this account, so
+    # the installer leaves the directory as it is, and the service can be removed again.
+    $again = Invoke-Tenko @('service', 'install', '--name', $Name, '--config', $ConfigPath)
+    Assert-That ($again.Code -eq 0) "service install over the kept data directory failed (status $($again.Code)): $($again.Output)"
+    Assert-That ($again.Output.Contains('left as it is')) "service install over the kept data directory did not leave it as it is: $($again.Output)"
+    Invoke-TenkoOk @('service', 'uninstall', '--name', $Name)
+    [void](Wait-Until -TimeoutSec 30 -What "service $Name to be gone again" -Test { $null -eq (Get-ServiceRecord) })
+    Write-Host 'installed again over the kept data directory (left as it is) and removed'
 } catch {
     $failed = $true
     Write-Host ''
