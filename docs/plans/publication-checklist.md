@@ -87,7 +87,7 @@ after, and steps 14 to 16 in the days around it.
 
 5. **Branch protection on `main`** (Settings, Branches, or a ruleset): require a pull
    request before merging; require the status checks `Rust (Linux)`, `cargo-deny`, `UI`,
-   `Rust with the built UI`, `Cluster smoke (Linux)`, `Deploy scripts`, `Changelog`, `Spelling`
+   `Rust with the built UI`, `Cluster smoke (Linux)`, `Deploy scripts`, `Changelog`, `Spelling`, `Windows mirror exporter (windows-latest, powershell)`, `Windows mirror exporter (windows-latest, pwsh)`, `Windows mirror exporter (ubuntu-latest, pwsh)`
    and `Signed-off-by on every commit` to pass; require branches to be up to date; no force
    pushes; no deletion; the rules apply to administrators too. The merge method keeps
    `Signed-off-by` trailers: merge commits or rebase, never squash.

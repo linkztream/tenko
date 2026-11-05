@@ -722,6 +722,55 @@ jobs:
             -x -P SCRIPTDIR -S warning "${files[@]}"
           python3 -m py_compile deploy/security/nodeapi.py deploy/security/dnswire.py
 
+  # The Windows DHCP mirror exporter (deploy/windows/mirror, WP14.1 of
+  # docs/plans/windows-takeover-plan.md, exit check E72): the Pester suites over the recorded
+  # cmdlet output, on Windows PowerShell 5.1 and on PowerShell 7 (Windows and Linux), and
+  # PSScriptAnalyzer with the rule file beside the scripts. Pester and PSScriptAnalyzer are
+  # CI tools (Apache-2.0 and MIT), installed at pinned versions from the PowerShell Gallery
+  # and never shipped. The job is cheap and runs with every push and pull request, like
+  # Deploy scripts.
+  mirror-exporter:
+    name: Windows mirror exporter (${{ matrix.os }}, ${{ matrix.shell }})
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            shell: powershell
+          - os: windows-latest
+            shell: pwsh
+          - os: ubuntu-latest
+            shell: pwsh
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Pester and PSScriptAnalyzer (pinned)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
+          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
+      - name: Pester
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module Pester -RequiredVersion 5.7.1
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'deploy/windows/mirror/tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config
+      - name: PSScriptAnalyzer
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0
+          Invoke-ScriptAnalyzer -Path deploy/windows/mirror -Recurse -Settings deploy/windows/mirror/PSScriptAnalyzerSettings.psd1 -EnableExit -ReportSummary
+
   # Changelog rule (OPS-23). Every change to the product adds an entry under
   # "## [Unreleased]" in CHANGELOG.md, because that section becomes the release notes that
   # running installations show. The product is `crates/**` and `ui/src/**`, except tests
