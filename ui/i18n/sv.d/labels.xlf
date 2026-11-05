@@ -1150,6 +1150,54 @@
         <notes><note category="description">What the audit action vault.secret.update is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Edit a secret</source><target>Redigera en hemlighet</target></segment>
       </unit>
+      <unit id="audit.action.dhcp.scope.prepare">
+        <notes><note category="description">What the audit action dhcp.scope.prepare is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Prepare a DHCP scope for a takeover</source><target>Förbered ett DHCP-omfång för ett övertagande</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.scope.revert">
+        <notes><note category="description">What the audit action dhcp.scope.revert is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Revert the takeover of a DHCP scope</source><target>Återställ övertagandet av ett DHCP-omfång</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.scope.takeover">
+        <notes><note category="description">What the audit action dhcp.scope.takeover is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Take over a DHCP scope from a mirrored source</source><target>Ta över ett DHCP-omfång från en speglad källa</target></segment>
+      </unit>
+      <unit id="audit.action.dns.zone.flip">
+        <notes><note category="description">What the audit action dns.zone.flip is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Flip a zone between secondary and primary</source><target>Växla en zon mellan sekundär och primär</target></segment>
+      </unit>
+      <unit id="audit.action.dns.zone.release">
+        <notes><note category="description">What the audit action dns.zone.release is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Release the frozen names of a zone</source><target>Släpp en zons frysta namn</target></segment>
+      </unit>
+      <unit id="audit.action.migrate.mirror.create">
+        <notes><note category="description">What the audit action migrate.mirror.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a mirrored source</source><target>Skapa en speglad källa</target></segment>
+      </unit>
+      <unit id="audit.action.migrate.mirror.delete">
+        <notes><note category="description">What the audit action migrate.mirror.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a mirrored source</source><target>Ta bort en speglad källa</target></segment>
+      </unit>
+      <unit id="audit.action.migrate.mirror.losses_ack">
+        <notes><note category="description">What the audit action migrate.mirror.losses_ack is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Acknowledge the losses of a mirrored source</source><target>Kvittera förlusterna hos en speglad källa</target></segment>
+      </unit>
+      <unit id="audit.action.migrate.mirror.push">
+        <notes><note category="description">What the audit action migrate.mirror.push is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Receive a snapshot from a mirrored source</source><target>Ta emot en ögonblicksbild från en speglad källa</target></segment>
+      </unit>
+      <unit id="audit.action.migrate.mirror.refuse">
+        <notes><note category="description">What the audit action migrate.mirror.refuse is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refuse a push from a mirrored source</source><target>Avvisa en push från en speglad källa</target></segment>
+      </unit>
+      <unit id="audit.action.migrate.mirror.token">
+        <notes><note category="description">What the audit action migrate.mirror.token is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Replace the token of a mirrored source</source><target>Byt en speglad källas token</target></segment>
+      </unit>
+      <unit id="audit.action.migrate.mirror.update">
+        <notes><note category="description">What the audit action migrate.mirror.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change a mirrored source</source><target>Ändra en speglad källa</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>
