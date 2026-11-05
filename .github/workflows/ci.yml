@@ -826,6 +826,11 @@ jobs:
           $config.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $config
       - name: PSScriptAnalyzer
+        # The analyzer runs on PowerShell 7 only: on Windows PowerShell 5.1 version 1.25.0
+        # fails inside one of its rules with a null reference on the exporter (RULE_ERROR),
+        # which is the analyzer's defect and not a finding. The compatibility rules of the
+        # settings file still target 5.1 and 7.0; the 5.1 row runs the Pester suites.
+        if: matrix.shell == 'pwsh'
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0
