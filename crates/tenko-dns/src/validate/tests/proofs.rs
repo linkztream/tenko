@@ -228,17 +228,43 @@ fn rfc4035_appendix_b_wildcard() {
     // B.5: a.z.w.example MX answered from *.w.example.
     let records = zone.records(Some(&["x.y.w.example"]));
     assert_eq!(
-        nsec::prove_wildcard(&records, &wire("a.z.w.example"), &apex),
+        nsec::prove_wildcard(&records, &wire("a.z.w.example"), 2, &apex),
         Ok(())
     );
     assert_eq!(
-        nsec::prove_wildcard(&records, &wire("x.w.example"), &apex),
+        nsec::prove_wildcard(&records, &wire("x.w.example"), 2, &apex),
         Err(ProofFault::Missing)
     );
     let records = zone.records(None);
     assert_eq!(
-        nsec::prove_wildcard(&records, &wire("x.w.example"), &apex),
+        nsec::prove_wildcard(&records, &wire("x.w.example"), 2, &apex),
         Err(ProofFault::Exists)
+    );
+}
+
+#[test]
+fn a_wildcard_proof_checks_the_closest_encloser_the_labels_name() {
+    let zone = NsecZone::rfc4035();
+    let apex = wire("example");
+    let records = zone.records(Some(&["x.y.w.example"]));
+    // The covering record implies the closest encloser w.example (labels 2): an RRSIG
+    // claiming *.example (labels 1) or *.z.w.example (labels 3) is not proved by it.
+    assert_eq!(
+        nsec::prove_wildcard(&records, &wire("a.z.w.example"), 1, &apex),
+        Err(ProofFault::Missing)
+    );
+    assert_eq!(
+        nsec::prove_wildcard(&records, &wire("a.z.w.example"), 3, &apex),
+        Err(ProofFault::Missing)
+    );
+    // A closest encloser above the zone, or the name itself, is never a wildcard's.
+    assert_eq!(
+        nsec::prove_wildcard(&records, &wire("a.z.w.example"), 0, &apex),
+        Err(ProofFault::Missing)
+    );
+    assert_eq!(
+        nsec::prove_wildcard(&records, &wire("a.z.w.example"), 4, &apex),
+        Err(ProofFault::Missing)
     );
 }
 

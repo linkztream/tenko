@@ -12,7 +12,7 @@ use crate::{
     cache::{Client, ClientEdns, Verdict},
     dnssec::chain::{base32hex, nsec3_hash},
     recurse::message::{Composed, Rr, compose, parse, types},
-    recursion::denial::{DenialCache, DenialKind},
+    recursion::denial::{DenialCache, DenialKind, Origin},
     wire,
 };
 
@@ -133,7 +133,6 @@ fn denials() -> Denials {
 /// `*.w` (A) under the empty non-terminal `w`. Two NXDOMAIN answers give the records
 /// `example.test -> a`, `a -> m`, `m -> sub` and `sub -> *.w`.
 fn nsec_zone(cache: &Denials, view: Option<ViewId>) {
-    let zone = DnsName::new("example.test").expect("zone");
     let mut authority: Vec<Rr> = signed_soa("example.test", 300).into();
     authority.extend(nsec(
         "example.test",
@@ -150,7 +149,7 @@ fn nsec_zone(cache: &Denials, view: Option<ViewId>) {
         300,
     ));
     let answer = message("b.example.test", A, 3, &[], &authority);
-    assert!(cache.insert(view, &zone, &answer, &SECURE, Instant::now()));
+    assert!(cache.insert(view, &answer, &SECURE, Origin::Recursion, Instant::now()));
     let mut authority: Vec<Rr> = signed_soa("example.test", 300).into();
     authority.extend(nsec(
         "example.test",
@@ -167,7 +166,7 @@ fn nsec_zone(cache: &Denials, view: Option<ViewId>) {
         300,
     ));
     let answer = message("n.example.test", A, 3, &[], &authority);
-    assert!(cache.insert(view, &zone, &answer, &SECURE, Instant::now()));
+    assert!(cache.insert(view, &answer, &SECURE, Origin::Recursion, Instant::now()));
 }
 
 struct Asked {
@@ -335,7 +334,6 @@ fn a_delegation_proves_nothing_below_it_and_some_types_are_never_synthesized() {
 fn a_validated_wildcard_expansion_answers_other_names_under_it() {
     let cache = denials();
     nsec_zone(&cache, None);
-    let zone = DnsName::new("example.test").expect("zone");
     // `one.w.example.test` answered from `*.w.example.test` (labels 3), with the record
     // covering the name in the authority section.
     let answer = [
@@ -350,7 +348,7 @@ fn a_validated_wildcard_expansion_answers_other_names_under_it() {
         300,
     );
     let message = message("one.w.example.test", A, 0, &answer, &authority);
-    assert!(cache.insert(None, &zone, &message, &SECURE, Instant::now()));
+    assert!(cache.insert(None, &message, &SECURE, Origin::Recursion, Instant::now()));
     let (hit, header, records) =
         synthesize(&cache, None, "two.w.example.test", A, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Wildcard);
@@ -380,7 +378,6 @@ fn a_validated_wildcard_expansion_answers_other_names_under_it() {
 #[test]
 fn nothing_is_kept_from_bogus_answers_and_only_names_from_insecure_ones() {
     let cache = denials();
-    let zone = DnsName::new("example.test").expect("zone");
     let mut authority: Vec<Rr> = signed_soa("example.test", 300).into();
     authority.extend(nsec(
         "example.test",
@@ -394,20 +391,40 @@ fn nothing_is_kept_from_bogus_answers_and_only_names_from_insecure_ones() {
         state: SecurityState::Bogus,
         ..Verdict::UNVALIDATED
     };
-    assert!(!cache.insert(None, &zone, &answer, &bogus, Instant::now()));
+    assert!(!cache.insert(None, &answer, &bogus, Origin::Recursion, Instant::now()));
     assert!(cache.is_empty());
-    // Unsigned records: the NSEC is not kept; the name of the NXDOMAIN is (RFC 8020).
-    assert!(cache.insert(None, &zone, &answer, &INSECURE, Instant::now()));
+    // An insecure answer whose SOA is signed keeps nothing: a signed zone is denied by its
+    // validated records only.
+    assert!(!cache.insert(None, &answer, &INSECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.is_empty());
+    // With the SOA unsigned the NSEC is still not kept; the name of the NXDOMAIN is (RFC
+    // 8020).
+    let mut authority = vec![soa("example.test", 300)];
+    authority.extend(nsec(
+        "example.test",
+        "a.example.test",
+        "m.example.test",
+        &[A, 46, 47],
+        300,
+    ));
+    let answer = message("b.example.test", A, 3, &[], &authority);
+    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, Instant::now()));
     assert_eq!(cache.len(), 1);
     assert!(synthesize(&cache, None, "c.example.test", A, true).is_none());
+    assert!(synthesize(&cache, None, "x.b.example.test", A, true).is_some());
 }
 
 #[test]
 fn names_below_a_cached_nxdomain_of_an_unsigned_zone_are_nxdomain() {
     let cache = denials();
-    let zone = DnsName::new("plain.test").expect("zone");
     let answer = message("gone.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
-    assert!(cache.insert(None, &zone, &answer, &Verdict::UNVALIDATED, Instant::now()));
+    assert!(cache.insert(
+        None,
+        &answer,
+        &Verdict::UNVALIDATED,
+        Origin::Recursion,
+        Instant::now()
+    ));
     for name in [
         "x.gone.plain.test",
         "y.x.gone.plain.test",
@@ -436,7 +453,7 @@ fn names_below_a_cached_nxdomain_of_an_unsigned_zone_are_nxdomain() {
         )],
         &[soa("plain.test", 600)],
     );
-    assert!(cache.insert(None, &zone, &answer, &INSECURE, Instant::now()));
+    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, Instant::now()));
     assert!(synthesize(&cache, None, "x.target.plain.test", A, false).is_some());
     assert!(synthesize(&cache, None, "x.alias.plain.test", A, false).is_none());
 }
@@ -444,7 +461,6 @@ fn names_below_a_cached_nxdomain_of_an_unsigned_zone_are_nxdomain() {
 /// The NSEC3 zone `n3.test` (no salt, no iterations) with the apex and `www` (A): two
 /// records, the whole chain.
 fn nsec3_zone(cache: &Denials, opt_out: bool) {
-    let zone = DnsName::new("n3.test").expect("zone");
     let mut hashes: Vec<([u8; 20], Vec<u16>)> = vec![
         (
             nsec3_hash(&wire_name("n3.test"), &[], 0),
@@ -468,7 +484,7 @@ fn nsec3_zone(cache: &Denials, opt_out: bool) {
         authority.push(rrsig(&owner, types::NSEC3, 3, "n3.test", 300));
     }
     let answer = message("nothing.n3.test", A, 3, &[], &authority);
-    assert!(cache.insert(None, &zone, &answer, &SECURE, Instant::now()));
+    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
 }
 
 #[test]
@@ -550,8 +566,7 @@ fn the_switch_the_truncation_the_flush_and_the_bound() {
     for index in 0..40u32 {
         let zone = format!("z{index}.test");
         let answer = message(&format!("gone.{zone}"), A, 3, &[], &[soa(&zone, 600)]);
-        let apex = DnsName::new(&zone).expect("zone");
-        assert!(small.insert(None, &apex, &answer, &INSECURE, Instant::now()));
+        assert!(small.insert(None, &answer, &INSECURE, Origin::Recursion, Instant::now()));
         assert!(small.len() <= 16, "{index}");
     }
     assert!(small.len() >= 8);
@@ -561,7 +576,6 @@ fn the_switch_the_truncation_the_flush_and_the_bound() {
 #[test]
 fn records_expire_with_their_ttl() {
     let cache = denials();
-    let zone = DnsName::new("example.test").expect("zone");
     let mut authority: Vec<Rr> = signed_soa("example.test", 2).into();
     authority.extend(nsec(
         "example.test",
@@ -579,7 +593,7 @@ fn records_expire_with_their_ttl() {
     ));
     let answer = message("b.example.test", A, 3, &[], &authority);
     let now = Instant::now();
-    assert!(cache.insert(None, &zone, &answer, &SECURE, now));
+    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, now));
     assert!(synthesize(&cache, None, "c.example.test", A, true).is_some());
     let asked = ask("c.example.test", A);
     let mut out = Vec::new();
@@ -638,7 +652,6 @@ fn canonical_order_is_byte_order() {
 fn a_wildcard_expansion_alone_answers_other_names_under_it() {
     // The zone known only from one positive wildcard answer: no SOA, one NSEC record.
     let cache = denials();
-    let zone = DnsName::new("wild.example.test").expect("zone");
     let answer = [
         rr("one.wild.example.test", A, 300, vec![192, 0, 2, 20]),
         rrsig("one.wild.example.test", A, 3, "wild.example.test", 300),
@@ -651,8 +664,7 @@ fn a_wildcard_expansion_alone_answers_other_names_under_it() {
         300,
     );
     let message = message("one.wild.example.test", A, 0, &answer, &authority);
-    assert_eq!(super::zone_of(&message), Some(zone.clone()));
-    assert!(cache.insert(None, &zone, &message, &SECURE, Instant::now()));
+    assert!(cache.insert(None, &message, &SECURE, Origin::Recursion, Instant::now()));
     let (hit, header, _) = synthesize(&cache, None, "foo.wild.example.test", A, true).expect("hit");
     assert_eq!((hit.kind, header.ancount), (DenialKind::Wildcard, 2));
     // A name after `host` is not in the range the record covers.
@@ -660,4 +672,237 @@ fn a_wildcard_expansion_alone_answers_other_names_under_it() {
     // The purge keeps a zone without an SOA while its records live.
     assert_eq!(cache.purge(Instant::now()), 0);
     assert!(synthesize(&cache, None, "foo.wild.example.test", A, true).is_some());
+}
+
+/// The apexes of the zones held.
+fn apexes(cache: &Denials) -> Vec<String> {
+    let store = cache.store.read().expect("store");
+    let mut out: Vec<String> = store
+        .zones
+        .keys()
+        .map(|key| {
+            DnsName::from_wire(apex_of(key))
+                .expect("apex")
+                .0
+                .as_str()
+                .to_owned()
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// An SOA of `zone` whose TTL and MINIMUM are both `ttl`.
+fn lasting_soa(zone: &str, ttl: u32) -> Rr {
+    let mut soa = soa(zone, ttl);
+    let at = soa.data.len() - 4;
+    soa.data[at..].copy_from_slice(&ttl.to_be_bytes());
+    soa
+}
+
+#[test]
+fn records_are_kept_only_under_the_zone_whose_signature_they_carry() {
+    // A secure wildcard answer of 0.example, no SOA: its NSEC carries an RRSIG naming
+    // `example` before the one of 0.example, and the expansion's RRSIG has labels 1.
+    let cache = denials();
+    let answer = [
+        rr("www.0.example", A, 300, vec![192, 0, 2, 1]),
+        rrsig("www.0.example", A, 1, "0.example", 300),
+    ];
+    let [record, own] = nsec(
+        "0.example",
+        "0.example",
+        "zz.0.example",
+        &[2, 6, 46, 47],
+        300,
+    );
+    let other = rrsig("0.example", types::NSEC, 2, "example", 300);
+    let authority = [record, other, own];
+    let wildcard = message("www.0.example", A, 0, &answer, &authority);
+    assert!(cache.insert(None, &wildcard, &SECURE, Origin::Recursion, Instant::now()));
+    assert_eq!(apexes(&cache), vec!["0.example"]);
+    // The NSEC record alone: no wildcard RRset is kept from a signature above its signer.
+    assert_eq!(cache.len(), 1);
+    for name in ["www.example", "other.example", "a.0.example"] {
+        assert!(synthesize(&cache, None, name, A, true).is_none(), "{name}");
+    }
+
+    // The same expansion with labels 2, the signer's own: `*.0.example` answers.
+    let answer = [
+        rr("www.0.example", A, 300, vec![192, 0, 2, 1]),
+        rrsig("www.0.example", A, 2, "0.example", 300),
+    ];
+    let wildcard = message("www.0.example", A, 0, &answer, &authority);
+    assert!(cache.insert(None, &wildcard, &SECURE, Origin::Recursion, Instant::now()));
+    let (hit, _, records) = synthesize(&cache, None, "a.0.example", A, true).expect("hit");
+    assert_eq!(hit.kind, DenialKind::Wildcard);
+    // Only the signature of the zone goes out with the record.
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record.2 == types::RRSIG)
+            .count(),
+        2
+    );
+    assert!(synthesize(&cache, None, "www.example", A, true).is_none());
+
+    // An NXDOMAIN whose SOA is the parent's: the NSEC of 0.example is not the parent's to
+    // keep, and nothing else is learned.
+    let cache = denials();
+    let mut authority: Vec<Rr> = signed_soa("example", 300).into();
+    authority.extend(nsec(
+        "0.example",
+        "0.example",
+        "zz.0.example",
+        &[2, 6, 46, 47],
+        300,
+    ));
+    let answer = message("a.0.example", A, 3, &[], &authority);
+    assert!(!cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.is_empty());
+}
+
+#[test]
+fn a_record_whose_next_name_leaves_its_zone_proves_nothing_there() {
+    // The zone `example` held from a secure NXDOMAIN: its SOA and `example -> a.example`.
+    let cache = denials();
+    let mut authority: Vec<Rr> = signed_soa("example", 300).into();
+    authority.extend(nsec(
+        "example",
+        "example",
+        "a.example",
+        &[2, 6, 46, 47],
+        300,
+    ));
+    let answer = message("0a.example", A, 3, &[], &authority);
+    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    // A record of attacker.example whose next name is `\000.www.example`, carrying an
+    // RRSIG that names `example` as well as its own.
+    let mut next = vec![1, 0];
+    next.extend(wire_name("www.example"));
+    next.extend(bitmap(&[2, 6, 46, 47]));
+    let authority = [
+        rr("attacker.example", types::NSEC, 300, next),
+        rrsig("attacker.example", types::NSEC, 2, "example", 300),
+        rrsig("attacker.example", types::NSEC, 2, "attacker.example", 300),
+    ];
+    let answer = message("x.attacker.example", A, 3, &[], &authority);
+    assert!(!cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    assert_eq!(apexes(&cache), vec!["example"]);
+    for qtype in [A, AAAA, MX] {
+        assert!(synthesize(&cache, None, "www.example", qtype, true).is_none());
+    }
+    // The zone's own records still prove what they cover.
+    assert!(synthesize(&cache, None, "0b.example", A, true).is_some());
+}
+
+#[test]
+fn an_unvalidated_nxdomain_cuts_only_what_its_path_vouches_for() {
+    let cache = Denials::new(DenialSettings {
+        negative_ttl: 60,
+        ..DenialSettings::default()
+    });
+    let alias = [rr(
+        "x.0.example",
+        types::CNAME,
+        300,
+        wire_name("www.example"),
+    )];
+    // A forwarded NXDOMAIN at the end of a CNAME to another zone, with the parent's SOA:
+    // the target is not the forwarder's question, so nothing is cut.
+    let answer = message(
+        "x.0.example",
+        A,
+        3,
+        &alias,
+        &[lasting_soa("example", 1 << 30)],
+    );
+    for verdict in [&Verdict::UNVALIDATED, &INSECURE] {
+        assert!(!cache.insert(None, &answer, verdict, Origin::Forwarder, Instant::now()));
+    }
+    // A signed SOA beside an unsigned CNAME: the zone is signed, so a bare NXDOMAIN cuts
+    // nothing on either path.
+    let authority = [
+        lasting_soa("example", 1 << 30),
+        rrsig("example", types::SOA, 1, "example", 1 << 30),
+    ];
+    let answer = message("x.0.example", A, 3, &alias, &authority);
+    for origin in [Origin::Recursion, Origin::Forwarder] {
+        assert!(!cache.insert(None, &answer, &INSECURE, origin, Instant::now()));
+    }
+    assert!(cache.is_empty());
+    for name in ["www.example", "a.www.example"] {
+        assert!(synthesize(&cache, None, name, A, false).is_none(), "{name}");
+    }
+
+    // The forwarder's question itself: cut, for at most `negative_ttl`.
+    let answer = message(
+        "gone.0.example",
+        A,
+        3,
+        &[],
+        &[lasting_soa("0.example", 1 << 30)],
+    );
+    let now = Instant::now();
+    assert!(cache.insert(None, &answer, &Verdict::UNVALIDATED, Origin::Forwarder, now));
+    let (hit, _, records) = synthesize(&cache, None, "a.gone.0.example", A, false).expect("hit");
+    assert_eq!(hit.kind, DenialKind::NxdomainCut);
+    assert!(records.iter().all(|record| record.3 <= 60));
+    let asked = ask("a.gone.0.example", A);
+    let mut out = Vec::new();
+    assert!(
+        cache
+            .answer(
+                None,
+                &wire_name("a.gone.0.example"),
+                A,
+                &client(&asked, false, 1232),
+                now + Duration::from_secs(61),
+                &mut out,
+            )
+            .is_none()
+    );
+}
+
+#[test]
+fn an_answer_that_is_not_secure_leaves_a_secure_zone_as_it_is() {
+    let cache = denials();
+    nsec_zone(&cache, None);
+    let before = cache.len();
+    let answer = message("gone.example.test", A, 3, &[], &[soa("example.test", 600)]);
+    for verdict in [&INSECURE, &Verdict::UNVALIDATED] {
+        assert!(!cache.insert(None, &answer, verdict, Origin::Recursion, Instant::now()));
+    }
+    assert_eq!(cache.len(), before);
+    let (hit, header, _) = synthesize(&cache, None, "c.example.test", A, true).expect("hit");
+    assert_eq!((hit.kind, header.ad), (DenialKind::Nxdomain, true));
+    assert!(
+        synthesize(&cache, None, "x.gone.example.test", A, true)
+            .is_none_or(|(hit, ..)| hit.kind != DenialKind::NxdomainCut)
+    );
+}
+
+#[test]
+fn a_delegation_covering_the_wildcard_proves_nothing_below_it() {
+    // `sub.example.test` is a delegation whose record covers `*.sub.example.test`; a
+    // record below it covers `x.sub.example.test`.
+    let cache = denials();
+    let mut authority: Vec<Rr> = signed_soa("example.test", 300).into();
+    authority.extend(nsec(
+        "example.test",
+        "sub.example.test",
+        "a.sub.example.test",
+        &[2, 46, 47],
+        300,
+    ));
+    authority.extend(nsec(
+        "example.test",
+        "a.sub.example.test",
+        "z.sub.example.test",
+        &[A, 46, 47],
+        300,
+    ));
+    let answer = message("b.sub.example.test", A, 3, &[], &authority);
+    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(synthesize(&cache, None, "x.sub.example.test", A, true).is_none());
 }

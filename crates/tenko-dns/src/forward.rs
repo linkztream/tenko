@@ -93,7 +93,7 @@ use crate::{
 // WP10.3: the denial and failure caches.
 use crate::{
     cache::{Denials, Failures, Verdict, denial::DenialSettings},
-    recursion::{DenialCache, FailureCache, FailureCause, denial::DenialKind},
+    recursion::{DenialCache, FailureCache, FailureCause, Origin, denial::DenialKind},
 };
 // WP10.3: end.
 
@@ -558,7 +558,7 @@ impl Forwarder {
                 .map_or(FAILURE_BOUND, |cache| cache.entries);
             Arc::new(Failures::new(recursion.recursion.failure_max, bound))
         });
-        let denials = settings.cache.as_ref().map(|_| {
+        let denials = settings.cache.as_ref().map(|cache| {
             let defaults = crate::recursion::RecursionSettings::default();
             let recursion = settings
                 .recursion
@@ -568,6 +568,7 @@ impl Forwarder {
                 aggressive: recursion.aggressive_nsec,
                 entries: recursion.denial_entries,
                 nsec3_iterations: recursion.caps.nsec3_insecure_above,
+                negative_ttl: cache.negative_ttl,
             }))
         });
         // WP10.1: the engine when recursion is on.
@@ -892,11 +893,16 @@ impl Shared {
                             Some(u32::try_from(hold.as_secs()).unwrap_or(u32::MAX).max(1));
                     }
                     cache.insert_with(key, &resolved.message, Instant::now(), None, &verdict);
-                    self.keep_denials(view, &resolved.message, &verdict);
+                    self.keep_denials(view, &resolved.message, &verdict, Origin::Recursion);
                 }
                 _ if !question.cd => {
                     cache.insert(key, &resolved.message, Instant::now(), None);
-                    self.keep_denials(view, &resolved.message, &Verdict::UNVALIDATED);
+                    self.keep_denials(
+                        view,
+                        &resolved.message,
+                        &Verdict::UNVALIDATED,
+                        Origin::Recursion,
+                    );
                 }
                 _ => {}
             }
@@ -906,13 +912,17 @@ impl Shared {
     // WP10.1: end.
 
     // WP10.3: the denial cache's records come from what the answer cache keeps.
-    /// Keeps the denial records (or, unsigned, the NXDOMAIN of RFC 8020) of `message`.
-    fn keep_denials(&self, view: Option<ViewId>, message: &[u8], verdict: &Verdict) {
-        let Some(denials) = &self.denials else {
-            return;
-        };
-        if let Some(zone) = crate::cache::denial::zone_of(message) {
-            denials.insert(view, &zone, message, verdict, Instant::now());
+    /// Keeps the denial records (or, unsigned, the NXDOMAIN of RFC 8020) of `message`,
+    /// which came from `origin`.
+    fn keep_denials(
+        &self,
+        view: Option<ViewId>,
+        message: &[u8],
+        verdict: &Verdict,
+        origin: Origin,
+    ) {
+        if let Some(denials) = &self.denials {
+            denials.insert(view, message, verdict, origin, Instant::now());
         }
     }
     // WP10.3: end.
@@ -1303,11 +1313,16 @@ impl Shared {
                     let verdict = validation.verdict(self.failure_ttl());
                     cache.insert_with(key, &answer, Instant::now(), rule, &verdict);
                     // WP10.3: forwarded answers feed the denial cache too.
-                    self.keep_denials(key.view(), &answer, &verdict);
+                    self.keep_denials(key.view(), &answer, &verdict, Origin::Forwarder);
                 }
                 _ if !question.cd => {
                     cache.insert(key, &answer, Instant::now(), rule);
-                    self.keep_denials(key.view(), &answer, &Verdict::UNVALIDATED);
+                    self.keep_denials(
+                        key.view(),
+                        &answer,
+                        &Verdict::UNVALIDATED,
+                        Origin::Forwarder,
+                    );
                 }
                 _ => {}
             }

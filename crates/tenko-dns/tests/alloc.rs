@@ -947,7 +947,7 @@ mod denial_data {
 }
 
 fn the_denial_synthesis_does_not_allocate() {
-    use tenko_dns::recursion::DenialCache as _;
+    use tenko_dns::recursion::{DenialCache as _, Origin};
     let catalog = CatalogHandle::new(Catalog::build(&full_image()));
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -973,7 +973,7 @@ fn the_denial_synthesis_does_not_allocate() {
         )
     });
     let denials = forwarder.denials().expect("a denial cache");
-    for (zone, answer, secure) in denial_data::answers() {
+    for (_, answer, secure) in denial_data::answers() {
         let verdict = Verdict {
             state: if secure {
                 SecurityState::Secure
@@ -982,13 +982,7 @@ fn the_denial_synthesis_does_not_allocate() {
             },
             ..Verdict::UNVALIDATED
         };
-        assert!(denials.insert(
-            None,
-            &DnsName::new(zone).expect("zone"),
-            &answer,
-            &verdict,
-            Instant::now()
-        ));
+        assert!(denials.insert(None, &answer, &verdict, Origin::Recursion, Instant::now()));
     }
     let responder = Responder::new(
         Authoritative::new(catalog).with_settings(Settings {

@@ -104,6 +104,18 @@ pub fn common_suffix<'a>(a: &'a [u8], b: &[u8]) -> &'a [u8] {
     name::suffix(a, la - common)
 }
 
+/// The closest encloser of `qname` that the record covering it implies: the longer of the
+/// suffixes the name shares with the record's owner and with its next name.
+fn closest_encloser<'a>(qname: &'a [u8], covering: &Nsec<'_>) -> &'a [u8] {
+    let by_owner = common_suffix(qname, covering.owner);
+    let by_next = common_suffix(qname, &covering.next);
+    if name::label_count(by_owner) >= name::label_count(by_next) {
+        by_owner
+    } else {
+        by_next
+    }
+}
+
 /// The wildcard at `encloser`: `*.encloser`.
 pub fn wildcard_of(encloser: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(encloser.len() + 2);
@@ -131,14 +143,7 @@ pub fn prove_nxdomain(records: &[Nsec<'_>], qname: &[u8], apex: &[u8]) -> Result
         .iter()
         .find(|nsec| nsec.covers(qname, apex))
         .ok_or(ProofFault::Missing)?;
-    let by_owner = common_suffix(qname, covering.owner);
-    let by_next = common_suffix(qname, &covering.next);
-    let encloser = if name::label_count(by_owner) >= name::label_count(by_next) {
-        by_owner
-    } else {
-        by_next
-    };
-    let wildcard = wildcard_of(encloser);
+    let wildcard = wildcard_of(closest_encloser(qname, covering));
     if records.iter().any(|nsec| nsec.matches(&wildcard)) {
         return Err(ProofFault::Exists);
     }
@@ -195,14 +200,7 @@ pub fn prove_nodata(
         .iter()
         .find(|nsec| nsec.covers(qname, apex))
         .ok_or(ProofFault::Missing)?;
-    let by_owner = common_suffix(qname, covering.owner);
-    let by_next = common_suffix(qname, &covering.next);
-    let encloser = if name::label_count(by_owner) >= name::label_count(by_next) {
-        by_owner
-    } else {
-        by_next
-    };
-    let wildcard = wildcard_of(encloser);
+    let wildcard = wildcard_of(closest_encloser(qname, covering));
     let star = records
         .iter()
         .find(|nsec| nsec.matches(&wildcard))
@@ -213,17 +211,34 @@ pub fn prove_nodata(
     Ok(Nodata::Wildcard)
 }
 
-/// Proves that a wildcard answer for `qname` was right (RFC 4035 section 5.3.4): a record
-/// covers the name itself, so no closer match exists.
+/// Proves that a wildcard answer for `qname`, signed with `labels` (the RRSIG's labels
+/// field), was right (RFC 4035 sections 5.3.4 and 5.4): the wildcard's closest encloser,
+/// the last `labels` labels of the name, lies within the zone and below the name, and a
+/// record covers the name itself and implies that same closest encloser, so no closer
+/// match exists.
 ///
 /// # Errors
 ///
 /// [`ProofFault`].
-pub fn prove_wildcard(records: &[Nsec<'_>], qname: &[u8], apex: &[u8]) -> Result<(), ProofFault> {
+pub fn prove_wildcard(
+    records: &[Nsec<'_>],
+    qname: &[u8],
+    labels: u8,
+    apex: &[u8],
+) -> Result<(), ProofFault> {
+    let count = name::label_count(qname);
+    let labels = usize::from(labels);
+    if labels >= count || labels < name::label_count(apex) {
+        return Err(ProofFault::Missing);
+    }
+    let encloser = name::suffix(qname, count - labels);
     if records.iter().any(|nsec| nsec.matches(qname)) {
         return Err(ProofFault::Exists);
     }
-    if records.iter().any(|nsec| nsec.covers(qname, apex)) {
+    if records
+        .iter()
+        .any(|nsec| nsec.covers(qname, apex) && closest_encloser(qname, nsec) == encloser)
+    {
         Ok(())
     } else {
         Err(ProofFault::Missing)

@@ -7,7 +7,7 @@
 
 use std::time::Instant;
 
-use tenko_core::dns::{DnsName, ViewId};
+use tenko_core::dns::ViewId;
 
 use crate::cache::{Client, Verdict};
 
@@ -44,6 +44,18 @@ impl DenialKind {
     }
 }
 
+/// Where an answer the denial cache is given came from: what it may take from an
+/// NXDOMAIN of an unsigned zone (RFC 8020) depends on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// The engine's resolution: each name of an alias chain was asked of the servers of its
+    /// own zone, and a negative step's SOA is that zone's (`recurse::message::classify`).
+    Recursion,
+    /// An upstream's answer to a forwarded question: the question name is the upstream's
+    /// to deny, the names an alias chain leads to are not.
+    Forwarder,
+}
+
 /// A synthesized answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DenialHit {
@@ -69,15 +81,16 @@ pub trait DenialCache: Send + Sync {
     ) -> Option<DenialHit>;
 
     /// Keeps the NSEC or NSEC3 records and the SOA of the validated negative (or
-    /// wildcard) answer `answer` of `zone` (the runtime). Returns whether anything was
-    /// kept: the records only from a `secure` verdict, the name an NXDOMAIN of an unsigned
-    /// zone denies (RFC 8020) from any verdict but `bogus`.
+    /// wildcard) answer `answer`, which came from `origin` (the runtime), under the zone
+    /// that signed them. Returns whether anything was kept: the records only from a
+    /// `secure` verdict, the name an NXDOMAIN of an unsigned zone denies (RFC 8020) from
+    /// any verdict but `bogus`.
     fn insert(
         &self,
         view: Option<ViewId>,
-        zone: &DnsName,
         answer: &[u8],
         verdict: &Verdict,
+        origin: Origin,
         now: Instant,
     ) -> bool;
 
@@ -114,9 +127,9 @@ impl DenialCache for NoDenial {
     fn insert(
         &self,
         _view: Option<ViewId>,
-        _zone: &DnsName,
         _answer: &[u8],
         _verdict: &Verdict,
+        _origin: Origin,
         _now: Instant,
     ) -> bool {
         false

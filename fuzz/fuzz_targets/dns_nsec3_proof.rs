@@ -53,7 +53,8 @@ fuzz_target!(|data: &[u8]| {
     let qtype = u16::from(*qtype);
     let _ = nsec::prove_nxdomain(&nsecs, &qname, &apex);
     let _ = nsec::prove_nodata(&nsecs, &qname, qtype, &apex);
-    let _ = nsec::prove_wildcard(&nsecs, &qname, &apex);
+    let apex_labels = u8::try_from(tenko_dns::name::label_count(&apex)).unwrap_or(u8::MAX);
+    let _ = nsec::prove_wildcard(&nsecs, &qname, apex_labels, &apex);
     let _ = nsec::delegation(&nsecs, &qname, &apex);
     let Some(chain) = Chain::new(&nsec3s, &apex) else {
         return;

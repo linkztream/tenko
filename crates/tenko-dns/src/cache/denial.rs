@@ -8,8 +8,14 @@
 //!   wildcard RRsets a validated expansion showed; each with its signatures and a lifetime of
 //!   its smallest TTL, never past an original TTL or a signature's expiration. They come from
 //!   answers the validator called `secure` only, never from insecure, bogus or unvalidated
-//!   ones. An NXDOMAIN of an unsigned (or unvalidated) zone keeps the name it denies instead
-//!   (RFC 8020: the last name of a CNAME chain, below the SOA's zone), with the SOA.
+//!   ones, and each is kept under the zone that signed it: the signer the validator checked
+//!   it under ([`rrset::signer_of`]), which must be the zone of the answer's SOA (else of its
+//!   first denial record); a wildcard RRset only when its signature's labels reach at least
+//!   that zone's. An NXDOMAIN of an unsigned (or unvalidated) zone keeps the name it denies
+//!   instead (RFC 8020), with the SOA, for at most `negative_ttl`: on the recursion path the
+//!   last name of a CNAME chain, below the SOA's zone; from a forwarder the question name
+//!   only. A signed SOA in such an answer keeps nothing, and an insecure answer never
+//!   replaces a zone held from secure ones.
 //! - **The bound** (`denial_entries`: 2,000 under Home, 20,000 otherwise) counts records and
 //!   names; past it the least recently used sixteenth goes.
 //! - **The lookup** ([`Denials::answer`], the worker): for a name the answer cache has
@@ -39,7 +45,7 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-use tenko_core::dns::{DnsName, SecurityState, ViewId};
+use tenko_core::dns::{SecurityState, ViewId};
 
 use self::store::{Chain3, Cut, Nsec, Nsec3, Set, Zone, nsec3_params, wildcard_key};
 use crate::{
@@ -49,8 +55,9 @@ use crate::{
     recurse::message::{self, Rr, types},
     recursion::{
         ValidationCaps,
-        denial::{DenialCache, DenialHit, DenialKind},
+        denial::{DenialCache, DenialHit, DenialKind, Origin},
     },
+    validate::rrset::{self, Sig},
 };
 
 /// The longest key of a zone: the view's tag and id, and the apex.
@@ -65,6 +72,9 @@ pub struct DenialSettings {
     pub entries: usize,
     /// The most NSEC3 iterations of a chain it keeps (the validator's insecure cap).
     pub nsec3_iterations: u16,
+    /// The longest a negative answer is kept, in seconds (the answer cache's
+    /// `negative_ttl`): an SOA and the names of RFC 8020 live no longer.
+    pub negative_ttl: u32,
 }
 
 impl Default for DenialSettings {
@@ -73,6 +83,7 @@ impl Default for DenialSettings {
             aggressive: true,
             entries: 20_000,
             nsec3_iterations: ValidationCaps::DEFAULT.nsec3_insecure_above,
+            negative_ttl: 3_600,
         }
     }
 }
@@ -123,30 +134,23 @@ fn unsynthesized(qtype: u16) -> bool {
     ) || (128..=255).contains(&qtype)
 }
 
-/// The zone whose denial records `answer` carries: the owner of its SOA, else the signer of
-/// its NSEC or NSEC3 records; for the forwarder to pass to [`DenialCache::insert`].
-pub fn zone_of(answer: &[u8]) -> Option<DnsName> {
-    let parsed = message::parse(answer)?;
-    let wire = parsed
-        .authority
-        .iter()
-        .find(|rr| rr.rtype == types::SOA)
-        .map(|rr| rr.owner.clone())
-        .or_else(|| {
-            parsed
-                .authority
-                .iter()
-                .find(|rr| matches!(rr.covered(), Some(types::NSEC | types::NSEC3)))
-                .and_then(|rr| signer(rr).map(<[u8]>::to_ascii_lowercase))
-        })?;
-    DnsName::from_wire(&wire).ok().map(|(name, _)| name)
+/// The signer `rrset` (records at one owner of `rtype`, with `sigs`) is checked under
+/// by the validator ([`rrset::signer_of`]): for a secure answer, the zone that vouched
+/// for it.
+fn verified_signer(owner: &[u8], rtype: u16, sigs: &[&Rr]) -> Option<Vec<u8>> {
+    rrset::signer_of(
+        owner,
+        rtype,
+        sigs.iter().filter_map(|rr| Sig::parse(&rr.data)),
+    )
 }
 
-/// The signer's name of an RRSIG's data (uncompressed, as the parser leaves it).
-fn signer(rrsig: &Rr) -> Option<&[u8]> {
-    let data = rrsig.data.get(18..)?;
-    let end = crate::wire::skip_name(data, 0)?;
-    Some(&data[..end])
+/// The signatures of `sigs` whose signer is `apex`.
+fn by_signer<'a>(sigs: &[&'a Rr], apex: &[u8]) -> Vec<&'a Rr> {
+    sigs.iter()
+        .copied()
+        .filter(|rr| Sig::parse(&rr.data).is_some_and(|sig| sig.signer_lower() == apex))
+        .collect()
 }
 
 /// The labels field of an RRSIG.
@@ -180,6 +184,7 @@ fn rrset<'a>(section: &'a [Rr], owner: &[u8], rtype: u16) -> (Vec<&'a Rr>, Vec<&
 /// What one answer adds to a zone.
 #[derive(Debug, Default)]
 struct Learned {
+    apex: Vec<u8>,
     soa: Option<Set>,
     nsec: Vec<Nsec>,
     nsec3: Vec<Nsec3>,
@@ -256,50 +261,116 @@ impl Denials {
         removed
     }
 
-    /// What `answer`, the validated answer of `zone` (`apex`), adds.
-    fn learn(&self, apex: &[u8], answer: &[u8], verdict: &Verdict, now: u32) -> Option<Learned> {
-        let parsed = message::parse(answer)?;
-        let unix = unix_now();
-        let mut learned = Learned::default();
-        let (soa, sigs) = rrset(&parsed.authority, apex, types::SOA);
-        learned.soa = Set::build(apex, &soa, &sigs, now, unix);
-        if verdict.state == SecurityState::Secure {
-            self.learn_secure(apex, &parsed, &mut learned, now, unix);
-        } else if parsed.rcode == 3 && learned.soa.is_some() {
-            // RFC 8020: the name the NXDOMAIN denies is the last of the chain.
-            let mut denied = parsed.qname.clone();
-            for _ in 0..16 {
-                let Some(target) = parsed
-                    .answer
-                    .iter()
-                    .find(|rr| rr.owner == denied && rr.rtype == types::CNAME)
-                    .and_then(Rr::target)
-                else {
-                    break;
-                };
-                denied = target;
-            }
-            if name::is_within(&denied, apex) && denied != apex {
-                let soa = learned.soa.as_ref()?;
-                let ttl = soa.left(now).min(soa.soa_minimum().unwrap_or(u32::MAX));
-                learned.cut = Some((denied, now.saturating_add(ttl)));
-            }
-        }
-        (!learned.is_empty()).then_some(learned)
+    /// The SOA set at `apex` in `parsed` with the signatures of `signer` (all of them for
+    /// `None`), never living past `negative_ttl`.
+    fn soa(
+        &self,
+        parsed: &message::Parsed,
+        apex: &[u8],
+        signer: Option<&[u8]>,
+        now: u32,
+    ) -> Option<Set> {
+        let (records, sigs) = rrset(&parsed.authority, apex, types::SOA);
+        let sigs = match signer {
+            Some(signer) => by_signer(&sigs, signer),
+            None => sigs,
+        };
+        let mut soa = Set::build(apex, &records, &sigs, now, unix_now())?;
+        soa.expires = soa
+            .expires
+            .min(now.saturating_add(self.settings.negative_ttl));
+        soa.fresh(now).then_some(soa)
     }
 
-    fn learn_secure(
-        &self,
-        apex: &[u8],
-        parsed: &message::Parsed,
-        learned: &mut Learned,
-        now: u32,
-        unix: u32,
-    ) {
+    /// What `parsed`, an answer the validator did not call secure, adds: the name its
+    /// NXDOMAIN denies in an unsigned zone (RFC 8020), under the zone of its SOA, for the
+    /// negative TTL at most `negative_ttl`. Only an SOA the path vouches for counts: on
+    /// the recursion path each name of an alias chain was asked of its own zone's servers,
+    /// so the last name is denied; a forwarder's answer denies the question name alone. A
+    /// signed SOA keeps nothing: a signed zone is answered from its validated NSEC or NSEC3
+    /// records only.
+    fn learn_cut(&self, parsed: &message::Parsed, origin: Origin, now: u32) -> Option<Learned> {
+        if parsed.rcode != 3 {
+            return None;
+        }
+        let apex = parsed
+            .authority
+            .iter()
+            .find(|rr| rr.rtype == types::SOA)?
+            .owner
+            .clone();
+        if parsed
+            .authority
+            .iter()
+            .any(|rr| rr.owner == apex && rr.covered() == Some(types::SOA))
+        {
+            return None;
+        }
+        // RFC 8020: the name the NXDOMAIN denies is the last of the chain.
+        let mut denied = parsed.qname.clone();
+        for _ in 0..16 {
+            let Some(target) = parsed
+                .answer
+                .iter()
+                .find(|rr| rr.owner == denied && rr.rtype == types::CNAME)
+                .and_then(Rr::target)
+            else {
+                break;
+            };
+            denied = target;
+        }
+        if origin == Origin::Forwarder && denied != parsed.qname {
+            return None;
+        }
+        if !name::is_within(&denied, &apex) || denied == apex {
+            return None;
+        }
+        let soa = self.soa(parsed, &apex, None, now)?;
+        let ttl = soa.left(now).min(soa.soa_minimum().unwrap_or(u32::MAX));
+        if ttl == 0 {
+            return None;
+        }
+        Some(Learned {
+            soa: Some(soa),
+            cut: Some((denied, now.saturating_add(ttl))),
+            apex,
+            ..Learned::default()
+        })
+    }
+
+    /// What `parsed`, an answer the validator called secure, adds: the records the zone
+    /// of its SOA signed (else the zone of its first NSEC or NSEC3 record), each kept only
+    /// when the signer the validator checked it under is that zone.
+    fn learn_secure(&self, parsed: &message::Parsed, now: u32) -> Option<Learned> {
+        let unix = unix_now();
+        let apex = match parsed.authority.iter().find(|rr| rr.rtype == types::SOA) {
+            Some(soa) => {
+                let (_, sigs) = rrset(&parsed.authority, &soa.owner, types::SOA);
+                // The zone's own SOA is signed by the zone.
+                let signer = verified_signer(&soa.owner, types::SOA, &sigs)?;
+                (signer == soa.owner).then_some(signer)?
+            }
+            None => [&parsed.authority, &parsed.answer]
+                .into_iter()
+                .find_map(|section| {
+                    let rr = section
+                        .iter()
+                        .find(|rr| matches!(rr.rtype, types::NSEC | types::NSEC3))?;
+                    let (_, sigs) = rrset(section, &rr.owner, rr.rtype);
+                    Some(verified_signer(&rr.owner, rr.rtype, &sigs))
+                })
+                .flatten()?,
+        };
+        let mut learned = Learned {
+            soa: self.soa(parsed, &apex, Some(&apex), now),
+            apex,
+            ..Learned::default()
+        };
+        let apex = learned.apex.clone();
         let mut owners: Vec<&[u8]> = Vec::new();
         for rr in parsed.answer.iter().chain(&parsed.authority) {
             if matches!(rr.rtype, types::NSEC | types::NSEC3)
-                && name::is_within(&rr.owner, apex)
+                && name::is_within(&rr.owner, &apex)
                 && !owners.contains(&rr.owner.as_slice())
             {
                 owners.push(&rr.owner);
@@ -317,18 +388,25 @@ impl Denials {
                     &parsed.answer
                 };
                 let (records, sigs) = rrset(section, owner, rtype);
-                if records.is_empty() || sigs.is_empty() {
+                if records.is_empty()
+                    || verified_signer(owner, rtype, &sigs).as_deref() != Some(apex.as_slice())
+                {
                     continue;
                 }
+                let sigs = by_signer(&sigs, &apex);
                 let Some(set) = Set::build(owner, &records[..1], &sigs, now, unix) else {
                     continue;
                 };
                 if rtype == types::NSEC {
-                    learned.nsec.extend(Nsec::of(set));
+                    // The next name of a zone's record lies within the zone (the last one's
+                    // is the apex).
+                    learned.nsec.extend(
+                        Nsec::of(set).filter(|record| name::is_within(&record.next_name, &apex)),
+                    );
                     continue;
                 }
                 // An NSEC3 owner is the hash's label right below the apex.
-                if name::label_count(owner) != name::label_count(apex) + 1
+                if name::label_count(owner) != name::label_count(&apex) + 1
                     || name::suffix(owner, 1) != apex
                 {
                     continue;
@@ -357,31 +435,56 @@ impl Denials {
                 }
             }
         }
-        // The wildcard RRsets of an expansion: a signature with fewer labels than its owner
-        // (RFC 4035 section 5.3.4).
+        Self::learn_wildcards(parsed, &apex, &mut learned.wildcards, now, unix);
+        Some(learned)
+    }
+
+    /// The wildcard RRsets of a secure expansion in `parsed` that the zone `apex` signed.
+    fn learn_wildcards(
+        parsed: &message::Parsed,
+        apex: &[u8],
+        wildcards: &mut Vec<(u16, Set)>,
+        now: u32,
+        unix: u32,
+    ) {
+        // The wildcard RRsets of an expansion: a signature by the zone with fewer labels
+        // than its owner and at least the zone's own (RFC 4035 sections 5.3.1 and 5.3.4).
+        let apex_labels = name::label_count(apex);
         for sig in parsed.answer.iter().filter(|rr| rr.rtype == types::RRSIG) {
             let (Some(covered), Some(labels)) = (sig.covered(), sig_labels(sig)) else {
                 continue;
             };
             let owner_labels = name::label_count(&sig.owner);
-            if usize::from(labels) >= owner_labels || !name::is_within(&sig.owner, apex) {
+            let labels = usize::from(labels);
+            if labels >= owner_labels
+                || labels < apex_labels
+                || !name::is_within(&sig.owner, apex)
+                || Sig::parse(&sig.data).is_none_or(|parsed| parsed.signer_lower() != apex)
+            {
                 continue;
             }
-            let encloser = name::suffix(&sig.owner, owner_labels - usize::from(labels));
+            let (records, sigs) = rrset(&parsed.answer, &sig.owner, covered);
+            if verified_signer(&sig.owner, covered, &sigs).as_deref() != Some(apex) {
+                continue;
+            }
+            let encloser = name::suffix(&sig.owner, owner_labels - labels);
             let mut buf = [0u8; order::NAME_MAX];
             let Some(wildcard) = order::wildcard_of(encloser, &mut buf) else {
                 continue;
             };
-            let (records, sigs) = rrset(&parsed.answer, &sig.owner, covered);
-            if learned
-                .wildcards
+            if wildcards
                 .iter()
                 .any(|(rtype, set)| *rtype == covered && *set.owner == *wildcard)
             {
                 continue;
             }
+            // Only the expansion's own signatures, by the zone with these labels.
+            let sigs: Vec<&Rr> = by_signer(&sigs, apex)
+                .into_iter()
+                .filter(|rr| sig_labels(rr).map(usize::from) == Some(labels))
+                .collect();
             if let Some(set) = Set::build(wildcard, &records, &sigs, now, unix) {
-                learned.wildcards.push((covered, set));
+                wildcards.push((covered, set));
             }
         }
     }
@@ -462,20 +565,28 @@ impl DenialCache for Denials {
     fn insert(
         &self,
         view: Option<ViewId>,
-        zone: &DnsName,
         answer: &[u8],
         verdict: &Verdict,
+        origin: Origin,
         now: Instant,
     ) -> bool {
         if verdict.state == SecurityState::Bogus {
             return false;
         }
         let now = self.secs(now);
-        let apex = zone.to_wire();
-        let Some(learned) = self.learn(&apex, answer, verdict, now) else {
+        let Some(parsed) = message::parse(answer) else {
             return false;
         };
         let secure = verdict.state == SecurityState::Secure;
+        let learned = if secure {
+            self.learn_secure(&parsed, now)
+        } else {
+            self.learn_cut(&parsed, origin, now)
+        };
+        let Some(learned) = learned.filter(|learned| !learned.is_empty()) else {
+            return false;
+        };
+        let apex = learned.apex;
         let mut buf = [0u8; ZONE_KEY_MAX];
         let key: Box<[u8]> = zone_key(view, &apex, &mut buf).into();
         let mut guard = self.store.write().unwrap_or_else(PoisonError::into_inner);
@@ -486,8 +597,12 @@ impl DenialCache for Denials {
             .or_insert_with(|| Zone::new(&apex, secure));
         let before = if entry.secure == secure {
             entry.count()
+        } else if entry.secure {
+            // An answer that is not secure never displaces what secure answers proved; the
+            // secure records go when they expire or are flushed.
+            return false;
         } else {
-            // The zone changed sides (a negative trust anchor came or went): start over.
+            // The zone is signed now (a negative trust anchor went): start over.
             let count = entry.count();
             *entry = Zone::new(&apex, secure);
             store.records = store.records.saturating_sub(count);

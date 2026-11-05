@@ -464,6 +464,13 @@ impl Zone {
         if !Self::covers(wild_owner, wild, wildcard_key.as_bytes()) {
             return None;
         }
+        // The same for the record that covers the wildcard: one of a delegation or a DNAME
+        // above the wildcard proves nothing below it.
+        if name::is_within(wildcard, &wild.set.owner)
+            && (is_delegation(&wild.bitmap) || has_type(&wild.bitmap, TYPE_DNAME))
+        {
+            return None;
+        }
         Some(Synth::new(
             DenialKind::Nxdomain,
             soa,

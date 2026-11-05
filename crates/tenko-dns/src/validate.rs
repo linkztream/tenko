@@ -58,7 +58,7 @@ use self::{
     keys::{KeyTable, ZoneState},
     nsec::{Nsec, ProofFault},
     nsec3::{Chain, Nsec3},
-    rrset::{RrSet, Sig, group, verify},
+    rrset::{RrSet, group, verify},
 };
 
 /// The validator's counters since the role started.
@@ -308,13 +308,7 @@ impl DnssecValidator {
     /// The state of one RRset: its signer's keys and the signature, or the zone's state
     /// for an unsigned set.
     async fn judge(&self, walker: &mut Walker<'_>, set: &RrSet<'_>) -> Result<Judged, Incomplete> {
-        let signer = set
-            .sigs
-            .iter()
-            .filter(|sig| sig.type_covered == set.rtype)
-            .map(Sig::signer_lower)
-            .filter(|signer| crate::name::is_within(set.owner, signer))
-            .max_by_key(|signer| crate::name::label_count(signer));
+        let signer = Self::signer(set);
         let Some(signer) = signer else {
             return Ok(match walker.state_at(set.owner).await? {
                 ZoneState::Secure(_) | ZoneState::NotACut => {
@@ -347,6 +341,12 @@ impl DnssecValidator {
                 }
             },
         )
+    }
+
+    /// The signer `judge` checks `set` under ([`rrset::signer_of`]): once the set is
+    /// secure, the signer that vouched for it, whatever other RRSIGs it carries.
+    fn signer(set: &RrSet<'_>) -> Option<Vec<u8>> {
+        rrset::signer_of(set.owner, set.rtype, set.sigs.iter().copied())
     }
 
     /// The state of a CNAME a DNAME synthesized (RFC 6672 section 3.4): it carries no
@@ -408,8 +408,8 @@ impl DnssecValidator {
                 Proof::Nodata(name, qtype) => {
                     nsec::prove_nodata(&denials.nsecs, name, qtype, &denials.zone).map(|_| ())
                 }
-                Proof::Wildcard(name, _) => {
-                    nsec::prove_wildcard(&denials.nsecs, name, &denials.zone)
+                Proof::Wildcard(name, labels) => {
+                    nsec::prove_wildcard(&denials.nsecs, name, labels, &denials.zone)
                 }
             };
             return match result {
@@ -538,7 +538,7 @@ impl DnssecValidator {
             {
                 continue;
             }
-            let Some(zone) = set.sigs.first().map(Sig::signer_lower) else {
+            let Some(zone) = Self::signer(set) else {
                 continue;
             };
             let entry = if let Some(index) = denials.iter().position(|entry| entry.zone == zone) {
@@ -566,7 +566,7 @@ impl DnssecValidator {
                 continue;
             };
             let set = &sets[*index];
-            let Some(zone) = set.sigs.first().map(Sig::signer_lower) else {
+            let Some(zone) = Self::signer(set) else {
                 continue;
             };
             let proved = match denials.iter().find(|entry| entry.zone == zone) {
@@ -594,7 +594,7 @@ impl DnssecValidator {
         let soa_zone = sets[answer_count..]
             .iter()
             .find(|set| set.rtype == types::SOA)
-            .and_then(|set| set.sigs.first().map(Sig::signer_lower))
+            .and_then(Self::signer)
             .or_else(|| denials.first().map(|entry| entry.zone.clone()));
         let Some(soa_zone) = soa_zone else {
             // Nothing says who denies: the zone's state decides.

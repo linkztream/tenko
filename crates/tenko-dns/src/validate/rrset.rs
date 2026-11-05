@@ -174,6 +174,29 @@ impl RrSet<'_> {
     }
 }
 
+/// The signer an RRset is checked under: of the RRSIGs covering `rtype`, the deepest
+/// signer whose name encloses `owner` (lowercase wire form; RFC 4035 section 5.3.1). The
+/// validator verifies the set with that signer's keys and passes over every signature by
+/// another name, so when the set validated, this is the signer that vouched for it.
+pub fn signer_of<'s>(
+    owner: &[u8],
+    rtype: u16,
+    sigs: impl IntoIterator<Item = Sig<'s>>,
+) -> Option<Vec<u8>> {
+    sigs.into_iter()
+        .filter(|sig| sig.type_covered == rtype)
+        .map(|sig| sig.signer_lower())
+        .filter(|signer| name::is_within(owner, signer))
+        .max_by_key(|signer| name::label_count(signer))
+}
+
+/// Whether a signature's labels field fits its signer: at least the labels of the signer's
+/// name, so that a wildcard it signs lies within the signer's zone (RFC 4035 section
+/// 5.3.1).
+pub fn labels_within_signer(sig: &Sig<'_>) -> bool {
+    usize::from(sig.labels) >= name::label_count(&sig.signer_lower())
+}
+
 /// The labels of a lowercase wire name without the root and without a leftmost `*`.
 fn signing_labels(owner: &[u8]) -> usize {
     name::label_count(owner) - usize::from(owner.starts_with(b"\x01*"))
@@ -324,8 +347,8 @@ pub struct Verified {
     pub expiration: u32,
     /// The original TTL of that signature.
     pub original_ttl: u32,
-    /// The signature's signer labels when the RRset is a wildcard expansion: the labels
-    /// of the closest encloser plus one (the wildcard's own), RFC 4035 section 5.3.4.
+    /// The signature's labels when the RRset is a wildcard expansion: the labels of the
+    /// closest encloser, at least the signer's (RFC 4035 sections 5.3.1 and 5.3.4).
     pub wildcard_labels: Option<u8>,
     /// The key tag of the key that verified it.
     pub key_tag: u16,
@@ -378,7 +401,7 @@ fn in_window(sig: &Sig<'_>, now: u32) -> Result<(), Fault> {
 /// otherwise).
 ///
 /// Signatures whose signer is not `zone`, whose type does not match, whose algorithm is
-/// unsupported or whose labels exceed the owner's are passed over. At most
+/// unsupported, whose labels exceed the owner's or fall below the signer's are passed over. At most
 /// `caps.key_candidates` keys of one tag are tried, at most `caps.per_rrset`
 /// verifications are spent on the set and at most `caps.per_query` on the query.
 ///
@@ -425,6 +448,7 @@ pub fn verify(
             || sig.labels > owner_labels
             || !crypto::supported_algorithm(sig.algorithm)
             || !sig.signer.eq_ignore_ascii_case(zone)
+            || !labels_within_signer(sig)
         {
             continue;
         }
@@ -514,6 +538,7 @@ pub fn self_signed(
             || sig.key_tag != key.key_tag
             || sig.algorithm != key.algorithm
             || !sig.signer.eq_ignore_ascii_case(zone)
+            || !labels_within_signer(sig)
             || in_window(sig, now).is_err()
         {
             continue;
@@ -626,5 +651,105 @@ mod tests {
             Some(wildcard.to_vec())
         );
         assert_eq!(signing_labels(wildcard), 2);
+    }
+
+    fn now32() -> u32 {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        u32::try_from(secs % (1 << 32)).unwrap_or(0)
+    }
+
+    /// An A RRset at `owner` signed by `signer` with a fresh Ed25519 key and `labels`:
+    /// the key's DNSKEY data and the RRSIG data.
+    fn signed_a(owner: &str, signer: &str, labels: u8) -> (Vec<u8>, Vec<u8>) {
+        use tenko_core::dns::{DnsName, DnssecAlgorithm, KeyRole, Rtype};
+
+        use crate::dnssec::canonical::{RrsigHead, signed_data_wire};
+        let algorithm = DnssecAlgorithm::Ed25519;
+        let (pair, _) = crypto::KeyPair::generate(algorithm).expect("key");
+        let dnskey = crypto::dnskey_wire(KeyRole::Zsk, algorithm, &pair.public_key());
+        let signer = DnsName::new(signer).expect("signer");
+        let owner = DnsName::new(owner).expect("owner").to_wire();
+        let now = now32();
+        let head = RrsigHead {
+            type_covered: Rtype(types::A),
+            algorithm: algorithm.number(),
+            labels,
+            original_ttl: 300,
+            expiration: now.wrapping_add(3600),
+            inception: now.wrapping_sub(3600),
+            key_tag: crypto::key_tag(&dnskey),
+            signer: &signer,
+        };
+        let rdata = [192u8, 0, 2, 1];
+        let signed_owner = signed_owner(&owner, labels).expect("signed owner");
+        let octets = signed_data_wire(
+            &head.wire(),
+            &signed_owner,
+            Rtype(types::A),
+            300,
+            [rdata.as_slice()],
+        );
+        let signature = pair.sign(&octets).expect("sign");
+        (dnskey, head.with_signature(&signature))
+    }
+
+    fn check(owner: &[u8], dnskey: &[u8], rrsig: &[u8], zone: &[u8]) -> Result<Verified, Fault> {
+        let rdata = [192u8, 0, 2, 1];
+        let set = RrSet {
+            owner,
+            rtype: types::A,
+            ttl: 300,
+            records: vec![rdata.as_slice()],
+            sigs: vec![Sig::parse(rrsig).expect("rrsig")],
+        };
+        verify(
+            &set,
+            zone,
+            &[dnskey],
+            &|_| true,
+            now32(),
+            &ValidationCaps::DEFAULT,
+            &mut Budget::default(),
+        )
+    }
+
+    #[test]
+    fn a_signature_whose_labels_fall_below_its_signer_is_not_accepted() {
+        let owner = b"\x03www\x010\x07example\x00";
+        let zone = b"\x010\x07example\x00";
+        // Labels 2: the wildcard `*.0.example`, inside the signer's zone.
+        let (dnskey, rrsig) = signed_a("www.0.example", "0.example", 2);
+        assert_eq!(
+            check(owner, &dnskey, &rrsig, zone).map(|verified| verified.wildcard_labels),
+            Ok(Some(2))
+        );
+        // Labels 1 signs `*.example`, a name above the signer: never verified, however
+        // good the signature.
+        let (dnskey, rrsig) = signed_a("www.0.example", "0.example", 1);
+        assert_eq!(check(owner, &dnskey, &rrsig, zone), Err(Fault::NoKey));
+        // The plain signature of the owner is unchanged.
+        let (dnskey, rrsig) = signed_a("www.0.example", "0.example", 3);
+        assert_eq!(
+            check(owner, &dnskey, &rrsig, zone).map(|verified| verified.wildcard_labels),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn the_signer_of_a_set_is_the_deepest_enclosing_one() {
+        let (_, genuine) = signed_a("www.0.example", "0.example", 3);
+        let (_, above) = signed_a("www.0.example", "example", 3);
+        let (_, beside) = signed_a("www.0.example", "1.example", 3);
+        let sigs = [&above, &genuine, &beside].map(|data| Sig::parse(data).expect("rrsig"));
+        assert_eq!(
+            signer_of(b"\x03www\x010\x07example\x00", types::A, sigs),
+            Some(b"\x010\x07example\x00".to_vec())
+        );
+        assert_eq!(
+            signer_of(b"\x03www\x010\x07example\x00", types::AAAA, sigs),
+            None
+        );
     }
 }

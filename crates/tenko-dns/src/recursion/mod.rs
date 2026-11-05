@@ -35,7 +35,7 @@ pub use authority::{
     Asked, Authority, AuthorityError, AuthorityQuery, AuthorityTransport, Exchange, MemAuthority,
     MemServer, MemZone, Quirks, ServerCookie,
 };
-pub use denial::{DenialCache, DenialHit, DenialKind, NoDenial};
+pub use denial::{DenialCache, DenialHit, DenialKind, NoDenial, Origin};
 pub use failure::{FailureCache, FailureCause, MemFailures};
 pub use infra::{
     AddressOrigin, DsState, InfraBounds, InfraCache, InfraSizes, MemInfra, NameServer, ServerState,
