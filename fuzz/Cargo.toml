@@ -181,6 +181,14 @@ test = false
 doc = false
 bench = false
 
+# The enrollment token of a node (`tnk2.<id>.<secret>.<fingerprint>`, `tnk1.<id>.<secret>`).
+[[bin]]
+name = "cluster_token"
+path = "fuzz_targets/cluster_token.rs"
+test = false
+doc = false
+bench = false
+
 [[bin]]
 name = "webauthn_authdata"
 path = "fuzz_targets/webauthn_authdata.rs"
