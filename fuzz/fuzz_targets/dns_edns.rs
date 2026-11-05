@@ -89,6 +89,7 @@ fn catalog() -> CatalogHandle {
             rdata: vec![Rdata::from_data(&data)],
             origin: Origin::Manual,
             key: None,
+            principal: None,
             updated: stamp.clone(),
         };
         image.rrsets.insert(set.key(), set);

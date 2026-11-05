@@ -98,6 +98,7 @@ fn fixture() -> &'static Fixture {
             rdata: vec![Rdata::from_data(&data)],
             origin: Origin::Manual,
             key: None,
+            principal: None,
             updated: stamp.clone(),
         };
         let soa = rrset(
