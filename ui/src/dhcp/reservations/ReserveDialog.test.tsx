@@ -4,7 +4,7 @@
 // record, the reservation shown afterwards, the address inside a pool, the lease that already is a
 // reservation, and who is offered the action.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
 import { audit } from "../../api/mock/audit-store";
 import { ADDRESS_IDS, HOST_IDS, INTERFACE_IDS, ipamState } from "../../api/mock/ipam/api";
@@ -15,12 +15,21 @@ import { renderRoute } from "../../app/testing/render";
 import { signInAlex } from "../../auth/account/testkit";
 import { signInWithRoles } from "../../auth/scope-testkit";
 import { setSessionForTest } from "../../auth/session";
-import { setLocale } from "../../i18n";
+import { loadPacks, setLocale } from "../../i18n";
 import AddressesView from "../../ipam/address/AddressesView";
 import AddressView from "../../ipam/address/AddressView";
 import { chooseVrf } from "../../ipam/scope";
 import LeasesPage from "../leases/LeasesPage";
 import { row, rowAction, rowActions, rows } from "../testkit";
+
+// The address page loads the dialog and the reservations of a host lazily, with the words of the
+// `dhcp` pack, and the first test to open one pays for transforming their modules: about a quarter
+// of a second on an idle machine and most of the 1,000 ms limit of `findBy*` on a loaded one. Load
+// them once here, outside of that limit, so each test waits for the dialog to read its data and
+// not for a cold module graph.
+beforeAll(async () => {
+  await Promise.all([import("./ReserveDialog"), import("./HostReservations"), loadPacks(["dhcp"])]);
+}, 60_000);
 
 beforeEach(async () => {
   chooseVrf(null);
@@ -35,6 +44,8 @@ afterEach(async () => {
 });
 
 const LEASES = "dhcp-leases";
+/** What a read of the mock API may take on a machine under load, in milliseconds. */
+const READ_TIMEOUT = 5000;
 
 function openAddress(ip: string) {
   return renderRoute(AddressView, {
@@ -45,8 +56,8 @@ function openAddress(ip: string) {
 }
 
 async function addressPage(ip: string) {
-  const page = await screen.findByTestId("page-ipam-address");
-  await waitFor(() => expect(within(page).getByRole("heading", { level: 1 }).textContent).toContain(ip));
+  const page = await screen.findByTestId("page-ipam-address", {}, { timeout: READ_TIMEOUT });
+  await waitFor(() => expect(within(page).getByRole("heading", { level: 1 }).textContent).toContain(ip), { timeout: READ_TIMEOUT });
   return page;
 }
 
@@ -54,10 +65,10 @@ function openLeases() {
   return renderRoute(LeasesPage, { url: "/dhcp/leases", path: "/dhcp/leases", routes: { "/ipam/hosts/:fqdn": () => <div data-testid="host-route" /> } });
 }
 
-/** The dialog once it has read what it needs. */
+/** The dialog once it has read what it needs (the host, the interface and the scope, from the mock API). */
 async function dialog(): Promise<HTMLElement> {
-  const found = await screen.findByTestId("dialog-reserve");
-  await within(found).findByTestId("reserve-form");
+  const found = await screen.findByTestId("dialog-reserve", {}, { timeout: READ_TIMEOUT });
+  await within(found).findByTestId("reserve-form", {}, { timeout: READ_TIMEOUT });
   return found;
 }
 
@@ -82,7 +93,7 @@ describe("from the address page", () => {
   it("prefills the address's host, interface and MAC address and says what the save changes", async () => {
     openAddress("192.0.2.30");
     const page = await addressPage("192.0.2.30");
-    fireEvent.click(await within(page).findByTestId("address-reserve"));
+    fireEvent.click(await within(page).findByTestId("address-reserve", {}, { timeout: READ_TIMEOUT }));
     const d = await dialog();
     expect(within(d).getByTestId("reserve-address").textContent).toBe("192.0.2.30");
     expect(within(d).getByTestId("reserve-scope").textContent).toContain("192.0.2.0/24");
@@ -103,7 +114,7 @@ describe("from the address page", () => {
     const spy = vi.spyOn(globalThis, "fetch");
     openAddress("192.0.2.30");
     const page = await addressPage("192.0.2.30");
-    fireEvent.click(await within(page).findByTestId("address-reserve"));
+    fireEvent.click(await within(page).findByTestId("address-reserve", {}, { timeout: READ_TIMEOUT }));
     const d = await dialog();
     await waitFor(() => expect(field(d, "reserve-iface").value).toBe(INTERFACE_IDS["printer-1"]));
     fireEvent.input(field(d, "reserve-client-id"), { target: { value: "01:00:00:5e:00:53:1e" } });
@@ -142,7 +153,7 @@ describe("from the address page", () => {
     await api.post("/api/v1/addresses", { body: { ip: "192.0.2.77", dns_name: "Scanner.example.test" } as never });
     openAddress("192.0.2.77");
     const page = await addressPage("192.0.2.77");
-    fireEvent.click(await within(page).findByTestId("address-reserve"));
+    fireEvent.click(await within(page).findByTestId("address-reserve", {}, { timeout: READ_TIMEOUT }));
     const d = await dialog();
     expect(field(d, "reserve-host").value).toBe("new");
     expect(field(d, "reserve-new-host").value).toBe("scanner");
@@ -172,7 +183,7 @@ describe("from the address page", () => {
     // Another reserved host presents the same MAC address in the scope (IPAM-23).
     openAddress("192.0.2.30");
     const page = await addressPage("192.0.2.30");
-    fireEvent.click(await within(page).findByTestId("address-reserve"));
+    fireEvent.click(await within(page).findByTestId("address-reserve", {}, { timeout: READ_TIMEOUT }));
     const d = await dialog();
     await waitFor(() => expect(field(d, "reserve-iface").value).toBe(INTERFACE_IDS["printer-1"]));
     fireEvent.input(field(d, "reserve-mac"), { target: { value: "00:00:5e:00:53:29" } });

@@ -6,7 +6,7 @@
 // a card and returns the focus to its chip.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { server } from "../api/mock/node";
@@ -15,7 +15,7 @@ import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
 import { session, setSessionForTest } from "../auth/session";
-import { setLocale } from "../i18n";
+import { loadPacks, setLocale } from "../i18n";
 import { PROFILE_DEFAULTS, valueOf } from "../settings/profileMatrix";
 import { formatToggle, TOGGLES } from "../settings/toggles";
 import { signInAdmin, viewerOnly } from "../updates/testkit";
@@ -29,6 +29,15 @@ let memberReads = 0;
 const onRequest = ({ request }: { request: Request }) => {
   if (request.method === "GET" && new URL(request.url).pathname.endsWith("/cluster/members")) memberReads += 1;
 };
+
+// The top bar loads the summary of the cluster (`./cluster`) and the cards behind the chips
+// (`./TopCards`, with the words of the `cluster` and `settings` packs) lazily, and the first test to need one pays for transforming its modules: about a
+// quarter of a second on an idle machine and the better part of the 1,000 ms limit of `findBy*`
+// and `waitFor` on a loaded one. Load them once here, outside of any of those limits, so each
+// test waits for what it tests and not for a cold module graph.
+beforeAll(async () => {
+  await Promise.all([import("./cluster"), import("./TopCards"), loadPacks(["cluster", "settings"])]);
+}, 60_000);
 
 beforeEach(() => {
   memberReads = 0;

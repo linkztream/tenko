@@ -2,7 +2,7 @@
 // per table, the one-time import of the older browser values, the fallback to the browser while
 // the API is out of reach with the reconciliation after it, and the reset.
 import { http, HttpResponse } from "msw";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockPreferences } from "../api/mock/routes-preferences";
 import { server } from "../api/mock/node";
 import { signInAlex } from "../auth/account/testkit";
@@ -22,7 +22,39 @@ import {
 
 const PATH = "*/api/v1/auth/preferences/:key";
 const user = () => session()?.user.id ?? "missing";
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The debounce and the retry of the store in these tests, in milliseconds. */
+const DEBOUNCE = 30;
+const RETRY = 50;
+
+/**
+ * Lets the test's own clock run: only the store's timers (setTimeout, clearTimeout) are faked, so
+ * the debounce and the retry fire when the test says and never because the machine was slow. The
+ * requests of the mock API still run on real turns of the event loop; `until` waits for them.
+ */
+function fakeClock() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+}
+
+/** Moves the fake clock by `ms` and lets the promises that wake up settle. */
+const tick = (ms: number) => vi.advanceTimersByTimeAsync(ms);
+
+/**
+ * Waits for `check` to stop throwing, on real turns of the event loop. `vi.waitFor` is no use
+ * here: with fake timers it also moves the clock on every poll, which would fire the debounce.
+ */
+async function until(check: () => void, timeout = 5000): Promise<void> {
+  const end = Date.now() + timeout;
+  for (;;) {
+    try {
+      check();
+      return;
+    } catch (err) {
+      if (Date.now() > end) throw err;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
 
 /** Counts the writes of the store and lets a test hold their answers. */
 function watchWrites(options: { hold?: boolean; fail?: boolean } = {}) {
@@ -55,11 +87,13 @@ function watchWrites(options: { hold?: boolean; fail?: boolean } = {}) {
 beforeEach(async () => {
   localStorage.clear();
   await signInAlex();
-  setLayoutTimingForTest({ debounce: 30, retry: 50 });
+  setLayoutTimingForTest({ debounce: DEBOUNCE, retry: RETRY });
   await syncLayoutsForTest(user());
+  fakeClock();
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   localStorage.clear();
 });
 
@@ -103,18 +137,24 @@ describe("the layout store", () => {
     patchLayout(user(), "addresses", { hidden: ["mac", "mode"] });
     expect(tableLayout(user(), "addresses")()?.hidden).toEqual(["mac", "mode"]);
     expect(watch.writes).toHaveLength(0);
-    await sleep(60);
-    expect(watch.writes).toHaveLength(1);
-    // A change while the first write is in flight waits for it.
+    // Not before the debounce has run out ...
+    await tick(DEBOUNCE - 1);
+    expect(watch.writes).toHaveLength(0);
+    // ... and once it has, in one request for both changes.
+    await tick(1);
+    await until(() => expect(watch.writes).toHaveLength(1));
+    // A change while the first write is in flight waits for it: its debounce runs out, no
+    // second request starts.
     patchLayout(user(), "addresses", { order: ["ip", "mac"] });
-    await sleep(60);
+    await tick(DEBOUNCE);
     expect(watch.writes).toHaveLength(1);
     watch.release();
-    await sleep(60);
-    expect(watch.writes).toHaveLength(2);
+    await until(() => expect(watch.writes).toHaveLength(2));
     expect(watch.maxInFlight()).toBe(1);
     expect(watch.writes[1]?.body).toEqual({ version: 1, hidden: ["mac", "mode"], order: ["ip", "mac"] });
-    expect(mockPreferences()["table:addresses"]).toEqual({ version: 1, order: ["ip", "mac"], hidden: ["mac", "mode"] });
+    await until(() =>
+      expect(mockPreferences()["table:addresses"]).toEqual({ version: 1, order: ["ip", "mac"], hidden: ["mac", "mode"] }),
+    );
   });
 
   it("imports the browser's older values once per table, then forgets them", async () => {
@@ -133,20 +173,27 @@ describe("the layout store", () => {
     expect(localStorage.getItem(`${LEGACY_COLUMNS}dns-zones`)).toBeNull();
     expect(localStorage.getItem(`${LEGACY_WIDTHS}${user()}:dns-zones`)).toBeNull();
     expect(localStorage.getItem(`${LEGACY_COLUMNS}dhcp-leases`)).toBeNull();
-    await sleep(60);
-    expect(mockPreferences()["table:dns-zones"]).toEqual({ version: 1, order: ["name", "kind"], hidden: ["serial"], widths: { name: 260 } });
-    // A second sign-in finds nothing more to import.
+    // The import writes at once, without the debounce.
+    await until(() =>
+      expect(mockPreferences()["table:dns-zones"]).toEqual({ version: 1, order: ["name", "kind"], hidden: ["serial"], widths: { name: 260 } }),
+    );
+    // A second sign-in finds nothing more to import: no write, not even after the debounce.
     const watch = watchWrites();
     await syncLayoutsForTest(user());
-    await sleep(60);
+    await tick(DEBOUNCE * 2);
     expect(watch.writes).toHaveLength(0);
   });
 
   it("falls back to the browser while the API is out of reach and reconciles when it returns", async () => {
     let reachable = false;
+    let refusedWrites = 0;
     server.use(
       http.get("*/api/v1/auth/preferences", () => (reachable ? undefined : HttpResponse.error())) as never,
-      http.put(PATH, () => (reachable ? undefined : HttpResponse.error())) as never,
+      http.put(PATH, () => {
+        if (reachable) return undefined;
+        refusedWrites++;
+        return HttpResponse.error();
+      }) as never,
     );
     patchLayout(user(), "findings", { hidden: ["since"] });
     await syncLayoutsForTest(user());
@@ -154,21 +201,25 @@ describe("the layout store", () => {
     // The change applies and survives a reload of the page in this browser.
     expect(tableLayout(user(), "findings")()?.hidden).toEqual(["since"]);
     expect(JSON.parse(localStorage.getItem(`tenko-layout:${user()}:findings`) ?? "{}")).toMatchObject({ pending: true });
-    await sleep(60);
+    // The debounce runs out and the write fails; the layout stays on the server's side unwritten.
+    await tick(DEBOUNCE);
+    await until(() => expect(refusedWrites).toBe(1));
     expect(mockPreferences()["table:findings"]).toBeUndefined();
-    // The API comes back: the store reads it again and writes what is pending.
+    // The API comes back: when the retry delay is over the store reads it again, and writes what
+    // is pending.
     reachable = true;
-    await sleep(150);
-    expect(syncState()).toBe("ready");
-    await sleep(60);
-    expect(mockPreferences()["table:findings"]).toEqual({ version: 1, hidden: ["since"] });
-    expect(JSON.parse(localStorage.getItem(`tenko-layout:${user()}:findings`) ?? "{}")).toMatchObject({ pending: false });
+    await tick(RETRY);
+    await until(() => expect(syncState()).toBe("ready"));
+    await until(() => expect(mockPreferences()["table:findings"]).toEqual({ version: 1, hidden: ["since"] }));
+    await until(() =>
+      expect(JSON.parse(localStorage.getItem(`tenko-layout:${user()}:findings`) ?? "{}")).toMatchObject({ pending: false }),
+    );
   });
 
   it("takes the server's value for what did not change here, and drops a layout reset elsewhere", async () => {
     patchLayout(user(), "jobs", { hidden: ["owner"] });
-    await sleep(60);
-    expect(mockPreferences()["table:jobs"]).toEqual({ version: 1, hidden: ["owner"] });
+    await tick(DEBOUNCE);
+    await until(() => expect(mockPreferences()["table:jobs"]).toEqual({ version: 1, hidden: ["owner"] }));
     // Another browser resets the table.
     await fetch(`${location.origin}/api/v1/auth/preferences/table:jobs`, { method: "DELETE" });
     await syncLayoutsForTest(user());
@@ -177,20 +228,22 @@ describe("the layout store", () => {
 
   it("deletes the key on reset, at once", async () => {
     patchLayout(user(), "addresses", { hidden: ["mac"], widths: { ip: 140 } });
-    await sleep(60);
-    expect(mockPreferences()["table:addresses"]).toBeDefined();
+    await tick(DEBOUNCE);
+    await until(() => expect(mockPreferences()["table:addresses"]).toBeDefined());
     const watch = watchWrites();
     resetLayout(user(), "addresses");
     expect(tableLayout(user(), "addresses")()).toBeNull();
-    await sleep(10);
-    expect(watch.writes).toEqual([{ method: "DELETE", key: "table:addresses", body: null }]);
-    expect(mockPreferences()["table:addresses"]).toBeUndefined();
+    // At once: the clock has not moved since the reset, so no debounce is behind this request.
+    await until(() => expect(watch.writes).toEqual([{ method: "DELETE", key: "table:addresses", body: null }]));
+    await until(() => expect(mockPreferences()["table:addresses"]).toBeUndefined());
   });
 
   it("keeps a table whose id cannot be a key in the browser only", async () => {
     const watch = watchWrites();
     patchLayout(user(), "Not a key", { hidden: ["a"] });
-    await sleep(60);
+    // No debounce is started for it, so there is nothing to wait for; run the clock past one
+    // anyway to show that nothing is sent.
+    await tick(DEBOUNCE * 2);
     expect(watch.writes).toHaveLength(0);
     expect(tableLayout(user(), "Not a key")()?.hidden).toEqual(["a"]);
   });
@@ -199,7 +252,14 @@ describe("the layout store", () => {
     const watch = watchWrites();
     const ids = Array.from({ length: 128 }, (_, i) => `${"c".repeat(60)}${String(i).padStart(4, "0")}`);
     patchLayout(user(), "big", { order: ids, hidden: ids });
-    await sleep(200);
+    await tick(DEBOUNCE);
+    await until(() => expect(watch.writes).toHaveLength(1));
+    // The refusal is final: the layout is marked as written, and the retry delay passing sends
+    // nothing more.
+    await until(() =>
+      expect(JSON.parse(localStorage.getItem(`tenko-layout:${user()}:big`) ?? "{}")).toMatchObject({ pending: false }),
+    );
+    await tick(RETRY * 2);
     expect(watch.writes).toHaveLength(1);
     expect(tableLayout(user(), "big")()?.order).toHaveLength(128);
     expect(syncState()).toBe("ready");
