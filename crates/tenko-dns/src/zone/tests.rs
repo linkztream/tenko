@@ -6,9 +6,10 @@ use tenko_core::{
     RequestCtx, SystemComponent,
     dns::{
         AclEntry, DnsName, Origin, Rdata, RecordData, RrSet, Rtype, ScopeName, SerialPolicy,
-        SoaDefaults, TsigAlgorithm, ZoneKind, codes, tables::RRSETS,
+        SoaDefaults, TextBytes, TsigAlgorithm, ZoneKind, codes, tables::RRSETS,
     },
     ipam::Stamp,
+    serde_util::HexBytes,
 };
 use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadViewExt, Store, WriteBatch};
 use tenko_vault::MemVault;
@@ -312,6 +313,254 @@ async fn another_origin_needs_a_take_over() {
         summary(&service, zone.id).await.origins,
         vec![(Origin::Manual, 3)]
     );
+}
+
+/// The DHCID record type (RFC 4701), by which a DHCP writer holds a name.
+const DHCID: Rtype = Rtype(49);
+
+fn dhcp(owner: &str, record: RecordData) -> Change {
+    Change {
+        op: Op::Set,
+        scope: ScopeName::DEFAULT,
+        name: name(owner),
+        rtype: record.rtype(),
+        ttl: Some(300),
+        records: vec![record],
+        take_over: false,
+        origin: Origin::Dhcp,
+    }
+}
+
+fn dhcid(owner: &str, last: u8) -> Change {
+    dhcp(
+        owner,
+        RecordData::Unknown {
+            rtype: DHCID,
+            data: HexBytes(vec![0, 2, 1, last]),
+        },
+    )
+}
+
+fn aaaa(last: u8) -> RecordData {
+    RecordData::Aaaa {
+        address: format!("2001:db8::{last}").parse().expect("address"),
+    }
+}
+
+/// A DHCP writer adds nothing beside data of another origin at a name it does not hold
+/// (RFC 4703 section 5, ADR 0020 point 2), whatever the type: no `dhcp` AAAA beside a
+/// `manual` A, no `dhcp` A beside a `manual` TXT. A name the writer holds (a `dhcp`
+/// DHCID stands there) stays its to update; `ipam` data gives way only where the zone
+/// lets dynamic writers replace it; a removal of its own records is never held up.
+#[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the cases of one rule, read top to bottom"
+)]
+async fn a_dhcp_writer_adds_nothing_beside_another_origin_at_a_name_it_does_not_hold() {
+    let (service, store) = new_service();
+    let zone = service
+        .create(&cx(), new_zone("example.test"))
+        .await
+        .expect("create")
+        .zone;
+    let refused = |error: super::ZoneError, origin: &str| {
+        assert!(error.is(codes::RECORD_ORIGIN), "{error:?}");
+        assert_eq!(
+            error.coded().params.get("origin").map(String::as_str),
+            Some(origin)
+        );
+    };
+
+    // A manual A at the name: a dhcp AAAA (with its DHCID) is refused.
+    service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[a("nas.example.test", &["192.0.2.9"])],
+            false,
+        )
+        .await
+        .expect("manual A");
+    let error = service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[
+                dhcp("nas.example.test", aaaa(9)),
+                dhcid("nas.example.test", 1),
+            ],
+            false,
+        )
+        .await
+        .expect_err("a dhcp AAAA beside a manual A");
+    refused(error, "manual");
+
+    // A manual TXT at the name: a dhcp A is refused.
+    service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[Change {
+                op: Op::Set,
+                scope: ScopeName::DEFAULT,
+                name: name("printer.example.test"),
+                rtype: Rtype::TXT,
+                ttl: Some(300),
+                records: vec![RecordData::Txt {
+                    strings: vec![TextBytes(b"model=1".to_vec())],
+                }],
+                take_over: false,
+                origin: Origin::Manual,
+            }],
+            false,
+        )
+        .await
+        .expect("manual TXT");
+    let error = service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[
+                dhcp(
+                    "printer.example.test",
+                    RecordData::A {
+                        address: "192.0.2.10".parse().expect("address"),
+                    },
+                ),
+                dhcid("printer.example.test", 2),
+            ],
+            false,
+        )
+        .await
+        .expect_err("a dhcp A beside a manual TXT");
+    refused(error, "manual");
+
+    // A name the writer holds: manual data added beside it later does not stop its updates,
+    // and it removes its own records beside that data.
+    service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[
+                dhcp(
+                    "laptop.example.test",
+                    RecordData::A {
+                        address: "192.0.2.11".parse().expect("address"),
+                    },
+                ),
+                dhcid("laptop.example.test", 3),
+            ],
+            false,
+        )
+        .await
+        .expect("the dhcp name");
+    service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[Change {
+                op: Op::Set,
+                scope: ScopeName::DEFAULT,
+                name: name("laptop.example.test"),
+                rtype: Rtype::TXT,
+                ttl: Some(300),
+                records: vec![RecordData::Txt {
+                    strings: vec![TextBytes(b"asset=7".to_vec())],
+                }],
+                take_over: false,
+                origin: Origin::Manual,
+            }],
+            false,
+        )
+        .await
+        .expect("a manual TXT beside the dhcp name");
+    service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[dhcp("laptop.example.test", aaaa(11))],
+            false,
+        )
+        .await
+        .expect("the holder adds its AAAA");
+    service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[
+                Change {
+                    op: Op::Delete,
+                    records: Vec::new(),
+                    ..dhcp("laptop.example.test", aaaa(11))
+                },
+                Change {
+                    op: Op::Delete,
+                    records: Vec::new(),
+                    ..dhcp(
+                        "laptop.example.test",
+                        RecordData::A {
+                            address: "192.0.2.11".parse().expect("address"),
+                        },
+                    )
+                },
+                Change {
+                    op: Op::Delete,
+                    records: Vec::new(),
+                    ..dhcid("laptop.example.test", 3)
+                },
+            ],
+            false,
+        )
+        .await
+        .expect("the holder removes its records");
+
+    // An ipam A at the name: a dhcp AAAA is refused until the zone lets dynamic writers
+    // replace ipam data.
+    let ipam = RrSet {
+        zone: zone.id,
+        scope: ScopeName::DEFAULT,
+        name: name("server.example.test"),
+        rtype: Rtype::A,
+        ttl: 600,
+        rdata: vec![Rdata::from_data(&RecordData::A {
+            address: "192.0.2.20".parse().expect("address"),
+        })],
+        origin: Origin::Ipam,
+        key: None,
+        updated: Stamp::new(cx().now, cx().principal),
+    };
+    let mut batch = WriteBatch::for_request(&cx());
+    super::stage_put(&mut batch, None, &ipam).expect("stage");
+    store.propose(batch).await.expect("ipam write");
+    let changes = [
+        dhcp("server.example.test", aaaa(20)),
+        dhcid("server.example.test", 4),
+    ];
+    let error = service
+        .change_records(&cx(), zone.id, &changes, false)
+        .await
+        .expect_err("a dhcp AAAA beside an ipam A");
+    refused(error, "ipam");
+    service
+        .update(
+            &cx(),
+            zone.id,
+            super::ZoneChange {
+                update: Some(tenko_core::dns::UpdatePolicy {
+                    may_replace_ipam: true,
+                    ..tenko_core::dns::UpdatePolicy::default()
+                }),
+                ..super::ZoneChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("the zone lets dynamic writers replace ipam data");
+    service
+        .change_records(&cx(), zone.id, &changes, false)
+        .await
+        .expect("the dhcp AAAA where the zone allows it");
 }
 
 #[tokio::test]

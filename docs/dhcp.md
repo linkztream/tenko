@@ -644,7 +644,7 @@ The rule applies to the forward zone and to the reverse zone alike. A refused zo
 
 The name of a lease, in this order:
 
-1. The name of option 81 (RFC 4702), lowercase. A single label goes under the forward zone (`laptop` becomes `laptop.lan.example.test`); a name below the zone stays as it is; a name outside the zone (or the apex itself) is cut to its first label under the zone, or refused with `refuse_foreign`.
+1. The name of option 81 (RFC 4702), lowercase. A single label goes under the forward zone (`laptop` becomes `laptop.lan.example.test`); a name below the zone stays as it is; a name outside the zone (or the apex itself) is cut to its first label under the zone, or refused with `refuse_foreign`. A name below the apex that lies in a child zone Tenko serves, or below a delegation of the forward zone (an NS set between the name and the apex), is outside the forward zone as well and follows the same rule (`lies in the zone <zone>`, `lies below the delegation <name>` when refused): a name is written into the zone that holds it, and the forward zone never holds a child zone's name.
 2. Without option 81, the host name of option 12, when `legacy_clients` is on; a host name with dots counts by its first label.
 3. Otherwise no name.
 
@@ -668,18 +668,23 @@ The reply's option 81 says what the server does (RFC 4702 section 4): S when the
 
 ### 13.4 Who may replace what
 
-| What is at the name | A and DHCID | PTR |
+A name is one owner's whatever the types and the address family of its records (RFC 4703 section 5, ADR 0020 point 2): a name that holds any record of another origin is refused to a client whose DHCID does not stand there. The rows apply to every RRset at the name, the DHCID aside:
+
+| What is at the name | A (or AAAA) and DHCID | PTR |
 |---|---|---|
 | nothing | written | written |
 | `dhcp`, the client's DHCID | replaced | replaced |
-| `dhcp`, another client's DHCID, or a `dhcp` A without one | refused (`protect`), taken over (`replace`) | replaced: the PTR belongs to the address |
-| `ipam` | taken over only where the zone's `may_replace_ipam` allows it, else refused | the same |
-| `manual`, `dynamic`, `transfer`, `dnssec`, `ad` | refused | refused |
+| `dhcp`, another client's DHCID, or `dhcp` records without one, of any type | refused (`protect`), taken over with the other client's records of both families (`replace`) | replaced: the PTR belongs to the address |
+| `ipam`, of any type | taken over only where the zone's `may_replace_ipam` allows it, else refused | the same |
+| `manual`, `dynamic`, `transfer`, `dnssec`, `ad`, of any type | refused (`holds <type> records of the origin <origin>`) | refused |
 | a CNAME | refused | refused |
+| a name IPAM gives one of its addresses, at any address | refused unless the zone's `may_replace_ipam` allows it (`IPAM manages <name>`) | the same |
+
+So a manual A refuses the AAAA of a DHCPv6 client, a manual MX or TXT refuses an A, and a host IPAM names with only an IPv4 address keeps its name against a DHCPv6 client. A client whose DHCID stands at the name keeps updating its own records beside data an operator added later, and never touches that data. The zone service checks the rule once more at the write (`crates/tenko-dns/src/zone/records.rs`): a `dhcp` change adds nothing at a name that holds data of another origin unless a `dhcp` DHCID already stands there, or the data is `ipam` in a zone that lets dynamic writers replace it.
 
 An address that IPAM names (an IPAM address object with a DNS name, such as a `reserved` host's) gets no DDNS at all: the DNS actuator writes its records with the origin `ipam`.
 
-On release (a DHCPRELEASE or an operator's release), on expiry, and when a lease's name or client changes, the names the lease wrote are removed: the lease's A record (and the DHCID with the last address of the set) only while the DHCID at the name is still the client's, and a `dhcp` PTR that points at the lease's name. Another client's records and records of another origin are never touched. A client refused by name protection gets the name on its next renewal after the holder's names are gone.
+On release (a DHCPRELEASE or an operator's release), on expiry, and when a lease's name or client changes, the names the lease wrote are removed: the lease's A record (and the DHCID with the last address of the set) only while the DHCID at the name is still the client's, and a `dhcp` PTR that points at the lease's name. The removal looks for the client's DHCID in the zone that holds the name first, then in the zones above it, so a name an earlier version wrote into a parent zone is removed from there. Another client's records and records of another origin are never touched. A client refused by name protection gets the name on its next renewal after the holder's names are gone.
 
 ### 13.5 The worker
 
@@ -689,8 +694,8 @@ The outcome is written to the lease row (`ddns` in `GET /dhcp/leases/{addr}`): `
 
 ### 13.6 Tests and measurements
 
-- `crates/tenko-dhcp/src/ddns/`: the RFC 4701 examples of section 3.6 for the three identifier types, the name rules, the reply flags.
-- `crates/tenko-dhcp/tests/ddns.rs`: the worker over the in-memory store: names on commit, name protection, removal on release and expiry, the zone switch under Standard, IPAM's names, a manual record, `replace` and the client that writes its own A record, Hardened's forced protection, and a policy's DDNS settings winning over the scope's both ways. `tests/classes.rs` checks that the engine records the policy's settings on the lease row; the configuration service's tests (`src/config/tests.rs`) the refusal of `replace` under Hardened.
+- `crates/tenko-dhcp/src/ddns/`: the RFC 4701 examples of section 3.6 for the three identifier types, the name rules, the reply flags, and the planner's rules: records of another origin of any type and either family, the holder's own updates, `replace` across the families, the names of child zones and delegations, and the removal from the zone that holds the name.
+- `crates/tenko-dhcp/tests/ddns.rs`: the worker over the in-memory store: names on commit, name protection, removal on release and expiry, the zone switch under Standard, IPAM's names, a manual record, a manual MX or TXT at the name, `replace` and the client that writes its own A record, Hardened's forced protection, a policy's DDNS settings winning over the scope's both ways, and a name below a child zone or a delegation. `tests/ddns6.rs` adds the DHCPv6 side: a manual A refusing a DHCPv6 claim, a manual AAAA refusing a DHCPv4 claim, an IPAM host with only an IPv4 address keeping its name, and the holder updating its name beside an operator's record. `tests/classes.rs` checks that the engine records the policy's settings on the lease row; the configuration service's tests (`src/config/tests.rs`) the refusal of `replace` under Hardened. The zone service's own check is in `crates/tenko-dns/src/zone/tests.rs`.
 - `crates/tenko/tests/acceptance_dhcp_ddns.rs` (E26 through the binary): a client with option 81 and a legacy client get their A, DHCID and PTR records served by the DNS role on ACK, a second client claiming the first one's name is refused, and the records go on DHCPRELEASE and on expiry. The lab rows of E26 (dhclient, Playwright) wait for WP7.6's lab.
 - M31 (the DDNS rate end to end): `bench/phase3-dhcp/scripts/run-m31-ddns.sh` with the load client `crates/tenko-dhcp/examples/ddns_load.rs`; results in `bench/phase3-dhcp/results/`.
 

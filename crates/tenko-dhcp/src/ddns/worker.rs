@@ -240,7 +240,9 @@ fn domain_of(image: &ConfigImage, request: &DdnsRequest) -> Option<DnsName> {
     DnsName::new(text.trim_end_matches('\0')).ok()
 }
 
-/// Whether IPAM names the address (an address object with a DNS name).
+/// Whether IPAM names the address (an address object with a DNS name): such a lease gets
+/// no names at all. Whether IPAM gives a lease's name to another address is the planner's
+/// check, by name ([`Planner::add`]).
 fn ipam_named(view: &dyn ReadView, vrf: VrfId, addr: IpAddr) -> Result<bool, StoreError> {
     let Some((id, _)) = view.get_typed(&ADDRESS_IPS, &(vrf, addr))? else {
         return Ok(false);
@@ -672,10 +674,17 @@ impl<'a> Worker<'a> {
                     domain,
                     lease_secs: request.lease_secs,
                 };
-                plan::desired(&lease, &zones, profile, named)
+                plan::desired(view, &lease, &zones, profile, named)
             } else {
                 Err(Skip::Quiet(None))
             };
+            // The store could not be read: nothing is removed, and the lease is tried
+            // again.
+            if let Err(Skip::Failed(error)) = &desired {
+                result.failure = Some(error.clone());
+                results.push(result);
+                continue;
+            }
             // Already in place: nothing to write.
             if let Ok(want) = &desired
                 && same_client
@@ -741,6 +750,7 @@ impl<'a> Worker<'a> {
                 }
                 Err(Skip::Quiet(note)) => result.note = note,
                 Err(Skip::Refused(reason)) => result.refusal = Some(reason),
+                Err(Skip::Failed(error)) => result.failure = Some(error),
             }
             results.push(result);
         }

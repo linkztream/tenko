@@ -13,6 +13,11 @@
 //!   only its PTR.
 //! - The DDNS settings a policy decided for the client (the row's `ddns_policy`) win over
 //!   the scope's, both ways.
+//! - A name that holds records of another origin of any type (a manual MX or TXT) is
+//!   refused like one with a manual A.
+//! - A name below a child zone Tenko serves, or below a delegation, is not the forward
+//!   zone's: it is cut to its first label under the forward zone or refused, and the
+//!   parent zone never holds it.
 
 use std::{
     net::{IpAddr, Ipv4Addr},
@@ -29,7 +34,7 @@ use tenko_core::{
     dhcp::{BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, tables::LEASES},
     dns::{
         DnsName, Origin, RecordData, RrSet, RrSetKey, Rtype, ScopeName, SerialPolicy, SoaDefaults,
-        UpdatePolicy, ZoneId, ZoneKind, tables::RRSETS,
+        TextBytes, UpdatePolicy, ZoneId, ZoneKind, tables::RRSETS,
     },
     ipam::{Address, AllocPolicy, Meta, Prefix, PrefixRole, Range, RangeRole, Stamp, Status},
     net::Fqdn,
@@ -349,6 +354,18 @@ where
 
 fn a_of(last: u8) -> RecordData {
     RecordData::A { address: ip(last) }
+}
+
+/// Neither zone holds an A or a DHCID at `owner`.
+async fn nothing_at(lab: &Lab, zones: [ZoneId; 2], owner: &str) {
+    for zone in zones {
+        for rtype in [Rtype::A, DHCID] {
+            assert!(
+                lab.rrset(zone, owner, rtype).await.is_none(),
+                "{owner} {rtype} in a zone"
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -719,4 +736,186 @@ async fn the_policys_ddns_settings_decide_over_the_scopes() {
         Vec::<RecordData>::new()
     );
     assert!(lab.ptr(82).await.is_none());
+}
+
+/// A name is one owner's whatever the types of its records (RFC 4703 section 5, ADR 0020
+/// point 2): a manual MX and a manual TXT at the name refuse a DHCP A as a manual A does,
+/// and the DHCID is not written either.
+#[tokio::test]
+async fn a_manual_mx_or_txt_at_the_name_refuses_a_dhcp_a() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    let manual = |owner: &str, record: RecordData| Change {
+        op: Op::Set,
+        scope: ScopeName::DEFAULT,
+        name: name(owner),
+        rtype: record.rtype(),
+        ttl: None,
+        records: vec![record],
+        take_over: false,
+        origin: Origin::Manual,
+    };
+    lab.zones
+        .change_records(
+            &cx(),
+            lab.forward,
+            &[
+                manual(
+                    "mail.lan.example.test",
+                    RecordData::Mx {
+                        preference: 10,
+                        exchange: name("mx.example.test"),
+                    },
+                ),
+                manual(
+                    "info.lan.example.test",
+                    RecordData::Txt {
+                        strings: vec![TextBytes(b"owner=ops".to_vec())],
+                    },
+                ),
+            ],
+            false,
+        )
+        .await
+        .expect("manual records");
+    lab.commit(lab.lease(63, 1, None, Some("mail"))).await;
+    lab.commit(lab.lease(64, 2, Some(("info", ClientFqdn::FLAG_S)), None))
+        .await;
+    for (last, owner, rtype) in [
+        (63, "mail.lan.example.test", "MX"),
+        (64, "info.lan.example.test", "TXT"),
+    ] {
+        until("the refusal", || async {
+            lab.ddns(last).await.last_error.is_some_and(|error| {
+                error.contains(&format!("holds {rtype} records of the origin manual"))
+            })
+        })
+        .await;
+        assert_eq!(lab.a(owner).await, Vec::<RecordData>::new());
+        assert!(lab.rrset(lab.forward, owner, DHCID).await.is_none());
+        assert!(lab.ptr(last).await.is_none());
+        assert_eq!(lab.ddns(last).await.forward, None);
+    }
+}
+
+/// A name below a child zone Tenko serves, or below a delegation of the forward zone, is
+/// not the scope's forward zone's (ADR 0020 points 3 and 6): it counts as a name outside
+/// the zone, cut to its first label under the forward zone, or refused when the scope
+/// says `refuse_foreign`; the parent zone never holds a name of the child's, and what is
+/// written is removed from the zone it was written into.
+#[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the cut name, the refused name and the delegated name of one lab"
+)]
+async fn a_name_below_a_child_zone_is_written_and_removed_in_the_forward_zone_only() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    let child = lab
+        .zones
+        .create(
+            &cx(),
+            new_zone("sub.lan.example.test", UpdatePolicy::default()),
+        )
+        .await
+        .expect("child zone")
+        .zone
+        .id;
+    lab.zones
+        .change_records(
+            &cx(),
+            lab.forward,
+            &[Change {
+                op: Op::Set,
+                scope: ScopeName::DEFAULT,
+                name: name("dl.lan.example.test"),
+                rtype: Rtype::NS,
+                ttl: None,
+                records: vec![RecordData::Ns {
+                    host: name("ns1.example.test"),
+                }],
+                take_over: false,
+                origin: Origin::Manual,
+            }],
+            false,
+        )
+        .await
+        .expect("the delegation");
+
+    // Cut to the first label under the forward zone, and removed from there.
+    lab.commit(lab.lease(
+        65,
+        1,
+        Some(("h.sub.lan.example.test", ClientFqdn::FLAG_S)),
+        None,
+    ))
+    .await;
+    until("the name under the forward zone", || async {
+        lab.a("h.lan.example.test").await == vec![a_of(65)] && lab.ptr(65).await.is_some()
+    })
+    .await;
+    assert_eq!(lab.ddns(65).await.forward, Some(name("h.lan.example.test")));
+    nothing_at(&lab, [lab.forward, child], "h.sub.lan.example.test").await;
+    lab.end(65, BindingState::Released).await;
+    until("the removal", || async {
+        lab.a("h.lan.example.test").await.is_empty()
+            && lab
+                .rrset(lab.forward, "h.lan.example.test", DHCID)
+                .await
+                .is_none()
+            && lab.ptr(65).await.is_none()
+    })
+    .await;
+    nothing_at(&lab, [lab.forward, child], "h.sub.lan.example.test").await;
+
+    // With `refuse_foreign`, refused with the reason; nothing is written anywhere.
+    lab.config
+        .update_scope(
+            &cx(),
+            lab.scope,
+            ScopeChange {
+                ddns: Some(DdnsPolicy {
+                    enabled: true,
+                    forward_zone: Some(lab.forward),
+                    refuse_foreign: true,
+                    ..DdnsPolicy::default()
+                }),
+                ..ScopeChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("scope");
+    lab.commit(lab.lease(
+        66,
+        2,
+        Some(("h.sub.lan.example.test", ClientFqdn::FLAG_S)),
+        None,
+    ))
+    .await;
+    until("the refusal of the child's name", || async {
+        lab.ddns(66).await.last_error.is_some_and(|error| {
+            error.contains("lies in the zone sub.lan.example.test, not in the scope's forward zone")
+        })
+    })
+    .await;
+    nothing_at(&lab, [lab.forward, child], "h.sub.lan.example.test").await;
+    assert_eq!(lab.a("h.lan.example.test").await, Vec::<RecordData>::new());
+    assert!(lab.ptr(66).await.is_none());
+
+    // Below a delegation of the forward zone: the same.
+    lab.commit(lab.lease(
+        67,
+        3,
+        Some(("h.dl.lan.example.test", ClientFqdn::FLAG_S)),
+        None,
+    ))
+    .await;
+    until("the refusal of the delegated name", || async {
+        lab.ddns(67)
+            .await
+            .last_error
+            .is_some_and(|error| error.contains("lies below the delegation dl.lan.example.test"))
+    })
+    .await;
+    nothing_at(&lab, [lab.forward, child], "h.dl.lan.example.test").await;
+    assert!(lab.ptr(67).await.is_none());
 }

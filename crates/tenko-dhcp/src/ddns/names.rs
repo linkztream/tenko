@@ -3,7 +3,9 @@
 //! - The name of option 81 (RFC 4702) goes under the scope's forward zone: a single label
 //!   becomes `label.zone`; a name below the zone stays as it is; a name outside the zone
 //!   is cut to its first label under the zone, or refused when the scope's policy says
-//!   `refuse_foreign`.
+//!   `refuse_foreign`. A name below the apex that another primary zone holds, or that
+//!   lies below a delegation of the forward zone, is outside the zone as well: the planner
+//!   checks that against the zones ([`super::plan::desired`]) and applies the same rule.
 //! - A client without option 81 that sends option 12 gets its host name under the zone
 //!   when the scope serves legacy clients (`legacy_clients`, DHCP-13); a host name with
 //!   dots counts by its first label.
@@ -25,6 +27,14 @@ pub enum NameRefusal {
     /// The name lies outside the forward zone and the scope refuses such names.
     #[error("the name {0} lies outside the zone {1}")]
     Foreign(String, String),
+    /// The name lies in another primary zone below the forward zone's apex, and the scope
+    /// refuses such names.
+    #[error("the name {0} lies in the zone {1}, not in the scope's forward zone")]
+    OtherZone(String, String),
+    /// The name lies below a delegation of the forward zone, and the scope refuses such
+    /// names.
+    #[error("the name {0} lies below the delegation {1}")]
+    Delegated(String, String),
     /// A label breaks the host-name rules.
     #[error("the name {0} is not a valid host name")]
     Invalid(String),
@@ -42,7 +52,12 @@ pub fn is_host_label(label: &str) -> bool {
         && bytes[bytes.len() - 1] != b'-'
 }
 
-fn under(zone: &DnsName, label: &str) -> Result<DnsName, NameRefusal> {
+/// `label` under `zone`, lowercase, held to the host-name rules.
+///
+/// # Errors
+///
+/// [`NameRefusal::Invalid`] when the label breaks the rules.
+pub fn under(zone: &DnsName, label: &str) -> Result<DnsName, NameRefusal> {
     let label = label.to_ascii_lowercase();
     if !is_host_label(&label) {
         return Err(NameRefusal::Invalid(label));

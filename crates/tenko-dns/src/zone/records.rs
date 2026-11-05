@@ -13,10 +13,13 @@
 //! IPAM writes `ipam`. A change that would replace, shrink or delete an RRset of another
 //! origin than its own is refused with `dns.record.origin` unless the change says
 //! `take_over`; the RRset then takes the change's origin, and the audit record names it.
-//! A batch with an `ipam` change is audited as `dns.record.actuate`, any other as
-//! `dns.record.change`.
+//! A `dhcp` change adds nothing at an owner name that holds data of another origin, of
+//! any type, unless a `dhcp` DHCID already stands there or the data is `ipam` and the zone
+//! lets dynamic writers replace it ([`check_dhcp_writer`], RFC 4703 section 5, ADR 0020
+//! point 2); the writer's own removals are never held up. A batch with an `ipam` change is
+//! audited as `dns.record.actuate`, any other as `dns.record.change`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use tenko_core::{
     ObjectRef, RequestCtx, Revision,
@@ -28,7 +31,7 @@ use tenko_core::{
     },
     ipam::Stamp,
 };
-use tenko_store::{ReadView, ReadViewExt, WriteBatch};
+use tenko_store::{ReadView, ReadViewExt, StoreError, WriteBatch};
 
 use super::{
     JournalLimits, Planned, Written, ZoneError, ZoneResult, ZoneService, holds_data, journal,
@@ -161,6 +164,73 @@ fn change_rdata(change: &Change) -> ZoneResult<Vec<Rdata>> {
     Ok(rdata)
 }
 
+/// The DHCID record type (RFC 4701): the record by which a DHCP writer holds a name.
+const DHCID: Rtype = Rtype(49);
+
+/// The RRsets of one owner name in a scope, as a writer plans against them.
+///
+/// # Errors
+///
+/// The store's error.
+pub fn node_rrsets(
+    view: &dyn ReadView,
+    zone: ZoneId,
+    scope: &ScopeName,
+    name: &DnsName,
+) -> Result<Vec<RrSet>, StoreError> {
+    Ok(view
+        .scan_typed(
+            &RRSETS,
+            super::rrset_range(zone, Some(scope), Some(name)),
+            usize::MAX,
+            false,
+        )?
+        .into_iter()
+        .map(|(_, rrset, _)| rrset)
+        .collect())
+}
+
+/// The rule of a `dhcp` change that adds data at `name` (RFC 4703 section 5, ADR 0020
+/// point 2): the name is the DHCP writer's when a `dhcp` DHCID stands there; otherwise it
+/// may hold nothing of another origin, of any type, except the signer's rows and `ipam`
+/// data in a zone that lets dynamic writers replace it. The check runs over the RRsets as
+/// they were before the batch, so the writer cannot bring its own DHCID along.
+fn check_dhcp_writer<'a>(
+    zone: &Zone,
+    name: &DnsName,
+    before: impl IntoIterator<Item = &'a RrSet>,
+) -> ZoneResult<()> {
+    let before: Vec<&RrSet> = before.into_iter().collect();
+    if before
+        .iter()
+        .any(|rrset| rrset.rtype == DHCID && rrset.origin == Origin::Dhcp)
+    {
+        return Ok(());
+    }
+    for rrset in before {
+        let gives_way = match rrset.origin {
+            Origin::Dhcp | Origin::Dnssec => true,
+            Origin::Ipam => zone.update.may_replace_ipam,
+            Origin::Manual | Origin::Dynamic | Origin::Ad | Origin::Transfer => false,
+        };
+        if !gives_way {
+            return Err(ZoneError::new(
+                codes::RECORD_ORIGIN,
+                409,
+                format!(
+                    "{name} holds {} of the origin {}; a DHCP writer adds nothing beside it",
+                    rrset.rtype,
+                    origin_name(rrset.origin)
+                ),
+            )
+            .param("name", name.as_str())
+            .param("type", rrset.rtype.to_string())
+            .param("origin", origin_name(rrset.origin)));
+        }
+    }
+    Ok(())
+}
+
 /// Plans `changes` against `view`: the diff, the serial steps and the batch that writes
 /// them (none when nothing changes).
 ///
@@ -203,6 +273,8 @@ pub(crate) fn plan(
     let stamp = Stamp::new(cx.now, cx.principal.clone());
     let mut nodes: BTreeMap<(ScopeName, DnsName), Node> = BTreeMap::new();
     let mut taken_over: Vec<String> = Vec::new();
+    // The owner names at which a DHCP writer adds data; its removals are not held up.
+    let mut dhcp_adds: BTreeSet<(ScopeName, DnsName)> = BTreeSet::new();
     for change in changes {
         if !zone.has_scope(&change.scope) {
             return Err(
@@ -247,6 +319,9 @@ pub(crate) fn plan(
             ));
         }
         let key = (change.scope.clone(), change.name.clone());
+        if change.origin == Origin::Dhcp && matches!(change.op, Op::Set | Op::Add) {
+            dhcp_adds.insert(key.clone());
+        }
         if !nodes.contains_key(&key) {
             let before: BTreeMap<Rtype, (RrSet, Revision)> =
                 node(view, zone.id, &change.scope, &change.name)?
@@ -395,6 +470,9 @@ pub(crate) fn plan(
         check_node(&zone.name, entry.after.values())?;
         if name == &zone.name {
             check_apex(&zone.name, entry.after.values())?;
+        }
+        if dhcp_adds.contains(&(scope.clone(), name.clone())) {
+            check_dhcp_writer(zone, name, entry.before.values().map(|(rrset, _)| rrset))?;
         }
     }
     if diff.is_empty() {

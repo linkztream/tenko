@@ -12,6 +12,9 @@
 //! - A dual-stack client (an RFC 4361 client identifier on the DHCPv4 side with the IAID
 //!   and DUID of its DHCPv6 lease) holds one name with an A and an AAAA record and one
 //!   DHCID, which goes with the second of the two releases.
+//! - A name that holds records of another origin of the other family (a manual A, a
+//!   manual AAAA, an IPAM host with only an IPv4 address) is refused, and the holder of a
+//!   name keeps updating it with its own DHCID.
 
 use std::{
     fmt::Write as _,
@@ -21,7 +24,7 @@ use std::{
 };
 
 use tenko_core::{
-    NodeId, PrefixId, Principal, RangeId, RequestCtx, SystemComponent, Timestamp, VrfId,
+    AddressId, NodeId, PrefixId, Principal, RangeId, RequestCtx, SystemComponent, Timestamp, VrfId,
     cluster::LeaderService as _,
     dhcp::{
         BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, Lease6, Lease6Kind,
@@ -30,10 +33,10 @@ use tenko_core::{
     },
     dns::{
         DnsName, Origin, RecordData, RrSet, RrSetKey, Rtype, ScopeName, SerialPolicy, SoaDefaults,
-        UpdatePolicy, ZoneId, ZoneKind, tables::RRSETS,
+        TextBytes, UpdatePolicy, ZoneId, ZoneKind, tables::RRSETS,
     },
-    ipam::{AllocPolicy, Meta, Prefix, PrefixRole, Range, RangeRole, Stamp, Status},
-    net::Duid,
+    ipam::{Address, AllocPolicy, Meta, Prefix, PrefixRole, Range, RangeRole, Stamp, Status},
+    net::{Duid, Fqdn},
     serde_util::HexBytes,
 };
 use tenko_dhcp::{
@@ -44,8 +47,11 @@ use tenko_dhcp::{
     ddns::{DdnsProfile, DdnsService, DdnsSettings, dhcid, plan::DHCID},
     v4::ClientFqdn,
 };
-use tenko_dns::zone::{NewZone, ZoneConfig, ZoneService};
-use tenko_ipam::tables::{PREFIX_RANGES, PREFIXES, RANGES};
+use tenko_dns::zone::{
+    NewZone, ZoneConfig, ZoneService,
+    records::{Change, Op},
+};
+use tenko_ipam::tables::{ADDRESS_IPS, ADDRESSES, PREFIX_RANGES, PREFIXES, RANGES};
 use tenko_store::{MemStore, ReadConsistency, ReadViewExt as _, Store, WriteBatch};
 use tokio_util::sync::CancellationToken;
 
@@ -120,6 +126,7 @@ fn new_zone(apex: &str) -> NewZone {
 
 struct Lab {
     store: Arc<dyn Store>,
+    zones: Arc<ZoneService>,
     config: Arc<ConfigService>,
     vrf: VrfId,
     scope6: PrefixId,
@@ -248,6 +255,7 @@ async fn lab() -> Lab {
     tokio::spawn(async move { service.run(0, token).await });
     Lab {
         store,
+        zones,
         config,
         vrf,
         scope6,
@@ -384,6 +392,14 @@ impl Lab {
         self.row6(last)
             .await
             .map(|lease| lease.ddns)
+            .unwrap_or_default()
+    }
+
+    async fn ddns4(&self, last: u8) -> DdnsState {
+        let view = self.store.read(ReadConsistency::Local).await.expect("view");
+        view.get_typed(&LEASES, &(self.vrf, ip4(last)))
+            .expect("row")
+            .map(|(lease, _)| lease.ddns)
             .unwrap_or_default()
     }
 
@@ -735,4 +751,162 @@ async fn a_dual_stack_client_holds_one_name_with_an_a_and_an_aaaa_record_and_one
                 .is_none()
     })
     .await;
+}
+
+/// A name is one owner's whatever the family of its records (RFC 4703 section 5, ADR 0020
+/// point 2): a manual A with no AAAA beside it refuses a DHCPv6 claim, a manual AAAA
+/// refuses a DHCPv4 claim, a name IPAM gives a host with only an IPv4 address keeps it
+/// against a DHCPv6 claim (before and after the DNS actuator wrote the host's records),
+/// and the client that holds a name keeps updating it with its own DHCID, whatever else
+/// an operator put beside its records.
+#[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the claims of both families against one set of records"
+)]
+async fn a_name_of_another_origin_is_refused_whatever_the_family_of_its_records() {
+    let lab = lab().await;
+    let record = |owner: &str, origin: Origin, data: RecordData| Change {
+        op: Op::Set,
+        scope: ScopeName::DEFAULT,
+        name: name(owner),
+        rtype: data.rtype(),
+        ttl: None,
+        records: vec![data],
+        take_over: false,
+        origin,
+    };
+    lab.zones
+        .change_records(
+            &cx(),
+            lab.forward,
+            &[
+                record(
+                    "nas.example.test",
+                    Origin::Manual,
+                    RecordData::A { address: ip4(9) },
+                ),
+                record("cam.example.test", Origin::Manual, aaaa_of(9)),
+                record(
+                    "files.example.test",
+                    Origin::Ipam,
+                    RecordData::A { address: ip4(8) },
+                ),
+            ],
+            false,
+        )
+        .await
+        .expect("the records of other origins");
+    // An IPAM host with only an IPv4 address and a name, before the actuator wrote it.
+    let address = Address {
+        id: AddressId::generate(),
+        vrf: lab.vrf,
+        ip: IpAddr::V4(ip4(7)),
+        prefix: lab.scope4,
+        status: Status::Active,
+        interface: None,
+        dns_name: Some(Fqdn::new("server.example.test").expect("fqdn")),
+        meta: Meta::new(Stamp::new(
+            Timestamp::now(),
+            Principal::system(SystemComponent::Api),
+        )),
+    };
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Api), Timestamp::now());
+    batch
+        .put_typed(&ADDRESSES, &address.id, &address)
+        .expect("address");
+    batch
+        .put_typed(&ADDRESS_IPS, &(lab.vrf, address.ip), &address.id)
+        .expect("index");
+    lab.store.propose(batch).await.expect("IPAM address");
+
+    // The DHCPv6 claims.
+    for (last, who, host) in [(0x40, 1, "nas"), (0x41, 2, "files"), (0x42, 3, "server")] {
+        lab.commit6(lab.lease6(last, who, Some((host, FLAGS_S_E))))
+            .await;
+    }
+    until("the refusal of the manual name", || async {
+        lab.ddns6(0x40)
+            .await
+            .last_error
+            .is_some_and(|error| error.contains("holds A records of the origin manual"))
+    })
+    .await;
+    for last in [0x41, 0x42] {
+        until("the refusal of IPAM's name", || async {
+            lab.ddns6(last)
+                .await
+                .last_error
+                .is_some_and(|error| error.contains("IPAM manages"))
+        })
+        .await;
+    }
+    for (last, owner) in [
+        (0x40, "nas.example.test"),
+        (0x41, "files.example.test"),
+        (0x42, "server.example.test"),
+    ] {
+        assert_eq!(lab.aaaa(owner).await, Vec::<RecordData>::new(), "{owner}");
+        assert!(
+            lab.rrset(lab.forward, owner, DHCID).await.is_none(),
+            "{owner}"
+        );
+        assert!(lab.ptr6(last).await.is_none(), "{owner}");
+        assert_eq!(lab.ddns6(last).await.forward, None, "{owner}");
+    }
+    assert_eq!(
+        lab.a("nas.example.test").await,
+        vec![RecordData::A { address: ip4(9) }]
+    );
+
+    // The mirror: a manual AAAA refuses a DHCPv4 claim.
+    lab.commit4(lab.lease4_rfc4361(160, 4, 1, ("cam", ClientFqdn::FLAG_S)))
+        .await;
+    until("the refusal of the manual AAAA's name", || async {
+        lab.ddns4(160)
+            .await
+            .last_error
+            .is_some_and(|error| error.contains("holds AAAA records of the origin manual"))
+    })
+    .await;
+    assert_eq!(lab.a("cam.example.test").await, Vec::<RecordData>::new());
+    assert!(
+        lab.rrset(lab.forward, "cam.example.test", DHCID)
+            .await
+            .is_none()
+    );
+    assert!(lab.ptr4(160).await.is_none());
+    assert_eq!(lab.aaaa("cam.example.test").await, vec![aaaa_of(9)]);
+
+    // The holder of a name keeps updating it: its own DHCID stands there, a manual TXT
+    // an operator added beside it changes nothing.
+    lab.commit6(lab.lease6(0x43, 5, Some(("phone", FLAGS_S_E))))
+        .await;
+    until("the phone's name", || async {
+        lab.aaaa("phone.example.test").await == vec![aaaa_of(0x43)]
+    })
+    .await;
+    lab.zones
+        .change_records(
+            &cx(),
+            lab.forward,
+            &[record(
+                "phone.example.test",
+                Origin::Manual,
+                RecordData::Txt {
+                    strings: vec![TextBytes(b"asset=7".to_vec())],
+                },
+            )],
+            false,
+        )
+        .await
+        .expect("a manual TXT beside the client's records");
+    lab.commit6(lab.lease6(0x44, 5, Some(("phone", FLAGS_S_E))))
+        .await;
+    until("the phone's new address", || async {
+        lab.aaaa("phone.example.test").await == vec![aaaa_of(0x44)]
+    })
+    .await;
+    assert_eq!(lab.ddns6(0x44).await.last_error, None);
+    assert_eq!(lab.ptr6(0x44).await, Some(ptr_to("phone.example.test")));
 }
