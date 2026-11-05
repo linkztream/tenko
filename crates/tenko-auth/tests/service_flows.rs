@@ -693,3 +693,413 @@ async fn break_glass_needs_an_attested_hardware_key_and_raises_alarms() {
             .contains(&"auth.login.break_glass".to_owned())
     );
 }
+
+/// The wrong-code and replay rules of the login ceremonies: wrong second-factor codes count
+/// toward the account's lock across challenges, and a finished ceremony is refused by every
+/// service instance that shares the store.
+mod ceremony_rules {
+    use std::sync::Arc;
+
+    use tenko_auth::{
+        AuthConfig, AuthService,
+        challenge::CeremonyKey,
+        lockout::{LockoutMode, LockoutPolicy},
+        model::USERS,
+    };
+    use tenko_vault::Vault;
+
+    use super::*;
+
+    fn seconds(env: &TestEnv) -> u64 {
+        u64::try_from(env.now().0.unix_timestamp()).expect("time")
+    }
+
+    /// Enrolls TOTP for the session's user and returns the seed.
+    async fn enroll_totp(env: &TestEnv, ctx: &RequestCtx) -> Vec<u8> {
+        let enrollment = env.service.totp_enroll_start(ctx).await.expect("start");
+        let seed = base32_decode(enrollment.secret.expose()).expect("seed");
+        let code = totp::code_at(&seed, &TotpParams::default(), seconds(env));
+        env.service
+            .totp_enroll_finish(
+                ctx,
+                &TotpEnrollFinish {
+                    enrollment_id: enrollment.enrollment_id,
+                    code: SecretString::new(code.as_str()),
+                },
+            )
+            .await
+            .expect("enroll");
+        seed
+    }
+
+    /// A six-digit code that no step within the verification window accepts.
+    fn wrong_code(env: &TestEnv, seed: &[u8]) -> String {
+        let params = TotpParams::default();
+        let now = seconds(env);
+        let valid: Vec<String> = [now - 60, now - 30, now, now + 30, now + 60]
+            .into_iter()
+            .map(|at| totp::code_at(seed, &params, at).as_str().to_owned())
+            .collect();
+        (0..1_000_000_u32)
+            .map(|n| format!("{n:06}"))
+            .find(|code| !valid.contains(code))
+            .expect("a wrong code exists")
+    }
+
+    async fn locked(env: &TestEnv) -> bool {
+        let view = env.store.read(ReadConsistency::Local).await.expect("view");
+        view.scan_typed(&USERS, KeyRange::all(), 10, false)
+            .expect("users")
+            .into_iter()
+            .find(|(_, user, _)| user.name == ADMIN)
+            .expect("admin")
+            .1
+            .active_lock(env.now())
+            .is_some()
+    }
+
+    /// A password login that waits out any delay and returns the second-factor challenge.
+    async fn challenge(env: &TestEnv) -> String {
+        loop {
+            match password_login(env, ADMIN, ADMIN_PASSWORD).await {
+                Ok(LoginOutcome::SecondFactor { challenge_id, .. }) => return challenge_id,
+                Err(AuthError::Throttled { retry_after }) => {
+                    env.clock
+                        .advance(Duration::from_secs(retry_after.unwrap_or(60)));
+                }
+                other => panic!("expected a challenge, got {other:?}"),
+            }
+        }
+    }
+
+    /// Sends one wrong code until it is counted. A delayed attempt spends its challenge: the helper waits and
+    /// signs in with the password again for a new one.
+    async fn one_wrong_code(env: &TestEnv, seed: &[u8], challenge_id: &mut String) {
+        loop {
+            let result = env
+                .service
+                .login_totp(
+                    &env.public_ctx(),
+                    None,
+                    &CodeLogin {
+                        challenge_id: challenge_id.clone(),
+                        code: SecretString::new(wrong_code(env, seed).as_str()),
+                    },
+                )
+                .await;
+            match result {
+                Err(AuthError::InvalidCredentials) => return,
+                Err(AuthError::Throttled { retry_after }) => {
+                    assert!(!locked(env).await, "a locked account gets no further code");
+                    env.clock
+                        .advance(Duration::from_secs(retry_after.unwrap_or(60)));
+                    *challenge_id = challenge(env).await;
+                }
+                other => panic!("expected a refused code, got {other:?}"),
+            }
+        }
+    }
+
+    /// Cycles of a correct password and three wrong codes until the account locks; returns
+    /// the number of wrong codes counted.
+    async fn wrong_codes_until_locked(env: &TestEnv, seed: &[u8]) -> u32 {
+        let mut wrong = 0;
+        for _ in 0..20 {
+            let mut challenge_id = challenge(env).await;
+            for _ in 0..3 {
+                one_wrong_code(env, seed, &mut challenge_id).await;
+                wrong += 1;
+                if locked(env).await {
+                    return wrong;
+                }
+            }
+        }
+        panic!("no lock after {wrong} wrong codes");
+    }
+
+    async fn wrong_codes_lock_the_account(profile: Profile) {
+        let (env, session) = TestEnv::installed(profile).await;
+        let ctx = env.session_ctx(&session).await.expect("ctx");
+        let seed = enroll_totp(&env, &ctx).await;
+        let policy = LockoutPolicy::for_mode(env.service.settings().lockout);
+        assert!(
+            policy.lock_after > 3,
+            "the lock needs more than one challenge"
+        );
+
+        let wrong = wrong_codes_until_locked(&env, &seed).await;
+        assert_eq!(wrong, policy.lock_after, "{profile:?}");
+
+        // Locked: the right password and a right code are both refused.
+        assert!(matches!(
+            password_login(&env, ADMIN, ADMIN_PASSWORD).await,
+            Err(AuthError::Throttled { .. })
+        ));
+        let actions = audit_actions(&env).await;
+        assert!(actions.contains(&"auth.user.lock".to_owned()));
+        let view = env.store.read(ReadConsistency::Local).await.expect("view");
+        let alarms = view
+            .scan_typed(&ALARMS, KeyRange::all(), 100, false)
+            .expect("alarms")
+            .into_iter()
+            .filter(|(_, alarm, _)| alarm.kind == AlarmKind::AccountLocked)
+            .count();
+        let expected = usize::from(policy.mode == LockoutMode::LockUntilUnlock);
+        assert_eq!(alarms, expected, "{profile:?}");
+    }
+
+    #[tokio::test]
+    async fn wrong_codes_across_challenges_lock_the_account_under_standard() {
+        wrong_codes_lock_the_account(Profile::Standard).await;
+    }
+
+    #[tokio::test]
+    async fn wrong_codes_across_challenges_lock_the_account_under_hardened() {
+        wrong_codes_lock_the_account(Profile::Hardened).await;
+    }
+
+    #[tokio::test]
+    async fn a_complete_login_clears_the_counter_and_a_password_alone_does_not() {
+        let (env, session) = TestEnv::installed(Profile::Standard).await;
+        let ctx = env.session_ctx(&session).await.expect("ctx");
+        let seed = enroll_totp(&env, &ctx).await;
+        let policy = LockoutPolicy::for_mode(env.service.settings().lockout);
+        assert_eq!(policy.free_attempts, 5);
+
+        // Four wrong codes, then a complete login: the four are forgotten, so five more
+        // wrong codes stay within the free attempts.
+        let mut challenge_id = challenge(&env).await;
+        for _ in 0..4 {
+            one_wrong_code(&env, &seed, &mut challenge_id).await;
+        }
+        env.clock.advance(Duration::from_secs(30));
+        let challenge_id = challenge(&env).await;
+        let code = totp::code_at(&seed, &TotpParams::default(), seconds(&env));
+        expect_session(
+            env.service
+                .login_totp(
+                    &env.public_ctx(),
+                    None,
+                    &CodeLogin {
+                        challenge_id,
+                        code: SecretString::new(code.as_str()),
+                    },
+                )
+                .await
+                .expect("complete login"),
+        );
+        let challenge_id = challenge(&env).await;
+        for _ in 0..5 {
+            assert!(matches!(
+                env.service
+                    .login_totp(
+                        &env.public_ctx(),
+                        None,
+                        &CodeLogin {
+                            challenge_id: challenge_id.clone(),
+                            code: SecretString::new(wrong_code(&env, &seed).as_str()),
+                        },
+                    )
+                    .await,
+                Err(AuthError::InvalidCredentials)
+            ));
+        }
+
+        // A correct password does not clear them: the next wrong code is the sixth failure
+        // and the attempt after it waits.
+        let challenge_id = challenge(&env).await;
+        assert!(matches!(
+            env.service
+                .login_totp(
+                    &env.public_ctx(),
+                    None,
+                    &CodeLogin {
+                        challenge_id: challenge_id.clone(),
+                        code: SecretString::new(wrong_code(&env, &seed).as_str()),
+                    },
+                )
+                .await,
+            Err(AuthError::InvalidCredentials)
+        ));
+        assert!(matches!(
+            password_login(&env, ADMIN, ADMIN_PASSWORD).await,
+            Err(AuthError::Throttled { .. })
+        ));
+    }
+
+    /// The installation's ceremony key, as every controller derives it.
+    fn cluster_ceremony_key() -> CeremonyKey {
+        CeremonyKey::from_cluster_key(&[0x5a; 32])
+    }
+
+    /// A second service instance over the same store and vault, with the same ceremony
+    /// key: another controller, or this one after a restart (nothing in local memory).
+    async fn second_instance(env: &TestEnv) -> Arc<AuthService> {
+        let vault: Arc<dyn Vault> = env.vault.clone();
+        let other = AuthService::new(env.store.clone(), vault, AuthConfig::default())
+            .await
+            .expect("a second instance starts");
+        other.set_ceremony_key(cluster_ceremony_key());
+        other
+    }
+
+    #[tokio::test]
+    async fn a_replayed_passkey_login_is_refused_by_another_instance() {
+        let (env, session) = TestEnv::installed(Profile::Standard).await;
+        env.service.set_ceremony_key(cluster_ceremony_key());
+        let ctx = env.session_ctx(&session).await.expect("ctx");
+        // No signature counter: the authenticator data of a replay is accepted as is, so
+        // only the record of the used ceremony refuses it.
+        let mut authenticator = register(
+            &env,
+            &ctx,
+            SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::None).counter(false),
+            false,
+        )
+        .await
+        .expect("register");
+        let options = env
+            .service
+            .webauthn_login_start(
+                &env.public_ctx(),
+                &WebAuthnLoginStart {
+                    user_name: None,
+                    challenge_id: None,
+                },
+            )
+            .await
+            .expect("start");
+        let finish = WebAuthnLoginFinish {
+            ceremony_id: options.ceremony_id,
+            credential: authenticator.assert(&options.public_key, ORIGIN),
+        };
+        env.service
+            .webauthn_login_finish(&env.public_ctx(), None, &finish)
+            .await
+            .expect("the first finish signs in");
+
+        let other = second_instance(&env).await;
+        assert!(matches!(
+            other
+                .webauthn_login_finish(&env.public_ctx(), None, &finish)
+                .await,
+            Err(AuthError::ChallengeInvalid)
+        ));
+        assert!(matches!(
+            env.service
+                .webauthn_login_finish(&env.public_ctx(), None, &finish)
+                .await,
+            Err(AuthError::ChallengeInvalid)
+        ));
+    }
+
+    #[tokio::test]
+    async fn used_challenges_are_refused_by_an_instance_with_an_empty_memory() {
+        let (env, session) = TestEnv::installed(Profile::Standard).await;
+        env.service.set_ceremony_key(cluster_ceremony_key());
+        let ctx = env.session_ctx(&session).await.expect("ctx");
+
+        // TOTP enrollment: the replay is refused as a used ceremony, before the factor.
+        let enrollment = env.service.totp_enroll_start(&ctx).await.expect("start");
+        let seed = base32_decode(enrollment.secret.expose()).expect("seed");
+        let code = totp::code_at(&seed, &TotpParams::default(), seconds(&env));
+        let enroll = TotpEnrollFinish {
+            enrollment_id: enrollment.enrollment_id,
+            code: SecretString::new(code.as_str()),
+        };
+        env.service
+            .totp_enroll_finish(&ctx, &enroll)
+            .await
+            .expect("enroll");
+
+        // Passkey registration: refused as a used ceremony, not as a duplicate credential.
+        let mut authenticator = SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::None);
+        let options = env
+            .service
+            .webauthn_register_start(
+                &ctx,
+                &WebAuthnRegisterStart {
+                    label: Some("Test key".to_owned()),
+                    security_key: false,
+                },
+            )
+            .await
+            .expect("start");
+        let register = WebAuthnRegisterFinish {
+            ceremony_id: options.ceremony_id,
+            credential: authenticator.register(&options.public_key, ORIGIN),
+        };
+        env.service
+            .webauthn_register_finish(&ctx, &register)
+            .await
+            .expect("register");
+
+        // A second-factor challenge spent on the passkey step.
+        env.clock.advance(Duration::from_secs(60));
+        let challenge_id = challenge(&env).await;
+        env.service
+            .webauthn_login_start(
+                &env.public_ctx(),
+                &WebAuthnLoginStart {
+                    user_name: None,
+                    challenge_id: Some(challenge_id.clone()),
+                },
+            )
+            .await
+            .expect("the passkey step starts");
+
+        let other = second_instance(&env).await;
+        assert!(matches!(
+            other.totp_enroll_finish(&ctx, &enroll).await,
+            Err(AuthError::ChallengeInvalid)
+        ));
+        assert!(matches!(
+            other.webauthn_register_finish(&ctx, &register).await,
+            Err(AuthError::ChallengeInvalid)
+        ));
+        assert!(matches!(
+            other
+                .webauthn_login_start(
+                    &env.public_ctx(),
+                    &WebAuthnLoginStart {
+                        user_name: None,
+                        challenge_id: Some(challenge_id.clone()),
+                    },
+                )
+                .await,
+            Err(AuthError::ChallengeInvalid)
+        ));
+        let code = totp::code_at(&seed, &TotpParams::default(), seconds(&env));
+        assert!(matches!(
+            other
+                .login_totp(
+                    &env.public_ctx(),
+                    None,
+                    &CodeLogin {
+                        challenge_id,
+                        code: SecretString::new(code.as_str()),
+                    },
+                )
+                .await,
+            Err(AuthError::ChallengeInvalid)
+        ));
+        // A code login that completed is refused on the other instance too.
+        let challenge_id = challenge(&env).await;
+        env.clock.advance(Duration::from_secs(30));
+        let code = totp::code_at(&seed, &TotpParams::default(), seconds(&env));
+        let login = CodeLogin {
+            challenge_id,
+            code: SecretString::new(code.as_str()),
+        };
+        expect_session(
+            env.service
+                .login_totp(&env.public_ctx(), None, &login)
+                .await
+                .expect("totp"),
+        );
+        assert!(matches!(
+            other.login_totp(&env.public_ctx(), None, &login).await,
+            Err(AuthError::ChallengeInvalid)
+        ));
+    }
+}

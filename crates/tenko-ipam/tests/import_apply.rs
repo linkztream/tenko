@@ -543,7 +543,7 @@ async fn the_csv_export_round_trips_with_zero_changes() {
 async fn sessions_belong_to_their_uploader_and_can_be_discarded() {
     let env = fresh();
     let cx = person();
-    let (id, _) = import(&env, &cx, vec![fixture("ip-plan.ods")]).await;
+    let (id, _) = import(&env, &cx, vec![fixture("ip-plan.xlsx")]).await;
     let stranger = person();
     let error = env.imports.get(&stranger, id).await.expect_err("hidden");
     assert!(error.is(codes::NOT_FOUND));
@@ -629,7 +629,7 @@ async fn staged_chunks(store: &MemStore) -> usize {
 async fn previewing_an_unchanged_import_again_keeps_its_revision() {
     let env = env_with(true, ImportConfig::default());
     let cx = person();
-    let (id, first) = import(&env, &cx, vec![fixture("ip-plan.ods")]).await;
+    let (id, first) = import(&env, &cx, vec![fixture("ip-plan.xlsx")]).await;
     let staged = staged_chunks(&env.store).await;
     let again = env
         .imports
@@ -656,7 +656,7 @@ async fn uploads_expire() {
     let cx = person();
     let view = env
         .imports
-        .upload(&cx, vec![fixture("ip-plan.ods")])
+        .upload(&cx, vec![fixture("ip-plan.xlsx")])
         .await
         .expect("upload");
     assert_eq!(staged_chunks(&env.store).await, 1);
@@ -672,7 +672,7 @@ async fn uploads_expire() {
 
     let view = env
         .imports
-        .upload(&cx, vec![fixture("ip-plan.ods")])
+        .upload(&cx, vec![fixture("ip-plan.xlsx")])
         .await
         .expect("upload");
     tokio::time::sleep(Duration::from_millis(5)).await;

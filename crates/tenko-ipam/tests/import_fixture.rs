@@ -1,7 +1,7 @@
 //! The fixture workbook of `docs/plans/import-fixtures.md` through readers, mapping and
 //! translation: the suggested mapping, the model (prefixes, hosts, interfaces, addresses,
 //! credentials by reference) and the loss report equal `ip-plan.expected.json`, for the
-//! xlsx, the ods and the per-sheet CSV files alike.
+//! xlsx and the per-sheet CSV files alike. The ods file is refused by the reader.
 //!
 //! Regenerate the expected file after a deliberate change with
 //! `TENKO_REGENERATE_FIXTURES=1 cargo test -p tenko-ipam --test import_fixture`, and review
@@ -91,9 +91,14 @@ fn the_xlsx_fixture_gives_the_expected_ir_and_loss_report() {
 }
 
 #[test]
-fn the_ods_fixture_gives_the_same() {
-    let (actual, _) = outcome(&[read("ip-plan.ods")]);
-    check("ods", &actual);
+fn the_ods_fixture_is_refused() {
+    let path = fixtures().join("ip-plan.ods");
+    let bytes = fs::read(&path).expect("fixture");
+    let error = read::read_file("ip-plan.ods", &bytes, &ReadLimits::default()).unwrap_err();
+    assert!(
+        matches!(&error, read::ReadError::Malformed(m) if m.contains("ods workbooks are not read")),
+        "{error:?}"
+    );
 }
 
 #[test]

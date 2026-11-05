@@ -11,6 +11,12 @@
 //!    [`FailureOutcome`] carries `locked_until` does the service persist a lock on the user
 //!    record (and raise an alarm when `alert` is set).
 //!
+//! A login of several steps is one attempt for the account's key. A wrong password and a
+//! wrong second-factor code (TOTP or recovery code) both count as a failure on it, so the
+//! policy's lock is reached after `lock_after` failures across any number of challenges. A
+//! correct password alone is not a success: the account's key is forgotten only when the
+//! whole login completes, when the last factor has passed and the session is written.
+//!
 //! Two kinds of key are tracked side by side ([`ThrottleKey`]): one per account, with a
 //! policy chosen by [`LockoutMode`], and one per client address with
 //! [`LockoutPolicy::source_policy`], which slows password spraying across many accounts.
@@ -455,7 +461,8 @@ impl Throttle {
 
     /// Forgets `key` after a successful login: counter, delay and any lock.
     ///
-    /// Call it for the account key only. A success must not wipe the failures of the client
+    /// Call it once the login has completed (the last factor passed), never after a first
+    /// factor that a second one follows. Call it for the account key only. A success must not wipe the failures of the client
     /// address, or one valid account would clear the spraying counter of its address.
     pub fn record_success(&self, key: &ThrottleKey) {
         self.table().remove(key);

@@ -1,17 +1,31 @@
 //! The workbook reader (see the [module documentation](super)).
 //!
-//! xlsx, xls and ods are read with `calamine`. For the zip-based formats the zip central
-//! directory is read by hand before `calamine` sees the bytes, so a workbook that expands
-//! beyond [`ReadLimits::max_uncompressed`] is refused without being inflated.
+//! xlsx is read with `calamine`. The zip central directory is read by hand before
+//! `calamine` sees the bytes, so a workbook that expands beyond
+//! [`ReadLimits::max_uncompressed`] is refused without being inflated.
+//!
+//! # Bounded sheets
+//!
+//! A sheet is read cell by cell from `calamine`'s streaming reader
+//! ([`Xlsx::worksheet_cells_reader`]), never as a dense range: a dense range has one entry
+//! for every position between the first and the last stored cell, so two cells far apart
+//! would allocate billions of entries before any limit could be checked. Every value is
+//! checked against [`ReadLimits::max_rows`] and [`ReadLimits::max_columns`] as it is read,
+//! so the rows built afterwards never exceed the limits. The `dimension` element a sheet
+//! declares is not used as a bound: it is optional and need not match the cells.
+//!
+//! ods and xls workbooks are refused. `calamine` parses every sheet of those formats when
+//! the workbook is opened and expands it into a dense range there (ods also expands its
+//! repeated rows and columns), before a limit can be applied.
 
 use std::io::{Cursor, Read, Seek};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use calamine::{Data, ExcelDateTime, Ods, Range, Reader, Xls, Xlsx};
+use calamine::{Data, ExcelDateTime, Reader, Xlsx, XlsxError};
 
 use super::{Cell, CellKind, ReadError, ReadLimits, Sheet, SourceFile, SourceFormat};
 
-/// Reads an xlsx, xls or ods workbook into [`Sheet`]s in workbook order.
+/// Reads an xlsx workbook into [`Sheet`]s in workbook order.
 ///
 /// The geometry of the source is kept: `rows[0]` is spreadsheet row 1 and index 0 of a row
 /// is column `A`, however far from the corner the first stored cell is. An empty worksheet
@@ -22,9 +36,11 @@ use super::{Cell, CellKind, ReadError, ReadLimits, Sheet, SourceFile, SourceForm
 ///
 /// # Errors
 ///
-/// Returns [`ReadError::Malformed`] for a damaged, encrypted or mislabeled file,
-/// [`ReadError::TooLarge`] when a limit of `limits` is exceeded (including a zip whose
-/// parts expand beyond [`ReadLimits::max_uncompressed`] or that uses zip64), and
+/// Returns [`ReadError::Malformed`] for a damaged, encrypted or mislabeled file and for an
+/// ods or xls workbook (see the [module documentation](self)), [`ReadError::TooLarge`] when
+/// a limit of `limits` is exceeded (including a zip whose parts expand beyond
+/// [`ReadLimits::max_uncompressed`] or that uses zip64, and a value beyond
+/// [`ReadLimits::max_rows`] or [`ReadLimits::max_columns`]), and
 /// [`ReadError::Unsupported`] for [`SourceFormat::Csv`], which is not a workbook.
 pub fn read_workbook(
     name: &str,
@@ -34,19 +50,20 @@ pub fn read_workbook(
 ) -> Result<SourceFile, ReadError> {
     match format {
         SourceFormat::Csv => return Err(ReadError::Unsupported),
-        SourceFormat::Xlsx | SourceFormat::Ods => {
-            read_directory(bytes, limits)?;
+        SourceFormat::Ods => return Err(unbounded_format("ods")),
+        // A password protected xlsx is an OLE file too; say what it is.
+        SourceFormat::Xls if is_encrypted_package(bytes) => {
+            return Err(ReadError::Malformed(
+                "the workbook is password protected".to_owned(),
+            ));
         }
-        SourceFormat::Xls => {
-            if is_encrypted_package(bytes) {
-                return Err(ReadError::Malformed(
-                    "the workbook is password protected".to_owned(),
-                ));
-            }
+        SourceFormat::Xls => return Err(unbounded_format("xls")),
+        SourceFormat::Xlsx => {
+            read_directory(bytes, limits)?;
         }
     }
     // A parser panic on hostile bytes is a damaged file, not a crashed import.
-    let sheets = catch_unwind(AssertUnwindSafe(|| read_sheets(bytes, format, limits)))
+    let sheets = catch_unwind(AssertUnwindSafe(|| read_xlsx(bytes, limits)))
         .map_err(|_| ReadError::Malformed("the workbook structure is damaged".to_owned()))??;
     Ok(SourceFile {
         name: name.to_owned(),
@@ -56,31 +73,11 @@ pub fn read_workbook(
     })
 }
 
-/// Opens the workbook with the reader of its format and converts every sheet.
-fn read_sheets(
-    bytes: &[u8],
-    format: SourceFormat,
-    limits: &ReadLimits,
-) -> Result<Vec<Sheet>, ReadError> {
-    let cursor = Cursor::new(bytes);
-    match format {
-        SourceFormat::Xlsx => convert_workbook(
-            Xlsx::new(cursor).map_err(|error| damaged_workbook("xlsx", &error))?,
-            "xlsx",
-            limits,
-        ),
-        SourceFormat::Xls => convert_workbook(
-            Xls::new(cursor).map_err(|error| damaged_workbook("xls", &error))?,
-            "xls",
-            limits,
-        ),
-        SourceFormat::Ods => convert_workbook(
-            Ods::new(cursor).map_err(|error| damaged_workbook("ods", &error))?,
-            "ods",
-            limits,
-        ),
-        SourceFormat::Csv => Err(ReadError::Unsupported),
-    }
+/// The refusal of a workbook format whose reader cannot be bounded before it allocates.
+fn unbounded_format(label: &str) -> ReadError {
+    ReadError::Malformed(format!(
+        "{label} workbooks are not read; save the sheet as xlsx or csv"
+    ))
 }
 
 /// The error for a workbook `calamine` could not open or read.
@@ -88,17 +85,10 @@ fn damaged_workbook(label: &str, error: &dyn std::fmt::Display) -> ReadError {
     ReadError::Malformed(format!("the {label} workbook cannot be read ({error})"))
 }
 
-/// Converts every sheet of an opened workbook.
-fn convert_workbook<RS, R>(
-    mut workbook: R,
-    label: &str,
-    limits: &ReadLimits,
-) -> Result<Vec<Sheet>, ReadError>
-where
-    RS: Read + Seek,
-    R: Reader<RS>,
-    <R as Reader<RS>>::Error: std::fmt::Display,
-{
+/// Opens the xlsx workbook and converts every sheet.
+fn read_xlsx(bytes: &[u8], limits: &ReadLimits) -> Result<Vec<Sheet>, ReadError> {
+    let mut workbook =
+        Xlsx::new(Cursor::new(bytes)).map_err(|error| damaged_workbook("xlsx", &error))?;
     let names = workbook.sheet_names();
     if names.len() > limits.max_sheets {
         return Err(ReadError::TooLarge(format!(
@@ -108,65 +98,116 @@ where
     }
     let mut sheets = Vec::with_capacity(names.len());
     for name in names {
-        let range = workbook
-            .worksheet_range(&name)
-            .map_err(|error| damaged_workbook(label, &error))?;
-        let rows = convert_range(&range, limits)?;
+        let rows = read_xlsx_sheet(&mut workbook, &name, limits)?;
         sheets.push(Sheet { name, rows });
     }
     Ok(sheets)
 }
 
-/// Converts one sheet, offsetting the range so that row 0 is spreadsheet row 1 and column
-/// 0 is column `A`.
-fn convert_range(range: &Range<Data>, limits: &ReadLimits) -> Result<Vec<Vec<Cell>>, ReadError> {
-    let Some((start_row, start_column)) = range.start() else {
-        return Ok(Vec::new());
+/// Streams the cells of one xlsx sheet into a [`SheetCells`].
+fn read_xlsx_sheet<RS: Read + Seek>(
+    workbook: &mut Xlsx<RS>,
+    name: &str,
+    limits: &ReadLimits,
+) -> Result<Vec<Vec<Cell>>, ReadError> {
+    let mut reader = match workbook.worksheet_cells_reader(name) {
+        Ok(reader) => reader,
+        // A chart sheet or a dialog sheet holds no cells.
+        Err(XlsxError::NotAWorksheet(_)) => return Ok(Vec::new()),
+        Err(error) => return Err(damaged_workbook("xlsx", &error)),
     };
-    let start_row = to_usize(start_row);
-    let start_column = to_usize(start_column);
+    let mut cells = SheetCells::new(limits);
+    while let Some(cell) = reader
+        .next_cell()
+        .map_err(|error| damaged_workbook("xlsx", &error))?
+    {
+        let (row, column) = cell.get_position();
+        cells.insert(row, column, Data::from(cell.get_value().clone()))?;
+    }
+    Ok(cells.into_rows())
+}
 
-    // The extent of the values, relative to the range: trailing empty rows and columns
-    // are dropped (and do not count against the limits).
-    let mut last_row = None;
-    let mut last_column = 0;
-    for (row_index, row) in range.rows().enumerate() {
-        for (column_index, data) in row.iter().enumerate() {
+/// The cells of one sheet as they are read, checked against the limits one by one.
+struct SheetCells<'a> {
+    limits: &'a ReadLimits,
+    /// The cells within the limits, by absolute position, in reading order (a later cell
+    /// at the same position wins).
+    cells: Vec<(usize, usize, Data)>,
+    /// The last row and column that hold a value.
+    last_row: Option<usize>,
+    last_column: usize,
+}
+
+impl<'a> SheetCells<'a> {
+    fn new(limits: &'a ReadLimits) -> Self {
+        Self {
+            limits,
+            cells: Vec::new(),
+            last_row: None,
+            last_column: 0,
+        }
+    }
+
+    /// Adds one cell. Empty cells are dropped; blank text is kept only within the limits
+    /// (it never widens the sheet). A value at or beyond `max_rows` or `max_columns` is
+    /// refused at once.
+    fn insert(&mut self, row: u32, column: u32, data: Data) -> Result<(), ReadError> {
+        let row = to_usize(row);
+        let column = to_usize(column);
+        if matches!(data, Data::Empty) {
+            return Ok(());
+        }
+        if is_blank(&data) {
+            if row < self.limits.max_rows && column < self.limits.max_columns {
+                self.cells.push((row, column, data));
+            }
+            return Ok(());
+        }
+        if row >= self.limits.max_rows {
+            return Err(ReadError::TooLarge(format!(
+                "more than {} rows (max_rows)",
+                self.limits.max_rows
+            )));
+        }
+        if column >= self.limits.max_columns {
+            return Err(ReadError::TooLarge(format!(
+                "more than {} columns (max_columns)",
+                self.limits.max_columns
+            )));
+        }
+        self.last_row = Some(self.last_row.map_or(row, |last| last.max(row)));
+        self.last_column = self.last_column.max(column);
+        self.cells.push((row, column, data));
+        Ok(())
+    }
+
+    /// The rows of the sheet: `rows[0]` is spreadsheet row 1, rows end at the last row
+    /// with a value, a row without a value is empty, and every other row is as wide as the
+    /// last column with a value. Both are below the limits, see [`insert`](Self::insert).
+    fn into_rows(self) -> Vec<Vec<Cell>> {
+        let Some(last_row) = self.last_row else {
+            return Vec::new();
+        };
+        let width = self.last_column + 1;
+        let mut has_value = vec![false; last_row + 1];
+        for (row, _, data) in &self.cells {
             if !is_blank(data) {
-                last_row = Some(row_index);
-                last_column = last_column.max(column_index);
+                has_value[*row] = true;
             }
         }
-    }
-    let Some(last_row) = last_row else {
-        return Ok(Vec::new());
-    };
-    if start_row.saturating_add(last_row) >= limits.max_rows {
-        return Err(ReadError::TooLarge(format!(
-            "more than {} rows (max_rows)",
-            limits.max_rows
-        )));
-    }
-    if start_column.saturating_add(last_column) >= limits.max_columns {
-        return Err(ReadError::TooLarge(format!(
-            "more than {} columns (max_columns)",
-            limits.max_columns
-        )));
-    }
-
-    let mut rows = Vec::with_capacity(start_row + last_row + 1);
-    rows.extend(std::iter::repeat_n(Vec::new(), start_row));
-    for row in range.rows().take(last_row + 1) {
-        if row.iter().all(is_blank) {
-            rows.push(Vec::new());
-            continue;
+        let mut rows = vec![Vec::new(); last_row + 1];
+        for (row, column, data) in &self.cells {
+            if *row > last_row || *column >= width || !has_value[*row] {
+                continue;
+            }
+            let cells: &mut Vec<Cell> = &mut rows[*row];
+            if cells.is_empty() {
+                cells.resize(width, Cell::empty());
+            }
+            cells[*column] = convert_cell(data);
         }
-        let mut cells = Vec::with_capacity(start_column + last_column + 1);
-        cells.extend(std::iter::repeat_n(Cell::empty(), start_column));
-        cells.extend(row.iter().take(last_column + 1).map(convert_cell));
-        rows.push(cells);
+        rows
     }
-    Ok(rows)
 }
 
 /// A `u32` position as an index.
@@ -828,19 +869,139 @@ mod tests {
         assert!(matches!(&error, ReadError::TooLarge(m) if m.contains("max_uncompressed")));
     }
 
+    /// An xlsx package written by hand with one sheet whose XML is `sheet`.
+    fn xlsx_with_sheet(sheet: &str) -> Vec<u8> {
+        let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\
+            <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\
+            <Default Extension=\"xml\" ContentType=\"application/xml\"/>\
+            <Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>\
+            <Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>\
+            </Types>";
+        let rels = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\
+            <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>\
+            </Relationships>";
+        let workbook = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" \
+            xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\
+            <sheets><sheet name=\"Plan\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>";
+        let workbook_rels = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\
+            <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>\
+            </Relationships>";
+        zip(&[
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("_rels/.rels", rels.as_bytes()),
+            ("xl/workbook.xml", workbook.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", sheet.as_bytes()),
+        ])
+    }
+
+    /// Sheet XML with a declared dimension and the given `(reference, value)` number cells.
+    fn sheet_xml(dimension: Option<&str>, cells: &[(&str, &str)]) -> String {
+        use std::fmt::Write as _;
+
+        let dimension = dimension
+            .map(|reference| format!("<dimension ref=\"{reference}\"/>"))
+            .unwrap_or_default();
+        let mut row = String::new();
+        for (reference, value) in cells {
+            write!(row, "<c r=\"{reference}\"><v>{value}</v></c>").expect("a string");
+        }
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+             <worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">\
+             {dimension}<sheetData><row>{row}</row></sheetData></worksheet>"
+        )
+    }
+
     #[test]
-    fn ods_round_trip() {
+    fn a_hand_written_xlsx_reads() {
+        let bytes = xlsx_with_sheet(&sheet_xml(Some("B2:C3"), &[("B2", "1"), ("C3", "2")]));
+        let file = read_workbook("h.xlsx", &bytes, SourceFormat::Xlsx, &limits()).unwrap();
+        let sheet = &file.sheets[0];
+        assert_eq!(sheet.name, "Plan");
+        assert_eq!(sheet.rows.len(), 3);
+        assert_eq!(sheet.rows[0], Vec::<Cell>::new());
+        assert_eq!(sheet.cell(1, 1), &Cell::number("1"));
+        assert_eq!(sheet.cell(2, 2), &Cell::number("2"));
+        assert_eq!(sheet.rows[1].len(), 3);
+    }
+
+    #[test]
+    fn values_at_opposite_corners_of_the_largest_sheet_are_refused_without_a_dense_range() {
+        // A1 and XFD1048576: a dense range of these two cells has 17,179,869,184 entries.
+        for dimension in [Some("A1:XFD1048576"), Some("A1"), None] {
+            let bytes = xlsx_with_sheet(&sheet_xml(dimension, &[("A1", "1"), ("XFD1048576", "2")]));
+            assert!(bytes.len() < 4096);
+            let error = read_workbook("c.xlsx", &bytes, SourceFormat::Xlsx, &limits()).unwrap_err();
+            assert!(
+                matches!(&error, ReadError::TooLarge(m) if m.contains("max_rows")),
+                "{dimension:?}: {error:?}"
+            );
+        }
+        // One row, a far column.
+        let bytes = xlsx_with_sheet(&sheet_xml(None, &[("A1", "1"), ("XFD1", "2")]));
+        let error = read_workbook("c.xlsx", &bytes, SourceFormat::Xlsx, &limits()).unwrap_err();
+        assert!(matches!(&error, ReadError::TooLarge(m) if m.contains("max_columns")));
+    }
+
+    #[test]
+    fn the_limits_apply_to_values_only() {
+        // A declared dimension and an empty cell far outside the limits do not count.
+        let sheet = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">\
+            <dimension ref=\"A1:XFD1048576\"/><sheetData>\
+            <row r=\"1\"><c r=\"A1\"><v>7</v></c></row>\
+            <row r=\"1048576\"><c r=\"XFD1048576\" s=\"1\"/></row>\
+            </sheetData></worksheet>";
+        let file = read_workbook(
+            "e.xlsx",
+            &xlsx_with_sheet(sheet),
+            SourceFormat::Xlsx,
+            &limits(),
+        )
+        .unwrap();
+        assert_eq!(file.sheets[0].rows, vec![vec![Cell::number("7")]]);
+
+        // The last row and column inside the limits are read; one more is refused.
+        let tight = ReadLimits {
+            max_rows: 3,
+            max_columns: 2,
+            ..limits()
+        };
+        let bytes = xlsx_with_sheet(&sheet_xml(None, &[("B3", "1")]));
+        let file = read_workbook("t.xlsx", &bytes, SourceFormat::Xlsx, &tight).unwrap();
+        assert_eq!(file.sheets[0].cell(2, 1), &Cell::number("1"));
+        for reference in ["B4", "C3"] {
+            let bytes = xlsx_with_sheet(&sheet_xml(None, &[(reference, "1")]));
+            assert!(matches!(
+                read_workbook("t.xlsx", &bytes, SourceFormat::Xlsx, &tight),
+                Err(ReadError::TooLarge(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn ods_and_xls_are_refused() {
         let bytes = ods(
             "Plan",
             &[&["host", "ip", "vlan"], &["web01", "192.0.2.10", "100"]],
         );
-        let file = read_workbook("plan.ods", &bytes, SourceFormat::Ods, &limits()).unwrap();
-        assert_eq!(file.format, SourceFormat::Ods);
-        let sheet = &file.sheets[0];
-        assert_eq!(sheet.name, "Plan");
-        assert_eq!(sheet.cell(0, 1), &Cell::text("ip"));
-        assert_eq!(sheet.cell(1, 1), &Cell::text("192.0.2.10"));
-        assert_eq!(sheet.cell(1, 2), &Cell::number("100"));
+        let error = read_workbook("plan.ods", &bytes, SourceFormat::Ods, &limits()).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::Malformed(m) if m.contains("ods workbooks are not read")),
+            "{error:?}"
+        );
+        let mut ole = vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+        ole.extend_from_slice(&[0; 600]);
+        let error = read_workbook("plan.xls", &ole, SourceFormat::Xls, &limits()).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::Malformed(m) if m.contains("xls workbooks are not read")),
+            "{error:?}"
+        );
     }
 
     #[test]
@@ -950,8 +1111,9 @@ mod tests {
         // The guard runs before the bytes reach the workbook parser.
         let error = read_workbook("bomb.xlsx", &bytes, SourceFormat::Xlsx, &tiny).unwrap_err();
         assert!(matches!(error, ReadError::TooLarge(_)));
+        // An ods workbook is refused before its sizes matter.
         let error = read_workbook("bomb.ods", &bytes, SourceFormat::Ods, &tiny).unwrap_err();
-        assert!(matches!(error, ReadError::TooLarge(_)));
+        assert!(matches!(error, ReadError::Malformed(_)));
     }
 
     #[test]

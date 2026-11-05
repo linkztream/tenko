@@ -35,6 +35,15 @@
 //! by the version precondition of the batch when both race. [`purge_used`] removes the rows
 //! of expired ceremonies; the leader runs it hourly as a leader-only service.
 //!
+//! Every finishing handler of the service does this: the TOTP and recovery code logins,
+//! the passkey login, the TOTP enrollment and the passkey registration. The passkey step of
+//! a password login spends its second-factor challenge when it starts: the row is written
+//! then, so the same challenge cannot also finish a code login or start a second passkey
+//! step. The memory this controller keeps of taken ceremonies stays as a second check, and it
+//! also covers a ceremony whose finish failed before its batch committed; a replay after a
+//! restart, on another controller, or after the memory evicted the ceremony is refused by
+//! the row.
+//!
 //! A wrong second-factor code is the one case that keeps a ceremony open:
 //! [`Ceremonies::put_back`] stores the pending state with its attempt counter on this
 //! controller only, under the id as given, so the same id works once more here. Another

@@ -17,7 +17,7 @@ use super::{
     },
 };
 use crate::{
-    challenge::{MAX_CODE_ATTEMPTS, Pending},
+    challenge::{MAX_CODE_ATTEMPTS, Pending, StagedUse},
     error::AuthError,
     lockout::{LockoutMode, LockoutPolicy, Retry, ThrottleKey},
     model::{
@@ -75,6 +75,23 @@ fn throttled(retry: Retry) -> AuthError {
 
 fn truncated(name: &str) -> String {
     name.trim().chars().take(MAX_NAME_CHARS).collect()
+}
+
+/// The throttle key of an account, as the password step builds it.
+fn account_key(user: &UserRecord) -> ThrottleKey {
+    ThrottleKey::account(&truncated(&user.name))
+}
+
+/// The strength of a passkey login: a hardware key or a passkey with user verification,
+/// otherwise a second factor only.
+fn assertion_strength(user_verified: bool, hardware_key: bool) -> AuthStrength {
+    if !user_verified {
+        AuthStrength::PasswordTotp
+    } else if hardware_key {
+        AuthStrength::HardwareKey
+    } else {
+        AuthStrength::Passkey
+    }
 }
 
 fn on_behalf_of(user: UserId) -> Principal {
@@ -327,7 +344,9 @@ impl AuthService {
                 )
                 .await);
         }
-        self.throttle.record_success(&account);
+        // A correct password alone does not clear the account's failures: a second factor
+        // may follow, and its wrong codes count toward the same lock (IAM-05). The counter
+        // clears when the login completes.
 
         let updated = self
             .after_password(
@@ -374,9 +393,9 @@ impl AuthService {
             vec![ObjectRef::from(user.id), ObjectRef::from(record.id)],
             ctx,
         ));
-        Ok(LoginOutcome::Session(
-            self.complete_login(batch, &updated, secret, record).await?,
-        ))
+        let session = self.complete_login(batch, &updated, secret, record).await?;
+        self.throttle.record_success(&account);
+        Ok(LoginOutcome::Session(session))
     }
 
     /// Records the password step and opens the second-factor challenge.
@@ -407,25 +426,37 @@ impl AuthService {
         })
     }
 
-    /// Takes a second-factor challenge and loads its user.
+    /// Takes a second-factor challenge and loads its user. The challenge is refused when
+    /// the store records it as used; the returned [`StagedUse`] goes into the batch that
+    /// completes the login. A persisted lock of the account refuses the attempt as the
+    /// password step does.
     async fn second_factor(
         &self,
         ctx: &RequestCtx,
         challenge_id: &str,
-    ) -> Result<(Pending, UserRecord, Revision), AuthError> {
-        let pending = self.ceremonies.take(challenge_id, ctx.now)?;
+    ) -> Result<(Pending, StagedUse, UserRecord, Revision), AuthError> {
+        let view = self.view().await?;
+        let (pending, staged) =
+            self.ceremonies
+                .take_staged(challenge_id, ctx.now, view.as_ref())?;
         let Pending::SecondFactor { user, .. } = &pending else {
             return Err(AuthError::ChallengeInvalid);
         };
-        let view = self.view().await?;
         let (user, revision) = Self::load_user(view.as_ref(), *user)?;
         if user.disabled || user.break_glass {
             return Err(AuthError::InvalidCredentials);
         }
-        Ok((pending, user, revision))
+        if let Some(lock) = user.active_lock(ctx.now) {
+            return Err(AuthError::Throttled {
+                retry_after: Some(lock.until.saturating_since(ctx.now).as_secs().max(1)),
+            });
+        }
+        Ok((pending, staged, user, revision))
     }
 
-    /// A wrong second-factor code: the challenge stays open for a few more attempts.
+    /// A wrong second-factor code: the challenge stays open for a few more attempts, and the
+    /// failure counts on the account's key like a wrong password, so the policy's lock is
+    /// reached across challenges.
     async fn second_factor_failed(
         &self,
         ctx: &RequestCtx,
@@ -455,7 +486,7 @@ impl AuthService {
         let policy = LockoutPolicy::for_mode(self.settings().lockout);
         self.login_failed(
             ctx,
-            &ThrottleKey::account(&truncated(&user.name)),
+            &account_key(user),
             Some((user, revision)),
             action,
             &user.name,
@@ -476,9 +507,10 @@ impl AuthService {
         user_agent: Option<&str>,
         request: &CodeLogin,
     ) -> Result<LoginOutcome, AuthError> {
-        let (pending, user, revision) = self.second_factor(ctx, &request.challenge_id).await?;
+        let (pending, staged, user, revision) =
+            self.second_factor(ctx, &request.challenge_id).await?;
         let policy = LockoutPolicy::for_mode(self.settings().lockout);
-        let account = ThrottleKey::account(&truncated(&user.name));
+        let account = account_key(&user);
         self.check_throttle(&account, ctx, &policy)?;
         let Some(factor) = user.totp.clone() else {
             return Err(AuthError::TotpNotEnrolled);
@@ -507,20 +539,23 @@ impl AuthService {
                 )
                 .await);
         };
-        self.throttle.record_success(&account);
         let mut updated = user.clone();
         if let Some(totp) = updated.totp.as_mut() {
             totp.last_used_step = Some(step);
         }
-        self.finish_second_factor(
-            ctx,
-            user_agent,
-            updated,
-            revision,
-            actions::LOGIN_TOTP,
-            None,
-        )
-        .await
+        let outcome = self
+            .finish_second_factor(
+                ctx,
+                user_agent,
+                updated,
+                revision,
+                &staged,
+                actions::LOGIN_TOTP,
+                None,
+            )
+            .await?;
+        self.throttle.record_success(&account);
+        Ok(outcome)
     }
 
     /// `POST /auth/login/recovery` (IAM-06): spends one recovery code.
@@ -534,9 +569,10 @@ impl AuthService {
         user_agent: Option<&str>,
         request: &CodeLogin,
     ) -> Result<LoginOutcome, AuthError> {
-        let (pending, user, revision) = self.second_factor(ctx, &request.challenge_id).await?;
+        let (pending, staged, user, revision) =
+            self.second_factor(ctx, &request.challenge_id).await?;
         let policy = LockoutPolicy::for_mode(self.settings().lockout);
-        let account = ThrottleKey::account(&truncated(&user.name));
+        let account = account_key(&user);
         self.check_throttle(&account, ctx, &policy)?;
         let Some(index) = recovery::find(request.code.expose(), &user.recovery_codes) else {
             return Err(self
@@ -550,34 +586,42 @@ impl AuthService {
                 )
                 .await);
         };
-        self.throttle.record_success(&account);
         let mut updated = user.clone();
         if let Some(code) = updated.recovery_codes.get_mut(index) {
             code.used_at = Some(ctx.now);
         }
         let left = updated.recovery_codes_left();
-        self.finish_second_factor(
-            ctx,
-            user_agent,
-            updated,
-            revision,
-            actions::LOGIN_RECOVERY,
-            Some(("recovery_codes_left", left.to_string())),
-        )
-        .await
+        let outcome = self
+            .finish_second_factor(
+                ctx,
+                user_agent,
+                updated,
+                revision,
+                &staged,
+                actions::LOGIN_RECOVERY,
+                Some(("recovery_codes_left", left.to_string())),
+            )
+            .await?;
+        self.throttle.record_success(&account);
+        Ok(outcome)
     }
 
+    /// The batch that completes a second-factor login: the user record, the used challenge
+    /// and the session, committed together.
+    #[allow(clippy::too_many_arguments)]
     async fn finish_second_factor(
         &self,
         ctx: &RequestCtx,
         user_agent: Option<&str>,
         user: UserRecord,
         revision: Revision,
+        staged: &StagedUse,
         action: AuditAction,
         context: Option<(&str, String)>,
     ) -> Result<LoginOutcome, AuthError> {
         let mut batch = WriteBatch::new(on_behalf_of(user.id), ctx.now);
         batch.request = Some(ctx.request);
+        staged.stage(&mut batch)?;
         // The used TOTP step or recovery code: a concurrent second login with the same code
         // conflicts here.
         batch.expect_typed(&USERS, &user.id, Some(revision));
@@ -621,10 +665,22 @@ impl AuthService {
         let rp = self.relying_party()?;
         let view = self.view().await?;
         let (user, continuation) = if let Some(challenge_id) = &request.challenge_id {
-            match self.ceremonies.take(challenge_id, ctx.now)? {
-                Pending::SecondFactor { user, .. } => (Some(user), true),
-                _ => return Err(AuthError::ChallengeInvalid),
-            }
+            let (pending, staged) =
+                self.ceremonies
+                    .take_staged(challenge_id, ctx.now, view.as_ref())?;
+            let Pending::SecondFactor { user, .. } = pending else {
+                return Err(AuthError::ChallengeInvalid);
+            };
+            // The second-factor challenge is spent here, in the store, so it cannot also
+            // finish a code login or start another passkey step on any controller.
+            let mut batch = WriteBatch::new(on_behalf_of(user), ctx.now);
+            batch.request = Some(ctx.request);
+            staged.stage(&mut batch)?;
+            self.commit(batch).await.map_err(|error| match error {
+                AuthError::Conflict => AuthError::ChallengeInvalid,
+                other => other,
+            })?;
+            (Some(user), true)
         } else if let Some(name) = &request.user_name {
             // An unknown name gets the same answer as a discoverable login.
             let found = Self::find_user(view.as_ref(), name)?.filter(|user| !user.disabled);
@@ -685,17 +741,20 @@ impl AuthService {
         user_agent: Option<&str>,
         request: &WebAuthnLoginFinish,
     ) -> Result<NewSession, AuthError> {
+        let view = self.view().await?;
+        let (pending, staged) =
+            self.ceremonies
+                .take_staged(&request.ceremony_id, ctx.now, view.as_ref())?;
         let Pending::WebAuthnLogin {
             challenge,
             user: expected,
             discoverable,
             continuation,
-        } = self.ceremonies.take(&request.ceremony_id, ctx.now)?
+        } = pending
         else {
             return Err(AuthError::ChallengeInvalid);
         };
         let credential_id = assertion_credential_id(&request.credential)?;
-        let view = self.view().await?;
         let Some((owner, _)) = view.get_typed(&CREDENTIAL_IDS, &credential_id)? else {
             return Err(self.webauthn_failed(ctx, None).await);
         };
@@ -734,13 +793,7 @@ impl AuthService {
         if user.break_glass {
             self.throttle.record_success(&break_glass_key(user.id));
         }
-        let strength = if !verified.user_verified {
-            AuthStrength::PasswordTotp
-        } else if credential.hardware_key {
-            AuthStrength::HardwareKey
-        } else {
-            AuthStrength::Passkey
-        };
+        let strength = assertion_strength(verified.user_verified, credential.hardware_key);
 
         let mut updated_credential = credential.clone();
         updated_credential.sign_count = verified.sign_count;
@@ -748,6 +801,7 @@ impl AuthService {
         updated_credential.last_used_at = Some(ctx.now);
         let mut batch = WriteBatch::new(on_behalf_of(user.id), ctx.now);
         batch.request = Some(ctx.request);
+        staged.stage(&mut batch)?;
         batch.expect_typed(
             &CREDENTIALS,
             &(owner, credential_id.clone()),
@@ -779,7 +833,12 @@ impl AuthService {
             .with_context("credential", updated_credential.label.clone())
             .with_context("strength", strength.as_str()),
         );
-        self.complete_login(batch, &user, secret, record).await
+        let session = self.complete_login(batch, &user, secret, record).await?;
+        if continuation {
+            // The passkey completed a password login: the account's failures clear.
+            self.throttle.record_success(&account_key(&user));
+        }
+        Ok(session)
     }
 
     /// Verifies the assertion of a WebAuthn login against the stored credential and the

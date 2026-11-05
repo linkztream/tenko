@@ -1,4 +1,5 @@
-//! Readers: CSV files and workbooks (xlsx, xls, ods) into [`Sheet`]s of [`Cell`]s.
+//! Readers: CSV files and xlsx workbooks into [`Sheet`]s of [`Cell`]s; xls and ods
+//! workbooks are recognized and refused.
 //!
 //! A reader keeps the geometry of the source: `rows[0]` is the first row of the sheet as a
 //! spreadsheet program numbers it (row 1), and `rows[r][0]` is column `A`, so every
@@ -9,7 +10,9 @@
 //!   are not UTF-8 (detected with `encoding_rs`), the delimiter sniffed among `,`, `;`
 //!   and tab, quoted fields per RFC 4180. One file is one sheet, named after the file
 //!   without its extension (`192.0.2.0.csv` is the sheet `192.0.2.0`).
-//! - Workbooks ([`workbook`]): `calamine` for xlsx, xls and ods. Numbers keep their kind
+//! - Workbooks ([`workbook`]): `calamine` for xlsx, read cell by cell within the limits;
+//!   xls and ods are refused, because `calamine` expands them before any limit applies.
+//!   Numbers keep their kind
 //!   ([`CellKind::Number`]), so the importer can tell a password that a spreadsheet stored
 //!   as a number (leading zeros lost) from text.
 
@@ -444,13 +447,13 @@ mod tests {
     }
 
     #[test]
-    fn ods_is_detected_from_the_content() {
+    fn ods_is_detected_from_the_content_and_refused() {
         let bytes = ods("Plan", &[&["host", "ip"], &["web01", "192.0.2.10"]]);
         for name in ["plan.ods", "plan.xlsx", "plan.csv", "plan"] {
-            let file = read(name, &bytes).unwrap();
-            assert_eq!(file.format, SourceFormat::Ods, "{name}");
-            assert_eq!(file.sheets[0].name, "Plan");
-            assert_eq!(file.sheets[0].cell(1, 0).text, "web01");
+            assert!(
+                matches!(read(name, &bytes), Err(ReadError::Malformed(m)) if m.contains("ods workbooks are not read")),
+                "{name}"
+            );
         }
     }
 
@@ -564,7 +567,7 @@ mod tests {
         };
         let error = read_file("a.csv", b"a,b\n", &columns).unwrap_err();
         assert!(matches!(&error, ReadError::TooLarge(m) if m.contains("max_columns")));
-        let error = read_file("a.ods", &ods("S", &[&["a", "b"]]), &columns).unwrap_err();
+        let error = read_file("a.xlsx", &xlsx_bytes(), &columns).unwrap_err();
         assert!(matches!(&error, ReadError::TooLarge(m) if m.contains("max_columns")));
     }
 

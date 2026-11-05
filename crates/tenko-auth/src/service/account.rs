@@ -473,11 +473,15 @@ impl AuthService {
         request: &TotpEnrollFinish,
     ) -> Result<FactorEnrolled, AuthError> {
         let (user, revision, _, session) = self.current(ctx).await?;
+        let view = self.view().await?;
+        let (pending, staged) =
+            self.ceremonies
+                .take_staged(&request.enrollment_id, ctx.now, view.as_ref())?;
         let Pending::TotpEnrollment {
             user: owner,
             session: started_in,
             secret,
-        } = self.ceremonies.take(&request.enrollment_id, ctx.now)?
+        } = pending
         else {
             return Err(AuthError::ChallengeInvalid);
         };
@@ -497,6 +501,7 @@ impl AuthService {
         )
         .ok_or(AuthError::TotpCodeMismatch)?;
         let mut batch = WriteBatch::for_request(ctx);
+        staged.stage(&mut batch)?;
         let secret_ref = self
             .vault
             .stage_put(
@@ -669,13 +674,17 @@ impl AuthService {
         request: &WebAuthnRegisterFinish,
     ) -> Result<FactorEnrolled, AuthError> {
         let (user, revision, _, session) = self.current(ctx).await?;
+        let view = self.view().await?;
+        let (pending, staged) =
+            self.ceremonies
+                .take_staged(&request.ceremony_id, ctx.now, view.as_ref())?;
         let Pending::WebAuthnRegister {
             challenge,
             user: owner,
             session: started_in,
             label,
             hardware_key,
-        } = self.ceremonies.take(&request.ceremony_id, ctx.now)?
+        } = pending
         else {
             return Err(AuthError::ChallengeInvalid);
         };
@@ -692,7 +701,6 @@ impl AuthService {
             },
             ctx.now,
         )?;
-        let view = self.view().await?;
         if view
             .get_typed(&CREDENTIAL_IDS, &registered.credential_id)?
             .is_some()
@@ -718,6 +726,7 @@ impl AuthService {
         let mut updated = user.clone();
         let recovery_codes = Self::fresh_recovery_codes(&mut updated)?;
         let mut batch = WriteBatch::for_request(ctx);
+        staged.stage(&mut batch)?;
         batch.expect_typed(&CREDENTIAL_IDS, &record.credential_id, None);
         batch.put_typed(&CREDENTIAL_IDS, &record.credential_id, &user.id)?;
         batch.put_typed(

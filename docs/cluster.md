@@ -577,7 +577,7 @@ Jobs whose steps are tied to one host run on that controller's own runner instea
 
 What any controller can finish, whichever started it:
 
-- **Sign-in ceremonies.** The state of a pending second factor, passkey sign-in or registration and TOTP enrollment travels sealed in the challenge id itself (AES-256-GCM under a key derived from the installation's cluster key), so a ceremony started on one controller finishes on another without sticky sessions. Nothing is written when a ceremony starts; finishing it records the challenge as used in the same write that completes the sign-in, so a replayed challenge is refused on every controller.
+- **Sign-in ceremonies.** The state of a pending second factor, passkey sign-in or registration and TOTP enrollment travels sealed in the challenge id itself (AES-256-GCM under a key derived from the installation's cluster key), so a ceremony started on one controller finishes on another without sticky sessions. Nothing is written when a ceremony starts; finishing it records the challenge as used in the same write that completes the sign-in, so a replayed challenge is refused on every controller. The record is in the store, so a replay is refused after a restart too, and whatever this controller's own memory of used challenges has forgotten. The passkey step of a password sign-in spends its second-factor challenge when it starts, so the challenge cannot also finish a code sign-in.
 - **Retries.** The fingerprints of idempotent requests are keyed from the cluster key too, so a retry that reaches another controller replays the first answer.
 - **Imports.** Uploads are staged in the store, encrypted under a key of their own that the vault holds, so preview, apply and discard work on every controller.
 
@@ -592,7 +592,7 @@ Two limits count on each controller separately and are not shared across the clu
 - **The API rate limiter** (`[rate_limit]`): each controller counts the requests it serves. Behind a load balancer that spreads a client over three controllers, the client gets up to three times the configured rate.
 - **The login throttle** (the pause after wrong passwords or codes, IAM-05): each controller counts the failed attempts it has seen. An attacker spread over three controllers gets up to three times the free attempts before the persisted account lock takes over; the lock is stored and replicated, so it holds on every controller at once, and unlocking the user lifts it on every controller.
 
-A wrong second-factor code keeps its ceremony open on the controller that checked it, with the attempt counted; another controller counts the attempts of the same challenge afresh, so the attempts per challenge are bounded per controller in the same way.
+A wrong second-factor code keeps its ceremony open on the controller that checked it, with the attempt counted; another controller counts the attempts of the same challenge afresh, so the attempts per challenge are bounded per controller in the same way. Every wrong code also counts toward the account's lock like a wrong password, and a correct password alone does not reset that count.
 
 ### 12.10 The cluster lab
 
