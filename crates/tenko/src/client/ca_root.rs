@@ -4,8 +4,8 @@
 //! The client does not trust the internal CA yet, which is the point of the download. So
 //! the request first verifies the server as usual (system roots, `--ca-file`); when that
 //! fails and `--fingerprint` gives the SHA-256 the server printed at start (console and log),
-//! the root is fetched once without verification and accepted only if its fingerprint
-//! matches. Without a fingerprint an untrusted server is refused.
+//! the root is fetched once without verification by [`fetch_unverified`], which returns it
+//! only when its fingerprint matches. Without a fingerprint an untrusted server is refused.
 
 use std::path::PathBuf;
 
@@ -49,10 +49,16 @@ pub async fn run(args: &CaRootArgs) -> Result<Output, Failure> {
         .as_deref()
         .map(normalize_fingerprint)
         .transpose()?;
-    let pem = match target.client()?.get_text(PATH).await {
-        Ok(pem) => pem,
+    let (pem, info) = match target.client()?.get_text(PATH).await {
+        Ok(pem) => {
+            let info = root_info(&pem)?;
+            if let Some(wanted) = &wanted {
+                expect_fingerprint(&info, wanted)?;
+            }
+            (pem, info)
+        }
         Err(ClientError::Transport(error)) => match &wanted {
-            Some(_) => fetch_unverified(&target).await?,
+            Some(wanted) => fetch_unverified(&target, wanted).await?,
             None => {
                 return Err(Failure::new(
                     exit::UNREACHABLE,
@@ -66,18 +72,6 @@ pub async fn run(args: &CaRootArgs) -> Result<Output, Failure> {
         },
         Err(error) => return Err(error.into()),
     };
-    let info = root_info(&pem)?;
-    if let Some(wanted) = &wanted
-        && *wanted != info.sha256
-    {
-        return Err(Failure::new(
-            exit::INTEGRITY,
-            format!(
-                "the root the server sent has SHA-256 {}, not {wanted}: do not trust it",
-                info.sha256
-            ),
-        ));
-    }
     let note = format!(
         "internal CA root {} (SHA-256 {}), valid until {}; install it as a trusted root on admin \
          clients",
@@ -102,9 +96,14 @@ pub async fn run(args: &CaRootArgs) -> Result<Output, Failure> {
     }
 }
 
-/// Fetches the root without verifying the server certificate (only with a fingerprint to
-/// compare the result against).
-async fn fetch_unverified(target: &Target) -> Result<String, Failure> {
+/// Fetches the root from a server the client cannot verify yet, and returns it, with what it
+/// holds, only when its SHA-256 is `wanted`, the fingerprint the operator passed.
+///
+/// The connection accepts any server certificate, because this is how a client obtains the
+/// root before it can trust anything; nothing but the root's PEM is read from it, and no
+/// credential is sent. A root with another fingerprint is refused here, so no caller holds an
+/// unverified root.
+async fn fetch_unverified(target: &Target, wanted: &str) -> Result<(String, CertInfo), Failure> {
     let http = reqwest::Client::builder()
         .use_rustls_tls()
         .danger_accept_invalid_certs(true)
@@ -137,7 +136,23 @@ async fn fetch_unverified(target: &Target) -> Result<String, Failure> {
             },
         );
     }
-    Ok(body)
+    let info = root_info(&body)?;
+    expect_fingerprint(&info, wanted)?;
+    Ok((body, info))
+}
+
+/// Refuses a root whose SHA-256 is not `wanted`.
+fn expect_fingerprint(info: &CertInfo, wanted: &str) -> Result<(), Failure> {
+    if info.sha256 == wanted {
+        return Ok(());
+    }
+    Err(Failure::new(
+        exit::INTEGRITY,
+        format!(
+            "the root the server sent has SHA-256 {}, not {wanted}: do not trust it",
+            info.sha256
+        ),
+    ))
 }
 
 /// What the PEM holds: exactly one CA certificate.
@@ -196,6 +211,30 @@ mod tests {
                 .expect_err("not hex")
                 .status,
             exit::USAGE
+        );
+    }
+
+    #[test]
+    fn a_root_with_another_fingerprint_is_refused() {
+        let info = CertInfo {
+            subject: "CN=Tenko internal CA".to_owned(),
+            issuer: "CN=Tenko internal CA".to_owned(),
+            dns_names: Vec::new(),
+            ip_addresses: Vec::new(),
+            uris: Vec::new(),
+            serial: "01".to_owned(),
+            not_before: tenko_core::Timestamp::now(),
+            not_after: tenko_core::Timestamp::now(),
+            sha256: "ab".repeat(32),
+            is_ca: true,
+        };
+        expect_fingerprint(&info, &"ab".repeat(32)).expect("the fingerprint matches");
+        let failure = expect_fingerprint(&info, &"cd".repeat(32)).expect_err("refused");
+        assert_eq!(failure.status, exit::INTEGRITY);
+        assert!(
+            failure.message.contains("do not trust it"),
+            "{}",
+            failure.message
         );
     }
 

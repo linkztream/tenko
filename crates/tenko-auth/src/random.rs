@@ -18,9 +18,9 @@ pub fn fill(buf: &mut [u8]) -> Result<(), AuthError> {
 ///
 /// As [`fill`].
 pub fn array<const N: usize>() -> Result<[u8; N], AuthError> {
-    let mut out = [0_u8; N];
-    fill(&mut out)?;
-    Ok(out)
+    aws_lc_rs::rand::generate::<[u8; N]>(&aws_lc_rs::rand::SystemRandom::new())
+        .map(aws_lc_rs::rand::Random::expose)
+        .map_err(|_| AuthError::internal("system random source failed"))
 }
 
 #[cfg(test)]

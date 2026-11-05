@@ -324,7 +324,8 @@ pub struct AuditExportUpdate {
 impl AuditExportUpdate {
     /// Validates the update and turns it into settings: names are trimmed, new sinks get
     /// an id, and every value is checked. `known` lists the ids of the stored sinks: an id
-    /// that is neither known nor new is refused, so a client cannot pick ids.
+    /// that is neither known nor new is refused, so a client cannot pick ids. A list of more
+    /// than [`MAX_SINKS`] sinks is refused before its sinks are looked at.
     ///
     /// # Errors
     ///
@@ -335,7 +336,9 @@ impl AuditExportUpdate {
             problems.push(invalid("alert_after_secs", "audit.export.range"));
         }
         if self.sinks.len() > MAX_SINKS {
+            // Refused before any sink is looked at: the list sizes nothing and costs nothing.
             problems.push(invalid("sinks", "audit.export.too_many"));
+            return Err(ExportError::Invalid(problems));
         }
         let mut ids = BTreeSet::new();
         let mut names = BTreeSet::new();
@@ -737,8 +740,10 @@ mod tests {
 
     #[test]
     fn too_many_sinks_are_refused() {
+        // One sink over the limit, and one with a name that would be a problem of its own:
+        // the list is refused as a whole, and its sinks are not examined.
         let sinks = (0..=MAX_SINKS)
-            .map(|i| spec(&format!("s{i}"), syslog(SyslogTransport::Udp)))
+            .map(|i| spec(if i == 0 { "" } else { "s" }, syslog(SyslogTransport::Udp)))
             .collect();
         let found = codes(
             &update(sinks)

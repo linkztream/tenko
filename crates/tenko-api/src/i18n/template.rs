@@ -11,9 +11,21 @@
 use std::{collections::BTreeMap, fmt::Write as _};
 
 use super::{
+    MAX_PACK_BYTES,
     validate::KeySet,
     xliff::{META_CATEGORY, METADATA_NS, Metadata, XLIFF_NS},
 };
+
+/// The bytes a unit of the template takes, roughly, for the size hint of the output.
+const BYTES_PER_UNIT: usize = 200;
+
+/// The size hint of a template of `units` units: the estimate, and never more than the
+/// largest pack the server takes back, whatever the key set's size. The key set comes from
+/// the UI build (embedded, or the `[server] ui_dir` directory), and the output grows past the
+/// hint when it must.
+fn capacity_hint(units: usize) -> usize {
+    units.saturating_mul(BYTES_PER_UNIT).min(MAX_PACK_BYTES)
+}
 
 /// Escapes text for element content.
 fn escape(text: &str) -> String {
@@ -70,7 +82,7 @@ pub fn render(
     metadata: &Metadata,
     targets: Option<&BTreeMap<String, String>>,
 ) -> String {
-    let mut out = String::with_capacity(keys.len() * 200);
+    let mut out = String::with_capacity(capacity_hint(keys.len()));
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     let _ = writeln!(
         out,
@@ -148,6 +160,14 @@ mod tests {
              </file></xliff>"
         );
         KeySet::from_source_documents(&[text.as_bytes()]).expect("keys")
+    }
+
+    #[test]
+    fn the_size_hint_never_exceeds_the_largest_pack() {
+        assert_eq!(capacity_hint(0), 0);
+        assert_eq!(capacity_hint(3), 3 * BYTES_PER_UNIT);
+        assert_eq!(capacity_hint(MAX_PACK_BYTES), MAX_PACK_BYTES);
+        assert_eq!(capacity_hint(usize::MAX), MAX_PACK_BYTES);
     }
 
     #[test]

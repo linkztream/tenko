@@ -589,7 +589,8 @@ async fn approve_proposals(
     authorize(&app, &cx, Action::Approve, new_of(ObjectKind::Proposal))?;
     let options = PlanOptions::default();
     let each = for_each_proposal(&cx);
-    let mut results = Vec::with_capacity(request.ids.len());
+    // The count passed `check_batch_size`; the clamp keeps the bound beside the allocation.
+    let mut results = Vec::with_capacity(request.ids.len().min(MAX_BATCH));
     for id in request.ids {
         let choice = request.choices.get(&id).cloned().unwrap_or_default();
         let outcome = async {
@@ -638,7 +639,8 @@ async fn reject_proposals(
     let reason = proposals::clean_reason(request.reason)?;
     authorize(&app, &cx, Action::Approve, new_of(ObjectKind::Proposal))?;
     let each = for_each_proposal(&cx);
-    let mut results = Vec::with_capacity(request.ids.len());
+    // The count passed `check_batch_size`; the clamp keeps the bound beside the allocation.
+    let mut results = Vec::with_capacity(request.ids.len().min(MAX_BATCH));
     for id in request.ids {
         let outcome = async {
             authorize(&app, &each, Action::Approve, ObjectRef::from(id))?;

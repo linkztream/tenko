@@ -50,6 +50,19 @@ pub struct PoolChange {
     pub lease: Option<LeaseTimes>,
 }
 
+/// The classes of a change in their order, a class named twice kept once in its first
+/// place. The list comes from a request and sizes nothing up front: the result grows with
+/// the distinct classes, so a long list of repeats costs no more than its distinct ones.
+fn unique_classes(classes: &[ClassId]) -> Vec<ClassId> {
+    let mut unique: Vec<ClassId> = Vec::new();
+    for class in classes {
+        if !unique.contains(class) {
+            unique.push(*class);
+        }
+    }
+    unique
+}
+
 fn not_found(range: RangeId) -> ConfigError {
     ConfigError::new(
         codes::POOL_NOT_FOUND,
@@ -245,16 +258,9 @@ impl ConfigService {
                 .as_ref()
                 .map_or(Revision::ZERO, |(_, revision)| *revision);
             check_expect(expect, revision)?;
-            // A class named twice is kept once, in its first place.
-            let mut classes: Vec<ClassId> = Vec::with_capacity(change.classes.len());
-            for class in &change.classes {
-                if !classes.contains(class) {
-                    classes.push(*class);
-                }
-            }
             let settings = PoolSettings {
                 range,
-                classes,
+                classes: unique_classes(&change.classes),
                 lease: change.lease,
                 updated: stamp(cx),
             };
@@ -332,5 +338,30 @@ impl ConfigService {
             })
             .await?;
         Ok(written)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classes_are_kept_once_in_their_first_place() {
+        let a = ClassId::generate();
+        let b = ClassId::generate();
+        assert_eq!(unique_classes(&[]), Vec::<ClassId>::new());
+        assert_eq!(unique_classes(&[a, b, a, b, b]), [a, b]);
+    }
+
+    #[test]
+    fn a_long_list_of_repeats_allocates_for_its_distinct_classes_only() {
+        let a = ClassId::generate();
+        let b = ClassId::generate();
+        let repeats: Vec<ClassId> = (0..100_000)
+            .map(|i| if i % 2 == 0 { a } else { b })
+            .collect();
+        let unique = unique_classes(&repeats);
+        assert_eq!(unique, [a, b]);
+        assert!(unique.capacity() < 16, "capacity {}", unique.capacity());
     }
 }
