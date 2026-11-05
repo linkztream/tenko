@@ -5,5 +5,9 @@
   "description": "The npm tools the release workflow runs for the SBOMs, installed from this lock file with npm ci --ignore-scripts (job sbom of .github/workflows/release.yml); not part of the product.",
   "dependencies": {
     "@cyclonedx/cyclonedx-npm": "6.0.1"
+  },
+  "overrides": {
+    "minimatch": "^11.0.1",
+    "glob": "^14.0.2"
   }
 }
