@@ -831,11 +831,27 @@ jobs:
         # rules (RULE_ERROR) and on PowerShell 7 in about one run of two before any rule
         # reports, which is the analyzer's defect and not a finding. The compatibility rules
         # of the settings file still target 5.1 and 7.0; the 5.1 row runs the Pester suites.
+        # Version 1.24.0 has the same defect in another form: now and then its start fails
+        # with "The term 'Get-Command' is not recognized" before any rule reports, on Linux
+        # and on Windows. A failure to start is tried again, three attempts in all; a
+        # finding is never tried again and fails the job.
         if: matrix.shell == 'pwsh'
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0
-          Invoke-ScriptAnalyzer -Path deploy/windows/mirror -Recurse -Settings deploy/windows/mirror/PSScriptAnalyzerSettings.psd1 -EnableExit -ReportSummary
+          $findings = $null
+          foreach ($attempt in 1..3) {
+            try {
+              $findings = @(Invoke-ScriptAnalyzer -Path deploy/windows/mirror -Recurse -Settings deploy/windows/mirror/PSScriptAnalyzerSettings.psd1)
+              break
+            } catch {
+              Write-Host "The analyzer did not start (attempt $attempt of 3): $($_.Exception.Message)"
+              if ($attempt -eq 3) { throw }
+            }
+          }
+          $findings | Format-Table -AutoSize -Wrap RuleName, Severity, ScriptName, Line, Message
+          Write-Host "$($findings.Count) findings"
+          if ($findings.Count -gt 0) { exit 1 }
 
   # Changelog rule (OPS-23). Every change to the product adds an entry under
   # "## [Unreleased]" in CHANGELOG.md, because that section becomes the release notes that
