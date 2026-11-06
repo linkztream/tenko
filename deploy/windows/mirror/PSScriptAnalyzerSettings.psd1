@@ -1,7 +1,8 @@
 @{
     # PSScriptAnalyzer rules for deploy/windows/mirror (plan section 4, WP14.1; exit check
     # E72: nothing above this file). Run with
-    #   Invoke-ScriptAnalyzer -Path deploy/windows/mirror -Recurse -Settings deploy/windows/mirror/PSScriptAnalyzerSettings.psd1
+    #   deploy/windows/mirror/tests/Invoke-Analysis.ps1
+    # which runs PSUseCorrectCasing in a pass of its own (see the script for why).
     # Every default rule applies, the compatibility rules on top; the two exclusions are
     # named with their reason.
     Severity     = @('Error', 'Warning', 'Information')

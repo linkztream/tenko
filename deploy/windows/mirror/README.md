@@ -216,8 +216,14 @@ certificate pin with certificates made in memory.
 
 ```powershell
 Invoke-Pester -Path deploy/windows/mirror/tests -Output Detailed
-Invoke-ScriptAnalyzer -Path deploy/windows/mirror -Recurse -Settings deploy/windows/mirror/PSScriptAnalyzerSettings.psd1
+deploy/windows/mirror/tests/Invoke-Analysis.ps1
 ```
+
+`Invoke-Analysis.ps1` runs PSScriptAnalyzer with `PSScriptAnalyzerSettings.psd1` in two
+passes, `PSUseCorrectCasing` apart from the other rules: in one pass, PSScriptAnalyzer
+1.24.0 and 1.25.0 fail in about one call of two with an error of their own (a race between
+that rule and the others in the analyzer's command cache), never with a finding. Exit code 1
+means findings, exit code 2 a failure of the analyzer itself.
 
 To record new fixtures from a lab server (never from a real one; nothing from a real
 export enters the repository), run each cmdlet as the exporter does and write it with

@@ -840,35 +840,27 @@ jobs:
           $config.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $config
       - name: PSScriptAnalyzer
-        # The analyzer runs on PowerShell 7 only, at version 1.24.0: version 1.25.0 fails
-        # with a null reference on the exporter, on Windows PowerShell 5.1 inside one of its
-        # rules (RULE_ERROR) and on PowerShell 7 in about one run of two before any rule
-        # reports, which is the analyzer's defect and not a finding. The compatibility rules
-        # of the settings file still target 5.1 and 7.0; the 5.1 row runs the Pester suites.
-        # Version 1.24.0 has the same defect in another form: now and then its start fails
-        # with "The term 'Get-Command' is not recognized" before any rule reports, on Linux
-        # and on Windows, or with the null reference of 1.25.0. A failure to start is tried
-        # again, six attempts in all with a pause between them (the first run with the retry
-        # needed its third attempt on both systems); a finding is never tried again and
-        # fails the job.
+        # The analyzer runs on PowerShell 7 at version 1.24.0; the compatibility rules of the
+        # settings file still target 5.1 and 7.0, and the 5.1 row runs the Pester suites.
+        # Run as one call with every rule of the settings file, 1.24.0 and 1.25.0 fail in
+        # about one call of two (Linux and Windows), with a RULE_ERROR and no finding: since
+        # 1.24.0 PSUseCorrectCasing also checks parameter names and reads
+        # CommandInfo.Parameters on its rule thread, while PSUseShouldProcessCorrectly and
+        # PSAvoidUsingCmdletAliases run Get-Command in the same runspace of the analyzer's
+        # command cache. That runspace is then used from two threads at once: a null
+        # reference in CommandInfo.Parameters, "The term 'Get-Command' is not recognized"
+        # (which stays for the rest of the process, so a retry in the same process fails
+        # too), now and then a crash or a hang. Without PSUseCorrectCasing, or with it alone,
+        # no call has failed. Invoke-Analysis.ps1 therefore runs the same rules over the same
+        # files in two passes, PSUseCorrectCasing apart, without a retry. Exit code 1 is a
+        # finding (printed with rule, severity, file, line and message); exit code 2 is a
+        # failure of the analyzer itself, printed with its exception.
         if: matrix.shell == 'pwsh'
         run: |
           $ErrorActionPreference = 'Stop'
           Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0
-          $findings = $null
-          foreach ($attempt in 1..6) {
-            try {
-              $findings = @(Invoke-ScriptAnalyzer -Path deploy/windows/mirror -Recurse -Settings deploy/windows/mirror/PSScriptAnalyzerSettings.psd1)
-              break
-            } catch {
-              Write-Host "The analyzer did not start (attempt $attempt of 6): $($_.Exception.Message)"
-              if ($attempt -eq 6) { throw }
-              Start-Sleep -Seconds 5
-            }
-          }
-          $findings | Format-Table -AutoSize -Wrap RuleName, Severity, ScriptName, Line, Message
-          Write-Host "$($findings.Count) findings"
-          if ($findings.Count -gt 0) { exit 1 }
+          & ./deploy/windows/mirror/tests/Invoke-Analysis.ps1
+          exit $LASTEXITCODE
 
   # Changelog rule (OPS-23). Every change to the product adds an entry under
   # "## [Unreleased]" in CHANGELOG.md, because that section becomes the release notes that
