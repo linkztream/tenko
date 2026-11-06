@@ -34,7 +34,14 @@ async fn server() -> Server {
         .await
         {
             Ok(server) => return server,
-            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse && attempts < 20 => {
+            // Windows refuses a port of an excluded range with PermissionDenied: the TCP
+            // listener takes the number the UDP socket got, and that number can be excluded.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
+                ) && attempts < 20 =>
+            {
                 attempts += 1;
             }
             Err(error) => panic!("server: {error}"),

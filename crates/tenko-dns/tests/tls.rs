@@ -227,7 +227,13 @@ async fn start(
         };
         match Server::start_authoritative(config, catalog(), hooks).await {
             Ok(server) => return server,
-            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse && attempts < 20 => {
+            // Windows refuses a port of an excluded range with PermissionDenied.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
+                ) && attempts < 20 =>
+            {
                 attempts += 1;
             }
             Err(error) => panic!("start: {error}"),

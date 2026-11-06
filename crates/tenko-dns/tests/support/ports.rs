@@ -67,7 +67,8 @@ pub fn free_port() -> u16 {
 
 /// Starts an authoritative server on a free port: `config` builds the configuration for the
 /// port picked. An `AddrInUse` from the start (another process took the port between the
-/// pick and the bind) starts again on a new port; any other error fails the test.
+/// pick and the bind) or a `PermissionDenied` (Windows excludes the port for one of the
+/// transports) starts again on a new port; any other error fails the test.
 pub async fn start_on_free_port(
     config: impl Fn(u16) -> ServerConfig,
     catalog: &CatalogHandle,
@@ -78,10 +79,13 @@ pub async fn start_on_free_port(
         {
             Ok(server) => return server,
             Err(error)
-                if error.kind() == std::io::ErrorKind::AddrInUse && attempt < START_ATTEMPTS =>
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
+                ) && attempt < START_ATTEMPTS =>
             {
                 eprintln!(
-                    "start attempt {attempt} of {START_ATTEMPTS}: the port was taken between \
+                    "start attempt {attempt} of {START_ATTEMPTS}: the port was taken or is excluded between \
                      the pick and the bind; picking another port"
                 );
             }
