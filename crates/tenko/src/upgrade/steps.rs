@@ -19,7 +19,7 @@
 
 use std::{
     collections::BTreeMap,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, Weak},
     time::Duration,
 };
@@ -38,7 +38,7 @@ use tenko_jobs::{
 use tenko_store::{ReadView, format};
 
 use super::{
-    layout::{CURRENT, Layout, PREVIOUS, binary_name},
+    layout::{CURRENT, PREVIOUS},
     probation::{self, Attempt},
     source::{Staged, sha256_file},
     updates::Inner,
@@ -86,6 +86,14 @@ fn failed(code: &'static str, status: u16, detail: impl Into<String>) -> StepErr
     StepError::Coded(Box::new(CodedError::new(code, status, detail)))
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "taken by value to serve as the argument of `map_err`"
+)]
+fn io_failed(error: std::io::Error) -> StepError {
+    failed("update.io", 500, error.to_string())
+}
+
 fn coded(error: CodedError) -> StepError {
     StepError::Coded(Box::new(error))
 }
@@ -98,13 +106,6 @@ fn encode(value: &impl Serialize) -> Result<HexBytes, CodedError> {
     to_cbor(value)
         .map(|bytes| HexBytes(bytes.to_vec()))
         .map_err(|error| CodedError::new("update.job", 500, error.to_string()))
-}
-
-/// The file a download or an upload is staged in.
-pub fn staged_path(layout: &Layout, version: &ReleaseVersion) -> PathBuf {
-    layout
-        .version_dir(version)
-        .join(format!("{}.part", binary_name()))
 }
 
 /// Checks a staged file against the manifest entry.
@@ -325,14 +326,17 @@ impl StepHandler for UpdateStep {
         match self.kind {
             FETCH => {
                 let params: AssetParams = self::params(params)?;
-                let _ = std::fs::remove_file(staged_path(layout, &params.version));
+                if let Ok(part) = layout.staged(&params.version) {
+                    let _ = std::fs::remove_file(part);
+                }
             }
             VERIFY => {
                 let params: AssetParams = self::params(params)?;
                 if params.version != inner.env.running
                     && layout.current() != Some(params.version.clone())
+                    && let Ok(dir) = layout.version_dir(&params.version)
                 {
-                    let _ = std::fs::remove_dir_all(layout.version_dir(&params.version));
+                    let _ = std::fs::remove_dir_all(dir);
                 }
             }
             SWITCH => {
@@ -372,7 +376,10 @@ async fn backup(inner: &Inner, params: &BackupParams, cx: &StepContext) -> Resul
 }
 
 async fn fetch(inner: &Inner, params: AssetParams) -> Result<(), StepError> {
-    let path = staged_path(&inner.layout, &params.version);
+    let path = inner
+        .layout
+        .prepare_staged(&params.version)
+        .map_err(io_failed)?;
     let staged = inner
         .source
         .download(&params.asset, &path)
@@ -384,8 +391,8 @@ async fn fetch(inner: &Inner, params: AssetParams) -> Result<(), StepError> {
 
 fn verify(inner: &Inner, params: &AssetParams) -> Result<(), StepError> {
     let layout = &inner.layout;
-    let part = staged_path(layout, &params.version);
-    let target = layout.binary(&params.version);
+    let part = layout.staged(&params.version).map_err(io_failed)?;
+    let target = layout.binary_path(&params.version).map_err(io_failed)?;
     if !part.is_file() && target.is_file() {
         // A repeated run after the rename: check the file in place.
         let (size, sha256) = sha256_file(&target).map_err(coded)?;
@@ -414,11 +421,8 @@ fn verify(inner: &Inner, params: &AssetParams) -> Result<(), StepError> {
     std::fs::rename(&part, &target).map_err(|error| failed("update.io", 500, error.to_string()))?;
     let entry = serde_json::to_vec_pretty(&params.asset)
         .map_err(|error| failed("update.io", 500, error.to_string()))?;
-    std::fs::write(
-        layout.version_dir(&params.version).join("release.json"),
-        entry,
-    )
-    .map_err(|error| failed("update.io", 500, error.to_string()))?;
+    let dir = layout.version_dir(&params.version).map_err(io_failed)?;
+    std::fs::write(dir.join("release.json"), entry).map_err(io_failed)?;
     tracing::info!(version = %params.version, "verified the release file");
     Ok(())
 }

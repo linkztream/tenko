@@ -1012,7 +1012,11 @@ impl Updates {
         let (_, asset) = self.release_for(&version).await?;
         // Answered before a byte of the file is read.
         let plan = self.backup_plan(query.backup).await?;
-        let part = steps::staged_path(&self.inner.layout, &version);
+        let part = self
+            .inner
+            .layout
+            .prepare_staged(&version)
+            .map_err(|error| CodedError::new("update.io", 500, error.to_string()))?;
         let mut writer = StagedWriter::create(&part, asset.size)?;
         while let Some(chunk) = body.next().await {
             let chunk = chunk.map_err(|error| {

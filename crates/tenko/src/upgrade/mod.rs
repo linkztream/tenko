@@ -188,7 +188,7 @@ pub fn ensure_layout(
     if layout.runs(exe) {
         return Ok(format!(
             "this binary runs from the layout ({})",
-            layout.version_dir(own).display()
+            layout.version_dir(own)?.display()
         ));
     }
     if !layout.binary(own).is_file() {
