@@ -144,6 +144,8 @@ pub enum TokenAuthz {
     Personal {
         /// The owner.
         owner: UserId,
+        /// The strength of the sign-in that created it.
+        issued_with: AuthStrength,
     },
     /// A scoped token: the intersection of its grants and its owner's.
     Scoped {
@@ -153,6 +155,8 @@ pub enum TokenAuthz {
         grants: Vec<TokenGrant>,
         /// Its special scopes.
         scopes: Vec<TokenScope>,
+        /// The strength of the sign-in that created it.
+        issued_with: AuthStrength,
     },
 }
 
@@ -160,7 +164,15 @@ impl TokenAuthz {
     /// The owner.
     pub fn owner(&self) -> UserId {
         match self {
-            Self::Personal { owner } | Self::Scoped { owner, .. } => *owner,
+            Self::Personal { owner, .. } | Self::Scoped { owner, .. } => *owner,
+        }
+    }
+
+    /// The strength of the sign-in that created the token. A token acts only while it
+    /// meets its owner's requirement, which may have risen since.
+    pub fn issued_with(&self) -> AuthStrength {
+        match self {
+            Self::Personal { issued_with, .. } | Self::Scoped { issued_with, .. } => *issued_with,
         }
     }
 }
@@ -338,6 +350,7 @@ impl AuthImage {
                     record.id,
                     TokenAuthz::Personal {
                         owner: record.owner,
+                        issued_with: record.issued_with,
                     },
                 )
             })
@@ -349,6 +362,7 @@ impl AuthImage {
                         owner: record.owner,
                         grants: record.grants,
                         scopes: record.scopes,
+                        issued_with: record.issued_with,
                     },
                 )
             })
@@ -365,6 +379,13 @@ impl AuthImage {
         Ok(())
     }
 
+    /// Removes the token stored under `hash`, so that it is refused.
+    fn remove_token(&mut self, hash: &[u8]) {
+        if let Some(id) = Arc::make_mut(&mut self.token_hashes).remove(hash) {
+            Arc::make_mut(&mut self.tokens).remove(&id);
+        }
+    }
+
     fn load_tokens(&mut self, view: &dyn ReadView) -> Result<(), StoreError> {
         let mut tokens = HashMap::new();
         let mut hashes = HashMap::new();
@@ -374,6 +395,7 @@ impl AuthImage {
                 record.id,
                 TokenAuthz::Personal {
                     owner: record.owner,
+                    issued_with: record.issued_with,
                 },
             );
         }
@@ -387,6 +409,7 @@ impl AuthImage {
                     owner: record.owner,
                     grants: record.grants,
                     scopes: record.scopes,
+                    issued_with: record.issued_with,
                 },
             );
         }
@@ -486,22 +509,33 @@ impl DerivedIndex for AuthIndex {
         }
     }
 
+    /// Applies one change set. When an entry cannot be read or decoded, the whole index is
+    /// built again from `view`; when that fails too, the image fails closed for what it
+    /// could not read: a user or a token that did not load is removed (refused), the grants
+    /// are emptied when they did not reload, and the vault counts as holding an operator
+    /// secret (the stricter PIN rule). Settings and role policies that did not reload keep
+    /// their previous value, since no value is known to be stricter without them.
     fn apply(&self, changes: &ChangeSet, view: &dyn ReadView) {
         let mut image = AuthImage::clone(&self.live.load());
         image.revision = changes.revision;
         let mut grants = false;
         let mut policies = false;
+        let mut failed = false;
         for change in &changes.changes {
             let table = &change.table;
             let result = if table == USERS.name() {
                 match USERS.decode_key(&change.key) {
-                    Ok(id) => image.load_user(view, id),
+                    Ok(id) => image.load_user(view, id).inspect_err(|_| {
+                        Arc::make_mut(&mut image.users).remove(&id);
+                    }),
                     Err(error) => Err(error.into()),
                 }
             } else if table == crate::model::SETTINGS.name() {
                 image.load_settings(view)
             } else if table == OPERATOR_INDEX.name() {
-                image.load_operator_secrets(view)
+                image.load_operator_secrets(view).inspect_err(|_| {
+                    image.operator_secrets = true;
+                })
             } else if table == PACKS.name() {
                 image.load_languages(view)
             } else if table == GRANTS.name() {
@@ -512,23 +546,45 @@ impl DerivedIndex for AuthIndex {
                 Ok(())
             } else if table == TOKENS.name() || table == SCOPED_TOKENS.name() {
                 match TOKENS.decode_key(&change.key) {
-                    Ok(hash) => image.load_token(view, table, hash),
+                    Ok(hash) => image
+                        .load_token(view, table, hash.clone())
+                        .inspect_err(|_| {
+                            image.remove_token(&hash);
+                        }),
                     Err(error) => Err(error.into()),
                 }
             } else {
                 Ok(())
             };
             if let Err(error) = result {
-                // Keep serving the previous state of this entry; the next build repairs it.
+                failed = true;
                 tracing::error!(%error, revision = %changes.revision, "auth index update failed");
             }
         }
         // Grants and policies are few: reloaded whole, once per change set.
         if grants && let Err(error) = image.load_grants(view) {
+            failed = true;
+            image.grants = Arc::new(HashMap::new());
             tracing::error!(%error, revision = %changes.revision, "auth index grants not reloaded");
         }
         if policies && let Err(error) = image.load_policies(view) {
+            failed = true;
             tracing::error!(%error, revision = %changes.revision, "auth index policies not reloaded");
+        }
+        if failed {
+            match self.build(view) {
+                Ok(rebuilt) => {
+                    self.install(rebuilt);
+                    return;
+                }
+                Err(error) => {
+                    tracing::error!(
+                        %error,
+                        revision = %changes.revision,
+                        "auth index not rebuilt; what did not load is refused"
+                    );
+                }
+            }
         }
         self.live.store(Arc::new(image));
     }
@@ -789,6 +845,13 @@ impl RbacAuthorizer {
                 if interactive_only(action, kind) {
                     return Err(DenyReason::MissingPermission);
                 }
+                // The owner's requirement may have risen since the token was issued (a
+                // profile, a setting, a role policy, an operator secret); a token issued
+                // below it acts no more until a stronger sign-in creates a new one.
+                let required = image.required_strength(*owner, action);
+                if !satisfies(token.issued_with(), required) {
+                    return Err(DenyReason::StepUpRequired { required });
+                }
                 let owner_reach = user_reach(user, image.grants_of(*owner), action, kind);
                 let reach = match token {
                     // Service accounts act through scoped tokens only.
@@ -919,6 +982,203 @@ mod tests {
     use tenko_store::{MemStore, Store, WriteBatch};
 
     use super::*;
+
+    /// A read view over a store that fails its point reads of users and tokens, and every
+    /// scan when asked:
+    /// a store error, or a row this build cannot decode, as the index meets it.
+    struct FailingView {
+        inner: Arc<dyn ReadView>,
+        scans_fail: bool,
+    }
+
+    impl ReadView for FailingView {
+        fn revision(&self) -> Revision {
+            self.inner.revision()
+        }
+
+        fn get(&self, table: &TableName, key: &[u8]) -> Result<Option<Versioned>, StoreError> {
+            // The rows an update reads one by one: users and tokens.
+            if table == USERS.name() || table == TOKENS.name() {
+                return Err(StoreError::Storage("injected read failure".to_owned()));
+            }
+            self.inner.get(table, key)
+        }
+
+        fn scan(
+            &self,
+            table: &TableName,
+            range: KeyRange,
+            limit: usize,
+            reverse: bool,
+        ) -> Result<Vec<(bytes::Bytes, Versioned)>, StoreError> {
+            if self.scans_fail {
+                return Err(StoreError::Storage("injected scan failure".to_owned()));
+            }
+            self.inner.scan(table, range, limit, reverse)
+        }
+
+        fn counter(&self, counter: &CounterKey) -> Result<u64, StoreError> {
+            self.inner.counter(counter)
+        }
+    }
+
+    fn batch() -> WriteBatch {
+        WriteBatch::new(
+            Principal::system(SystemComponent::Auth),
+            Timestamp::UNIX_EPOCH,
+        )
+    }
+
+    fn change_of(table: &TableName, key: bytes::Bytes) -> ChangeSet {
+        ChangeSet {
+            revision: Revision(1_000),
+            principal: Principal::system(SystemComponent::Auth),
+            at: Timestamp::UNIX_EPOCH,
+            changes: vec![tenko_store::Change {
+                table: table.clone(),
+                key,
+                deleted: false,
+            }],
+        }
+    }
+
+    /// An index over a store with one administrator, one personal token of hers and one
+    /// grant of hers.
+    async fn indexed() -> (
+        Arc<MemStore>,
+        Arc<AuthIndex>,
+        crate::model::UserRecord,
+        Vec<u8>,
+    ) {
+        let store = Arc::new(MemStore::default());
+        let index = Arc::new(AuthIndex::new());
+        store.register_index(index.clone()).expect("register");
+        let user = crate::model::UserRecord::new(
+            "ada".to_owned(),
+            "Ada".to_owned(),
+            vec![RoleName::Admin],
+            Timestamp::UNIX_EPOCH,
+        );
+        let hash = vec![7_u8; 32];
+        let mut write = batch();
+        write.put_typed(&USERS, &user.id, &user).expect("user");
+        write
+            .put_typed(
+                &TOKENS,
+                &hash,
+                &crate::model::TokenRecord {
+                    id: ApiTokenId::generate(),
+                    owner: user.id,
+                    name: "t".to_owned(),
+                    created_at: Timestamp::UNIX_EPOCH,
+                    expires_at: None,
+                    last_used_at: None,
+                    issued_with: AuthStrength::Password,
+                    prefix: "tnk_".to_owned(),
+                },
+            )
+            .expect("token");
+        write
+            .put_typed(
+                &GRANTS,
+                &crate::model::GrantId::generate(),
+                &GrantRecord {
+                    id: crate::model::GrantId::generate(),
+                    subject: user.id,
+                    role: RoleName::Operator,
+                    scope: ScopeRule::Vrf(tenko_core::VrfId::generate()),
+                    delegable: false,
+                    granted_by: None,
+                    granted_at: Timestamp::UNIX_EPOCH,
+                    parent: None,
+                },
+            )
+            .expect("grant");
+        store.propose(write).await.expect("commit");
+        assert!(index.image().user(user.id).is_some());
+        assert_eq!(index.image().grants_of(user.id).len(), 1);
+        (store, index, user, hash)
+    }
+
+    #[tokio::test]
+    async fn an_update_that_cannot_be_read_refuses_what_it_could_not_load() {
+        let (store, index, user, hash) = indexed().await;
+        // The user is disabled; the update reaches the index, but nothing can be read.
+        let mut disabled = user.clone();
+        disabled.disabled = true;
+        let mut write = batch();
+        write.put_typed(&USERS, &user.id, &disabled).expect("user");
+        store.propose(write).await.expect("commit");
+        let view = FailingView {
+            inner: store.read(ReadConsistency::Local).await.expect("view"),
+            scans_fail: true,
+        };
+        // Back to the image before the disable, as an index that missed it would hold.
+        index.install(Box::new({
+            let mut before = AuthImage::clone(&index.image());
+            Arc::make_mut(&mut before.users).insert(user.id, user_authz(user.clone()));
+            before
+        }));
+        index.apply(&change_of(USERS.name(), USERS.key(&user.id)), &view);
+        assert!(
+            index.image().user(user.id).is_none(),
+            "a user that did not load is refused, not served from the old state"
+        );
+
+        let token = index
+            .image()
+            .token_hashes
+            .get(&hash)
+            .copied()
+            .expect("token");
+        index.apply(&change_of(TOKENS.name(), TOKENS.key(&hash)), &view);
+        assert!(index.image().token(token).is_none(), "the token is refused");
+
+        index.apply(
+            &change_of(
+                GRANTS.name(),
+                GRANTS.key(&crate::model::GrantId::generate()),
+            ),
+            &view,
+        );
+        assert!(
+            index.image().grants_of(user.id).is_empty(),
+            "grants fail closed"
+        );
+
+        index.apply(
+            &change_of(OPERATOR_INDEX.name(), bytes::Bytes::from_static(b"k")),
+            &view,
+        );
+        assert!(
+            index.image().operator_secrets(),
+            "the stricter PIN rule holds"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_update_that_cannot_be_read_rebuilds_the_index_when_it_can() {
+        let (store, index, user, _) = indexed().await;
+        let mut disabled = user.clone();
+        disabled.disabled = true;
+        let mut write = batch();
+        write.put_typed(&USERS, &user.id, &disabled).expect("user");
+        store.propose(write).await.expect("commit");
+        index.install(Box::new({
+            let mut before = AuthImage::clone(&index.image());
+            Arc::make_mut(&mut before.users).insert(user.id, user_authz(user.clone()));
+            before
+        }));
+        // Point reads fail, scans work: the rebuild reads the disable.
+        let view = FailingView {
+            inner: store.read(ReadConsistency::Local).await.expect("view"),
+            scans_fail: false,
+        };
+        index.apply(&change_of(USERS.name(), USERS.key(&user.id)), &view);
+        let image = index.image();
+        assert!(image.user(user.id).is_some_and(|loaded| loaded.disabled));
+        assert_eq!(image.grants_of(user.id).len(), 1, "the rest is intact");
+    }
 
     async fn put_pack(store: &MemStore, tag: &str, state: PackState) {
         let mut batch = WriteBatch::new(

@@ -213,7 +213,7 @@ impl AuthService {
 
     /// Records a failed login: in memory first, then one audit record (and a lock when the
     /// policy says so). Always answers [`AuthError::InvalidCredentials`].
-    async fn login_failed(
+    pub(super) async fn login_failed(
         &self,
         ctx: &RequestCtx,
         account: &ThrottleKey,
@@ -304,8 +304,14 @@ impl AuthService {
         let found = Self::find_user_versioned(view.as_ref(), &request.user_name)?;
         let normalized = normalize(request.password.expose());
         let strength = hash_strength(&settings);
+        // An account of an external directory has no local password, whatever its record
+        // holds: it is refused as an unknown account is.
         let usable = found.filter(|(user, _)| {
-            !user.disabled && !user.break_glass && !user.is_service() && user.password.is_some()
+            !user.disabled
+                && !user.break_glass
+                && !user.is_service()
+                && user.source.is_local()
+                && user.password.is_some()
         });
         let Some((user, revision)) = usable else {
             let dummy = normalized.clone();

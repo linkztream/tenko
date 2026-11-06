@@ -17702,13 +17702,23 @@ export interface components {
             current_password?: components["schemas"]["SecretString"] | null;
             /** @description The new password. */
             new_password: components["schemas"]["SecretString"];
+            /**
+             * @description Also remove the account's TOTP seed, passkeys and recovery codes, so that only the
+             *     new password signs in. An account that needs a second factor then enrolls one at its
+             *     next sign-in.
+             */
+            remove_factors?: boolean;
         };
         /** @description The answer of a password change. */
         PasswordChanged: {
             /** @description The breached-password check. */
             breach_check: components["schemas"]["BreachStatus"];
+            /** @description Whether the TOTP seed, the passkeys and the recovery codes were removed. */
+            factors_removed: boolean;
             /** @description Other sessions of the account that were ended. */
             sessions_revoked: number;
+            /** @description Personal and scoped tokens of the account that were revoked. */
+            tokens_revoked: number;
         };
         /** @description `POST /auth/password/check`: live policy feedback. */
         PasswordCheck: {
@@ -25191,6 +25201,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description A scoped token without a grant that reads users (`auth.forbidden`): it reads its owner's grants only with one */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
             503: {
                 headers: {
@@ -25757,7 +25776,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The caller may not administer users (`auth.forbidden`), the session is not strong enough (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`) */
+            /** @description The caller may not administer users (`auth.forbidden`), the session is not strong enough for the caller and the account or did not authenticate within the last five minutes (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -27457,7 +27476,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The password changed; the other sessions ended */
+            /** @description The password changed; the other sessions ended and the account's tokens were revoked, and with `remove_factors` its TOTP seed, passkeys and recovery codes were removed */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -27484,7 +27503,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The current password is wrong (`auth.password.incorrect`) or the account is the break-glass account (`auth.break_glass.hardware_key_only`) */
+            /** @description The current password is wrong (`auth.password.incorrect`, counted and audited as a failed sign-in), the account is the break-glass account (`auth.break_glass.hardware_key_only`), or the account has no password and the session did not authenticate within the last five minutes (`auth.step_up_required`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -28443,6 +28462,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description A scoped token without a grant that reads users (`auth.forbidden`): it reads the sessions of its owner only with one */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
             503: {
                 headers: {
@@ -28538,6 +28566,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description A scoped token without a grant that reads users (`auth.forbidden`): it reads the tokens of its owner only with one */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
             503: {
                 headers: {
@@ -28589,7 +28626,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The session is not strong enough (`auth.step_up_required`) is the break-glass session (`auth.break_glass.hardware_key_only`), or a grant of a scoped token goes beyond the owner's (`auth.grant.exceeds_own`) */
+            /** @description The session is not strong enough or did not authenticate within the last five minutes (`auth.step_up_required`), is the break-glass session (`auth.break_glass.hardware_key_only`), or a grant of a scoped token goes beyond the owner's (`auth.grant.exceeds_own`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -28769,6 +28806,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description The session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`): a new factor outlives the session that adds it */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description The code does not match the new seed (`auth.totp.code_mismatch`) */
             422: {
                 headers: {
@@ -28816,6 +28862,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description The session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`): a new factor outlives the session that adds it */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description TOTP is already enrolled (`auth.totp.already_enrolled`) */
             409: {
                 headers: {
@@ -28856,6 +28911,15 @@ export interface operations {
             };
             /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A scoped token without a grant that reads users (`auth.forbidden`): it reads the passkeys of its owner only with one */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -29094,7 +29158,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The attestation is refused (`auth.webauthn.attestation_required`, `auth.webauthn.attestation_untrusted`, `auth.webauthn.backup_eligible_refused`) */
+            /** @description The attestation is refused (`auth.webauthn.attestation_required`, `auth.webauthn.attestation_untrusted`, `auth.webauthn.backup_eligible_refused`), or the session did not authenticate within the last five minutes (`auth.step_up_required`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -29157,6 +29221,15 @@ export interface operations {
             };
             /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`): a new factor outlives the session that adds it */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -50071,7 +50144,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            /** @description The caller may not change settings (`auth.forbidden`), or the session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -53510,7 +53583,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            /** @description The caller may not administer users (`auth.forbidden`), or the user is the break-glass account and the session is not one of at least password and TOTP from the last five minutes (`auth.step_up_required`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -53596,7 +53669,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            /** @description The caller may not administer users (`auth.forbidden`), or the user is the break-glass account and the session is not one of at least password and TOTP from the last five minutes (`auth.step_up_required`) */
             403: {
                 headers: {
                     [name: string]: unknown;

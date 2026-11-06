@@ -66,27 +66,7 @@ impl Planner<'_> {
         if self.ws.exists(&CUSTOM_FIELD_KEYS, &key_text, true)? {
             return Err(name_taken("custom field", input.key.as_str()));
         }
-        let id = match input.id {
-            Some(id) => {
-                if self.ws.exists(&CUSTOM_FIELDS, &id, true)? {
-                    let object: ObjectRef = id.into();
-                    return Err(IpamError::new(
-                        codes::ID_TAKEN,
-                        409,
-                        format!("{object} exists already"),
-                    )
-                    .param("kind", object.kind)
-                    .param("id", object.id));
-                }
-                id
-            }
-            None => loop {
-                let id = CustomFieldId::from(self.new_uuid());
-                if !self.ws.exists(&CUSTOM_FIELDS, &id, true)? {
-                    break id;
-                }
-            },
-        };
+        let id = self.claim_in(&CUSTOM_FIELDS, input.id)?;
         let def = CustomFieldDef {
             id,
             key: input.key.clone(),

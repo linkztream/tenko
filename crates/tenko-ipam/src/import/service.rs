@@ -443,13 +443,22 @@ impl ImportService {
         if let Some((_, files)) = lock(&self.parsed).iter().find(|(id, _)| *id == session.id) {
             return Ok(Arc::clone(files));
         }
-        let mut files = Vec::with_capacity(session.files.len());
+        let mut stored = Vec::with_capacity(session.files.len());
         for (index, file) in session.files.iter().enumerate() {
             let bytes = self.stash.read(session.id, index, &file.stored_as).await?;
-            files.push(
-                read::read_file(&file.name, &bytes, &self.config.limits).map_err(read_error)?,
-            );
+            stored.push((file.name.clone(), bytes));
         }
+        let limits = self.config.limits;
+        let files = off_runtime(move || {
+            read::read_upload(
+                stored
+                    .iter()
+                    .map(|(name, bytes)| (name.as_str(), bytes.as_slice())),
+                &limits,
+            )
+        })
+        .await?
+        .map_err(read_error)?;
         let files = Arc::new(files);
         let mut cache = lock(&self.parsed);
         cache.push_back((session.id, Arc::clone(&files)));
@@ -544,13 +553,18 @@ impl ImportService {
         if total > self.config.max_upload {
             return Err(too_large(total, self.config.max_upload));
         }
-        let mut files = Vec::with_capacity(uploads.len());
-        for upload in &uploads {
-            files.push(
-                read::read_file(&upload.name, &upload.bytes, &self.config.limits)
-                    .map_err(read_error)?,
+        let limits = self.config.limits;
+        let (uploads, files) = off_runtime(move || {
+            let files = read::read_upload(
+                uploads
+                    .iter()
+                    .map(|upload| (upload.name.as_str(), upload.bytes.as_slice())),
+                &limits,
             );
-        }
+            (uploads, files)
+        })
+        .await?;
+        let files = files.map_err(read_error)?;
         let id = ImportId::generate();
         let mut staged = Vec::with_capacity(uploads.len());
         for (index, (upload, file)) in uploads.iter().zip(&files).enumerate() {
@@ -1495,6 +1509,31 @@ impl ImportService {
     }
 }
 
+/// Uploads parsed at once on this controller.
+const MAX_PARSES: usize = 2;
+
+/// The permits of [`MAX_PARSES`].
+static PARSES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(MAX_PARSES);
+
+/// Runs the readers on a thread of the blocking pool: parsing an upload is CPU work that
+/// the read limits bound but that would otherwise hold an async worker of the API, and of
+/// a DNS or DHCP role in the same process, for its whole length. At most [`MAX_PARSES`]
+/// run at once, since each may build up to the read limits; the others wait their turn. A
+/// panic the readers did not catch is an unreadable file.
+async fn off_runtime<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> IpamResult<T> {
+    let _permit = PARSES
+        .acquire()
+        .await
+        .map_err(|_| IpamError::new(codes::UNAVAILABLE, 503, "the import readers are closed"))?;
+    tokio::task::spawn_blocking(work).await.map_err(|_| {
+        read_error(ReadError::Malformed(
+            "the file structure is damaged".to_owned(),
+        ))
+    })
+}
+
 fn read_error(error: ReadError) -> IpamError {
     match error {
         ReadError::Unsupported => IpamError::new(
@@ -1643,4 +1682,64 @@ pub fn chunk_ranges(
 ) -> Vec<Range<usize>> {
     let items = reconcile::work_items(model, options);
     job::cut_chunks(&items, model, config.chunk_bytes, config.max_chunk_commands)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::mpsc, time::Duration};
+
+    use super::*;
+
+    /// The readers run on a thread of the blocking pool: while one reads, the async worker
+    /// it was called from stays free. On a runtime of one thread, a task spawned before the
+    /// read must run while the read waits for it.
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_readers_leave_the_async_worker_free() {
+        let (sender, receiver) = mpsc::channel::<()>();
+        let other = tokio::spawn(async move {
+            sender.send(()).expect("the reader waits");
+        });
+        let ran_meanwhile =
+            off_runtime(move || receiver.recv_timeout(Duration::from_secs(10)).is_ok())
+                .await
+                .expect("the work ran");
+        assert!(ran_meanwhile, "the other task ran while the reader worked");
+        other.await.expect("the other task");
+    }
+
+    /// At most two uploads are parsed at once on a controller, whatever the number of
+    /// requests: each may build up to the read limits.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn at_most_two_reads_run_at_once() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let running = Arc::new(AtomicUsize::new(0));
+        let most = Arc::new(AtomicUsize::new(0));
+        let mut tasks = Vec::new();
+        for _ in 0..5 {
+            let (running, most) = (Arc::clone(&running), Arc::clone(&most));
+            tasks.push(tokio::spawn(off_runtime(move || {
+                let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                most.fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(150));
+                running.fetch_sub(1, Ordering::SeqCst);
+            })));
+        }
+        for task in tasks {
+            task.await.expect("joined").expect("ran");
+        }
+        assert!(most.load(Ordering::SeqCst) <= MAX_PARSES, "{most:?}");
+        assert_eq!(MAX_PARSES, 2);
+    }
+
+    /// A panic of the work is an unreadable file, not a lost request.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_panic_off_the_runtime_is_an_unreadable_file() {
+        let error = off_runtime(|| -> () { panic!("a reader bug") })
+            .await
+            .expect_err("the panic");
+        assert_eq!(error.code_str(), codes::UPLOAD_UNREADABLE);
+    }
 }

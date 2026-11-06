@@ -195,9 +195,12 @@ export type MessageKey =
   | "account.password.confirm"
   | "account.password.current"
   | "account.password.current_help"
+  | "account.password.factors_removed"
   | "account.password.lede"
   | "account.password.mismatch"
   | "account.password.new"
+  | "account.password.remove_factors"
+  | "account.password.remove_factors_help"
   | "account.password.rule.length"
   | "account.password.rule.passphrase"
   | "account.password.rule.pattern"
@@ -211,6 +214,7 @@ export type MessageKey =
   | "account.password.state.pending"
   | "account.password.submit"
   | "account.password.title"
+  | "account.password.tokens_revoked"
   | "account.recovery.confirm_body"
   | "account.recovery.confirm_title"
   | "account.recovery.generate"
@@ -8092,6 +8096,7 @@ export interface MessageArgs {
   "account.password.rule.pattern": { min: string | number };
   "account.password.rule.pin": { min: string | number };
   "account.password.rule.profile": { profile: string | number };
+  "account.password.tokens_revoked": { count: number };
   "account.recovery.left": { count: number };
   "account.sessions.client": { browser: string | number; os: string | number };
   "account.sessions.confirm_body": { count: number };
@@ -9790,9 +9795,12 @@ export const messageKeys: readonly MessageKey[] = [
   "account.password.confirm",
   "account.password.current",
   "account.password.current_help",
+  "account.password.factors_removed",
   "account.password.lede",
   "account.password.mismatch",
   "account.password.new",
+  "account.password.remove_factors",
+  "account.password.remove_factors_help",
   "account.password.rule.length",
   "account.password.rule.passphrase",
   "account.password.rule.pattern",
@@ -9806,6 +9814,7 @@ export const messageKeys: readonly MessageKey[] = [
   "account.password.state.pending",
   "account.password.submit",
   "account.password.title",
+  "account.password.tokens_revoked",
   "account.recovery.confirm_body",
   "account.recovery.confirm_title",
   "account.recovery.generate",

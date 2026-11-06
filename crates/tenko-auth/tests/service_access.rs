@@ -654,6 +654,67 @@ async fn the_holder_of_a_delegable_grant_grants_a_role_no_higher_over_a_scope_in
     );
 }
 
+/// Disabling an account ends the grants it holds and the grants issued under them, as its
+/// sessions and tokens end: a delegate keeps no delegation its source no longer stands
+/// behind.
+#[tokio::test]
+async fn disabling_a_holder_revokes_their_grants_and_the_grants_issued_under_them() {
+    let lab = Lab::new().await;
+    let dana = lab.user("dana", Some(PIN_DANA), &[]).await;
+    let erin = lab.user("erin", None, &[]).await;
+    let parent = lab
+        .grant(dana.id, RoleName::Operator, prefix(P1, true), true)
+        .await;
+    let dana_ctx = lab.sign_in("dana", PIN_DANA).await;
+    let issued = lab
+        .try_grant(
+            &dana_ctx,
+            erin.id,
+            RoleName::Viewer,
+            prefix(P2, true),
+            false,
+        )
+        .await
+        .expect("a delegation");
+    assert_eq!(issued.parent, Some(parent.id));
+    let reader = person(erin.id, AuthStrength::Pin);
+    assert_eq!(lab.code(&reader, Action::Read, HOST_P2), "ok");
+
+    let admin = lab.admin().await;
+    lab.env
+        .service
+        .update_user(
+            &admin,
+            dana.id,
+            &tenko_auth::service::UserUpdate {
+                disabled: Some(true),
+                ..tenko_auth::service::UserUpdate::default()
+            },
+            None,
+        )
+        .await
+        .expect("disable");
+    assert_eq!(
+        lab.env
+            .service
+            .list_grants(&admin, None)
+            .await
+            .expect("grants"),
+        Vec::new()
+    );
+    assert_eq!(
+        lab.code(&reader, Action::Read, HOST_P2),
+        "auth.forbidden",
+        "the delegate lost the delegation"
+    );
+    let audit = lab.audit("auth.user.update").await;
+    let disabled = audit.last().expect("the change is audited");
+    assert_eq!(
+        disabled.draft.details.context.get("grants_revoked"),
+        Some(&"2".to_owned())
+    );
+}
+
 #[tokio::test]
 async fn a_delegation_beyond_the_holders_own_grant_is_refused_and_audited() {
     let lab = Lab::new().await;
@@ -1938,4 +1999,267 @@ async fn an_unlock_on_one_service_clears_the_throttle_of_another_over_the_same_s
         outcome = login_result(&lab, &other, "dana", PIN_DANA).await;
     }
     outcome.expect("the second service cleared its throttle after the unlock");
+}
+
+// ---------------------------------------------------------------------------------------
+// What a token reads of its owner, and the strength it was issued with
+// ---------------------------------------------------------------------------------------
+
+/// A scoped token reads its owner's sessions, tokens and passkeys only when one of its
+/// grants reads users: the owner's account is not inside every token's reach. A personal
+/// token acts as its owner and reads them.
+#[tokio::test]
+async fn a_scoped_token_reads_its_owners_account_only_with_a_grant_that_reads_users() {
+    let lab = Lab::new().await;
+    lab.user("mona", Some(PIN_DANA), &[RoleName::Admin]).await;
+    let ctx = lab.sign_in("mona", PIN_DANA).await;
+    let metrics = lab
+        .env
+        .service
+        .create_token_with(&ctx, &with_scopes(&[TokenScope::Metrics]))
+        .await
+        .expect("a metrics token");
+    let narrow = lab.token_ctx(metrics.token.expose()).await;
+    let forbidden = |result: Result<usize, AuthError>| {
+        matches!(
+            result,
+            Err(AuthError::Denied(Denied {
+                reason: DenyReason::MissingPermission,
+                ..
+            }))
+        )
+    };
+    let service = &lab.env.service;
+    assert!(forbidden(
+        service.list_sessions(&narrow).await.map(|list| list.len())
+    ));
+    assert!(forbidden(
+        service.list_tokens(&narrow).await.map(|list| list.len())
+    ));
+    assert!(forbidden(
+        service
+            .list_credentials(&narrow)
+            .await
+            .map(|list| list.len())
+    ));
+
+    let wide = service
+        .create_token_with(
+            &ctx,
+            &TokenRequest {
+                name: "admin".to_owned(),
+                expires_in_days: None,
+                grants: Some(vec![TokenGrant {
+                    role: RoleName::Admin,
+                    scope: None,
+                }]),
+                scopes: Vec::new(),
+            },
+        )
+        .await
+        .expect("an admin token");
+    let wide = lab.token_ctx(wide.token.expose()).await;
+    service.list_sessions(&wide).await.expect("sessions");
+    service.list_tokens(&wide).await.expect("tokens");
+    service.list_credentials(&wide).await.expect("credentials");
+
+    let personal = service
+        .create_token(
+            &ctx,
+            &TokenCreate {
+                name: "personal".to_owned(),
+                expires_in_days: None,
+            },
+        )
+        .await
+        .expect("a personal token");
+    let personal = lab.token_ctx(personal.token.expose()).await;
+    service.list_sessions(&personal).await.expect("sessions");
+    service.list_tokens(&personal).await.expect("tokens");
+    service
+        .list_credentials(&personal)
+        .await
+        .expect("credentials");
+}
+
+/// A token keeps the strength of the sign-in that created it. When its owner's requirement
+/// rises above that strength (a profile, a setting or a role policy), the token stops
+/// acting until a stronger sign-in creates a new one (IAM-06, IAM-10).
+#[tokio::test]
+async fn a_token_issued_below_a_raised_requirement_stops_acting() {
+    let lab = Lab::new().await;
+    lab.user("ines", Some(PIN_DANA), &[RoleName::Viewer]).await;
+    let ctx = lab.sign_in("ines", PIN_DANA).await;
+    let service = &lab.env.service;
+    let personal = service
+        .create_token(
+            &ctx,
+            &TokenCreate {
+                name: "personal".to_owned(),
+                expires_in_days: None,
+            },
+        )
+        .await
+        .expect("a personal token");
+    let scoped = service
+        .create_token_with(
+            &ctx,
+            &TokenRequest {
+                name: "scoped".to_owned(),
+                expires_in_days: None,
+                grants: Some(vec![TokenGrant {
+                    role: RoleName::Viewer,
+                    scope: None,
+                }]),
+                scopes: Vec::new(),
+            },
+        )
+        .await
+        .expect("a scoped token");
+    let tokens = [
+        lab.token_ctx(personal.token.expose()).await.principal,
+        lab.token_ctx(scoped.token.expose()).await.principal,
+    ];
+    for token in &tokens {
+        assert_eq!(
+            lab.code(token, Action::Read, anywhere(ObjectKind::Prefix)),
+            "ok"
+        );
+    }
+
+    let admin = lab.admin().await;
+    service
+        .set_role_policy(
+            &admin,
+            RoleName::Viewer,
+            &RolePolicyUpdate {
+                mfa: RoleMfa::TotpOrStronger,
+            },
+        )
+        .await
+        .expect("a stricter policy");
+    for token in &tokens {
+        assert_eq!(
+            lab.refusal(token, Action::Read, anywhere(ObjectKind::Prefix)),
+            Some(DenyReason::StepUpRequired {
+                required: AuthStrength::PasswordTotp
+            })
+        );
+    }
+
+    service
+        .clear_role_policy(&admin, RoleName::Viewer)
+        .await
+        .expect("the policy is lifted");
+    for token in &tokens {
+        assert_eq!(
+            lab.code(token, Action::Read, anywhere(ObjectKind::Prefix)),
+            "ok"
+        );
+    }
+}
+
+/// A token for a service account is issued with the creator's sign-in, which must meet the
+/// account's requirement as well as the creator's own, so that the token acts at once.
+#[tokio::test]
+async fn a_service_account_token_needs_a_sign_in_that_meets_the_accounts_requirement() {
+    let lab = Lab::new().await;
+    let account = service_account(&lab, "svc-ops", &[RoleName::Operator]).await;
+    let admin = lab.admin().await;
+    lab.env
+        .service
+        .set_role_policy(
+            &admin,
+            RoleName::Operator,
+            &RolePolicyUpdate {
+                mfa: RoleMfa::TotpOrStronger,
+            },
+        )
+        .await
+        .expect("a stricter policy for operators");
+    let request = TokenRequest {
+        name: "svc".to_owned(),
+        expires_in_days: None,
+        grants: Some(vec![TokenGrant {
+            role: RoleName::Operator,
+            scope: None,
+        }]),
+        scopes: Vec::new(),
+    };
+    assert_eq!(
+        lab.env
+            .service
+            .create_account_token(&admin, account.id, &request)
+            .await
+            .expect_err("a PIN session"),
+        AuthError::StepUpRequired {
+            required: AuthStrength::PasswordTotp.as_str()
+        }
+    );
+}
+
+/// A scoped token reads its owner's grants, and the people a grant can name, only with a
+/// grant that reads users, as for the owner's sessions and tokens.
+#[tokio::test]
+async fn a_scoped_token_reads_grants_and_subjects_only_with_a_grant_that_reads_users() {
+    let lab = Lab::new().await;
+    let dana = lab.user("dana", Some(PIN_DANA), &[RoleName::Viewer]).await;
+    let erin = lab.user("erin", None, &[]).await;
+    lab.grant(dana.id, RoleName::Operator, prefix(P1, true), true)
+        .await;
+    let ctx = lab.sign_in("dana", PIN_DANA).await;
+    lab.try_grant(&ctx, erin.id, RoleName::Viewer, prefix(P2, true), false)
+        .await
+        .expect("a delegation");
+    let narrow = lab
+        .env
+        .service
+        .create_token_with(
+            &ctx,
+            &TokenRequest {
+                name: "narrow".to_owned(),
+                expires_in_days: None,
+                grants: Some(vec![TokenGrant {
+                    role: RoleName::Viewer,
+                    scope: None,
+                }]),
+                scopes: Vec::new(),
+            },
+        )
+        .await
+        .expect("a token");
+    let narrow = lab.token_ctx(narrow.token.expose()).await;
+    let denied = |error: AuthError| {
+        matches!(
+            error,
+            AuthError::Denied(Denied {
+                reason: DenyReason::MissingPermission,
+                ..
+            })
+        )
+    };
+    assert!(denied(
+        lab.env
+            .service
+            .list_grants(&narrow, None)
+            .await
+            .expect_err("grants")
+    ));
+    assert!(denied(
+        lab.env
+            .service
+            .grant_subjects(&narrow)
+            .await
+            .expect_err("subjects")
+    ));
+    // The session itself reads them.
+    assert_eq!(
+        lab.env
+            .service
+            .list_grants(&ctx, None)
+            .await
+            .expect("grants")
+            .len(),
+        2
+    );
 }

@@ -14,6 +14,13 @@
 //! so the rows built afterwards never exceed the limits. The `dimension` element a sheet
 //! declares is not used as a bound: it is optional and need not match the cells.
 //!
+//! The limits of one sheet still let a few bytes describe much more: a value in a far
+//! column widens its row, a sheet of many such rows holds many cells, and a shared string
+//! stored once may be named by every cell. So the whole workbook has two budgets of its
+//! own, [`ReadLimits::max_cells`] and [`ReadLimits::max_text_bytes`]: the text of a value
+//! is charged as it is read, before it is copied, and the cells of the rows (and the rows)
+//! before they are built. The cells read are bounded by `max_cells` as well.
+//!
 //! ods and xls workbooks are refused. `calamine` parses every sheet of those formats when
 //! the workbook is opened and expands it into a dense range there (ods also expands its
 //! repeated rows and columns), before a limit can be applied.
@@ -23,7 +30,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use calamine::{Data, ExcelDateTime, Reader, Xlsx, XlsxError};
 
-use super::{Cell, CellKind, ReadError, ReadLimits, Sheet, SourceFile, SourceFormat};
+use calamine::DataRef;
+
+use super::{Budget, Cell, CellKind, ReadError, ReadLimits, Sheet, SourceFile, SourceFormat};
 
 /// Reads an xlsx workbook into [`Sheet`]s in workbook order.
 ///
@@ -48,6 +57,17 @@ pub fn read_workbook(
     format: SourceFormat,
     limits: &ReadLimits,
 ) -> Result<SourceFile, ReadError> {
+    read_workbook_within(name, bytes, format, limits, &mut Budget::new(limits))
+}
+
+/// [`read_workbook`] drawing on `budget`.
+pub(super) fn read_workbook_within(
+    name: &str,
+    bytes: &[u8],
+    format: SourceFormat,
+    limits: &ReadLimits,
+    budget: &mut Budget,
+) -> Result<SourceFile, ReadError> {
     match format {
         SourceFormat::Csv => return Err(ReadError::Unsupported),
         SourceFormat::Ods => return Err(unbounded_format("ods")),
@@ -59,11 +79,17 @@ pub fn read_workbook(
         }
         SourceFormat::Xls => return Err(unbounded_format("xls")),
         SourceFormat::Xlsx => {
-            read_directory(bytes, limits)?;
+            let directory = read_directory(bytes, limits)?;
+            // `calamine` loads the shared strings whole when it opens the workbook.
+            for entry in &directory.entries {
+                if is_shared_strings(&entry.name) {
+                    budget.text(usize::try_from(entry.uncompressed).unwrap_or(usize::MAX))?;
+                }
+            }
         }
     }
     // A parser panic on hostile bytes is a damaged file, not a crashed import.
-    let sheets = catch_unwind(AssertUnwindSafe(|| read_xlsx(bytes, limits)))
+    let sheets = catch_unwind(AssertUnwindSafe(|| read_xlsx(bytes, limits, budget)))
         .map_err(|_| ReadError::Malformed("the workbook structure is damaged".to_owned()))??;
     Ok(SourceFile {
         name: name.to_owned(),
@@ -71,6 +97,13 @@ pub fn read_workbook(
         sheets,
         text: None,
     })
+}
+
+/// Whether a part is a shared-strings table, wherever the workbook keeps it.
+fn is_shared_strings(name: &str) -> bool {
+    name.rsplit('/')
+        .next()
+        .is_some_and(|file| file.eq_ignore_ascii_case("sharedStrings.xml"))
 }
 
 /// The refusal of a workbook format whose reader cannot be bounded before it allocates.
@@ -86,7 +119,11 @@ fn damaged_workbook(label: &str, error: &dyn std::fmt::Display) -> ReadError {
 }
 
 /// Opens the xlsx workbook and converts every sheet.
-fn read_xlsx(bytes: &[u8], limits: &ReadLimits) -> Result<Vec<Sheet>, ReadError> {
+fn read_xlsx(
+    bytes: &[u8],
+    limits: &ReadLimits,
+    budget: &mut Budget,
+) -> Result<Vec<Sheet>, ReadError> {
     let mut workbook =
         Xlsx::new(Cursor::new(bytes)).map_err(|error| damaged_workbook("xlsx", &error))?;
     let names = workbook.sheet_names();
@@ -98,7 +135,7 @@ fn read_xlsx(bytes: &[u8], limits: &ReadLimits) -> Result<Vec<Sheet>, ReadError>
     }
     let mut sheets = Vec::with_capacity(names.len());
     for name in names {
-        let rows = read_xlsx_sheet(&mut workbook, &name, limits)?;
+        let rows = read_xlsx_sheet(&mut workbook, &name, limits, budget)?;
         sheets.push(Sheet { name, rows });
     }
     Ok(sheets)
@@ -109,6 +146,7 @@ fn read_xlsx_sheet<RS: Read + Seek>(
     workbook: &mut Xlsx<RS>,
     name: &str,
     limits: &ReadLimits,
+    budget: &mut Budget,
 ) -> Result<Vec<Vec<Cell>>, ReadError> {
     let mut reader = match workbook.worksheet_cells_reader(name) {
         Ok(reader) => reader,
@@ -122,17 +160,17 @@ fn read_xlsx_sheet<RS: Read + Seek>(
         .map_err(|error| damaged_workbook("xlsx", &error))?
     {
         let (row, column) = cell.get_position();
-        cells.insert(row, column, Data::from(cell.get_value().clone()))?;
+        cells.insert(row, column, cell.get_value(), budget)?;
     }
-    Ok(cells.into_rows())
+    cells.into_rows(budget)
 }
 
 /// The cells of one sheet as they are read, checked against the limits one by one.
 struct SheetCells<'a> {
     limits: &'a ReadLimits,
     /// The cells within the limits, by absolute position, in reading order (a later cell
-    /// at the same position wins).
-    cells: Vec<(usize, usize, Data)>,
+    /// at the same position wins); a blank one is an empty cell.
+    cells: Vec<(usize, usize, Cell)>,
     /// The last row and column that hold a value.
     last_row: Option<usize>,
     last_column: usize,
@@ -150,18 +188,32 @@ impl<'a> SheetCells<'a> {
 
     /// Adds one cell. Empty cells are dropped; blank text is kept only within the limits
     /// (it never widens the sheet). A value at or beyond `max_rows` or `max_columns` is
-    /// refused at once.
-    fn insert(&mut self, row: u32, column: u32, data: Data) -> Result<(), ReadError> {
+    /// refused at once. Its text is charged to `budget` before it is copied, and every
+    /// cell kept is charged as a cell.
+    fn insert(
+        &mut self,
+        row: u32,
+        column: u32,
+        value: &DataRef<'_>,
+        budget: &mut Budget,
+    ) -> Result<(), ReadError> {
         let row = to_usize(row);
         let column = to_usize(column);
-        if matches!(data, Data::Empty) {
+        if matches!(value, DataRef::Empty) {
             return Ok(());
         }
-        if is_blank(&data) {
+        budget.text(text_len(value))?;
+        let cell = convert_cell(&Data::from(value.clone()));
+        if cell.is_empty() {
             if row < self.limits.max_rows && column < self.limits.max_columns {
-                self.cells.push((row, column, data));
+                budget.read_cells(1)?;
+                self.cells.push((row, column, Cell::empty()));
             }
             return Ok(());
+        }
+        if !holds_text(value) {
+            // A number, a date or an error is rendered: its text is charged once it is.
+            budget.text(cell.text.len())?;
         }
         if row >= self.limits.max_rows {
             return Err(ReadError::TooLarge(format!(
@@ -175,38 +227,42 @@ impl<'a> SheetCells<'a> {
                 self.limits.max_columns
             )));
         }
+        budget.read_cells(1)?;
         self.last_row = Some(self.last_row.map_or(row, |last| last.max(row)));
         self.last_column = self.last_column.max(column);
-        self.cells.push((row, column, data));
+        self.cells.push((row, column, cell));
         Ok(())
     }
 
     /// The rows of the sheet: `rows[0]` is spreadsheet row 1, rows end at the last row
     /// with a value, a row without a value is empty, and every other row is as wide as the
     /// last column with a value. Both are below the limits, see [`insert`](Self::insert).
-    fn into_rows(self) -> Vec<Vec<Cell>> {
+    /// The rows and their cells are charged to `budget` before they are built.
+    fn into_rows(self, budget: &mut Budget) -> Result<Vec<Vec<Cell>>, ReadError> {
         let Some(last_row) = self.last_row else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         let width = self.last_column + 1;
         let mut has_value = vec![false; last_row + 1];
-        for (row, _, data) in &self.cells {
-            if !is_blank(data) {
+        for (row, _, cell) in &self.cells {
+            if !cell.is_empty() {
                 has_value[*row] = true;
             }
         }
+        let valued = has_value.iter().filter(|&&value| value).count();
+        budget.cells((last_row + 1).saturating_add(valued.saturating_mul(width)))?;
         let mut rows = vec![Vec::new(); last_row + 1];
-        for (row, column, data) in &self.cells {
-            if *row > last_row || *column >= width || !has_value[*row] {
+        for (row, column, cell) in self.cells {
+            if row > last_row || column >= width || !has_value[row] {
                 continue;
             }
-            let cells: &mut Vec<Cell> = &mut rows[*row];
+            let cells: &mut Vec<Cell> = &mut rows[row];
             if cells.is_empty() {
                 cells.resize(width, Cell::empty());
             }
-            cells[*column] = convert_cell(data);
+            cells[column] = cell;
         }
-        rows
+        Ok(rows)
     }
 }
 
@@ -215,13 +271,27 @@ fn to_usize(value: u32) -> usize {
     usize::try_from(value).unwrap_or(usize::MAX)
 }
 
-/// Whether a cell holds nothing (an empty cell, or text of only whitespace).
-fn is_blank(data: &Data) -> bool {
-    match data {
-        Data::Empty => true,
-        Data::String(text) => text.trim().is_empty(),
-        _ => false,
+/// The bytes of text a value holds before it is converted: its string for text and ISO
+/// dates, nothing for the other kinds, whose rendering is short and charged after it.
+fn text_len(value: &DataRef<'_>) -> usize {
+    match value {
+        DataRef::String(text) | DataRef::DateTimeIso(text) | DataRef::DurationIso(text) => {
+            text.len()
+        }
+        DataRef::SharedString(text) => text.len(),
+        _ => 0,
     }
+}
+
+/// Whether [`text_len`] charged the text of the value already.
+fn holds_text(value: &DataRef<'_>) -> bool {
+    matches!(
+        value,
+        DataRef::String(_)
+            | DataRef::SharedString(_)
+            | DataRef::DateTimeIso(_)
+            | DataRef::DurationIso(_)
+    )
 }
 
 /// Converts one cell.
@@ -917,6 +987,24 @@ mod tests {
         )
     }
 
+    /// A cell reference whose column has more letters than a sheet has columns overflows the
+    /// arithmetic of `calamine`'s reference parser: a panic where overflow is checked, a
+    /// wrapped position otherwise. Either way the file is refused or bounded, and nothing
+    /// escapes the reader.
+    #[test]
+    fn an_overlong_cell_reference_is_refused_without_a_panic() {
+        let bytes = xlsx_with_sheet(&sheet_xml(None, &[("A1", "1"), ("ZZZZZZZZZZZZ1", "2")]));
+        let result = std::panic::catch_unwind(|| {
+            read_workbook("r.xlsx", &bytes, SourceFormat::Xlsx, &limits())
+        })
+        .expect("no panic leaves the reader");
+        match result {
+            Err(ReadError::Malformed(_) | ReadError::TooLarge(_)) => {}
+            Ok(file) => assert!(file.sheets[0].width() <= limits().max_columns),
+            Err(other) => panic!("unexpected {other:?}"),
+        }
+    }
+
     #[test]
     fn a_hand_written_xlsx_reads() {
         let bytes = xlsx_with_sheet(&sheet_xml(Some("B2:C3"), &[("B2", "1"), ("C3", "2")]));
@@ -1287,5 +1375,105 @@ mod tests {
         assert_eq!(render(1_462.0, DateTime, true), "1908-01-02");
         assert_eq!(render(1.5, TimeDelta, false), "PT36H0M0S");
         assert_eq!(render(0.020_833_333_3, TimeDelta, false), "PT0H30M0S");
+    }
+
+    /// A value in a far column widens its row to that column, so a few bytes per row describe
+    /// many cells: the cells of the rows a workbook builds are counted against `max_cells`,
+    /// over all its sheets, before the rows are built.
+    #[test]
+    fn the_cells_of_the_rows_are_bounded_across_the_workbook() {
+        let mut workbook = Workbook::new();
+        for _ in 0..2 {
+            let sheet = workbook.add_worksheet();
+            for row in 0..20 {
+                sheet.write_number(row, 99, 1).unwrap();
+            }
+        }
+        let bytes = workbook.save_to_buffer().unwrap();
+        // Two sheets of 20 rows of 100 cells, each row counting as one cell more.
+        let fits = ReadLimits {
+            max_cells: 4_040,
+            ..limits()
+        };
+        let file = read_workbook("w.xlsx", &bytes, SourceFormat::Xlsx, &fits).unwrap();
+        assert_eq!(file.sheets.len(), 2);
+        assert_eq!(file.sheets[1].rows[19].len(), 100);
+        let tight = ReadLimits {
+            max_cells: 4_039,
+            ..limits()
+        };
+        let error = read_workbook("w.xlsx", &bytes, SourceFormat::Xlsx, &tight).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::TooLarge(m) if m.contains("max_cells")),
+            "{error}"
+        );
+    }
+
+    /// A shared string is stored once and may be referenced by every cell: the text the
+    /// cells hold is counted against `max_text_bytes` as each cell is read, before it is
+    /// copied, whitespace included.
+    #[test]
+    fn the_text_of_the_cells_is_bounded_before_it_is_copied() {
+        let long = "x".repeat(1_000);
+        let mut workbook = Workbook::new();
+        let sheet = workbook.add_worksheet();
+        for row in 0..50 {
+            sheet.write_string(row, 0, &long).unwrap();
+        }
+        let bytes = workbook.save_to_buffer().unwrap();
+        // Fifty cells of the string, and the table that holds it once.
+        let fits = ReadLimits {
+            max_text_bytes: 52_000,
+            ..limits()
+        };
+        assert!(read_workbook("t.xlsx", &bytes, SourceFormat::Xlsx, &fits).is_ok());
+        let tight = ReadLimits {
+            max_text_bytes: 49_999,
+            ..limits()
+        };
+        let error = read_workbook("t.xlsx", &bytes, SourceFormat::Xlsx, &tight).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::TooLarge(m) if m.contains("max_text_bytes")),
+            "{error}"
+        );
+
+        // Whitespace counts too: it is read before it is found blank.
+        let blank = " ".repeat(1_000);
+        let mut workbook = Workbook::new();
+        let sheet = workbook.add_worksheet();
+        sheet.write_string(0, 0, "x").unwrap();
+        for row in 1..60 {
+            sheet.write_string(row, 0, &blank).unwrap();
+        }
+        let bytes = workbook.save_to_buffer().unwrap();
+        let error = read_workbook("b.xlsx", &bytes, SourceFormat::Xlsx, &tight).unwrap_err();
+        assert!(matches!(&error, ReadError::TooLarge(m) if m.contains("max_text_bytes")));
+    }
+
+    /// The shared-strings table is loaded whole when the workbook is opened, before a cell
+    /// is read, and many empty strings cost far more memory than their markup: the part's
+    /// size is charged to `max_text_bytes` before the workbook is opened.
+    #[test]
+    fn the_shared_strings_table_is_charged_before_it_is_loaded() {
+        let long = "x".repeat(2_000);
+        let mut workbook = Workbook::new();
+        let sheet = workbook.add_worksheet();
+        sheet.write_string(0, 0, &long).unwrap();
+        let bytes = workbook.save_to_buffer().unwrap();
+        // The cell alone fits, the table and the cell together do not.
+        let tight = ReadLimits {
+            max_text_bytes: 3_000,
+            ..limits()
+        };
+        let error = read_workbook("s.xlsx", &bytes, SourceFormat::Xlsx, &tight).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::TooLarge(m) if m.contains("max_text_bytes")),
+            "{error}"
+        );
+        let roomy = ReadLimits {
+            max_text_bytes: 5_000,
+            ..limits()
+        };
+        assert!(read_workbook("s.xlsx", &bytes, SourceFormat::Xlsx, &roomy).is_ok());
     }
 }

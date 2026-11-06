@@ -313,6 +313,11 @@ pub struct PasswordChange {
     pub current_password: Option<SecretString>,
     /// The new password.
     pub new_password: SecretString,
+    /// Also remove the account's TOTP seed, passkeys and recovery codes, so that only the
+    /// new password signs in. An account that needs a second factor then enrolls one at its
+    /// next sign-in.
+    #[serde(default)]
+    pub remove_factors: bool,
 }
 
 /// `POST /auth/password/check`: live policy feedback.
@@ -364,6 +369,10 @@ pub struct PasswordChanged {
     pub breach_check: BreachStatus,
     /// Other sessions of the account that were ended.
     pub sessions_revoked: usize,
+    /// Personal and scoped tokens of the account that were revoked.
+    pub tokens_revoked: usize,
+    /// Whether the TOTP seed, the passkeys and the recovery codes were removed.
+    pub factors_removed: bool,
 }
 
 /// The answer of `POST /auth/totp/enroll/start`. The secret is shown once.

@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use encoding_rs::{UTF_16BE, UTF_16LE, WINDOWS_1252};
 
-use super::{Cell, ReadError, ReadLimits, Sheet, SourceFile, SourceFormat, TextInfo};
+use super::{Budget, Cell, ReadError, ReadLimits, Sheet, SourceFile, SourceFormat, TextInfo};
 
 /// The delimiters the sniffer chooses among; on a tie the earlier one wins.
 const DELIMITERS: [u8; 3] = *b",;\t";
@@ -30,9 +30,19 @@ const UTF16BE_BOM: [u8; 2] = [0xFE, 0xFF];
 /// Returns [`ReadError::Malformed`] when UTF-16 text is damaged and
 /// [`ReadError::TooLarge`] when the file has more rows or columns than `limits` allow.
 pub fn read_csv(name: &str, bytes: &[u8], limits: &ReadLimits) -> Result<SourceFile, ReadError> {
+    read_csv_within(name, bytes, limits, &mut Budget::new(limits))
+}
+
+/// [`read_csv`] drawing on `budget`.
+pub(super) fn read_csv_within(
+    name: &str,
+    bytes: &[u8],
+    limits: &ReadLimits,
+    budget: &mut Budget,
+) -> Result<SourceFile, ReadError> {
     let decoded = decode(bytes)?;
     let delimiter = sniff_delimiter(&decoded.text);
-    let rows = parse_rows(&decoded.text, delimiter, limits)?;
+    let rows = parse_rows(&decoded.text, delimiter, limits, budget)?;
     Ok(SourceFile {
         name: name.to_owned(),
         format: SourceFormat::Csv,
@@ -186,7 +196,12 @@ fn sample_counts(text: &str) -> Vec<[usize; DELIMITERS.len()]> {
 
 /// Parses the text into rows of cells, keeping blank lines as empty rows and dropping
 /// the trailing ones.
-fn parse_rows(text: &str, delimiter: u8, limits: &ReadLimits) -> Result<Vec<Vec<Cell>>, ReadError> {
+fn parse_rows(
+    text: &str,
+    delimiter: u8,
+    limits: &ReadLimits,
+    budget: &mut Budget,
+) -> Result<Vec<Vec<Cell>>, ReadError> {
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(delimiter)
         .has_headers(false)
@@ -215,7 +230,7 @@ fn parse_rows(text: &str, delimiter: u8, limits: &ReadLimits) -> Result<Vec<Vec<
         });
         pending_empty = pending_empty.saturating_add(blank_lines_from(bytes, from));
 
-        let cells = record_cells(&record, limits)?;
+        let cells = record_cells(&record, limits, budget)?;
         if cells.iter().all(Cell::is_empty) {
             pending_empty = pending_empty.saturating_add(1);
             continue;
@@ -226,6 +241,8 @@ fn parse_rows(text: &str, delimiter: u8, limits: &ReadLimits) -> Result<Vec<Vec<
                 limits.max_rows
             )));
         }
+        // Every row counts as a cell of the budget, the empty ones before this one too.
+        budget.cells(pending_empty.saturating_add(1))?;
         rows.extend(std::iter::repeat_n(Vec::new(), pending_empty));
         pending_empty = 0;
         rows.push(cells);
@@ -261,8 +278,13 @@ fn blank_lines_from(bytes: &[u8], from: usize) -> usize {
 }
 
 /// The cells of one record. Empty fields beyond `max_columns` are dropped, a value
-/// beyond it is an error.
-fn record_cells(record: &csv::StringRecord, limits: &ReadLimits) -> Result<Vec<Cell>, ReadError> {
+/// beyond it is an error. The cells and their text are charged to `budget` before they are
+/// built.
+fn record_cells(
+    record: &csv::StringRecord,
+    limits: &ReadLimits,
+    budget: &mut Budget,
+) -> Result<Vec<Cell>, ReadError> {
     let width = record.len().min(limits.max_columns);
     if record
         .iter()
@@ -274,6 +296,8 @@ fn record_cells(record: &csv::StringRecord, limits: &ReadLimits) -> Result<Vec<C
             limits.max_columns
         )));
     }
+    budget.cells(width)?;
+    budget.text(record.iter().take(width).map(str::len).sum())?;
     Ok(record.iter().take(width).map(Cell::text).collect())
 }
 
@@ -638,5 +662,32 @@ mod tests {
         assert_eq!(file.sheets[0].rows[0].len(), 3);
         let error = read_csv("x.csv", b"a,b,c,d\n", &limits).unwrap_err();
         assert!(matches!(&error, ReadError::TooLarge(message) if message.contains("max_columns")));
+    }
+
+    #[test]
+    fn cell_and_text_budgets_are_enforced() {
+        // Two rows of three cells: eight, each row counting as one more.
+        let cells = ReadLimits {
+            max_cells: 8,
+            ..ReadLimits::default()
+        };
+        assert!(read_csv("x.csv", b"a,b,c\nd,e,f\n", &cells).is_ok());
+        let error = read_csv("x.csv", b"a,b,c\nd,e,f\ng\n", &cells).unwrap_err();
+        assert!(matches!(&error, ReadError::TooLarge(message) if message.contains("max_cells")));
+        // Empty fields are cells too.
+        assert!(matches!(
+            read_csv("x.csv", b"a,,,\n,,,\n", &cells),
+            Err(ReadError::TooLarge(_))
+        ));
+
+        let text = ReadLimits {
+            max_text_bytes: 6,
+            ..ReadLimits::default()
+        };
+        assert!(read_csv("x.csv", b"abc,def\n", &text).is_ok());
+        let error = read_csv("x.csv", b"abc,defg\n", &text).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::TooLarge(message) if message.contains("max_text_bytes"))
+        );
     }
 }

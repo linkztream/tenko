@@ -424,15 +424,36 @@ const changePassword = route("post", "/api/v1/auth/password", async (ctx) => {
 
   user.password = next;
   user.password_change_required = false;
-  // The other sessions of the account end.
+  // The other sessions of the account end, and so do its personal and scoped tokens.
   const others = db.sessions.filter((s) => s.user_id === user.id && s.id !== session.id);
   db.sessions = db.sessions.filter((s) => !others.includes(s));
+  const tokens = db.tokens.filter((t) => t.user_id === user.id);
+  db.tokens = db.tokens.filter((t) => t.user_id !== user.id);
+  for (const token of tokens) forgetToken(token.info.id);
+  // On request the other ways in go too: the TOTP seed, the passkeys, the recovery codes.
+  const removeFactors = optBool(body, "remove_factors") === true;
+  if (removeFactors) {
+    user.totp = false;
+    user.credentials = [];
+    user.recovery_codes = [];
+  }
   commit(
     "admin",
-    { ...userChange(user), deleted: others.map((s) => ({ kind: "session", id: s.id })) },
+    {
+      ...userChange(user),
+      deleted: [
+        ...others.map((s) => ({ kind: "session", id: s.id })),
+        ...tokens.map((t) => ({ kind: "api_token", id: t.info.id })),
+      ],
+    },
     [user],
   );
-  return ok({ breach_check: result.breach_check, sessions_revoked: others.length });
+  return ok({
+    breach_check: result.breach_check,
+    sessions_revoked: others.length,
+    tokens_revoked: tokens.length,
+    factors_removed: removeFactors,
+  });
 });
 
 // ---------------------------------------------------------------------------------

@@ -27,6 +27,8 @@ tenko-core = { path = "../crates/tenko-core" }
 # The DHCPv4 wire codec of the `dhcp_v4` target.
 tenko-dhcp = { path = "../crates/tenko-dhcp" }
 tenko-dns = { path = "../crates/tenko-dns" }
+# The readers of uploaded import files of the `import_files` target.
+tenko-ipam = { path = "../crates/tenko-ipam" }
 # The Kerberos codec, cipher, keytab, PAC, SPNEGO, AP-REQ and MIC targets.
 tenko-krb = { path = "../crates/tenko-krb" }
 tenko-scan = { path = "../crates/tenko-scan" }
@@ -401,3 +403,12 @@ test = false
 doc = false
 bench = false
 # WP13.2: end.
+
+# import_files: the readers of uploaded import files (marked block).
+[[bin]]
+name = "import_files"
+path = "fuzz_targets/import_files.rs"
+test = false
+doc = false
+bench = false
+# import_files: end.

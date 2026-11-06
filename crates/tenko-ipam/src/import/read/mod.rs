@@ -176,6 +176,14 @@ pub struct ReadLimits {
     /// Total uncompressed size of the parts of a zip-based workbook (xlsx, ods), checked
     /// before parsing so a compressed bomb is refused cheaply.
     pub max_uncompressed: u64,
+    /// Cells of one file, over all its sheets, each row counting as one cell more. A
+    /// workbook describes a row as wide as its last value in a few bytes, so the cells
+    /// built are bounded on their own, before they are built.
+    pub max_cells: usize,
+    /// Bytes of text of one file, over all its cells, counted as each value is read and
+    /// before it is copied: a workbook stores a shared string once and may name it in every
+    /// cell.
+    pub max_text_bytes: usize,
 }
 
 impl Default for ReadLimits {
@@ -185,7 +193,67 @@ impl Default for ReadLimits {
             max_rows: 200_000,
             max_columns: 256,
             max_uncompressed: 256 * 1024 * 1024,
+            max_cells: 5_000_000,
+            max_text_bytes: 64 * 1024 * 1024,
         }
+    }
+}
+
+/// What a reader may still build for one file: cells (rows included) and bytes of text,
+/// each charged before it is allocated or copied.
+pub(super) struct Budget {
+    /// Cells a workbook reader may still hold as it streams a sheet.
+    read: usize,
+    /// Cells (and rows) the readers may still build.
+    cells: usize,
+    text: usize,
+    max_cells: usize,
+    max_text: usize,
+}
+
+impl Budget {
+    /// The budget of one file under `limits`.
+    pub(super) fn new(limits: &ReadLimits) -> Self {
+        Self {
+            read: limits.max_cells,
+            cells: limits.max_cells,
+            text: limits.max_text_bytes,
+            max_cells: limits.max_cells,
+            max_text: limits.max_text_bytes,
+        }
+    }
+
+    /// Charges `count` cells (or rows) built.
+    pub(super) fn cells(&mut self, count: usize) -> Result<(), ReadError> {
+        self.cells = self
+            .cells
+            .checked_sub(count)
+            .ok_or_else(|| self.too_many_cells())?;
+        Ok(())
+    }
+
+    /// Charges `count` cells a reader holds while it streams them.
+    pub(super) fn read_cells(&mut self, count: usize) -> Result<(), ReadError> {
+        self.read = self
+            .read
+            .checked_sub(count)
+            .ok_or_else(|| self.too_many_cells())?;
+        Ok(())
+    }
+
+    fn too_many_cells(&self) -> ReadError {
+        ReadError::TooLarge(format!("more than {} cells (max_cells)", self.max_cells))
+    }
+
+    /// Charges `bytes` of text.
+    pub(super) fn text(&mut self, bytes: usize) -> Result<(), ReadError> {
+        self.text = self.text.checked_sub(bytes).ok_or_else(|| {
+            ReadError::TooLarge(format!(
+                "more than {} bytes of text (max_text_bytes)",
+                self.max_text
+            ))
+        })?;
+        Ok(())
     }
 }
 
@@ -233,14 +301,24 @@ const BINARY_MAGICS: [&[u8]; 5] = [
 /// Returns [`ReadError`] when the format is unknown, the file is damaged or a limit is
 /// exceeded.
 pub fn read_file(name: &str, bytes: &[u8], limits: &ReadLimits) -> Result<SourceFile, ReadError> {
+    read_within(name, bytes, limits, &mut Budget::new(limits))
+}
+
+/// [`read_file`] drawing on `budget`.
+fn read_within(
+    name: &str,
+    bytes: &[u8],
+    limits: &ReadLimits,
+    budget: &mut Budget,
+) -> Result<SourceFile, ReadError> {
     let file = if bytes.starts_with(ZIP_MAGIC) {
         let format = workbook::detect_zip(bytes, limits, format_from_name(name))?;
-        workbook::read_workbook(name, bytes, format, limits)?
+        workbook::read_workbook_within(name, bytes, format, limits, budget)?
     } else if bytes.starts_with(OLE_MAGIC) {
-        workbook::read_workbook(name, bytes, SourceFormat::Xls, limits)?
+        workbook::read_workbook_within(name, bytes, SourceFormat::Xls, limits, budget)?
     } else {
         check_text(bytes)?;
-        csv::read_csv(name, bytes, limits)?
+        csv::read_csv_within(name, bytes, limits, budget)?
     };
     if file.sheets.len() > limits.max_sheets {
         return Err(ReadError::TooLarge(format!(
@@ -252,6 +330,25 @@ pub fn read_file(name: &str, bytes: &[u8], limits: &ReadLimits) -> Result<Source
 }
 
 /// The format a file name suggests, `None` for an unknown or missing extension.
+/// Reads the files of one upload in order. Every file is held to the limits, and the cells
+/// and the text of all of them share one budget of [`ReadLimits::max_cells`] and
+/// [`ReadLimits::max_text_bytes`]: an upload of many parts builds no more than one file may.
+///
+/// # Errors
+///
+/// The first error of [`read_file`], or [`ReadError::TooLarge`] when the files together
+/// exceed the budget.
+pub fn read_upload<'a>(
+    files: impl IntoIterator<Item = (&'a str, &'a [u8])>,
+    limits: &ReadLimits,
+) -> Result<Vec<SourceFile>, ReadError> {
+    let mut budget = Budget::new(limits);
+    files
+        .into_iter()
+        .map(|(name, bytes)| read_within(name, bytes, limits, &mut budget))
+        .collect()
+}
+
 fn format_from_name(name: &str) -> Option<SourceFormat> {
     let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let (_, extension) = file.rsplit_once('.')?;
@@ -348,6 +445,8 @@ mod tests {
         assert_eq!(limits.max_rows, 200_000);
         assert_eq!(limits.max_columns, 256);
         assert_eq!(limits.max_uncompressed, 256 * 1024 * 1024);
+        assert_eq!(limits.max_cells, 5_000_000);
+        assert_eq!(limits.max_text_bytes, 64 * 1024 * 1024);
     }
 
     #[test]
@@ -569,6 +668,38 @@ mod tests {
         assert!(matches!(&error, ReadError::TooLarge(m) if m.contains("max_columns")));
         let error = read_file("a.xlsx", &xlsx_bytes(), &columns).unwrap_err();
         assert!(matches!(&error, ReadError::TooLarge(m) if m.contains("max_columns")));
+    }
+
+    /// The cells and the text of one upload share one budget over all its files: many
+    /// files that each stay within it do not build more together.
+    #[test]
+    fn the_files_of_one_upload_share_the_budget() {
+        let limits = ReadLimits {
+            max_cells: 10,
+            ..ReadLimits::default()
+        };
+        // Each file: one row of three cells, four with the row.
+        let file = b"a,b,c\n".as_slice();
+        assert!(read_upload([("a.csv", file), ("b.csv", file)], &limits).is_ok());
+        let error =
+            read_upload([("a.csv", file), ("b.csv", file), ("c.csv", file)], &limits).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::TooLarge(m) if m.contains("max_cells")),
+            "{error}"
+        );
+        // A workbook draws on the same budget.
+        let error = read_upload(
+            [("a.csv", file), ("p.xlsx", xlsx_bytes().as_slice())],
+            &ReadLimits {
+                max_cells: 8,
+                ..ReadLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, ReadError::TooLarge(m) if m.contains("max_cells")),
+            "{error}"
+        );
     }
 
     #[test]

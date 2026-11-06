@@ -7,12 +7,14 @@
 //! | Endpoint | Success | Errors |
 //! |---|---|---|
 //! | `GET /settings/security` | 200 `SecuritySettingsView` with `ETag: "<revision>"` | 401, 403, 503 |
-//! | `PATCH /settings/security` | 200 `SecuritySettingsView` with the new `ETag` | 400, 401, 403, 409 `auth.conflict`, `settings.pin_coupling` or `audit.export.required`, 503 |
+//! | `PATCH /settings/security` | 200 `SecuritySettingsView` with the new `ETag` | 400, 401, 403 `auth.forbidden` or `auth.step_up_required`, 409 `auth.conflict`, `settings.pin_coupling` or `audit.export.required`, 503 |
 //! | `PUT /settings/default-language` | 200 `DefaultLanguage` | 400 `auth.invalid_request` (field `language`), 401, 403, 409, 503 |
 //!
 //! `PATCH` takes a `SettingsPatch`: a new profile resets every toggle first, explicit
 //! toggles apply on top. `If-Match: "<revision>"` makes the change conditional on the
-//! revision the client read (`W/"<revision>"` and the bare number are accepted too).
+//! revision the client read (`W/"<revision>"` and the bare number are accepted too). The
+//! settings decide the other step-ups, so a change needs a session that authenticated within
+//! the last five minutes.
 
 use axum::{
     Json,
@@ -81,8 +83,8 @@ async fn get_security_settings(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<Respo
             headers(("ETag" = String, description = "The new revision of the settings"))),
         (status = 400, description = "The body is malformed (`sys.invalid_request`), a value is invalid (`auth.invalid_request`) or `If-Match` is malformed (`sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "`If-Match` is stale (`auth.conflict`), a PIN would be the only factor while the vault holds operator secrets (`settings.pin_coupling`), or the change would start to require the audit export while no sink is enabled (`audit.export.required`, TGL-21)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The caller may not change settings (`auth.forbidden`), or the session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
-        Forbidden,
         Unavailable
     ),
     security(("session" = []))

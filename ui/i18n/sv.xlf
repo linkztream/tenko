@@ -1268,6 +1268,18 @@
       <unit id="account.password.changed_others">
         <segment><source>{count, plural, =0 {No other sessions were signed out.} one {# other session was signed out.} other {# other sessions were signed out.}}</source><target>{count, plural, =0 {Inga andra sessioner loggades ut.} one {# annan session loggades ut.} other {# andra sessioner loggades ut.}}</target></segment>
       </unit>
+      <unit id="account.password.tokens_revoked">
+        <segment><source>{count, plural, =0 {No token was revoked.} one {# token was revoked.} other {# tokens were revoked.}}</source><target>{count, plural, =0 {Ingen token återkallades.} one {# token återkallades.} other {# token återkallades.}}</target></segment>
+      </unit>
+      <unit id="account.password.factors_removed">
+        <segment><source>Your passkeys, authenticator app and recovery codes were removed.</source><target>Dina nycklar, din autentiseringsapp och dina återställningskoder togs bort.</target></segment>
+      </unit>
+      <unit id="account.password.remove_factors">
+        <segment><source>Also remove my passkeys, authenticator app and recovery codes</source><target>Ta också bort mina nycklar, min autentiseringsapp och mina återställningskoder</target></segment>
+      </unit>
+      <unit id="account.password.remove_factors_help">
+        <segment><source>Choose this when someone else may have used your account: afterwards only the new password signs in. Your tokens are always revoked.</source><target>Välj detta om någon annan kan ha använt ditt konto: efteråt loggar bara det nya lösenordet in. Dina token återkallas alltid.</target></segment>
+      </unit>
       <unit id="account.password.rule.pin">
         <segment><source>Digits only, at least {min}</source><target>Endast siffror, minst {min}</target></segment>
       </unit>

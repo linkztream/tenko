@@ -82,8 +82,12 @@ function profileName(): string {
   return t(`profile.${session()?.profile ?? "home"}.name`);
 }
 
-/** Change of the password or PIN, with the live checklist of the policy (IAM-03, IAM-04). */
-export function PasswordSection() {
+/**
+ * Change of the password or PIN, with the live checklist of the policy (IAM-03, IAM-04).
+ * The change ends the other sessions and the tokens; on request it removes the other
+ * factors too, and then `onFactorsRemoved` runs.
+ */
+export function PasswordSection(props: { onFactorsRemoved?: () => void }) {
   const [current, setCurrent] = createSignal("");
   const [next, setNext] = createSignal("");
   const [confirm, setConfirm] = createSignal("");
@@ -93,6 +97,7 @@ export function PasswordSection() {
   const [checking, setChecking] = createSignal(false);
   const [checkFailed, setCheckFailed] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
+  const [removeFactors, setRemoveFactors] = createSignal(false);
   const [error, setError] = createSignal<unknown>(null);
   let currentInput!: HTMLInputElement;
   let nextInput!: HTMLInputElement;
@@ -201,17 +206,29 @@ export function PasswordSection() {
     setBusy(true);
     try {
       const res = await api.post("/api/v1/auth/password", {
-        body: { new_password: next(), ...(current() ? { current_password: current() } : {}) },
+        body: {
+          new_password: next(),
+          ...(current() ? { current_password: current() } : {}),
+          ...(removeFactors() ? { remove_factors: true } : {}),
+        },
       });
       setCurrent("");
       setNext("");
       setConfirm("");
       setShow(false);
+      setRemoveFactors(false);
+      const ended = [
+        t("account.password.changed_others", { count: res.sessions_revoked }),
+        t("account.password.tokens_revoked", { count: res.tokens_revoked }),
+        ...(res.factors_removed ? [t("account.password.factors_removed")] : []),
+      ];
       toast({
         title: t("account.password.changed"),
-        body: t("account.password.changed_others", { count: res.sessions_revoked }),
+        body: ended.join(" "),
         kind: "ok",
       });
+      // The other sections show the factors as they are now.
+      if (res.factors_removed) props.onFactorsRemoved?.();
       void refreshSession();
     } catch (err) {
       setError(err);
@@ -325,6 +342,23 @@ export function PasswordSection() {
                 {t("account.password.mismatch")}
               </span>
             </Show>
+          </div>
+
+          <div class="field">
+            <label class="ackrow">
+              <input
+                type="checkbox"
+                class="cb"
+                data-testid="acct-pw-remove-factors"
+                aria-describedby="acct-pw-remove-factors-help"
+                checked={removeFactors()}
+                onChange={(e) => setRemoveFactors(e.currentTarget.checked)}
+              />
+              {t("account.password.remove_factors")}
+            </label>
+            <span class="help" id="acct-pw-remove-factors-help">
+              {t("account.password.remove_factors_help")}
+            </span>
           </div>
 
           <Show when={error() && !wrongCurrent()}>

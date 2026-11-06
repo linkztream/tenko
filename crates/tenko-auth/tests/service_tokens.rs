@@ -842,6 +842,7 @@ async fn a_token_cannot_create_tokens_or_change_the_account() {
                 &PasswordChange {
                     current_password: Some(SecretString::new(PIN)),
                     new_password: SecretString::new("5820"),
+                    remove_factors: false,
                 },
             )
             .await,
@@ -1177,4 +1178,125 @@ async fn a_token_always_expires_while_a_maximum_is_configured() {
             );
         }
     }
+}
+
+/// A new factor and a new token outlive the session that adds them, so adding one needs a
+/// session that authenticated within the last five minutes (IAM-10), as removing a factor
+/// does: an old session cannot leave access behind that survives its own end.
+#[tokio::test]
+async fn adding_a_factor_or_creating_a_token_needs_a_fresh_session() {
+    let (env, session) = token_env(Profile::Home).await;
+    env.clock.advance(Duration::from_secs(6 * 60));
+    let stale = env.session_ctx(&session).await.expect("ctx");
+    let fresh_required = AuthError::StepUpRequired { required: "fresh" };
+    assert_eq!(
+        make_token(&env, &session, "late", Some(30))
+            .await
+            .expect_err("a personal token"),
+        fresh_required
+    );
+    assert_eq!(
+        env.service
+            .create_token_with(
+                &stale,
+                &tenko_auth::service::TokenRequest {
+                    name: "late scoped".to_owned(),
+                    expires_in_days: Some(30),
+                    grants: Some(vec![tenko_auth::model::TokenGrant {
+                        role: RoleName::Viewer,
+                        scope: None,
+                    }]),
+                    scopes: Vec::new(),
+                },
+            )
+            .await
+            .expect_err("a scoped token"),
+        fresh_required
+    );
+    assert_eq!(
+        env.service
+            .totp_enroll_start(&stale)
+            .await
+            .expect_err("TOTP"),
+        fresh_required
+    );
+    assert_eq!(
+        env.service
+            .webauthn_register_start(
+                &stale,
+                &WebAuthnRegisterStart {
+                    label: None,
+                    security_key: false,
+                },
+            )
+            .await
+            .expect_err("a passkey"),
+        fresh_required
+    );
+    assert_eq!(
+        env.service.list_tokens(&stale).await.expect("list").len(),
+        0
+    );
+
+    // A fresh sign-in may.
+    let fresh = expect_session(password_login(&env, "tina", PIN).await.expect("login"));
+    make_token(&env, &fresh, "now", Some(30))
+        .await
+        .expect("a token");
+    let ctx = env.session_ctx(&fresh).await.expect("ctx");
+    enroll_totp(&env, &ctx).await;
+    register(
+        &env,
+        &ctx,
+        &mut SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::None),
+    )
+    .await
+    .expect("a passkey");
+}
+
+/// Minting a token for a service account outlives the session too.
+#[tokio::test]
+async fn creating_a_service_account_token_needs_a_fresh_session() {
+    let (env, admin_session) = TestEnv::installed(Profile::Home).await;
+    let admin = env.session_ctx(&admin_session).await.expect("ctx");
+    let account = env
+        .service
+        .create_service_account(
+            &admin,
+            &tenko_auth::service::ServiceAccountCreate {
+                name: "svc".to_owned(),
+                display_name: None,
+                roles: vec![RoleName::Viewer],
+            },
+        )
+        .await
+        .expect("a service account");
+    let request = tenko_auth::service::TokenRequest {
+        name: "svc token".to_owned(),
+        expires_in_days: Some(30),
+        grants: Some(vec![tenko_auth::model::TokenGrant {
+            role: RoleName::Viewer,
+            scope: None,
+        }]),
+        scopes: Vec::new(),
+    };
+    env.clock.advance(Duration::from_secs(6 * 60));
+    let stale = env.session_ctx(&admin_session).await.expect("ctx");
+    assert_eq!(
+        env.service
+            .create_account_token(&stale, account.id, &request)
+            .await
+            .expect_err("stale"),
+        AuthError::StepUpRequired { required: "fresh" }
+    );
+    let fresh = expect_session(
+        password_login(&env, ADMIN, tenko_auth::testing::env::ADMIN_PIN)
+            .await
+            .expect("login"),
+    );
+    let fresh = env.session_ctx(&fresh).await.expect("ctx");
+    env.service
+        .create_account_token(&fresh, account.id, &request)
+        .await
+        .expect("fresh");
 }

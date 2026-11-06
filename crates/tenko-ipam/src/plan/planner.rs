@@ -361,9 +361,31 @@ impl<'v> Planner<'v> {
 
     /// The identifier for a new object: the client's (which must be unused) or a new one.
     pub(super) fn claim_id<T: Entity>(&mut self, id: Option<T::Id>) -> IpamResult<T::Id> {
+        self.claim_in(T::table(), id)
+    }
+
+    /// The identifier for a new row of `table`: the client's, which must be unused and not
+    /// reserved, or a new one. The nil and the all-ones identifiers are reserved:
+    /// authorization reads the all-ones id as "some object of this kind" and the nil id as
+    /// the kind itself, so a stored object under either would pass checks meant for the
+    /// kind.
+    pub(super) fn claim_in<K, V>(
+        &mut self,
+        table: &tenko_core::table::TableDef<K, V>,
+        id: Option<K>,
+    ) -> IpamResult<K>
+    where
+        K: tenko_core::codec::KeyCodec + Copy + From<Uuid> + Into<ObjectRef>,
+        V: serde::Serialize + serde::de::DeserializeOwned,
+    {
         match id {
             Some(id) => {
-                if self.ws.exists(T::table(), &id, true)? {
+                let object: ObjectRef = id.into();
+                if object.id.is_nil() || object.id == Uuid::max() {
+                    return Err(IpamError::invalid("id", "the identifier is reserved")
+                        .param("kind", object.kind));
+                }
+                if self.ws.exists(table, &id, true)? {
                     let object: ObjectRef = id.into();
                     return Err(IpamError::new(
                         codes::ID_TAKEN,
@@ -378,8 +400,8 @@ impl<'v> Planner<'v> {
             None => loop {
                 // Derived identifiers repeat when a caller plans twice under one request
                 // id; skip any that exist (the absence is a precondition of the batch).
-                let id = T::Id::from(self.new_uuid());
-                if !self.ws.exists(T::table(), &id, true)? {
+                let id = K::from(self.new_uuid());
+                if !self.ws.exists(table, &id, true)? {
                     return Ok(id);
                 }
             },

@@ -185,8 +185,14 @@ async fn sessions_expire_idle_and_absolute_and_end_at_logout() {
         env.clock.advance(Duration::from_secs(6 * 86_400));
         env.session_ctx(&session).await.expect("still alive");
     }
-    // Tightening TGL-04 applies to existing sessions at once.
-    let admin = env.session_ctx(&session).await.expect("ctx");
+    // Tightening TGL-04 applies to existing sessions at once. Changing the settings needs a
+    // fresh sign-in, a second session.
+    let admin = env
+        .session_ctx(&expect_session(
+            password_login(&env, ADMIN, ADMIN_PIN).await.expect("login"),
+        ))
+        .await
+        .expect("ctx");
     env.service
         .update_security_settings(
             &admin,
@@ -693,6 +699,116 @@ async fn break_glass_needs_an_attested_hardware_key_and_raises_alarms() {
             .await
             .contains(&"auth.login.break_glass".to_owned())
     );
+}
+
+/// Disabling or deleting the break-glass account removes the way back in that its
+/// designation set up, so it needs the same step-up as removing the designation: a session
+/// of at least password and TOTP that authenticated within the last five minutes.
+#[tokio::test]
+async fn disabling_or_deleting_the_break_glass_account_needs_a_fresh_strong_session() {
+    let (env, session) = TestEnv::installed(Profile::Home).await;
+    let admin = env.session_ctx(&session).await.expect("ctx");
+    let user = env
+        .service
+        .create_user(
+            &admin,
+            &UserCreate {
+                name: "emergency".to_owned(),
+                display_name: None,
+                password: Some(SecretString::new("7391")),
+                roles: vec![tenko_auth::roles::RoleName::Admin],
+                language: None,
+            },
+        )
+        .await
+        .expect("create");
+    let emergency = expect_session(
+        password_login(&env, "emergency", "7391")
+            .await
+            .expect("password login before designation"),
+    );
+    let emergency_ctx = env.session_ctx(&emergency).await.expect("ctx");
+    register(
+        &env,
+        &emergency_ctx,
+        SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::PackedCertificate),
+        true,
+    )
+    .await
+    .expect("hardware key");
+    let mut admin_key = register(
+        &env,
+        &admin,
+        SoftAuthenticator::new(SoftKeyAlg::Ed25519, SoftAttestation::None),
+        false,
+    )
+    .await
+    .expect("admin passkey");
+    let strong = passkey_login(&env, &mut admin_key, Some(ADMIN))
+        .await
+        .expect("login");
+    let strong_ctx = env.session_ctx(&strong).await.expect("ctx");
+    env.service
+        .set_break_glass(
+            &strong_ctx,
+            &BreakGlassChange {
+                user_id: user.id,
+                enabled: true,
+            },
+        )
+        .await
+        .expect("designate");
+    let disable = tenko_auth::service::UserUpdate {
+        disabled: Some(true),
+        ..tenko_auth::service::UserUpdate::default()
+    };
+
+    // The administrator's PIN session is not strong enough, however fresh.
+    assert!(matches!(
+        env.service
+            .update_user(&admin, user.id, &disable, None)
+            .await,
+        Err(AuthError::StepUpRequired { .. })
+    ));
+    assert!(matches!(
+        env.service.delete_user(&admin, user.id).await,
+        Err(AuthError::StepUpRequired { .. })
+    ));
+    // A strong session that authenticated more than five minutes ago is not fresh.
+    env.clock.advance(Duration::from_secs(6 * 60));
+    let stale = env.session_ctx(&strong).await.expect("ctx");
+    assert!(matches!(
+        env.service
+            .update_user(&stale, user.id, &disable, None)
+            .await,
+        Err(AuthError::StepUpRequired { required: "fresh" })
+    ));
+    assert!(matches!(
+        env.service.delete_user(&stale, user.id).await,
+        Err(AuthError::StepUpRequired { required: "fresh" })
+    ));
+    let info = env
+        .service
+        .get_user(&stale, user.id)
+        .await
+        .expect("still there");
+    assert!(info.break_glass && !info.disabled);
+
+    // A fresh strong session may.
+    let fresh = passkey_login(&env, &mut admin_key, Some(ADMIN))
+        .await
+        .expect("login again");
+    let fresh_ctx = env.session_ctx(&fresh).await.expect("ctx");
+    let disabled = env
+        .service
+        .update_user(&fresh_ctx, user.id, &disable, None)
+        .await
+        .expect("disable");
+    assert!(disabled.disabled);
+    env.service
+        .delete_user(&fresh_ctx, user.id)
+        .await
+        .expect("delete");
 }
 
 /// The wrong-code and replay rules of the login ceremonies: wrong second-factor codes count

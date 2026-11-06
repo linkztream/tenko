@@ -189,6 +189,7 @@ fn change(current: Option<&str>, new: &str) -> PasswordChange {
     PasswordChange {
         current_password: current.map(SecretString::new),
         new_password: SecretString::new(new),
+        remove_factors: false,
     }
 }
 
@@ -369,7 +370,14 @@ async fn a_wrong_or_missing_current_password_is_refused() {
             .await
             .expect("the session survived");
     }
-    assert_eq!(audit_of(&env, "auth.password.change").await, []);
+    // Each wrong password is audited as a failure; a missing one is not a guess.
+    let records = audit_of(&env, "auth.password.change").await;
+    assert_eq!(records.len(), 2);
+    assert!(
+        records
+            .iter()
+            .all(|record| record.draft.outcome != tenko_core::audit::AuditOutcome::Success)
+    );
     assert_eq!(
         AuthError::PasswordIncorrect.code(),
         "auth.password.incorrect"
@@ -1480,4 +1488,453 @@ async fn a_short_numeric_secret_does_not_administer_once_the_vault_holds_a_secre
         .list_users(&ctx(&env, &mixed).await)
         .await
         .expect("a password session administers");
+}
+
+// ---------------------------------------------------------------------------------------
+// What a password change ends
+// ---------------------------------------------------------------------------------------
+
+/// A new password ends the account's personal and scoped tokens with its other sessions
+/// (IAM-08): a token made by whoever held the old password does not outlive it.
+#[tokio::test]
+async fn a_password_change_revokes_the_accounts_tokens() {
+    let (env, _) = TestEnv::installed(Profile::Standard).await;
+    add_user(&env, "olga", RoleName::Operator, PASSPHRASE).await;
+    let session = login(&env, "olga", PASSPHRASE).await;
+    let ctx = ctx(&env, &session).await;
+    let personal = env
+        .service
+        .create_token(
+            &ctx,
+            &TokenCreate {
+                name: "script".to_owned(),
+                expires_in_days: Some(30),
+            },
+        )
+        .await
+        .expect("a personal token");
+    let scoped = env
+        .service
+        .create_token_with(
+            &ctx,
+            &tenko_auth::service::TokenRequest {
+                name: "narrow".to_owned(),
+                expires_in_days: Some(30),
+                grants: Some(vec![tenko_auth::model::TokenGrant {
+                    role: RoleName::Viewer,
+                    scope: None,
+                }]),
+                scopes: Vec::new(),
+            },
+        )
+        .await
+        .expect("a scoped token");
+    let changed = env
+        .service
+        .change_password(&ctx, &change(Some(PASSPHRASE), FRESH_PASSPHRASE))
+        .await
+        .expect("change");
+    assert_eq!(changed.tokens_revoked, 2);
+    assert!(!changed.factors_removed);
+    for token in [&personal, &scoped] {
+        assert!(matches!(
+            env.service
+                .authenticate_credentials(
+                    &Credentials::Bearer(token.token.expose().to_owned()),
+                    env.now()
+                )
+                .await,
+            Err(AuthError::Unauthenticated)
+        ));
+    }
+    assert_eq!(env.service.list_tokens(&ctx).await.expect("list").len(), 0);
+    let records = audit_of(&env, "auth.password.change").await;
+    assert_eq!(records[0].draft.details.context["tokens_revoked"], "2");
+}
+
+/// The person changing a password may also remove every other way into the account: its
+/// TOTP seed, its passkeys and its recovery codes. Without being asked the change keeps
+/// them, and an account left without a second factor signs in to enroll one again.
+#[tokio::test]
+async fn a_password_change_removes_the_other_factors_when_asked() {
+    let (env, session) = TestEnv::installed(Profile::Standard).await;
+    let ctx = ctx(&env, &session).await;
+    enroll_totp(&env, &ctx).await;
+    let mut key = register_passkey(&env, &ctx).await;
+    let kept = env
+        .service
+        .change_password(&ctx, &change(Some(ADMIN_PASSWORD), FRESH_PASSPHRASE))
+        .await
+        .expect("change");
+    assert!(!kept.factors_removed);
+    let info = env
+        .service
+        .get_user(&env.public_ctx(), session.info.user.id)
+        .await
+        .expect("info");
+    assert!(info.factors.totp && info.factors.webauthn == 1 && info.factors.recovery_codes > 0);
+
+    let removed = env
+        .service
+        .change_password(
+            &ctx,
+            &PasswordChange {
+                current_password: Some(SecretString::new(FRESH_PASSPHRASE)),
+                new_password: SecretString::new(PASSPHRASE),
+                remove_factors: true,
+            },
+        )
+        .await
+        .expect("change and remove");
+    assert!(removed.factors_removed);
+    let info = env
+        .service
+        .get_user(&env.public_ctx(), session.info.user.id)
+        .await
+        .expect("info");
+    assert!(!info.factors.totp);
+    assert_eq!(info.factors.webauthn, 0);
+    assert_eq!(info.factors.recovery_codes, 0);
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    assert!(
+        view.scan(&tenko_vault::tables::SECRETS, KeyRange::all(), 10, false)
+            .expect("secrets")
+            .is_empty(),
+        "the TOTP seed left the vault"
+    );
+    let options = env
+        .service
+        .webauthn_login_start(
+            &env.public_ctx(),
+            &WebAuthnLoginStart {
+                user_name: None,
+                challenge_id: None,
+            },
+        )
+        .await
+        .expect("login starts");
+    let credential = key.assert(&options.public_key, ORIGIN);
+    assert!(
+        env.service
+            .webauthn_login_finish(
+                &env.public_ctx(),
+                None,
+                &WebAuthnLoginFinish {
+                    ceremony_id: options.ceremony_id,
+                    credential,
+                },
+            )
+            .await
+            .is_err(),
+        "the removed passkey signs in no more"
+    );
+    let records = audit_of(&env, "auth.password.change").await;
+    assert_eq!(records[1].draft.details.context["factors_removed"], "true");
+    // The account signs in with the new password and is asked to enroll a factor again.
+    let back = login(&env, ADMIN, PASSPHRASE).await;
+    assert!(back.info.flags.mfa_enrollment_required);
+}
+
+/// Without a password there is no current one to prove, so setting the first password
+/// needs a session that authenticated within the last five minutes.
+#[tokio::test]
+async fn setting_a_first_password_needs_a_fresh_session() {
+    let (env, _) = TestEnv::installed(Profile::Home).await;
+    let pia = add_user(&env, "pia", RoleName::Operator, "5827").await;
+    let old = login(&env, "pia", "5827").await;
+    env.clock.advance(Duration::from_secs(6 * 60));
+    let recent = login(&env, "pia", "5827").await;
+    // The account loses its password, as one that signs in another way has none.
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    let (mut record, _) = view
+        .get_typed(&tenko_auth::model::USERS, &pia.id)
+        .expect("read")
+        .expect("the user");
+    record.password = None;
+    let mut batch = tenko_store::WriteBatch::new(
+        tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
+        env.now(),
+    );
+    batch
+        .put_typed(&tenko_auth::model::USERS, &pia.id, &record)
+        .expect("encode");
+    env.store.propose(batch).await.expect("commit");
+
+    assert_eq!(
+        env.service
+            .change_password(&ctx(&env, &old).await, &change(None, "5820"))
+            .await
+            .expect_err("stale"),
+        AuthError::StepUpRequired { required: "fresh" }
+    );
+    env.service
+        .change_password(&ctx(&env, &recent).await, &change(None, "5820"))
+        .await
+        .expect("fresh");
+    // The first password is audited as a change, and the refusal before it was not one.
+    let records = audit_of(&env, "auth.password.change").await;
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0].draft.outcome,
+        tenko_core::audit::AuditOutcome::Success
+    );
+    assert_eq!(
+        records[0].draft.objects,
+        vec![tenko_core::ObjectRef::from(pia.id)]
+    );
+}
+
+/// A wrong current password is a failed sign-in in substance: it is audited, counts toward
+/// the account's lock, and a lock it causes is stored like one a login causes (IAM-05,
+/// NEVER-02).
+#[tokio::test]
+async fn wrong_current_passwords_are_audited_and_the_lock_is_stored() {
+    let (env, session) = TestEnv::installed(Profile::Standard).await;
+    let user = session.info.user.id;
+    let mut wrong = 0;
+    for _ in 0..60 {
+        let ctx = ctx(&env, &session).await;
+        match env
+            .service
+            .change_password(&ctx, &change(Some("not the password"), FRESH_PASSPHRASE))
+            .await
+        {
+            Err(AuthError::PasswordIncorrect) => wrong += 1,
+            Err(AuthError::Throttled { retry_after }) => {
+                env.clock
+                    .advance(Duration::from_secs(retry_after.unwrap_or(1) + 1));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let info = env
+            .service
+            .get_user(&env.public_ctx(), user)
+            .await
+            .expect("info");
+        if info.lock.is_some() {
+            break;
+        }
+    }
+    let info = env
+        .service
+        .get_user(&env.public_ctx(), user)
+        .await
+        .expect("info");
+    assert!(
+        info.lock.is_some(),
+        "the lock is stored after {wrong} attempts"
+    );
+    let failed: Vec<_> = audit_of(&env, "auth.password.change")
+        .await
+        .into_iter()
+        .filter(|record| record.draft.outcome != tenko_core::audit::AuditOutcome::Success)
+        .collect();
+    assert_eq!(failed.len(), wrong, "every wrong password is audited");
+    assert_eq!(audit_of(&env, "auth.user.lock").await.len(), 1);
+}
+
+/// Failed sign-ins and wrong current passwords count toward one lock of the account: the
+/// lock comes after as many failures of both kinds together as a sign-in alone needs, and
+/// it is stored and audited as `auth.user.lock` whichever kind came last.
+#[tokio::test]
+async fn failed_sign_ins_and_wrong_current_passwords_share_one_lock() {
+    let (env, session) = TestEnv::installed(Profile::Standard).await;
+    let user = session.info.user.id;
+    // Half of the failures are sign-ins.
+    let mut failures = 0;
+    while failures < 5 {
+        match password_login(&env, ADMIN, "not the password").await {
+            Err(AuthError::InvalidCredentials) => failures += 1,
+            Err(AuthError::Throttled { retry_after }) => {
+                env.clock
+                    .advance(Duration::from_secs(retry_after.unwrap_or(1) + 1));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    assert!(!locked(&env, user).await);
+    // The rest are wrong current passwords, until the lock.
+    for _ in 0..60 {
+        let ctx = ctx(&env, &session).await;
+        match env
+            .service
+            .change_password(&ctx, &change(Some("not the password"), FRESH_PASSPHRASE))
+            .await
+        {
+            Err(AuthError::PasswordIncorrect) => failures += 1,
+            Err(AuthError::Throttled { retry_after }) => {
+                env.clock
+                    .advance(Duration::from_secs(retry_after.unwrap_or(1) + 1));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        if locked(&env, user).await {
+            break;
+        }
+    }
+    assert!(locked(&env, user).await);
+    let policy = tenko_auth::lockout::LockoutPolicy::for_mode(env.service.settings().lockout);
+    assert_eq!(failures, usize::try_from(policy.lock_after).expect("count"));
+    assert_eq!(audit_of(&env, "auth.user.lock").await.len(), 1);
+}
+
+/// Whether the stored record of the account holds an active lock.
+async fn locked(env: &TestEnv, user: tenko_core::UserId) -> bool {
+    env.service
+        .get_user(&env.public_ctx(), user)
+        .await
+        .expect("info")
+        .lock
+        .is_some()
+}
+
+// ---------------------------------------------------------------------------------------
+// Accounts of an external directory have no local password
+// ---------------------------------------------------------------------------------------
+
+/// Rewrites the stored record of `user`: its source becomes an external directory, and its
+/// password is the given one (a directory account has none; a test forces one in).
+async fn make_external(
+    env: &TestEnv,
+    user: tenko_core::UserId,
+    password: Option<tenko_auth::model::StoredPassword>,
+) {
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    let (mut record, _) = view
+        .get_typed(&tenko_auth::model::USERS, &user)
+        .expect("read")
+        .expect("the user");
+    record.source = tenko_auth::directory::UserSource::External {
+        provider: tenko_auth::directory::ProviderId::generate(),
+        subject: "S-1-5-21-1004336348-1177238915-682003330-1201".to_owned(),
+    };
+    record.password = password;
+    let mut batch = tenko_store::WriteBatch::new(
+        tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
+        env.now(),
+    );
+    batch
+        .put_typed(&tenko_auth::model::USERS, &user, &record)
+        .expect("encode");
+    env.store.propose(batch).await.expect("commit");
+}
+
+/// The stored password of `user`.
+async fn stored_password(
+    env: &TestEnv,
+    user: tenko_core::UserId,
+) -> Option<tenko_auth::model::StoredPassword> {
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    view.get_typed(&tenko_auth::model::USERS, &user)
+        .expect("read")
+        .expect("the user")
+        .0
+        .password
+}
+
+/// An account whose source is an external directory signs in through the directory only:
+/// it gets no local password from its own session, however fresh, nor from an
+/// administrator's reset.
+#[tokio::test]
+async fn a_directory_account_cannot_be_given_a_local_password() {
+    let (env, admin_session) = TestEnv::installed(Profile::Home).await;
+    let dora = add_user(&env, "dora", RoleName::Operator, "5827").await;
+    let session = login(&env, "dora", "5827").await;
+    make_external(&env, dora.id, None).await;
+    let own = ctx(&env, &session).await;
+    for current in [None, Some("5827")] {
+        assert!(
+            matches!(
+                env.service
+                    .change_password(&own, &change(current, "5820"))
+                    .await,
+                Err(AuthError::Invalid {
+                    field: "new_password",
+                    ..
+                })
+            ),
+            "{current:?}"
+        );
+    }
+    let admin = ctx(&env, &admin_session).await;
+    assert!(matches!(
+        env.service
+            .update_user(
+                &admin,
+                dora.id,
+                &tenko_auth::service::UserUpdate {
+                    password: Some(SecretString::new("5820")),
+                    ..tenko_auth::service::UserUpdate::default()
+                },
+                None,
+            )
+            .await,
+        Err(AuthError::Invalid {
+            field: "password",
+            ..
+        })
+    ));
+    assert!(stored_password(&env, dora.id).await.is_none());
+}
+
+/// A password that reaches the record of a directory account anyway (an older version, a
+/// restore) signs nobody in, and the refusal is the refusal of a wrong password.
+#[tokio::test]
+async fn a_directory_account_never_signs_in_with_a_local_password() {
+    let (env, _) = TestEnv::installed(Profile::Home).await;
+    let dora = add_user(&env, "dora", RoleName::Operator, "5827").await;
+    let forced = stored_password(&env, dora.id).await;
+    assert!(forced.is_some());
+    make_external(&env, dora.id, forced).await;
+    let refused = password_login(&env, "dora", "5827")
+        .await
+        .expect_err("the right local password");
+    let wrong = password_login(&env, "dora", "0000")
+        .await
+        .expect_err("a wrong password");
+    assert_eq!(refused, AuthError::InvalidCredentials);
+    assert_eq!(refused, wrong);
+    assert_eq!(refused.code(), wrong.code());
+}
+
+/// A lock stored on the account (by any controller, before a restart) holds for a password
+/// change as it holds for a sign-in: no guess is checked while it lasts.
+#[tokio::test]
+async fn a_stored_lock_holds_for_a_password_change() {
+    let (env, session) = TestEnv::installed(Profile::Standard).await;
+    let user = session.info.user.id;
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    let (mut record, _) = view
+        .get_typed(&tenko_auth::model::USERS, &user)
+        .expect("read")
+        .expect("the user");
+    record.lock = Some(tenko_auth::model::AccountLock {
+        since: env.now(),
+        until: env
+            .now()
+            .checked_add(Duration::from_secs(900))
+            .expect("time"),
+        until_unlock: false,
+    });
+    let mut batch = tenko_store::WriteBatch::new(
+        tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
+        env.now(),
+    );
+    batch
+        .put_typed(&tenko_auth::model::USERS, &user, &record)
+        .expect("encode");
+    env.store.propose(batch).await.expect("commit");
+    let own = ctx(&env, &session).await;
+    for current in ["not the password", ADMIN_PASSWORD] {
+        assert!(
+            matches!(
+                env.service
+                    .change_password(&own, &change(Some(current), FRESH_PASSPHRASE))
+                    .await,
+                Err(AuthError::Throttled { .. })
+            ),
+            "{current}"
+        );
+    }
+    assert_eq!(audit_of(&env, "auth.password.change").await.len(), 0);
 }

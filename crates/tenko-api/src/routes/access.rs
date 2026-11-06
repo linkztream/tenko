@@ -93,6 +93,7 @@ fn created<T: serde::Serialize>(location: &str, body: &T) -> Result<Response, Ro
     responses(
         (status = 200, description = "The grants the caller may see", body = Page<GrantView>),
         (status = 400, description = "Unknown parameter (`sys.invalid_query`) or a subject that is not a UUID (`sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "A scoped token without a grant that reads users (`auth.forbidden`): it reads its owner's grants only with one", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
     )
@@ -291,7 +292,7 @@ async fn list_service_account_tokens(
     responses(
         (status = 201, description = "The token: its secret (`tnk_...`, shown once) and its metadata", body = tenko_auth::service::CreatedToken),
         (status = 400, description = "The body is malformed (`sys.invalid_request`) or the name or lifetime is invalid (`auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The caller may not administer users (`auth.forbidden`), the session is not strong enough (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The caller may not administer users (`auth.forbidden`), the session is not strong enough for the caller and the account or did not authenticate within the last five minutes (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such service account (`auth.service_account.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`), a grant names a global-only role (`auth.grant.invalid_role`) or a scope that cannot be granted (`auth.grant.invalid_scope`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,

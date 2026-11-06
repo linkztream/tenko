@@ -132,9 +132,13 @@ describe("change of the password or PIN", () => {
     fireEvent.click(submit);
 
     expect(await screen.findByText("PIN or password changed")).toBeTruthy();
-    expect(screen.getByText("2 other sessions were signed out.")).toBeTruthy();
+    expect(screen.getByText(/2 other sessions were signed out\. 1 token was revoked\./)).toBeTruthy();
     expect(alex().password).toBe(STRONG);
     expect(db.sessions).toHaveLength(1);
+    expect(db.tokens.filter((token) => token.user_id === alex().id)).toHaveLength(0);
+    // Without being asked, the other factors stay.
+    expect(alex().totp).toBe(true);
+    expect(alex().credentials.length).toBeGreaterThan(0);
     expect(field("New PIN or password").value).toBe("");
     // The session is read again, so the warning goes away.
     await waitFor(() => expect(session()?.flags.password_change_required).toBe(false), WAIT);
@@ -151,7 +155,26 @@ describe("change of the password or PIN", () => {
     const submit = screen.getByRole("button", { name: "Change PIN or password" });
     await waitFor(() => expect(submit.hasAttribute("disabled")).toBe(false), WAIT);
     fireEvent.click(submit);
-    expect(await screen.findByText("No other sessions were signed out.")).toBeTruthy();
+    expect(await screen.findByText(/No other sessions were signed out\./)).toBeTruthy();
+  });
+
+  it("removes the other factors when asked and says so", async () => {
+    await signInAlex();
+    show();
+    type("Current PIN or password", MOCK_PASSWORDS.alex);
+    type("New PIN or password", STRONG);
+    type("Repeat the new PIN or password", STRONG);
+    const remove = screen.getByLabelText("Also remove my passkeys, authenticator app and recovery codes") as HTMLInputElement;
+    expect(remove.checked).toBe(false);
+    fireEvent.click(remove);
+    const submit = screen.getByRole("button", { name: "Change PIN or password" });
+    await waitFor(() => expect(submit.hasAttribute("disabled")).toBe(false), WAIT);
+    fireEvent.click(submit);
+    expect(await screen.findByText(/Your passkeys, authenticator app and recovery codes were removed\./)).toBeTruthy();
+    expect(alex().totp).toBe(false);
+    expect(alex().credentials).toHaveLength(0);
+    expect(alex().recovery_codes).toHaveLength(0);
+    expect(remove.checked).toBe(false);
   });
 
   it("shows the new password only when asked to", async () => {

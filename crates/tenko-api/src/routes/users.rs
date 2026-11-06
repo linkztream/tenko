@@ -165,9 +165,9 @@ async fn get_user(
         (status = 400, description = "The identifier is not a UUID or `If-Match` is malformed (`sys.invalid_value`), the body is malformed (`sys.invalid_request`), or a value is invalid (`auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such user (`users.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "`If-Match` is stale (`auth.conflict`) or the change would leave no active administrator (`users.last_administrator`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The caller may not administer users (`auth.forbidden`), or the user is the break-glass account and the session is not one of at least password and TOTP from the last five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The new password breaks the policy (`auth.password.policy`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
-        Forbidden,
         Unavailable
     ),
     security(("session" = []))
@@ -200,9 +200,9 @@ async fn update_user(
         (status = 204, description = "The user was deleted"),
         (status = 400, description = "The identifier is not a UUID (`sys.invalid_value`) or is the caller's own account (`auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such user (`users.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The caller may not administer users (`auth.forbidden`), or the user is the break-glass account and the session is not one of at least password and TOTP from the last five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The user is the last active administrator (`users.last_administrator`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
-        Forbidden,
         Unavailable
     ),
     security(("session" = []))

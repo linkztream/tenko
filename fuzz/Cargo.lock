@@ -3304,6 +3304,7 @@ dependencies = [
  "tenko-core",
  "tenko-dhcp",
  "tenko-dns",
+ "tenko-ipam",
  "tenko-krb",
  "tenko-scan",
  "tenko-store",

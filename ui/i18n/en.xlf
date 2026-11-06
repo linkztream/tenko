@@ -1268,6 +1268,18 @@
       <unit id="account.password.changed_others">
         <segment><source>{count, plural, =0 {No other sessions were signed out.} one {# other session was signed out.} other {# other sessions were signed out.}}</source></segment>
       </unit>
+      <unit id="account.password.tokens_revoked">
+        <segment><source>{count, plural, =0 {No token was revoked.} one {# token was revoked.} other {# tokens were revoked.}}</source></segment>
+      </unit>
+      <unit id="account.password.factors_removed">
+        <segment><source>Your passkeys, authenticator app and recovery codes were removed.</source></segment>
+      </unit>
+      <unit id="account.password.remove_factors">
+        <segment><source>Also remove my passkeys, authenticator app and recovery codes</source></segment>
+      </unit>
+      <unit id="account.password.remove_factors_help">
+        <segment><source>Choose this when someone else may have used your account: afterwards only the new password signs in. Your tokens are always revoked.</source></segment>
+      </unit>
       <unit id="account.password.rule.pin">
         <segment><source>Digits only, at least {min}</source></segment>
       </unit>

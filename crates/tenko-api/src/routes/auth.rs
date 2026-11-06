@@ -706,6 +706,7 @@ async fn get_session(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<Json<SessionInf
     summary = "List the sessions of the current user",
     responses(
         (status = 200, description = "Every session of the user; `current` marks the session of the request", body = Page<SessionSummary>),
+        (status = 403, description = "A scoped token without a grant that reads users (`auth.forbidden`): it reads the sessions of its owner only with one", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
     )
@@ -759,9 +760,9 @@ async fn revoke_session(
     summary = "Change the password of the current user",
     request_body = PasswordChange,
     responses(
-        (status = 200, description = "The password changed; the other sessions ended", body = PasswordChanged),
+        (status = 200, description = "The password changed; the other sessions ended and the account's tokens were revoked, and with `remove_factors` its TOTP seed, passkeys and recovery codes were removed", body = PasswordChanged),
         (status = 400, description = "The body is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The current password is wrong (`auth.password.incorrect`) or the account is the break-glass account (`auth.break_glass.hardware_key_only`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The current password is wrong (`auth.password.incorrect`, counted and audited as a failed sign-in), the account is the break-glass account (`auth.break_glass.hardware_key_only`), or the account has no password and the session did not authenticate within the last five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The new password breaks the policy (`auth.password.policy`, with the violations in `errors`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Too many wrong current passwords (`auth.throttled`); `Retry-After` gives the seconds", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
@@ -838,6 +839,7 @@ async fn check_password(
     summary = "Start TOTP enrollment and return the provisioning data",
     responses(
         (status = 200, description = "The seed, the `otpauth://` URI and the enrollment id for the finish step; shown once", body = TotpEnrollment),
+        (status = 403, description = "The session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`): a new factor outlives the session that adds it", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "TOTP is already enrolled (`auth.totp.already_enrolled`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
@@ -864,6 +866,7 @@ async fn totp_enroll_start(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<Response,
     responses(
         (status = 200, description = "TOTP is enrolled; recovery codes when the account had none; `reauthenticate` says whether the session must log in again to reach the required strength", body = FactorEnrolled),
         (status = 400, description = "The body is malformed (`sys.invalid_request`) or the enrollment is unknown or expired (`auth.challenge_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`): a new factor outlives the session that adds it", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The code does not match the new seed (`auth.totp.code_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
@@ -919,6 +922,7 @@ async fn remove_totp(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<StatusCode, Rou
     responses(
         (status = 200, description = "The options for `navigator.credentials.create()` and the ceremony id for the finish step", body = WebAuthnRegisterOptions),
         (status = 400, description = "The body is malformed (`sys.invalid_request`) or the label is invalid (`auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`): a new factor outlives the session that adds it", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
     ),
@@ -943,7 +947,7 @@ async fn webauthn_register_start(
     responses(
         (status = 200, description = "The credential is registered; recovery codes when the account had none", body = FactorEnrolled),
         (status = 400, description = "The body or the attestation is malformed or fails verification (`sys.invalid_request`, `auth.challenge_invalid`, `auth.webauthn.*`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The attestation is refused (`auth.webauthn.attestation_required`, `auth.webauthn.attestation_untrusted`, `auth.webauthn.backup_eligible_refused`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The attestation is refused (`auth.webauthn.attestation_required`, `auth.webauthn.attestation_untrusted`, `auth.webauthn.backup_eligible_refused`), or the session did not authenticate within the last five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The credential is registered already (`auth.webauthn.credential_exists`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
@@ -972,6 +976,7 @@ async fn webauthn_register_finish(
     summary = "List the WebAuthn credentials of the current user",
     responses(
         (status = 200, description = "Every credential of the user", body = Page<CredentialInfo>),
+        (status = 403, description = "A scoped token without a grant that reads users (`auth.forbidden`): it reads the passkeys of its owner only with one", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
     )
@@ -1058,6 +1063,7 @@ async fn regenerate_recovery_codes(
     summary = "List the personal API tokens of the current user",
     responses(
         (status = 200, description = "Every token of the user", body = Page<TokenInfo>),
+        (status = 403, description = "A scoped token without a grant that reads users (`auth.forbidden`): it reads the tokens of its owner only with one", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
     )
@@ -1084,7 +1090,7 @@ async fn list_tokens(
     responses(
         (status = 201, description = "The token: its secret (`tnk_...`, shown once) and its metadata", body = CreatedToken),
         (status = 400, description = "The body is malformed (`sys.invalid_request`) or the name or lifetime is invalid (`auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The session is not strong enough (`auth.step_up_required`) is the break-glass session (`auth.break_glass.hardware_key_only`), or a grant of a scoped token goes beyond the owner's (`auth.grant.exceeds_own`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The session is not strong enough or did not authenticate within the last five minutes (`auth.step_up_required`), is the break-glass session (`auth.break_glass.hardware_key_only`), or a grant of a scoped token goes beyond the owner's (`auth.grant.exceeds_own`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`), a grant names a global-only role (`auth.grant.invalid_role`) or a scope that cannot be granted or does not exist (`auth.grant.invalid_scope`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable

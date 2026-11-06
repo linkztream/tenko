@@ -794,7 +794,7 @@ describe("password", () => {
   it("changes a password and ends the other sessions", async () => {
     await loginAs("sam");
     const change = (current: string | null, next: string) =>
-      post<{ breach_check: string; sessions_revoked: number }>("/api/v1/auth/password", {
+      post<{ breach_check: string; sessions_revoked: number; tokens_revoked: number; factors_removed: boolean }>("/api/v1/auth/password", {
         current_password: current,
         new_password: next,
       });
@@ -807,7 +807,7 @@ describe("password", () => {
     expect(sessions.body.items).toHaveLength(3);
     const done = await change(MOCK_PASSWORDS.sam, "a-long-enough-new-one");
     expect(done.status).toBe(200);
-    expect(done.body).toEqual({ breach_check: "clean", sessions_revoked: 2 });
+    expect(done.body).toEqual({ breach_check: "clean", sessions_revoked: 2, tokens_revoked: 0, factors_removed: false });
     expect((await get<Page<SessionSummary>>("/api/v1/auth/sessions")).body.items).toHaveLength(1);
 
     // The new password signs in, the old one does not.

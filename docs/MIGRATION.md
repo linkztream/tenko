@@ -94,7 +94,7 @@ The same three stages run for every source (MIG-03). Each stage is a job on the 
 
 ### Spreadsheet import: file formats
 
-The spreadsheet import (IPAM-11) reads CSV files and xlsx workbooks. An xlsx sheet is read cell by cell, and a value beyond the row or column limit (200,000 rows, 256 columns) refuses the file as too large before anything else is built. The declared size of a sheet is not trusted. An xls or ods workbook is refused with "the file cannot be read"; save it as xlsx or CSV, because the reader of those formats expands a sheet to its full size before any limit can be checked.
+The spreadsheet import (IPAM-11) reads CSV files and xlsx workbooks. An xlsx sheet is read cell by cell, and a value beyond the row or column limit (200,000 rows, 256 columns) refuses the file as too large before anything else is built. The declared size of a sheet is not trusted. An upload also builds at most 5,000,000 cells (each row counts as one cell more) and 64 MiB of text over all its files and sheets; both are counted before the rows are built or a value is copied, the shared-strings table of a workbook before it is opened, so a far column in every row or one long shared string named by every cell refuses the upload as too large. Files are read on a thread of their own, two uploads at a time, never on a worker the API shares. An xls or ods workbook is refused with "the file cannot be read"; save it as xlsx or CSV, because the reader of those formats expands a sheet to its full size before any limit can be checked.
 
 ### Spreadsheet import: networks inside an existing network
 

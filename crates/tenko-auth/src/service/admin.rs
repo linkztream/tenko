@@ -157,22 +157,71 @@ impl AuthService {
         Ok(stored)
     }
 
-    /// Adds the removal of every personal token of a user to a batch.
-    fn stage_token_removal(
+    /// Adds the removal of every personal token of a user to a batch; returns how many.
+    pub(super) fn stage_token_removal(
         view: &dyn ReadView,
         batch: &mut WriteBatch,
         id: UserId,
-    ) -> Result<(), AuthError> {
-        for (key, hash, _) in view.scan_typed(
+    ) -> Result<usize, AuthError> {
+        let tokens = view.scan_typed(
             &USER_TOKENS,
             KeyRange::prefix(tenko_core::codec::encode_key(&(id,))),
             LIST_LIMIT,
             false,
-        )? {
-            batch.delete_typed(&TOKENS, &hash);
-            batch.delete_typed(&USER_TOKENS, &key);
+        )?;
+        for (key, hash, _) in &tokens {
+            batch.delete_typed(&TOKENS, hash);
+            batch.delete_typed(&USER_TOKENS, key);
+        }
+        Ok(tokens.len())
+    }
+
+    /// Whether `user` may be disabled (or enabled again) by the caller: not the caller's own
+    /// account, not the last administrator, and for the break-glass account only with the
+    /// step-up its designation needs.
+    async fn check_disable(
+        &self,
+        ctx: &RequestCtx,
+        view: &dyn ReadView,
+        user: &UserRecord,
+        disabled: bool,
+    ) -> Result<(), AuthError> {
+        if user.break_glass && disabled != user.disabled {
+            self.require_break_glass_step_up(ctx).await?;
+        }
+        if disabled && ctx.principal.user() == Some(user.id) {
+            return Err(AuthError::invalid(
+                "disabled",
+                "you cannot disable your own account",
+            ));
+        }
+        if disabled && Self::guarded(user) && Self::other_admins(view, user.id)? == 0 {
+            return Err(AuthError::LastAdministrator);
         }
         Ok(())
+    }
+
+    /// Adds what ends with a disabled account to a batch: its personal and scoped tokens, as
+    /// its sessions end, and its grants with every grant issued under them, since a
+    /// delegation needs its source. Returns the number of grants.
+    fn stage_disable(
+        view: &dyn ReadView,
+        batch: &mut WriteBatch,
+        id: UserId,
+    ) -> Result<usize, AuthError> {
+        Self::stage_tokens_end(view, batch, id)?;
+        Self::stage_grant_removal(view, batch, id)
+    }
+
+    /// Adds the removal of every personal and scoped token of a user to a batch; returns
+    /// how many.
+    pub(super) fn stage_tokens_end(
+        view: &dyn ReadView,
+        batch: &mut WriteBatch,
+        id: UserId,
+    ) -> Result<usize, AuthError> {
+        Ok(Self::stage_token_removal(view, batch, id)?
+            + Self::stage_scoped_token_removal(view, batch, id)?)
     }
 
     /// Serializes changes to the set of administrators: the batch expects the current value
@@ -186,15 +235,44 @@ impl AuthService {
         Ok(())
     }
 
-    /// Active administrators other than `except` (break-glass accounts do not count).
+    /// Active administrators other than `except`: people who can sign in and administer.
+    /// Break-glass accounts do not count, and neither do service accounts, which act through
+    /// tokens, and tokens never administer.
     fn other_admins(view: &dyn ReadView, except: UserId) -> Result<usize, AuthError> {
         Ok(view
             .scan_typed(&USERS, KeyRange::all(), LIST_LIMIT, false)?
             .into_iter()
             .filter(|(id, user, _)| {
-                *id != except && user.is_admin() && !user.disabled && !user.break_glass
+                *id != except
+                    && user.is_admin()
+                    && !user.disabled
+                    && !user.break_glass
+                    && !user.is_service()
             })
             .count())
+    }
+
+    /// Whether the last-administrator guard holds for `user`: a person with the admin role
+    /// other than the break-glass account. Removing anyone else never takes the last person
+    /// who administers.
+    fn guarded(user: &UserRecord) -> bool {
+        user.is_admin() && !user.break_glass && !user.is_service()
+    }
+
+    /// The step-up a change that can remove the break-glass account needs (IAM-09): a
+    /// session of at least password and TOTP that authenticated within the last five
+    /// minutes, as designating or releasing the account needs.
+    async fn require_break_glass_step_up(&self, ctx: &RequestCtx) -> Result<(), AuthError> {
+        let (caller, session_id, strength) = Self::session_principal(ctx)?;
+        if !satisfies(strength, AuthStrength::PasswordTotp) {
+            return Err(AuthError::StepUpRequired {
+                required: AuthStrength::PasswordTotp.as_str(),
+            });
+        }
+        let view = self.view().await?;
+        let (_, session) = Self::load_session(view.as_ref(), caller, session_id)?
+            .ok_or(AuthError::Unauthenticated)?;
+        Self::require_fresh(&session, ctx.now)
     }
 
     /// `GET /users`.
@@ -350,19 +428,8 @@ impl AuthService {
         }
         let mut revoke = false;
         if let Some(disabled) = request.disabled {
-            if disabled && ctx.principal.user() == Some(id) {
-                return Err(AuthError::invalid(
-                    "disabled",
-                    "you cannot disable your own account",
-                ));
-            }
-            if disabled
-                && user.is_admin()
-                && !user.break_glass
-                && Self::other_admins(view.as_ref(), id)? == 0
-            {
-                return Err(AuthError::LastAdministrator);
-            }
+            self.check_disable(ctx, view.as_ref(), &user, disabled)
+                .await?;
             updated.disabled = disabled;
             revoke |= disabled;
             fields.push(change(
@@ -377,6 +444,9 @@ impl AuthService {
             }
             if user.is_service() {
                 return Err(AuthError::ServiceAccountNoLogin);
+            }
+            if !user.source.is_local() {
+                return Err(super::account::directory_has_no_password("password"));
             }
             updated.password = Some(
                 self.reset_password(ctx, view.as_ref(), &user, password)
@@ -403,13 +473,20 @@ impl AuthService {
         if revoke {
             Self::stage_revoke(&mut batch, &Self::user_sessions(view.as_ref(), id)?);
         }
-        if updated.disabled && !user.disabled {
-            // The tokens of a disabled account end with it, as its sessions do.
-            Self::stage_token_removal(view.as_ref(), &mut batch, id)?;
-            Self::stage_scoped_token_removal(view.as_ref(), &mut batch, id)?;
-        }
+        let grants = if updated.disabled && !user.disabled {
+            Self::stage_disable(view.as_ref(), &mut batch, id)?
+        } else {
+            if updated.password != user.password {
+                // A reset answers a compromised account: its tokens end with its sessions.
+                Self::stage_tokens_end(view.as_ref(), &mut batch, id)?;
+            }
+            0
+        };
         let mut draft = Self::audit(actions::USER_UPDATE, vec![Self::user_object(id)], ctx);
         draft.details.changes = fields;
+        if grants > 0 {
+            draft = draft.with_context("grants_revoked", grants.to_string());
+        }
         batch.audit(draft);
         self.commit(batch).await?;
         Self::info(self.view().await?.as_ref(), id, ctx.now)
@@ -433,7 +510,10 @@ impl AuthService {
         }
         let view = self.view().await?;
         let (user, revision) = Self::load_user(view.as_ref(), id)?;
-        if user.is_admin() && !user.break_glass && Self::other_admins(view.as_ref(), id)? == 0 {
+        if user.break_glass {
+            self.require_break_glass_step_up(ctx).await?;
+        }
+        if Self::guarded(&user) && Self::other_admins(view.as_ref(), id)? == 0 {
             return Err(AuthError::LastAdministrator);
         }
         let mut batch = WriteBatch::for_request(ctx);
@@ -557,7 +637,7 @@ impl AuthService {
                 "the break-glass account is always admin",
             ));
         }
-        if user.is_admin()
+        if Self::guarded(&user)
             && !roles.contains(&RoleName::Admin)
             && !user.disabled
             && Self::other_admins(view.as_ref(), id)? == 0
@@ -615,16 +695,8 @@ impl AuthService {
             ObjectRef::singleton(ObjectKind::System),
         )
         .await?;
-        let (caller, session_id, strength) = Self::session_principal(ctx)?;
-        if !satisfies(strength, AuthStrength::PasswordTotp) {
-            return Err(AuthError::StepUpRequired {
-                required: AuthStrength::PasswordTotp.as_str(),
-            });
-        }
+        self.require_break_glass_step_up(ctx).await?;
         let view = self.view().await?;
-        let (_, session) = Self::load_session(view.as_ref(), caller, session_id)?
-            .ok_or(AuthError::Unauthenticated)?;
-        Self::require_fresh(&session, ctx.now)?;
         let id = request.user_id;
         let (user, revision) = Self::load_user(view.as_ref(), id)?;
         if user.break_glass == request.enabled {
@@ -766,7 +838,8 @@ impl AuthService {
     /// [`AuthError::Denied`], [`AuthError::Conflict`] when `expect` is stale,
     /// [`AuthError::Invalid`], [`AuthError::PinCoupling`], [`AuthError::AuditExportRequired`]
     /// when the change starts to require the audit export while no sink is enabled (TGL-21),
-    /// [`AuthError::Unavailable`] before setup.
+    /// [`AuthError::Unavailable`] before setup, [`AuthError::StepUpRequired`] for a session
+    /// that did not authenticate within the last five minutes.
     pub async fn update_security_settings(
         &self,
         ctx: &RequestCtx,
@@ -779,6 +852,9 @@ impl AuthService {
             ObjectRef::singleton(ObjectKind::Settings),
         )
         .await?;
+        // The settings decide every other step-up (TGL-23, TGL-24), so changing them needs
+        // a fresh authentication itself.
+        self.require_fresh_person(ctx).await?;
         let (current, revision) = self
             .stored_settings()
             .await?

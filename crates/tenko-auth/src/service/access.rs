@@ -188,7 +188,8 @@ impl AuthService {
         ctx: &RequestCtx,
         subject: Option<UserId>,
     ) -> Result<Vec<GrantView>, AuthError> {
-        let caller = ctx.principal.user().ok_or(AuthError::Unauthenticated)?;
+        // A scoped token reads its owner's grants only with a grant that reads users.
+        let caller = self.own_account(ctx).await?;
         let view = self.view().await?;
         let all = Self::all_grants(view.as_ref())?;
         let everything = self
@@ -428,6 +429,12 @@ impl AuthService {
     ///
     /// [`AuthError::Denied`] for anybody else.
     pub async fn grant_subjects(&self, ctx: &RequestCtx) -> Result<Vec<SubjectSummary>, AuthError> {
+        // A scoped token lists the people only with a grant that reads users, whatever
+        // its owner may delegate.
+        if self.is_scoped_token(&ctx.principal) {
+            self.authorize(ctx, Action::Read, ObjectRef::singleton(ObjectKind::User))
+                .await?;
+        }
         let reads_users = self
             .authorized(ctx, Action::Read, ObjectRef::singleton(ObjectKind::User))
             .is_ok();
@@ -597,6 +604,8 @@ impl AuthService {
     ) -> Result<CreatedToken, AuthError> {
         let (account, view) = self.service_account(ctx, id).await?;
         let (creator, _, strength) = Self::session_principal(ctx)?;
+        // The token outlives the session that mints it (IAM-10).
+        self.require_fresh_session(ctx).await?;
         self.issue_scoped_token(ctx, view.as_ref(), &account, creator, strength, request)
             .await
     }
@@ -697,7 +706,8 @@ impl AuthService {
     }
 
     /// Creates a scoped token for `owner` (IAM-10): checked against TGL-05, the session's
-    /// strength and the owner's grants; shown once.
+    /// strength and the owner's grants; shown once. The session must meet the creator's
+    /// requirement and the owner's, which the token is held to at every use.
     pub(super) async fn issue_scoped_token(
         &self,
         ctx: &RequestCtx,
@@ -707,7 +717,10 @@ impl AuthService {
         strength: AuthStrength,
         request: &TokenRequest,
     ) -> Result<CreatedToken, AuthError> {
-        let required = self.index.image().required_strength(creator, Action::Read);
+        let image = self.index.image();
+        let required = image
+            .required_strength(creator, Action::Read)
+            .max(image.required_strength(owner.id, Action::Read));
         if !satisfies(strength, required) {
             return Err(AuthError::StepUpRequired {
                 required: required.as_str(),
@@ -804,7 +817,9 @@ impl AuthService {
     ///
     /// # Errors
     ///
-    /// [`AuthError::Denied`] without the update permission on settings.
+    /// [`AuthError::Denied`] without the update permission on settings,
+    /// [`AuthError::StepUpRequired`] for a session that did not authenticate within the last
+    /// five minutes: the policies decide the step-ups of every role.
     pub async fn set_role_policy(
         &self,
         ctx: &RequestCtx,
@@ -817,6 +832,7 @@ impl AuthService {
             ObjectRef::singleton(ObjectKind::Settings),
         )
         .await?;
+        self.require_fresh_person(ctx).await?;
         let view = self.view().await?;
         let key = role.as_str().to_owned();
         let old = view
@@ -857,7 +873,9 @@ impl AuthService {
     ///
     /// # Errors
     ///
-    /// [`AuthError::Denied`] without the update permission on settings.
+    /// [`AuthError::Denied`] without the update permission on settings,
+    /// [`AuthError::StepUpRequired`] for a session that did not authenticate within the last
+    /// five minutes.
     pub async fn clear_role_policy(
         &self,
         ctx: &RequestCtx,
@@ -869,6 +887,7 @@ impl AuthService {
             ObjectRef::singleton(ObjectKind::Settings),
         )
         .await?;
+        self.require_fresh_person(ctx).await?;
         let view = self.view().await?;
         let key = role.as_str().to_owned();
         if let Some((old, _)) = view.get_typed(&ROLE_POLICIES, &key)? {
@@ -894,7 +913,7 @@ impl AuthService {
     }
 
     /// Adds the removal of every grant a user holds, and of the grants issued under them, to
-    /// a batch (the account is deleted).
+    /// a batch (the account is deleted or disabled).
     pub(super) fn stage_grant_removal(
         view: &dyn ReadView,
         batch: &mut WriteBatch,
@@ -912,22 +931,23 @@ impl AuthService {
         Ok(removed.len())
     }
 
-    /// Adds the removal of every scoped token of a user to a batch.
+    /// Adds the removal of every scoped token of a user to a batch; returns how many.
     pub(super) fn stage_scoped_token_removal(
         view: &dyn ReadView,
         batch: &mut WriteBatch,
         id: UserId,
-    ) -> Result<(), AuthError> {
-        for (key, hash, _) in view.scan_typed(
+    ) -> Result<usize, AuthError> {
+        let tokens = view.scan_typed(
             &USER_SCOPED_TOKENS,
             KeyRange::prefix(tenko_core::codec::encode_key(&(id,))),
             LIST_LIMIT,
             false,
-        )? {
-            batch.delete_typed(&SCOPED_TOKENS, &hash);
-            batch.delete_typed(&USER_SCOPED_TOKENS, &key);
+        )?;
+        for (key, hash, _) in &tokens {
+            batch.delete_typed(&SCOPED_TOKENS, hash);
+            batch.delete_typed(&USER_SCOPED_TOKENS, key);
         }
-        Ok(())
+        Ok(tokens.len())
     }
 
     /// The scoped token `id` of `owner` with its hash, if there is one.

@@ -3529,6 +3529,63 @@ async fn ipam_10_supernet_utilization_sums_its_tree_and_counts_an_address_once()
 
 // ----- lookups and state errors ---------------------------------------------------------------
 
+/// The nil and the all-ones identifiers are reserved: authorization reads the all-ones id
+/// as "some object of this kind" and the nil id as the kind itself, so no stored object may
+/// carry either. A client-chosen id that is one of them is refused before anything is
+/// written.
+#[tokio::test]
+async fn the_reserved_identifiers_cannot_be_claimed() {
+    let (service, _) = service();
+    for reserved in [uuid::Uuid::max(), uuid::Uuid::nil()] {
+        let mut network = prefix(None, "192.0.2.0/24");
+        network.id = Some(PrefixId::from_uuid(reserved));
+        let error = run_err(
+            &service,
+            vec![IpamCommand::CreatePrefix(network)],
+            codes::VALIDATION,
+        )
+        .await;
+        assert_eq!(status_of(&error), 400);
+        assert_eq!(error.coded().params["field"], "id");
+
+        let mut place = site("Reserved", None);
+        place.id = Some(SiteId::from_uuid(reserved));
+        run_err(
+            &service,
+            vec![IpamCommand::CreateSite(place)],
+            codes::VALIDATION,
+        )
+        .await;
+
+        let mut owner = tenant("Reserved");
+        owner.id = Some(TenantId::from_uuid(reserved));
+        run_err(
+            &service,
+            vec![IpamCommand::CreateTenant(owner)],
+            codes::VALIDATION,
+        )
+        .await;
+
+        let mut definition = field("reserved", CustomKind::Text, &[ObjectKind::Prefix], false);
+        definition.id = Some(tenko_core::CustomFieldId::from_uuid(reserved));
+        run_err(
+            &service,
+            vec![IpamCommand::CreateCustomField(definition)],
+            codes::VALIDATION,
+        )
+        .await;
+    }
+    let view = snapshot(&service).await;
+    assert!(
+        view.get_typed(
+            &tenko_ipam::tables::PREFIXES,
+            &PrefixId::from_uuid(uuid::Uuid::max())
+        )
+        .expect("read")
+        .is_none()
+    );
+}
+
 #[tokio::test]
 async fn lookups_and_state_errors_have_their_own_codes() {
     let (service, _) = service();

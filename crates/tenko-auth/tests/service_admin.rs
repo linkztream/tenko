@@ -313,6 +313,7 @@ fn password_change(current: &str, new: &str) -> PasswordChange {
     PasswordChange {
         current_password: Some(SecretString::new(current)),
         new_password: SecretString::new(new),
+        remove_factors: false,
     }
 }
 
@@ -540,6 +541,7 @@ async fn an_initial_password_forces_a_change() {
             &PasswordChange {
                 current_password: Some(SecretString::new("6402")),
                 new_password: SecretString::new("8305"),
+                remove_factors: false,
             },
         )
         .await
@@ -963,6 +965,58 @@ async fn the_last_administrator_cannot_be_disabled_demoted_or_deleted() {
             .delete_user(&system, me)
             .await
             .expect_err("last again"),
+        guard
+    );
+}
+
+/// A service account acts through tokens, which never administer, so an admin service
+/// account does not keep the installation administrable: it does not count as another
+/// administrator.
+#[tokio::test]
+async fn an_admin_service_account_does_not_count_as_another_administrator() {
+    let (env, session) = TestEnv::installed(Profile::Home).await;
+    let admin = ctx(&env, &session).await;
+    let me = admin.principal.user().expect("a user");
+    env.service
+        .create_service_account(
+            &admin,
+            &tenko_auth::service::ServiceAccountCreate {
+                name: "svc".to_owned(),
+                display_name: None,
+                roles: vec![RoleName::Admin],
+            },
+        )
+        .await
+        .expect("a service account");
+    let guard = AuthError::LastAdministrator;
+    assert_eq!(
+        env.service
+            .set_user_roles(&admin, me, &[RoleName::Viewer], None)
+            .await
+            .expect_err("self-demotion"),
+        guard
+    );
+    let system = env.public_ctx();
+    assert_eq!(
+        env.service
+            .update_user(
+                &system,
+                me,
+                &UserUpdate {
+                    disabled: Some(true),
+                    ..UserUpdate::default()
+                },
+                None,
+            )
+            .await
+            .expect_err("disable"),
+        guard
+    );
+    assert_eq!(
+        env.service
+            .delete_user(&system, me)
+            .await
+            .expect_err("delete"),
         guard
     );
 }
@@ -1662,6 +1716,70 @@ async fn a_patch_that_changes_nothing_writes_nothing() {
         assert_eq!(view, before);
     }
     assert_eq!(audit_records(&env).await.len(), records);
+}
+
+/// The security settings and the role policies decide every other step-up (TGL-23,
+/// TGL-24, IAM-06), so changing them needs a session that authenticated within the last
+/// five minutes, whatever the change.
+#[tokio::test]
+async fn changing_the_settings_or_a_role_policy_needs_a_fresh_session() {
+    let (env, session) = TestEnv::installed(Profile::Home).await;
+    env.clock.advance(Duration::from_secs(6 * 60));
+    let stale = ctx(&env, &session).await;
+    let weaker = SettingsPatch {
+        secret_reveal: Some(RevealPolicy {
+            step_up: RevealStepUp::Session,
+            bound_host_only: false,
+        }),
+        ..SettingsPatch::default()
+    };
+    let before = env
+        .service
+        .security_settings(&stale)
+        .await
+        .expect("reading needs no step-up");
+    assert_eq!(
+        env.service
+            .update_security_settings(&stale, &weaker, None)
+            .await
+            .expect_err("stale"),
+        AuthError::StepUpRequired { required: "fresh" }
+    );
+    let policy = tenko_auth::service::RolePolicyUpdate {
+        mfa: tenko_auth::model::RoleMfa::Optional,
+    };
+    assert_eq!(
+        env.service
+            .set_role_policy(&stale, RoleName::Operator, &policy)
+            .await
+            .expect_err("stale"),
+        AuthError::StepUpRequired { required: "fresh" }
+    );
+    assert_eq!(
+        env.service
+            .clear_role_policy(&stale, RoleName::Operator)
+            .await
+            .expect_err("stale"),
+        AuthError::StepUpRequired { required: "fresh" }
+    );
+    let after = env.service.security_settings(&stale).await.expect("read");
+    assert_eq!(after.revision, before.revision, "nothing was written");
+    assert_eq!(audit_of(&env, "auth.role_policy.update").await.len(), 0);
+
+    // A fresh sign-in may.
+    let fresh = ctx(&env, &login(&env, ADMIN, ADMIN_PIN).await).await;
+    env.service
+        .update_security_settings(&fresh, &weaker, None)
+        .await
+        .expect("fresh");
+    env.service
+        .set_role_policy(&fresh, RoleName::Operator, &policy)
+        .await
+        .expect("fresh");
+    env.service
+        .clear_role_policy(&fresh, RoleName::Operator)
+        .await
+        .expect("fresh");
 }
 
 #[tokio::test]
@@ -3128,4 +3246,105 @@ async fn a_change_that_starts_to_require_the_audit_export_needs_an_enabled_sink_
         .await
         .expect("TGL-21 satisfied");
     assert_eq!(view.settings.audit_export(), AuditExport::Required);
+}
+
+/// An administrator's password reset is the answer to a compromised account, so it ends the
+/// account's personal and scoped tokens as well as its sessions.
+#[tokio::test]
+async fn an_administrator_password_reset_revokes_the_accounts_tokens() {
+    let (env, session) = TestEnv::installed(Profile::Home).await;
+    let admin = ctx(&env, &session).await;
+    let user = create(
+        &env,
+        &admin,
+        &new_user("ivo", &[RoleName::Operator], Some("6402")),
+    )
+    .await;
+    let own = ctx(&env, &login(&env, "ivo", "6402").await).await;
+    let token = env
+        .service
+        .create_token(
+            &own,
+            &TokenCreate {
+                name: "script".to_owned(),
+                expires_in_days: Some(30),
+            },
+        )
+        .await
+        .expect("a token");
+    env.service
+        .update_user(
+            &admin,
+            user.id,
+            &UserUpdate {
+                password: Some(SecretString::new("8305")),
+                ..UserUpdate::default()
+            },
+            None,
+        )
+        .await
+        .expect("the reset");
+    assert!(matches!(
+        env.service
+            .authenticate_credentials(
+                &Credentials::Bearer(token.token.expose().to_owned()),
+                env.now()
+            )
+            .await,
+        Err(AuthError::Unauthenticated)
+    ));
+}
+
+/// The guard that keeps the last administrator guards people. Removing an admin service
+/// account never leaves the installation without a person who administers, so it is not
+/// held to the guard, also when no person holds the admin role (a break-glass recovery).
+#[tokio::test]
+async fn an_admin_service_account_can_be_removed_when_no_person_administers() {
+    let (env, session) = TestEnv::installed(Profile::Home).await;
+    let admin = ctx(&env, &session).await;
+    let me = admin.principal.user().expect("a user");
+    let make = |name: &'static str| tenko_auth::service::ServiceAccountCreate {
+        name: name.to_owned(),
+        display_name: None,
+        roles: vec![RoleName::Admin],
+    };
+    let first = env
+        .service
+        .create_service_account(&admin, &make("svc-one"))
+        .await
+        .expect("a service account");
+    let second = env
+        .service
+        .create_service_account(&admin, &make("svc-two"))
+        .await
+        .expect("a service account");
+    // No person administers any more.
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    let (mut record, _) = view.get_typed(&USERS, &me).expect("read").expect("me");
+    record.roles = vec![RoleName::Viewer];
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), env.now());
+    batch.put_typed(&USERS, &me, &record).expect("encode");
+    env.store.propose(batch).await.expect("commit");
+
+    let system = env.public_ctx();
+    env.service
+        .set_user_roles(&system, first.id, &[RoleName::Viewer], None)
+        .await
+        .expect("demote a service account");
+    env.service
+        .update_user(
+            &system,
+            second.id,
+            &UserUpdate {
+                disabled: Some(true),
+                ..UserUpdate::default()
+            },
+            None,
+        )
+        .await
+        .expect("disable a service account");
+    env.service
+        .delete_user(&system, second.id)
+        .await
+        .expect("delete a service account");
 }

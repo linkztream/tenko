@@ -77,6 +77,15 @@ pub(super) fn admits_pin(policy: &crate::password::policy::PasswordPolicy) -> bo
         .is_empty()
 }
 
+/// The refusal of a local password for an account of an external directory, which signs
+/// in through its directory only.
+pub(super) fn directory_has_no_password(field: &'static str) -> AuthError {
+    AuthError::invalid(
+        field,
+        "the account signs in through its directory and has no local password",
+    )
+}
+
 /// Longest label of a credential or name of a token.
 const MAX_LABEL_CHARS: usize = 64;
 
@@ -241,6 +250,38 @@ impl AuthService {
         Self::require_fresh(&session, ctx.now)
     }
 
+    /// Checks that a person acting through a session authenticated within the last five
+    /// minutes, for changes that decide or bypass other step-ups. The system acts without a
+    /// session and passes, as it passes authorization; any other principal is refused.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::Unauthenticated`] for a token or a node,
+    /// [`AuthError::StepUpRequired`] when the session's authentication is older.
+    pub(super) async fn require_fresh_person(&self, ctx: &RequestCtx) -> Result<(), AuthError> {
+        if matches!(ctx.principal, Principal::System { .. }) {
+            return Ok(());
+        }
+        self.require_fresh_session(ctx).await
+    }
+
+    /// The account whose own records (sessions, tokens, passkeys) the caller reads: the
+    /// user of a session or of a personal token, which acts as its owner. A scoped token
+    /// acts only within its grants, so it reads them only with a grant that reads users.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::Unauthenticated`] without a user, [`AuthError::Denied`] for a scoped
+    /// token without such a grant.
+    pub(super) async fn own_account(&self, ctx: &RequestCtx) -> Result<UserId, AuthError> {
+        let user = ctx.principal.user().ok_or(AuthError::Unauthenticated)?;
+        if self.is_scoped_token(&ctx.principal) {
+            self.authorize(ctx, Action::Read, ObjectRef::singleton(ObjectKind::User))
+                .await?;
+        }
+        Ok(user)
+    }
+
     /// `GET /auth/session` (IAM-08).
     ///
     /// # Errors
@@ -257,7 +298,7 @@ impl AuthService {
     ///
     /// [`AuthError::Unauthenticated`] or a store error.
     pub async fn list_sessions(&self, ctx: &RequestCtx) -> Result<Vec<SessionSummary>, AuthError> {
-        let user = ctx.principal.user().ok_or(AuthError::Unauthenticated)?;
+        let user = self.own_account(ctx).await?;
         let current = match ctx.principal {
             Principal::User { session, .. } => Some(session),
             _ => None,
@@ -349,12 +390,18 @@ impl AuthService {
         })
     }
 
-    /// `POST /auth/password`: changes the user's password and ends their other sessions.
+    /// `POST /auth/password`: changes the user's password, ends their other sessions and
+    /// revokes their personal and scoped tokens (IAM-08); with `remove_factors` it also
+    /// removes the TOTP seed, the passkeys and the recovery codes. A wrong current password
+    /// counts and is audited as a failed sign-in, and a lock it causes is stored. An account
+    /// without a password has no current one to prove, so setting its first password needs
+    /// a session that authenticated within the last five minutes.
     ///
     /// # Errors
     ///
     /// [`AuthError::PasswordIncorrect`], [`AuthError::PasswordPolicy`],
-    /// [`AuthError::Throttled`], or [`AuthError::BreakGlassHardwareKeyOnly`].
+    /// [`AuthError::Throttled`], [`AuthError::StepUpRequired`] or
+    /// [`AuthError::BreakGlassHardwareKeyOnly`].
     pub async fn change_password(
         &self,
         ctx: &RequestCtx,
@@ -363,6 +410,9 @@ impl AuthService {
         let (user, revision, _, session) = self.current(ctx).await?;
         if user.break_glass {
             return Err(AuthError::BreakGlassHardwareKeyOnly);
+        }
+        if !user.source.is_local() {
+            return Err(directory_has_no_password("new_password"));
         }
         let settings = self.settings();
         if let Some(stored) = &user.password {
@@ -373,6 +423,12 @@ impl AuthService {
                 .map_err(|retry| AuthError::Throttled {
                     retry_after: retry.after.map(|after| after.as_secs().max(1)),
                 })?;
+            // A lock stored on the account (by any controller) holds here as at sign-in.
+            if let Some(lock) = user.active_lock(ctx.now) {
+                return Err(AuthError::Throttled {
+                    retry_after: Some(lock.until.saturating_since(ctx.now).as_secs().max(1)),
+                });
+            }
             let current = request
                 .current_password
                 .as_ref()
@@ -380,10 +436,21 @@ impl AuthService {
             let candidate = normalize(current.expose());
             let hash = stored.hash.clone();
             if !blocking(move || verify_password(&candidate, &hash)).await?? {
-                self.throttle.record_failure(&account, &policy, ctx.now);
+                // A failed sign-in in substance: counted, audited, a lock stored.
+                self.login_failed(
+                    ctx,
+                    &account,
+                    Some((&user, revision)),
+                    actions::PASSWORD_CHANGE,
+                    &user.name,
+                    &policy,
+                )
+                .await;
                 return Err(AuthError::PasswordIncorrect);
             }
             self.throttle.record_success(&account);
+        } else {
+            Self::require_fresh(&session, ctx.now)?;
         }
         let host_name = self.host_name().await?;
         let (password, breach_check) = self
@@ -407,21 +474,39 @@ impl AuthService {
             .filter(|(_, record)| record.id != session.id)
             .collect();
         let mut batch = WriteBatch::for_request(ctx);
+        Self::stage_revoke(&mut batch, &others);
+        // A token made with the old password does not outlive it.
+        let tokens = Self::stage_tokens_end(view.as_ref(), &mut batch, user.id)?;
+        if request.remove_factors {
+            if let Some(factor) = &user.totp {
+                self.vault.stage_delete(&mut batch, ctx, factor.secret);
+            }
+            for credential in Self::user_credentials(view.as_ref(), user.id)? {
+                batch.delete_typed(&CREDENTIAL_IDS, &credential.credential_id);
+                batch.delete_typed(&CREDENTIALS, &(user.id, credential.credential_id));
+            }
+            updated.totp = None;
+            updated.recovery_codes.clear();
+        }
         batch.expect_typed(&USERS, &user.id, Some(revision));
         batch.put_typed(&USERS, &user.id, &updated)?;
-        Self::stage_revoke(&mut batch, &others);
-        batch.audit(
-            Self::audit(
-                actions::PASSWORD_CHANGE,
-                vec![ObjectRef::from(user.id)],
-                ctx,
-            )
-            .with_context("sessions_revoked", others.len().to_string()),
-        );
+        let mut draft = Self::audit(
+            actions::PASSWORD_CHANGE,
+            vec![ObjectRef::from(user.id)],
+            ctx,
+        )
+        .with_context("sessions_revoked", others.len().to_string())
+        .with_context("tokens_revoked", tokens.to_string());
+        if request.remove_factors {
+            draft = draft.with_context("factors_removed", "true");
+        }
+        batch.audit(draft);
         self.commit(batch).await?;
         Ok(PasswordChanged {
             breach_check,
             sessions_revoked: others.len(),
+            tokens_revoked: tokens,
+            factors_removed: request.remove_factors,
         })
     }
 
@@ -430,9 +515,13 @@ impl AuthService {
     ///
     /// # Errors
     ///
-    /// [`AuthError::TotpAlreadyEnrolled`] or [`AuthError::Unauthenticated`].
+    /// [`AuthError::TotpAlreadyEnrolled`], [`AuthError::Unauthenticated`], or
+    /// [`AuthError::StepUpRequired`] for a session that did not authenticate within the last
+    /// five minutes.
     pub async fn totp_enroll_start(&self, ctx: &RequestCtx) -> Result<TotpEnrollment, AuthError> {
         let (user, _, _, session) = self.current(ctx).await?;
+        // A factor outlives the session that adds it (IAM-10).
+        Self::require_fresh(&session, ctx.now)?;
         if user.totp.is_some() {
             return Err(AuthError::TotpAlreadyEnrolled);
         }
@@ -466,13 +555,15 @@ impl AuthService {
     ///
     /// # Errors
     ///
-    /// [`AuthError::ChallengeInvalid`], [`AuthError::TotpCodeMismatch`].
+    /// [`AuthError::ChallengeInvalid`], [`AuthError::TotpCodeMismatch`],
+    /// [`AuthError::StepUpRequired`].
     pub async fn totp_enroll_finish(
         &self,
         ctx: &RequestCtx,
         request: &TotpEnrollFinish,
     ) -> Result<FactorEnrolled, AuthError> {
         let (user, revision, _, session) = self.current(ctx).await?;
+        Self::require_fresh(&session, ctx.now)?;
         let view = self.view().await?;
         let (pending, staged) =
             self.ceremonies
@@ -610,7 +701,8 @@ impl AuthService {
     /// # Errors
     ///
     /// [`AuthError::Unavailable`] before a host name exists, [`AuthError::Invalid`] for a
-    /// bad label.
+    /// bad label, [`AuthError::StepUpRequired`] for a session that did not authenticate
+    /// within the last five minutes.
     pub async fn webauthn_register_start(
         &self,
         ctx: &RequestCtx,
@@ -618,6 +710,8 @@ impl AuthService {
     ) -> Result<WebAuthnRegisterOptions, AuthError> {
         let rp = self.relying_party()?;
         let (user, _, _, session) = self.current(ctx).await?;
+        // A passkey outlives the session that adds it (IAM-10).
+        Self::require_fresh(&session, ctx.now)?;
         let hardware_key = request.security_key || user.break_glass;
         let label = label(
             "label",
@@ -674,6 +768,7 @@ impl AuthService {
         request: &WebAuthnRegisterFinish,
     ) -> Result<FactorEnrolled, AuthError> {
         let (user, revision, _, session) = self.current(ctx).await?;
+        Self::require_fresh(&session, ctx.now)?;
         let view = self.view().await?;
         let (pending, staged) =
             self.ceremonies
@@ -765,7 +860,7 @@ impl AuthService {
         &self,
         ctx: &RequestCtx,
     ) -> Result<Vec<CredentialInfo>, AuthError> {
-        let user = ctx.principal.user().ok_or(AuthError::Unauthenticated)?;
+        let user = self.own_account(ctx).await?;
         let view = self.view().await?;
         Ok(Self::user_credentials(view.as_ref(), user)?
             .iter()
@@ -863,7 +958,7 @@ impl AuthService {
     ///
     /// [`AuthError::Unauthenticated`] or a store error.
     pub async fn list_tokens(&self, ctx: &RequestCtx) -> Result<Vec<TokenInfo>, AuthError> {
-        let user = ctx.principal.user().ok_or(AuthError::Unauthenticated)?;
+        let user = self.own_account(ctx).await?;
         let view = self.view().await?;
         let mut tokens = Vec::new();
         for (_, hash, _) in view.scan_typed(
@@ -912,6 +1007,8 @@ impl AuthService {
         if session.break_glass {
             return Err(AuthError::BreakGlassHardwareKeyOnly);
         }
+        // A token outlives the session that creates it (IAM-10).
+        Self::require_fresh(&session, ctx.now)?;
         if request.is_scoped() {
             let view = self.view().await?;
             return self

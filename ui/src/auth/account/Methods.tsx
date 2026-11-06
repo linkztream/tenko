@@ -46,7 +46,12 @@ export default function Methods() {
         )}
       </Show>
 
-      <PasswordSection />
+      <PasswordSection
+        onFactorsRemoved={() => {
+          data.setTotp(false);
+          data.refetch();
+        }}
+      />
       <PasskeySection data={data} onCodes={setCodes} onReauthenticate={() => setReauth(true)} />
       <TotpSection data={data} onCodes={setCodes} onReauthenticate={() => setReauth(true)} />
       <RecoverySection data={data} onCodes={setCodes} />

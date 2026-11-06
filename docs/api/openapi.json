@@ -339,6 +339,16 @@
               }
             }
           },
+          "403": {
+            "description": "A scoped token without a grant that reads users (`auth.forbidden`): it reads its owner's grants only with one",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "503": {
             "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
             "content": {
@@ -1052,7 +1062,7 @@
             }
           },
           "403": {
-            "description": "The caller may not administer users (`auth.forbidden`), the session is not strong enough (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`)",
+            "description": "The caller may not administer users (`auth.forbidden`), the session is not strong enough for the caller and the account or did not authenticate within the last five minutes (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3448,7 +3458,7 @@
         },
         "responses": {
           "200": {
-            "description": "The password changed; the other sessions ended",
+            "description": "The password changed; the other sessions ended and the account's tokens were revoked, and with `remove_factors` its TOTP seed, passkeys and recovery codes were removed",
             "content": {
               "application/json": {
                 "schema": {
@@ -3478,7 +3488,7 @@
             }
           },
           "403": {
-            "description": "The current password is wrong (`auth.password.incorrect`) or the account is the break-glass account (`auth.break_glass.hardware_key_only`)",
+            "description": "The current password is wrong (`auth.password.incorrect`, counted and audited as a failed sign-in), the account is the break-glass account (`auth.break_glass.hardware_key_only`), or the account has no password and the session did not authenticate within the last five minutes (`auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4662,6 +4672,16 @@
               }
             }
           },
+          "403": {
+            "description": "A scoped token without a grant that reads users (`auth.forbidden`): it reads the sessions of its owner only with one",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "503": {
             "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
             "content": {
@@ -4773,6 +4793,16 @@
               }
             }
           },
+          "403": {
+            "description": "A scoped token without a grant that reads users (`auth.forbidden`): it reads the tokens of its owner only with one",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "503": {
             "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
             "content": {
@@ -4833,7 +4863,7 @@
             }
           },
           "403": {
-            "description": "The session is not strong enough (`auth.step_up_required`) is the break-glass session (`auth.break_glass.hardware_key_only`), or a grant of a scoped token goes beyond the owner's (`auth.grant.exceeds_own`)",
+            "description": "The session is not strong enough or did not authenticate within the last five minutes (`auth.step_up_required`), is the break-glass session (`auth.break_glass.hardware_key_only`), or a grant of a scoped token goes beyond the owner's (`auth.grant.exceeds_own`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5042,6 +5072,16 @@
               }
             }
           },
+          "403": {
+            "description": "The session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`): a new factor outlives the session that adds it",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "The code does not match the new seed (`auth.totp.code_mismatch`)",
             "content": {
@@ -5098,6 +5138,16 @@
               }
             }
           },
+          "403": {
+            "description": "The session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`): a new factor outlives the session that adds it",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "409": {
             "description": "TOTP is already enrolled (`auth.totp.already_enrolled`)",
             "content": {
@@ -5146,6 +5196,16 @@
           },
           "401": {
             "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A scoped token without a grant that reads users (`auth.forbidden`): it reads the passkeys of its owner only with one",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5445,7 +5505,7 @@
             }
           },
           "403": {
-            "description": "The attestation is refused (`auth.webauthn.attestation_required`, `auth.webauthn.attestation_untrusted`, `auth.webauthn.backup_eligible_refused`)",
+            "description": "The attestation is refused (`auth.webauthn.attestation_required`, `auth.webauthn.attestation_untrusted`, `auth.webauthn.backup_eligible_refused`), or the session did not authenticate within the last five minutes (`auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5529,6 +5589,16 @@
           },
           "401": {
             "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`): a new factor outlives the session that adds it",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -33853,7 +33923,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The caller may not change settings (`auth.forbidden`), or the session did not authenticate within the last five minutes (`auth.step_up_required` with `required: fresh`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -38391,7 +38461,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The caller may not administer users (`auth.forbidden`), or the user is the break-glass account and the session is not one of at least password and TOTP from the last five minutes (`auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -38516,7 +38586,7 @@
             }
           },
           "403": {
-            "description": "The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`)",
+            "description": "The caller may not administer users (`auth.forbidden`), or the user is the break-glass account and the session is not one of at least password and TOTP from the last five minutes (`auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -70419,6 +70489,10 @@
           "new_password": {
             "$ref": "#/components/schemas/SecretString",
             "description": "The new password."
+          },
+          "remove_factors": {
+            "type": "boolean",
+            "description": "Also remove the account's TOTP seed, passkeys and recovery codes, so that only the\nnew password signs in. An account that needs a second factor then enrolls one at its\nnext sign-in."
           }
         }
       },
@@ -70427,16 +70501,27 @@
         "description": "The answer of a password change.",
         "required": [
           "breach_check",
-          "sessions_revoked"
+          "sessions_revoked",
+          "tokens_revoked",
+          "factors_removed"
         ],
         "properties": {
           "breach_check": {
             "$ref": "#/components/schemas/BreachStatus",
             "description": "The breached-password check."
           },
+          "factors_removed": {
+            "type": "boolean",
+            "description": "Whether the TOTP seed, the passkeys and the recovery codes were removed."
+          },
           "sessions_revoked": {
             "type": "integer",
             "description": "Other sessions of the account that were ended.",
+            "minimum": 0
+          },
+          "tokens_revoked": {
+            "type": "integer",
+            "description": "Personal and scoped tokens of the account that were revoked.",
             "minimum": 0
           }
         }
