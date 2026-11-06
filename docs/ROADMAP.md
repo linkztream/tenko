@@ -48,14 +48,15 @@ A release is cut when one of three things happens: a milestone of the current pl
 |---|---|---|
 | 0.0.6 | The installer's role change (prepare every role outside Hardened) | DHCPv6 IA_NA on the server side (WP9.1), reserving an address in DHCP, the reachable scan configuration, the installer change |
 | 0.0.7 | WP9.2, WP9.4 and the DHCPv6 half of WP9.3 | IA_PD and delegation pools, the RA check, the DHCPv6 UI and routes, the Kea `Dhcp6` export; E29 and E30 complete |
-| 0.1.0 | The Phase 3 exit (WP9.5) | DHCP complete and measured on one node |
-| 0.1.x | WP12.1 and WP12.2 of Slice 12 | The node store and `dns` and `dhcp` nodes that serve without a controller |
-| 0.2.0 | Slice 12 complete | The failover pair and its chaos test |
-| 0.2.x | The Kerberos line of Slice 13 | GSS-TSIG from Windows clients and domain controllers |
-| 0.3.0 | Slice 13 complete | Directory sign-in with OIDC, LDAP and Kerberos |
+| 0.0.12 | The first run of the reworked release workflow | The fixes of the security audit, data format 6 with the contracts of the Windows takeover and of Slice 13, the exporter of the Windows DHCP mirror; the rehearsal for 0.1.0 |
+| 0.1.0 | The Phase 3 exit (WP9.5) and the Kerberos line of Slice 13 (WP13.0 to WP13.4), with E44 run in the owner's Windows lab | DHCP complete and measured on one node; secure dynamic updates with GSS-TSIG from Windows clients and domain controllers, verified against Windows: the release line the Windows takeover runs on |
+| 0.1.x | The remaining packages of Slice 14 and the first packages of directory sign-in (WP13.5, WP13.6) | The mirror of a Windows DHCP server, the takeover of a scope and the flip of a zone; sign-in with OIDC and LDAP as they land |
+| 0.2.0 | Slice 13 complete | Directory sign-in with OIDC, LDAP and Kerberos |
+| 0.2.x | WP12.1 and WP12.2 of Slice 12 | The node store and `dns` and `dhcp` nodes that serve without a controller |
+| 0.3.0 | Slice 12 complete | The failover pair and its chaos test |
 | 1.0 | Signing, re-measurement and support | The first release recommended outside a lab |
 
-The versions after 0.1.0 follow the order decided on 2026-10-25: identity (Slice 13) is built before high availability (Slice 12) where the two compete for builders, because it is smaller, well specified and unblocks the Active Directory take-over; the table lists Slice 12 first only because its node-store packages can ship on their own.
+The versions follow the owner's order. On 2026-10-25 identity (Slice 13) was placed before high availability (Slice 12) where the two compete for builders, because it is smaller, well specified and unblocks the Active Directory take-over. On 2026-11-06 the owner tied 0.1.0 to the Kerberos line: the first minor release is the one the Windows takeover runs on, so it waits for GSS-TSIG verified against Windows in the owner's lab (E44 of [identity-plan.md](plans/identity-plan.md)) and not only for the Phase 3 exit. The real cutover of [windows-takeover-plan.md](plans/windows-takeover-plan.md) runs on the first 0.1 release that also carries Slice 14 complete. Before the 0.1.0 tag the lead checks on the release candidate that the update flow takes the backup of ADR 0023 before it replaces the binary, which the paragraph above promises from 0.1.0 on.
 
 ## Overview
 
