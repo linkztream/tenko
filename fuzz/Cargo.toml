@@ -392,3 +392,12 @@ test = false
 doc = false
 bench = false
 # WP13.1: end.
+
+# WP13.2: TKEY and GSS-TSIG (marked block).
+[[bin]]
+name = "dns_tkey"
+path = "fuzz_targets/dns_tkey.rs"
+test = false
+doc = false
+bench = false
+# WP13.2: end.

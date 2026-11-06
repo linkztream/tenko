@@ -461,7 +461,7 @@ impl Lab {
         let got = read(&answer);
         if let (Some(signer), None | Some(0)) = (&signer, got.tsig_error) {
             let mut verifier = Verifier::new(
-                Arc::clone(signer.key()),
+                signer.key().clone(),
                 signer.last_mac().expect("request MAC"),
             );
             verifier

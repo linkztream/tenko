@@ -560,41 +560,7 @@ impl<R: Resolver> Responder<R> {
                     return Reply::Send;
                 }
             };
-            answer.clear();
-            answer.udp_payload = self.udp_size;
-            let max_len = request.udp_len(self.udp_size);
-            let client = conn.client.ip();
-            let cookie = match self.cookie_mode {
-                CookieMode::Off => None,
-                _ => request.edns.and_then(|edns| edns.cookie),
-            };
-            if request.edns.is_some_and(|edns| edns.version != 0) {
-                answer.rcode = rcode::BADVERS;
-            } else if let Some(cookie) = &cookie
-                && self.cookie_mode == CookieMode::Required
-                && !self.cookies.verify(cookie, client, clock.unix_secs)
-            {
-                answer.rcode = rcode::BADCOOKIE;
-            } else {
-                match self.resolver.admit(conn.client, conn.transport, now) {
-                    RateDecision::Send => return forward,
-                    RateDecision::Drop => return Reply::Drop,
-                    RateDecision::Slip => answer.truncated = true,
-                }
-            }
-            return self.build(
-                batch,
-                conn,
-                request,
-                None,
-                &query,
-                max_len,
-                cookie.as_ref(),
-                clock,
-                now,
-                answer,
-                out,
-            );
+            return self.admit_off_path(conn, clock, now, request, &query, answer, out, batch);
         }
         // WP6.1: NOTIFY, IXFR (the SOA only) and signed SOA queries over UDP.
         if conn.transport == QueryTransport::Udp
@@ -631,6 +597,22 @@ impl<R: Resolver> Responder<R> {
                 return Reply::Send;
             }
         };
+        // WP13.2: a TKEY query (GSS-TSIG, RFC 3645) leaves the query path for the update
+        // path, which negotiates off the worker: one compare of the question type for
+        // every other query. Over UDP it first passes the admission an UPDATE passes.
+        if request.qtype == crate::tkey::wire::TYPE_TKEY
+            && request.opcode == 0
+            && self.updates.is_some()
+        {
+            if conn.transport != QueryTransport::Udp {
+                return Reply::Forward {
+                    view: None,
+                    rule: None,
+                };
+            }
+            return self.admit_off_path(conn, clock, now, request, &query, answer, out, batch);
+        }
+        // WP13.2: end.
         answer.clear();
         answer.udp_payload = self.udp_size;
         let max_len = match conn.transport {
@@ -817,14 +799,77 @@ impl<R: Resolver> Responder<R> {
         Reply::Send
     }
 
+    // WP13.2: shared by an UPDATE and a TKEY query over UDP.
+    /// The admission of a UDP message that leaves the query path (an UPDATE, a TKEY
+    /// query): BADVERS, the cookie where the profile requires one, the rate limiter; it
+    /// goes on ([`Reply::Forward`]) or is answered here like any query.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parts of one query the admission reads and writes"
+    )]
+    fn admit_off_path(
+        &self,
+        conn: &Conn,
+        clock: &Clock,
+        now: Instant,
+        request: &Request,
+        query: &<DomainCodec as Codec>::Query<'_>,
+        answer: &mut AnswerBuf,
+        out: &mut Vec<u8>,
+        batch: &mut Batch,
+    ) -> Reply {
+        answer.clear();
+        answer.udp_payload = self.udp_size;
+        let max_len = request.udp_len(self.udp_size);
+        let client = conn.client.ip();
+        let cookie = match self.cookie_mode {
+            CookieMode::Off => None,
+            _ => request.edns.and_then(|edns| edns.cookie),
+        };
+        if request.edns.is_some_and(|edns| edns.version != 0) {
+            answer.rcode = rcode::BADVERS;
+        } else if let Some(cookie) = &cookie
+            && self.cookie_mode == CookieMode::Required
+            && !self.cookies.verify(cookie, client, clock.unix_secs)
+        {
+            answer.rcode = rcode::BADCOOKIE;
+        } else {
+            match self.resolver.admit(conn.client, conn.transport, now) {
+                RateDecision::Send => {
+                    return Reply::Forward {
+                        view: None,
+                        rule: None,
+                    };
+                }
+                RateDecision::Drop => return Reply::Drop,
+                RateDecision::Slip => answer.truncated = true,
+            }
+        }
+        self.build(
+            batch,
+            conn,
+            request,
+            None,
+            query,
+            max_len,
+            cookie.as_ref(),
+            clock,
+            now,
+            answer,
+            out,
+        )
+    }
+    // WP13.2: end.
+
     /// Hands a query the resolver sent to the forwarder (after [`Reply::Forward`]).
     /// Allocates the copy of the query: the forwarder runs off the query path. The cookie
     /// option of the answer is computed here, from the query's client cookie.
     pub fn forward(&self, message: &[u8], conn: &Conn, reply: Reply, path: ReplyPath) {
         // WP6.2: an UPDATE goes to the update path, which copies it only once it has a
         // place for it.
+        // WP13.2: so does a TKEY query.
         if let Some(updates) = &self.updates
-            && crate::update::message::is_update(message)
+            && (crate::update::message::is_update(message) || crate::tkey::wire::is_tkey(message))
         {
             updates.submit(message, conn, path);
             return;
@@ -1139,6 +1184,98 @@ mod tests {
             wire::parse_header(&scratch.out).expect("header").rcode,
             1,
             "FORMERR"
+        );
+    }
+
+    /// DNS-28 (WP13.2): a TKEY query leaves the query path for the update path after the
+    /// admission an UPDATE passes over UDP (the rate limiter's drop holds it back); over a
+    /// stream it goes as it is; `forward` hands it to the update sink. Without an update
+    /// path it stays with the resolver, as does every other query.
+    #[test]
+    fn dns_28_a_tkey_query_goes_to_the_update_path_after_the_admission() {
+        #[derive(Default)]
+        struct Sink(std::sync::Mutex<Vec<Vec<u8>>>);
+        impl crate::update::UpdateSink for Sink {
+            fn submit(&self, message: &[u8], _: &Conn, _: ReplyPath) {
+                self.0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(message.to_vec());
+            }
+        }
+        struct Gate(Arc<std::sync::Mutex<RateDecision>>);
+        impl Resolver for Gate {
+            fn resolve(&self, _: &QueryContext<'_>, answer: &mut AnswerBuf) -> Resolution {
+                answer.rcode = rcode::NOTIMP;
+                Resolution::Answered { view: None }
+            }
+            fn admit(&self, _: SocketAddr, _: QueryTransport, _: Instant) -> RateDecision {
+                *self
+                    .0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            }
+        }
+        let decision = Arc::new(std::sync::Mutex::new(RateDecision::Send));
+        let sink = Arc::new(Sink::default());
+        let responder = Responder::new(
+            Gate(Arc::clone(&decision)),
+            CookieSecret::with_secret([5; 16]),
+        )
+        .with_updates(Arc::clone(&sink) as Arc<dyn crate::update::UpdateSink>)
+        .with_metrics(false);
+        let plain = Responder::new(
+            Gate(Arc::clone(&decision)),
+            CookieSecret::with_secret([5; 16]),
+        )
+        .with_metrics(false);
+        let mut tkey = Vec::new();
+        crate::tkey::wire::write_query(
+            &mut tkey,
+            7,
+            b"\x04ctx1\x07example\x04test\x00",
+            crate::tsig::GSS_TSIG,
+            crate::tkey::wire::mode::GSSAPI,
+            b"token",
+            0,
+        );
+        let conn = |transport| Conn {
+            client: "192.0.2.77:40000".parse().expect("client"),
+            local: "192.0.2.53:53".parse().expect("local"),
+            transport,
+        };
+        let udp = conn(QueryTransport::Udp);
+        let tcp = conn(QueryTransport::Tcp);
+        let clock = Clock::now();
+        let mut scratch = Scratch::new();
+        let forward = Reply::Forward {
+            view: None,
+            rule: None,
+        };
+        let ask = |responder: &Responder<Gate>, message: &[u8], conn: &Conn, s: &mut Scratch| {
+            responder.respond(message, conn, &clock, Instant::now(), s)
+        };
+        assert_eq!(ask(&responder, &tkey, &udp, &mut scratch), forward);
+        assert_eq!(ask(&responder, &tkey, &tcp, &mut scratch), forward);
+        *decision
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = RateDecision::Drop;
+        assert_eq!(ask(&responder, &tkey, &udp, &mut scratch), Reply::Drop);
+        *decision
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = RateDecision::Send;
+        // Other queries and a node without an update path stay with the resolver.
+        assert_eq!(ask(&responder, &query(), &udp, &mut scratch), Reply::Send);
+        assert_eq!(ask(&plain, &tkey, &udp, &mut scratch), Reply::Send);
+        // The hand-off.
+        let socket = Arc::new(std::net::UdpSocket::bind("127.0.0.1:0").expect("socket"));
+        responder.forward(&tkey, &udp, forward, ReplyPath::Udp(socket));
+        assert_eq!(
+            *sink
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            vec![tkey]
         );
     }
 

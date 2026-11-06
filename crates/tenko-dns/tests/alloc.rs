@@ -1283,6 +1283,8 @@ fn the_query_path_allocates_nothing() {
     the_denial_synthesis_does_not_allocate();
     the_policy_and_the_limiter_do_not_allocate();
     tsig_verify_and_sign_do_not_allocate();
+    // WP13.2 (E51): GSS-TSIG on an established context.
+    gss_tsig_verify_and_sign_do_not_allocate();
 }
 
 /// The flags of libtest that take the next argument as their value.
@@ -1380,4 +1382,67 @@ fn tsig_verify_and_sign_do_not_allocate() {
         t.step("sign");
     });
     measured.assert_none("TSIG verify and sign allocated");
+}
+
+/// GSS-TSIG on the update path (WP13.2, E51): once a context is established, finding it,
+/// verifying a signed request (the MIC and the sequence window) and signing the answer
+/// allocate nothing, as for TSIG.
+fn gss_tsig_verify_and_sign_do_not_allocate() {
+    use tenko_dns::{
+        tkey::{GssSettings, Tkey, UpdateKeys, testing::pair},
+        tsig::{Keyring, MacKey, Signer, find, verify_request},
+    };
+    let now = 1_790_000_000;
+    let tkey = Tkey::new(GssSettings::default());
+    let name = b"\x04ctx1\x07example\x04test\x00";
+    let unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let (acceptor, client) = pair(
+        name,
+        "pc01$@CORP.EXAMPLE.TEST",
+        None,
+        Vec::new(),
+        "192.0.2.21".parse().expect("address"),
+        unix,
+    );
+    tkey.adopt(acceptor);
+    let hmac = Keyring::default();
+    let keys = UpdateKeys {
+        hmac: &hmac,
+        gss: Some(&tkey),
+    };
+    // One signed request per round, each with the next sequence number.
+    let requests: Vec<Vec<u8>> = (0..1_001_u16)
+        .map(|id| {
+            let mut request = Vec::with_capacity(512);
+            wire::write_query(&mut request, id, "example.test", 6, None);
+            assert!(Signer::request(MacKey::Gss(Arc::clone(&client))).sign(
+                &mut request,
+                now,
+                0,
+                &[],
+                MAX_MESSAGE_LEN
+            ));
+            request
+        })
+        .collect();
+    let mut next = requests.iter();
+    let mut answer = Vec::with_capacity(4096);
+    let measured = measure(1000, |t| {
+        let request = next.next().expect("a request per round");
+        let tsig = find(black_box(request)).expect("parse").expect("signed");
+        t.step("find");
+        let verified = verify_request(&keys, request, &tsig, now).expect("verifies");
+        t.step("verify_request");
+        answer.clear();
+        answer.extend_from_slice(&request[..tsig.record_start]);
+        answer[2] |= 0x80;
+        let mut signer = Signer::answer(verified.key, verified.mac);
+        assert!(signer.sign(&mut answer, now, 0, &[], MAX_MESSAGE_LEN));
+        black_box(&answer);
+        t.step("sign");
+    });
+    measured.assert_none("GSS-TSIG verify and sign allocated");
 }

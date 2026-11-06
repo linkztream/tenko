@@ -96,6 +96,12 @@ impl DnsNodeSlot {
     pub fn status(&self) -> Option<DnsStatus> {
         self.get().map(|node| node.status())
     }
+
+    // WP13.2: the TKEY handler's contexts and findings.
+    /// The TKEY handler's report, once the role runs with an update path.
+    pub fn gss(&self) -> Option<tenko_dns::tkey::GssReport> {
+        self.get().and_then(|node| node.gss())
+    }
 }
 
 pub(super) type Slot = Option<Extension<DnsNodeSlot>>;

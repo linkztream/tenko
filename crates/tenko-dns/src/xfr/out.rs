@@ -99,7 +99,7 @@ impl Signed {
     fn signer(&self) -> Option<Signer> {
         match self {
             Signed::No => None,
-            Signed::Yes(verified) => Some(Signer::answer(Arc::clone(&verified.key), verified.mac)),
+            Signed::Yes(verified) => Some(Signer::answer(verified.key.clone(), verified.mac)),
         }
     }
 }

@@ -819,6 +819,13 @@ pub(crate) async fn assemble(
         && let Some(role) = slot.status()
     {
         status.warnings.extend(dns_role_warnings(&role));
+        // WP13.2: the findings the acceptor's refusals raise (identity plan section 3.10),
+        // only from several sources (`tenko_dns::tkey::refusals`).
+        if let Some(report) = slot.gss() {
+            status
+                .warnings
+                .extend(report.findings.iter().map(gss_refusal_warning));
+        }
     }
     if let Some(Extension(slot)) = dhcp
         && let Some(role) = slot.status()
@@ -874,6 +881,36 @@ pub(crate) async fn assemble(
     }
     status
 }
+
+// WP13.2: the acceptor's findings.
+/// The warning of a finding the acceptor's refusals raise.
+pub fn gss_refusal_warning(finding: &tenko_dns::tkey::GssFinding) -> StatusWarning {
+    let reason = match finding.code {
+        tenko_core::dns::findings::GSS_CLOCK_SKEW => {
+            "clients' authenticators are outside the clock skew allowed; check the node's time (OPS-09)"
+        }
+        tenko_core::dns::findings::GSS_KVNO_UNKNOWN => {
+            "clients present tickets for a key version Tenko does not hold; the account's password was reset: adopt it again or import a new keytab"
+        }
+        tenko_core::dns::findings::GSS_WEAK_ETYPE => {
+            "clients present RC4 tickets; set msDS-SupportedEncryptionTypes of the account to 24"
+        }
+        _ => {
+            "the node's TKEY negotiations are at their bound; raise [dns.gss] negotiating_max or find the clients"
+        }
+    };
+    StatusWarning {
+        code: finding.code.to_owned(),
+        detail: format!(
+            "{reason} ({} sources refused in the last 15 minutes)",
+            finding.sources
+        ),
+        params: [("sources".to_owned(), finding.sources.to_string())]
+            .into_iter()
+            .collect(),
+    }
+}
+// WP13.2: end.
 
 /// The warning of a switch port a bounce left down.
 pub fn stuck_port_warning(condition: CodedError) -> StatusWarning {

@@ -148,7 +148,7 @@ fn a_chain_of_answers_verifies_with_unsigned_messages_between() {
     let (query, request_mac) = signed_query(&ring, NOW);
     let tsig = find(&query).expect("parse").expect("tsig");
     let verified = verify_request(&ring, &query, &tsig, NOW).expect("request");
-    let mut signer = Signer::answer(Arc::clone(&verified.key), verified.mac);
+    let mut signer = Signer::answer(verified.key.clone(), verified.mac);
     let mut messages = Vec::new();
     for index in 0..5u8 {
         let mut message = answer(0x1234, index);
@@ -228,4 +228,18 @@ fn a_tsig_record_must_be_the_last() {
     let mut plain = Vec::new();
     write_query(&mut plain, 1, "example.test", 1, Some(1232));
     assert_eq!(find(&plain), Ok(None));
+}
+
+/// DNS-28 (WP13.2): a key name is found and digested in its canonical lowercase form, so a
+/// sender that writes the name in another case is verified (RFC 8945 section 4.3.3).
+#[test]
+fn a_key_name_in_another_case_is_found_and_verifies() {
+    let ring = ring(TsigAlgorithm::HmacSha256);
+    let (mut signed, _) = signed_query(&ring, NOW);
+    let start = find(&signed).expect("parse").expect("tsig").record_start;
+    let end = start + b"\x08transfer\x07example\x04test\x00".len();
+    signed[start..end].make_ascii_uppercase();
+    let tsig = find(&signed).expect("parse").expect("tsig");
+    assert_eq!(tsig.key, b"\x08TRANSFER\x07EXAMPLE\x04TEST\x00");
+    assert!(verify_request(&ring, &signed, &tsig, NOW).is_ok());
 }

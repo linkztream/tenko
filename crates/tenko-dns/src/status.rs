@@ -469,6 +469,13 @@ pub trait DnsNode: Send + Sync {
     fn execute(&self, kind: &str, args: &[u8]) -> CommandResult;
 
     // WP10.3: the counters of minimization and the denial and failure caches.
+    // WP13.2: the TKEY handler of secure updates.
+    /// The contexts, the refusals of the last hour and the findings of the TKEY handler;
+    /// `None` without one (no update path on the node).
+    fn gss(&self) -> Option<crate::tkey::GssReport> {
+        None
+    }
+
     /// The counters of QNAME minimization and the denial and failure caches since the role
     /// started; `None` without a forwarder.
     fn resolver_counters(&self) -> Option<ResolverCounters> {
@@ -522,6 +529,8 @@ pub struct ResolverCounters {
 
 /// The `dns` role of this process.
 pub struct LocalNode {
+    // WP13.2: the TKEY handler, when the role runs the update path.
+    gss: Option<Arc<crate::tkey::Tkey>>,
     node: NodeId,
     started: Timestamp,
     catalog: CatalogHandle,
@@ -550,6 +559,7 @@ impl LocalNode {
         log: Option<(Arc<FileLog>, PathBuf)>,
     ) -> Self {
         Self {
+            gss: None,
             node,
             started: Timestamp::now(),
             catalog: server.catalog().clone(),
@@ -558,6 +568,14 @@ impl LocalNode {
             forwarder,
             log,
         }
+    }
+
+    // WP13.2: the TKEY handler's report.
+    /// The same role with the TKEY handler whose contexts and findings it reports.
+    #[must_use]
+    pub fn with_gss(mut self, gss: Option<Arc<crate::tkey::Tkey>>) -> Self {
+        self.gss = gss;
+        self
     }
 
     /// Takes the server out to stop it; the role reports `serving: false` from then on.
@@ -941,6 +959,11 @@ pub fn list_cache(cache: Option<&crate::cache::Cache>, args: &[u8]) -> CommandRe
 impl DnsNode for LocalNode {
     fn node(&self) -> NodeId {
         self.node
+    }
+
+    // WP13.2: the TKEY handler's contexts and findings.
+    fn gss(&self) -> Option<crate::tkey::GssReport> {
+        self.gss.as_ref().map(|gss| gss.report())
     }
 
     // WP10.3: the counters of minimization and the denial and failure caches.

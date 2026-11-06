@@ -71,13 +71,26 @@ impl std::fmt::Debug for MicKey {
     }
 }
 
-/// A MIC being computed over data fed in pieces.
-pub struct MicContext<'a> {
-    key: &'a MicKey,
+/// A MIC being computed over data fed in pieces. It holds what it needs of its key (the
+/// HMAC state and the flags), so that a TSIG signer can keep it between the messages of
+/// an answer; cloning it allocates nothing.
+#[derive(Clone)]
+pub struct MicContext {
+    sent_by_acceptor: bool,
+    acceptor_subkey: bool,
     context: hmac::Context,
 }
 
-impl MicContext<'_> {
+impl std::fmt::Debug for MicContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MicContext")
+            .field("sent_by_acceptor", &self.sent_by_acceptor)
+            .field("acceptor_subkey", &self.acceptor_subkey)
+            .finish_non_exhaustive()
+    }
+}
+
+impl MicContext {
     /// Feeds data.
     pub fn update(&mut self, data: &[u8]) {
         self.context.update(data);
@@ -85,7 +98,7 @@ impl MicContext<'_> {
 
     /// The token for the data fed, with the sender's flags and `seq`.
     pub fn sign(mut self, seq: u64) -> [u8; TOKEN_LEN] {
-        let header = header(self.key.flags(), seq);
+        let header = header(flags(self.sent_by_acceptor, self.acceptor_subkey), seq);
         self.context.update(&header);
         let tag = self.context.sign();
         let mut token = [0_u8; TOKEN_LEN];
@@ -100,7 +113,7 @@ impl MicContext<'_> {
     ///
     /// A [`MicError`].
     pub fn verify(mut self, token: &[u8]) -> Result<Header, MicError> {
-        let parsed = self.key.check_header(token)?;
+        let parsed = check_header(token, self.sent_by_acceptor, self.acceptor_subkey)?;
         self.context.update(&token[..HEADER_LEN]);
         let tag = self.context.sign();
         verify_slices_are_equal(&tag.as_ref()[..cipher::HMAC_LEN], &token[HEADER_LEN..])
@@ -137,20 +150,19 @@ impl MicKey {
 
     /// The flags a sender under this key sets.
     pub const fn flags(&self) -> u8 {
-        let mut flags = 0;
-        if self.sent_by_acceptor {
-            flags |= FLAG_SENT_BY_ACCEPTOR;
-        }
-        if self.acceptor_subkey {
-            flags |= FLAG_ACCEPTOR_SUBKEY;
-        }
-        flags
+        flags(self.sent_by_acceptor, self.acceptor_subkey)
+    }
+
+    /// Whether this key signs what the acceptor sends.
+    pub const fn sent_by_acceptor(&self) -> bool {
+        self.sent_by_acceptor
     }
 
     /// Starts a MIC over data fed in pieces.
-    pub fn begin(&self) -> MicContext<'_> {
+    pub fn begin(&self) -> MicContext {
         MicContext {
-            key: self,
+            sent_by_acceptor: self.sent_by_acceptor,
+            acceptor_subkey: self.acceptor_subkey,
             context: hmac::Context::with_key(&self.hmac),
         }
     }
@@ -172,26 +184,41 @@ impl MicKey {
         context.update(data);
         context.verify(token)
     }
+}
 
-    fn check_header(&self, token: &[u8]) -> Result<Header, MicError> {
-        if token.len() != TOKEN_LEN || token[..2] != TOKEN_ID || token[3..8] != FILLER {
-            return Err(MicError::Malformed);
-        }
-        let flags = token[2];
-        // Unknown flag bits are ignored (RFC 4121 section 4.2.2).
-        if (flags & FLAG_SENT_BY_ACCEPTOR != 0) != self.sent_by_acceptor
-            || flags & FLAG_SEALED != 0
-            || (flags & FLAG_ACCEPTOR_SUBKEY != 0) != self.acceptor_subkey
-        {
-            return Err(MicError::Flags);
-        }
-        let mut seq = [0_u8; 8];
-        seq.copy_from_slice(&token[8..HEADER_LEN]);
-        Ok(Header {
-            flags,
-            seq: u64::from_be_bytes(seq),
-        })
+const fn flags(sent_by_acceptor: bool, acceptor_subkey: bool) -> u8 {
+    let mut flags = 0;
+    if sent_by_acceptor {
+        flags |= FLAG_SENT_BY_ACCEPTOR;
     }
+    if acceptor_subkey {
+        flags |= FLAG_ACCEPTOR_SUBKEY;
+    }
+    flags
+}
+
+fn check_header(
+    token: &[u8],
+    sent_by_acceptor: bool,
+    acceptor_subkey: bool,
+) -> Result<Header, MicError> {
+    if token.len() != TOKEN_LEN || token[..2] != TOKEN_ID || token[3..8] != FILLER {
+        return Err(MicError::Malformed);
+    }
+    let flags = token[2];
+    // Unknown flag bits are ignored (RFC 4121 section 4.2.2).
+    if (flags & FLAG_SENT_BY_ACCEPTOR != 0) != sent_by_acceptor
+        || flags & FLAG_SEALED != 0
+        || (flags & FLAG_ACCEPTOR_SUBKEY != 0) != acceptor_subkey
+    {
+        return Err(MicError::Flags);
+    }
+    let mut seq = [0_u8; 8];
+    seq.copy_from_slice(&token[8..HEADER_LEN]);
+    Ok(Header {
+        flags,
+        seq: u64::from_be_bytes(seq),
+    })
 }
 
 fn header(flags: u8, seq: u64) -> [u8; HEADER_LEN] {

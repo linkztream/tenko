@@ -986,7 +986,7 @@ REFUSED carries the extended error 18 (Prohibited) with the reason, and is audit
 |---|---|---|
 | Home | No external update at all | As the zone says (`require_tsig`, on by default) |
 | Standard | No update | As the zone says: TSIG by default |
-| Hardened | No update | Always: an unsigned update is refused even when the zone switched `require_tsig` off. GSS-TSIG for AD zones is Phase 4 |
+| Hardened | No update | Always, TSIG or GSS-TSIG: an unsigned update is refused even when the zone switched `require_tsig` off, and a zone with Kerberos settings keeps the ownership rules of section 13.11 whatever its `ownership` says |
 | Lab | No update | Never required: an unsigned update from an address the lists allow passes; a list that names only keys still asks for its key |
 
 A zone overrides the default by naming access lists in `allowed` (every profile), and in Home and Standard by switching `require_tsig` off; Hardened and Lab hold their rule for the signature whatever the zone says. The settings tab of a primary zone in the web UI has the section "Dynamic updates" with the access lists, the two switches and the profile's rule beside them. TGL-09 concerns updates from external clients; the DDNS path of Tenko DHCP (Phase 3) is internal (DHCP-13).
@@ -1043,7 +1043,7 @@ The metrics:
 
 | Metric | Labels | What |
 |---|---|---|
-| `tenko_dns_updates_total` | `outcome`: `ok`, `prerequisite`, `refused`, `notauth`, `formerr`, `failed` | Updates by the outcome of their answer |
+| `tenko_dns_updates_total` | `outcome`: `ok`, `prerequisite`, `refused`, `notauth`, `formerr`, `failed`; `auth`: `none`, `tsig`, `gss` | Updates by the outcome of their answer and by their signature |
 | `tenko_dns_update_duration_seconds` | | From the arrival of an update to its answer (1 ms to 5 s buckets) |
 
 ### 13.6 TSIG keys for clients, and `nsupdate`
@@ -1073,7 +1073,7 @@ nsupdate -y hmac-sha256:update.example.test:<secret in base64>
 | Audit action | When |
 |---|---|
 | `dns.update.apply` | An update changed the zone: the client, the key, the zone, the counts of prerequisites and updates, the records added and removed, the RRsets changed, and the serial; never the data. Written in the same commit as the change |
-| `dns.update.refuse` | An update was refused (the policy, the TSIG key, an origin rule): the client, the key, the zone, the code `dns.update.refused` and the reason; at most once a minute per client, so that a scan cannot fill the audit log |
+| `dns.update.refuse` | An update was refused (the policy, the TSIG key, an origin rule, ownership): the client, the key, the zone, the code `dns.update.refused` and the reason; at most once a minute per client, so that a scan cannot fill the audit log. An update signed with GSS-TSIG names its principal and SID in place of the key (section 13.11) |
 
 ### 13.8 The lab and M21
 
@@ -1082,7 +1082,7 @@ The round `update` of [`deploy/compose/lab-dns`](../deploy/compose/lab-dns/READM
 ### 13.9 Limits
 
 - Updates are accepted for primary zones only; Tenko does not forward an update for a secondary zone to its primary (RFC 2136 section 6), it refuses it.
-- GSS-TSIG (the signature of Windows hosts in AD zones, RFC 3007 with RFC 3645) is Slice 13 (section 13.10); until WP13.2 ships, a Windows host updates a zone in Tenko only with a TSIG key or, in the Lab profile, unsigned.
+- GSS-TSIG (the signature of Windows hosts in AD zones, RFC 3007 with RFC 3645) is section 13.11; it needs the account's keys on the node (section 13.10).
 - An update of the SOA is ignored rather than applied: the SOA follows the zone settings.
 - The prerequisites of an update read the RRsets of its names as the store holds them under the commit, and the write expects those RRsets unchanged; an RRset of another type that a concurrent write of the API creates at a name that should not be in use, in the same moment, is not caught by that expectation.
 - The `dns` role serves updates when it runs in the controller's process (Phase 2); the `Dns.Update` message of a remote node is Phase 5.
@@ -1090,7 +1090,7 @@ The round `update` of [`deploy/compose/lab-dns`](../deploy/compose/lab-dns/READM
 
 ### 13.10 Secure updates with GSS-TSIG: the contracts (WP13.0)
 
-Slice 13 ([identity-plan.md](plans/identity-plan.md), ADR 0026) gives Tenko GSS-TSIG (RFC 3645) for the secure dynamic updates of Windows clients and domain controllers: a TKEY exchange (RFC 2930) negotiates a Kerberos context with the keys of an AD computer account Tenko holds in its vault, every later update is signed on that context, and a name is owned by the principal that created it, with the Windows rules (plan section 3.6). WP13.0 puts the contracts in place; nothing of it works yet: the TKEY handler and the signer are WP13.2, the account's wizard and its rotation WP13.3, the owner view and the Windows semantics WP13.4. What a reader sees today:
+Slice 13 ([identity-plan.md](plans/identity-plan.md), ADR 0026) gives Tenko GSS-TSIG (RFC 3645) for the secure dynamic updates of Windows clients and domain controllers: a TKEY exchange (RFC 2930) negotiates a Kerberos context with the keys of an AD computer account Tenko holds in its vault, every later update is signed on that context, and a name is owned by the principal that created it, with the Windows rules (plan section 3.6). WP13.0 put the contracts in place; TKEY, the signature and ownership are section 13.11, the account's wizard and its rotation WP13.3, the owner view and the Windows semantics WP13.4. What a reader sees today:
 
 - **The model.** A zone's `update` policy has `kerberos` (`DnsUpdatePolicy.kerberos`: the realms whose tickets the zone accepts, the ownership rule `windows` or `none`, the owner hold in days, the privileged groups and the DnsUpdateProxy group by SID). With it set, `require_tsig` means "a signature is required, TSIG or GSS-TSIG": the Windows modes map onto the policy (plan section 3.5; `windows_mode` in the model). An access list may hold an entry of kind `kerberos` (the realm, an optional name pattern such as `*$` for computer accounts, an optional prefix); such an entry matches a request signed with GSS-TSIG only, so a list of Kerberos entries alone refuses every TSIG or unsigned update. An RRset written by a secure update records the principal (`principal`), beside the TSIG key of a TSIG update (`key`). The owners live in `dns.name_owners`, the account's metadata in `dns.krb_accounts` ([dns-contracts.md](dns-contracts.md) section 12).
 - **The configuration** of a node's `dns` role, `[dns.gss]` in `tenko.toml` (`deploy/tenko.example.toml`), read and checked at start and consumed from WP13.2 on:
@@ -1105,3 +1105,74 @@ Slice 13 ([identity-plan.md](plans/identity-plan.md), ADR 0026) gives Tenko GSS-
 
 - **The routes, the CLI and the UI.** `GET /dns/kerberos`, `POST /dns/kerberos/adopt|import|check|rotate` and `DELETE /dns/kerberos` (`tenko dns kerberos status|adopt|import|check|rotate|delete`, the page DNS, Kerberos) and `GET /dns/zones/{id}/owners` answer 501 `sys.not_implemented` after the scope check until their packages build them. The codes `dns.krb.*` and `dns.gss.refused`, the audit actions `dns.krb.account.*` and `dns.gss.refuse`, the health findings `dns.gss.*` and the metric families `tenko_dns_tkey_total{outcome}`, `tenko_dns_gss_contexts{state}` and `tenko_dns_gss_establish_seconds` are declared in the same way.
 - **The profiles.** TGL-09's Slice 13 values (secure only on the zones the wizard enables under Standard, secure only with ownership on every zone with Kerberos under Hardened, everything under Lab) are applied by WP13.2 and WP13.8 ([SECURITY-PROFILES.md](SECURITY-PROFILES.md)).
+
+### 13.11 Secure updates with GSS-TSIG: TKEY, the signature and ownership
+
+A Windows client or domain controller, and a Linux host with `nsupdate -g`, sign their updates with GSS-TSIG (RFC 3645, DNS-28): they negotiate a security context with Tenko through TKEY (RFC 2930) with a Kerberos ticket for `DNS/<the SOA mname>` inside SPNEGO (RFC 4178) or raw, and sign every update on that context. Tenko accepts the ticket with the keys of its AD computer account (section 13.10), with its own acceptor (`tenko-krb`, ADR 0026), as the unprivileged service account; it never asks a KDC or the operating system. The code is `tenko_dns::tkey` (the TKEY handler, the context table, the handle of the account's keys) and the key type of `tenko_dns::tsig`.
+
+**TKEY.** A TKEY query is a QUERY whose question is `<key name> TKEY`, with a TKEY record of that name in the additional section (or in the answer section, where Windows 2000 put it). The query path recognizes it by one comparison of the question's type and hands it to the update path, off the worker, after the admission of an UPDATE (section 13.1). Over UDP, whose source address can be spoofed, every TKEY query is answered with the header and the question and TC set, before any other work, so that the negotiation runs over TCP (Windows and `nsupdate` send TKEY over TCP in any case). A node without the account's keys answers it REFUSED without touching the acceptor, and a node without an update path FORMERR. The answer carries the TKEY record with the acceptor's token in its key data. The account's keys reach the node with the account's import or adoption (section 13.10); until then every TKEY query is REFUSED.
+
+| TKEY | The answer |
+|---|---|
+| Mode 3, `gss-tsig`, a token the acceptor takes | NOERROR with the next token: the AP-REP for mutual authentication once the context is established, signed with the new context; a `negTokenResp` asking for the next leg when SPNEGO needs one |
+| Mode 3 with a token the acceptor refuses (no Kerberos offered, NTLM alone, a ticket that does not decrypt, a key version Tenko does not hold, an RC4 ticket, a skew above `skew_secs`, a replayed authenticator) | NOERROR with the TKEY error BADKEY and no token, audited as `dns.gss.refuse` |
+| Mode 5 (deletion), signed by the context it names | NOERROR, signed by the context, which is then deleted; unsigned, or signed by another context: BADKEY; a signature that does not verify (another key type, an unknown name, the time): NOTAUTH |
+| Another mode | BADMODE |
+| An algorithm other than `gss-tsig` (the Windows 2000 name `gss.microsoft.com` too) | BADALG |
+| A key name in use: an established context, a TSIG key, another client's negotiation | BADNAME |
+| A signed mode-3 query | FORMERR |
+
+**The context table.** Per node, in memory, keyed by the key name: the negotiations in flight and the established contexts, each with the principal, its realm, the SID and the groups of the PAC, the two MIC keys derived once, the sequence numbers and the client's address. A negotiation that is not complete within 30 s is dropped. At most `per_client_max` are in flight from one client (an IPv4 address or an IPv6 /64): one more is refused with BADKEY before any Kerberos work (counted as `limit`). At most `negotiating_max` are in flight on the node: at that bound the oldest negotiation waiting for its next leg leaves for the new one (counted as `limit`), since a leg that only asks for the Kerberos token proves nothing, and a real client sends its next leg within a round trip. An established context lives until the earlier of its ticket's end and `context_max_secs` after its establishment; with `contexts_max` held, the expired ones go first, then the one idle longest. Contexts are neither stored nor replicated: a restart of the node drops them, a client's next update gets BADKEY, and the client negotiates again. When the account's keys are removed, every context goes with them.
+
+**The signature.** An UPDATE signed with the algorithm `gss-tsig` is verified against the node's contexts in the order of section 13.2: the key (an unknown or expired context is NOTAUTH with BADKEY), the MAC, which is the 28-octet MIC token of RFC 4121 over the TSIG digest data of RFC 8945 (BADSIG), the time within the fudge of 300 s (BADTIME, the answer signed), and the token's sequence number against the context's window of 64: a number seen before, or below the window, is NOTAUTH with BADSIG, so a captured signed update is not accepted twice. Every answer to a signed update is signed with the acceptor's key of the context. The first signed message of a context, the TKEY answer, covers no request MAC in its digest ([MS-GSSA] section 3.1.5.1), which is what Windows and MIT's `nsupdate` verify.
+
+**The policy** of an update signed with GSS-TSIG (section 13.2, with its principal in place of the key): the zone must have Kerberos settings (`update.kerberos`) whose realms include the principal's; an access list of `allowed` must allow it, by a `prefix` entry for its address, a `kerberos` entry for its realm, its name pattern and its prefix, or `any` (a `key` entry never matches it); and where a signature is required, an allowing `kerberos` entry must name the principal, as a `key` entry names a TSIG key for a TSIG update. `require_tsig` thus means "a signature is required, TSIG or GSS-TSIG". The Windows zone modes map onto the policy (plan section 3.5): "None" is `allowed` empty; "Nonsecure and secure" is a Kerberos entry and an address entry with `require_tsig` off; "Secure only" is a Kerberos entry with `require_tsig` on.
+
+```
+POST /api/v1/dns/acls
+{"name": "ad-corp", "entries": [{"kind": "kerberos", "realm": "CORP.EXAMPLE.TEST"}]}
+
+PATCH /api/v1/dns/zones/{id}
+{"update": {"allowed": ["<the list's id>"], "require_tsig": true, "may_replace_ipam": false,
+  "kerberos": {"realms": ["CORP.EXAMPLE.TEST"], "ownership": "windows",
+    "privileged": ["S-1-5-21-1000-2000-3000-512", "S-1-5-21-1000-2000-3000-516"],
+    "update_proxy": "S-1-5-21-1000-2000-3000-1101"}}}
+```
+
+**Ownership** (plan section 3.6). Windows secures a name, not an RRset, and Tenko does the same: in a zone whose Kerberos settings have `ownership = "windows"` (and in every zone with Kerberos settings under the Hardened profile), `dns.name_owners` holds the owner of each name (its SID from the PAC and its principal), written in the same batch as the records. The rules apply to an update signed with GSS-TSIG, once per name before the update's first operation on it; the origin rules of section 13.4 apply to each operation after them, so an update must pass both:
+
+| The name | May change it | Then |
+|---|---|---|
+| A locator name: every name of a zone whose apex starts with `_msdcs` or that has a label `_msdcs`, a first label `_ldap`, `_kerberos`, `_kpasswd`, `_gc`, `DomainDnsZones` or `ForestDnsZones`, and the apex | A privileged principal | No owner is kept |
+| A wildcard name (`*` as its first label), which answers every name of the zone that does not exist | A privileged principal | No owner is kept |
+| Owned, its hold not passed | The owner (by SID when the owner has one, so that a ticket without a PAC never matches it; by the principal's name when the owner has no SID, as for an MIT realm), or a privileged principal | The owner stays; when the last record goes the owner is held for `owner_hold_days` (14 by default), and a record that comes back within the hold ends it |
+| Without an owner, holding a `manual`, `ipam` or `dhcp` record | A privileged principal | No owner |
+| Without an owner, holding a record imported from AD (origin `ad`) | A privileged principal, or the computer the record names: `HOST$@REALM` claims `host.<zone>`, and a name whose records are all PTR records pointing at `host.*` | The claimant becomes the owner |
+| Without an owner, holding dynamic records only, or new (no record, its owner's hold passed, or an owner without a hold whose records went outside the update path, through the API or an import) | A principal the zone's lists allow | It becomes the owner, unless it is a member of the `update_proxy` group (DnsUpdateProxy): then the name stays unowned and the next principal becomes its owner |
+
+A privileged principal is a member of a group the Kerberos settings list in `privileged` (Domain Admins, RID 512; Domain Controllers, 516; Enterprise Admins, 519; DnsAdmins and others the operator adds), by the group SIDs of its ticket's PAC; no directory is asked on the update path. A principal of a realm without a PAC (MIT) has no groups and so is never privileged; it owns names by its principal name. An update signed with TSIG, or unsigned where the zone allows it, takes no ownership and is REFUSED on a name that is owned and held; it removes an owner whose hold has passed. A refusal names the owner's principal in the extended error. With `ownership = "none"` (outside Hardened) a zone keeps no owners and behaves as for TSIG.
+
+**Audit and metrics.** `dns.update.apply` and `dns.update.refuse` of an update signed with GSS-TSIG carry the `principal` and its `sid` in place of the `key`, and `dns.update.apply` the ownership decision (`ownership`: `owner`, `privileged`, `claimed` or `proxy`). A refused negotiation is `dns.gss.refuse` with the client, the reason and the code `dns.gss.refused`, at most once a minute per client; never a token, a ticket or a key. The refusals that point at a cause on Tenko's side (a skewed clock, a key version Tenko does not hold, an RC4 ticket, the table full) come from unauthenticated input, which a forged ticket or a spoofed source can produce, so the node raises the findings `dns.gss.clock_skew`, `dns.gss.kvno_unknown`, `dns.gss.weak_etype` and `dns.gss.context_limit` only while at least three distinct sources were refused for one of them within 15 minutes; one client with a wrong clock, or one attacker, raises nothing.
+
+| Metric | Labels | What |
+|---|---|---|
+| `tenko_dns_updates_total` | `outcome` as in section 13.5; `auth`: `none`, `tsig`, `gss` | Updates by outcome and by their signature |
+| `tenko_dns_tkey_total` | `outcome`: `established`, `continue`, `deleted`, `mechanism`, `token`, `skew`, `kvno`, `limit`, `unknown_context` | TKEY negotiations, and updates on a context the node does not hold |
+| `tenko_dns_gss_contexts` | `state`: `negotiating`, `established` | The node's contexts |
+| `tenko_dns_gss_establish_seconds` | | From the first TKEY leg's arrival to the established context |
+
+Once a context is established, finding it, verifying a signed update and signing the answer allocate nothing, as for TSIG (`tests/alloc.rs`).
+
+**From a Linux host.** With a ticket (`kinit`) and the zone's SOA naming the node, `nsupdate -g` finds the server through the SOA, negotiates and signs:
+
+```
+kinit alice@CORP.EXAMPLE.TEST
+nsupdate -g
+> zone corp.example.test
+> update add ws01.corp.example.test 300 IN A 192.0.2.41
+> send
+```
+
+**The lab.** The round `gss` of [`deploy/compose/lab-ad`](../deploy/compose/lab-ad/README.md) (E43) has a Samba AD controller register its records with `samba_dnsupdate` and a Linux client add, replace and delete over UDP and TCP, and checks mutual authentication, the answers' signatures, BADKEY on an unknown and an expired context, BADTIME, a replay, a second principal on an owned name and an NTLM-only offer. The early probe with a real Windows controller (risk R120) is [r120-probe.md](../deploy/compose/lab-ad/r120-probe.md).
+
+**Limits.** Contexts are per node and not replicated (single node first; a client negotiates with the server it updates). Transfers (AXFR, IXFR) and NOTIFY take TSIG keys only, not GSS-TSIG. An update is checked against the realm's groups as its ticket's PAC lists them when the ticket was issued; a change of group membership reaches Tenko with the client's next ticket.

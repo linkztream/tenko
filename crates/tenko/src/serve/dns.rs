@@ -80,6 +80,8 @@ pub(crate) struct DnsRole {
     /// The file watcher of a certificate of DoT and DoH's own; aborted at the stop.
     watchers: Vec<JoinHandle<()>>,
     announce: String,
+    // WP13.2: the handle of the account's keys, when the role runs the update path.
+    gss: Option<tenko_dns::tkey::KeyHandle>,
 }
 
 impl std::fmt::Debug for DnsRole {
@@ -813,6 +815,8 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     tenko_dns::xfr::register_metrics(metrics);
     // WP6.2: the update families.
     tenko_dns::update::register_metrics(metrics);
+    // WP13.2: the families of TKEY and GSS-TSIG.
+    tenko_dns::metrics::register_gss(metrics);
     // WP10.1: the recursive resolver's families, when it runs.
     if section.recursion.enabled.unwrap_or(true) {
         tenko_dns::metrics::register_recursion(metrics);
@@ -921,6 +925,18 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         encrypted_line = Some(encrypted.describe);
     }
     let transfer_path = transfer_path(transfers.as_ref(), &handle, &store, stop.child_token());
+    // WP13.2: the TKEY handler and GSS-TSIG contexts of the node, with the bounds of
+    // `[dns.gss]` under the profile the role starts with; the account's keys arrive through
+    // its handle (`DnsRole::gss_keys`).
+    let gss = transfer_path.as_ref().map(|_| {
+        tenko_dns::tkey::Tkey::new(tenko_dns::tkey::GssSettings {
+            context_max_secs: section.gss.context_max_secs,
+            contexts_max: section.gss.contexts_max_for(profile),
+            negotiating_max: section.gss.negotiating_max_for(profile),
+            per_client_max: section.gss.per_client_max,
+            skew_secs: section.gss.skew_secs,
+        })
+    });
     // WP6.2: the update path, with the zone service, the keys of the transfer path's
     // directory and the policy under the profile in force (TGL-09).
     let update_path =
@@ -928,7 +944,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
             .as_ref()
             .zip(transfers.as_ref())
             .map(|((_, _, directory), transfers)| {
-                Arc::new(tenko_dns::update::UpdatePath::with_settings(
+                let path = tenko_dns::update::UpdatePath::with_settings(
                     handle.clone(),
                     Arc::clone(directory),
                     Arc::clone(&transfers.zones),
@@ -940,7 +956,13 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
                         per_source: section.update.per_source,
                         ..tenko_dns::update::UpdateSettings::default()
                     },
-                )) as Arc<dyn tenko_dns::update::UpdateSink>
+                );
+                // WP13.2: TKEY and GSS-TSIG on the update path.
+                let path = match &gss {
+                    Some(gss) => path.with_gss(Arc::clone(gss)),
+                    None => path,
+                };
+                Arc::new(path) as Arc<dyn tenko_dns::update::UpdateSink>
             });
     let hooks = Hooks {
         log: log_sink,
@@ -985,14 +1007,18 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         announce = format!("{announce}; {line}");
         summary = format!("{summary}; {line}");
     }
-    let node = Arc::new(LocalNode::new(
-        resolved.node_id,
-        server,
-        progress,
-        Some(forwarder),
-        log.as_ref()
-            .map(|writer| (writer.sink(), writer.dir().to_path_buf())),
-    ));
+    let node = Arc::new(
+        LocalNode::new(
+            resolved.node_id,
+            server,
+            progress,
+            Some(forwarder),
+            log.as_ref()
+                .map(|writer| (writer.sink(), writer.dir().to_path_buf())),
+        )
+        // WP13.2: the TKEY handler's contexts and findings in the role's status.
+        .with_gss(gss.clone()),
+    );
     Ok((
         DnsRole {
             node,
@@ -1004,6 +1030,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
             log,
             watchers,
             announce,
+            gss: gss.as_ref().map(tenko_dns::tkey::Tkey::handle),
         },
         summary,
     ))
@@ -1018,6 +1045,14 @@ impl DnsRole {
     /// The line `tenko serve` prints when it is ready.
     pub(crate) fn announce(&self) -> &str {
         &self.announce
+    }
+
+    // WP13.2: the seam with the account's lifecycle (identity plan section 3.2).
+    /// The handle through which the watcher of the account's keys (`dns.krb`) installs,
+    /// replaces and clears the keys of the node's acceptor; `None` when the role runs
+    /// without an update path (no zone service on the node).
+    pub(crate) fn gss_keys(&self) -> Option<tenko_dns::tkey::KeyHandle> {
+        self.gss.clone()
     }
 
     /// Stops answering, then the writer, the forwarder and the query log.

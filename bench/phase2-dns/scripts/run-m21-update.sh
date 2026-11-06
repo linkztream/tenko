@@ -179,6 +179,17 @@ listen = "$LOOPBACK:$METRICS_PORT"
 
 [dns]
 listen = ["$DNS_ADDRESS:$DNS_PORT"]
+
+# WP13.2: the admission bounds of the update path (in flight per node and per client, 256
+# and 16 by default) postdate the first M21 result. The load generator is one client at
+# --rate updates per second, so at the default per-client bound its updates in flight are
+# cut with a header-only SERVFAIL whenever a commit takes longer than 16 ms, and the run
+# measures the bound instead of the update path. Both bounds are raised to values that do
+# not bind at this rate.
+[dns.update]
+in_flight = 4096
+per_source = 4096
+# WP13.2: end.
 TOML
 "$SERVER_BINARY" serve --config "$(native_path "$WORK/tenko.toml")" >> "${OUT%.jsonl}.server.log" 2>&1 &
 SRV=$!

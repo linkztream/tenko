@@ -67,6 +67,9 @@ before it merges.
 | `krb_ap_req` | The AP-REQ checks (`tenko_krb::acceptor`): an AP-REQ as it is, or one built from the plaintexts of a ticket and an authenticator encrypted under the lab keys, so that the `EncTicketPart` and authenticator decoders, the ticket flags and times, the GSS checksum, the PAC lookup and the AP-REP are fuzzed behind the ciphers |
 | `krb_pac` | The PAC reader of [MS-PAC] (`tenko_krb::pac`): the buffers, the client information and the NDR of the logon information with its group, extra SID and resource group lists, read without the signature and verified with the lab key; each group appears once |
 | `gss_mic` | RFC 4121 MIC tokens of GSS-TSIG (`tenko_krb::mic`): the first 28 octets are a token over the rest, verified in both directions under a fixed context key; a token signed over the rest verifies with its sequence number and is refused in the other direction and with a changed octet |
+<!-- WP13.2 TKEY and GSS-TSIG (marked block). -->
+| `dns_tkey` | TKEY queries and GSS-TSIG on the update path (`tenko_dns::tkey`, `tenko_dns::tsig`): the TKEY parser with the record in the additional or the answer section, the handler of modes 3 and 5 over UDP and TCP (BADMODE, BADALG, BADNAME, the bounds of the context table, truncation for UDP), and GSS-TSIG verification of any message on a context negotiated beforehand from the recorded Samba exchange with the lab key, so that the context table, the deletion and the MIC check are reached; an answer is a response with the request's id |
+<!-- End WP13.2 TKEY and GSS-TSIG. -->
 <!-- WP13.1: end. -->
 
 `fuzz/Cargo.lock` is committed, so the weekly smoke builds the same dependency versions as the last gate; refresh it with `cargo update` in `fuzz/` when a target needs a newer dependency.

@@ -335,10 +335,20 @@ async fn get_dns_kerberos(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
     kerberos: Kerberos,
+    dns: Option<axum::Extension<super::DnsNodeSlot>>,
 ) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::DnsKey))?;
     let account = kerberos.get()?.status().await?;
-    Ok(Json(KerberosStatus::of(account)).into_response())
+    let mut status = KerberosStatus::of(account);
+    // WP13.2: the contexts of this node's TKEY handler.
+    status.contexts = dns
+        .and_then(|axum::Extension(slot)| slot.gss())
+        .map(|report| GssContexts {
+            negotiating: report.negotiating,
+            established: report.established,
+            refused_last_hour: report.refused_last_hour,
+        });
+    Ok(Json(status).into_response())
 }
 
 #[utoipa::path(

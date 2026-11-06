@@ -5,7 +5,9 @@
 //! 1. The header: an opcode other than QUERY is NOTIMP; a signed query is NOTAUTH until the
 //!    TSIG keys reach the engine (WP6.2); a class other than IN is REFUSED; the meta types
 //!    OPT, TKEY and TSIG are FORMERR, AXFR and IXFR are REFUSED (transfers are WP6.1),
-//!    MAILA and MAILB NOTIMP.
+//!    MAILA and MAILB NOTIMP. A TKEY query reaches the resolver only on a node without an
+//!    update path: with one, the responder hands it to the update path's TKEY handler
+//!    before the resolver runs ([`crate::respond::Responder::respond`], WP13.2).
 //! 2. The rate limiter admits the query ([`RateLimiter::admit_query`]).
 //! 3. The view: the first view of the catalog whose rules all match, else the implicit
 //!    default view; its weights pick a scope per zone, stable per client.

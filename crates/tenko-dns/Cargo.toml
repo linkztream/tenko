@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# The Kerberos initiator and clock of the GSS-TSIG tests (`tkey::testing`), for this crate's
+# tests and the acceptance tests. Never enabled in release builds.
+testing = []
+
 [dependencies]
 arc-swap = { workspace = true }
 # The zone service (src/zone): the inline jobs of every write and the TSIG secrets.
@@ -67,6 +72,7 @@ proptest = { workspace = true }
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }
 stats_alloc = { workspace = true }
 tenko-core = { workspace = true, features = ["testing"] }
+tenko-dns = { path = ".", features = ["testing"] }
 # The TLS service of the process (imported files with hot reload) in tests/tls*.rs.
 tenko-cluster = { workspace = true }
 tenko-jobs = { workspace = true, features = ["testing"] }

@@ -22,15 +22,29 @@
 //! into a [`Keyring`] that the transfer and NOTIFY paths read without a lock. Once the key
 //! is resolved, verifying and signing allocate nothing: the MAC is computed in place with
 //! an HMAC context over the message's slices.
+//!
+//! GSS-TSIG (RFC 3645, DNS-28; identity plan section 3.4) is a key type of this module: a
+//! [`MacKey`] is an HMAC key or a security context negotiated by TKEY
+//! ([`crate::tkey::GssContext`]), found through a [`KeySource`], and the digest data goes
+//! into a [`MacSink`], an HMAC context or an RFC 4121 MIC computation. The digest data is
+//! the same for both (RFC 3645 section 5.1 refers to RFC 2845). The MAC of GSS-TSIG is the
+//! 28-octet MIC token with the sender's sequence number in its header. After the MIC and
+//! the time window, the sequence number of a verified message is checked against the
+//! context's window of 64: a number seen before is refused as BADSIG, so a captured signed
+//! update is not accepted twice within the fudge. The first signed message of a context,
+//! the TKEY answer, covers no request MAC at all ([MS-GSSA] section 3.1.5.1):
+//! [`Signer::request`] signs it.
 
 use std::{collections::HashMap, sync::Arc};
 
 use arc_swap::ArcSwap;
 use aws_lc_rs::{constant_time, hmac};
 use tenko_core::dns::{DnsName, TsigAlgorithm};
+use tenko_krb::mic::{self, MicContext};
 
 use crate::{
     name::NameBuf,
+    tkey::GssContext,
     wire::{self, CLASS_ANY, HEADER_LEN, TYPE_TSIG, TsigRecord},
 };
 
@@ -55,6 +69,10 @@ pub mod error {
 
 /// The longest MAC (HMAC-SHA512).
 pub const MAX_MAC: usize = 64;
+
+/// The wire form of the GSS-TSIG algorithm name (RFC 3645 section 2). The Windows 2000 name
+/// `gss.microsoft.com` is not taken (identity plan section 3.3).
+pub const GSS_TSIG: &[u8] = b"\x08gss-tsig\x00";
 
 /// The wire form of an algorithm's name.
 pub const fn algorithm_wire(algorithm: TsigAlgorithm) -> &'static [u8] {
@@ -133,6 +151,16 @@ impl TsigKey {
         self.name.to_dns_name()
     }
 
+    /// A key under a wire name as it is (tests of names that are not model names).
+    #[cfg(test)]
+    pub(crate) fn with_wire_name(wire: &[u8], algorithm: TsigAlgorithm, secret: &[u8]) -> Self {
+        Self {
+            name: NameBuf::from_wire(wire).unwrap_or_default(),
+            algorithm,
+            key: hmac::Key::new(hmac_algorithm(algorithm), secret),
+        }
+    }
+
     /// The algorithm.
     pub fn algorithm(&self) -> TsigAlgorithm {
         self.algorithm
@@ -193,6 +221,175 @@ impl Keyring {
     }
 }
 
+// WP13.2: the key of a TSIG record, HMAC or GSS-TSIG (identity plan section 3.4).
+/// The key of a signed message: an HMAC key of the keyring or a GSS-TSIG security context.
+/// Cloning it clones an `Arc`.
+#[derive(Debug, Clone)]
+pub enum MacKey {
+    /// An HMAC key (RFC 8945).
+    Hmac(Arc<TsigKey>),
+    /// A security context negotiated by TKEY (RFC 3645).
+    Gss(Arc<GssContext>),
+}
+
+impl From<Arc<TsigKey>> for MacKey {
+    fn from(key: Arc<TsigKey>) -> Self {
+        MacKey::Hmac(key)
+    }
+}
+
+impl From<Arc<GssContext>> for MacKey {
+    fn from(context: Arc<GssContext>) -> Self {
+        MacKey::Gss(context)
+    }
+}
+
+impl MacKey {
+    /// The key name in lowercase wire form.
+    pub fn name_wire(&self) -> &[u8] {
+        match self {
+            MacKey::Hmac(key) => key.name_wire(),
+            MacKey::Gss(context) => context.name_wire(),
+        }
+    }
+
+    /// The key name.
+    pub fn name(&self) -> Option<DnsName> {
+        match self {
+            MacKey::Hmac(key) => key.name(),
+            MacKey::Gss(context) => context.name(),
+        }
+    }
+
+    /// The algorithm name in wire form.
+    pub fn algorithm_wire(&self) -> &'static [u8] {
+        match self {
+            MacKey::Hmac(key) => algorithm_wire(key.algorithm),
+            MacKey::Gss(_) => GSS_TSIG,
+        }
+    }
+
+    /// The HMAC key, when it is one.
+    pub fn hmac(&self) -> Option<&Arc<TsigKey>> {
+        match self {
+            MacKey::Hmac(key) => Some(key),
+            MacKey::Gss(_) => None,
+        }
+    }
+
+    /// The security context, when it is one.
+    pub fn gss(&self) -> Option<&Arc<GssContext>> {
+        match self {
+            MacKey::Hmac(_) => None,
+            MacKey::Gss(context) => Some(context),
+        }
+    }
+
+    fn mac_length_ok(&self, len: usize) -> Result<(), TsigError> {
+        match self {
+            MacKey::Hmac(key) => mac_length_ok(key.algorithm, len),
+            // A MIC token has one length; it is never truncated (RFC 3645 section 5.1).
+            MacKey::Gss(_) if len == mic::TOKEN_LEN => Ok(()),
+            MacKey::Gss(_) => Err(TsigError::BadSig),
+        }
+    }
+
+    /// A sink for what this side signs.
+    fn signing(&self) -> MacSink {
+        match self {
+            MacKey::Hmac(key) => MacSink::Hmac(hmac::Context::with_key(&key.key)),
+            MacKey::Gss(context) => MacSink::Mic(context.sending().begin()),
+        }
+    }
+
+    /// A sink for what the other side signed.
+    fn verifying(&self) -> MacSink {
+        match self {
+            MacKey::Hmac(key) => MacSink::Hmac(hmac::Context::with_key(&key.key)),
+            MacKey::Gss(context) => MacSink::Mic(context.receiving().begin()),
+        }
+    }
+
+    /// Records the sequence number of a verified MIC in the context's window.
+    fn accept_seq(&self, seq: Option<u64>) -> Result<(), TsigError> {
+        match (self, seq) {
+            (MacKey::Gss(context), Some(seq)) if !context.accept_seq(seq) => {
+                Err(TsigError::Replayed)
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Where the digest data of a TSIG record goes: an HMAC context, or the MIC computation of
+/// GSS-TSIG (HMAC-SHA1 under the context's derived key, the token header fed last).
+#[derive(Clone)]
+pub enum MacSink {
+    /// RFC 8945.
+    Hmac(hmac::Context),
+    /// RFC 4121 section 4.2.6.1.
+    Mic(MicContext),
+}
+
+impl std::fmt::Debug for MacSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            MacSink::Hmac(_) => "MacSink::Hmac",
+            MacSink::Mic(_) => "MacSink::Mic",
+        })
+    }
+}
+
+impl MacSink {
+    /// Feeds digest data.
+    pub fn update(&mut self, data: &[u8]) {
+        match self {
+            MacSink::Hmac(ctx) => ctx.update(data),
+            MacSink::Mic(ctx) => ctx.update(data),
+        }
+    }
+
+    /// The MAC of what was fed: the HMAC, or the MIC token with the next sequence number
+    /// of the context's sending side.
+    fn sign(self, key: &MacKey) -> Mac {
+        match (self, key) {
+            (MacSink::Hmac(ctx), _) => Mac::from_slice(ctx.sign().as_ref()),
+            (MacSink::Mic(ctx), MacKey::Gss(context)) => {
+                Mac::from_slice(&ctx.sign(context.next_send_seq()))
+            }
+            (MacSink::Mic(_), MacKey::Hmac(_)) => Mac::empty(),
+        }
+    }
+
+    /// Verifies `received` over what was fed; the sequence number of a MIC token comes
+    /// back for the window check.
+    fn verify(self, received: &[u8]) -> Result<(Mac, Option<u64>), TsigError> {
+        match self {
+            MacSink::Hmac(ctx) => compare(&ctx.sign(), received).map(|mac| (mac, None)),
+            MacSink::Mic(ctx) => ctx
+                .verify(received)
+                .map(|header| (Mac::from_slice(received), Some(header.seq)))
+                .map_err(|_| TsigError::BadSig),
+        }
+    }
+}
+
+/// Where a verifier finds the key of a TSIG record, by the key name in lowercase wire form
+/// and the algorithm name as written. The keyring holds HMAC keys only; the update path
+/// adds the GSS-TSIG contexts of the node ([`crate::tkey::Tkey`]).
+pub trait KeySource {
+    /// The key of `name` for `algorithm`, if known. A key whose algorithm is another may
+    /// be returned; the verifier answers BADKEY then.
+    fn find(&self, name: &[u8], algorithm: &[u8]) -> Option<MacKey>;
+}
+
+impl KeySource for Keyring {
+    fn find(&self, name: &[u8], _algorithm: &[u8]) -> Option<MacKey> {
+        self.get(name).map(MacKey::Hmac)
+    }
+}
+// WP13.2: end.
+
 /// A MAC of at most [`MAX_MAC`] octets, held without allocating.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Mac {
@@ -234,7 +431,7 @@ impl Mac {
         &self.bytes[..self.len]
     }
 
-    fn feed(&self, ctx: &mut hmac::Context) {
+    fn feed(&self, ctx: &mut MacSink) {
         let len = u16::try_from(self.len).unwrap_or(0);
         ctx.update(&len.to_be_bytes());
         ctx.update(self.as_bytes());
@@ -349,7 +546,7 @@ fn view<'a>(message: &'a [u8], record: &wire::RawRecord) -> Result<TsigView<'a>,
 
 /// Feeds the message before its TSIG record, as it was before signing: the original id and
 /// ARCOUNT one lower.
-fn feed_message(ctx: &mut hmac::Context, message: &[u8], tsig: &TsigView<'_>) {
+fn feed_message(ctx: &mut MacSink, message: &[u8], tsig: &TsigView<'_>) {
     let mut header = [0u8; HEADER_LEN];
     header.copy_from_slice(&message[..HEADER_LEN]);
     header[..2].copy_from_slice(&tsig.original_id.to_be_bytes());
@@ -365,7 +562,7 @@ fn feed_message(ctx: &mut hmac::Context, message: &[u8], tsig: &TsigView<'_>) {
     reason = "the fields of the TSIG variables"
 )]
 fn feed_variables(
-    ctx: &mut hmac::Context,
+    ctx: &mut MacSink,
     key: &[u8],
     algorithm: &[u8],
     time_signed: u64,
@@ -389,7 +586,7 @@ fn feed_variables(
     ctx.update(other);
 }
 
-fn feed_timers(ctx: &mut hmac::Context, time_signed: u64, fudge: u16) {
+fn feed_timers(ctx: &mut MacSink, time_signed: u64, fudge: u16) {
     ctx.update(&time_signed.to_be_bytes()[2..]);
     ctx.update(&fudge.to_be_bytes());
 }
@@ -409,6 +606,12 @@ pub enum TsigError {
     /// The MAC is truncated below the allowed length (FORMERR, RFC 8945 section 5.2.2.1).
     #[error("the MAC is truncated below the allowed length")]
     Truncated,
+    // WP13.2: a GSS-TSIG sequence number seen before.
+    /// The MIC verified, but its sequence number was seen before or is below the context's
+    /// window (answered as BADSIG).
+    #[error("the GSS-TSIG sequence number was seen before (BADSIG)")]
+    Replayed,
+    // WP13.2: end.
     /// The message has no TSIG record where one is required.
     #[error("the message is not signed")]
     Unsigned,
@@ -425,7 +628,7 @@ impl TsigError {
     pub const fn code(self) -> u16 {
         match self {
             TsigError::BadKey => error::BADKEY,
-            TsigError::BadSig => error::BADSIG,
+            TsigError::BadSig | TsigError::Replayed => error::BADSIG,
             TsigError::BadTime => error::BADTIME,
             _ => 0,
         }
@@ -458,7 +661,7 @@ fn in_window(time_signed: u64, fudge: u16, now: u64) -> bool {
 #[derive(Debug, Clone)]
 pub struct Verified {
     /// The key.
-    pub key: Arc<TsigKey>,
+    pub key: MacKey,
     /// The request's MAC.
     pub mac: Mac,
     /// The time the request was signed (a BADTIME answer echoes it).
@@ -472,20 +675,22 @@ pub struct Refused {
     /// Why.
     pub error: TsigError,
     /// The key, when known.
-    pub key: Option<Arc<TsigKey>>,
+    pub key: Option<MacKey>,
     /// The request's MAC, when it verified (BADTIME).
     pub mac: Mac,
     /// The request's time signed.
     pub time_signed: u64,
 }
 
-/// Verifies a signed request (a query, a NOTIFY) at `now` (seconds since 1970).
+/// Verifies a signed request (a query, a NOTIFY, an UPDATE) at `now` (seconds since
+/// 1970), with the key `keys` holds for its name.
 ///
 /// # Errors
 ///
-/// [`Refused`] with BADKEY, BADSIG, BADTIME or a truncated MAC.
-pub fn verify_request(
-    keyring: &Keyring,
+/// [`Refused`] with BADKEY, BADSIG, BADTIME or a truncated MAC; a GSS-TSIG sequence
+/// number seen before is [`TsigError::Replayed`] (BADSIG).
+pub fn verify_request<K: KeySource + ?Sized>(
+    keys: &K,
     message: &[u8],
     tsig: &TsigView<'_>,
     now: u64,
@@ -498,32 +703,39 @@ pub fn verify_request(
             time_signed: tsig.time_signed,
         })
     };
-    let Some(key) = keyring.get(tsig.key) else {
+    // WP13.2: the key name is found and digested in its canonical (lowercase) form (RFC 8945
+    // section 4.3.3), whatever case the sender wrote it in.
+    let mut lower = [0_u8; 255];
+    let key_name = lowercase(tsig.key, &mut lower);
+    let Some(key) = keys.find(key_name, tsig.algorithm) else {
         return Err(refuse(TsigError::BadKey, None, Mac::empty()));
     };
-    if !wire_eq(algorithm_wire(key.algorithm), tsig.algorithm) {
+    if !wire_eq(key.algorithm_wire(), tsig.algorithm) {
         return Err(refuse(TsigError::BadKey, None, Mac::empty()));
     }
-    if let Err(error) = mac_length_ok(key.algorithm, tsig.mac.len()) {
+    if let Err(error) = key.mac_length_ok(tsig.mac.len()) {
         return Err(refuse(error, None, Mac::empty()));
     }
-    let mut ctx = hmac::Context::with_key(&key.key);
+    let mut ctx = key.verifying();
     feed_message(&mut ctx, message, tsig);
     feed_variables(
         &mut ctx,
-        tsig.key,
+        key_name,
         tsig.algorithm,
         tsig.time_signed,
         tsig.fudge,
         tsig.error,
         tsig.other,
     );
-    let mac = match compare(&ctx.sign(), tsig.mac) {
-        Ok(mac) => mac,
+    let (mac, seq) = match ctx.verify(tsig.mac) {
+        Ok(verified) => verified,
         Err(error) => return Err(refuse(error, None, Mac::empty())),
     };
     if !in_window(tsig.time_signed, tsig.fudge, now) {
         return Err(refuse(TsigError::BadTime, Some(key), mac));
+    }
+    if let Err(error) = key.accept_seq(seq) {
+        return Err(refuse(error, None, Mac::empty()));
     }
     Ok(Verified {
         key,
@@ -532,25 +744,34 @@ pub fn verify_request(
     })
 }
 
+/// A wire name in lowercase, in `buf` (a wire name is at most 255 octets).
+fn lowercase<'a>(name: &[u8], buf: &'a mut [u8; 255]) -> &'a [u8] {
+    let len = name.len().min(buf.len());
+    for (to, from) in buf.iter_mut().zip(&name[..len]) {
+        *to = from.to_ascii_lowercase();
+    }
+    &buf[..len]
+}
+
 fn wire_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.eq_ignore_ascii_case(y))
 }
-
 /// Signs the messages of one side of an exchange, in order: a request (no prior MAC) or the
 /// answers to a verified request (the request's MAC first, then the MAC chain).
 #[derive(Debug, Clone)]
 pub struct Signer {
-    key: Arc<TsigKey>,
+    key: MacKey,
     prior: Option<Mac>,
     first: bool,
-    pending: Option<hmac::Context>,
+    pending: Option<MacSink>,
 }
 
 impl Signer {
-    /// A signer of a request.
-    pub fn request(key: Arc<TsigKey>) -> Self {
+    /// A signer of a request, or of the first signed message of a GSS-TSIG context (the
+    /// TKEY answer, whose digest covers no request MAC; [MS-GSSA] section 3.1.5.1).
+    pub fn request(key: impl Into<MacKey>) -> Self {
         Self {
-            key,
+            key: key.into(),
             prior: None,
             first: true,
             pending: None,
@@ -558,9 +779,9 @@ impl Signer {
     }
 
     /// A signer of the answers to a request whose MAC was `request_mac`.
-    pub fn answer(key: Arc<TsigKey>, request_mac: Mac) -> Self {
+    pub fn answer(key: impl Into<MacKey>, request_mac: Mac) -> Self {
         Self {
-            key,
+            key: key.into(),
             prior: Some(request_mac),
             first: true,
             pending: None,
@@ -568,7 +789,7 @@ impl Signer {
     }
 
     /// The key.
-    pub fn key(&self) -> &Arc<TsigKey> {
+    pub fn key(&self) -> &MacKey {
         &self.key
     }
 
@@ -593,7 +814,7 @@ impl Signer {
         }
         let mut ctx = self.pending.clone().unwrap_or_else(|| self.start());
         ctx.update(out);
-        let algorithm = algorithm_wire(self.key.algorithm);
+        let algorithm = self.key.algorithm_wire();
         if self.first {
             feed_variables(
                 &mut ctx,
@@ -607,14 +828,14 @@ impl Signer {
         } else {
             feed_timers(&mut ctx, now, FUDGE);
         }
-        let tag = ctx.sign();
+        let mac = ctx.sign(&self.key);
         let original_id = u16::from_be_bytes([out[0], out[1]]);
         let record = TsigRecord {
             key: self.key.name_wire(),
             algorithm,
             time_signed: now,
             fudge: FUDGE,
-            mac: tag.as_ref(),
+            mac: mac.as_bytes(),
             original_id,
             error,
             other,
@@ -622,7 +843,7 @@ impl Signer {
         if !wire::append_tsig(out, &record, max_len) {
             return false;
         }
-        self.prior = Some(Mac::from_slice(tag.as_ref()));
+        self.prior = Some(mac);
         self.first = false;
         self.pending = None;
         true
@@ -636,8 +857,8 @@ impl Signer {
         self.pending = Some(ctx);
     }
 
-    fn start(&self) -> hmac::Context {
-        let mut ctx = hmac::Context::with_key(&self.key.key);
+    fn start(&self) -> MacSink {
+        let mut ctx = self.key.signing();
         if let Some(prior) = &self.prior {
             prior.feed(&mut ctx);
         }
@@ -658,7 +879,7 @@ pub fn refusal_tsig(
     if let (Some(key), TsigError::BadTime) = (&refused.key, refused.error) {
         {
             let time = now.to_be_bytes();
-            let mut signer = Signer::answer(Arc::clone(key), refused.mac);
+            let mut signer = Signer::answer(key.clone(), refused.mac);
             signer.sign(
                 out,
                 refused.time_signed,
@@ -689,10 +910,10 @@ pub fn refusal_tsig(
 /// first must be signed, later ones may leave up to 99 messages in between unsigned.
 #[derive(Debug)]
 pub struct Verifier {
-    key: Arc<TsigKey>,
+    key: MacKey,
     prior: Mac,
     first: bool,
-    pending: Option<hmac::Context>,
+    pending: Option<MacSink>,
     unsigned: usize,
 }
 
@@ -701,14 +922,30 @@ pub const MAX_UNSIGNED: usize = 99;
 
 impl Verifier {
     /// A verifier of the answers to a request whose MAC was `request_mac`.
-    pub fn new(key: Arc<TsigKey>, request_mac: Mac) -> Self {
+    pub fn new(key: impl Into<MacKey>, request_mac: Mac) -> Self {
         Self {
-            key,
+            key: key.into(),
             prior: request_mac,
             first: true,
             pending: None,
             unsigned: 0,
         }
+    }
+
+    // WP13.2: the first signed message of a GSS-TSIG context.
+    /// A verifier of the TKEY answer that completes a GSS-TSIG negotiation: its digest
+    /// covers no request MAC ([MS-GSSA] section 3.1.5.1).
+    pub fn without_request_mac(key: impl Into<MacKey>) -> Self {
+        let mut verifier = Self::new(key, Mac::empty());
+        verifier.pending = Some(verifier.key.verifying());
+        verifier
+    }
+    // WP13.2: end.
+
+    fn start(&self) -> MacSink {
+        let mut ctx = self.key.verifying();
+        self.prior.feed(&mut ctx);
+        ctx
     }
 
     /// Verifies the next message at `now`.
@@ -723,12 +960,12 @@ impl Verifier {
             if self.first || self.unsigned >= MAX_UNSIGNED {
                 return Err(TsigError::Unsigned);
             }
-            let ctx = self.pending.get_or_insert_with(|| {
-                let mut ctx = hmac::Context::with_key(&self.key.key);
-                self.prior.feed(&mut ctx);
-                ctx
-            });
-            ctx.update(message);
+            if self.pending.is_none() {
+                self.pending = Some(self.start());
+            }
+            if let Some(ctx) = &mut self.pending {
+                ctx.update(message);
+            }
             self.unsigned += 1;
             return Ok(());
         };
@@ -736,21 +973,18 @@ impl Verifier {
             return Err(TsigError::Peer(tsig.error));
         }
         if !wire_eq(tsig.key, self.key.name_wire())
-            || !wire_eq(tsig.algorithm, algorithm_wire(self.key.algorithm))
+            || !wire_eq(tsig.algorithm, self.key.algorithm_wire())
         {
             return Err(TsigError::BadKey);
         }
-        mac_length_ok(self.key.algorithm, tsig.mac.len())?;
-        let mut ctx = self.pending.take().unwrap_or_else(|| {
-            let mut ctx = hmac::Context::with_key(&self.key.key);
-            self.prior.feed(&mut ctx);
-            ctx
-        });
+        self.key.mac_length_ok(tsig.mac.len())?;
+        let mut ctx = self.pending.take().unwrap_or_else(|| self.start());
         feed_message(&mut ctx, message, &tsig);
         if self.first {
+            let mut lower = [0_u8; 255];
             feed_variables(
                 &mut ctx,
-                tsig.key,
+                lowercase(tsig.key, &mut lower),
                 tsig.algorithm,
                 tsig.time_signed,
                 tsig.fudge,
@@ -760,10 +994,12 @@ impl Verifier {
         } else {
             feed_timers(&mut ctx, tsig.time_signed, tsig.fudge);
         }
-        self.prior = compare(&ctx.sign(), tsig.mac)?;
+        let (mac, seq) = ctx.verify(tsig.mac)?;
+        self.prior = mac;
         if !in_window(tsig.time_signed, tsig.fudge, now) {
             return Err(TsigError::BadTime);
         }
+        self.key.accept_seq(seq)?;
         self.first = false;
         self.unsigned = 0;
         Ok(())

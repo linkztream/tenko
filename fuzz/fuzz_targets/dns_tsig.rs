@@ -148,7 +148,7 @@ fuzz_target!(|data: &[u8]| {
     let id = wire::parse_header(message).expect("header").id;
     check_answer(&out, id);
     if let Some(verified) = verified {
-        let mut signer = Signer::answer(Arc::clone(&verified.key), verified.mac);
+        let mut signer = Signer::answer(verified.key.clone(), verified.mac);
         assert!(signer.sign(&mut out, NOW, 0, &[], MAX_MESSAGE_LEN));
         check_answer(&out, id);
         let mut verifier = Verifier::new(Arc::clone(&key), verified.mac);

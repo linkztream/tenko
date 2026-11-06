@@ -1413,7 +1413,7 @@ async fn start(
     // service over the network, its rotation step, and the leader service `dns.krb`
     // (recovery of a pending change, the daily self-test, the rotation when due), whose
     // writes carry the leader epoch. The watcher that hands the keys to the dns role's
-    // acceptor joins when the TKEY handler's key handle is on this branch.
+    // acceptor starts with the dns role (below, WP13.2).
     let kerberos = zones.as_ref().map(|zones| {
         let profile = resolved.config.profile.name;
         let service = tenko_dns::zone::kerberos::KerberosService::networked(
@@ -2036,6 +2036,17 @@ async fn start(
     let dns_line = dns_role.as_ref().map(|role| role.announce().to_owned());
     if let Some(role) = dns_role {
         dns_slot.set(role.node());
+        // WP13.2: the watcher of the account's keys hands them to the dns role's acceptor.
+        if let (Some(kerberos), Some(keys)) = (&kerberos, role.gss_keys()) {
+            running
+                .tasks
+                .push(tokio::spawn(tenko_dns::zone::kerberos::follow(
+                    Arc::clone(kerberos),
+                    Arc::new(keys) as Arc<dyn tenko_dns::zone::kerberos::KeySink>,
+                    leader::stop_token(running.stop.subscribe()),
+                )));
+        }
+        // WP13.2: end.
         running.dns = Some(role);
     }
     // WP7.5: the dhcp role, after the dns role and before the leader services start (it

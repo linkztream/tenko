@@ -73,6 +73,8 @@ pub mod recurse;
 // WP10.2: the validator and the trust anchors.
 pub mod anchors;
 pub mod validate;
+// WP13.2: TKEY and GSS-TSIG (identity plan section 3.3).
+pub mod tkey;
 
 pub use codec::{AnswerBuf, Codec, CodecError, DomainCodec, Request};
 pub use feed::{DnsData, MemFeed, ZoneFeed};

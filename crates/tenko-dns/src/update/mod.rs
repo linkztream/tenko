@@ -39,8 +39,17 @@
 //! in Phase 5 a `dns` node without a controller sends the same change set over the cluster
 //! channel (`Dns.Update`) and waits for its delta (ADR 0017), and nothing else changes.
 //!
-//! Metrics: `tenko_dns_updates_total{outcome}` and `tenko_dns_update_duration_seconds`
-//! (from the arrival of the message to its answer), registered by the role.
+//! GSS-TSIG (identity plan sections 3.3 to 3.6): a TKEY query arrives the same way as an
+//! UPDATE and is answered by the node's [`crate::tkey::Tkey`]; an UPDATE signed with
+//! GSS-TSIG is verified against the node's contexts, and its [`Signer`] is the principal
+//! with its SID and groups from the PAC. The policy checks the principal ([`policy`]), the
+//! planner applies the ownership rules of section 3.6 and writes `dns.name_owners` in the
+//! same batch ([`apply`]), the RRsets it writes carry the principal, and the audit records
+//! carry the principal, its SID and the ownership decision.
+//!
+//! Metrics: `tenko_dns_updates_total{outcome,auth}` (`auth`: `none`, `tsig`, `gss`) and
+//! `tenko_dns_update_duration_seconds` (from the arrival of the message to its answer),
+//! registered by the role.
 
 pub mod apply;
 pub mod message;
@@ -51,7 +60,7 @@ use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
     sync::{
-        Arc, Mutex, PoisonError,
+        Arc, Mutex, OnceLock, PoisonError,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -60,9 +69,89 @@ use std::{
 use tenko_core::{
     ObjectRef, RequestCtx, SystemComponent,
     audit::AuditDraft,
-    dns::{KeyName, QueryTransport, Rtype, ScopeName, Zone, ZoneId, audit},
+    dns::{KeyName, PrincipalName, QueryTransport, Rtype, ScopeName, Zone, ZoneId, audit},
     metrics::{CounterVec, Desc, Histogram, Registry},
 };
+
+pub use crate::tkey::GssIdentity;
+use crate::tkey::{Tkey, UpdateKeys};
+
+// WP13.2: who signed an update (identity plan section 3.5).
+/// Who signed an update: nobody, a TSIG key, or a Kerberos principal through GSS-TSIG.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Signer {
+    /// Unsigned.
+    None,
+    /// Signed with a TSIG key.
+    Tsig(KeyName),
+    /// Signed with GSS-TSIG.
+    Gss(GssIdentity),
+}
+
+impl Signer {
+    /// The TSIG key, when signed with one.
+    pub fn key(&self) -> Option<&KeyName> {
+        match self {
+            Signer::Tsig(key) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// The principal, when signed with GSS-TSIG.
+    pub fn principal(&self) -> Option<&PrincipalName> {
+        match self {
+            Signer::Gss(identity) => Some(&identity.principal),
+            _ => None,
+        }
+    }
+
+    /// The identity, when signed with GSS-TSIG.
+    pub fn gss(&self) -> Option<&GssIdentity> {
+        match self {
+            Signer::Gss(identity) => Some(identity),
+            _ => None,
+        }
+    }
+
+    /// The `auth` label of the update counter.
+    pub const fn auth(&self) -> Auth {
+        match self {
+            Signer::None => Auth::None,
+            Signer::Tsig(_) => Auth::Tsig,
+            Signer::Gss(_) => Auth::Gss,
+        }
+    }
+
+    /// Adds the signer to an audit record: `key`, or `principal` and `sid`.
+    pub fn audit(&self, draft: AuditDraft) -> AuditDraft {
+        match self {
+            Signer::Gss(identity) => {
+                let draft = draft.with_context("principal", identity.principal.to_string());
+                match &identity.sid {
+                    Some(sid) => draft.with_context("sid", sid.to_string()),
+                    None => draft,
+                }
+            }
+            other => draft.with_context("key", other.key().map_or("none", KeyName::as_str)),
+        }
+    }
+}
+
+/// The `auth` label of `tenko_dns_updates_total`, in the order of [`AUTHS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+pub enum Auth {
+    /// Unsigned.
+    None = 0,
+    /// TSIG.
+    Tsig = 1,
+    /// GSS-TSIG.
+    Gss = 2,
+}
+
+/// The `auth` label values.
+pub const AUTHS: [&str; 3] = ["none", "tsig", "gss"];
+// WP13.2: end.
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -77,7 +166,7 @@ use crate::{
     index::ScopeOf as _,
     rate::limiter::prefix_bits,
     respond::{Conn, ReplyPath},
-    tsig::{self, Signer, Verified},
+    tsig::{self, MacKey, Signer as TsigSigner, Verified},
     wire::{self, CLASSIC_UDP_LEN, HEADER_LEN, MAX_MESSAGE_LEN, SERVER_UDP_PAYLOAD},
     xfr::{Directory, TransferAudit, out::unix_now},
     zone::ZoneService,
@@ -133,9 +222,10 @@ pub const UPDATE_BUCKETS_US: &[u64] = &[
     5_000_000,
 ];
 
-/// `tenko_dns_updates_total{outcome}`: dynamic updates by outcome.
-pub const UPDATES: Desc =
-    Desc::counter("tenko_dns_updates", "DNS dynamic updates (RFC 2136)").labels(&["outcome"]);
+/// `tenko_dns_updates_total{outcome,auth}`: dynamic updates by outcome and by how they
+/// were signed.
+pub const UPDATES: Desc = Desc::counter("tenko_dns_updates", "DNS dynamic updates (RFC 2136)")
+    .labels(&["outcome", "auth"]);
 
 /// `tenko_dns_update_duration_seconds`: from the arrival of an update to its answer.
 pub const UPDATE_DURATION: Desc = Desc::histogram(
@@ -173,18 +263,38 @@ pub enum MetricOutcome {
     Failed = 5,
 }
 
+/// The series of [`UPDATES`]: every outcome with every `auth` value, outcome first.
+static UPDATE_SERIES: [[&str; 2]; 18] = {
+    let mut rows = [["", ""]; 18];
+    let mut outcome = 0;
+    while outcome < 6 {
+        let mut auth = 0;
+        while auth < 3 {
+            rows[outcome * 3 + auth] = [OUTCOMES[outcome], AUTHS[auth]];
+            auth += 1;
+        }
+        outcome += 1;
+    }
+    rows
+};
+
+static UPDATE_ROWS: [&[&str]; 18] = {
+    let mut rows: [&[&str]; 18] = [&[]; 18];
+    let mut index = 0;
+    while index < 18 {
+        rows[index] = &UPDATE_SERIES[index];
+        index += 1;
+    }
+    rows
+};
+
 /// [`UPDATES`].
-pub static UPDATE_COUNTER: CounterVec = CounterVec::fixed(
-    UPDATES,
-    &[
-        &["ok"],
-        &["prerequisite"],
-        &["refused"],
-        &["notauth"],
-        &["formerr"],
-        &["failed"],
-    ],
-);
+pub static UPDATE_COUNTER: CounterVec = CounterVec::fixed(UPDATES, &UPDATE_ROWS);
+
+/// Counts one update.
+fn count(outcome: MetricOutcome, auth: Auth) {
+    UPDATE_COUNTER.inc(outcome as u16 * 3 + auth as u16);
+}
 
 /// [`UPDATE_DURATION`].
 pub static UPDATE_LATENCY: Histogram = Histogram::new(UPDATE_DURATION);
@@ -239,7 +349,7 @@ impl Answer {
 struct Pending {
     message: UpdateMessage,
     scope: ScopeName,
-    key: Option<KeyName>,
+    signer: Signer,
     client: IpAddr,
     done: oneshot::Sender<Answer>,
 }
@@ -273,6 +383,8 @@ struct Inner {
     sources: Mutex<HashMap<Source, usize>>,
     /// The updates refused by the admission bounds.
     refused: AtomicU64,
+    // WP13.2: the node's TKEY handler and GSS-TSIG contexts.
+    gss: OnceLock<Arc<Tkey>>,
 }
 
 /// A client of the admission: the address family and the bits of its prefix, a /32 for
@@ -358,12 +470,29 @@ impl UpdatePath {
                 in_flight: AtomicUsize::new(0),
                 sources: Mutex::new(HashMap::new()),
                 refused: AtomicU64::new(0),
+                gss: OnceLock::new(),
             }),
         }
     }
 
-    /// Answers one UPDATE: the octets of the answer, or `None` for no answer. What
-    /// [`UpdateSink::submit`] runs for each admitted message, for tests and tools.
+    // WP13.2: GSS-TSIG on the update path.
+    /// The same path taking TKEY negotiations and GSS-TSIG updates through `gss`. A path
+    /// without it answers TKEY REFUSED and verifies no GSS-TSIG signature (BADKEY).
+    #[must_use]
+    pub fn with_gss(self, gss: Arc<Tkey>) -> Self {
+        let _ = self.inner.gss.set(gss);
+        self
+    }
+
+    /// The node's TKEY handler, when the path has one.
+    pub fn gss(&self) -> Option<&Arc<Tkey>> {
+        self.inner.gss.get()
+    }
+    // WP13.2: end.
+
+    /// Answers one UPDATE or TKEY query: the octets of the answer, or `None` for no
+    /// answer. What [`UpdateSink::submit`] runs for each admitted message, for tests and
+    /// tools.
     pub async fn answer(&self, message: &[u8], conn: &Conn) -> Option<Vec<u8>> {
         Arc::clone(&self.inner).answer(message, conn).await
     }
@@ -386,8 +515,15 @@ impl UpdateSink for UpdatePath {
             // Over a bound: a header-only SERVFAIL (no larger than the request), nothing
             // copied and nothing started.
             let mut out = Vec::with_capacity(HEADER_LEN);
+            // WP13.2: a TKEY query is a QUERY; its answer keeps the opcode.
+            if crate::tkey::wire::is_tkey(message) {
+                if crate::tkey::wire::write_header_answer(message, rcode::SERVFAIL, &mut out) {
+                    let _ = reply.deliver(conn.client, out);
+                }
+                return;
+            }
             if message::write_answer(message, None, rcode::SERVFAIL, None, &mut out) {
-                UPDATE_COUNTER.inc(MetricOutcome::Failed as u16);
+                count(MetricOutcome::Failed, Auth::None);
                 let _ = reply.deliver(conn.client, out);
             }
             return;
@@ -415,6 +551,34 @@ fn max_len(conn: &Conn, edns: Option<u16>) -> usize {
     }
 }
 
+// WP13.2: who signed a verified request.
+/// The signer of a verified request. A TSIG key whose name is not a model name cannot be
+/// named by an access list, and an update signed with it is refused rather than taken as
+/// unsigned.
+///
+/// # Errors
+///
+/// The reason of the refusal (REFUSED).
+fn signer_of(signed: Option<&Verified>) -> Result<Signer, policy::Refusal> {
+    match signed.map(|verified| &verified.key) {
+        None => Ok(Signer::None),
+        Some(MacKey::Hmac(key)) => key
+            .name()
+            .map(Signer::Tsig)
+            .ok_or("the TSIG key's name is not one an access list can name; the update is refused"),
+        Some(MacKey::Gss(context)) => Ok(Signer::Gss(context.identity().clone())),
+    }
+}
+
+/// The `auth` label of a verified request.
+fn auth_of(signed: Option<&Verified>) -> Auth {
+    match signed.map(|verified| &verified.key) {
+        None => Auth::None,
+        Some(MacKey::Hmac(_)) => Auth::Tsig,
+        Some(MacKey::Gss(_)) => Auth::Gss,
+    }
+}
+
 /// Writes and signs an answer.
 fn finish(
     request: &[u8],
@@ -436,10 +600,10 @@ fn finish(
         return None;
     }
     if let Some(verified) = signed {
-        let mut chain = Signer::answer(Arc::clone(&verified.key), verified.mac);
+        let mut chain = TsigSigner::answer(verified.key.clone(), verified.mac);
         chain.sign(&mut out, unix_now(), 0, &[], max_len(conn, edns));
     }
-    UPDATE_COUNTER.inc(outcome_of(answer.rcode) as u16);
+    count(outcome_of(answer.rcode), auth_of(signed));
     Some(out)
 }
 
@@ -467,7 +631,20 @@ impl Inner {
         })
     }
 
+    // WP13.2: a TKEY query goes to the node's handler; a node without one, or without the
+    // account's keys, answers REFUSED without touching the acceptor.
+    fn tkey(&self, request: &[u8], conn: &Conn) -> Option<Vec<u8>> {
+        if let Some(gss) = self.gss.get() {
+            return gss.answer(request, conn, self.directory.keys(), self.audit.as_ref());
+        }
+        let mut out = Vec::with_capacity(512);
+        crate::tkey::wire::write_header_answer(request, rcode::REFUSED, &mut out).then_some(out)
+    }
+
     async fn answer(self: Arc<Self>, request: &[u8], conn: &Conn) -> Option<Vec<u8>> {
+        if crate::tkey::wire::is_tkey(request) {
+            return self.tkey(request, conn);
+        }
         let header = wire::parse_header(request)?;
         if header.qr {
             return None;
@@ -483,7 +660,11 @@ impl Inner {
             }
             Ok(None) => None,
             Ok(Some(view)) => {
-                match tsig::verify_request(self.directory.keys(), request, &view, now) {
+                let keys = UpdateKeys {
+                    hmac: self.directory.keys(),
+                    gss: self.gss.get().map(AsRef::as_ref),
+                };
+                match tsig::verify_request(&keys, request, &view, now) {
                     Ok(verified) => Some(verified),
                     Err(refused) => {
                         let code = if refused.error == tsig::TsigError::Truncated {
@@ -496,7 +677,12 @@ impl Inner {
                             return None;
                         }
                         tsig::refusal_tsig(&mut out, &refused, &view, now, MAX_MESSAGE_LEN);
-                        UPDATE_COUNTER.inc(outcome_of(code) as u16);
+                        let auth = if view.algorithm.eq_ignore_ascii_case(tsig::GSS_TSIG) {
+                            Auth::Gss
+                        } else {
+                            Auth::Tsig
+                        };
+                        count(outcome_of(code), auth);
                         tracing::debug!(client = %conn.client, error = %refused.error, "dynamic update with a TSIG that does not verify");
                         return Some(out);
                     }
@@ -523,8 +709,10 @@ impl Inner {
                 );
             }
         };
-        let key = signed.as_ref().and_then(|verified| verified.key.name());
-        let answer = self.decide(message.clone(), key, conn).await;
+        let answer = match signer_of(signed.as_ref()) {
+            Ok(author) => self.decide(message.clone(), author, conn).await,
+            Err(reason) => Answer::with(rcode::REFUSED, ede::PROHIBITED, reason),
+        };
         finish(
             request,
             Some(message.zone_end),
@@ -539,7 +727,7 @@ impl Inner {
     async fn decide(
         self: &Arc<Self>,
         message: UpdateMessage,
-        key: Option<KeyName>,
+        signer: Signer,
         conn: &Conn,
     ) -> Answer {
         let client = conn.client.ip();
@@ -556,9 +744,9 @@ impl Inner {
         let scope = {
             let catalog = self.catalog.load();
             if let Err(reason) =
-                policy::check(&zone, |id| catalog.acl(id), profile, client, key.as_ref())
+                policy::check(&zone, |id| catalog.acl(id), profile, client, &signer)
             {
-                self.refused(&zone, client, key.as_ref(), reason);
+                self.refused(&zone, client, &signer, reason);
                 return Answer::with(rcode::REFUSED, ede::PROHIBITED, reason);
             }
             let apex = zone.name.to_wire();
@@ -582,7 +770,7 @@ impl Inner {
         let pending = Pending {
             message,
             scope,
-            key,
+            signer,
             client,
             done,
         };
@@ -595,16 +783,17 @@ impl Inner {
     }
 
     /// Audits a refusal, at most once a minute per client.
-    fn refused(&self, zone: &Zone, client: IpAddr, key: Option<&KeyName>, reason: &str) {
+    fn refused(&self, zone: &Zone, client: IpAddr, signer: &Signer, reason: &str) {
         if !self.audit.refusal_due(client) {
             return;
         }
+        let draft = AuditDraft::denied(audit::UPDATE_REFUSE, vec![ObjectRef::from(zone.id)])
+            .with_source_ip(Some(client))
+            .with_context("zone", zone.name.as_str())
+            .with_context("client", client.to_string());
         self.audit.record(
-            AuditDraft::denied(audit::UPDATE_REFUSE, vec![ObjectRef::from(zone.id)])
-                .with_source_ip(Some(client))
-                .with_context("zone", zone.name.as_str())
-                .with_context("client", client.to_string())
-                .with_context("key", key.map_or("none", KeyName::as_str))
+            signer
+                .audit(draft)
                 .with_context("code", tenko_core::dns::codes::UPDATE_REFUSED)
                 .with_context("reason", reason),
         );
@@ -671,7 +860,7 @@ impl Inner {
             .map(|pending| Item {
                 message: &pending.message,
                 scope: pending.scope.clone(),
-                key: pending.key.clone(),
+                signer: pending.signer.clone(),
                 client: pending.client,
             })
             .collect();
@@ -683,7 +872,7 @@ impl Inner {
                 |id| catalog.acl(id),
                 profile,
                 item.client,
-                item.key.as_ref(),
+                &item.signer,
             )
         };
         let cx = RequestCtx::system(SystemComponent::Dns);
@@ -691,7 +880,7 @@ impl Inner {
         let result = self
             .zones
             .execute(&cx, |view| {
-                apply::plan(view, zone, &items, &admit, &cx, limits)
+                apply::plan(view, zone, &items, &admit, &cx, limits, profile)
             })
             .await;
         let answers: Vec<Answer> = match result {
@@ -748,7 +937,7 @@ impl Inner {
             Outcome::Unmet(unmet) => Answer::with(unmet.rcode, ede::OTHER, unmet.text()),
             Outcome::Refused(reason) => {
                 if let Some(zone) = zone {
-                    self.refused(zone, item.client, item.key.as_ref(), &reason);
+                    self.refused(zone, item.client, &item.signer, &reason);
                 }
                 Answer::with(rcode::REFUSED, ede::PROHIBITED, reason)
             }
@@ -797,5 +986,36 @@ pub fn conn(client: SocketAddr, local: SocketAddr, transport: QueryTransport) ->
         client,
         local,
         transport,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use tenko_core::dns::TsigAlgorithm;
+
+    use super::*;
+    use crate::tsig::{Mac, TsigKey};
+
+    /// DNS-11, DNS-28 (review): an update verified with a TSIG key whose name is not a model
+    /// name is refused, never taken as unsigned; a key with a model name is its signer.
+    #[test]
+    fn dns_28_a_key_whose_name_does_not_convert_is_refused_not_unsigned() {
+        let verified = |key: TsigKey| Verified {
+            key: MacKey::Hmac(Arc::new(key)),
+            mac: Mac::empty(),
+            time_signed: 0,
+        };
+        let odd = TsigKey::with_wire_name(b"\x03a b\x04test\x00", TsigAlgorithm::HmacSha256, b"k");
+        assert!(
+            odd.name().is_none(),
+            "a name with a space is not a model name"
+        );
+        assert!(signer_of(Some(&verified(odd))).is_err());
+        let name = tenko_core::dns::DnsName::new("update.example.test").expect("name");
+        let fine = TsigKey::new(&name, TsigAlgorithm::HmacSha256, b"k");
+        assert_eq!(signer_of(Some(&verified(fine))), Ok(Signer::Tsig(name)));
+        assert_eq!(signer_of(None), Ok(Signer::None));
     }
 }

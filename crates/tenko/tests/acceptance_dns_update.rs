@@ -148,7 +148,7 @@ fn read(answer: &[u8], signer: Option<&Signer>) -> Got {
     let tsig_error = tsig::find(answer).expect("tsig").map(|view| view.error);
     if let (Some(signer), None | Some(0)) = (signer, tsig_error) {
         let mut verifier = Verifier::new(
-            Arc::clone(signer.key()),
+            signer.key().clone(),
             signer.last_mac().expect("request MAC"),
         );
         verifier

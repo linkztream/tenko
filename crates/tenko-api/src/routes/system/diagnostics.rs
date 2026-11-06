@@ -89,6 +89,9 @@ const ERRORS: &[&str] = &[
     tenko_core::dns::findings::GSS_SPN_DUPLICATE,
     tenko_core::dns::findings::GSS_WEAK_ETYPE,
     // WP13.3: end.
+    // WP13.2: the acceptor raises the same codes from its refusals, from three sources at
+    // least: a key version Tenko does not hold and an RC4 ticket are errors above; clock
+    // skew and the full table of negotiations (`dns.gss.context_limit`) stay warnings.
 ];
 
 /// The severity of a finding by its code.

@@ -26,26 +26,51 @@
 //! with `dns.update.refused`, its extended error naming the first RRset. A model rule the
 //! result breaks (a record set too large, a CNAME beside other data written another way)
 //! fails the update: SERVFAIL with the rule in the extended error, nothing of it written.
+//!
+//! **Ownership** (identity plan section 3.6, DNS-28). In a zone whose ownership rules are on
+//! ([`super::policy::ownership_on`]) the planner decides, before the first operation of an
+//! update on a name, whether the update's signer may change that name, from the name's
+//! owner in `dns.name_owners` and the RRsets it holds:
+//!
+//! | The name | A GSS-TSIG principal may change it when | and then |
+//! |---|---|---|
+//! | A locator name (every name of an `_msdcs` zone or under `_msdcs`, a first label `_ldap`, `_kerberos`, `_kpasswd`, `_gc`, `DomainDnsZones` or `ForestDnsZones`, the apex) | it is privileged | no owner is kept |
+//! | A wildcard name (`*` first) | it is privileged | no owner is kept |
+//! | Owned, the hold not passed | it is the owner (by SID when the owner has one, else by name), or privileged | the owner stays; the hold starts when the last record goes and ends when a record comes back |
+//! | Unowned with a manual, IPAM or DHCP record | it is privileged | no owner |
+//! | Unowned with a record imported from AD (origin `ad`) | it is privileged, or it claims its own host: `HOST$` claims `host.<zone>`, and a name whose records are PTR records pointing at `host.*` | a claimant becomes the owner |
+//! | Unowned with dynamic records only, or new (no records, the hold passed, or an owner without a hold whose records went outside the update path) | the zone's lists allow it | it becomes the owner, unless it is a member of `DnsUpdateProxy` |
+//!
+//! Privileged principals are the members of the zone's privileged groups by SID from the
+//! PAC. An update signed with TSIG or unsigned takes no ownership and may not change a name
+//! that is owned and held; it removes an owner whose hold has passed. The owner rows are
+//! written in the same batch as the records, with their revisions expected, and the audit
+//! record carries the decision (`owner`, `privileged`, `claimed`, `proxy`) and the
+//! principal with its SID.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::IpAddr,
+    time::Duration,
 };
 
 use tenko_core::{
     ObjectRef, RequestCtx, Revision,
     audit::AuditDraft,
     dns::{
-        DnsName, KeyName, Origin, Rdata, RrSet, RrSetKey, Rtype, ScopeName, Zone, ZoneId, audit,
-        check_apex, check_node, tables::RRSETS,
+        DnsName, NameOwner, NameOwnerKey, Origin, Rdata, RecordData, RrSet, RrSetKey, Rtype,
+        ScopeName, Zone, ZoneId, audit, check_apex, check_node,
+        tables::{NAME_OWNERS, RRSETS},
     },
     ipam::Stamp,
+    timestamp::Timestamp,
 };
-use tenko_store::{ReadView, WriteBatch};
+use tenko_store::{ReadView, ReadViewExt as _, WriteBatch};
 
 use super::{
+    GssIdentity, Signer,
     message::{Prerequisite, Update, UpdateMessage},
-    policy::Refusal,
+    policy::{self, Refusal, UpdateProfile},
     prereq::{self, Records, Unmet},
 };
 use crate::zone::{
@@ -61,11 +86,136 @@ pub struct Item<'a> {
     pub message: &'a UpdateMessage,
     /// The scope the client's view chose.
     pub scope: ScopeName,
-    /// The TSIG key that signed it.
-    pub key: Option<KeyName>,
+    /// Who signed it.
+    pub signer: Signer,
     /// The client.
     pub client: IpAddr,
 }
+
+// WP13.2: the ownership decision of a name (identity plan section 3.6).
+/// What the ownership rules decided for one name of an update, from the weakest to the
+/// strongest reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Decision {
+    /// No ownership is involved (a TSIG or unsigned update of an unowned name).
+    Unowned,
+    /// The principal owns the name, or becomes its owner.
+    Owner,
+    /// A member of `DnsUpdateProxy` changed an unowned name; it stays unowned.
+    Proxy,
+    /// The principal claimed an imported name of its own host.
+    Claimed,
+    /// A privileged principal.
+    Privileged,
+}
+
+impl Decision {
+    /// The value of the audit context `ownership`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Decision::Unowned => "none",
+            Decision::Owner => "owner",
+            Decision::Proxy => "proxy",
+            Decision::Claimed => "claimed",
+            Decision::Privileged => "privileged",
+        }
+    }
+}
+
+/// The owner of a name while the group is planned.
+#[derive(Debug, Clone, Default)]
+struct OwnerState {
+    before: Option<(NameOwner, Revision)>,
+    after: Option<NameOwner>,
+}
+
+/// The first labels of the names Active Directory's controllers register (section 3.6).
+const LOCATOR_LABELS: [&str; 6] = [
+    "_ldap",
+    "_kerberos",
+    "_kpasswd",
+    "_gc",
+    "domaindnszones",
+    "forestdnszones",
+];
+
+/// Whether `name` is a locator name of `zone`: privileged principals only.
+fn is_locator(zone: &DnsName, name: &DnsName) -> bool {
+    if name == zone {
+        return true;
+    }
+    if zone
+        .labels()
+        .next()
+        .is_some_and(|label| label.eq_ignore_ascii_case("_msdcs"))
+    {
+        return true;
+    }
+    if name
+        .labels()
+        .any(|label| label.eq_ignore_ascii_case("_msdcs"))
+    {
+        return true;
+    }
+    name.labels().next().is_some_and(|first| {
+        LOCATOR_LABELS
+            .iter()
+            .any(|known| first.eq_ignore_ascii_case(known))
+    })
+}
+
+/// Whether `identity` is `owner`: by SID when the owner has one (a ticket without a PAC,
+/// which has none, never matches it), by the principal's name otherwise.
+fn owns(owner: &NameOwner, identity: &GssIdentity) -> bool {
+    match (&owner.sid, &identity.sid) {
+        (Some(own), Some(other)) => own == other,
+        (Some(_), None) => false,
+        (None, _) => owner.principal == identity.principal,
+    }
+}
+
+/// The host label a computer account may claim: `pc01` for `PC01$@REALM`.
+fn own_host(identity: &GssIdentity) -> Option<String> {
+    let name = identity.principal.without_realm();
+    let host = name.strip_suffix('$')?;
+    (!host.is_empty() && !host.contains('/') && !host.contains('.'))
+        .then(|| host.to_ascii_lowercase())
+}
+
+/// Whether the RRsets of `name` carry `host`: the name is `host.<zone>`, or every record
+/// there is a PTR record whose target's first label is `host`.
+fn carries_host<'a>(
+    zone: &DnsName,
+    name: &DnsName,
+    host: &str,
+    rrsets: impl Iterator<Item = &'a RrSet> + Clone,
+) -> bool {
+    let first_is_host = |of: &DnsName| {
+        of.labels()
+            .next()
+            .is_some_and(|label| label.eq_ignore_ascii_case(host))
+    };
+    if first_is_host(name) && name.parent().as_ref() == Some(zone) {
+        return true;
+    }
+    let mut any = false;
+    for rrset in rrsets {
+        if rrset.rtype != Rtype::PTR {
+            return false;
+        }
+        let Ok(records) = rrset.records() else {
+            return false;
+        };
+        for record in records {
+            match record {
+                RecordData::Ptr { target } if first_is_host(&target) => any = true,
+                _ => return false,
+            }
+        }
+    }
+    any
+}
+// WP13.2: end.
 
 /// What became of one update.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +264,13 @@ struct Planner<'v> {
     nodes: BTreeMap<NodeKey, NodeState>,
     /// The RRsets the prerequisites read, with the revision the write expects.
     reads: BTreeMap<RrSetKey, Option<Revision>>,
+    // WP13.2: ownership.
+    /// Whether the ownership rules apply.
+    ownership: bool,
+    /// The owners of the names the group touched, when they apply.
+    owners: BTreeMap<NodeKey, OwnerState>,
+    /// The strongest decision of the last update planned.
+    decision: Option<Decision>,
 }
 
 /// The nodes of one scope, as the prerequisites see them.
@@ -252,7 +409,7 @@ impl Planner<'_> {
         rtype: Rtype,
         ttl: u32,
         rdata: Vec<Rdata>,
-        key: Option<&KeyName>,
+        signer: &Signer,
     ) -> RrSet {
         RrSet {
             zone: self.zone.id,
@@ -262,11 +419,178 @@ impl Planner<'_> {
             ttl,
             rdata,
             origin: Origin::Dynamic,
-            key: key.cloned(),
-            principal: None,
+            key: signer.key().cloned(),
+            principal: signer.principal().cloned(),
             updated: self.stamp.clone(),
         }
     }
+
+    // WP13.2: the ownership rules (identity plan section 3.6).
+    fn now(&self) -> Timestamp {
+        self.stamp.at
+    }
+
+    fn load_owner(&mut self, scope: &ScopeName, name: &DnsName) -> ZoneResult<()> {
+        let key = (scope.clone(), name.clone());
+        if self.owners.contains_key(&key) {
+            return Ok(());
+        }
+        let row = NameOwnerKey {
+            zone: self.zone.id,
+            scope: scope.clone(),
+            name: name.clone(),
+        };
+        let before = self.view.get_typed(&NAME_OWNERS, &row)?;
+        let after = before.as_ref().map(|(owner, _)| owner.clone());
+        self.owners.insert(key, OwnerState { before, after });
+        Ok(())
+    }
+
+    /// Whether `signer` may change `name`, before the update's first operation on it.
+    fn decide(&self, signer: &Signer, scope: &ScopeName, name: &DnsName) -> Result<Decision, Stop> {
+        let key = (scope.clone(), name.clone());
+        let now = self.now();
+        let live = self
+            .owners
+            .get(&key)
+            .and_then(|state| state.after.as_ref())
+            .filter(|owner| !owner.hold_passed(now));
+        let rrsets: Vec<&RrSet> = self
+            .nodes
+            .get(&key)
+            .map(|node| {
+                node.after
+                    .values()
+                    .filter(|rrset| rrset.origin != Origin::Dnssec)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let Signer::Gss(identity) = signer else {
+            return match live {
+                Some(owner) => Err(Stop::Refused(format!(
+                    "{name} is owned by {}; an update signed with TSIG or unsigned does not change it",
+                    owner.principal
+                ))),
+                None => Ok(Decision::Unowned),
+            };
+        };
+        let Some(kerberos) = &self.zone.update.kerberos else {
+            return Err(Stop::Refused(format!(
+                "{name}: the zone takes no GSS-TSIG updates"
+            )));
+        };
+        let privileged = kerberos.is_privileged(&identity.groups);
+        if is_locator(&self.zone.name, name) {
+            return if privileged {
+                Ok(Decision::Privileged)
+            } else {
+                Err(Stop::Refused(format!(
+                    "{name} is a locator name; only privileged principals change it"
+                )))
+            };
+        }
+        // A wildcard answers every name of the zone that does not exist: only a privileged
+        // principal writes one.
+        if name.labels().next() == Some("*") {
+            return if privileged {
+                Ok(Decision::Privileged)
+            } else {
+                Err(Stop::Refused(format!(
+                    "{name} is a wildcard name; only privileged principals change it"
+                )))
+            };
+        }
+        if let Some(owner) = live {
+            if owns(owner, identity) {
+                return Ok(Decision::Owner);
+            }
+            if privileged {
+                return Ok(Decision::Privileged);
+            }
+            return Err(Stop::Refused(format!(
+                "{name} is owned by {}",
+                owner.principal
+            )));
+        }
+        if rrsets
+            .iter()
+            .any(|rrset| matches!(rrset.origin, Origin::Manual | Origin::Ipam | Origin::Dhcp))
+        {
+            return if privileged {
+                Ok(Decision::Privileged)
+            } else {
+                Err(Stop::Refused(format!(
+                    "{name} holds a static record; only privileged principals change it"
+                )))
+            };
+        }
+        if rrsets.iter().any(|rrset| rrset.origin == Origin::Ad) {
+            if privileged {
+                return Ok(Decision::Privileged);
+            }
+            let claims = own_host(identity).is_some_and(|host| {
+                carries_host(&self.zone.name, name, &host, rrsets.iter().copied())
+            });
+            return if claims {
+                Ok(Decision::Claimed)
+            } else {
+                Err(Stop::Refused(format!(
+                    "{name} was imported without an owner; only a privileged principal or the host it names may claim it"
+                )))
+            };
+        }
+        if kerberos.is_update_proxy(&identity.groups) {
+            return Ok(Decision::Proxy);
+        }
+        Ok(Decision::Owner)
+    }
+
+    /// The owners after an update that passed: the creator or claimant owns the name, the
+    /// hold starts when the last record went and ends when a record came back, an owner
+    /// whose hold passed goes.
+    fn settle(&mut self, signer: &Signer, decided: &BTreeMap<NodeKey, Decision>) {
+        let now = self.now();
+        let days = self
+            .zone
+            .update
+            .kerberos
+            .as_ref()
+            .map_or(0, |kerberos| kerberos.owner_hold_days);
+        let hold_until = now
+            .checked_add(Duration::from_secs(u64::from(days) * 86_400))
+            .unwrap_or(now);
+        for (key, decision) in decided {
+            let has_records = self.nodes.get(key).is_some_and(|node| {
+                node.after
+                    .values()
+                    .any(|rrset| rrset.origin != Origin::Dnssec)
+            });
+            let Some(state) = self.owners.get_mut(key) else {
+                continue;
+            };
+            let live = state.after.take().filter(|owner| !owner.hold_passed(now));
+            state.after = match (decision, live, signer.gss()) {
+                (Decision::Owner | Decision::Claimed, None, Some(identity)) if has_records => {
+                    Some(NameOwner {
+                        sid: identity.sid.clone(),
+                        principal: identity.principal.clone(),
+                        since: now,
+                        hold_until: None,
+                    })
+                }
+                (_, Some(mut owner), _) => {
+                    if has_records {
+                        owner.hold_until = None;
+                    } else if owner.hold_until.is_none() {
+                        owner.hold_until = Some(hold_until);
+                    }
+                    Some(owner)
+                }
+                _ => None,
+            };
+        }
+    }
+    // WP13.2: end.
 
     /// Applies one operation to the nodes; `undo` collects the nodes it changes with
     /// their state before the update, for the rollback.
@@ -348,8 +672,7 @@ impl Planner<'_> {
                     next.remove(rtype);
                 } else {
                     let ttl = existing.ttl;
-                    let rrset =
-                        self.fresh(&item.scope, name, *rtype, ttl, records, item.key.as_ref());
+                    let rrset = self.fresh(&item.scope, name, *rtype, ttl, records, &item.signer);
                     next.insert(*rtype, rrset);
                 }
             }
@@ -391,7 +714,7 @@ impl Planner<'_> {
             }
             _ => vec![rdata.clone()],
         };
-        let rrset = self.fresh(&item.scope, name, rtype, ttl, records, item.key.as_ref());
+        let rrset = self.fresh(&item.scope, name, rtype, ttl, records, &item.signer);
         next.insert(rtype, rrset);
         Ok(())
     }
@@ -404,8 +727,68 @@ impl Planner<'_> {
         }
     }
 
+    /// Decides on `name` for the update of `item` once, before its first operation there.
+    fn own(
+        &mut self,
+        item: &Item<'_>,
+        name: &DnsName,
+        decided: &mut BTreeMap<NodeKey, Decision>,
+    ) -> Result<(), Stop> {
+        let key = (item.scope.clone(), name.clone());
+        if !self.ownership || decided.contains_key(&key) {
+            return Ok(());
+        }
+        self.load(&item.scope, name)?;
+        self.load_owner(&item.scope, name)?;
+        // An owner without a hold of a name without records lost them outside the update
+        // path (the API, a zone import): the name is new again rather than owned forever.
+        // Scavenging (DNS-29) starts the hold itself (identity plan section 3.8).
+        let empty = self.nodes.get(&key).is_none_or(|node| {
+            node.after
+                .values()
+                .all(|rrset| rrset.origin == Origin::Dnssec)
+        });
+        if empty
+            && let Some(state) = self.owners.get_mut(&key)
+            && state
+                .after
+                .as_ref()
+                .is_some_and(|owner| owner.hold_until.is_none())
+        {
+            state.after = None;
+        }
+        let decision = self.decide(&item.signer, &item.scope, name)?;
+        decided.insert(key, decision);
+        Ok(())
+    }
+
+    /// Plans every update of the group in order: the outcome of each and the strongest
+    /// ownership decision of each.
+    fn run(
+        &mut self,
+        items: &[Item<'_>],
+        admit: &dyn Fn(&Zone, &Item<'_>) -> Result<(), Refusal>,
+    ) -> ZoneResult<(Vec<Outcome>, Vec<Option<Decision>>)> {
+        let mut outcomes = Vec::with_capacity(items.len());
+        let mut decisions = Vec::with_capacity(items.len());
+        for item in items {
+            self.decision = None;
+            let outcome = if let Err(reason) = admit(&self.zone, item) {
+                Outcome::Refused(reason.to_owned())
+            } else if !self.zone.has_scope(&item.scope) {
+                Outcome::Failed(format!("the zone has no scope {}", item.scope))
+            } else {
+                self.update(item)?
+            };
+            outcomes.push(outcome);
+            decisions.push(self.decision);
+        }
+        Ok((outcomes, decisions))
+    }
+
     /// Plans one update: its prerequisites, its operations, the model's rules.
     fn update(&mut self, item: &Item<'_>) -> ZoneResult<Outcome> {
+        self.decision = None;
         let message = item.message;
         for prerequisite in &message.prerequisites {
             self.load(&item.scope, prerequisite.name())?;
@@ -424,8 +807,13 @@ impl Planner<'_> {
             return Ok(Outcome::Unmet(unmet));
         }
         let mut undo = BTreeMap::new();
+        // WP13.2: the ownership decision of each name, before its first operation.
+        let mut decided: BTreeMap<NodeKey, Decision> = BTreeMap::new();
         for op in &message.updates {
-            match self.apply_op(item, op, &mut undo) {
+            let step = self
+                .own(item, op.name(), &mut decided)
+                .and_then(|()| self.apply_op(item, op, &mut undo));
+            match step {
                 Ok(()) => {}
                 Err(Stop::Refused(reason)) => {
                     self.rollback(undo);
@@ -438,11 +826,15 @@ impl Planner<'_> {
             }
         }
         match self.counts(&undo) {
-            Ok((added, removed, rrsets)) => Ok(Outcome::Applied {
-                added,
-                removed,
-                rrsets,
-            }),
+            Ok((added, removed, rrsets)) => {
+                self.settle(&item.signer, &decided);
+                self.decision = decided.values().copied().max();
+                Ok(Outcome::Applied {
+                    added,
+                    removed,
+                    rrsets,
+                })
+            }
             Err(reason) => {
                 self.rollback(undo);
                 Ok(Outcome::Failed(reason))
@@ -524,12 +916,20 @@ impl Planner<'_> {
 }
 
 /// The audit record of an applied update.
-fn applied_audit(zone: &Zone, item: &Item<'_>, outcome: &Outcome) -> AuditDraft {
-    let mut draft = AuditDraft::success(audit::UPDATE_APPLY, vec![ObjectRef::from(zone.id)])
+fn applied_audit(
+    zone: &Zone,
+    item: &Item<'_>,
+    outcome: &Outcome,
+    decision: Option<Decision>,
+    serial: Option<u32>,
+) -> AuditDraft {
+    let draft = AuditDraft::success(audit::UPDATE_APPLY, vec![ObjectRef::from(zone.id)])
         .with_source_ip(Some(item.client))
         .with_context("zone", zone.name.as_str())
-        .with_context("client", item.client.to_string())
-        .with_context("key", item.key.as_ref().map_or("none", KeyName::as_str))
+        .with_context("client", item.client.to_string());
+    let mut draft = item
+        .signer
+        .audit(draft)
         .with_context(
             "prerequisites",
             item.message.prerequisites.len().to_string(),
@@ -549,8 +949,49 @@ fn applied_audit(zone: &Zone, item: &Item<'_>, outcome: &Outcome) -> AuditDraft 
     if item.scope != ScopeName::DEFAULT {
         draft = draft.with_context("scope", item.scope.as_str());
     }
+    if let Some(decision) = decision.filter(|decision| *decision != Decision::Unowned) {
+        draft = draft.with_context("ownership", decision.name());
+    }
+    if let Some(serial) = serial {
+        draft = draft.with_context("serial", serial.to_string());
+    }
     draft
 }
+
+// WP13.2: the owner rows of a group.
+/// Adds the owners of a group to `batch`: every row read is expected unchanged, the ones
+/// that changed are written or deleted.
+fn stage_owners(
+    batch: &mut WriteBatch,
+    zone: ZoneId,
+    owners: &BTreeMap<NodeKey, OwnerState>,
+) -> ZoneResult<()> {
+    for ((scope, name), state) in owners {
+        let key = NameOwnerKey {
+            zone,
+            scope: scope.clone(),
+            name: name.clone(),
+        };
+        batch.expect_typed(
+            &NAME_OWNERS,
+            &key,
+            state.before.as_ref().map(|(_, revision)| *revision),
+        );
+        if state.before.as_ref().map(|(owner, _)| owner) == state.after.as_ref() {
+            continue;
+        }
+        match &state.after {
+            Some(owner) => {
+                batch.put_typed(&NAME_OWNERS, &key, owner)?;
+            }
+            None => {
+                batch.delete_typed(&NAME_OWNERS, &key);
+            }
+        }
+    }
+    Ok(())
+}
+// WP13.2: end.
 
 /// Plans the updates `items` of the zone `zone` against `view`: one outcome per update,
 /// and the write of every change, or nothing when no update changed anything. `admit` runs
@@ -566,6 +1007,7 @@ pub(crate) fn plan(
     admit: &dyn Fn(&Zone, &Item<'_>) -> Result<(), Refusal>,
     cx: &RequestCtx,
     limits: JournalLimits,
+    profile: UpdateProfile,
 ) -> ZoneResult<Planned<Vec<Outcome>>> {
     let row = match ZoneService::zone(view, zone) {
         Ok(row) => row,
@@ -575,28 +1017,18 @@ pub(crate) fn plan(
         }
         Err(error) => return Err(error),
     };
+    let ownership = policy::ownership_on(&row.zone, profile);
     let mut planner = Planner {
         view,
         zone: row.zone,
         stamp: Stamp::new(cx.now, cx.principal.clone()),
         nodes: BTreeMap::new(),
         reads: BTreeMap::new(),
+        ownership,
+        owners: BTreeMap::new(),
+        decision: None,
     };
-    let mut outcomes = Vec::with_capacity(items.len());
-    for item in items {
-        if let Err(reason) = admit(&planner.zone, item) {
-            outcomes.push(Outcome::Refused(reason.to_owned()));
-            continue;
-        }
-        if !planner.zone.has_scope(&item.scope) {
-            outcomes.push(Outcome::Failed(format!(
-                "the zone has no scope {}",
-                item.scope
-            )));
-            continue;
-        }
-        outcomes.push(planner.update(item)?);
-    }
+    let (outcomes, decisions) = planner.run(items, admit)?;
     let diff = planner.diff();
     if diff.is_empty() {
         return Ok(Planned::nothing(outcomes));
@@ -621,6 +1053,7 @@ pub(crate) fn plan(
             (None, None) => {}
         }
     }
+    stage_owners(&mut batch, zone, &planner.owners)?;
     let mut scopes: Vec<&ScopeName> = diff.iter().map(|item| &item.key.scope).collect();
     scopes.sort();
     scopes.dedup();
@@ -642,13 +1075,15 @@ pub(crate) fn plan(
             serial = Some(step.to);
         }
     }
-    for (item, outcome) in items.iter().zip(&outcomes) {
+    for ((item, outcome), decision) in items.iter().zip(&outcomes).zip(&decisions) {
         if outcome.changed() {
-            let mut draft = applied_audit(&planner.zone, item, outcome);
-            if let Some(serial) = serial {
-                draft = draft.with_context("serial", serial.to_string());
-            }
-            batch.audit(draft);
+            batch.audit(applied_audit(
+                &planner.zone,
+                item,
+                outcome,
+                *decision,
+                serial,
+            ));
         }
     }
     let changed = outcomes.iter().filter(|outcome| outcome.changed()).count();
@@ -662,4 +1097,140 @@ pub(crate) fn plan(
         ),
         vec![ObjectRef::from(zone)],
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_core::{
+        Principal, SystemComponent,
+        dns::{PrincipalName, ZoneId},
+    };
+
+    use super::*;
+
+    fn name(text: &str) -> DnsName {
+        DnsName::new(text).expect("name")
+    }
+
+    fn identity(principal: &str) -> GssIdentity {
+        GssIdentity {
+            principal: PrincipalName::parse(principal).expect("principal"),
+            sid: None,
+            groups: Vec::new(),
+        }
+    }
+
+    fn rrset(owner: &str, rtype: Rtype, records: &[RecordData]) -> RrSet {
+        RrSet {
+            zone: ZoneId::generate(),
+            scope: ScopeName::DEFAULT,
+            name: name(owner),
+            rtype,
+            ttl: 300,
+            rdata: records.iter().map(Rdata::from_data).collect(),
+            origin: Origin::Ad,
+            key: None,
+            principal: None,
+            updated: Stamp::new(Timestamp::now(), Principal::system(SystemComponent::Dns)),
+        }
+    }
+
+    fn ptr(target: &str) -> RecordData {
+        RecordData::Ptr {
+            target: name(target),
+        }
+    }
+
+    /// DNS-28: the locator names of section 3.6.
+    #[test]
+    fn dns_28_the_locator_names() {
+        let zone = name("corp.example.test");
+        for locator in [
+            "corp.example.test",
+            "_ldap._tcp.corp.example.test",
+            "_kerberos._udp.corp.example.test",
+            "_kpasswd._tcp.corp.example.test",
+            "_gc._tcp.corp.example.test",
+            "gc._msdcs.corp.example.test",
+            "DomainDnsZones.corp.example.test",
+            "forestdnszones.corp.example.test",
+        ] {
+            assert!(is_locator(&zone, &name(locator)), "{locator}");
+        }
+        for host in ["pc01.corp.example.test", "ldap.corp.example.test"] {
+            assert!(!is_locator(&zone, &name(host)), "{host}");
+        }
+        let msdcs = name("_msdcs.corp.example.test");
+        assert!(is_locator(
+            &msdcs,
+            &name("dc01-guid._msdcs.corp.example.test")
+        ));
+    }
+
+    /// DNS-28, R122: `HOST$` claims `host.<zone>` and a name whose records are PTR records
+    /// to `host.*`; not a name in another place, a user principal, or a PTR to another host.
+    #[test]
+    fn dns_28_a_computer_claims_only_its_own_host() {
+        let zone = name("corp.example.test");
+        let pc01 = identity("PC01$@CORP.EXAMPLE.TEST");
+        let host = own_host(&pc01).expect("a computer account");
+        assert_eq!(host, "pc01");
+        assert_eq!(own_host(&identity("alice@CORP.EXAMPLE.TEST")), None);
+        let a = rrset("pc01.corp.example.test", Rtype::A, &[]);
+        let at = |owner: &str| name(owner);
+        assert!(carries_host(
+            &zone,
+            &at("pc01.corp.example.test"),
+            &host,
+            [&a].into_iter()
+        ));
+        assert!(!carries_host(
+            &zone,
+            &at("pc01.lab.corp.example.test"),
+            &host,
+            [&a].into_iter()
+        ));
+        assert!(!carries_host(
+            &zone,
+            &at("pc02.corp.example.test"),
+            &host,
+            [&a].into_iter()
+        ));
+        let reverse = name("2.0.192.in-addr.arpa");
+        let own = rrset(
+            "21.2.0.192.in-addr.arpa",
+            Rtype::PTR,
+            &[ptr("PC01.corp.example.test")],
+        );
+        let other = rrset(
+            "22.2.0.192.in-addr.arpa",
+            Rtype::PTR,
+            &[ptr("pc02.corp.example.test")],
+        );
+        let mixed = rrset(
+            "23.2.0.192.in-addr.arpa",
+            Rtype::PTR,
+            &[ptr("pc01.corp.example.test"), ptr("pc02.corp.example.test")],
+        );
+        let ptr_name = at("21.2.0.192.in-addr.arpa");
+        assert!(carries_host(&reverse, &ptr_name, &host, [&own].into_iter()));
+        assert!(!carries_host(
+            &reverse,
+            &ptr_name,
+            &host,
+            [&other].into_iter()
+        ));
+        assert!(!carries_host(
+            &reverse,
+            &ptr_name,
+            &host,
+            [&mixed].into_iter()
+        ));
+        assert!(!carries_host(
+            &reverse,
+            &ptr_name,
+            &host,
+            std::iter::empty()
+        ));
+    }
 }
