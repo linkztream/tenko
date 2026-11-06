@@ -111,7 +111,7 @@ pub const DNSSEC_PURPOSE: &str = "dnssec";
 /// The secret purpose of the Kerberos account's keys in the vault (identity plan section
 /// 3.2, ADR 0026 point 5): one system secret per account, never revealed, read by the
 /// `dns` role through the watcher that loads TSIG keys. Declared by the node-sync purposes
-/// when WP13.3 delivers the keys.
+/// (`PURPOSES` of `tenko-cluster`, WP13.3).
 pub const KRB_PURPOSE: &str = "krb";
 // WP13.0: end.
 

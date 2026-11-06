@@ -204,7 +204,7 @@ The system component of the DNS services' own writes is `dns`.
 | `tenko_dns_log_dropped` | counter | |
 | `tenko_dns_xfr` | counter | `kind` (`axfr_out`, `ixfr_out`, `axfr_in`, `ixfr_in`, `notify_out`, `notify_in`), `outcome` (`ok`, `current`, `refused`, `failed`) |
 | `tenko_dns_xfr_bytes` | counter | `direction` (`out`, `in`) |
-| `tenko_dns_updates` | counter | `outcome` (`ok`, `prerequisite`, `refused`, `notauth`, `formerr`, `failed`) (WP6.2; registered by the role, `tenko_dns::update::register_metrics`) |
+| `tenko_dns_updates` | counter | `outcome` (`ok`, `prerequisite`, `refused`, `notauth`, `formerr`, `failed`), `auth` (`none`, `tsig`, `gss`: how the update was signed; WP13.2) (WP6.2; registered by the role, `tenko_dns::update::register_metrics`) |
 | `tenko_dns_update_duration_seconds` | histogram (1 ms to 5 s) | (WP6.2: from the arrival of an update to its answer) |
 
 ## 8. Node sync
@@ -339,7 +339,7 @@ No object kind is added: the account authorizes as DNS key material, the provide
 | `tenko_dns_gss_contexts` | gauge, set before a scrape | `state` (`negotiating`, `established`) |
 | `tenko_dns_gss_establish_seconds` | histogram (50 µs to 2 s) | |
 
-The label `auth` (`none`, `tsig`, `gss`) on `tenko_dns_updates`, and `tenko_auth_logins_total{method,outcome}` and `tenko_auth_directory_request_seconds{provider,kind}`, are declared by the packages that count into them (WP13.2, WP13.5): they change or add families the running roles serve.
+The label `auth` (`none`, `tsig`, `gss`) on `tenko_dns_updates` is declared since WP13.2 (`update::UPDATES`, the values in `update::AUTHS`). `tenko_auth_logins_total{method,outcome}` and `tenko_auth_directory_request_seconds{provider,kind}` are declared by the package that counts into them (WP13.5): it adds families the running roles serve.
 
 **Configuration** `[dns.gss]` (`crates/tenko/src/config/gss.rs`, `deploy/tenko.example.toml`): `context_max_secs`, `contexts_max`, `negotiating_max`, `per_client_max`, `skew_secs`, with the defaults of plan section 3.3 and the Home profile's bounds ([dns.md](dns.md) section 13.10); read and validated, consumed from WP13.2 on.
 

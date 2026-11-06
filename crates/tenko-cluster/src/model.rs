@@ -78,7 +78,7 @@ pub struct CertificateRef {
     pub sha256: String,
     /// Start of validity.
     pub not_before: Timestamp,
-    /// End of validity.
+    /// End of validity, or the certificate's retirement after a renewal replaced it.
     pub not_after: Timestamp,
 }
 
