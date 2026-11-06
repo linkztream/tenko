@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="dns-kerberos">
+      <unit id="dns.kerberos.no_access">
+        <segment><source>The Kerberos account is key material: it is shown to administrators, who hold dns.keys.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.setup.title">
+        <segment><source>Set up the account of secure updates</source></segment>
+      </unit>
+      <unit id="dns.kerberos.setup.body">
+        <segment><source>Windows clients and domain controllers sign their dynamic updates with Kerberos. Tenko accepts them with the keys of one Active Directory computer account. Take over an account a domain administrator pre-staged with a one-time password (recommended: Tenko then owns and rotates its password), or import a keytab made with ktpass or msktutil.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.setup.adopt">
+        <segment><source>Adopt a pre-staged account</source></segment>
+      </unit>
+      <unit id="dns.kerberos.setup.import">
+        <segment><source>Import a keytab</source></segment>
+      </unit>
+      <unit id="dns.kerberos.setup.no_admin">
+        <segment><source>Tenko never asks for a directory administrator's password.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.steps">
+        <segment><source>Steps of the set-up</source></segment>
+      </unit>
+      <unit id="dns.kerberos.step.realm">
+        <segment><source>Realm</source></segment>
+      </unit>
+      <unit id="dns.kerberos.step.account">
+        <segment><source>Account and SPNs</source></segment>
+      </unit>
+      <unit id="dns.kerberos.step.password">
+        <segment><source>One-time password</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.realm">
+        <segment><source>Realm</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.realm_help">
+        <segment><source>The Active Directory domain in upper case, for example CORP.EXAMPLE.TEST.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.kdcs">
+        <segment><source>KDCs</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.kdcs_help">
+        <segment><source>One per line, host or host:port. Empty: found through the _kerberos._tcp records of the realm.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.name">
+        <segment><source>Account name</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.name_help">
+        <segment><source>The computer account's name, 1 to 15 letters, digits or hyphens; the $ is added.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.spns">
+        <segment><source>Service principal names</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.spns_help">
+        <segment><source>One per line: DNS/&lt;name&gt; for each Tenko node that is the primary of an AD zone, HTTP/&lt;name&gt; for Kerberos sign-in to the web UI.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.password">
+        <segment><source>One-time password</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.password_help">
+        <segment><source>The password the administrator set when creating the account. Tenko uses it once and replaces it at once.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.rotation">
+        <segment><source>Rotate the password every (days)</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.rotation_help">
+        <segment><source>1 to 365; 30 by default (TGL-32); 0 turns rotation off under the Lab profile only. Tenko keeps the previous key version until the tickets issued under it have expired.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.keytab">
+        <segment><source>Keytab file</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.keytab_help">
+        <segment><source>The file ktpass or msktutil wrote. Tenko keeps the AES keys and not the file.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.keytab_chosen">
+        <segment><source>{file} is read; it is sent once with the import.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.import_name">
+        <segment><source>Account name (optional)</source></segment>
+      </unit>
+      <unit id="dns.kerberos.field.import_name_help">
+        <segment><source>Needed when the keytab names only an SPN (ktpass /princ DNS/...).</source></segment>
+      </unit>
+      <unit id="dns.kerberos.check.realm">
+        <segment><source>Enter the realm as a domain name, for example CORP.EXAMPLE.TEST.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.check.kdcs">
+        <segment><source>Each KDC is a host or host:port on a line of its own.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.check.spns">
+        <segment><source>Enter at least one SPN, each DNS/&lt;name&gt; or HTTP/&lt;name&gt;.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.check.name">
+        <segment><source>The name is 1 to 15 letters, digits or hyphens.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.check.password">
+        <segment><source>Enter the one-time password.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.check.rotation">
+        <segment><source>Enter a number of days from 0 to 365.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.check.keytab">
+        <segment><source>Choose the keytab file.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.check.keytab_size">
+        <segment><source>A keytab is at most 1 MiB.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.block.title">
+        <segment><source>For the domain administrator</source></segment>
+      </unit>
+      <unit id="dns.kerberos.block.body">
+        <segment><source>The administrator creates the account with the PowerShell block of the documentation ({section}) on a management host or a domain controller and types these values at its prompts. Tenko shows values only, never a script, and offers no copy: type them by hand.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.block.name">
+        <segment><source>Account name</source></segment>
+      </unit>
+      <unit id="dns.kerberos.block.ou">
+        <segment><source>Organizational unit</source></segment>
+      </unit>
+      <unit id="dns.kerberos.block.ou_value">
+        <segment><source>The one you choose, as a distinguished name (OU=Service Accounts,DC=corp,DC=example,DC=test)</source></segment>
+      </unit>
+      <unit id="dns.kerberos.block.spn">
+        <segment><source>SPN {n}</source></segment>
+      </unit>
+      <unit id="dns.kerberos.block.realm">
+        <segment><source>Realm (printed by the block)</source></segment>
+      </unit>
+      <unit id="dns.kerberos.block.safety">
+        <segment><source>The block runs as a domain administrator and takes nothing Tenko wrote: each value is typed at its prompt and checked there, and anything pasted beyond one line is discarded.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.password_intro">
+        <segment><source>Enter the one-time password of {name} in {realm}. Tenko changes it at once to one only it knows, stores the keys and runs the self-test.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.back">
+        <segment><source>Back</source></segment>
+      </unit>
+      <unit id="dns.kerberos.next">
+        <segment><source>Next</source></segment>
+      </unit>
+      <unit id="dns.kerberos.adopting">
+        <segment><source>Taking over the account…</source></segment>
+      </unit>
+      <unit id="dns.kerberos.adopt_submit">
+        <segment><source>Take over the account</source></segment>
+      </unit>
+      <unit id="dns.kerberos.import_intro">
+        <segment><source>The password stays the administrator's: Tenko does not rotate an imported account, and a password reset in Active Directory needs a new keytab.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.importing">
+        <segment><source>Importing…</source></segment>
+      </unit>
+      <unit id="dns.kerberos.import_submit">
+        <segment><source>Import the keytab</source></segment>
+      </unit>
+      <unit id="dns.kerberos.passed">
+        <segment><source>The self-test passed at {at}.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.checked">
+        <segment><source>The self-test ran</source></segment>
+      </unit>
+      <unit id="dns.kerberos.rotation_started">
+        <segment><source>The rotation started</source></segment>
+      </unit>
+      <unit id="dns.kerberos.rotation_job">
+        <segment><source>Follow the rotation job</source></segment>
+      </unit>
+      <unit id="dns.kerberos.deleted">
+        <segment><source>The account is removed from Tenko</source></segment>
+      </unit>
+      <unit id="dns.kerberos.account">
+        <segment><source>Account</source></segment>
+      </unit>
+      <unit id="dns.kerberos.principal">
+        <segment><source>Principal</source></segment>
+      </unit>
+      <unit id="dns.kerberos.password">
+        <segment><source>Password</source></segment>
+      </unit>
+      <unit id="dns.kerberos.owned">
+        <segment><source>Tenko's: only Tenko knows it</source></segment>
+      </unit>
+      <unit id="dns.kerberos.imported">
+        <segment><source>The administrator's: imported from a keytab</source></segment>
+      </unit>
+      <unit id="dns.kerberos.rotation">
+        <segment><source>Rotation</source></segment>
+      </unit>
+      <unit id="dns.kerberos.rotation_every">
+        <segment><source>{days, plural, one {Every day} other {Every # days}}</source></segment>
+      </unit>
+      <unit id="dns.kerberos.rotation_none">
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="dns.kerberos.last_rotation">
+        <segment><source>Last rotation</source></segment>
+      </unit>
+      <unit id="dns.kerberos.next_rotation">
+        <segment><source>Next rotation</source></segment>
+      </unit>
+      <unit id="dns.kerberos.last_check">
+        <segment><source>Last self-test</source></segment>
+      </unit>
+      <unit id="dns.kerberos.kdcs">
+        <segment><source>KDCs</source></segment>
+      </unit>
+      <unit id="dns.kerberos.kdcs_found">
+        <segment><source>Found through the _kerberos._tcp records</source></segment>
+      </unit>
+      <unit id="dns.kerberos.versions">
+        <segment><source>Key versions</source></segment>
+      </unit>
+      <unit id="dns.kerberos.col.kvno">
+        <segment><source>Version</source></segment>
+      </unit>
+      <unit id="dns.kerberos.col.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="dns.kerberos.col.etypes">
+        <segment><source>Encryption types</source></segment>
+      </unit>
+      <unit id="dns.kerberos.col.created">
+        <segment><source>Made</source></segment>
+      </unit>
+      <unit id="dns.kerberos.state.current">
+        <segment><source>Current</source></segment>
+      </unit>
+      <unit id="dns.kerberos.state.previous">
+        <segment><source>Previous, still accepted</source></segment>
+      </unit>
+      <unit id="dns.kerberos.state.pending">
+        <segment><source>Pending, being changed</source></segment>
+      </unit>
+      <unit id="dns.kerberos.spns">
+        <segment><source>Service principal names</source></segment>
+      </unit>
+      <unit id="dns.kerberos.contexts">
+        <segment><source>Contexts of this node</source></segment>
+      </unit>
+      <unit id="dns.kerberos.contexts_line">
+        <segment><source>{negotiating} negotiating, {established} established, {refused} refused in the last hour</source></segment>
+      </unit>
+      <unit id="dns.kerberos.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="dns.kerberos.check_now">
+        <segment><source>Run the self-test</source></segment>
+      </unit>
+      <unit id="dns.kerberos.rotate_now">
+        <segment><source>Rotate the password now</source></segment>
+      </unit>
+      <unit id="dns.kerberos.delete">
+        <segment><source>Remove from Tenko</source></segment>
+      </unit>
+      <unit id="dns.kerberos.delete_title">
+        <segment><source>Remove {principal} from Tenko?</source></segment>
+      </unit>
+      <unit id="dns.kerberos.delete_body">
+        <segment><source>Tenko forgets the account's keys and stops accepting secure updates; zones with Kerberos settings fall back to their other lists. The account in Active Directory stays: a domain administrator deletes it there.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.self_test_failed.title">
+        <segment><source>The self-test failed</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.self_test_failed.fix">
+        <segment><source>{reason, select, disabled {The account is disabled or locked in Active Directory. Enable it again.} keys_refused {The KDC refuses the keys Tenko holds: someone reset the account's password. Set a new one-time password and adopt the account again, or import a new keytab.} unknown {The account does not exist in the directory. Create it again with the PowerShell block and adopt it.} expired {The account's password has expired. Set a new one-time password and adopt the account again.} kdc_unreachable {No KDC answered. Check the KDCs listed, the _kerberos._tcp records and the network path to port 88.} adopt_incomplete {The adopt did not finish. Remove the account from Tenko, set a new one-time password and adopt it again.} change_pending {A password change is pending. Tenko asks the KDC again and commits or undoes it; run the self-test again in a few minutes.} kvno_not_newer {The KDC names a key version that is not newer than the ones Tenko holds. Check the account's msDS-KeyVersionNumber, then run the self-test again.} ticket_key {A ticket does not decrypt with the key Tenko holds for its version. Check that the SPN is on this account only (setspn -Q), or import a new keytab.} install_refused {The DNS role refused the keys. Check the SPNs of the account.} no_keys {Tenko holds no key for the account. Remove it from Tenko and adopt or import it again.} other {Check the account and the KDCs, then run the self-test again.}}</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.kvno_unknown.title">
+        <segment><source>The KDC issues key version {kvno}, Tenko holds {held}</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.kvno_unknown.fix">
+        <segment><source>The password was changed outside Tenko, or the keytab was exported with another version. Adopt the account again with a new one-time password, or import a new keytab.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.spn_missing.title">
+        <segment><source>No account holds {spn}</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.spn_missing.fix">
+        <segment><source>Add the SPN to the account on a domain controller: setspn -S {spn} with the account's name.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.spn_duplicate.title">
+        <segment><source>{spn} is held by another account as well</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.spn_duplicate.fix">
+        <segment><source>Find the other holder with setspn -Q {spn} and remove the SPN there.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.weak_etype.title">
+        <segment><source>The KDC does not issue AES tickets for the account</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.weak_etype.fix">
+        <segment><source>Tenko accepts AES only. Set msDS-SupportedEncryptionTypes of the account to 24 (AES128 and AES256).</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.clock_skew.title">
+        <segment><source>The clock is {skew} s off the KDC's</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.clock_skew.fix">
+        <segment><source>Synchronize the node's clock with the domain's time source (OPS-09). Kerberos refuses tickets beyond 300 s.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.rotation_failed.title">
+        <segment><source>The password rotation failed ({failures} in a row)</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.rotation_failed.fix">
+        <segment><source>The old keys stay current. Run the self-test: it names the cause, usually a disabled account or a password policy that refuses the change.</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.other.title">
+        <segment><source>A finding of the self-test</source></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.other.fix">
+        <segment><source>Read the detail below and run the self-test again.</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

@@ -58,8 +58,8 @@ pub use recursion::{
 // WP10.0: end.
 // WP13.0: the identity of a secure update.
 pub use identity::{
-    EncryptionType, KerberosUpdate, KeyVersionMeta, KeyVersionState, KrbAccount, NameOwner,
-    NameOwnerKey, Ownership, PrincipalName, Realm, Sid,
+    EncryptionType, KerberosUpdate, KeyVersionMeta, KeyVersionState, KrbAccount, KrbFinding,
+    NameOwner, NameOwnerKey, Ownership, PrincipalName, Realm, Sid,
 };
 // WP13.0: end.
 

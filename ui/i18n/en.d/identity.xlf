@@ -14,14 +14,6 @@
         <notes><note category="description">Subtitle under the title of the Kerberos page: what the page is for.</note></notes>
         <segment><source>The Active Directory account that signs secure dynamic updates, its status and the zones of its realm.</source></segment>
       </unit>
-      <unit id="dns.kerberos.coming.title">
-        <notes><note category="description">Heading of the notice on the Kerberos page while the wizard and the status are not built yet.</note></notes>
-        <segment><source>Coming in a later package</source></segment>
-      </unit>
-      <unit id="dns.kerberos.coming.body">
-        <notes><note category="description">Body of the notice on the Kerberos page: what the later packages add.</note></notes>
-        <segment><source>The wizard that takes over the computer account, the keytab import, the self-test and the status of the key versions arrive with the Kerberos packages of Slice 13.</source></segment>
-      </unit>
       <unit id="settings.nav.providers">
         <notes><note category="description">Entry of the settings sub-navigation that leads to the sign-in providers.</note></notes>
         <segment><source>Sign-in providers</source></segment>

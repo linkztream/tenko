@@ -3311,10 +3311,112 @@ export type MessageKey =
   | "dns.infra.suffix"
   | "dns.infra.title"
   | "dns.job.dnssec_rollover"
-  | "dns.kerberos.coming.body"
-  | "dns.kerberos.coming.title"
+  | "dns.job.krb_rotate"
+  | "dns.job.krb_rotate_preview"
+  | "dns.kerberos.account"
+  | "dns.kerberos.actions"
+  | "dns.kerberos.adopt_submit"
+  | "dns.kerberos.adopting"
+  | "dns.kerberos.back"
+  | "dns.kerberos.block.body"
+  | "dns.kerberos.block.name"
+  | "dns.kerberos.block.ou"
+  | "dns.kerberos.block.ou_value"
+  | "dns.kerberos.block.realm"
+  | "dns.kerberos.block.safety"
+  | "dns.kerberos.block.spn"
+  | "dns.kerberos.block.title"
+  | "dns.kerberos.check.kdcs"
+  | "dns.kerberos.check.keytab"
+  | "dns.kerberos.check.keytab_size"
+  | "dns.kerberos.check.name"
+  | "dns.kerberos.check.password"
+  | "dns.kerberos.check.realm"
+  | "dns.kerberos.check.rotation"
+  | "dns.kerberos.check.spns"
+  | "dns.kerberos.check_now"
+  | "dns.kerberos.checked"
+  | "dns.kerberos.col.created"
+  | "dns.kerberos.col.etypes"
+  | "dns.kerberos.col.kvno"
+  | "dns.kerberos.col.state"
+  | "dns.kerberos.contexts"
+  | "dns.kerberos.contexts_line"
+  | "dns.kerberos.delete"
+  | "dns.kerberos.delete_body"
+  | "dns.kerberos.delete_title"
+  | "dns.kerberos.deleted"
+  | "dns.kerberos.field.import_name"
+  | "dns.kerberos.field.import_name_help"
+  | "dns.kerberos.field.kdcs"
+  | "dns.kerberos.field.kdcs_help"
+  | "dns.kerberos.field.keytab"
+  | "dns.kerberos.field.keytab_chosen"
+  | "dns.kerberos.field.keytab_help"
+  | "dns.kerberos.field.name"
+  | "dns.kerberos.field.name_help"
+  | "dns.kerberos.field.password"
+  | "dns.kerberos.field.password_help"
+  | "dns.kerberos.field.realm"
+  | "dns.kerberos.field.realm_help"
+  | "dns.kerberos.field.rotation"
+  | "dns.kerberos.field.rotation_help"
+  | "dns.kerberos.field.spns"
+  | "dns.kerberos.field.spns_help"
+  | "dns.kerberos.finding.clock_skew.fix"
+  | "dns.kerberos.finding.clock_skew.title"
+  | "dns.kerberos.finding.kvno_unknown.fix"
+  | "dns.kerberos.finding.kvno_unknown.title"
+  | "dns.kerberos.finding.other.fix"
+  | "dns.kerberos.finding.other.title"
+  | "dns.kerberos.finding.rotation_failed.fix"
+  | "dns.kerberos.finding.rotation_failed.title"
+  | "dns.kerberos.finding.self_test_failed.fix"
+  | "dns.kerberos.finding.self_test_failed.title"
+  | "dns.kerberos.finding.spn_duplicate.fix"
+  | "dns.kerberos.finding.spn_duplicate.title"
+  | "dns.kerberos.finding.spn_missing.fix"
+  | "dns.kerberos.finding.spn_missing.title"
+  | "dns.kerberos.finding.weak_etype.fix"
+  | "dns.kerberos.finding.weak_etype.title"
+  | "dns.kerberos.import_intro"
+  | "dns.kerberos.import_submit"
+  | "dns.kerberos.imported"
+  | "dns.kerberos.importing"
+  | "dns.kerberos.kdcs"
+  | "dns.kerberos.kdcs_found"
+  | "dns.kerberos.last_check"
+  | "dns.kerberos.last_rotation"
+  | "dns.kerberos.next"
+  | "dns.kerberos.next_rotation"
+  | "dns.kerberos.no_access"
+  | "dns.kerberos.owned"
+  | "dns.kerberos.passed"
+  | "dns.kerberos.password"
+  | "dns.kerberos.password_intro"
+  | "dns.kerberos.principal"
+  | "dns.kerberos.rotate_now"
+  | "dns.kerberos.rotation"
+  | "dns.kerberos.rotation_every"
+  | "dns.kerberos.rotation_job"
+  | "dns.kerberos.rotation_none"
+  | "dns.kerberos.rotation_started"
+  | "dns.kerberos.setup.adopt"
+  | "dns.kerberos.setup.body"
+  | "dns.kerberos.setup.import"
+  | "dns.kerberos.setup.no_admin"
+  | "dns.kerberos.setup.title"
+  | "dns.kerberos.spns"
+  | "dns.kerberos.state.current"
+  | "dns.kerberos.state.pending"
+  | "dns.kerberos.state.previous"
+  | "dns.kerberos.step.account"
+  | "dns.kerberos.step.password"
+  | "dns.kerberos.step.realm"
+  | "dns.kerberos.steps"
   | "dns.kerberos.sub"
   | "dns.kerberos.title"
+  | "dns.kerberos.versions"
   | "dns.key.col.algorithm"
   | "dns.key.col.created"
   | "dns.key.col.name"
@@ -5688,6 +5790,7 @@ export type MessageKey =
   | "jobs.title.dns.dnssec.rollover"
   | "jobs.title.dns.edit"
   | "jobs.title.dns.import"
+  | "jobs.title.dns.krb.rotate"
   | "jobs.title.dns.list.compile"
   | "jobs.title.dns_import"
   | "jobs.title.dns_list_fetch"
@@ -8543,6 +8646,23 @@ export interface MessageArgs {
   "dns.infra.ms": { ms: string | number };
   "dns.infra.no_addresses": { servers: number };
   "dns.infra.servers_of": { zone: string | number };
+  "dns.job.krb_rotate_preview": { realm: string | number };
+  "dns.kerberos.block.body": { section: string | number };
+  "dns.kerberos.block.spn": { n: string | number };
+  "dns.kerberos.contexts_line": { established: string | number; negotiating: string | number; refused: string | number };
+  "dns.kerberos.delete_title": { principal: string | number };
+  "dns.kerberos.field.keytab_chosen": { file: string | number };
+  "dns.kerberos.finding.clock_skew.title": { skew: string | number };
+  "dns.kerberos.finding.kvno_unknown.title": { held: string | number; kvno: string | number };
+  "dns.kerberos.finding.rotation_failed.title": { failures: string | number };
+  "dns.kerberos.finding.self_test_failed.fix": { reason: string };
+  "dns.kerberos.finding.spn_duplicate.fix": { spn: string | number };
+  "dns.kerberos.finding.spn_duplicate.title": { spn: string | number };
+  "dns.kerberos.finding.spn_missing.fix": { spn: string | number };
+  "dns.kerberos.finding.spn_missing.title": { spn: string | number };
+  "dns.kerberos.passed": { at: string | number };
+  "dns.kerberos.password_intro": { name: string | number; realm: string | number };
+  "dns.kerberos.rotation_every": { days: number };
   "dns.key.created_body": { name: string | number };
   "dns.key.delete_title": { name: string | number };
   "dns.key.deleted": { name: string | number };
@@ -12786,10 +12906,112 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.infra.suffix",
   "dns.infra.title",
   "dns.job.dnssec_rollover",
-  "dns.kerberos.coming.body",
-  "dns.kerberos.coming.title",
+  "dns.job.krb_rotate",
+  "dns.job.krb_rotate_preview",
+  "dns.kerberos.account",
+  "dns.kerberos.actions",
+  "dns.kerberos.adopt_submit",
+  "dns.kerberos.adopting",
+  "dns.kerberos.back",
+  "dns.kerberos.block.body",
+  "dns.kerberos.block.name",
+  "dns.kerberos.block.ou",
+  "dns.kerberos.block.ou_value",
+  "dns.kerberos.block.realm",
+  "dns.kerberos.block.safety",
+  "dns.kerberos.block.spn",
+  "dns.kerberos.block.title",
+  "dns.kerberos.check.kdcs",
+  "dns.kerberos.check.keytab",
+  "dns.kerberos.check.keytab_size",
+  "dns.kerberos.check.name",
+  "dns.kerberos.check.password",
+  "dns.kerberos.check.realm",
+  "dns.kerberos.check.rotation",
+  "dns.kerberos.check.spns",
+  "dns.kerberos.check_now",
+  "dns.kerberos.checked",
+  "dns.kerberos.col.created",
+  "dns.kerberos.col.etypes",
+  "dns.kerberos.col.kvno",
+  "dns.kerberos.col.state",
+  "dns.kerberos.contexts",
+  "dns.kerberos.contexts_line",
+  "dns.kerberos.delete",
+  "dns.kerberos.delete_body",
+  "dns.kerberos.delete_title",
+  "dns.kerberos.deleted",
+  "dns.kerberos.field.import_name",
+  "dns.kerberos.field.import_name_help",
+  "dns.kerberos.field.kdcs",
+  "dns.kerberos.field.kdcs_help",
+  "dns.kerberos.field.keytab",
+  "dns.kerberos.field.keytab_chosen",
+  "dns.kerberos.field.keytab_help",
+  "dns.kerberos.field.name",
+  "dns.kerberos.field.name_help",
+  "dns.kerberos.field.password",
+  "dns.kerberos.field.password_help",
+  "dns.kerberos.field.realm",
+  "dns.kerberos.field.realm_help",
+  "dns.kerberos.field.rotation",
+  "dns.kerberos.field.rotation_help",
+  "dns.kerberos.field.spns",
+  "dns.kerberos.field.spns_help",
+  "dns.kerberos.finding.clock_skew.fix",
+  "dns.kerberos.finding.clock_skew.title",
+  "dns.kerberos.finding.kvno_unknown.fix",
+  "dns.kerberos.finding.kvno_unknown.title",
+  "dns.kerberos.finding.other.fix",
+  "dns.kerberos.finding.other.title",
+  "dns.kerberos.finding.rotation_failed.fix",
+  "dns.kerberos.finding.rotation_failed.title",
+  "dns.kerberos.finding.self_test_failed.fix",
+  "dns.kerberos.finding.self_test_failed.title",
+  "dns.kerberos.finding.spn_duplicate.fix",
+  "dns.kerberos.finding.spn_duplicate.title",
+  "dns.kerberos.finding.spn_missing.fix",
+  "dns.kerberos.finding.spn_missing.title",
+  "dns.kerberos.finding.weak_etype.fix",
+  "dns.kerberos.finding.weak_etype.title",
+  "dns.kerberos.import_intro",
+  "dns.kerberos.import_submit",
+  "dns.kerberos.imported",
+  "dns.kerberos.importing",
+  "dns.kerberos.kdcs",
+  "dns.kerberos.kdcs_found",
+  "dns.kerberos.last_check",
+  "dns.kerberos.last_rotation",
+  "dns.kerberos.next",
+  "dns.kerberos.next_rotation",
+  "dns.kerberos.no_access",
+  "dns.kerberos.owned",
+  "dns.kerberos.passed",
+  "dns.kerberos.password",
+  "dns.kerberos.password_intro",
+  "dns.kerberos.principal",
+  "dns.kerberos.rotate_now",
+  "dns.kerberos.rotation",
+  "dns.kerberos.rotation_every",
+  "dns.kerberos.rotation_job",
+  "dns.kerberos.rotation_none",
+  "dns.kerberos.rotation_started",
+  "dns.kerberos.setup.adopt",
+  "dns.kerberos.setup.body",
+  "dns.kerberos.setup.import",
+  "dns.kerberos.setup.no_admin",
+  "dns.kerberos.setup.title",
+  "dns.kerberos.spns",
+  "dns.kerberos.state.current",
+  "dns.kerberos.state.pending",
+  "dns.kerberos.state.previous",
+  "dns.kerberos.step.account",
+  "dns.kerberos.step.password",
+  "dns.kerberos.step.realm",
+  "dns.kerberos.steps",
   "dns.kerberos.sub",
   "dns.kerberos.title",
+  "dns.kerberos.versions",
   "dns.key.col.algorithm",
   "dns.key.col.created",
   "dns.key.col.name",
@@ -15163,6 +15385,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.title.dns.dnssec.rollover",
   "jobs.title.dns.edit",
   "jobs.title.dns.import",
+  "jobs.title.dns.krb.rotate",
   "jobs.title.dns.list.compile",
   "jobs.title.dns_import",
   "jobs.title.dns_list_fetch",

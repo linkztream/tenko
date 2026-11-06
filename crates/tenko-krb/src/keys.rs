@@ -10,6 +10,8 @@
 
 use tenko_core::dns::{EncryptionType, KeyVersionState, PrincipalName};
 
+use zeroize::Zeroizing;
+
 use crate::cipher::{self, CipherError, Key};
 
 /// The most entries a key set holds: two principals (the account and an SPN as a keytab
@@ -75,6 +77,15 @@ pub enum KeySetError {
     /// A key could not be derived.
     #[error(transparent)]
     Cipher(#[from] CipherError),
+    /// The stored form of a key set is not one [`KeySet::encode`] wrote: the field that
+    /// failed and its offset. Never the octets.
+    #[error("the stored key set is malformed at offset {offset}: {field}")]
+    Stored {
+        /// The offset in the stored octets.
+        offset: usize,
+        /// The field that failed.
+        field: &'static str,
+    },
 }
 
 /// The keys of one account.
@@ -154,6 +165,163 @@ impl KeySet {
         &self.entries
     }
 
+    /// The entries in one state, as a key set of their own (the pending keys a recovery
+    /// tries alone, the current keys a rotation authenticates with).
+    #[must_use]
+    pub fn in_state(&self, state: KeyVersionState) -> KeySet {
+        Self {
+            entries: self
+                .entries
+                .iter()
+                .filter(|e| e.state == state)
+                .cloned()
+                .collect(),
+        }
+    }
+
+    /// The set with every entry of `kvno` moved to `state` (`kvno` itself unchanged).
+    #[must_use]
+    pub fn with_state(mut self, kvno: u32, state: KeyVersionState) -> KeySet {
+        for entry in &mut self.entries {
+            if entry.kvno == kvno {
+                entry.state = state;
+            }
+        }
+        self
+    }
+
+    /// The set with every entry in `state` dropped.
+    #[must_use]
+    pub fn without_state(mut self, state: KeyVersionState) -> KeySet {
+        self.entries.retain(|e| e.state != state);
+        self
+    }
+
+    /// The set without the version `kvno`.
+    #[must_use]
+    pub fn without_kvno(mut self, kvno: u32) -> KeySet {
+        self.entries.retain(|e| e.kvno != kvno);
+        self
+    }
+
+    /// The set with every entry of the version `from` renumbered to `to` (a pending
+    /// version whose number the KDC told only after the change); `None` when another
+    /// version holds `to` already, so that no key is ever lost to a renumbering.
+    #[must_use]
+    pub fn renumbered(mut self, from: u32, to: u32) -> Option<KeySet> {
+        if from == to {
+            return Some(self);
+        }
+        if self.entries.iter().any(|e| e.kvno == to) {
+            return None;
+        }
+        for entry in &mut self.entries {
+            if entry.kvno == from {
+                entry.kvno = to;
+            }
+        }
+        Some(self)
+    }
+
+    /// The stored form of the set: the value of the vault secret of purpose `dns.krb`
+    /// (identity plan section 3.2). Written into zeroizing memory.
+    ///
+    /// ```text
+    /// set     = magic:"TKS" version:u8(1) count:u16 count*entry
+    /// entry   = state:u8 kvno:u32 etype:u8 principal:u16-data key:u8-data
+    /// state   = 0 current | 1 previous | 2 pending
+    /// etype   = 17 aes128-cts-hmac-sha1-96 | 18 aes256-cts-hmac-sha1-96
+    /// principal = the RFC 1964 string form of the principal with its realm, UTF-8
+    /// ```
+    ///
+    /// All numbers are big-endian. The format is Tenko's own: it holds exactly the fields
+    /// of [`KeyEntry`], it is read by [`KeySet::decode`] with every length checked, and it
+    /// never passes the key octets through a general serializer's buffers.
+    pub fn encode(&self) -> Zeroizing<Vec<u8>> {
+        // The exact length first: a buffer that grew would leave copies of key octets in
+        // the memory it gave back.
+        let len = 6 + self
+            .entries
+            .iter()
+            .map(|e| 1 + 4 + 1 + 2 + e.principal.to_string().len() + 1 + e.key.as_bytes().len())
+            .sum::<usize>();
+        let mut out = Zeroizing::new(Vec::with_capacity(len));
+        out.extend_from_slice(&STORED_MAGIC);
+        // At most MAX_KEY_ENTRIES (64) entries: the count fits.
+        let count = u16::try_from(self.entries.len()).unwrap_or(u16::MAX);
+        out.extend_from_slice(&count.to_be_bytes());
+        for entry in &self.entries {
+            out.push(match entry.state {
+                KeyVersionState::Current => 0,
+                KeyVersionState::Previous => 1,
+                KeyVersionState::Pending => 2,
+            });
+            out.extend_from_slice(&entry.kvno.to_be_bytes());
+            // 17 or 18.
+            out.push(u8::try_from(entry.etype().number()).unwrap_or(0));
+            let principal = entry.principal.to_string();
+            // A principal is at most MAX_PRINCIPAL_LEN (1,024) octets.
+            let len = u16::try_from(principal.len()).unwrap_or(u16::MAX);
+            out.extend_from_slice(&len.to_be_bytes());
+            out.extend_from_slice(principal.as_bytes());
+            let key = entry.key.as_bytes();
+            // 16 or 32 octets.
+            out.push(u8::try_from(key.len()).unwrap_or(0));
+            out.extend_from_slice(key);
+        }
+        out
+    }
+
+    /// Reads the stored form [`KeySet::encode`] wrote.
+    ///
+    /// # Errors
+    ///
+    /// [`KeySetError::Stored`] naming the field and its offset; [`KeySetError::TooMany`]
+    /// or [`KeySetError::Conflict`] when the entries break the rules of a set.
+    pub fn decode(bytes: &[u8]) -> Result<KeySet, KeySetError> {
+        let mut r = Stored { bytes, at: 0 };
+        if r.take(4, "magic")? != STORED_MAGIC {
+            return Err(stored_error(0, "magic"));
+        }
+        let count = usize::from(r.u16("count")?);
+        if count > MAX_KEY_ENTRIES {
+            return Err(KeySetError::TooMany);
+        }
+        let mut set = KeySet::default();
+        for _ in 0..count {
+            let at = r.at;
+            let state = match r.u8("state")? {
+                0 => KeyVersionState::Current,
+                1 => KeyVersionState::Previous,
+                2 => KeyVersionState::Pending,
+                _ => return Err(stored_error(at, "state")),
+            };
+            let kvno = r.u32("kvno")?;
+            let at = r.at;
+            let etype = EncryptionType::from_number(i32::from(r.u8("etype")?))
+                .ok_or_else(|| stored_error(at, "etype"))?;
+            let at = r.at;
+            let len = usize::from(r.u16("principal")?);
+            let principal = std::str::from_utf8(r.take(len, "principal")?)
+                .ok()
+                .and_then(|text| PrincipalName::parse(text).ok())
+                .ok_or_else(|| stored_error(at, "principal"))?;
+            let at = r.at;
+            let len = usize::from(r.u8("key")?);
+            let key = Key::new(etype, r.take(len, "key")?).map_err(|_| stored_error(at, "key"))?;
+            set.insert(KeyEntry {
+                principal,
+                kvno,
+                state,
+                key,
+            })?;
+        }
+        if r.at != bytes.len() {
+            return Err(stored_error(r.at, "trailing octets"));
+        }
+        Ok(set)
+    }
+
     /// Whether the set is empty.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -204,6 +372,50 @@ impl KeySet {
             return Err(SelectError::EnctypeNotHeld { etype, kvno });
         }
         Ok(keys)
+    }
+}
+
+/// The first octets of the stored form of a key set: `TKS` and the format version 1.
+pub const STORED_MAGIC: [u8; 4] = [b'T', b'K', b'S', 1];
+
+/// The error of a stored key set at `offset`.
+fn stored_error(offset: usize, field: &'static str) -> KeySetError {
+    KeySetError::Stored { offset, field }
+}
+
+/// A bounds-checked reader of the stored form.
+struct Stored<'a> {
+    bytes: &'a [u8],
+    at: usize,
+}
+
+impl<'a> Stored<'a> {
+    fn take(&mut self, len: usize, field: &'static str) -> Result<&'a [u8], KeySetError> {
+        let end = self
+            .at
+            .checked_add(len)
+            .filter(|end| *end <= self.bytes.len())
+            .ok_or(KeySetError::Stored {
+                offset: self.at,
+                field,
+            })?;
+        let out = &self.bytes[self.at..end];
+        self.at = end;
+        Ok(out)
+    }
+
+    fn u8(&mut self, field: &'static str) -> Result<u8, KeySetError> {
+        Ok(self.take(1, field)?[0])
+    }
+
+    fn u16(&mut self, field: &'static str) -> Result<u16, KeySetError> {
+        let b = self.take(2, field)?;
+        Ok(u16::from_be_bytes([b[0], b[1]]))
+    }
+
+    fn u32(&mut self, field: &'static str) -> Result<u32, KeySetError> {
+        let b = self.take(4, field)?;
+        Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
     }
 }
 
@@ -321,5 +533,140 @@ mod tests {
             hex(set.select(17, Some(3)).expect("aes128")[0]),
             "be2115f40aae7c4e4418aae54bee2a7f"
         );
+    }
+
+    /// IAM-16: the stored form of a key set reads back as the same set, octet for octet,
+    /// with every state, both types and a principal that needs escapes.
+    #[test]
+    fn iam_16_the_stored_key_set_round_trips() {
+        let mut set = KeySet::new(vec![
+            entry(2, KeyVersionState::Previous, AES256, 2),
+            entry(3, KeyVersionState::Current, AES256, 4),
+            entry(3, KeyVersionState::Current, AES128, 5),
+            entry(4, KeyVersionState::Pending, AES256, 6),
+        ])
+        .expect("set");
+        set.insert(KeyEntry {
+            principal: principal(r"DNS/a\/b.corp.example.test@CORP.EXAMPLE.TEST"),
+            kvno: u32::MAX,
+            state: KeyVersionState::Current,
+            key: Key::new(AES128, &[9; 16]).expect("key"),
+        })
+        .expect("escaped");
+        let stored = set.encode();
+        assert_eq!(stored.capacity(), stored.len(), "written without growing");
+        assert_eq!(&stored[..4], &STORED_MAGIC);
+        let back = KeySet::decode(&stored).expect("decode");
+        assert_eq!(back, set);
+        assert_eq!(&*back.encode(), &*stored);
+        // The empty set is stored too (an account whose adopt has not finished).
+        let empty = KeySet::default().encode();
+        assert_eq!(KeySet::decode(&empty).expect("empty"), KeySet::default());
+    }
+
+    /// IAM-16: every truncation and every corrupted field of the stored form is refused
+    /// with the field named and no key octet in the error text.
+    #[test]
+    fn iam_16_a_malformed_stored_key_set_is_refused() {
+        let set = KeySet::new(vec![
+            entry(3, KeyVersionState::Current, AES256, 0xaa),
+            entry(4, KeyVersionState::Pending, AES128, 0xbb),
+        ])
+        .expect("set");
+        let stored = set.encode();
+        for len in 0..stored.len() {
+            let error = KeySet::decode(&stored[..len]).expect_err("truncated");
+            assert!(
+                matches!(error, KeySetError::Stored { .. }),
+                "{len}: {error}"
+            );
+            let text = error.to_string();
+            assert!(!text.contains("aa") && !text.contains("bb"), "{text}");
+        }
+        let mut longer = stored.to_vec();
+        longer.push(0);
+        assert!(matches!(
+            KeySet::decode(&longer),
+            Err(KeySetError::Stored {
+                field: "trailing octets",
+                ..
+            })
+        ));
+        let field = |mutate: &dyn Fn(&mut Vec<u8>)| {
+            let mut bytes = stored.to_vec();
+            mutate(&mut bytes);
+            match KeySet::decode(&bytes) {
+                Err(KeySetError::Stored { field, .. }) => field,
+                other => panic!("{other:?}"),
+            }
+        };
+        assert_eq!(field(&|b| b[0] = b'X'), "magic");
+        assert_eq!(field(&|b| b[3] = 2), "magic");
+        // The first entry starts at 6: state, kvno (4), etype, principal length (2).
+        assert_eq!(field(&|b| b[6] = 3), "state");
+        assert_eq!(field(&|b| b[11] = 23), "etype");
+        assert_eq!(field(&|b| b[14] = 0xff), "principal");
+        // The key length of the first entry follows its principal.
+        let principal_len = usize::from(u16::from_be_bytes([stored[12], stored[13]]));
+        let key_at = 14 + principal_len;
+        assert_eq!(field(&|b| b[key_at] = 16), "key");
+        // More entries than a set holds, and two different keys for one version.
+        let mut many = STORED_MAGIC.to_vec();
+        many.extend_from_slice(&65_u16.to_be_bytes());
+        assert_eq!(KeySet::decode(&many), Err(KeySetError::TooMany));
+        let mut twice = STORED_MAGIC.to_vec();
+        twice.extend_from_slice(&2_u16.to_be_bytes());
+        let one = entry(3, KeyVersionState::Current, AES256, 1);
+        let other = entry(3, KeyVersionState::Current, AES256, 2);
+        for e in [one, other] {
+            let single = KeySet::new(vec![e]).expect("one").encode();
+            twice.extend_from_slice(&single[6..]);
+        }
+        assert!(matches!(
+            KeySet::decode(&twice),
+            Err(KeySetError::Conflict { kvno: 3, .. })
+        ));
+        // Arbitrary octets after the magic never panic.
+        let mut seed = 0x9e37_79b9_u32;
+        for _ in 0..2_000 {
+            let mut bytes = STORED_MAGIC.to_vec();
+            for _ in 0..(seed % 200) {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                bytes.push((seed >> 24) as u8);
+            }
+            let _ = KeySet::decode(&bytes);
+        }
+    }
+
+    /// DNS-28: the moves of a rotation: the pending keys alone, renumbered to the version
+    /// the KDC told, made current; the old current made previous; the old previous gone.
+    #[test]
+    fn dns_28_the_states_of_a_rotation() {
+        let set = KeySet::new(vec![
+            entry(2, KeyVersionState::Previous, AES256, 2),
+            entry(3, KeyVersionState::Current, AES256, 4),
+            entry(4, KeyVersionState::Pending, AES256, 6),
+        ])
+        .expect("set");
+        assert_eq!(set.in_state(KeyVersionState::Pending).kvnos(), [4]);
+        let rotated = set
+            .without_state(KeyVersionState::Previous)
+            .with_state(3, KeyVersionState::Previous)
+            .renumbered(4, 7)
+            .expect("free")
+            .with_state(7, KeyVersionState::Current);
+        assert_eq!(rotated.kvnos(), [3, 7]);
+        assert_eq!(rotated.in_state(KeyVersionState::Current).kvnos(), [7]);
+        assert_eq!(rotated.in_state(KeyVersionState::Previous).kvnos(), [3]);
+        assert!(rotated.in_state(KeyVersionState::Pending).is_empty());
+        // Renumbering onto a version that is held is refused: no key is lost to it.
+        let clash = KeySet::new(vec![
+            entry(3, KeyVersionState::Current, AES256, 4),
+            entry(4, KeyVersionState::Pending, AES256, 6),
+        ])
+        .expect("set");
+        assert_eq!(clash.clone().renumbered(4, 3), None);
+        assert_eq!(clash.clone().renumbered(4, 4), Some(clash.clone()));
+        assert_eq!(clash.without_kvno(3).kvnos(), [4]);
     }
 }

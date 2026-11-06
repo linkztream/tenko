@@ -18,6 +18,7 @@
 //! | [`import`] | the zone file import: preview, then a background job in chunks |
 //! | [`acl`] | access lists |
 //! | [`keys`] | TSIG keys, the secret in the vault |
+//! | [`kerberos`] | the Kerberos account of secure updates: adopt, import, rotation, self-test, the watcher (WP13.3) |
 //! | [`jobs`] | the inline job of every change and the job runner stand-in |
 //! | [`views`] | views, their positions and the scope rule (WP6.4) |
 //! | [`secondary`] | secondary and catalog zones: transfers in as a leader service (WP6.1) |
@@ -45,6 +46,9 @@ pub mod export;
 pub mod import;
 pub mod jobs;
 pub mod journal;
+// WP13.3: the Kerberos account of secure updates.
+pub mod kerberos;
+// WP13.3: end.
 pub mod keys;
 pub mod records;
 // WP6.1: the leader service of secondary and catalog zones, and the read-only rule.

@@ -347,12 +347,15 @@ where
 
 /// Routes (relative to [`API_BASE`]) whose request bodies carry credentials: exact paths,
 /// then path prefixes. The middleware never fingerprints or records them.
-const CREDENTIAL_PATHS: [&str; 5] = [
+const CREDENTIAL_PATHS: [&str; 7] = [
     "/setup",
     "/auth/password",
     "/auth/password/check",
     "/auth/totp/enroll/finish",
     "/users",
+    // WP13.3: the one-time password of the Kerberos account and a keytab.
+    "/dns/kerberos/adopt",
+    "/dns/kerberos/import",
 ];
 const CREDENTIAL_PREFIXES: [&str; 2] = ["/auth/login/", "/auth/webauthn/login/"];
 
@@ -1006,6 +1009,9 @@ mod tests {
             "/api/v1/auth/totp/enroll/finish",
             "/api/v1/users",
             "/api/v1/users/",
+            // WP13.3 (IAM-16): the one-time password and the keytab are never fingerprinted.
+            "/api/v1/dns/kerberos/adopt",
+            "/api/v1/dns/kerberos/import",
         ] {
             assert!(carries_credentials(&Method::POST, path), "{path}");
         }
@@ -1019,6 +1025,7 @@ mod tests {
             ),
             (Method::POST, "/setup"),
             (Method::POST, "/api/v1/auth/login"),
+            (Method::POST, "/api/v1/dns/kerberos/rotate"),
         ] {
             assert!(!carries_credentials(&method, path), "{method} {path}");
         }

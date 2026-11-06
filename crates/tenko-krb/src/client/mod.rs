@@ -111,7 +111,17 @@ pub enum ClientError {
         /// The result string, as text, or in hex when it is not UTF-8 (AD sends a policy
         /// structure for code 4).
         message: String,
+        /// Whether the refusal proves that the password did not change: it came in the
+        /// `KRB-PRIV` of an AP-REP that answers the only request sent. A refusal in a bare
+        /// `KRB-ERROR` is unauthenticated (anyone on the path can send one), and a refusal of
+        /// a resent request may follow a first request the server applied and answered too
+        /// late (a resend of the same password is then refused by the password history).
+        definite: bool,
     },
+    /// The exchange failed before the change-password request was sent (the ticket for
+    /// `kadmin/changepw` was refused or no KDC answered): the password did not change.
+    #[error("{0}")]
+    BeforeChange(Box<ClientError>),
 }
 
 /// What the client authenticates with.
@@ -757,9 +767,11 @@ impl ChangePassword {
             // A KRB-ERROR whose e-data is the result.
             let error = KrbError::decode(rest)?;
             return Err(match error.e_data.as_deref().and_then(result) {
-                Some((code, message)) if code != 0 => {
-                    ClientError::PasswordRefused { code, message }
-                }
+                Some((code, message)) if code != 0 => ClientError::PasswordRefused {
+                    code,
+                    message,
+                    definite: false,
+                },
                 _ => kdc_failure(&error),
             });
         }
@@ -803,7 +815,11 @@ impl ChangePassword {
         }
         match result(&private.user_data) {
             Some((0, _)) => Ok(()),
-            Some((code, message)) => Err(ClientError::PasswordRefused { code, message }),
+            Some((code, message)) => Err(ClientError::PasswordRefused {
+                code,
+                message,
+                definite: self.attempt == 1,
+            }),
             None => Err(ClientError::Reply("the result is malformed")),
         }
     }
@@ -826,6 +842,19 @@ fn hex(bytes: &[u8]) -> String {
         let _ = write!(out, "{b:02x}");
         out
     })
+}
+
+/// `kadmin/changepw` in the client's realm: the service of the change-password ticket.
+///
+/// # Errors
+///
+/// [`ClientError::Reply`] when the realm cannot hold the name (it always can).
+pub fn changepw_principal(client: &PrincipalName) -> Result<PrincipalName, ClientError> {
+    PrincipalName::new(
+        vec!["kadmin".into(), "changepw".into()],
+        client.realm().clone(),
+    )
+    .map_err(|_| ClientError::Reply("kadmin/changepw"))
 }
 
 /// The client: the exchanges over the network to the servers the caller lists.
@@ -925,18 +954,33 @@ impl Client {
         password: &[u8],
         new_password: &[u8],
     ) -> Result<(), ClientError> {
-        let changepw = PrincipalName::new(
-            vec!["kadmin".into(), "changepw".into()],
-            client.realm().clone(),
+        self.change_password_with(
+            client,
+            Secret::Password(Zeroizing::new(password.to_vec())),
+            new_password,
         )
-        .map_err(|_| ClientError::Reply("kadmin/changepw"))?;
+        .await
+    }
+
+    /// Changes the password of `client` to `new_password`, authenticating with `secret`:
+    /// the one-time password of an adopt, or the account's current keys for a rotation,
+    /// since Tenko keeps the keys and forgets the password (identity plan section 3.1).
+    ///
+    /// # Errors
+    ///
+    /// A [`ClientError`]; [`ClientError::PasswordRefused`] when the server refuses.
+    pub async fn change_password_with(
+        &self,
+        client: &PrincipalName,
+        secret: Secret,
+        new_password: &[u8],
+    ) -> Result<(), ClientError> {
+        let changepw =
+            changepw_principal(client).map_err(|e| ClientError::BeforeChange(Box::new(e)))?;
         let ticket = self
-            .as_exchange(
-                client,
-                &changepw,
-                Secret::Password(Zeroizing::new(password.to_vec())),
-            )
-            .await?
+            .as_exchange(client, &changepw, secret)
+            .await
+            .map_err(|e| ClientError::BeforeChange(Box::new(e)))?
             .credentials;
         let mut exchange = ChangePassword::new(ticket, new_password, self.clock.now())?;
         let reply = transport::exchange(&self.transport, &self.kpasswd, |local| {

@@ -848,6 +848,21 @@ pub(crate) async fn assemble(
                 params: finding.params,
             }));
     }
+    // WP13.3: the findings of the Kerberos account's last self-test (identity plan section
+    // 3.10), each with the values its localized text and its fix need.
+    if let Ok(view) = state.store.read(tenko_store::ReadConsistency::Local).await
+        && let Ok(Some((account, _))) =
+            tenko_dns::zone::kerberos::KerberosService::account(view.as_ref())
+    {
+        status
+            .warnings
+            .extend(account.findings.into_iter().map(|finding| StatusWarning {
+                code: finding.code,
+                detail: finding.detail,
+                params: finding.params,
+            }));
+    }
+    // WP13.3: end.
     // ADR 0028: every switch port a bounce left down (`connect.port_stuck`), with the
     // connector, the device and the port, until the connector host brought it up.
     if let Some(Extension(host)) = connectors

@@ -11946,6 +11946,31 @@ export interface components {
             provider: string;
             rotation?: components["schemas"]["KekRotationPhase"] | null;
         };
+        /** @description The account, metadata only: never a key, a password or the reference of its secret. */
+        KerberosAccountItem: {
+            /** @description The KDCs listed; empty: found through `_kerberos._tcp.<realm>`. */
+            kdcs: string[];
+            last_check?: components["schemas"]["Timestamp"] | null;
+            last_rotation?: components["schemas"]["Timestamp"] | null;
+            /** @description The account name as the KDC knows it. */
+            name: string;
+            next_rotation?: components["schemas"]["Timestamp"] | null;
+            /** @description Whether Tenko owns the password (adopted) or an administrator does (imported). */
+            owned: boolean;
+            /** @description The principal (`TENKO-DNS$@CORP.EXAMPLE.TEST`). */
+            principal: string;
+            /** @description The realm. */
+            realm: components["schemas"]["Realm"];
+            /**
+             * Format: int32
+             * @description Days between rotations of an owned account; 0: off.
+             */
+            rotation_days: number;
+            /** @description The service principal names the self-test checks. */
+            spns: string[];
+            /** @description The key versions held with their states. */
+            versions: components["schemas"]["KeyVersionMeta"][];
+        };
         /**
          * @description Body of `POST /dns/kerberos/adopt`: the pre-staged account and its one-time password
          *     (ID-Q4). Tenko changes the password at once; the one given is used once and forgotten.
@@ -11981,6 +12006,13 @@ export interface components {
             code: string;
             /** @description What was seen (the skew measured, the version seen, the SPN), in English. */
             detail: string;
+            /**
+             * @description The values the UI fills its localized text with: `spn`, `kvno`, `held`,
+             *     `skew_secs`, `etype`, `kdc_error`, `reason`, `failures`.
+             */
+            params?: {
+                [key: string]: string;
+            };
         };
         /** @description Body of `POST /dns/kerberos/import`: a keytab made with `ktpass` or `msktutil`. */
         KerberosImport: {
@@ -11991,6 +12023,11 @@ export interface components {
              *     section 5).
              */
             keytab: components["schemas"]["SecretString"];
+            /**
+             * @description The account name; absent: the one principal of one component in the keytab (a
+             *     keytab of `ktpass /princ DNS/...` names only the SPN and needs it).
+             */
+            name?: string | null;
             /** @description The realm. */
             realm: components["schemas"]["Realm"];
             /** @description The service principal names the account holds. */
@@ -11998,9 +12035,8 @@ export interface components {
         };
         /** @description Body of `GET /dns/kerberos` and the answer of `POST /dns/kerberos/check`. */
         KerberosStatus: {
-            account?: components["schemas"]["KrbAccount"] | null;
-            /** @description The contexts of this node. */
-            contexts: components["schemas"]["GssContexts"];
+            account?: components["schemas"]["KerberosAccountItem"] | null;
+            contexts?: components["schemas"]["GssContexts"] | null;
             /** @description The findings of the last self-test, empty when it passed. */
             findings?: components["schemas"]["KerberosFinding"][];
         };
@@ -12122,38 +12158,6 @@ export interface components {
             reason?: string | null;
             /** @description Whether it is on (or asked to be on). */
             stopped: boolean;
-        };
-        /**
-         * @description The AD computer account whose keys Tenko holds (section 3.1): one per realm, with the
-         *     SPN of every node name. Metadata only; the keys are the system secret of purpose
-         *     [`super::KRB_PURPOSE`] in the vault.
-         */
-        KrbAccount: {
-            /** @description The KDCs the operator listed; empty: found through `_kerberos._tcp.<realm>`. */
-            kdcs?: string[];
-            last_check?: components["schemas"]["Timestamp"] | null;
-            last_rotation?: components["schemas"]["Timestamp"] | null;
-            /**
-             * @description The account name as the KDC knows it (`TENKO-DNS$` for a computer account, a user
-             *     name for an imported user account).
-             */
-            name: string;
-            /**
-             * @description Whether Tenko owns the password (adopted) or an administrator does (imported
-             *     keytab).
-             */
-            owned: boolean;
-            /** @description The realm. */
-            realm: components["schemas"]["Realm"];
-            /**
-             * Format: int32
-             * @description Days between rotations of an owned account; 0 is off (Lab only, TGL-32).
-             */
-            rotation_days?: number;
-            /** @description The service principal names (`DNS/<fqdn>`, `HTTP/<fqdn>`). */
-            spns: string[];
-            /** @description The key versions held. */
-            versions?: components["schemas"]["KeyVersionMeta"][];
         };
         /** @description A language the UI offers to everyone (`GET /i18n/languages`). */
         LanguageInfo: {
@@ -35164,15 +35168,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     delete_dns_kerberos: {
@@ -35211,15 +35206,6 @@ export interface operations {
             };
             /** @description No account is set up (`dns.krb.account.not_found`) */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -35296,15 +35282,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description No KDC of the realm answered (`dns.krb.kdc.unreachable`) */
             503: {
                 headers: {
@@ -35361,16 +35338,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description No KDC of the realm answered (`dns.krb.kdc.unreachable`) */
+            /** @description No KDC of the realm answered (`dns.krb.kdc.unreachable`); the finding is stored */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -35394,7 +35362,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The keys are held; the status with its findings */
+            /** @description The keys are held; the status with the findings of the self-test */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -35441,15 +35409,6 @@ export interface operations {
             };
             /** @description The keytab does not parse or holds no AES entry for the principal (`dns.krb.keytab.invalid`) */
             422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -35506,15 +35465,6 @@ export interface operations {
             };
             /** @description The account was imported, so its password is not Tenko's (`dns.krb.account.not_owned`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };

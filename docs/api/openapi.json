@@ -13468,16 +13468,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -13514,16 +13504,6 @@
           },
           "404": {
             "description": "No account is set up (`dns.krb.account.not_found`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13619,16 +13599,6 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "503": {
             "description": "No KDC of the realm answered (`dns.krb.kdc.unreachable`)",
             "content": {
@@ -13696,18 +13666,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "503": {
-            "description": "No KDC of the realm answered (`dns.krb.kdc.unreachable`)",
+            "description": "No KDC of the realm answered (`dns.krb.kdc.unreachable`); the finding is stored",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13739,7 +13699,7 @@
         },
         "responses": {
           "201": {
-            "description": "The keys are held; the status with its findings",
+            "description": "The keys are held; the status with the findings of the self-test",
             "content": {
               "application/json": {
                 "schema": {
@@ -13790,16 +13750,6 @@
           },
           "422": {
             "description": "The keytab does not parse or holds no AES entry for the principal (`dns.krb.keytab.invalid`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13867,16 +13817,6 @@
           },
           "409": {
             "description": "The account was imported, so its password is not Tenko's (`dns.krb.account.not_owned`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -56207,6 +56147,98 @@
           }
         }
       },
+      "KerberosAccountItem": {
+        "type": "object",
+        "description": "The account, metadata only: never a key, a password or the reference of its secret.",
+        "required": [
+          "realm",
+          "name",
+          "principal",
+          "spns",
+          "kdcs",
+          "owned",
+          "rotation_days",
+          "versions"
+        ],
+        "properties": {
+          "kdcs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The KDCs listed; empty: found through `_kerberos._tcp.<realm>`."
+          },
+          "last_check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The last self-test."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_rotation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The last successful rotation."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The account name as the KDC knows it."
+          },
+          "next_rotation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the next rotation is due; absent when Tenko does not rotate the account."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "owned": {
+            "type": "boolean",
+            "description": "Whether Tenko owns the password (adopted) or an administrator does (imported)."
+          },
+          "principal": {
+            "type": "string",
+            "description": "The principal (`TENKO-DNS$@CORP.EXAMPLE.TEST`)."
+          },
+          "realm": {
+            "$ref": "#/components/schemas/Realm",
+            "description": "The realm."
+          },
+          "rotation_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days between rotations of an owned account; 0: off.",
+            "minimum": 0
+          },
+          "spns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The service principal names the self-test checks."
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeyVersionMeta"
+            },
+            "description": "The key versions held with their states."
+          }
+        }
+      },
       "KerberosAdopt": {
         "type": "object",
         "description": "Body of `POST /dns/kerberos/adopt`: the pre-staged account and its one-time password\n(ID-Q4). Tenko changes the password at once; the one given is used once and forgotten.",
@@ -56274,6 +56306,16 @@
           "detail": {
             "type": "string",
             "description": "What was seen (the skew measured, the version seen, the SPN), in English."
+          },
+          "params": {
+            "type": "object",
+            "description": "The values the UI fills its localized text with: `spn`, `kvno`, `held`,\n`skew_secs`, `etype`, `kdc_error`, `reason`, `failures`.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           }
         }
       },
@@ -56297,6 +56339,13 @@
             "$ref": "#/components/schemas/SecretString",
             "description": "The keytab file (MIT format version 2) in base64url without padding (RFC 4648\nsection 5)."
           },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The account name; absent: the one principal of one component in the keytab (a\nkeytab of `ktpass /princ DNS/...` names only the SPN and needs it)."
+          },
           "realm": {
             "$ref": "#/components/schemas/Realm",
             "description": "The realm."
@@ -56313,14 +56362,11 @@
       "KerberosStatus": {
         "type": "object",
         "description": "Body of `GET /dns/kerberos` and the answer of `POST /dns/kerberos/check`.",
-        "required": [
-          "contexts"
-        ],
         "properties": {
           "account": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/KrbAccount",
+                "$ref": "#/components/schemas/KerberosAccountItem",
                 "description": "The account, metadata only; absent until one is adopted or imported."
               },
               {
@@ -56329,8 +56375,15 @@
             ]
           },
           "contexts": {
-            "$ref": "#/components/schemas/GssContexts",
-            "description": "The contexts of this node."
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GssContexts",
+                "description": "The contexts of this node; absent while the node's TKEY handler does not report\nthem."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "findings": {
             "type": "array",
@@ -56616,79 +56669,6 @@
           "stopped": {
             "type": "boolean",
             "description": "Whether it is on (or asked to be on)."
-          }
-        }
-      },
-      "KrbAccount": {
-        "type": "object",
-        "description": "The AD computer account whose keys Tenko holds (section 3.1): one per realm, with the\nSPN of every node name. Metadata only; the keys are the system secret of purpose\n[`super::KRB_PURPOSE`] in the vault.",
-        "required": [
-          "realm",
-          "name",
-          "spns",
-          "owned"
-        ],
-        "properties": {
-          "kdcs": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The KDCs the operator listed; empty: found through `_kerberos._tcp.<realm>`."
-          },
-          "last_check": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Timestamp",
-                "description": "The last self-test."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "last_rotation": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Timestamp",
-                "description": "The last successful rotation."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "name": {
-            "type": "string",
-            "description": "The account name as the KDC knows it (`TENKO-DNS$` for a computer account, a user\nname for an imported user account)."
-          },
-          "owned": {
-            "type": "boolean",
-            "description": "Whether Tenko owns the password (adopted) or an administrator does (imported\nkeytab)."
-          },
-          "realm": {
-            "$ref": "#/components/schemas/Realm",
-            "description": "The realm."
-          },
-          "rotation_days": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Days between rotations of an owned account; 0 is off (Lab only, TGL-32).",
-            "minimum": 0
-          },
-          "spns": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The service principal names (`DNS/<fqdn>`, `HTTP/<fqdn>`)."
-          },
-          "versions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/KeyVersionMeta"
-            },
-            "description": "The key versions held."
           }
         }
       },

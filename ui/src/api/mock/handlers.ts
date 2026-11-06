@@ -34,6 +34,7 @@ import { stubs } from "./stubs";
 import { nodeRoutes } from "./routes-nodes";
 import { connectorRoutes } from "./routes-connectors";
 import { dnsRoutes } from "./routes-dns";
+import { dnsKerberosRoutes } from "./routes-dns-kerberos"; // WP13.3
 // WP7.4
 import { dhcpRoutes } from "./routes-dhcp";
 // WP7.5: the leases, the history and the state of the dhcp role of a node.
@@ -92,6 +93,8 @@ export const happyPaths: HttpHandler[] = [
   ...i18nRoutes,
   // The DNS area of Phase 2 (WP4.5): zones, records, zone files, access lists and TSIG keys.
   ...dnsRoutes,
+  // WP13.3: the Kerberos account of secure updates.
+  ...dnsKerberosRoutes,
   // WP7.4: the DHCP configuration of Phase 3.
   ...dhcpRoutes,
   // WP7.5: the leases and the history, ahead of the 501 stubs.

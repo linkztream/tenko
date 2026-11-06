@@ -497,6 +497,8 @@ fn ms_kile_salts_for_user_and_computer_accounts() {
         versions: vec![],
         last_rotation: None,
         last_check: None,
+        secret: None,
+        findings: Vec::new(),
     };
     assert_eq!(
         salt::account(&account("TENKO-DNS$")),

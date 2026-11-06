@@ -80,6 +80,15 @@ const ERRORS: &[&str] = &[
     "audit.export.failing",
     // ADR 0028: a switch port a bounce left down cuts its client off.
     tenko_connect::host::service::PORT_STUCK,
+    // WP13.3: the self-test findings of the Kerberos account under which secure updates
+    // fail (identity plan section 3.10); clock skew above 60 s and a failed rotation stay
+    // warnings, since updates still work.
+    tenko_core::dns::findings::GSS_SELF_TEST_FAILED,
+    tenko_core::dns::findings::GSS_KVNO_UNKNOWN,
+    tenko_core::dns::findings::GSS_SPN_MISSING,
+    tenko_core::dns::findings::GSS_SPN_DUPLICATE,
+    tenko_core::dns::findings::GSS_WEAK_ETYPE,
+    // WP13.3: end.
 ];
 
 /// The severity of a finding by its code.

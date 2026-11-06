@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dns-kerberos">
+      <unit id="dns.kerberos.no_access">
+        <segment><source>The Kerberos account is key material: it is shown to administrators, who hold dns.keys.</source><target>Kerberos-kontot är nyckelmaterial: det visas för administratörer, som har dns.keys.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.setup.title">
+        <segment><source>Set up the account of secure updates</source><target>Ställ in kontot för säkra uppdateringar</target></segment>
+      </unit>
+      <unit id="dns.kerberos.setup.body">
+        <segment><source>Windows clients and domain controllers sign their dynamic updates with Kerberos. Tenko accepts them with the keys of one Active Directory computer account. Take over an account a domain administrator pre-staged with a one-time password (recommended: Tenko then owns and rotates its password), or import a keytab made with ktpass or msktutil.</source><target>Windows-klienter och domänkontrollanter signerar sina dynamiska uppdateringar med Kerberos. Tenko tar emot dem med nycklarna från ett Active Directory-datorkonto. Ta över ett konto som en domänadministratör har förberett med ett engångslösenord (rekommenderas: Tenko äger då kontots lösenord och roterar det), eller importera en keytab som gjorts med ktpass eller msktutil.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.setup.adopt">
+        <segment><source>Adopt a pre-staged account</source><target>Ta över ett förberett konto</target></segment>
+      </unit>
+      <unit id="dns.kerberos.setup.import">
+        <segment><source>Import a keytab</source><target>Importera en keytab</target></segment>
+      </unit>
+      <unit id="dns.kerberos.setup.no_admin">
+        <segment><source>Tenko never asks for a directory administrator's password.</source><target>Tenko frågar aldrig efter en katalogadministratörs lösenord.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.steps">
+        <segment><source>Steps of the set-up</source><target>Stegen i inställningen</target></segment>
+      </unit>
+      <unit id="dns.kerberos.step.realm">
+        <segment><source>Realm</source><target>Realm</target></segment>
+      </unit>
+      <unit id="dns.kerberos.step.account">
+        <segment><source>Account and SPNs</source><target>Konto och SPN</target></segment>
+      </unit>
+      <unit id="dns.kerberos.step.password">
+        <segment><source>One-time password</source><target>Engångslösenord</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.realm">
+        <segment><source>Realm</source><target>Realm</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.realm_help">
+        <segment><source>The Active Directory domain in upper case, for example CORP.EXAMPLE.TEST.</source><target>Active Directory-domänen med versaler, till exempel CORP.EXAMPLE.TEST.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.kdcs">
+        <segment><source>KDCs</source><target>KDC:er</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.kdcs_help">
+        <segment><source>One per line, host or host:port. Empty: found through the _kerberos._tcp records of the realm.</source><target>En per rad, värd eller värd:port. Tomt: hittas via realmens _kerberos._tcp-poster.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.name">
+        <segment><source>Account name</source><target>Kontonamn</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.name_help">
+        <segment><source>The computer account's name, 1 to 15 letters, digits or hyphens; the $ is added.</source><target>Datorkontots namn, 1 till 15 bokstäver, siffror eller bindestreck; $ läggs till.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.spns">
+        <segment><source>Service principal names</source><target>Service principal names</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.spns_help">
+        <segment><source>One per line: DNS/&lt;name&gt; for each Tenko node that is the primary of an AD zone, HTTP/&lt;name&gt; for Kerberos sign-in to the web UI.</source><target>En per rad: DNS/&lt;name&gt; för varje Tenko-nod som är primär för en AD-zon, HTTP/&lt;name&gt; för Kerberos-inloggning till webbgränssnittet.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.password">
+        <segment><source>One-time password</source><target>Engångslösenord</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.password_help">
+        <segment><source>The password the administrator set when creating the account. Tenko uses it once and replaces it at once.</source><target>Lösenordet som administratören satte när kontot skapades. Tenko använder det en gång och byter ut det direkt.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.rotation">
+        <segment><source>Rotate the password every (days)</source><target>Byt lösenordet var (dagar)</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.rotation_help">
+        <segment><source>1 to 365; 30 by default (TGL-32); 0 turns rotation off under the Lab profile only. Tenko keeps the previous key version until the tickets issued under it have expired.</source><target>1 till 365; 30 som standard (TGL-32); 0 stänger av bytet, bara under Lab-profilen. Tenko behåller den föregående nyckelversionen tills biljetterna som utfärdats med den har gått ut.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.keytab">
+        <segment><source>Keytab file</source><target>Keytab-fil</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.keytab_help">
+        <segment><source>The file ktpass or msktutil wrote. Tenko keeps the AES keys and not the file.</source><target>Filen som ktpass eller msktutil skrev. Tenko behåller AES-nycklarna men inte filen.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.keytab_chosen">
+        <segment><source>{file} is read; it is sent once with the import.</source><target>{file} är inläst; den skickas en gång med importen.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.import_name">
+        <segment><source>Account name (optional)</source><target>Kontonamn (valfritt)</target></segment>
+      </unit>
+      <unit id="dns.kerberos.field.import_name_help">
+        <segment><source>Needed when the keytab names only an SPN (ktpass /princ DNS/...).</source><target>Behövs när keytab-filen bara anger en SPN (ktpass /princ DNS/...).</target></segment>
+      </unit>
+      <unit id="dns.kerberos.check.realm">
+        <segment><source>Enter the realm as a domain name, for example CORP.EXAMPLE.TEST.</source><target>Ange realmen som ett domännamn, till exempel CORP.EXAMPLE.TEST.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.check.kdcs">
+        <segment><source>Each KDC is a host or host:port on a line of its own.</source><target>Varje KDC är en värd eller värd:port på en egen rad.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.check.spns">
+        <segment><source>Enter at least one SPN, each DNS/&lt;name&gt; or HTTP/&lt;name&gt;.</source><target>Ange minst en SPN, var och en DNS/&lt;name&gt; eller HTTP/&lt;name&gt;.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.check.name">
+        <segment><source>The name is 1 to 15 letters, digits or hyphens.</source><target>Namnet är 1 till 15 bokstäver, siffror eller bindestreck.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.check.password">
+        <segment><source>Enter the one-time password.</source><target>Ange engångslösenordet.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.check.rotation">
+        <segment><source>Enter a number of days from 0 to 365.</source><target>Ange ett antal dagar från 0 till 365.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.check.keytab">
+        <segment><source>Choose the keytab file.</source><target>Välj keytab-filen.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.check.keytab_size">
+        <segment><source>A keytab is at most 1 MiB.</source><target>En keytab är högst 1 MiB.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.block.title">
+        <segment><source>For the domain administrator</source><target>För domänadministratören</target></segment>
+      </unit>
+      <unit id="dns.kerberos.block.body">
+        <segment><source>The administrator creates the account with the PowerShell block of the documentation ({section}) on a management host or a domain controller and types these values at its prompts. Tenko shows values only, never a script, and offers no copy: type them by hand.</source><target>Administratören skapar kontot med PowerShell-blocket i dokumentationen ({section}) på en administrationsdator eller en domänkontrollant och skriver in de här värdena vid dess frågor. Tenko visar bara värden, aldrig ett skript, och erbjuder ingen kopiering: skriv in dem för hand.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.block.name">
+        <segment><source>Account name</source><target>Kontonamn</target></segment>
+      </unit>
+      <unit id="dns.kerberos.block.ou">
+        <segment><source>Organizational unit</source><target>Organisationsenhet</target></segment>
+      </unit>
+      <unit id="dns.kerberos.block.ou_value">
+        <segment><source>The one you choose, as a distinguished name (OU=Service Accounts,DC=corp,DC=example,DC=test)</source><target>Den du väljer, som unikt namn (OU=Service Accounts,DC=corp,DC=example,DC=test)</target></segment>
+      </unit>
+      <unit id="dns.kerberos.block.spn">
+        <segment><source>SPN {n}</source><target>SPN {n}</target></segment>
+      </unit>
+      <unit id="dns.kerberos.block.realm">
+        <segment><source>Realm (printed by the block)</source><target>Realm (skrivs ut av blocket)</target></segment>
+      </unit>
+      <unit id="dns.kerberos.block.safety">
+        <segment><source>The block runs as a domain administrator and takes nothing Tenko wrote: each value is typed at its prompt and checked there, and anything pasted beyond one line is discarded.</source><target>Blocket körs som domänadministratör och tar inget som Tenko har skrivit: varje värde skrivs in vid sin fråga och kontrolleras där, och allt som klistras in utöver en rad kastas.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.password_intro">
+        <segment><source>Enter the one-time password of {name} in {realm}. Tenko changes it at once to one only it knows, stores the keys and runs the self-test.</source><target>Ange engångslösenordet för {name} i {realm}. Tenko byter det direkt till ett som bara Tenko känner till, lagrar nycklarna och kör självtestet.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.back">
+        <segment><source>Back</source><target>Tillbaka</target></segment>
+      </unit>
+      <unit id="dns.kerberos.next">
+        <segment><source>Next</source><target>Nästa</target></segment>
+      </unit>
+      <unit id="dns.kerberos.adopting">
+        <segment><source>Taking over the account…</source><target>Tar över kontot…</target></segment>
+      </unit>
+      <unit id="dns.kerberos.adopt_submit">
+        <segment><source>Take over the account</source><target>Ta över kontot</target></segment>
+      </unit>
+      <unit id="dns.kerberos.import_intro">
+        <segment><source>The password stays the administrator's: Tenko does not rotate an imported account, and a password reset in Active Directory needs a new keytab.</source><target>Lösenordet förblir administratörens: Tenko roterar inte ett importerat konto, och en lösenordsåterställning i Active Directory kräver en ny keytab.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.importing">
+        <segment><source>Importing…</source><target>Importerar…</target></segment>
+      </unit>
+      <unit id="dns.kerberos.import_submit">
+        <segment><source>Import the keytab</source><target>Importera keytab-filen</target></segment>
+      </unit>
+      <unit id="dns.kerberos.passed">
+        <segment><source>The self-test passed at {at}.</source><target>Självtestet klarades {at}.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.checked">
+        <segment><source>The self-test ran</source><target>Självtestet kördes</target></segment>
+      </unit>
+      <unit id="dns.kerberos.rotation_started">
+        <segment><source>The rotation started</source><target>Rotationen startade</target></segment>
+      </unit>
+      <unit id="dns.kerberos.rotation_job">
+        <segment><source>Follow the rotation job</source><target>Följ rotationsjobbet</target></segment>
+      </unit>
+      <unit id="dns.kerberos.deleted">
+        <segment><source>The account is removed from Tenko</source><target>Kontot är borttaget från Tenko</target></segment>
+      </unit>
+      <unit id="dns.kerberos.account">
+        <segment><source>Account</source><target>Konto</target></segment>
+      </unit>
+      <unit id="dns.kerberos.principal">
+        <segment><source>Principal</source><target>Principal</target></segment>
+      </unit>
+      <unit id="dns.kerberos.password">
+        <segment><source>Password</source><target>Lösenord</target></segment>
+      </unit>
+      <unit id="dns.kerberos.owned">
+        <segment><source>Tenko's: only Tenko knows it</source><target>Tenkos: bara Tenko känner till det</target></segment>
+      </unit>
+      <unit id="dns.kerberos.imported">
+        <segment><source>The administrator's: imported from a keytab</source><target>Administratörens: importerat från en keytab</target></segment>
+      </unit>
+      <unit id="dns.kerberos.rotation">
+        <segment><source>Rotation</source><target>Rotation</target></segment>
+      </unit>
+      <unit id="dns.kerberos.rotation_every">
+        <segment><source>{days, plural, one {Every day} other {Every # days}}</source><target>{days, plural, one {Varje dag} other {Var # dag}}</target></segment>
+      </unit>
+      <unit id="dns.kerberos.rotation_none">
+        <segment><source>None</source><target>Ingen</target></segment>
+      </unit>
+      <unit id="dns.kerberos.last_rotation">
+        <segment><source>Last rotation</source><target>Senaste rotation</target></segment>
+      </unit>
+      <unit id="dns.kerberos.next_rotation">
+        <segment><source>Next rotation</source><target>Nästa rotation</target></segment>
+      </unit>
+      <unit id="dns.kerberos.last_check">
+        <segment><source>Last self-test</source><target>Senaste självtest</target></segment>
+      </unit>
+      <unit id="dns.kerberos.kdcs">
+        <segment><source>KDCs</source><target>KDC:er</target></segment>
+      </unit>
+      <unit id="dns.kerberos.kdcs_found">
+        <segment><source>Found through the _kerberos._tcp records</source><target>Hittade via _kerberos._tcp-posterna</target></segment>
+      </unit>
+      <unit id="dns.kerberos.versions">
+        <segment><source>Key versions</source><target>Nyckelversioner</target></segment>
+      </unit>
+      <unit id="dns.kerberos.col.kvno">
+        <segment><source>Version</source><target>Version</target></segment>
+      </unit>
+      <unit id="dns.kerberos.col.state">
+        <segment><source>State</source><target>Tillstånd</target></segment>
+      </unit>
+      <unit id="dns.kerberos.col.etypes">
+        <segment><source>Encryption types</source><target>Krypteringstyper</target></segment>
+      </unit>
+      <unit id="dns.kerberos.col.created">
+        <segment><source>Made</source><target>Skapad</target></segment>
+      </unit>
+      <unit id="dns.kerberos.state.current">
+        <segment><source>Current</source><target>Gällande</target></segment>
+      </unit>
+      <unit id="dns.kerberos.state.previous">
+        <segment><source>Previous, still accepted</source><target>Föregående, accepteras fortfarande</target></segment>
+      </unit>
+      <unit id="dns.kerberos.state.pending">
+        <segment><source>Pending, being changed</source><target>Väntande, byts just nu</target></segment>
+      </unit>
+      <unit id="dns.kerberos.spns">
+        <segment><source>Service principal names</source><target>Service principal names</target></segment>
+      </unit>
+      <unit id="dns.kerberos.contexts">
+        <segment><source>Contexts of this node</source><target>Kontexter på den här noden</target></segment>
+      </unit>
+      <unit id="dns.kerberos.contexts_line">
+        <segment><source>{negotiating} negotiating, {established} established, {refused} refused in the last hour</source><target>{negotiating} förhandlar, {established} upprättade, {refused} avvisade den senaste timmen</target></segment>
+      </unit>
+      <unit id="dns.kerberos.actions">
+        <segment><source>Actions</source><target>Åtgärder</target></segment>
+      </unit>
+      <unit id="dns.kerberos.check_now">
+        <segment><source>Run the self-test</source><target>Kör självtestet</target></segment>
+      </unit>
+      <unit id="dns.kerberos.rotate_now">
+        <segment><source>Rotate the password now</source><target>Rotera lösenordet nu</target></segment>
+      </unit>
+      <unit id="dns.kerberos.delete">
+        <segment><source>Remove from Tenko</source><target>Ta bort från Tenko</target></segment>
+      </unit>
+      <unit id="dns.kerberos.delete_title">
+        <segment><source>Remove {principal} from Tenko?</source><target>Ta bort {principal} från Tenko?</target></segment>
+      </unit>
+      <unit id="dns.kerberos.delete_body">
+        <segment><source>Tenko forgets the account's keys and stops accepting secure updates; zones with Kerberos settings fall back to their other lists. The account in Active Directory stays: a domain administrator deletes it there.</source><target>Tenko glömmer kontots nycklar och slutar ta emot säkra uppdateringar; zoner med Kerberos-inställningar faller tillbaka på sina övriga listor. Kontot i Active Directory finns kvar: en domänadministratör tar bort det där.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.self_test_failed.title">
+        <segment><source>The self-test failed</source><target>Självtestet misslyckades</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.self_test_failed.fix">
+        <segment><source>{reason, select, disabled {The account is disabled or locked in Active Directory. Enable it again.} keys_refused {The KDC refuses the keys Tenko holds: someone reset the account's password. Set a new one-time password and adopt the account again, or import a new keytab.} unknown {The account does not exist in the directory. Create it again with the PowerShell block and adopt it.} expired {The account's password has expired. Set a new one-time password and adopt the account again.} kdc_unreachable {No KDC answered. Check the KDCs listed, the _kerberos._tcp records and the network path to port 88.} adopt_incomplete {The adopt did not finish. Remove the account from Tenko, set a new one-time password and adopt it again.} change_pending {A password change is pending. Tenko asks the KDC again and commits or undoes it; run the self-test again in a few minutes.} kvno_not_newer {The KDC names a key version that is not newer than the ones Tenko holds. Check the account's msDS-KeyVersionNumber, then run the self-test again.} ticket_key {A ticket does not decrypt with the key Tenko holds for its version. Check that the SPN is on this account only (setspn -Q), or import a new keytab.} install_refused {The DNS role refused the keys. Check the SPNs of the account.} no_keys {Tenko holds no key for the account. Remove it from Tenko and adopt or import it again.} other {Check the account and the KDCs, then run the self-test again.}}</source><target>{reason, select, disabled {Kontot är inaktiverat eller låst i Active Directory. Aktivera det igen.} keys_refused {KDC:n godtar inte nycklarna som Tenko har: någon har återställt kontots lösenord. Sätt ett nytt engångslösenord och ta över kontot igen, eller importera en ny keytab.} unknown {Kontot finns inte i katalogen. Skapa det igen med PowerShell-blocket och ta över det.} expired {Kontots lösenord har gått ut. Sätt ett nytt engångslösenord och ta över kontot igen.} kdc_unreachable {Ingen KDC svarade. Kontrollera de angivna KDC:erna, _kerberos._tcp-posterna och nätverksvägen till port 88.} adopt_incomplete {Övertagandet blev inte klart. Ta bort kontot från Tenko, sätt ett nytt engångslösenord och ta över det igen.} change_pending {Ett lösenordsbyte väntar. Tenko frågar KDC:n igen och genomför eller ångrar det; kör självtestet igen om några minuter.} kvno_not_newer {KDC:n anger en nyckelversion som inte är nyare än de som Tenko har. Kontrollera kontots msDS-KeyVersionNumber och kör sedan självtestet igen.} ticket_key {En biljett går inte att dekryptera med nyckeln som Tenko har för dess version. Kontrollera att SPN:en bara finns på det här kontot (setspn -Q), eller importera en ny keytab.} install_refused {DNS-rollen avvisade nycklarna. Kontrollera kontots SPN:er.} no_keys {Tenko har ingen nyckel för kontot. Ta bort det från Tenko och ta över eller importera det igen.} other {Kontrollera kontot och KDC:erna och kör sedan självtestet igen.}}</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.kvno_unknown.title">
+        <segment><source>The KDC issues key version {kvno}, Tenko holds {held}</source><target>KDC:n utfärdar nyckelversion {kvno}, Tenko har {held}</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.kvno_unknown.fix">
+        <segment><source>The password was changed outside Tenko, or the keytab was exported with another version. Adopt the account again with a new one-time password, or import a new keytab.</source><target>Lösenordet ändrades utanför Tenko, eller så exporterades keytab-filen med en annan version. Ta över kontot igen med ett nytt engångslösenord, eller importera en ny keytab.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.spn_missing.title">
+        <segment><source>No account holds {spn}</source><target>Inget konto har {spn}</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.spn_missing.fix">
+        <segment><source>Add the SPN to the account on a domain controller: setspn -S {spn} with the account's name.</source><target>Lägg till SPN:en på kontot på en domänkontrollant: setspn -S {spn} med kontots namn.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.spn_duplicate.title">
+        <segment><source>{spn} is held by another account as well</source><target>{spn} innehas även av ett annat konto</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.spn_duplicate.fix">
+        <segment><source>Find the other holder with setspn -Q {spn} and remove the SPN there.</source><target>Hitta den andra innehavaren med setspn -Q {spn} och ta bort SPN:en där.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.weak_etype.title">
+        <segment><source>The KDC does not issue AES tickets for the account</source><target>KDC:n utfärdar inga AES-biljetter för kontot</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.weak_etype.fix">
+        <segment><source>Tenko accepts AES only. Set msDS-SupportedEncryptionTypes of the account to 24 (AES128 and AES256).</source><target>Tenko accepterar bara AES. Sätt kontots msDS-SupportedEncryptionTypes till 24 (AES128 och AES256).</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.clock_skew.title">
+        <segment><source>The clock is {skew} s off the KDC's</source><target>Klockan avviker {skew} s från KDC:ns</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.clock_skew.fix">
+        <segment><source>Synchronize the node's clock with the domain's time source (OPS-09). Kerberos refuses tickets beyond 300 s.</source><target>Synkronisera nodens klocka med domänens tidskälla (OPS-09). Kerberos avvisar biljetter med mer än 300 s avvikelse.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.rotation_failed.title">
+        <segment><source>The password rotation failed ({failures} in a row)</source><target>Lösenordsrotationen misslyckades ({failures} i rad)</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.rotation_failed.fix">
+        <segment><source>The old keys stay current. Run the self-test: it names the cause, usually a disabled account or a password policy that refuses the change.</source><target>De gamla nycklarna förblir gällande. Kör självtestet: det anger orsaken, oftast ett inaktiverat konto eller en lösenordspolicy som avvisar bytet.</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.other.title">
+        <segment><source>A finding of the self-test</source><target>Ett fynd från självtestet</target></segment>
+      </unit>
+      <unit id="dns.kerberos.finding.other.fix">
+        <segment><source>Read the detail below and run the self-test again.</source><target>Läs detaljerna nedan och kör självtestet igen.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

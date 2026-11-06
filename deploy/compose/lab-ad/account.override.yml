@@ -1,0 +1,29 @@
+# The round `account` of the Active Directory lab (identity plan section 3.19, WP13.3, E45):
+# the lifecycle of Tenko's Kerberos service account against a Samba AD domain controller.
+# Used beside compose.yml with a project name of its own, so that it never shares containers
+# with another round:
+#
+#   docker compose -p tenkoadaccount -f deploy/compose/lab-ad/compose.yml \
+#     -f deploy/compose/lab-ad/account.override.yml ...
+#
+# account/round.sh does that, builds the two images below from Ubuntu 24.04 (pinned by
+# digest in their Dockerfiles), and runs the rows. What this file changes: the controller
+# runs account/samba.sh (the provisioning with TENKO-DNS$ pre-staged, and faketime for the
+# skew row) with the capabilities iptables and Samba's ACLs need; both the controller and the
+# client get the round's output directory and the scripts; the client sleeps until the round
+# drives it. The services' addresses, names and the Tenko node are compose.yml's.
+
+services:
+  samba:
+    command: ["bash", "/lab/account/samba.sh"]
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    volumes:
+      - "./account:/lab/account:ro"
+      - "${LAB_DIR:?set LAB_DIR}/out:/lab/out"
+
+  client:
+    volumes:
+      - "./account:/lab/account:ro"
+      - "${LAB_DIR:?set LAB_DIR}/out:/lab/out"

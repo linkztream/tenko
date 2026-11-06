@@ -3517,6 +3517,7 @@ dependencies = [
  "tenko-cluster",
  "tenko-core",
  "tenko-jobs",
+ "tenko-krb",
  "tenko-store",
  "tenko-vault",
  "thiserror 2.0.21",

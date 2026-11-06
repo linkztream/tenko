@@ -2252,6 +2252,14 @@
         <notes><note category="description">Title of the job that rolls a DNSSEC key.</note></notes>
         <segment><source>DNSSEC key rollover</source><target>Nyckelbyte för DNSSEC</target></segment>
       </unit>
+      <unit id="dns.job.krb_rotate">
+        <notes><note category="description">Title of the job that rotates the password and the keys of the Kerberos account.</note></notes>
+        <segment><source>Kerberos account rotation</source><target>Rotation av Kerberos-kontot</target></segment>
+      </unit>
+      <unit id="dns.job.krb_rotate_preview">
+        <notes><note category="description">What the rotation job will do, shown before it runs. {realm} is the Kerberos realm, such as CORP.EXAMPLE.TEST.</note></notes>
+        <segment><source>Change the password of the Kerberos account in {realm} and store its new keys</source><target>Byt lösenordet för Kerberos-kontot i {realm} och spara dess nya nycklar</target></segment>
+      </unit>
       <unit id="dns.dnssec.parent_ds">
         <notes><note category="description">Manual step of a KSK or CSK rollover.</note></notes>
         <segment><source>Put the new DS records of {zone} at the parent zone and confirm once the parent serves them: {ds}</source><target>Lägg in de nya DS-posterna för {zone} i föräldrazonen och bekräfta när föräldern serverar dem: {ds}</target></segment>

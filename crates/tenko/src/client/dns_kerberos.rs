@@ -1,8 +1,5 @@
 //! `tenko dns kerberos ...`: the Kerberos account of secure dynamic updates (identity plan
-//! sections 3.1 and 4.3; WP13.0 declares the commands, WP13.3 builds the routes).
-//!
-//! Every route answers the 501 `sys.not_implemented` problem details until WP13.3 builds
-//! it, printed as any other API error.
+//! sections 3.1 and 4.3; WP13.0 declared the commands, WP13.3 built the routes).
 //!
 //! # Routes
 //!
@@ -10,7 +7,7 @@
 //! |---|---|
 //! | `kerberos status` | `GET /dns/kerberos` |
 //! | `kerberos adopt <realm> <name> --spn S... [--kdc K...] [--rotation-days D]` | `POST /dns/kerberos/adopt` |
-//! | `kerberos import <realm> <keytab file> --spn S... [--kdc K...]` | `POST /dns/kerberos/import` |
+//! | `kerberos import <realm> <keytab file> --spn S... [--kdc K...] [--name N]` | `POST /dns/kerberos/import` |
 //! | `kerberos check` | `POST /dns/kerberos/check` |
 //! | `kerberos rotate` | `POST /dns/kerberos/rotate` |
 //! | `kerberos delete` | `DELETE /dns/kerberos` |
@@ -125,6 +122,9 @@ pub struct ImportArgs {
     /// A KDC, `host` or `host:port`; repeat for each.
     #[arg(long = "kdc", value_name = "KDC")]
     pub kdcs: Vec<String>,
+    /// The account name, when the keytab names only an SPN (`ktpass /princ DNS/...`).
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
 }
 
 /// Runs a `tenko dns kerberos` subcommand.
@@ -199,6 +199,7 @@ fn render_status(answer: &Value) -> String {
             }
             for (label, field) in [
                 ("last rotation", "last_rotation"),
+                ("next rotation", "next_rotation"),
                 ("last check", "last_check"),
             ] {
                 let value = text(account, &[field]);
@@ -278,21 +279,30 @@ async fn adopt(target: &Target, args: &AdoptArgs) -> Result<Output, Failure> {
 
 async fn import(target: &Target, args: &ImportArgs) -> Result<Output, Failure> {
     let realm = realm_text(&args.realm)?;
-    let bytes = std::fs::read(&args.keytab).map_err(|error| {
+    let bytes = zeroize::Zeroizing::new(std::fs::read(&args.keytab).map_err(|error| {
         usage(format!(
             "cannot read the keytab {}: {error}",
             args.keytab.display()
         ))
-    })?;
+    })?);
     if bytes.len() > 1 << 20 {
         return Err(usage("a keytab is at most 1 MiB"));
     }
-    let body = json!({
+    let mut body = json!({
         "realm": realm,
         "keytab": base64url_encode(&bytes),
         "spns": args.spns,
         "kdcs": args.kdcs,
     });
+    drop(bytes);
+    if let Some(name) = args
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+    {
+        body["name"] = json!(name);
+    }
     let client = target.connect().await?;
     let answer: Value = client
         .post("/dns/kerberos/import", &body, Some(&key()))
@@ -363,7 +373,8 @@ mod tests {
                 "realm": "CORP.EXAMPLE.TEST", "name": "TENKO-DNS$", "owned": true,
                 "spns": ["DNS/ns1.corp.example.test"],
                 "versions": [{ "kvno": 3, "state": "current", "created": "2026-10-25T12:00:00Z" }],
-                "last_check": "2026-10-26T12:00:00Z"
+                "last_check": "2026-10-26T12:00:00Z",
+                "next_rotation": "2026-11-24T12:00:00Z"
             },
             "findings": [{ "code": "dns.gss.clock_skew", "detail": "61 s" }],
             "contexts": { "negotiating": 1, "established": 2, "refused_last_hour": 0 }
@@ -373,6 +384,7 @@ mod tests {
             "  spn DNS/ns1.corp.example.test",
             "  kvno 3 current since 2026-10-25T12:00:00Z",
             "  last check 2026-10-26T12:00:00Z",
+            "  next rotation 2026-11-24T12:00:00Z",
             "finding dns.gss.clock_skew: 61 s",
             "contexts: 1 negotiating, 2 established, 0 refused in the last hour",
         ] {

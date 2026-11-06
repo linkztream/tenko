@@ -33,11 +33,14 @@ pub const SECRETS_ACTION: AuditAction = AuditAction::from_static("cluster.node.s
 /// 2.10).
 /// WP7.0: the `dhcp` role's purpose `dhcp.failover` (the failover shared secret, IAM-16) is
 /// declared the same way for Phase 5.
-pub const PURPOSES: [(&str, Role); 4] = [
+/// WP13.3: the `dns` role's purpose `krb` (the keys of the Kerberos account, identity plan
+/// section 3.2, ADR 0026 point 5) beside `tsig`, for a Phase 5 `dns` node.
+pub const PURPOSES: [(&str, Role); 5] = [
     ("snmp", Role::Probe),
     (tenko_core::dns::TSIG_PURPOSE, Role::Dns),
     (tenko_core::dns::DNSSEC_PURPOSE, Role::Dns),
     (tenko_core::dhcp::FAILOVER_PURPOSE, Role::Dhcp),
+    (tenko_core::dns::KRB_PURPOSE, Role::Dns),
 ];
 
 /// A vault secret a node configuration names for one purpose.
@@ -308,6 +311,9 @@ mod tests {
         assert!(!purpose_allowed("snmp", &[Role::Dns]));
         assert!(!purpose_allowed("tsig", &[Role::Probe]));
         assert!(purpose_allowed("tsig", &[Role::Dns]));
+        // WP13.3: the keys of the Kerberos account go to a dns node only (IAM-16).
+        assert!(purpose_allowed("krb", &[Role::Dns]));
+        assert!(!purpose_allowed("krb", &[Role::Dhcp, Role::Probe]));
         assert!(purpose_allowed("dnssec", &[Role::Dns, Role::Controller]));
         assert!(!purpose_allowed("dnssec", &[Role::Probe, Role::Dhcp]));
         assert!(!purpose_allowed("snmp", &[Role::Dns]));

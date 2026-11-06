@@ -12,6 +12,7 @@ Contents:
 2. [What Active Directory needs from DNS](#2-what-active-directory-needs-from-dns)
 3. [The `_msdcs` zone](#3-the-_msdcs-zone)
 4. [Unsecured updates, GSS-TSIG and the profiles](#4-unsecured-updates-gss-tsig-and-the-profiles)
+   - [4.1 The Kerberos account of secure updates: pre-staging it](#41-the-kerberos-account-of-secure-updates-pre-staging-it)
 5. [Prerequisites](#5-prerequisites)
 6. [The DNS steps](#6-the-dns-steps)
 7. [The DHCP steps](#7-the-dhcp-steps)
@@ -124,6 +125,106 @@ Compensate by keeping the controllers on a network segment where source addresse
 Member computers and servers with a static address cannot register themselves on this footing: their unsigned update is refused and their secure update cannot be negotiated. Tenko DHCP writes the names of DHCP clients itself, by the internal path that TGL-09 does not govern (TGL-29, [dhcp.md](dhcp.md) section 13), so those clients need nothing. Hosts with static addresses get their records by hand or from IPAM. Opening the list to the client networks would let them register, and would let every host in those networks overwrite any record of the zone, the locator records included; do not.
 
 **Variant: static registration.** When the profile forbids unsigned updates, or you do not want them, switch the dynamic registration of the controllers off and keep the records in Tenko by hand. Setting `UseDynamicDns` to 0 in `HKLM\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters` makes Netlogon stop registering, and Microsoft says the records in `%SystemRoot%\System32\Config\Netlogon.dns` must then be registered manually; that file lists the records a controller needs, in zone file format, and `tenko dns import` reads it. Delete `Netlogon.dnb` and restart Netlogon for the setting to take effect. Cost: nothing re-registers by itself, so a changed controller address, a new controller or a moved global catalog needs a new import, and `dcdiag /test:dns` may report the missing dynamic registration.
+
+### 4.1 The Kerberos account of secure updates: pre-staging it
+
+GSS-TSIG needs one AD computer account whose keys Tenko holds (identity plan section 3.1, ADR 0026 point 4). A domain administrator creates it once with the block below; Tenko then changes its password with the change-password protocol (RFC 3244), so that from then on only Tenko knows it, derives the AES keys and keeps them in its vault. No administrator credential is ever entered into Tenko: the administrator types a one-time password here and the same password once into Tenko's wizard (**DNS, Kerberos**) or `tenko dns kerberos adopt`, and Tenko replaces it at once.
+
+The block is static: it is printed here and versioned with the release, Tenko never generates it, and it takes no input that Tenko wrote. It runs as a domain administrator, so it must not run anything a less privileged system could have shaped: every value is typed at its prompt, checked against a strict pattern, and passed to a cmdlet as a parameter, never into a command line or `Invoke-Expression`. The wizard shows the values to type (the account name, the organizational unit to choose, the SPNs of the nodes) as text, never as code, and offers no copy.
+
+Save the block as a file (for example `New-TenkoAccount.ps1`) from this page of the release's documentation, read it line by line, and run it with `powershell -File New-TenkoAccount.ps1` on a management host with the RSAT Active Directory module, rather than on a domain controller. Type each value at its prompt; do not paste them. The block discards whatever arrives beyond the one line a prompt reads, and the console's input at the end, so that nothing pasted can run as a command of the administrator's session.
+
+It runs as a member of Domain Admins, or as an account delegated these rights on the chosen organizational unit: create computer objects; write `servicePrincipalName` and `msDS-SupportedEncryptionTypes` of the objects it creates (the creator owns them, which usually covers it; check it in your domain); and modify permissions, which `ProtectedFromAccidentalDeletion` needs because it writes a deny entry on the organizational unit. Without the last right the block warns and leaves the protection to you.
+
+```powershell
+# Tenko DDI: pre-stage the computer account of secure dynamic updates (GSS-TSIG).
+# Static block from docs/active-directory.md section 4.1; it takes no input from Tenko.
+# Save it as a file, read it, and run it with powershell -File. Type every value.
+Import-Module ActiveDirectory
+$ErrorActionPreference = 'Stop'
+
+# Anything waiting in the console's input (the rest of a paste) is thrown away, so that it
+# cannot run as a command; also when the block stops with an error.
+function Clear-Input { try { $Host.UI.RawUI.FlushInputBuffer() } catch { } }
+trap { Clear-Input; break }
+# One line at a prompt; whatever came with it is discarded.
+function Read-Value([string] $prompt) {
+    $value = Read-Host $prompt
+    Clear-Input
+    return $value
+}
+
+# 1. The account name: 1 to 15 letters, digits or hyphens; the `$` is added here.
+$name = Read-Value 'Account name (for example TENKO-DNS)'
+if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,14}$') { throw 'The name is 1 to 15 letters, digits or hyphens.' }
+
+# 2. The organizational unit, as a distinguished name; it must exist.
+$ou = Read-Value 'Organizational unit (for example OU=Service Accounts,DC=corp,DC=example,DC=test)'
+$ouObject = Get-ADOrganizationalUnit -Identity $ou
+
+# 3. The service principal names: DNS/<fqdn> for each Tenko node that is the primary of an
+#    AD zone, HTTP/<fqdn> for Kerberos sign-in to the web UI. One per prompt; empty ends.
+$spns = @()
+while ($true) {
+    $spn = Read-Value 'SPN (DNS/host.corp.example.test or HTTP/host.corp.example.test; empty to finish)'
+    if ($spn -eq '') { break }
+    if ($spn -notmatch '^(DNS|HTTP)/[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?)+$') { throw "Not an SPN of the form DNS/<fqdn> or HTTP/<fqdn>: $spn" }
+    $fqdn = $spn.Split('/')[1]
+    # An SPN must be unique, and the host must not be another computer's: Active Directory
+    # maps DNS/ and HTTP/ to HOST/, so a computer named like the host holds them already.
+    # The pattern above keeps the filters to letters, digits, dots, hyphens and one slash.
+    $holder = Get-ADObject -LDAPFilter "(|(servicePrincipalName=$spn)(servicePrincipalName=HOST/$fqdn)(dNSHostName=$fqdn))"
+    if ($holder) { throw "The host $fqdn or the SPN $spn belongs to $($holder.DistinguishedName) already." }
+    $spns += $spn
+}
+if ($spns.Count -eq 0) { throw 'At least one SPN is needed.' }
+
+# 4. The one-time password, typed twice and never shown; Tenko replaces it at once.
+$password = Read-Host 'One-time password' -AsSecureString
+Clear-Input
+$again = Read-Host 'The same password again' -AsSecureString
+Clear-Input
+$same = [System.Net.NetworkCredential]::new('', $password).Password -ceq [System.Net.NetworkCredential]::new('', $again).Password
+if (-not $same) { throw 'The two passwords differ.' }
+
+# 5. The account: AES only (msDS-SupportedEncryptionTypes = 24), the SPNs, no delegation,
+#    no group membership beyond Domain Computers.
+New-ADComputer -Name $name -SamAccountName "$name`$" -Path $ouObject.DistinguishedName `
+    -ServicePrincipalNames $spns -KerberosEncryptionType AES128,AES256 `
+    -AccountPassword $password -Enabled $true -TrustedForDelegation $false `
+    -Description 'Tenko DDI secure dynamic updates; Tenko rotates the password'
+$account = Get-ADComputer -Identity "$name`$" -Properties msDS-SupportedEncryptionTypes, servicePrincipalName
+try {
+    Set-ADObject -Identity $account.DistinguishedName -ProtectedFromAccidentalDeletion $true
+} catch {
+    Write-Warning "The account exists, but protecting it from accidental deletion failed: $($_.Exception.Message)"
+}
+$password = $null; $again = $null
+
+# 6. What to type into Tenko's wizard, and the checks.
+"Realm:        $((Get-ADDomain).DNSRoot.ToUpper())"
+"Account name: $($account.SamAccountName)"
+"SPNs:         $($account.servicePrincipalName -join ', ')"
+"Encryption:   $($account.'msDS-SupportedEncryptionTypes') (24 is AES128 and AES256 only)"
+Clear-Input
+```
+
+What each step is for:
+
+| Step | What it does | Why |
+|---|---|---|
+| `Clear-Input`, `Read-Value` | Discard what the console holds beyond the line a prompt read, after every prompt, at the end and when the block stops | A paste of several lines, from a page a compromised system served, cannot run as the administrator (R130) |
+| 1, 2, 3 | Reads the name, the OU and the SPNs at the prompt and checks each against a pattern or the directory | Nothing typed can become code: each value only ever fills a cmdlet parameter |
+| 3 | Refuses an SPN another account of the domain holds, and a host another computer owns (its `HOST/` SPN or its `dNSHostName`) | A duplicate SPN gives clients a ticket Tenko cannot read (`dns.gss.spn_duplicate`), and an SPN of another computer's host would take that host's service over |
+| 4 | Reads the one-time password twice as a secure string and compares the two | The password is not echoed, logged or kept in the session's history; the plain text exists only inside the comparison, as a managed string the block cannot wipe |
+| 5 | Creates the computer account with AES only, the SPNs and no delegation, and protects it from deletion (with a warning when the right is missing) | RC4, DES and 3DES are never accepted (ADR 0026 point 3); the account has no right beyond its own password |
+| 6 | Prints the realm, the account name and the SPNs, and the encryption types | The values the wizard asks for, and a check that the attribute is 24 |
+
+Then, in Tenko: **DNS, Kerberos**, *Adopt a pre-staged account*, with the realm, the account name, the SPNs and the one-time password; or `tenko dns kerberos adopt CORP.EXAMPLE.TEST 'TENKO-DNS$' --spn DNS/tenko1.corp.example.test`, which asks for the password on the terminal. Tenko changes the password, stores the keys, runs the self-test and shows its findings. Its check: `tenko dns kerberos status` lists the key versions and the SPNs, and the audit log has `dns.krb.account.adopt`. Its way back: `tenko dns kerberos delete` removes the keys from Tenko; delete the computer account in the directory yourself (`Set-ADObject -ProtectedFromAccidentalDeletion $false`, then `Remove-ADComputer`).
+
+Keep the account out of clean-up scripts that disable inactive computer accounts: Tenko's rotation (every 30 days by default) and its daily self-test keep `lastLogonTimestamp` moving, but a script that keys on `pwdLastSet` or on the operating system attribute may still pick it; exclude its OU. An administrator who resets its password breaks it on purpose: the daily self-test reports `dns.gss.self_test_failed` with the reason `keys_refused`, and the fix is to set a new one-time password and adopt it again.
+
+**Variant: a keytab.** When the password should stay with the administrator, create the account (or a user account) and a keytab with `ktpass /out tenko.keytab /princ DNS/tenko1.corp.example.test@CORP.EXAMPLE.TEST /mapuser CORP\TENKO-DNS$ /crypto AES256-SHA1 /ptype KRB5_NT_PRINCIPAL /pass *`, and import it in the wizard or with `tenko dns kerberos import CORP.EXAMPLE.TEST tenko.keytab --spn DNS/tenko1.corp.example.test --name 'TENKO-DNS$'`. Tenko keeps the AES entries, refuses RC4 and DES entries, does not keep the file and does not rotate the password; a reset in AD needs a new keytab. Delete the keytab file after the import.
 
 ## 5. Prerequisites
 

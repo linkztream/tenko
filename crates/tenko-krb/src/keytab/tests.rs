@@ -99,6 +99,8 @@ fn ktutil_keys_equal_tenko_string_to_key_with_the_ms_kile_salts() {
         versions: vec![],
         last_rotation: None,
         last_check: None,
+        secret: None,
+        findings: Vec::new(),
     };
     let alice = PrincipalName::parse("alice@CORP.EXAMPLE.TEST").expect("alice");
     let cases = [

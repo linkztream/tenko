@@ -1409,6 +1409,37 @@ async fn start(
             tenko_dns::zone::ZoneConfig::default(),
         )
     });
+    // WP13.3: the Kerberos account of secure updates (identity plan section 3.1): the
+    // service over the network, its rotation step, and the leader service `dns.krb`
+    // (recovery of a pending change, the daily self-test, the rotation when due), whose
+    // writes carry the leader epoch. The watcher that hands the keys to the dns role's
+    // acceptor joins when the TKEY handler's key handle is on this branch.
+    let kerberos = zones.as_ref().map(|zones| {
+        let profile = resolved.config.profile.name;
+        let service = tenko_dns::zone::kerberos::KerberosService::networked(
+            Arc::clone(&store_dyn),
+            Some(Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>),
+            tenko_dns::zone::kerberos::KerberosConfig {
+                rotation_off_allowed: matches!(profile, tenko_auth::settings::Profile::Lab),
+                rotation_failures_before_finding: if matches!(
+                    profile,
+                    tenko_auth::settings::Profile::Hardened
+                ) {
+                    1
+                } else {
+                    2
+                },
+                ..tenko_dns::zone::kerberos::KerberosConfig::default()
+            },
+        );
+        engine.register(service.rotate_step());
+        leaders.register(tenko_dns::zone::kerberos::LeaderLoop::new(
+            Arc::clone(&service),
+            Arc::clone(zones.jobs()),
+        ));
+        service
+    });
+    // WP13.3: end.
     // WP7.4: the configuration service of the DHCP module; its write step joins the engine
     // before it starts. Without the module nothing is built and no DHCP route exists.
     let dhcp_config = modules.contains(crate::modules::Module::Dhcp).then(|| {
@@ -1784,6 +1815,11 @@ async fn start(
                 server.extensions.insert(Arc::clone(topology));
             }
             server.extensions.insert(engine.clone());
+            // WP13.3: the Kerberos account routes.
+            if let Some(kerberos) = &kerberos {
+                server.extensions.insert(Arc::clone(kerberos));
+            }
+            // WP13.3: end.
             if let Some(zones) = &zones {
                 server.extensions.insert(Arc::clone(zones));
                 // WP6.1: the transfer state and the transfer-now route.

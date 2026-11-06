@@ -34,6 +34,10 @@
         <notes><note category="description">What the job kind dns.import is called in the jobs list, on a job page and on the dashboard.</note></notes>
         <segment><source>Import a DNS zone file</source></segment>
       </unit>
+      <unit id="jobs.title.dns.krb.rotate">
+        <notes><note category="description">What the job kind dns.krb.rotate is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Rotate the password of the Kerberos account</source></segment>
+      </unit>
       <unit id="jobs.title.dns.list.compile">
         <notes><note category="description">What the job kind dns.list.compile is called in the jobs list, on a job page and on the dashboard.</note></notes>
         <segment><source>Compile a block list</source></segment>

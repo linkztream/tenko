@@ -236,6 +236,8 @@ fn name_owner_keys_order_by_zone_scope_and_name_and_the_tables_are_declared() {
         versions: Vec::new(),
         last_rotation: None,
         last_check: None,
+        secret: None,
+        findings: Vec::new(),
     }
     .validate()
     .expect_err("an empty name");

@@ -42,6 +42,7 @@ rustls-native-certs = "0.8.4"
 socket2 = { workspace = true }
 tenko-core = { workspace = true }
 tenko-jobs = { workspace = true }
+tenko-krb = { workspace = true }
 tenko-store = { workspace = true }
 tenko-vault = { workspace = true }
 thiserror = { workspace = true }

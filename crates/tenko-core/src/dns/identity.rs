@@ -16,6 +16,7 @@
 //! | [`Ownership`] | Whether the Windows ownership rules apply (section 3.6) |
 //! | [`NameOwner`], [`NameOwnerKey`] | The owner of a name in `dns.name_owners` |
 //! | [`KrbAccount`], [`KeyVersionMeta`] | The account and its key versions, metadata only |
+//! | [`KrbFinding`] | A finding of the account's self-test, bounded and cleaned (WP13.3) |
 
 use std::{fmt, str::FromStr};
 
@@ -976,7 +977,116 @@ pub struct KrbAccount {
     /// The last self-test.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_check: Option<Timestamp>,
+    // WP13.3: the link to the keys and the findings of the last self-test.
+    /// The vault secret of purpose [`super::KRB_PURPOSE`] that holds the keys; absent only
+    /// while an adopt or an import writes its first keys. Never shown in the API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<crate::secret::SecretRef>,
+    /// The findings of the last self-test (section 3.10), at most [`MAX_KRB_FINDINGS`];
+    /// empty when it passed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<KrbFinding>,
+    // WP13.3: end.
 }
+
+// WP13.3: the most SPNs of the account (the self-test asks a ticket for each).
+/// The most service principal names an account holds.
+pub const MAX_KRB_SPNS: usize = 64;
+
+// WP13.3: the findings of the account's self-test, bounded and cleaned: a KDC's error text
+// is network input, and no password, key, salt or one-time secret is ever put in one.
+/// The most findings an account keeps.
+pub const MAX_KRB_FINDINGS: usize = 32;
+/// The longest `detail` of a finding, in octets.
+pub const MAX_KRB_FINDING_DETAIL: usize = 512;
+/// The longest value of a finding's parameter, in octets.
+pub const MAX_KRB_FINDING_PARAM: usize = 256;
+/// The parameters a finding may carry: the SPN, the key version seen and the versions
+/// held, the skew measured, the encryption type, the KDC's error code, the reason and the
+/// failures in a row of a rotation.
+pub const KRB_FINDING_PARAMS: [&str; 8] = [
+    "spn",
+    "kvno",
+    "held",
+    "skew_secs",
+    "etype",
+    "kdc_error",
+    "reason",
+    "failures",
+];
+
+/// One finding of the account's self-test (identity plan section 3.10): the code of
+/// `tenko_core::dns::findings`, what was seen in English, the parameters the UI fills its
+/// localized text with, and when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct KrbFinding {
+    /// The finding (`dns.gss.spn_missing`, ...).
+    pub code: String,
+    /// What was seen, in English, without control characters.
+    pub detail: String,
+    /// Parameters from [`KRB_FINDING_PARAMS`].
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub params: std::collections::BTreeMap<String, String>,
+    /// When it was found.
+    pub at: Timestamp,
+}
+
+/// `text` with every control character replaced by a space, cut to at most `max` octets
+/// at a character boundary.
+pub fn clean_finding_text(text: &str, max: usize) -> String {
+    let mut out = String::with_capacity(text.len().min(max));
+    for c in text.chars() {
+        let c = if c.is_control() { ' ' } else { c };
+        if out.len() + c.len_utf8() > max {
+            break;
+        }
+        out.push(c);
+    }
+    out
+}
+
+impl KrbFinding {
+    /// A finding with its detail cleaned and cut to [`MAX_KRB_FINDING_DETAIL`].
+    pub fn new(code: &str, detail: &str, at: Timestamp) -> Self {
+        Self {
+            code: code.to_owned(),
+            detail: clean_finding_text(detail, MAX_KRB_FINDING_DETAIL),
+            params: std::collections::BTreeMap::new(),
+            at,
+        }
+    }
+
+    /// The finding with a parameter, its value cleaned and cut to
+    /// [`MAX_KRB_FINDING_PARAM`]; a key outside [`KRB_FINDING_PARAMS`] is not added.
+    #[must_use]
+    pub fn param(mut self, key: &str, value: impl fmt::Display) -> Self {
+        if KRB_FINDING_PARAMS.contains(&key) {
+            self.params.insert(
+                key.to_owned(),
+                clean_finding_text(&value.to_string(), MAX_KRB_FINDING_PARAM),
+            );
+        }
+        self
+    }
+
+    fn validate(&self) -> Result<(), &'static str> {
+        if !super::findings::ALL.contains(&self.code.as_str()) {
+            return Err("a finding's code is not a DNS finding");
+        }
+        let clean =
+            |text: &str, max: usize| text.len() <= max && !text.chars().any(char::is_control);
+        if !clean(&self.detail, MAX_KRB_FINDING_DETAIL) {
+            return Err("a finding's detail is too long or holds control characters");
+        }
+        for (key, value) in &self.params {
+            if !KRB_FINDING_PARAMS.contains(&key.as_str()) || !clean(value, MAX_KRB_FINDING_PARAM) {
+                return Err("a finding's parameter is not one of the set, too long or not clean");
+            }
+        }
+        Ok(())
+    }
+}
+// WP13.3: end.
 
 const fn default_rotation_days() -> u16 {
     DEFAULT_ROTATION_DAYS
@@ -1006,6 +1116,10 @@ impl KrbAccount {
         }
         if self.spns.is_empty() {
             return invalid("spns", "at least one service principal name");
+        }
+        // WP13.3: the self-test asks a ticket for each.
+        if self.spns.len() > MAX_KRB_SPNS {
+            return invalid("spns", "at most 64 service principal names");
         }
         for spn in &self.spns {
             let Some((service, host)) = spn.split_once('/') else {
@@ -1053,6 +1167,16 @@ impl KrbAccount {
         if current > 1 || pending > 1 {
             return invalid("versions", "at most one current and one pending version");
         }
+        // WP13.3
+        if self.findings.len() > MAX_KRB_FINDINGS {
+            return invalid("findings", "at most 32 findings");
+        }
+        for finding in &self.findings {
+            finding
+                .validate()
+                .or_else(|reason| invalid("findings", reason))?;
+        }
+        // WP13.3: end.
         Ok(())
     }
 
@@ -1352,7 +1476,64 @@ mod tests {
             }],
             last_rotation: None,
             last_check: None,
+            secret: None,
+            findings: Vec::new(),
         }
+    }
+
+    /// DNS-28 (WP13.3): a finding's text is cleaned and bounded, its parameters come from
+    /// the fixed set, and an account refuses findings that break those bounds, too many
+    /// of them, or a code that is not a DNS finding.
+    #[test]
+    fn dns_28_findings_are_bounded_and_cleaned() {
+        let at: Timestamp = "2026-11-06T12:00:00Z".parse().expect("time");
+        let finding = KrbFinding::new(
+            super::super::findings::GSS_SPN_MISSING,
+            "the KDC said\r\n\u{1b}[31mforged\u{0}",
+            at,
+        )
+        .param("spn", "DNS/ns1.corp.example.test\n")
+        .param("password", "never")
+        .param("reason", "x".repeat(1_000));
+        assert_eq!(finding.detail, "the KDC said   [31mforged ");
+        assert_eq!(finding.params["spn"], "DNS/ns1.corp.example.test ");
+        assert!(!finding.params.contains_key("password"));
+        assert_eq!(finding.params["reason"].len(), MAX_KRB_FINDING_PARAM);
+        let long = KrbFinding::new(
+            super::super::findings::GSS_SPN_MISSING,
+            &"ö".repeat(400),
+            at,
+        );
+        assert!(long.detail.len() <= MAX_KRB_FINDING_DETAIL);
+        assert!(long.detail.chars().all(|c| c == 'ö'));
+        let mut account = account();
+        account.findings = vec![finding.clone()];
+        account.validate().expect("valid");
+        account.findings = vec![finding.clone(); MAX_KRB_FINDINGS + 1];
+        assert!(account.validate().is_err());
+        let breaks: [fn(&mut KrbFinding); 4] = [
+            |f| f.code = "dns.made.up".to_owned(),
+            |f| f.detail = "a\nb".to_owned(),
+            |f| {
+                f.params.insert("password".to_owned(), "x".to_owned());
+            },
+            |f| {
+                f.params
+                    .insert("spn".to_owned(), "y".repeat(MAX_KRB_FINDING_PARAM + 1));
+            },
+        ];
+        for broken in breaks {
+            let mut bad = finding.clone();
+            broken(&mut bad);
+            account.findings = vec![bad];
+            assert!(account.validate().is_err(), "{:?}", account.findings);
+        }
+        // The new fields are optional in the stored and the API form.
+        let plain = self::account();
+        let json = serde_json::to_value(&plain).expect("json");
+        assert!(json.get("secret").is_none() && json.get("findings").is_none());
+        let back: KrbAccount = serde_json::from_value(json).expect("back");
+        assert_eq!(back, plain);
     }
 
     /// One change that breaks the account.

@@ -533,10 +533,15 @@ fn dns_28_recorded_change_password_exchange() {
     let not_ours = Err(ClientError::Reply("the answer is not to the last request"));
     assert_eq!(change.handle(&record.octets("change_reply")), not_ours);
     change.request(ip).expect("the request without a target");
-    // The answer to it was MIT's "malformed".
+    // The answer to it was MIT's "malformed", in the KRB-PRIV of the AP-REP to the only
+    // request sent: a refusal that proves the password did not change.
     assert!(matches!(
         change.handle(&record.octets("unnamed_reply")),
-        Err(ClientError::PasswordRefused { code: 1, .. })
+        Err(ClientError::PasswordRefused {
+            code: 1,
+            definite: true,
+            ..
+        })
     ));
     assert_eq!(change.handle(&record.octets("change_reply")), not_ours);
     change.name_target();
@@ -566,6 +571,55 @@ fn dns_28_recorded_change_password_exchange() {
         part.s_address,
         Some(HostAddress::from_ip("127.0.0.1".parse().expect("ip")))
     );
+}
+
+/// DNS-28: a rotation authenticates its change-password ticket with the keys Tenko holds,
+/// not with a password: the recorded `kadmin/changepw` exchange replays with keys derived
+/// from the one-time password and the KDC's salt, chosen by the type the KDC names, the
+/// way `Client::change_password_with` uses them.
+#[test]
+fn dns_28_the_change_password_ticket_with_the_held_keys() {
+    let record = Record::load("samba-adopt");
+    let account = tenko_dns_account();
+    let tenko = account.principal().expect("principal");
+    let sub = Record(
+        record
+            .0
+            .iter()
+            .filter_map(|(k, v)| {
+                k.strip_prefix("changepw_")
+                    .map(|k| (k.to_owned(), v.clone()))
+            })
+            .collect(),
+    );
+    let keys = KeySet::from_password(
+        &tenko,
+        10,
+        KeyVersionState::Current,
+        ONE_TIME_PW,
+        &cipher::salt::account(&account),
+        cipher::DEFAULT_ITERATIONS,
+        &ETYPES,
+    )
+    .expect("keys");
+    let ticket = replay_as(&sub, &tenko, &changepw(), Secret::Keys(keys)).expect("ticket");
+    assert_eq!(
+        ticket.credentials.part.sname.components,
+        ["kadmin", "changepw"]
+    );
+    assert_eq!(changepw_principal(&tenko).expect("changepw"), changepw());
+    // Keys of another password do not decrypt the KDC's answer.
+    let wrong = KeySet::from_password(
+        &tenko,
+        10,
+        KeyVersionState::Current,
+        b"not-the-password",
+        &cipher::salt::account(&account),
+        cipher::DEFAULT_ITERATIONS,
+        &ETYPES,
+    )
+    .expect("keys");
+    assert!(replay_as(&sub, &tenko, &changepw(), Secret::Keys(wrong)).is_err());
 }
 
 #[test]
@@ -602,6 +656,35 @@ fn change_password_results_and_malformed_answers() {
         change.handle(&version),
         Err(ClientError::Reply("not a change-password answer"))
     );
+    // DNS-28 (R123): a refusal in a bare KRB-ERROR is unauthenticated, so it does not prove
+    // that the password stayed as it was.
+    let error = der::KrbError {
+        ctime: None,
+        cusec: None,
+        stime: 0,
+        susec: 0,
+        error_code: 60,
+        crealm: None,
+        cname: None,
+        realm: "CORP.EXAMPLE.TEST".to_owned(),
+        sname: principal_wire(&changepw(), name_type::SRV_INST),
+        e_text: None,
+        e_data: Some(vec![0, 4, b'n', b'o']),
+    }
+    .encode();
+    let total = u16::try_from(6 + error.len()).expect("small");
+    let mut bare = total.to_be_bytes().to_vec();
+    bare.extend_from_slice(&1_u16.to_be_bytes());
+    bare.extend_from_slice(&0_u16.to_be_bytes());
+    bare.extend_from_slice(&error);
+    assert_eq!(
+        change.handle(&bare),
+        Err(ClientError::PasswordRefused {
+            code: 4,
+            message: "no".to_owned(),
+            definite: false,
+        })
+    );
 }
 
 const ONE_TIME_PW: &[u8] = b"One-Time-Pass-1";
@@ -618,6 +701,8 @@ fn tenko_dns_account() -> tenko_core::dns::KrbAccount {
         versions: vec![],
         last_rotation: None,
         last_check: None,
+        secret: None,
+        findings: Vec::new(),
     }
 }
 
