@@ -7389,7 +7389,7 @@ export interface components {
         Capability: "inventory" | "webhook" | "network_controller" | "actuator" | "migration" | "port_bounce" | "client_kick";
         /** @description A certificate issued to a node, as the registry remembers it. */
         CertificateRef: {
-            /** @description End of validity. */
+            /** @description End of validity, or the certificate's retirement after a renewal replaced it. */
             not_after: components["schemas"]["Timestamp"];
             /** @description Start of validity. */
             not_before: components["schemas"]["Timestamp"];

@@ -44291,7 +44291,7 @@
         "properties": {
           "not_after": {
             "$ref": "#/components/schemas/Timestamp",
-            "description": "End of validity."
+            "description": "End of validity, or the certificate's retirement after a renewal replaced it."
           },
           "not_before": {
             "$ref": "#/components/schemas/Timestamp",
