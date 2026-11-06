@@ -19,7 +19,10 @@
 #   7. disconnects a follower from the lab network (the fault service runs
 #      `docker network disconnect`), checks through its own port that it lost its quorum and
 #      that the majority keeps taking writes, connects it again and checks the digests;
-#   8. tears everything down (containers, volumes, network, work directory), also when a
+#   8. checks that a renewal before its window is refused, that 30 enrollments with an
+#      invalid token give 10 audit records and one summary, and that a revoked probe is cut
+#      off by the controller it is connected to (the installation's first revocation);
+#   9. tears everything down (containers, volumes, network, work directory), also when a
 #      step fails, after printing the logs of every service. KEEP=1 leaves the lab running.
 #
 # Needs: bash, Docker with the compose and buildx plugins, curl, openssl and python3 on the
@@ -412,5 +415,46 @@ compose run --rm -T fault network connect --alias "$cut" "$network" "$container"
 retry 90 "$cut healthy again" back
 retry 90 "all three digests to agree after the heal" digests_agree 3
 ok "heal" "$cut is back and the three digests agree"
+
+step "renewal, refused enrollments and revocation"
+# A renewal before the certificate's window is refused: a new certificate has a year.
+early="$(compose exec -T probe-1 "$tenko_bin" node renew --data-dir /var/lib/tenko 2>&1 || true)"
+[[ "$early" == *"not due for renewal"* ]] || fail "an early renewal was not refused: $early"
+ok "renewal before its window" "refused as not due"
+
+# Thirty enrollments with an invalid token, on one controller (the session cookie keeps
+# HAProxy on one): ten audit records one by one and one summary at the end of the minute.
+login
+for _ in $(seq 30); do
+  curl -s -o /dev/null --max-time 10 --cacert "$ca" -b "$jar" -H "Origin: $url" \
+    -H "Content-Type: application/json" --data '{"token":"x","csr":""}' \
+    "$url/api/v1/nodes/enroll" || true
+done
+refusals() {
+  api GET "/audit?action=cluster.node.enroll&limit=200" | python3 -c "
+import json, sys
+items = json.load(sys.stdin)['items']
+summary = [r for r in items if 'cluster.enrollment.refusals' in json.dumps(r)]
+one = sum(1 for r in items if 'cluster.enrollment.invalid_token' in json.dumps(r) and r not in summary)
+print(one, len(summary), summary[0] if summary else '')"
+}
+summarized() { [[ "$(refusals)" == "10 1 "* ]]; }
+retry 120 "the summary of the refused enrollments" summarized
+ok "refused enrollments" "30 refused: 10 recorded one by one, 20 in one summary"
+
+# probe-2 revoked through the API: the controller it is connected to closes its
+# connection and the probe reports the state revoked. It is the installation's first
+# revocation, so every controller's revocation list was empty before it.
+probe2="$(api GET /nodes | json "next(n['id'] for n in j['items'] if n['name'] == 'probe-2')")"
+holder="$(api GET "/nodes/$probe2" | json "(j.get('connection') or {}).get('controller')")"
+api DELETE "/nodes/$probe2" >/dev/null
+probe2_state() {
+  compose exec -T probe-2 "$tenko_bin" node status --json --data-dir /var/lib/tenko |
+    json "(j.get('process') or {}).get('state')"
+}
+revoked() { [[ "$(probe2_state)" == revoked ]]; }
+retry 30 "probe-2 to report itself revoked" revoked
+retry 60 "probe-1 still connected" probe_ok probe-1
+ok "revocation" "probe-2 (connected to controller node $holder) cut off and revoked; probe-1 connected"
 
 step "OK: the cluster lab passed"

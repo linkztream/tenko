@@ -431,7 +431,22 @@ impl Peers {
                 }
                 Ok(Some(record))
             }
-            None if access == Access::Raft => Ok(None),
+            // The first controller of a cluster never enrolled and has no record; a revoked
+            // controller has none either. Its certificates are on the revocation list, but
+            // one its record no longer held is not, so the node id decides.
+            None if access == Access::Raft => match self.registry() {
+                Ok(registry)
+                    if registry.is_revoked_node(node)
+                        || registry.revocations().is_revoked(&peer.identity.serial) =>
+                {
+                    Err(status_of(&ClusterError::new(
+                        "cluster.node.unknown",
+                        403,
+                        format!("controller {node} was revoked"),
+                    )))
+                }
+                _ => Ok(None),
+            },
             None => Err(status_of(&ClusterError::new(
                 "cluster.node.unknown",
                 403,

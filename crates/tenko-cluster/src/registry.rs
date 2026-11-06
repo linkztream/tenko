@@ -125,6 +125,28 @@ pub const TOKEN_RETENTION: Duration = Duration::from_secs(7 * 24 * 3600);
 /// A repeated refused handshake with the same offer is recorded and audited at most this
 /// often.
 pub const MISMATCH_REPEAT: Duration = Duration::from_secs(3600);
+/// How often an open configuration, command or heartbeat stream of a node checks again
+/// that the node is enrolled and holds the certificate of its connection. A revocation
+/// closes the node's connections at once; this check ends a stream whose connection
+/// outlived its record for any other reason.
+pub const STREAM_RECHECK: Duration = Duration::from_secs(60);
+/// A node renews its certificate at most once in this time. A node whose renewal answer was
+/// lost asks again with the certificate it still holds after its own pause of an hour
+/// (`client::RENEW_RETRY`).
+pub const RENEW_INTERVAL: Duration = Duration::from_secs(3600);
+/// The fewest days before expiry from which a node certificate may be renewed, whatever
+/// the CA policy says: the node's own rule asks from 30 days or a third of the lifetime,
+/// whichever is longer (`identity::Credentials::needs_renewal`).
+pub const RENEW_FROM_DAYS: u32 = 30;
+/// How long the certificates a renewal replaced keep working once the node has shown that
+/// it holds the new one: long enough for the calls under way on its old connection, after
+/// which its streams end and it connects again with the new certificate.
+pub const RETIRE_GRACE: Duration = Duration::from_secs(15 * 60);
+/// Refused enrollments a controller audits one by one in each [`REFUSAL_WINDOW`]; the
+/// rest of the window's refusals go into one summary record at its end.
+pub const REFUSAL_AUDIT_BURST: u32 = 10;
+/// The window of [`REFUSAL_AUDIT_BURST`].
+pub const REFUSAL_WINDOW: Duration = Duration::from_secs(60);
 /// Longest node name.
 pub const MAX_NAME_LEN: usize = 63;
 /// How many times a revocation or a renewal is planned before a conflict is reported: the
@@ -161,6 +183,29 @@ impl RegistryConfig {
             default_port: 8444,
             default_token_ttl: DEFAULT_TOKEN_TTL,
             majors: version::SUPPORTED_MAJORS.to_vec(),
+        }
+    }
+}
+
+/// The pace of the checks of connected nodes and of the audit of refused enrollments. The
+/// defaults are [`STREAM_RECHECK`], [`RETIRE_GRACE`] and [`REFUSAL_WINDOW`]; tests
+/// shorten them with [`NodeRegistry::set_timings`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Timings {
+    /// How often an open stream of a node checks the node's record again.
+    pub stream_recheck: Duration,
+    /// How long replaced certificates keep working once the node holds the new one.
+    pub retire_grace: Duration,
+    /// The window in which a few refused enrollments are audited one by one.
+    pub refusal_window: Duration,
+}
+
+impl Default for Timings {
+    fn default() -> Self {
+        Self {
+            stream_recheck: STREAM_RECHECK,
+            retire_grace: RETIRE_GRACE,
+            refusal_window: REFUSAL_WINDOW,
         }
     }
 }
@@ -235,6 +280,110 @@ pub enum PortDemand {
     Enrolled,
 }
 
+/// Most source addresses a summary of refused enrollments keeps; beyond them it counts.
+const SUMMARY_ADDRESSES: usize = 1024;
+/// Most source addresses a summary of refused enrollments names in its record.
+const SUMMARY_NAMED: usize = 16;
+
+/// The audit pace of refused enrollments on this controller.
+#[derive(Debug, Default)]
+struct Refusals {
+    /// When the current window started.
+    started: Option<Instant>,
+    /// Refusals recorded one by one in it, of requests that did not know a token's
+    /// secret.
+    recorded: u32,
+    /// Refusals recorded one by one in it, of requests that knew one (a used or expired
+    /// token, a refused role or name): they have a budget of their own, so a flood of
+    /// invalid tokens does not hide them.
+    recorded_known: u32,
+    /// The refusals past the burst, until the window's summary is written.
+    pending: Option<PendingRefusals>,
+}
+
+/// The refused enrollments a summary record covers.
+#[derive(Debug)]
+struct PendingRefusals {
+    since: Timestamp,
+    count: u64,
+    codes: BTreeMap<&'static str, u64>,
+    /// The source addresses in the order they were first seen.
+    addresses: Vec<std::net::IpAddr>,
+    seen: HashSet<std::net::IpAddr>,
+    more_addresses: bool,
+}
+
+impl PendingRefusals {
+    fn new(since: Timestamp) -> Self {
+        Self {
+            since,
+            count: 0,
+            codes: BTreeMap::new(),
+            addresses: Vec::new(),
+            seen: HashSet::new(),
+            more_addresses: false,
+        }
+    }
+
+    fn add(&mut self, code: &'static str, source: Option<std::net::IpAddr>) {
+        self.count += 1;
+        *self.codes.entry(code).or_default() += 1;
+        if let Some(source) = source
+            && !self.seen.contains(&source)
+        {
+            if self.addresses.len() < SUMMARY_ADDRESSES {
+                self.seen.insert(source);
+                self.addresses.push(source);
+            } else {
+                self.more_addresses = true;
+            }
+        }
+    }
+
+    /// Writes the summary record.
+    async fn audit(self, store: &dyn Store) {
+        let codes = self
+            .codes
+            .iter()
+            .map(|(code, count)| format!("{code}={count}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sources = if self.more_addresses {
+            format!("more than {SUMMARY_ADDRESSES}")
+        } else {
+            self.addresses.len().to_string()
+        };
+        let named = self
+            .addresses
+            .iter()
+            .take(SUMMARY_NAMED)
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let detail = format!(
+            "{} more enrollment requests were refused since {}; they are counted here, not \
+             recorded one by one",
+            self.count, self.since
+        );
+        tracing::warn!(refusals = self.count, codes = %codes, sources = %sources, "refused enrollments since {}", self.since);
+        let draft = AuditDraft::failed(
+            actions::NODE_ENROLL,
+            Vec::new(),
+            &Refusal("cluster.enrollment.refusals", &detail),
+        )
+        .with_context("refusals", self.count.to_string())
+        .with_context("codes", codes)
+        .with_context("sources", sources)
+        .with_context("addresses", named)
+        .with_context("since", self.since.to_rfc3339());
+        let mut batch = WriteBatch::for_request(&RequestCtx::system(SystemComponent::Cluster));
+        batch.audit(draft);
+        if let Err(error) = store.propose(batch).await {
+            tracing::warn!(%error, "the summary of refused enrollments could not be audited");
+        }
+    }
+}
+
 /// The node registry of a controller.
 pub struct NodeRegistry {
     store: Arc<dyn Store>,
@@ -242,6 +391,7 @@ pub struct NodeRegistry {
     config: RegistryConfig,
     jobs: OnceLock<JobEngine>,
     revoked: Arc<RevocationSet>,
+    revoked_nodes: ArcSwap<HashSet<NodeId>>,
     sessions: Arc<Sessions>,
     listening: ArcSwap<Vec<SocketAddr>>,
     listener_wanted: Notify,
@@ -249,6 +399,8 @@ pub struct NodeRegistry {
     touched: Mutex<HashMap<NodeId, Instant>>,
     mismatches: Mutex<HashMap<NodeId, (VersionMismatch, Instant)>>,
     node_sync: OnceLock<crate::node_sync::NodeSync>,
+    timings: Mutex<Timings>,
+    refusals: Arc<Mutex<Refusals>>,
     metrics: OnceLock<Arc<dyn crate::metrics::MetricsSource>>,
 }
 
@@ -288,6 +440,7 @@ impl NodeRegistry {
             config,
             jobs: OnceLock::new(),
             revoked,
+            revoked_nodes: ArcSwap::from_pointee(HashSet::new()),
             sessions,
             listening: ArcSwap::from_pointee(Vec::new()),
             listener_wanted: Notify::new(),
@@ -295,6 +448,8 @@ impl NodeRegistry {
             touched: Mutex::new(HashMap::new()),
             mismatches: Mutex::new(HashMap::new()),
             node_sync: OnceLock::new(),
+            timings: Mutex::new(Timings::default()),
+            refusals: Arc::new(Mutex::new(Refusals::default())),
             metrics: OnceLock::new(),
         })
     }
@@ -330,6 +485,21 @@ impl NodeRegistry {
         let mut registered = engine.clone();
         registered.register(Arc::new(WriteStep));
         let _ = self.jobs.set(engine.clone());
+    }
+
+    /// Sets the pace of the checks of connected nodes ([`Timings::default`] unless set;
+    /// tests shorten it). Streams opened afterwards use it.
+    pub fn set_timings(&self, timings: Timings) {
+        *self.timings.lock().unwrap_or_else(PoisonError::into_inner) = Timings {
+            stream_recheck: timings.stream_recheck.max(Duration::from_millis(10)),
+            retire_grace: timings.retire_grace,
+            refusal_window: timings.refusal_window,
+        };
+    }
+
+    /// The pace of the checks of connected nodes.
+    pub fn timings(&self) -> Timings {
+        *self.timings.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// The settings.
@@ -409,6 +579,11 @@ impl NodeRegistry {
         let view = self.store.read(ReadConsistency::Local).await?;
         let rows = view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?;
         let count = rows.len();
+        self.revoked_nodes.store(Arc::new(
+            rows.iter()
+                .map(|(_, revocation, _)| revocation.node)
+                .collect(),
+        ));
         self.revoked
             .replace(rows.into_iter().map(|(serial, _, _)| serial));
         Ok(count)
@@ -448,7 +623,9 @@ impl NodeRegistry {
     }
 
     /// Removes expired revocations, and used or expired tokens older than
-    /// [`TOKEN_RETENTION`]. Returns how many rows went.
+    /// [`TOKEN_RETENTION`], and cuts a node record that names more than two certificates
+    /// back to the newest and the one that ends last beside it. Returns how many rows went
+    /// or were cut back.
     ///
     /// # Errors
     ///
@@ -499,10 +676,46 @@ impl NodeRegistry {
                 removed += 1;
             }
         }
+        // A record with more than the two certificates a renewal keeps (from before
+        // renewals kept two): the newest and the one that ends last beside it stay.
+        let mut trims = Vec::new();
+        for (id, mut record, revision) in
+            view.scan_typed(&tables::NODES, KeyRange::all(), usize::MAX, false)?
+        {
+            if record.serials.len() <= 2 {
+                continue;
+            }
+            let newest = record.certificate.serial.clone();
+            let keep = record
+                .serials
+                .iter()
+                .filter(|cert| cert.serial != newest)
+                .max_by_key(|cert| cert.not_after)
+                .map(|cert| cert.serial.clone());
+            record
+                .serials
+                .retain(|cert| cert.serial == newest || Some(&cert.serial) == keep.as_ref());
+            trims.push((id, record, revision));
+        }
         drop(view);
         if removed > 0 {
             self.store.propose(batch).await?;
             self.load_revocations().await?;
+        }
+        for (id, record, revision) in trims {
+            let mut batch = WriteBatch::for_request(&ctx);
+            if let Some(epoch) = epoch {
+                batch.preconditions.push(tenko_store::fence(epoch));
+            }
+            batch.expect_typed(&tables::NODES, &id, Some(revision));
+            batch.put_typed(&tables::NODES, &id, &record)?;
+            match self.store.propose(batch).await {
+                Ok(_) => removed += 1,
+                // The node's bookkeeping won the race, or the office moved on: the next
+                // pass trims it.
+                Err(StoreError::PreconditionFailed(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
         }
         Ok(removed)
     }
@@ -825,6 +1038,13 @@ impl NodeRegistry {
         }
     }
 
+    /// Audits a refused enrollment. In each [`Timings::refusal_window`] this controller
+    /// records [`REFUSAL_AUDIT_BURST`] refusals one by one of requests that did not know a
+    /// token's secret (anyone can send those), and as many again of requests that did (a
+    /// used or expired token, a refused role or name); the rest of the window's are counted
+    /// and recorded at its end as one summary (`cluster.enrollment.refusals`: how many, by
+    /// code, and from which addresses), so a flood from the network cannot fill the audit
+    /// log and the store, and cannot push a refusal of a real token out of it.
     async fn audit_refusal(&self, cx: &RequestCtx, error: &ClusterError, token: Option<Uuid>) {
         if error.status() >= 500 {
             return;
@@ -840,6 +1060,63 @@ impl NodeRegistry {
             "cluster.ca.invalid_csr" => "cluster.ca.invalid_csr",
             _ => "cluster.enrollment.refused",
         };
+        let window = self.timings().refusal_window;
+        let flush_at = {
+            let mut refusals = self.refusals.lock().unwrap_or_else(PoisonError::into_inner);
+            let now = Instant::now();
+            let started = match refusals.started {
+                Some(started) if now.saturating_duration_since(started) < window => started,
+                _ => {
+                    refusals.started = Some(now);
+                    refusals.recorded = 0;
+                    refusals.recorded_known = 0;
+                    now
+                }
+            };
+            // Before the secret matched: the token is malformed, unknown, wrong or from
+            // another controller, which anyone can send.
+            let unproven = matches!(
+                error.code(),
+                "cluster.enrollment.invalid_token" | "cluster.enrollment.wrong_controller"
+            );
+            let recorded = if unproven {
+                &mut refusals.recorded
+            } else {
+                &mut refusals.recorded_known
+            };
+            if *recorded < REFUSAL_AUDIT_BURST {
+                *recorded += 1;
+                None
+            } else {
+                let first = refusals.pending.is_none();
+                refusals
+                    .pending
+                    .get_or_insert_with(|| PendingRefusals::new(cx.now))
+                    .add(code, cx.source_ip);
+                // The first refusal past the burst schedules the summary of the window.
+                Some(first.then_some(started + window))
+            }
+        };
+        match flush_at {
+            None => {}
+            Some(None) => return,
+            Some(Some(at)) => {
+                let store = Arc::clone(&self.store);
+                let refusals = Arc::clone(&self.refusals);
+                tokio::spawn(async move {
+                    tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await;
+                    let pending = refusals
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .pending
+                        .take();
+                    if let Some(pending) = pending {
+                        pending.audit(store.as_ref()).await;
+                    }
+                });
+                return;
+            }
+        }
         let mut draft = AuditDraft::failed(
             actions::NODE_ENROLL,
             Vec::new(),
@@ -1291,7 +1568,9 @@ impl NodeRegistry {
     }
 
     /// Reloads the revocation set and closes the connections of nodes revoked since
-    /// `known`.
+    /// `known`. On the first call `known` is empty, so every revoked node that still has a
+    /// session or a connection here loses it: the revocations that were in the table
+    /// before, and the first one ever made, are no exception.
     async fn apply_revocations(&self, known: &mut HashSet<String>) -> Result<(), ClusterError> {
         let view = self.store.read(ReadConsistency::Local).await?;
         let rows = view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?;
@@ -1301,20 +1580,34 @@ impl NodeRegistry {
             .filter(|(serial, _, _)| !known.contains(serial))
             .map(|(_, revocation, _)| revocation.node)
             .collect();
+        let nodes: HashSet<NodeId> = rows
+            .iter()
+            .map(|(_, revocation, _)| revocation.node)
+            .collect();
         let serials: HashSet<String> = rows.into_iter().map(|(serial, _, _)| serial).collect();
+        // The verifier first: a handshake after this point is refused. A connection whose
+        // handshake completed before it and that is not tracked yet when the loop below
+        // looks finds the node record gone at its first call (the record and the rows
+        // commit together).
         self.revoked.replace(serials.iter().cloned());
-        let first = known.is_empty();
+        self.revoked_nodes.store(Arc::new(nodes));
         *known = serials;
-        if !first {
-            let now = Timestamp::now();
-            for node in fresh {
-                if self.sessions.connection_count(node) > 0 {
-                    tracing::warn!(node = %node, "closing the connections of a node revoked on another controller");
-                }
-                self.sessions.revoke(node, now);
+        let now = Timestamp::now();
+        for node in fresh {
+            if self.sessions.connection_count(node) == 0 && self.sessions.view(node).is_none() {
+                continue;
             }
+            tracing::warn!(node = %node, "closing the connections of a revoked node");
+            self.sessions.revoke(node, now);
         }
         Ok(())
+    }
+
+    /// Whether `node` was revoked: a row of `cluster.revocations` names it. A controller
+    /// that is not enrolled through a token has no node record, so the Raft service checks
+    /// this instead of the record for a caller without one.
+    pub fn is_revoked_node(&self, node: NodeId) -> bool {
+        self.revoked_nodes.load().contains(&node)
     }
 
     /// The record of `node` for an edit: as this node has applied it on the first attempt,
@@ -1354,27 +1647,42 @@ impl NodeRegistry {
                 .record_for_edit(node, attempt)
                 .await?
                 .ok_or_else(|| not_found(node))?;
-            let serials: Vec<&CertificateRef> = record
+            // Every certificate the record names. One that a renewal retired has its end in
+            // the record moved forward but may be valid for longer: its row lives until the
+            // newest certificate expires (an older one never ends later unless the CA's
+            // lifetime was shortened in between).
+            let newest = record.certificate.not_after;
+            let serials: Vec<(&str, Timestamp)> = record
                 .serials
                 .iter()
-                .filter(|cert| cert.not_after > cx.now)
+                .filter_map(|cert| {
+                    let until = if cert.serial == record.certificate.serial {
+                        cert.not_after
+                    } else {
+                        cert.not_after.max(newest)
+                    };
+                    (until > cx.now).then_some((cert.serial.as_str(), until))
+                })
                 .collect();
             let mut batch = WriteBatch::for_request(cx);
             batch.expect_typed(&tables::NODES, &node.0, Some(revision));
             batch.delete_typed(&tables::NODES, &node.0);
             batch.delete_typed(&tables::NODE_NAMES, &record.name.to_lowercase());
-            for cert in &serials {
+            for (serial, until) in &serials {
                 batch.put_typed(
                     &tables::REVOCATIONS,
-                    &cert.serial,
+                    &(*serial).to_owned(),
                     &Revocation {
                         node,
                         revoked_at: cx.now,
-                        not_after: cert.not_after,
+                        not_after: *until,
                     },
                 )?;
             }
-            let serial_list: Vec<String> = serials.iter().map(|cert| cert.serial.clone()).collect();
+            let serial_list: Vec<String> = serials
+                .iter()
+                .map(|(serial, _)| (*serial).to_owned())
+                .collect();
             batch.audit(
                 AuditDraft::success(actions::NODE_REVOKE, vec![ObjectRef::node(node)])
                     .with_source_ip(cx.source_ip)
@@ -1406,6 +1714,9 @@ impl NodeRegistry {
             }
         };
         self.revoked.insert(serial_list.iter().cloned());
+        let mut nodes = HashSet::clone(&self.revoked_nodes.load());
+        nodes.insert(node);
+        self.revoked_nodes.store(Arc::new(nodes));
         self.sessions.revoke(node, cx.now);
         self.lock_touched().remove(&node);
         tracing::warn!(node = %node, name = %record.name, "node revoked");
@@ -1413,7 +1724,15 @@ impl NodeRegistry {
     }
 
     /// Renews the certificate of a connected node for the key of `csr_der`, with the node's
-    /// id and roles. The calling certificate (`serial`) must be one the node holds.
+    /// id and roles. The calling certificate (`serial`) must be one the node holds, inside
+    /// its renewal window ([`renewal_window`]), and the node's last renewal at least
+    /// [`RENEW_INTERVAL`] ago.
+    ///
+    /// The record keeps the calling certificate beside the new one and drops any other: a
+    /// certificate an earlier renewal replaced, or one whose answer never reached the node.
+    /// So a node holds at most two certificates however often it renews, and its revocation
+    /// stays small. The calling certificate works on until the node shows that it holds the
+    /// new one ([`retire_replaced`](Self::retire_replaced)), or until it expires.
     ///
     /// The certificate is issued once. Like [`revoke`](Self::revoke), the write of the
     /// record is planned again from a fresh read when the node's bookkeeping changed the
@@ -1422,6 +1741,7 @@ impl NodeRegistry {
     /// # Errors
     ///
     /// `cluster.node.not_found` (404), `cluster.node.certificate_unknown` (403),
+    /// `cluster.node.renew_not_due`, `cluster.node.renew_too_soon` (409),
     /// `cluster.ca.invalid_csr` (422), or a store or job error (the store's conflict when
     /// every attempt lost the race).
     pub async fn renew(
@@ -1435,9 +1755,7 @@ impl NodeRegistry {
             .record_for_edit(node, 1)
             .await?
             .ok_or_else(|| not_found(node))?;
-        if !record.holds(serial, now) {
-            return Err(unknown_certificate());
-        }
+        self.check_renewal(&record, serial, now)?;
         let issued = self
             .ca
             .issue_node_cert_for(node, record.role_set(), csr_der, now)?;
@@ -1451,7 +1769,9 @@ impl NodeRegistry {
         cx.now = now;
         let mut attempt = 1;
         loop {
-            record.serials.retain(|cert| cert.not_after > now);
+            record
+                .serials
+                .retain(|cert| cert.serial == serial && cert.not_after > now);
             record.serials.push(certificate.clone());
             record.certificate = certificate.clone();
             record.renewed_at = Some(now);
@@ -1483,15 +1803,123 @@ impl NodeRegistry {
                         .record_for_edit(node, attempt)
                         .await?
                         .ok_or_else(|| not_found(node))?;
-                    if !record.holds(serial, now) {
-                        return Err(unknown_certificate());
-                    }
+                    // A renewal through another controller that won the race counts.
+                    self.check_renewal(&record, serial, now)?;
                 }
                 Err(error) => return Err(error),
             }
         }
         tracing::info!(node = %node, not_after = %issued.info.not_after, "node certificate renewed");
         Ok(issued)
+    }
+
+    /// Whether `serial` of `record` may be renewed at `now`.
+    fn check_renewal(
+        &self,
+        record: &NodeRecord,
+        serial: &str,
+        now: Timestamp,
+    ) -> Result<(), ClusterError> {
+        let Some(cert) = record
+            .serials
+            .iter()
+            .find(|cert| cert.serial == serial && cert.not_after > now)
+        else {
+            return Err(unknown_certificate());
+        };
+        if let Some(at) = record.renewed_at
+            && now.saturating_since(at) < RENEW_INTERVAL
+        {
+            let next = at.checked_add(RENEW_INTERVAL).unwrap_or(at);
+            return Err(ClusterError::new(
+                "cluster.node.renew_too_soon",
+                409,
+                format!(
+                    "the node renewed its certificate less than an hour ago; it may renew \
+                     again from {next}"
+                ),
+            )
+            .with_param("from", next.to_rfc3339()));
+        }
+        let window = renewal_window(cert, self.ca.policy().renew_before_days);
+        let due = Timestamp(cert.not_after.0 - window);
+        if now < due {
+            return Err(ClusterError::new(
+                "cluster.node.renew_not_due",
+                409,
+                format!("the certificate is not due for renewal before {due}"),
+            )
+            .with_param("from", due.to_rfc3339()));
+        }
+        Ok(())
+    }
+
+    /// Retires the certificates a renewal replaced once the node shows that it holds the
+    /// newest one: its connection presents it, or its heartbeat reports the expiry
+    /// `newest_not_after` of the newest certificate. Each other certificate the record holds
+    /// then ends, in the record, [`Timings::retire_grace`] from `now` (or at its own expiry
+    /// when that is sooner); [`authenticate`](Self::authenticate) refuses it afterwards with
+    /// `cluster.node.certificate_replaced`, which sends the node to connect again with the
+    /// new one. A node that never got the new certificate keeps the old one: nothing here
+    /// happens without that proof. Returns `true` when nothing is left to retire for this
+    /// proof (retired now or before), `false` when the proof does not name the newest
+    /// certificate or a race with the node's bookkeeping was lost: the caller tries again
+    /// later.
+    ///
+    /// # Errors
+    ///
+    /// A store error.
+    pub async fn retire_replaced(
+        &self,
+        node: NodeId,
+        newest_not_after: Timestamp,
+        now: Timestamp,
+    ) -> Result<bool, ClusterError> {
+        let Some((mut record, revision)) = self.record(node).await? else {
+            return Ok(false);
+        };
+        if record.certificate.not_after != newest_not_after {
+            return Ok(false);
+        }
+        let Some(until) = now.checked_add(self.timings().retire_grace) else {
+            return Ok(false);
+        };
+        let newest = record.certificate.serial.clone();
+        let mut retired = Vec::new();
+        for cert in &mut record.serials {
+            if cert.serial != newest && cert.not_after > until {
+                cert.not_after = until;
+                retired.push(cert.serial.clone());
+            }
+        }
+        if retired.is_empty() {
+            return Ok(true);
+        }
+        let mut ctx = RequestCtx::system(SystemComponent::Cluster);
+        ctx.now = now;
+        let mut batch = WriteBatch::for_request(&ctx);
+        batch.expect_typed(&tables::NODES, &node.0, Some(revision));
+        batch.put_typed(&tables::NODES, &node.0, &record)?;
+        match self.store.propose(batch).await {
+            Ok(_) => {}
+            Err(StoreError::PreconditionFailed(_)) => return Ok(false),
+            Err(error) => return Err(error.into()),
+        }
+        tracing::info!(node = %node, serials = %retired.join(","), until = %until, "the node holds its renewed certificate; the replaced ones retire");
+        Ok(true)
+    }
+
+    /// Whether `record` names a certificate besides the newest that
+    /// [`retire_replaced`](Self::retire_replaced) would still retire at `now`: a cheap
+    /// look before the store is read again.
+    pub fn retirable(&self, record: &NodeRecord, now: Timestamp) -> bool {
+        let Some(until) = now.checked_add(self.timings().retire_grace) else {
+            return false;
+        };
+        record
+            .serials
+            .iter()
+            .any(|cert| cert.serial != record.certificate.serial && cert.not_after > until)
     }
 
     /// Checks a caller on the cluster port: the node exists and holds the certificate.
@@ -1523,6 +1951,18 @@ impl NodeRegistry {
             )
         })?;
         if !record.holds(serial, now) {
+            // A certificate a renewal replaced: the node holds a newer one and connects
+            // again with it (503 tells it to; 403 would hold it back as refused).
+            if record.certificate.serial != serial
+                && record.serials.iter().any(|cert| cert.serial == serial)
+            {
+                return Err(ClusterError::new(
+                    "cluster.node.certificate_replaced",
+                    503,
+                    "the certificate of this connection was replaced by a renewal; connect \
+                     again with the new one",
+                ));
+            }
             return Err(unknown_certificate());
         }
         Ok(record)
@@ -1915,6 +2355,17 @@ fn name_taken(name: &str) -> ClusterError {
     .with_param("field", "name")
 }
 
+/// How long before its expiry a node certificate may be renewed: a third of its lifetime,
+/// or `renew_before_days` of the CA policy but at least [`RENEW_FROM_DAYS`], whichever is
+/// longer, and never more than the lifetime. A node asks by the rule of
+/// `identity::Credentials::needs_renewal` (a third of the lifetime or 30 days), which never
+/// asks earlier than this accepts.
+pub fn renewal_window(cert: &CertificateRef, renew_before_days: u32) -> Duration {
+    let lifetime = cert.not_after.saturating_since(cert.not_before);
+    let days = Duration::from_secs(u64::from(renew_before_days.max(RENEW_FROM_DAYS)) * 86_400);
+    (lifetime / 3).max(days).min(lifetime)
+}
+
 fn unknown_certificate() -> ClusterError {
     ClusterError::new(
         "cluster.node.certificate_unknown",
@@ -2039,5 +2490,184 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    /// A registry over an in-memory store, without a job engine.
+    async fn mem_registry() -> (Arc<tenko_store::mem::MemStore>, Arc<NodeRegistry>) {
+        let store = Arc::new(tenko_store::mem::MemStore::default());
+        let vault = tenko_vault::MemVault::with_store(store.clone());
+        let ca = InternalCa::load_or_init(
+            &*store,
+            &vault,
+            &RequestCtx::system(SystemComponent::Cluster),
+            crate::ca::CaPolicy::default(),
+        )
+        .await
+        .expect("CA");
+        let registry = NodeRegistry::new(
+            store.clone() as Arc<dyn Store>,
+            Arc::new(ca),
+            RegistryConfig::new(NodeId(1)),
+        );
+        (store, registry)
+    }
+
+    /// The failed `cluster.node.enroll` records: their code and context.
+    async fn refused_enrollments(
+        store: &tenko_store::mem::MemStore,
+    ) -> Vec<(String, BTreeMap<String, String>)> {
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        view.scan_typed(
+            &tenko_store::tables::AUDIT,
+            KeyRange::all(),
+            usize::MAX,
+            false,
+        )
+        .expect("audit")
+        .into_iter()
+        .filter(|(_, record, _)| record.draft.action == actions::NODE_ENROLL)
+        .filter_map(|(_, record, _)| match record.draft.outcome {
+            tenko_core::audit::AuditOutcome::Failed { code } => {
+                Some((code.into_owned(), record.draft.details.context))
+            }
+            _ => None,
+        })
+        .collect()
+    }
+
+    /// A flood of refused enrollments writes a few records one by one and then one summary
+    /// per window, not a record each.
+    #[tokio::test]
+    async fn refused_enrollments_are_audited_as_a_summary_beyond_a_few() {
+        let (store, registry) = mem_registry().await;
+        registry.set_timings(Timings {
+            refusal_window: Duration::from_secs(3),
+            ..Timings::default()
+        });
+        for n in 0..50u8 {
+            let mut cx = RequestCtx::system(SystemComponent::Cluster);
+            cx.source_ip = Some(std::net::IpAddr::from([192, 0, 2, 10 + n % 3]));
+            let refused = registry
+                .enroll(
+                    &cx,
+                    EnrollRequest {
+                        token: "x".to_owned(),
+                        csr: String::new(),
+                        name: None,
+                        roles: Vec::new(),
+                        address: None,
+                        version: String::new(),
+                        majors: Vec::new(),
+                    },
+                )
+                .await
+                .expect_err("garbage");
+            assert_eq!(refused.code(), "cluster.enrollment.invalid_token");
+        }
+        let one_by_one = refused_enrollments(&store).await;
+        assert_eq!(one_by_one.len(), REFUSAL_AUDIT_BURST as usize);
+        assert!(
+            one_by_one
+                .iter()
+                .all(|(code, _)| code == "cluster.enrollment.invalid_token")
+        );
+
+        // At the end of the window the rest arrive as one summary.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let all = loop {
+            let all = refused_enrollments(&store).await;
+            if all.len() > one_by_one.len() || Instant::now() > deadline {
+                break all;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert_eq!(all.len(), REFUSAL_AUDIT_BURST as usize + 1, "{all:?}");
+        let (code, context) = all.last().expect("the summary");
+        assert_eq!(code, "cluster.enrollment.refusals");
+        let expected = 50 - REFUSAL_AUDIT_BURST;
+        assert_eq!(context.get("refusals"), Some(&expected.to_string()));
+        assert_eq!(
+            context.get("codes"),
+            Some(&format!("cluster.enrollment.invalid_token={expected}"))
+        );
+        assert_eq!(context.get("sources").map(String::as_str), Some("3"));
+        // In the order first seen past the burst: the 11th request came from .11.
+        assert_eq!(
+            context.get("addresses").map(String::as_str),
+            Some("192.0.2.11,192.0.2.12,192.0.2.10")
+        );
+
+        // A new window records one by one again.
+        let refused = registry
+            .enroll(
+                &RequestCtx::system(SystemComponent::Cluster),
+                EnrollRequest {
+                    token: "x".to_owned(),
+                    csr: String::new(),
+                    name: None,
+                    roles: Vec::new(),
+                    address: None,
+                    version: String::new(),
+                    majors: Vec::new(),
+                },
+            )
+            .await;
+        assert!(refused.is_err());
+        assert_eq!(
+            refused_enrollments(&store).await.len(),
+            REFUSAL_AUDIT_BURST as usize + 2
+        );
+    }
+
+    /// A refusal of a request that knew a token's secret (a used or expired token) is
+    /// recorded one by one even while a flood of invalid tokens fills the summary.
+    #[tokio::test]
+    async fn a_refusal_that_knew_the_secret_is_recorded_during_a_flood() {
+        let (store, registry) = mem_registry().await;
+        registry.set_timings(Timings {
+            refusal_window: Duration::from_secs(30),
+            ..Timings::default()
+        });
+        let system = RequestCtx::system(SystemComponent::Cluster);
+        let (_, token) = registry
+            .create_enrollment(&system, NewEnrollment::default())
+            .await
+            .expect("token");
+        let (_, csr) = crate::ca::generate_csr().expect("csr");
+        let request = |token: &str| EnrollRequest {
+            token: token.to_owned(),
+            csr: crate::ca::pem_block("CERTIFICATE REQUEST", &csr),
+            name: None,
+            roles: Vec::new(),
+            address: None,
+            version: String::new(),
+            majors: Vec::new(),
+        };
+        let text = token.to_text().to_string();
+        registry
+            .enroll(&system, request(&text))
+            .await
+            .expect("enrolled");
+        for _ in 0..(REFUSAL_AUDIT_BURST + 5) {
+            let _ = registry.enroll(&system, request("x")).await;
+        }
+        let refused = registry
+            .enroll(&system, request(&text))
+            .await
+            .expect_err("used");
+        assert_eq!(refused.code(), "cluster.enrollment.used");
+        let codes: Vec<String> = refused_enrollments(&store)
+            .await
+            .into_iter()
+            .map(|(code, _)| code)
+            .collect();
+        assert_eq!(
+            codes
+                .iter()
+                .filter(|code| *code == "cluster.enrollment.used")
+                .count(),
+            1,
+            "{codes:?}"
+        );
     }
 }

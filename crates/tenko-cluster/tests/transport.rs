@@ -90,9 +90,15 @@ fn system() -> RequestCtx {
 
 impl Controller {
     async fn start() -> Self {
+        Self::start_with(CaPolicy::default()).await
+    }
+
+    /// A controller whose CA issues by `policy`: a short node lifetime puts a new node
+    /// certificate inside its renewal window at once.
+    async fn start_with(policy: CaPolicy) -> Self {
         let store = Arc::new(MemStore::default());
         let vault = MemVault::with_store(store.clone());
-        let ca = InternalCa::load_or_init(&*store, &vault, &system(), CaPolicy::default())
+        let ca = InternalCa::load_or_init(&*store, &vault, &system(), policy)
             .await
             .expect("CA");
         let store_dyn: Arc<dyn Store> = store.clone();
@@ -439,6 +445,107 @@ async fn revocation_closes_the_connection_and_refuses_the_certificate() {
     );
 }
 
+/// Writes a revocation of `node` the way another controller's does when it replicates
+/// here: the record and its name go, every serial the record holds becomes a revocation
+/// row, and nothing on this controller is told directly.
+async fn revoke_on_another_controller(controller: &Controller, node: NodeId) {
+    let view = controller
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    let (record, revision) = view
+        .get_typed(&model::tables::NODES, &node.0)
+        .expect("read")
+        .expect("the node record");
+    drop(view);
+    let mut batch = WriteBatch::for_request(&system());
+    batch.expect_typed(&model::tables::NODES, &node.0, Some(revision));
+    batch.delete_typed(&model::tables::NODES, &node.0);
+    batch.delete_typed(&model::tables::NODE_NAMES, &record.name.to_lowercase());
+    for cert in &record.serials {
+        batch
+            .put_typed(
+                &model::tables::REVOCATIONS,
+                &cert.serial,
+                &model::Revocation {
+                    node,
+                    revoked_at: Timestamp::now(),
+                    not_after: cert.not_after,
+                },
+            )
+            .expect("row");
+    }
+    controller.store.propose(batch).await.expect("replicated");
+}
+
+/// The first revocation an installation ever sees arrives from another controller into an
+/// empty revocation table: the node's open connection here closes all the same.
+#[tokio::test]
+async fn a_revocation_from_another_controller_into_an_empty_table_closes_the_connection() {
+    let controller = Controller::start().await;
+    let (stop_follow, stopped) = watch::channel(false);
+    let follow = controller.registry.follow_revocations(stopped);
+    let dir = tempfile::tempdir().expect("dir");
+    let credentials = controller.enroll(dir.path(), "probe-first").await;
+    let node = credentials.identity.node;
+    let agent = agent(dir.path());
+    let (stop, task) = run(&agent);
+    wait_for("the heartbeat session", || {
+        agent.status().state == AgentState::Connected
+            && controller.registry.sessions().view(node).is_some()
+    })
+    .await;
+    assert!(controller.registry.revocations().is_empty());
+
+    revoke_on_another_controller(&controller, node).await;
+    wait_for("the connection to close", || {
+        controller.registry.sessions().connection_count(node) == 0
+            && controller.registry.sessions().view(node).is_none()
+    })
+    .await;
+    assert!(
+        controller
+            .registry
+            .revocations()
+            .is_revoked(&credentials.info.serial)
+    );
+    let _ = stop.send(true);
+    task.await.expect("agent");
+    let _ = stop_follow.send(true);
+    follow.await.expect("follow");
+}
+
+/// A revocation that is in the table when the controller starts to follow it closes a
+/// connection of that node that is open by then.
+#[tokio::test]
+async fn a_revocation_present_when_following_starts_closes_the_connection() {
+    let controller = Controller::start().await;
+    let dir = tempfile::tempdir().expect("dir");
+    let credentials = controller.enroll(dir.path(), "probe-early").await;
+    let node = credentials.identity.node;
+    let agent = agent(dir.path());
+    let (stop, task) = run(&agent);
+    wait_for("the heartbeat session", || {
+        agent.status().state == AgentState::Connected
+            && controller.registry.sessions().view(node).is_some()
+    })
+    .await;
+    revoke_on_another_controller(&controller, node).await;
+
+    let (stop_follow, stopped) = watch::channel(false);
+    let follow = controller.registry.follow_revocations(stopped);
+    wait_for("the connection to close", || {
+        controller.registry.sessions().connection_count(node) == 0
+            && controller.registry.sessions().view(node).is_none()
+    })
+    .await;
+    let _ = stop.send(true);
+    task.await.expect("agent");
+    let _ = stop_follow.send(true);
+    follow.await.expect("follow");
+}
+
 #[tokio::test]
 async fn a_node_offering_only_an_older_major_is_refused_with_a_notice() {
     let controller = Controller::start().await;
@@ -678,7 +785,12 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
 
 #[tokio::test]
 async fn renewal_issues_a_new_certificate_that_connects() {
-    let controller = Controller::start().await;
+    // Twenty-day certificates are due for renewal from the start.
+    let controller = Controller::start_with(CaPolicy {
+        node_validity_days: 20,
+        ..CaPolicy::default()
+    })
+    .await;
     let dir = tempfile::tempdir().expect("dir");
     let credentials = controller.enroll(dir.path(), "probe-renew").await;
     let paths = NodePaths::new(dir.path());
@@ -696,7 +808,8 @@ async fn renewal_issues_a_new_certificate_that_connects() {
         .expect("node");
     assert_eq!(view.certificate.serial, renewed.info.serial);
     assert!(view.renewed_at.is_some());
-    // The old certificate still works until it expires; both connect.
+    // The old certificate keeps working until the node shows it holds the new one; both
+    // connect.
     client::check(&credentials, "0.0.1", &[1])
         .await
         .expect("old");
@@ -918,9 +1031,10 @@ async fn a_revocation_that_loses_every_race_is_a_conflict_that_changes_nothing()
 #[tokio::test]
 async fn a_renewal_that_races_the_heartbeat_is_planned_again_with_the_same_certificate() {
     let (store, registry, node, serial, csr) = racing_registry().await;
+    let due = days_before(node_record(&registry, node).await.certificate.not_after, 10);
     store.arm(1);
     let renewed = registry
-        .renew(node, &serial, &csr, Timestamp::now())
+        .renew(node, &serial, &csr, due)
         .await
         .expect("renew");
     assert_eq!(store.raced.load(Ordering::SeqCst), 1);
@@ -1079,4 +1193,428 @@ async fn hello_answers_with_its_old_fields_and_empty_capabilities_and_endpoints(
     assert!(response.server_time.is_some());
     assert!(response.capabilities.is_empty(), "{response:?}");
     assert!(response.endpoints.is_empty(), "{response:?}");
+}
+
+/// Removes a node's record directly, as a replicated revocation does, without any
+/// revocation row: nothing closes the node's connection, so only the streams' own checks
+/// can end them.
+async fn forget_node(controller: &Controller, node: NodeId) {
+    let mut batch = WriteBatch::for_request(&system());
+    batch.delete_typed(&model::tables::NODES, &node.0);
+    controller
+        .store
+        .propose(batch)
+        .await
+        .expect("forget the node");
+}
+
+/// Waits for the next item of a stream of the cluster port and returns its refusal code.
+async fn ended_with<T: std::fmt::Debug>(
+    what: &str,
+    stream: &mut tonic::Streaming<T>,
+) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let next = tokio::time::timeout_at(deadline, stream.message())
+            .await
+            .unwrap_or_else(|_| panic!("the {what} stream is still open"));
+        match next {
+            Ok(Some(_)) => {}
+            Ok(None) => return None,
+            Err(status) => {
+                return tenko_cluster::server::code_of(&status).map(str::to_owned);
+            }
+        }
+    }
+}
+
+/// The configuration, command and heartbeat streams of a node check its record again while
+/// they are open: once the record is gone they end with the refusal of a new call.
+#[tokio::test]
+async fn open_streams_end_once_the_node_record_is_gone() {
+    let controller = Controller::start().await;
+    controller.registry.set_timings(registry::Timings {
+        stream_recheck: Duration::from_millis(100),
+        ..registry::Timings::default()
+    });
+    let dir = tempfile::tempdir().expect("dir");
+    let channel = enrolled_channel(&controller, dir.path(), "probe-streams").await;
+    let node = NodeId(1001);
+
+    let mut config = v1::config_client::ConfigClient::new(channel.clone())
+        .watch(v1::WatchRequest { from_revision: 0 })
+        .await
+        .expect("watch")
+        .into_inner();
+    let mut commands = v1::commands_client::CommandsClient::new(channel.clone())
+        .subscribe(v1::SubscribeRequest {
+            after: String::new(),
+        })
+        .await
+        .expect("subscribe")
+        .into_inner();
+    let (beats, inbound) = tokio::sync::mpsc::channel::<v1::Beat>(4);
+    let mut directives = v1::node_client::NodeClient::new(channel.clone())
+        .heartbeat(futures::stream::unfold(inbound, |mut inbound| async move {
+            inbound.recv().await.map(|beat| (beat, inbound))
+        }))
+        .await
+        .expect("heartbeat")
+        .into_inner();
+    // The node beats every 50 ms for as long as the test runs.
+    let beating = tokio::spawn(async move {
+        let mut sequence = 0;
+        loop {
+            sequence += 1;
+            let beat = v1::Beat {
+                sequence,
+                version: "0.0.1".to_owned(),
+                ..v1::Beat::default()
+            };
+            if beats.send(beat).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    });
+    wait_for("the heartbeat session", || {
+        controller.registry.sessions().view(node).is_some()
+    })
+    .await;
+
+    forget_node(&controller, node).await;
+    assert_eq!(
+        ended_with("configuration", &mut config).await.as_deref(),
+        Some("cluster.node.unknown")
+    );
+    assert_eq!(
+        ended_with("command", &mut commands).await.as_deref(),
+        Some("cluster.node.unknown")
+    );
+    assert_eq!(
+        ended_with("heartbeat", &mut directives).await.as_deref(),
+        Some("cluster.node.unknown")
+    );
+    beating.abort();
+}
+
+// ---------------------------------------------------------------------------------------
+// Renewal: the window, the pace and the certificates a renewal replaces
+// ---------------------------------------------------------------------------------------
+
+/// The node record of `node`.
+async fn node_record(registry: &NodeRegistry, node: NodeId) -> model::NodeRecord {
+    registry
+        .record(node)
+        .await
+        .expect("read")
+        .expect("the node record")
+        .0
+}
+
+/// `days` days before `at`.
+fn days_before(at: Timestamp, days: u64) -> Timestamp {
+    Timestamp(at.0 - Duration::from_secs(days * 86_400))
+}
+
+/// A renewal is accepted only inside the renewal window of the calling certificate: from a
+/// third of its lifetime (or 30 days) before its expiry.
+#[tokio::test]
+async fn a_renewal_before_the_window_is_refused() {
+    let (_, registry, node, serial, csr) = racing_registry().await;
+    let record = node_record(&registry, node).await;
+    let error = registry
+        .renew(node, &serial, &csr, Timestamp::now())
+        .await
+        .expect_err("not due yet");
+    assert_eq!(error.code(), "cluster.node.renew_not_due");
+    assert_eq!(error.status(), 409);
+    // A year's certificate is due 121 days before it expires, not 125.
+    let early = days_before(record.certificate.not_after, 125);
+    assert_eq!(
+        registry
+            .renew(node, &serial, &csr, early)
+            .await
+            .expect_err("still early")
+            .code(),
+        "cluster.node.renew_not_due"
+    );
+    let due = days_before(record.certificate.not_after, 121);
+    registry.renew(node, &serial, &csr, due).await.expect("due");
+    assert_eq!(node_record(&registry, node).await.serials.len(), 2);
+}
+
+/// A node renews at most once an hour; a renewal keeps only the calling certificate beside
+/// the new one, so the record and a revocation stay small however often a node renews.
+#[tokio::test]
+async fn renewals_are_paced_and_keep_two_certificates() {
+    let (_, registry, node, serial, csr) = racing_registry().await;
+    let enrolled = node_record(&registry, node).await;
+    let mut now = days_before(enrolled.certificate.not_after, 10);
+    let first = registry
+        .renew(node, &serial, &csr, now)
+        .await
+        .expect("first renewal");
+    let error = registry
+        .renew(
+            node,
+            &serial,
+            &csr,
+            now.checked_add(Duration::from_secs(60)).expect("time"),
+        )
+        .await
+        .expect_err("a minute later");
+    assert_eq!(error.code(), "cluster.node.renew_too_soon");
+    assert_eq!(error.status(), 409);
+    // The answer was lost: the node asks again with the certificate it still has, every
+    // hour, and gets one each time; the record never holds more than two.
+    let mut last = first.info.serial.clone();
+    for _ in 0..12 {
+        now = now
+            .checked_add(registry::RENEW_INTERVAL + Duration::from_secs(1))
+            .expect("time");
+        let issued = registry
+            .renew(node, &serial, &csr, now)
+            .await
+            .expect("an hour later");
+        let record = node_record(&registry, node).await;
+        let serials: Vec<&str> = record
+            .serials
+            .iter()
+            .map(|cert| cert.serial.as_str())
+            .collect();
+        assert_eq!(serials, [serial.as_str(), issued.info.serial.as_str()]);
+        assert_ne!(issued.info.serial, last);
+        last = issued.info.serial.clone();
+    }
+    // The certificate of a renewal that never reached the node no longer works.
+    assert_eq!(
+        registry
+            .authenticate(node, &first.info.serial, now)
+            .await
+            .expect_err("dropped")
+            .code(),
+        "cluster.node.certificate_unknown"
+    );
+    let revoked = registry.revoke(&system(), node).await.expect("revoke");
+    assert_eq!(revoked.len(), 2);
+}
+
+/// Once the node shows that it holds the newest certificate, the certificates the renewal
+/// replaced work for [`registry::RETIRE_GRACE`] more and are refused afterwards with a code
+/// that sends the node to connect again.
+#[tokio::test]
+async fn the_replaced_certificate_retires_once_the_node_holds_the_new_one() {
+    let (_, registry, node, serial, csr) = racing_registry().await;
+    let enrolled = node_record(&registry, node).await;
+    let now = days_before(enrolled.certificate.not_after, 10);
+    let issued = registry
+        .renew(node, &serial, &csr, now)
+        .await
+        .expect("renewal");
+    // A report of another certificate changes nothing.
+    assert!(
+        !registry
+            .retire_replaced(node, enrolled.certificate.not_after, now)
+            .await
+            .expect("retire")
+    );
+    let later = now
+        .checked_add(registry::RETIRE_GRACE + Duration::from_secs(1))
+        .expect("time");
+    registry
+        .authenticate(node, &serial, later)
+        .await
+        .expect("no proof yet: the old certificate keeps working");
+
+    assert!(
+        registry
+            .retire_replaced(node, issued.info.not_after, now)
+            .await
+            .expect("retire")
+    );
+    registry
+        .authenticate(node, &serial, now)
+        .await
+        .expect("inside the grace");
+    let error = registry
+        .authenticate(node, &serial, later)
+        .await
+        .expect_err("retired");
+    assert_eq!(error.code(), "cluster.node.certificate_replaced");
+    assert_eq!(error.status(), 503);
+    registry
+        .authenticate(node, &issued.info.serial, later)
+        .await
+        .expect("the new certificate");
+    // Retiring again finds nothing left to retire.
+    assert!(
+        registry
+            .retire_replaced(node, issued.info.not_after, now)
+            .await
+            .expect("retire")
+    );
+    // A revocation after the grace still lists the retired certificate: it has not
+    // expired, so the TLS verifier must refuse it too.
+    let mut cx = system();
+    cx.now = later;
+    let revoked = registry.revoke(&cx, node).await.expect("revoke");
+    assert!(revoked.contains(&serial), "{revoked:?}");
+    assert!(registry.revocations().is_revoked(&serial));
+    assert!(registry.revocations().is_revoked(&issued.info.serial));
+}
+
+/// A node renews by itself over its connection, reports the new certificate on its next
+/// beat, and moves to it: the old one is retired, the old connection's streams end, and the
+/// node connects again with the new certificate without a refusal.
+#[tokio::test]
+async fn a_node_renews_and_moves_to_its_new_certificate() {
+    let controller = Controller::start_with(CaPolicy {
+        node_validity_days: 20,
+        ..CaPolicy::default()
+    })
+    .await;
+    controller.registry.set_timings(registry::Timings {
+        stream_recheck: Duration::from_millis(100),
+        retire_grace: Duration::from_millis(300),
+        ..registry::Timings::default()
+    });
+    let dir = tempfile::tempdir().expect("dir");
+    let credentials = controller.enroll(dir.path(), "probe-moves").await;
+    let node = credentials.identity.node;
+    // Expiries have whole seconds: the renewed certificate must end later than this one.
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let agent = agent(dir.path());
+    let (stop, task) = run(&agent);
+    wait_for("the renewal", || {
+        Credentials::load(&NodePaths::new(dir.path()))
+            .is_ok_and(|now| now.info.serial != credentials.info.serial)
+    })
+    .await;
+    let renewed = Credentials::load(&NodePaths::new(dir.path())).expect("load");
+    let renewed_by = Timestamp::now();
+    let mut refused = false;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let status = agent.status();
+        refused |= matches!(status.state, AgentState::Refused | AgentState::Revoked);
+        let moved = controller
+            .registry
+            .sessions()
+            .view(node)
+            .is_some_and(|live| {
+                live.since > renewed_by
+                    && live.certificate_not_after == Some(renewed.info.not_after)
+            });
+        let retired = controller
+            .registry
+            .authenticate(node, &credentials.info.serial, Timestamp::now())
+            .await
+            .is_err();
+        if moved && retired && status.state == AgentState::Connected {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the node did not move to its new certificate (moved {moved}, retired {retired}): {status:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!refused, "the node was refused on the way");
+    let _ = stop.send(true);
+    task.await.expect("agent");
+}
+
+/// A record that collected many certificates before renewals kept two is cut back to the
+/// newest and the one before it by the maintenance pass, so it stays revocable in one
+/// write.
+#[tokio::test]
+async fn the_maintenance_pass_trims_a_record_with_many_certificates() {
+    let (store, registry, node, serial, _) = racing_registry().await;
+    let (mut record, revision) = registry
+        .record(node)
+        .await
+        .expect("read")
+        .expect("the record");
+    let newest = record.certificate.clone();
+    let mut older = Vec::new();
+    for n in 0..200u32 {
+        let mut cert = newest.clone();
+        cert.serial = format!("{n:032x}");
+        cert.not_after = days_before(newest.not_after, u64::from(200 - n));
+        older.push(cert);
+    }
+    record.serials = older.clone();
+    record.serials.push(newest.clone());
+    let mut batch = WriteBatch::for_request(&system());
+    batch.expect_typed(&model::tables::NODES, &node.0, Some(revision));
+    batch
+        .put_typed(&model::tables::NODES, &node.0, &record)
+        .expect("row");
+    store.inner.propose(batch).await.expect("write");
+
+    registry.prune(Timestamp::now()).await.expect("prune");
+    let trimmed = node_record(&registry, node).await;
+    let serials: Vec<&str> = trimmed
+        .serials
+        .iter()
+        .map(|cert| cert.serial.as_str())
+        .collect();
+    assert_eq!(serials, [older[199].serial.as_str(), serial.as_str()]);
+    assert_eq!(
+        registry
+            .revoke(&system(), node)
+            .await
+            .expect("revoke")
+            .len(),
+        2
+    );
+}
+
+/// The heartbeat answer asks for a renewal at most once an hour per stream: a node whose
+/// renewal answer was lost is not sent to renew on every beat.
+#[tokio::test]
+async fn the_renewal_directive_is_paced() {
+    let controller = Controller::start_with(CaPolicy {
+        node_validity_days: 20,
+        ..CaPolicy::default()
+    })
+    .await;
+    let dir = tempfile::tempdir().expect("dir");
+    let credentials = controller.enroll(dir.path(), "probe-paced").await;
+    let channel = client::connect(
+        &controller.addr.to_string(),
+        credentials.client_config().expect("config"),
+    )
+    .await
+    .expect("channel");
+    let (beats, inbound) = tokio::sync::mpsc::channel::<v1::Beat>(8);
+    let mut directives = v1::node_client::NodeClient::new(channel)
+        .heartbeat(futures::stream::unfold(inbound, |mut inbound| async move {
+            inbound.recv().await.map(|beat| (beat, inbound))
+        }))
+        .await
+        .expect("heartbeat")
+        .into_inner();
+    let mut asked = 0;
+    for sequence in 1..=5 {
+        beats
+            .send(v1::Beat {
+                sequence,
+                version: "0.0.1".to_owned(),
+                certificate_not_after: Some(tenko_cluster::probe::timestamp_to_proto(
+                    credentials.info.not_after,
+                )),
+                ..v1::Beat::default()
+            })
+            .await
+            .expect("beat");
+        let directive = tokio::time::timeout(WAIT, directives.message())
+            .await
+            .expect("an answer")
+            .expect("ok")
+            .expect("a directive");
+        asked += usize::from(directive.renew);
+    }
+    assert_eq!(asked, 1);
 }

@@ -3,7 +3,7 @@
 //! (OPS-28, SCAN-05). The work is done in [`crate::node_sync`]; this file authenticates the
 //! caller and maps the answers.
 
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 
 use futures::Stream;
 use tenko_core::{Role, Timestamp};
@@ -34,7 +34,7 @@ impl v1::config_server::Config for ClusterService {
         let peer = peer_of(&request)?;
         let record = self.authenticate(&peer).await?;
         let from = request.into_inner().from_revision;
-        let (tx, mut rx) = mpsc::channel(4);
+        let (tx, rx) = mpsc::channel(4);
         let sync = self.registry.node_sync().clone();
         tokio::spawn(source::serve_watch(
             sync,
@@ -43,7 +43,12 @@ impl v1::config_server::Config for ClusterService {
             from,
             tx,
         ));
-        let stream: DeltaStream = Box::pin(futures::stream::poll_fn(move |cx| rx.poll_recv(cx)));
+        let stream: DeltaStream = super::node::rechecked(
+            Arc::clone(&self.registry),
+            record.id,
+            peer.identity.serial.clone(),
+            rx,
+        );
         Ok(Response::new(stream))
     }
 

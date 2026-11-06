@@ -43,14 +43,19 @@ impl v1::commands_server::Commands for ClusterService {
                 ))
             })?)
         };
-        let (tx, mut rx) = mpsc::channel(16);
+        let (tx, rx) = mpsc::channel(16);
         tokio::spawn(commands::serve_subscribe(
             Arc::clone(self.registry.node_sync().store()),
             record.id,
             after,
             tx,
         ));
-        let stream: CommandStream = Box::pin(futures::stream::poll_fn(move |cx| rx.poll_recv(cx)));
+        let stream: CommandStream = super::node::rechecked(
+            Arc::clone(&self.registry),
+            record.id,
+            peer.identity.serial.clone(),
+            rx,
+        );
         Ok(Response::new(stream))
     }
 

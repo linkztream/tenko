@@ -1,6 +1,7 @@
 //! Membership scenarios of the cluster lab (WP3.1c): a member rejoins with an empty data
-//! directory (M6), a dead voter is replaced, a controller is revoked, and the leader steps
-//! down under load.
+//! directory (M6), a dead voter is replaced, a controller is revoked, a probe is revoked
+//! through another controller than the one it is connected to, and the leader steps down
+//! under load.
 
 mod cluster_support;
 mod serve_support;
@@ -196,6 +197,46 @@ fn a_revoked_controller_leaves_and_cannot_come_back() {
     lab.mark_removed(revoked);
     assert_eq!(lab.state(revoked), State::Removed);
     lab.digests_agree(load.committed_revision());
+    assert!(lab.elapsed() < SCENARIO_LIMIT, "took {:?}", lab.elapsed());
+}
+
+/// A probe connected to one controller and revoked through another loses its connection
+/// there and learns that it was revoked: the installation's first revocation reaches every
+/// controller, whose revocation lists were empty until then.
+#[test]
+#[ignore = "slow lab scenario, nightly"]
+fn a_probe_revoked_through_another_controller_is_cut_off() {
+    let mut lab = ClusterLab::start(3);
+    let follower = lab.followers()[0];
+    let probe = lab.probe(follower);
+    let mut holder = None;
+    lab.wait_for("the probe connected", Duration::from_secs(60), || {
+        holder = lab
+            .node_view(follower, probe.id)
+            .and_then(|view| view["connection"]["controller"].as_u64());
+        holder.is_some() && probe.process_state() == "connected"
+    });
+    let holder = holder.expect("the controller the probe is connected to");
+    let other = std::iter::once(lab.leader())
+        .chain(lab.followers())
+        .find(|id| *id != holder)
+        .expect("another controller");
+    let revoked = lab.api(other).delete(&format!("/nodes/{}", probe.id), None);
+    assert!(
+        (200..300).contains(&revoked.status),
+        "revoke: {} {}",
+        revoked.status,
+        revoked.text
+    );
+    lab.wait_for(
+        "the probe to report itself revoked",
+        Duration::from_secs(30),
+        || probe.process_state() == "revoked",
+    );
+    assert!(
+        lab.node_view(holder, probe.id).is_none(),
+        "the controller it was connected to still lists it"
+    );
     assert!(lab.elapsed() < SCENARIO_LIMIT, "took {:?}", lab.elapsed());
 }
 

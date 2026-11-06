@@ -43,7 +43,9 @@ voters, enrolls and starts the probes, writes 100 addresses per second through H
 seconds and that the survivors' digests agree, restarts the killed controller, partitions a
 follower with `docker network disconnect`, checks through its own port that it lost its
 quorum and that the majority keeps taking writes, connects it again, checks that all three
-digests agree, and tears everything down. It prints a summary line per step; on a failure it
+digests agree, checks that a probe's renewal before its window is refused and that 30
+enrollments with an invalid token leave 10 audit records and one summary, revokes a probe
+and checks that it is cut off, and tears everything down. It prints a summary line per step; on a failure it
 prints the logs of every service first. The weekly CI job `cluster-lab` runs it.
 
 Settings: `IMAGE`, `LAB_PORT` (28443), `RATE` and `SECONDS_UNDER_LOAD` (100 writes per

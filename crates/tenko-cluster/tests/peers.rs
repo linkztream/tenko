@@ -85,6 +85,8 @@ struct Member {
     stop: watch::Sender<bool>,
     tasks: Vec<JoinHandle<()>>,
     engine: JobEngine,
+    /// The certificate chain and key it presents to its peers.
+    identity: (Vec<rustls::pki_types::CertificateDer<'static>>, SecretBytes),
 }
 
 impl Member {
@@ -153,7 +155,7 @@ async fn start_member(
     peers.attach_kek(Arc::new(EchoKek));
     let resolver = Arc::new(TlsResolver::default());
     resolver.set(Some(
-        TlsMaterial::from_der(chain, key, CertSource::Inline).expect("material"),
+        TlsMaterial::from_der(chain.clone(), key, CertSource::Inline).expect("material"),
     ));
     let (stop, stopped) = watch::channel(false);
     let mut tasks = peers.spawn(stopped.clone());
@@ -185,12 +187,21 @@ async fn start_member(
         stop,
         tasks,
         engine,
+        identity: (chain, SecretBytes::from_slice(key.expose())),
     }
 }
 
 impl Lab {
     /// The first controller alone.
     async fn first(configure: &(dyn Fn(&mut RaftStoreConfig) + Sync)) -> Self {
+        Self::first_with(configure, CaPolicy::default()).await
+    }
+
+    /// The first controller, with a CA that issues by `policy`.
+    async fn first_with(
+        configure: &(dyn Fn(&mut RaftStoreConfig) + Sync),
+        policy: CaPolicy,
+    ) -> Self {
         let store = RaftStore::open_temp(store_config(1, configure))
             .await
             .expect("store");
@@ -200,7 +211,7 @@ impl Lab {
             .await
             .expect("vault");
         let ca = Arc::new(
-            InternalCa::load_or_init(store_dyn.as_ref(), &vault, &system(), CaPolicy::default())
+            InternalCa::load_or_init(store_dyn.as_ref(), &vault, &system(), policy)
                 .await
                 .expect("CA"),
         );
@@ -322,7 +333,15 @@ impl Lab {
 
     /// The first controller and two that joined, promoted to three voters.
     async fn three(configure: &(dyn Fn(&mut RaftStoreConfig) + Sync)) -> Self {
-        let lab = Self::first(configure).await;
+        Self::three_with(configure, CaPolicy::default()).await
+    }
+
+    /// Three voters, with a CA that issues by `policy`.
+    async fn three_with(
+        configure: &(dyn Fn(&mut RaftStoreConfig) + Sync),
+        policy: CaPolicy,
+    ) -> Self {
+        let lab = Self::first_with(configure, policy).await;
         lab.join("controller-two", configure).await;
         lab.join("controller-three", configure).await;
         wait_until("three voters", || {
@@ -668,6 +687,232 @@ async fn the_raft_service_refuses_probes_and_foreign_controllers() {
     lab.stop().await;
 }
 
+/// A revoked controller has no node record left, like the first controller of a cluster,
+/// which never enrolled. The `Raft` service accepts a caller without a record only while
+/// it is not revoked: a certificate of a revoked controller that is not on the revocation
+/// list (one its record no longer held) is refused all the same.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_raft_service_refuses_a_revoked_controller_without_a_record() {
+    let lab = Lab::three(&no_change).await;
+    let (_, token) = lab
+        .first
+        .registry
+        .create_enrollment(
+            &system(),
+            NewEnrollment {
+                roles: vec![Role::Controller],
+                ..NewEnrollment::default()
+            },
+        )
+        .await
+        .expect("controller token");
+    let (_, csr) = generate_csr().expect("csr");
+    let enrolled = lab
+        .first
+        .registry
+        .enroll(
+            &system(),
+            EnrollRequest {
+                token: token.to_text().to_string(),
+                csr: pem_block("CERTIFICATE REQUEST", &csr),
+                name: Some("controller-gone".to_owned()),
+                roles: Vec::new(),
+                address: None,
+                version: "0.0.1".to_owned(),
+                majors: vec![1],
+            },
+        )
+        .await
+        .expect("enroll a controller");
+    let node = enrolled.node.id;
+    // A second certificate for the same controller that its record never held.
+    let (key, csr) = generate_csr().expect("csr");
+    let other = lab
+        .ca
+        .issue_node_cert_for(
+            node,
+            [Role::Controller].into_iter().collect(),
+            &csr,
+            tenko_core::Timestamp::now(),
+        )
+        .expect("a second certificate");
+    let serials = lab
+        .first
+        .registry
+        .revoke(&system(), node)
+        .await
+        .expect("revoke");
+    assert!(!serials.contains(&other.info.serial));
+    // The call goes to another member, which learned of the revocation by replication.
+    let second = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != NodeId(1))
+        .expect("another member");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !second.registry.is_revoked_node(node) {
+        assert!(
+            Instant::now() < deadline,
+            "the revocation did not reach the other member"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let network = PeerNetwork::new(node, PeerTimings::default());
+    network.set_tls(
+        tenko_cluster::mtls::client_config(lab.ca.root_der(), other.chain.clone(), &key)
+            .expect("config"),
+    );
+    let channel = network
+        .channel(&second.addr.to_string())
+        .await
+        .expect("the certificate passes the handshake");
+    let refused = v1::raft_client::RaftClient::new(channel)
+        .vote(v1::RaftRequest::default())
+        .await
+        .expect_err("a revoked controller may not vote");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied, "{refused:?}");
+    assert_eq!(code_of(&refused), Some("cluster.node.unknown"));
+    lab.stop().await;
+}
+
+/// Calls `Raft.Vote` on `addr` as `node` with `chain` and `key`: the refusal's code, or
+/// `None` when the connection itself was refused (the TLS handshake, or the first call
+/// after it in TLS 1.3). Panics when the call is accepted.
+async fn raft_vote_refusal(
+    lab: &Lab,
+    node: NodeId,
+    chain: Vec<rustls::pki_types::CertificateDer<'static>>,
+    key: &SecretBytes,
+    addr: SocketAddr,
+    what: &str,
+) -> Option<String> {
+    let network = PeerNetwork::new(node, PeerTimings::default());
+    network.set_tls(
+        tenko_cluster::mtls::client_config(lab.ca.root_der(), chain, key).expect("config"),
+    );
+    let Ok(channel) = network.channel(&addr.to_string()).await else {
+        return None;
+    };
+    match v1::raft_client::RaftClient::new(channel)
+        .vote(v1::RaftRequest::default())
+        .await
+    {
+        Ok(_) => panic!("{what}: a removed controller's vote was taken on {addr}"),
+        Err(status) => code_of(&status).map(str::to_owned),
+    }
+}
+
+/// A controller removed from the cluster is refused with every certificate it was issued,
+/// on every member that stays: the one it runs with and one a renewal issued before the
+/// removal are on the revocation list and fail the handshake; a certificate of it that its
+/// record never held passes the handshake and is refused before Raft sees the call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_removed_controller_is_refused_with_every_certificate() {
+    // Twenty-day certificates are due for renewal at once.
+    let lab = Lab::three_with(
+        &no_change,
+        CaPolicy {
+            node_validity_days: 20,
+            ..CaPolicy::default()
+        },
+    )
+    .await;
+    let leader = lab.leader().await;
+    let target = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node() && member.node() != NodeId(1))
+        .expect("a joined member that is not the leader");
+    let node = target.node();
+    let staying: Vec<Arc<Member>> = lab
+        .members()
+        .into_iter()
+        .filter(|member| member.node() != node)
+        .collect();
+
+    // The certificate it runs with, and one a renewal issued before the removal.
+    let (running_chain, running_key) = target.identity.clone();
+    let running = tenko_cluster::ca::CertInfo::from_der(&running_chain[0]).expect("info");
+    let (renewed_key, csr) = generate_csr().expect("csr");
+    let renewed = lab
+        .first
+        .registry
+        .renew(node, &running.serial, &csr, tenko_core::Timestamp::now())
+        .await
+        .expect("a renewal before the removal");
+    // A certificate of the controller that its record never held.
+    let (stray_key, csr) = generate_csr().expect("csr");
+    let stray = lab
+        .ca
+        .issue_node_cert_for(
+            node,
+            [Role::Controller].into_iter().collect(),
+            &csr,
+            tenko_core::Timestamp::now(),
+        )
+        .expect("a certificate outside the record");
+
+    leader
+        .peers
+        .remove(&system(), node)
+        .await
+        .expect("the removal");
+    for member in &staying {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !(member.registry.revocations().is_revoked(&running.serial)
+            && member
+                .registry
+                .revocations()
+                .is_revoked(&renewed.info.serial)
+            && member.registry.is_revoked_node(node))
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the revocation did not reach member {}",
+                member.node()
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+    assert!(
+        !lab.first
+            .registry
+            .revocations()
+            .is_revoked(&stray.info.serial)
+    );
+
+    // Each certificate with the refusal it gets: `None` for the handshake.
+    let cases = [
+        (
+            "the certificate it runs with",
+            running_chain,
+            running_key,
+            None,
+        ),
+        ("the renewed certificate", renewed.chain, renewed_key, None),
+        (
+            "the certificate outside the record",
+            stray.chain,
+            stray_key,
+            Some("cluster.node.unknown"),
+        ),
+    ];
+    for member in &staying {
+        for (what, chain, key, expected) in &cases {
+            let refused =
+                raft_vote_refusal(&lab, node, chain.clone(), key, member.addr, what).await;
+            assert_eq!(
+                refused.as_deref(),
+                *expected,
+                "{what} on member {}",
+                member.node()
+            );
+        }
+    }
+    lab.stop().await;
+}
+
 /// A learner that joins after the leader purged its log installs a snapshot streamed over
 /// mutual TLS, with its digest checked, and replicates by log afterwards.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -843,7 +1088,7 @@ async fn revocations_and_endpoints_reach_every_member() {
     let channel = tenko_cluster::client::connect(&second.addr.to_string(), Arc::clone(&config))
         .await
         .expect("the probe reaches another member");
-    let mut handshake = v1::handshake_client::HandshakeClient::new(channel);
+    let mut handshake = v1::handshake_client::HandshakeClient::new(channel.clone());
     let hello = handshake
         .hello(v1::HelloRequest {
             majors: vec![1],
@@ -868,6 +1113,13 @@ async fn revocations_and_endpoints_reach_every_member() {
         second.addr.to_string(),
         "the answering controller first"
     );
+    // A stream the probe holds open on that member; this is the first revocation the
+    // installation sees, so the member's revocation table was empty until now.
+    let mut watch = v1::config_client::ConfigClient::new(channel)
+        .watch(v1::WatchRequest { from_revision: 0 })
+        .await
+        .expect("watch on another member")
+        .into_inner();
 
     lab.first
         .registry
@@ -882,6 +1134,20 @@ async fn revocations_and_endpoints_reach_every_member() {
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    // The member closes the probe's connection, and the open stream with it.
+    let ended = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match watch.message().await {
+                Ok(Some(_)) => {}
+                Ok(None) | Err(_) => return,
+            }
+        }
+    })
+    .await;
+    assert!(
+        ended.is_ok(),
+        "the revoked probe's stream stayed open on another member"
+    );
     // In TLS 1.3 the client may finish its side before the alert arrives; the first call
     // fails then.
     let answered = async {
