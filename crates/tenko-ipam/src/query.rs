@@ -640,7 +640,8 @@ pub fn prefix_addresses(
                 IpamError::new(codes::INVALID_CURSOR, 400, "the cursor is malformed")
                     .field("cursor", codes::INVALID_CURSOR)
             })?;
-            u128::from_be_bytes(bytes)
+            // A cursor below the prefix starts at its first address.
+            u128::from_be_bytes(bytes).max(first)
         }
         None => first,
     };
