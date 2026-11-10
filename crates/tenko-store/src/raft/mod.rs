@@ -439,6 +439,9 @@ pub struct EngineStats {
     pub reseeds_in_place: u64,
     /// Durable checkpoints of the state file (deferred durability).
     pub checkpoints: u64,
+    /// Leadership confirmation rounds run for linearizable reads; the reads that wait at
+    /// the same time share one.
+    pub leadership_rounds: u64,
 }
 
 /// Bytes on disk of a store, from the size cache (refreshed every
@@ -943,6 +946,7 @@ impl RaftStore {
             last_compact_micros: load(&sm.last_compact_micros),
             reseeds_in_place: load(&sm.rewrites),
             checkpoints: load(&sm.checkpoints),
+            leadership_rounds: self.inner.confirmer.rounds(),
         }
     }
 
@@ -1893,41 +1897,19 @@ impl Inner {
     /// a quorum did not answer within the heartbeat interval is not the end while this
     /// leader's replication is acknowledged by a quorum (its quorum state accepts writes):
     /// one late heartbeat answer of a loaded follower is not a lost quorum, so the next
-    /// round decides, within the read wait. An isolated leader fails at once.
+    /// round decides. A leader that has lost its quorum keeps the read waiting until it
+    /// counts as isolated (`isolation_after` after its last quorum acknowledgment) or until
+    /// the deadline, whichever comes first. The read then fails with `NoQuorum`, or with
+    /// `Timeout` when the deadline passes while a round is still running.
     async fn confirm_leadership(&self, deadline: Instant) -> Confirmation {
-        loop {
-            let mut round = self.confirmer.join();
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let waited = tokio::time::timeout(remaining, round.wait_for(Option::is_some))
-                .await
-                .map(|seen| seen.map(|outcome| (*outcome).unwrap_or(Confirmation::Timeout)));
-            let outcome = match waited {
-                Ok(Ok(outcome)) => outcome,
-                // The round went without an outcome (its task was dropped with its
-                // runtime): a new round decides, within the deadline.
-                Ok(Err(_)) => {
-                    if self.check_running().is_err() {
-                        return Confirmation::ShuttingDown;
-                    }
-                    if Instant::now() >= deadline {
-                        return Confirmation::Timeout;
-                    }
-                    tokio::task::yield_now().await;
-                    continue;
-                }
-                Err(_) => Confirmation::Timeout,
-            };
-            let in_contact = self.leadership.subscribe_quorum().borrow().accepts_writes();
-            if outcome != Confirmation::NoQuorum || !in_contact {
-                return outcome;
-            }
-            let pause = Duration::from_millis(self.config.timings.heartbeat_ms);
-            if Instant::now() + pause >= deadline {
-                return outcome;
-            }
-            tracing::debug!("a leadership round missed its quorum; the next one decides");
-            tokio::time::sleep(pause).await;
-        }
+        self.confirmer
+            .confirm_read(
+                deadline,
+                Duration::from_millis(self.config.timings.heartbeat_ms),
+                || self.check_running().is_ok(),
+                || self.leadership.subscribe_quorum().borrow().accepts_writes(),
+            )
+            .await
     }
 
     fn check_running(&self) -> Result<(), StoreError> {

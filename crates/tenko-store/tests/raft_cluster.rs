@@ -113,8 +113,9 @@ async fn a_forwarded_write_follows_a_leader_change() {
 
 /// With one voter of three down, a burst of linearizable reads on the leader goes through
 /// the one follower left, a loaded one that answers one message at a time: the reads share
-/// their leadership rounds instead of sending one heartbeat each, so the follower's queue
-/// stays short and no read fails with `NoQuorum` while a quorum is up.
+/// their leadership rounds instead of sending one heartbeat each (far fewer rounds than
+/// reads), so the follower's queue stays short and no read fails with `NoQuorum` while a
+/// quorum is up.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn linearizable_reads_share_leadership_rounds_with_one_voter_down() {
     const READS: usize = 40;
@@ -131,6 +132,7 @@ async fn linearizable_reads_share_leadership_rounds_with_one_voter_down() {
     cluster
         .network()
         .set_service_time(followers[1], Some(Duration::from_millis(20)));
+    let rounds_before = leader.engine_stats().leadership_rounds;
     let reads: Vec<_> = (0..READS)
         .map(|_| {
             let leader = leader.clone();
@@ -154,16 +156,24 @@ async fn linearizable_reads_share_leadership_rounds_with_one_voter_down() {
         "{} of {READS} linearizable reads failed: {failed:?}",
         failed.len()
     );
+    let rounds = leader.engine_stats().leadership_rounds - rounds_before;
+    assert!(
+        (1..=READS as u64 / 4).contains(&rounds),
+        "{READS} reads took {rounds} leadership rounds"
+    );
     cluster.network().set_service_time(followers[1], None);
     cluster.network().set_isolated(followers[0], false);
     cluster.shutdown().await;
 }
 
-/// A leader cut off from both followers, with a burst of reads in flight and more arriving
-/// while the others elect a new leader and commit, answers none of them: recent contact
-/// with a quorum (the isolation threshold is far away here, so its quorum state still says
-/// healthy) only lets a read wait for the next round, and every round fails, so every read
-/// ends in `NoQuorum` or `Timeout` and none sees the old state.
+/// A leader cut off from both followers answers no read that arrived after the cut, even
+/// with a round in flight when it is cut off: reads start before the cut against slow
+/// followers, so that their round is still running, and the reads that arrive after it
+/// join the next one. Recent contact with a quorum (the isolation threshold is far away
+/// here, so its quorum state still says healthy) only lets a read wait for another round,
+/// and every round after the cut fails, so every later read ends in `NoQuorum` or
+/// `Timeout` while the others elect a new leader and commit. A read that arrived before
+/// the cut may be answered, by a round that started after it arrived.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_deposed_leader_answers_no_linearizable_read() {
     let cluster = InProcessCluster::start_with(3, &ConformanceConfig::default(), |config| {
@@ -183,8 +193,30 @@ async fn a_deposed_leader_answers_no_linearizable_read() {
                 .map(|view| view.revision())
         })
     };
+    let others: Vec<u64> = cluster
+        .members()
+        .iter()
+        .map(|member| member.node_id().0)
+        .filter(|id| *id != leader.node_id().0)
+        .collect();
+    for id in &others {
+        cluster
+            .network()
+            .set_service_time(*id, Some(Duration::from_millis(60)));
+    }
+    let rounds_before = leader.engine_stats().leadership_rounds;
+    let early: Vec<_> = (0..10).map(|_| read(leader.clone())).collect();
+    wait_until("a round in flight", || {
+        leader.engine_stats().leadership_rounds > rounds_before
+    })
+    .await;
     cluster.network().set_isolated(leader.node_id().0, true);
     let mut reads: Vec<_> = (0..10).map(|_| read(leader.clone())).collect();
+    // The early round was in flight at the cut and the reads after it have joined the
+    // next one; the followers are fast again for their election.
+    for id in &others {
+        cluster.network().set_service_time(*id, None);
+    }
     let revision = put(&follower, 2, "after the cut")
         .await
         .expect("the others elect a leader and commit");
@@ -193,6 +225,15 @@ async fn a_deposed_leader_answers_no_linearizable_read() {
         matches!(*leader.quorum().borrow(), QuorumState::Healthy),
         "the cut-off leader still counts itself in contact"
     );
+    for read in early {
+        match read.await.expect("a read task") {
+            Ok(_) => {}
+            Err(error) => assert!(
+                matches!(error, StoreError::NoQuorum | StoreError::Timeout),
+                "{error:?}"
+            ),
+        }
+    }
     for read in reads {
         match read.await.expect("a read task") {
             Ok(seen) => panic!(
