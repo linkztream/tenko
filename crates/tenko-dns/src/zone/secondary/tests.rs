@@ -244,3 +244,74 @@ fn xot_on_the_default_port_goes_to_853() {
     server.port = 53;
     assert_eq!(primary_address(&server).port(), 53);
 }
+
+fn held(serial: u32) -> ZoneState {
+    ZoneState {
+        serial: Some(serial),
+        primaries: Vec::new(),
+        next_refresh: Timestamp::now(),
+        expires: None,
+        running: false,
+        requested: None,
+    }
+}
+
+const TIMERS: Timers = Timers {
+    refresh: 3600,
+    retry: 600,
+    expire: 86_400,
+};
+
+/// RFC 1996 section 4.4: a NOTIFY that arrives while a transfer runs is not lost; the
+/// zone is refreshed again once the transfer ends, unless it ended at the serial the
+/// NOTIFY announced or a later one.
+#[test]
+fn a_notify_during_a_running_transfer_refreshes_the_zone_again() {
+    let now = Timestamp::now();
+    let mut zone = held(1);
+    zone.running = true;
+    zone.request(Some(2), now);
+    zone.finish(Some(Refreshed::Serial(1)), now, TIMERS);
+    assert!(!zone.running);
+    assert!(zone.next_refresh <= now, "the NOTIFY for serial 2 was lost");
+    assert_eq!(zone.requested, None);
+    // That refresh reaches serial 2: the refresh timer applies.
+    zone.running = true;
+    zone.finish(Some(Refreshed::Serial(2)), now, TIMERS);
+    assert_eq!(zone.next_refresh, after(now, TIMERS.refresh));
+}
+
+#[test]
+fn a_notify_the_running_transfer_covers_needs_no_second_refresh() {
+    let now = Timestamp::now();
+    let mut zone = held(1);
+    zone.running = true;
+    zone.request(Some(2), now);
+    zone.request(Some(3), now);
+    zone.finish(Some(Refreshed::Serial(3)), now, TIMERS);
+    assert_eq!(zone.next_refresh, after(now, TIMERS.refresh));
+    // A request without a serial (the API, a NOTIFY without SOA) always refreshes again.
+    zone.running = true;
+    zone.request(None, now);
+    zone.request(Some(3), now);
+    zone.finish(Some(Refreshed::Serial(3)), now, TIMERS);
+    assert!(zone.next_refresh <= now);
+    // A failed transfer retries on its own timer, or at once when a NOTIFY came.
+    zone.running = true;
+    zone.finish(Some(Refreshed::Failed), now, TIMERS);
+    assert_eq!(zone.next_refresh, after(now, TIMERS.retry));
+    zone.running = true;
+    zone.request(Some(4), now);
+    zone.finish(None, now, TIMERS);
+    assert!(zone.next_refresh <= now);
+}
+
+#[test]
+fn a_request_while_idle_makes_the_zone_due_without_a_second_refresh() {
+    let now = Timestamp::now();
+    let mut zone = held(1);
+    zone.next_refresh = after(now, 3600);
+    zone.request(Some(2), now);
+    assert!(zone.next_refresh <= now);
+    assert_eq!(zone.requested, None);
+}

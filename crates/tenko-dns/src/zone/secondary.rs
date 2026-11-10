@@ -265,6 +265,69 @@ struct ZoneState {
     next_refresh: Timestamp,
     expires: Option<Timestamp>,
     running: bool,
+    /// A refresh asked for while a transfer ran.
+    requested: Option<Requested>,
+}
+
+/// A refresh asked for while a transfer of the zone ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Requested {
+    /// NOTIFY messages up to this serial (the highest one announced).
+    Serial(u32),
+    /// A request without a serial: a NOTIFY without SOA, or the API.
+    Any,
+}
+
+impl ZoneState {
+    /// A NOTIFY or a request through the API: the zone is due now. While a transfer runs
+    /// it may already have read the primary's old copy, so the request is kept and the
+    /// zone refreshed once more when it ends (RFC 1996 section 4.4).
+    fn request(&mut self, serial: Option<u32>, now: Timestamp) {
+        self.next_refresh = now;
+        if self.running {
+            self.requested = Some(match (self.requested, serial) {
+                (Some(Requested::Serial(kept)), Some(serial))
+                    if crate::xfr::out::serial_ge(kept, serial) =>
+                {
+                    Requested::Serial(kept)
+                }
+                (Some(Requested::Any), _) | (_, None) => Requested::Any,
+                (_, Some(serial)) => Requested::Serial(serial),
+            });
+        }
+    }
+
+    /// The end of a transfer: the next refresh after the SOA's timers, or at once when a
+    /// request came while it ran that the serial reached does not cover.
+    fn finish(&mut self, outcome: Option<Refreshed>, now: Timestamp, timers: Timers) {
+        self.running = false;
+        match outcome {
+            Some(Refreshed::Serial(serial)) => {
+                self.serial = Some(serial);
+                self.next_refresh = after(now, timers.refresh);
+                self.expires = Some(after(now, timers.expire));
+            }
+            Some(Refreshed::Failed) | None => {
+                let retry = if self.serial.is_some() {
+                    timers.retry
+                } else {
+                    timers.retry.min(60)
+                };
+                self.next_refresh = after(now, retry);
+            }
+        }
+        if let Some(requested) = self.requested.take() {
+            let covered = match requested {
+                Requested::Serial(wanted) => self
+                    .serial
+                    .is_some_and(|held| crate::xfr::out::serial_ge(held, wanted)),
+                Requested::Any => false,
+            };
+            if !covered {
+                self.next_refresh = now;
+            }
+        }
+    }
 }
 
 /// The SOA timers of a copy.
@@ -328,6 +391,7 @@ impl std::fmt::Debug for SecondaryService {
 }
 
 /// What one refresh did.
+#[derive(Debug, Clone, Copy)]
 enum Refreshed {
     /// The copy is current or was replaced: the new serial.
     Serial(u32),
@@ -411,7 +475,7 @@ impl SecondaryService {
         );
         self.inner.zones.store().propose(batch).await?;
         if let Some(state) = self.inner.lock().get_mut(&id) {
-            state.next_refresh = Timestamp::now();
+            state.request(None, Timestamp::now());
         }
         self.inner.wake.notify_one();
         self.state(view.as_ref(), &zone)
@@ -447,7 +511,7 @@ impl NotifyHandler for SecondaryService {
                 tracing::debug!(%from, ?serial, "NOTIFY for a serial already held");
                 return;
             }
-            entry.next_refresh = Timestamp::now();
+            entry.request(serial, Timestamp::now());
         }
         drop(state);
         self.inner.wake.notify_one();
@@ -681,6 +745,7 @@ impl Inner {
                         next_refresh: now,
                         expires,
                         running: false,
+                        requested: None,
                     },
                 );
             }
@@ -903,22 +968,7 @@ impl Inner {
             .unwrap_or(Timers::DEFAULT);
         let mut state = self.lock();
         if let Some(zone) = state.get_mut(&id) {
-            zone.running = false;
-            match outcome {
-                Some(Refreshed::Serial(serial)) => {
-                    zone.serial = Some(serial);
-                    zone.next_refresh = after(now, timers.refresh);
-                    zone.expires = Some(after(now, timers.expire));
-                }
-                Some(Refreshed::Failed) | None => {
-                    let retry = if zone.serial.is_some() {
-                        timers.retry
-                    } else {
-                        timers.retry.min(60)
-                    };
-                    zone.next_refresh = after(now, retry);
-                }
-            }
+            zone.finish(outcome, now, timers);
         }
         drop(state);
         self.wake.notify_one();

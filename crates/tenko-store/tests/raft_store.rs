@@ -413,13 +413,19 @@ fn a_due_snapshot_waits_for_a_deep_commit_queue_within_its_bound() {
 
 /// ADR 0030: a snapshot built while commits keep coming never stalls them: its build reads
 /// an MVCC view beside the apply path. Every commit of a steady load through several builds
-/// completes within the bound.
+/// completes within the bound. The builds are due by entries, so how many a minute brings
+/// depends on the host's commit rate, which the product does not promise: a snapshot every
+/// 100 entries needs about 300 entries for three, a fifth of a minute at the 15 entries
+/// per second a loaded four-core CI runner made (2026-11-08); the minute is a guard against
+/// a hang, not the measure. nextest gives the test four threads (`.config/nextest.toml`),
+/// the runtime's workers, so the stall bound is not measured on a machine other tests
+/// have taken.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn snapshots_built_under_load_do_not_stall_the_commits() {
     let dir = TestDir::new("snapshot-load");
     let mut cfg = config(dir.path());
     cfg.snapshot = SnapshotPolicy {
-        every_entries: 300,
+        every_entries: 100,
         every_log_bytes: u64::MAX,
         keep_entries: 50,
     };
@@ -453,8 +459,14 @@ async fn snapshots_built_under_load_do_not_stall_the_commits() {
             slowest = slowest.max(task.await.expect("task"));
         }
     }
-    let built = store.engine_stats().snapshots_built - before.snapshots_built;
-    assert!(built >= 3, "{built} snapshots in a minute of commits");
+    let after = store.engine_stats();
+    let built = after.snapshots_built - before.snapshots_built;
+    let entries = after.entries_proposed - before.entries_proposed;
+    assert!(
+        built >= 3,
+        "{built} snapshots in {:?} of commits ({entries} entries)",
+        started.elapsed()
+    );
     assert!(
         slowest < Duration::from_millis(1_500),
         "a commit took {slowest:?} while snapshots were built"

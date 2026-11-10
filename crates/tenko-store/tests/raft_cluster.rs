@@ -111,6 +111,103 @@ async fn a_forwarded_write_follows_a_leader_change() {
     cluster.shutdown().await;
 }
 
+/// With one voter of three down, a burst of linearizable reads on the leader goes through
+/// the one follower left, a loaded one that answers one message at a time: the reads share
+/// their leadership rounds instead of sending one heartbeat each, so the follower's queue
+/// stays short and no read fails with `NoQuorum` while a quorum is up.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn linearizable_reads_share_leadership_rounds_with_one_voter_down() {
+    const READS: usize = 40;
+    let cluster = InProcessCluster::start_with(3, &ConformanceConfig::default(), quick).await;
+    let leader = cluster.wait_for_leader().await;
+    let revision = put(&leader, 1, "before").await.expect("write");
+    let followers: Vec<u64> = cluster
+        .members()
+        .iter()
+        .map(|member| member.node_id().0)
+        .filter(|id| *id != leader.node_id().0)
+        .collect();
+    cluster.network().set_isolated(followers[0], true);
+    cluster
+        .network()
+        .set_service_time(followers[1], Some(Duration::from_millis(20)));
+    let reads: Vec<_> = (0..READS)
+        .map(|_| {
+            let leader = leader.clone();
+            tokio::spawn(async move {
+                leader
+                    .read(ReadConsistency::Linearizable)
+                    .await
+                    .map(|view| view.revision())
+            })
+        })
+        .collect();
+    let mut failed = Vec::new();
+    for read in reads {
+        match read.await.expect("a read task") {
+            Ok(seen) => assert!(seen >= revision),
+            Err(error) => failed.push(error),
+        }
+    }
+    assert!(
+        failed.is_empty(),
+        "{} of {READS} linearizable reads failed: {failed:?}",
+        failed.len()
+    );
+    cluster.network().set_service_time(followers[1], None);
+    cluster.network().set_isolated(followers[0], false);
+    cluster.shutdown().await;
+}
+
+/// A leader cut off from both followers, with a burst of reads in flight and more arriving
+/// while the others elect a new leader and commit, answers none of them: recent contact
+/// with a quorum (the isolation threshold is far away here, so its quorum state still says
+/// healthy) only lets a read wait for the next round, and every round fails, so every read
+/// ends in `NoQuorum` or `Timeout` and none sees the old state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_deposed_leader_answers_no_linearizable_read() {
+    let cluster = InProcessCluster::start_with(3, &ConformanceConfig::default(), |config| {
+        config.isolation_after = Duration::from_secs(60);
+        config.read_wait = Duration::from_secs(2);
+        config.leader_wait = Duration::from_secs(10);
+    })
+    .await;
+    let leader = cluster.wait_for_leader().await;
+    put(&leader, 1, "before").await.expect("write");
+    let follower = cluster.a_follower().await;
+    let read = |leader: RaftStore| {
+        tokio::spawn(async move {
+            leader
+                .read(ReadConsistency::Linearizable)
+                .await
+                .map(|view| view.revision())
+        })
+    };
+    cluster.network().set_isolated(leader.node_id().0, true);
+    let mut reads: Vec<_> = (0..10).map(|_| read(leader.clone())).collect();
+    let revision = put(&follower, 2, "after the cut")
+        .await
+        .expect("the others elect a leader and commit");
+    reads.extend((0..10).map(|_| read(leader.clone())));
+    assert!(
+        matches!(*leader.quorum().borrow(), QuorumState::Healthy),
+        "the cut-off leader still counts itself in contact"
+    );
+    for read in reads {
+        match read.await.expect("a read task") {
+            Ok(seen) => panic!(
+                "a deposed leader answered a linearizable read at revision {seen} (the new leader committed {revision})"
+            ),
+            Err(error) => assert!(
+                matches!(error, StoreError::NoQuorum | StoreError::Timeout),
+                "{error:?}"
+            ),
+        }
+    }
+    cluster.network().set_isolated(leader.node_id().0, false);
+    cluster.shutdown().await;
+}
+
 /// A cut-off follower and a cut-off leader report `Isolated` after the threshold, with the
 /// revision they applied; a reconnected member is healthy again. The leader reports when
 /// it last heard from each member.

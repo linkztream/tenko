@@ -137,12 +137,24 @@ COPY . .
 # The build script of tenko-api embeds ui/dist into the binary; a release build refuses
 # the placeholder page that TENKO_UI_STUB=1 would give.
 COPY --from=ui /src/ui/dist ui/dist
-# The target directory is a cache mount and is not part of the image layer,
-# so the binary is copied out to /out inside the same RUN.
+# The target directory is shared between builds of one checkout only. A cache mount
+# outlives the build and serves every build on the same Docker engine that names its id,
+# and cargo takes an artifact for fresh by its file times: one mount for two checkouts hands
+# one tree's crates to the other tree's build, which then links a binary of mixed code (or
+# fails to compile where the trees differ). Without TENKO_BUILD_TREE (the command above, the
+# compose examples) the build has a target directory of its own, a full build; the lab
+# scripts pass a hash of the checkout's absolute path, and the mount's id carries it, so a
+# checkout reuses only its own artifacts. The registry mount stays shared: its contents are
+# addressed by name and version and checked by checksum. The binary is copied out to /out
+# inside the same RUN, since a cache mount is not part of the image layer.
+ARG TENKO_BUILD_TREE=
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p tenko --target x86_64-unknown-linux-musl \
-    && cp target/x86_64-unknown-linux-musl/release/tenko /out-tenko
+    --mount=type=cache,id=tenko-target-${TENKO_BUILD_TREE:-unshared},target=/src/target-tree \
+    set -eu; \
+    if [ -n "$TENKO_BUILD_TREE" ]; then target=/src/target-tree; else target=/tmp/tenko-target; fi; \
+    CARGO_TARGET_DIR="$target" cargo build --release --locked -p tenko --target x86_64-unknown-linux-musl; \
+    cp "$target/x86_64-unknown-linux-musl/release/tenko" /out-tenko; \
+    rm -rf /tmp/tenko-target
 
 # The binary built here (TENKO_BINARY_SOURCE=source).
 FROM scratch AS source

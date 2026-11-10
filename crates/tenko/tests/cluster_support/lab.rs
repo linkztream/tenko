@@ -1000,10 +1000,17 @@ fn member_config(
     text
 }
 
-/// A command of the `tenko` binary at `binary` (the binary under test when `None`) with the
-/// clean environment of [`tenko`].
-fn program(binary: Option<&Path>) -> Command {
-    let Some(binary) = binary else {
+/// The variable that names the `tenko` binary the controllers of a lab run instead of the
+/// one cargo built with the tests: the weekly lab runs the shipped build (the static musl
+/// binary with the release profile), as every lab and smoke does; a debug build of three
+/// controllers on a four-core runner measures the build, not the cluster.
+pub const LAB_BIN: &str = "TENKO_LAB_BIN";
+
+/// A command of the `tenko` binary at `binary`, else the one [`LAB_BIN`] names, else the
+/// binary under test, with the clean environment of [`tenko`].
+pub fn program(binary: Option<&Path>) -> Command {
+    let shipped = std::env::var_os(LAB_BIN).map(PathBuf::from);
+    let Some(binary) = binary.map(Path::to_path_buf).or(shipped) else {
         return tenko();
     };
     let mut command = Command::new(binary);

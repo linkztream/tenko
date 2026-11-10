@@ -62,6 +62,10 @@ fn a_follower_is_killed_under_load() {
     let report = load.stop();
     print_report("kill a follower at 100 writes/s", &report);
     println!("the follower caught up {caught_up:?} after its restart (lag {lag} entries)");
+    if report.failed_writes() > 0 {
+        // The leader's and the survivor's logs around the kill say why writes failed.
+        println!("{}", lab.diagnostics());
+    }
     assert_eq!(
         report.failed_writes(),
         0,

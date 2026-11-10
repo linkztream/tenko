@@ -1,0 +1,12 @@
+# nextest settings of the workspace: the lead's gate and the CI jobs run the default profile.
+#
+# A test that measures a latency bound on threads of its own reserves them here, so that
+# nextest does not run other tests on the cores it measures on. Do not add retries: a test
+# that fails under load has a cause, in the product or in the test.
+
+[[profile.default.overrides]]
+# The commit stall bound while snapshots are built (ADR 0030) is measured on the test's own
+# runtime of four workers; on a four-core CI runner beside three other tests its commits
+# waited for the CPU, not for the store.
+filter = 'binary_id(tenko-store::raft_store) & test(=snapshots_built_under_load_do_not_stall_the_commits)'
+threads-required = 4

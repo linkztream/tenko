@@ -390,10 +390,7 @@ jobs:
     name: Cluster lab (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      # Rust-only builds use a placeholder UI page; release builds refuse it.
-      TENKO_UI_STUB: "1"
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -411,10 +408,39 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
+          targets: x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - name: Cluster lab tests
+      # The lab's controllers and probes run the shipped build, as every lab and smoke does:
+      # the static musl binary with the release profile and the real UI, built as the release
+      # workflow builds it (TENKO_LAB_BIN). A debug build of three controllers on a four-core
+      # runner measured the build; the follower kill failed every week on it. The tests are
+      # a debug build with the placeholder UI page (TENKO_UI_STUB on their step only).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build the UI
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+      - name: Install the musl C compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+      - name: Build the shipped binary
         run: |
           set -euo pipefail
+          cargo build --release --locked -p tenko --target x86_64-unknown-linux-musl
+          file target/x86_64-unknown-linux-musl/release/tenko | grep -Eq 'statically linked|static-pie linked'
+      - name: Cluster lab tests
+        env:
+          # Rust-only builds use a placeholder UI page; release builds refuse it.
+          TENKO_UI_STUB: "1"
+        run: |
+          set -euo pipefail
+          export TENKO_LAB_BIN="$PWD/target/x86_64-unknown-linux-musl/release/tenko"
           shopt -s nullglob
           lab=()
           for f in crates/tenko/tests/cluster_*.rs crates/tenko/tests/acceptance_cluster.rs crates/tenko/tests/acceptance_partition.rs; do

@@ -9,21 +9,35 @@ use std::{path::PathBuf, process::Command, time::Duration};
 use serde_json::Value;
 use tempfile::TempDir;
 
-use super::lab::{ClusterLab, START_LIMIT};
-use crate::serve_support::{Outcome, Proc, run, tenko};
+use super::lab::{ClusterLab, START_LIMIT, program};
+use crate::serve_support::{Outcome, Proc, run};
 
-/// A batch of two documentation addresses seen by ARP.
-pub const BATCH: &str = r#"{
+/// A batch of two documentation addresses seen by ARP. Its times are a few seconds before
+/// now, so that no purge or age window of the controller treats it as old whatever the
+/// calendar says.
+pub fn batch() -> String {
+    let now = tenko_core::Timestamp::now();
+    let ago = |secs: u64| {
+        now.checked_sub(Duration::from_secs(secs))
+            .expect("a time before now")
+    };
+    format!(
+        r#"{{
   "method": "arp",
   "complete": false,
-  "collected_at": "2026-10-10T08:00:05Z",
+  "collected_at": "{}",
   "sightings": [
-    {"observed_at": "2026-10-10T08:00:01Z",
-     "subject": {"type": "address", "data": {"ip": "192.0.2.30", "mac": "00:00:5e:00:53:30"}}},
-    {"observed_at": "2026-10-10T08:00:02Z",
-     "subject": {"type": "address", "data": {"ip": "192.0.2.31"}}}
+    {{"observed_at": "{}",
+     "subject": {{"type": "address", "data": {{"ip": "192.0.2.30", "mac": "00:00:5e:00:53:30"}}}}}},
+    {{"observed_at": "{}",
+     "subject": {{"type": "address", "data": {{"ip": "192.0.2.31"}}}}}}
   ]
-}"#;
+}}"#,
+        ago(5),
+        ago(9),
+        ago(8)
+    )
+}
 
 /// An enrolled, running probe; stopped and removed when dropped.
 pub struct LabProbe {
@@ -45,7 +59,7 @@ impl ClusterLab {
             .tempdir()
             .expect("a temporary directory");
         let data_dir = dir.path().join("data");
-        let mut enroll = tenko();
+        let mut enroll = program(None);
         enroll
             .args(["node", "enroll", "--controller", &self.url(via)])
             .args(["--token", &token, "--ca-fingerprint", self.fingerprint()])
@@ -108,7 +122,7 @@ impl LabProbe {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = tenko();
+        let mut command = program(None);
         command.args(args).arg("--data-dir").arg(self.data_dir());
         command
     }
@@ -157,11 +171,12 @@ impl LabProbe {
             .unwrap_or(u64::MAX)
     }
 
-    /// Injects a batch (`tenko node inject`); [`BATCH`] when `batch` is `None`.
+    /// Injects a batch (`tenko node inject`); [`batch()`] when `batch` is `None`.
     #[track_caller]
     pub fn inject(&self, batch: Option<&str>) {
         let file = self.dir.path().join("batch.json");
-        std::fs::write(&file, batch.unwrap_or(BATCH)).expect("write the batch");
+        let text = batch.map_or_else(self::batch, str::to_owned);
+        std::fs::write(&file, text).expect("write the batch");
         let injected = run(
             self.command(&["node", "inject", "--file", file.to_str().expect("UTF-8")]),
             None,

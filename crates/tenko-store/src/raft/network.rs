@@ -39,7 +39,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, Mutex, PoisonError, RwLock},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use bytes::Bytes;
@@ -431,6 +431,9 @@ impl RaftNetwork<TypeConfig> for PeerClient {
     }
 }
 
+/// The appends a slow node serves one at a time, and the time each takes at least.
+type ServiceQueue = (tokio::sync::Mutex<()>, Duration);
+
 /// Raft nodes in one process (tests and benchmarks).
 ///
 /// Register every store with [`InProcessNetwork::register`] after opening it with
@@ -440,6 +443,8 @@ impl RaftNetwork<TypeConfig> for PeerClient {
 pub struct InProcessNetwork {
     nodes: Arc<RwLock<BTreeMap<RaftNodeId, WeakRaftStore>>>,
     isolated: Arc<RwLock<BTreeSet<RaftNodeId>>>,
+    /// Nodes that serve appends one at a time, each taking at least the duration.
+    slow: Arc<RwLock<BTreeMap<RaftNodeId, Arc<ServiceQueue>>>>,
 }
 
 impl std::fmt::Debug for InProcessNetwork {
@@ -493,6 +498,20 @@ impl InProcessNetwork {
         }
     }
 
+    /// Makes a node serve the appends it receives (replication and heartbeats) one at a
+    /// time, each taking at least `service`, like a loaded host; `None` makes it fast again.
+    pub fn set_service_time(&self, node: RaftNodeId, service: Option<Duration>) {
+        let mut slow = self.slow.write().unwrap_or_else(PoisonError::into_inner);
+        match service {
+            Some(service) => {
+                slow.insert(node, Arc::new((tokio::sync::Mutex::new(()), service)));
+            }
+            None => {
+                slow.remove(&node);
+            }
+        }
+    }
+
     fn target(&self, sender: RaftNodeId, target: RaftNodeId) -> Result<RaftStore, Unreachable> {
         {
             let isolated = self.isolated.read().unwrap_or_else(PoisonError::into_inner);
@@ -520,6 +539,20 @@ impl PeerTransport for InProcessNetwork {
         let store = self
             .target(rpc.vote.leader_id().voted_for().unwrap_or_default(), target)
             .map_err(RPCError::Unreachable)?;
+        let service = self
+            .slow
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&target)
+            .cloned();
+        let _serving = match &service {
+            Some(queue) => {
+                let guard = queue.0.lock().await;
+                tokio::time::sleep(queue.1).await;
+                Some(guard)
+            }
+            None => None,
+        };
         store
             .handle_append_entries(rpc)
             .await

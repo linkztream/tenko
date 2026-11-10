@@ -25,7 +25,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use serve_support::{Node, api::Api, free_port, wait_for_setup_token};
+use serve_support::{Node, Proc, api::Api, free_port, wait_for_setup_token};
 use tenko_dhcp::v4::{ClientFqdn, Message, MessageType};
 use tenko_dns::wire;
 
@@ -240,8 +240,8 @@ fn wire_name(name: &str) -> Vec<u8> {
     out
 }
 
-/// Waits until `done` holds, at most `within`.
-fn until(what: &str, within: Duration, mut done: impl FnMut() -> bool) {
+/// Waits until `done` holds, at most `within`; a timeout shows the node's output.
+fn until(server: &Proc, what: &str, within: Duration, mut done: impl FnMut() -> bool) {
     let start = Instant::now();
     while start.elapsed() < within {
         if done() {
@@ -249,7 +249,11 @@ fn until(what: &str, within: Duration, mut done: impl FnMut() -> bool) {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    panic!("timed out after {within:?} waiting for {what}");
+    panic!(
+        "timed out after {within:?} waiting for {what}
+{}",
+        server.diagnostics()
+    );
 }
 
 fn a_answer(dns: SocketAddr, name: &str, address: Ipv4Addr) -> bool {
@@ -260,6 +264,14 @@ fn a_answer(dns: SocketAddr, name: &str, address: Ipv4Addr) -> bool {
 fn gone(dns: SocketAddr, name: &str, qtype: u16) -> bool {
     let (rcode, answers) = rcode_and_answers(&udp(dns, name, qtype));
     answers == 0 && (rcode == NXDOMAIN || rcode == NOERROR)
+}
+
+/// The bytes of a hexadecimal string.
+fn from_hex(text: &str) -> Vec<u8> {
+    (0..text.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&text[at..at + 2], 16).expect("hexadecimal"))
+        .collect()
 }
 
 fn ptr_name(address: Ipv4Addr) -> String {
@@ -356,7 +368,7 @@ fn ddns_writes_names_on_ack_refuses_a_stolen_name_and_removes_names_on_release_a
         .expect("parse")
         .yiaddr();
     let acked = Instant::now();
-    until("the A records", Duration::from_secs(10), || {
+    until(&server, "the A records", Duration::from_secs(10), || {
         a_answer(dns, "laptop.lan.example.test", laptop)
             && a_answer(dns, "printer.lan.example.test", printer)
     });
@@ -364,13 +376,13 @@ fn ddns_writes_names_on_ack_refuses_a_stolen_name_and_removes_names_on_release_a
     // The PTR lands in the reverse zone a moment after the A record (the two zones are
     // written in one change set, but the role serves each zone from its own image), so
     // wait for it as for the A records.
-    until("the PTR", Duration::from_secs(10), || {
+    until(&server, "the PTR", Duration::from_secs(10), || {
         rcode_and_answers(&udp(dns, &ptr_name(laptop), TYPE_PTR)) == (NOERROR, 1)
     });
     let ptr = udp(dns, &ptr_name(laptop), TYPE_PTR);
     assert_eq!(rcode_and_answers(&ptr), (NOERROR, 1));
     assert!(holds(&ptr, &wire_name("laptop.lan.example.test")));
-    until("the legacy PTR", Duration::from_secs(5), || {
+    until(&server, "the legacy PTR", Duration::from_secs(5), || {
         holds(
             &udp(dns, &ptr_name(printer), TYPE_PTR),
             &wire_name("printer.lan.example.test"),
@@ -378,11 +390,17 @@ fn ddns_writes_names_on_ack_refuses_a_stolen_name_and_removes_names_on_release_a
     });
     let dhcid = udp(dns, "laptop.lan.example.test", TYPE_DHCID);
     assert_eq!(rcode_and_answers(&dhcid), (NOERROR, 1));
-    until("the outcome on the rows", Duration::from_secs(5), || {
-        lease(&api, laptop)["ddns"]["dhcid"].is_string()
-            && lease(&api, printer)["ddns"]["reverse"].is_string()
-    });
+    until(
+        &server,
+        "the outcome on the rows",
+        Duration::from_secs(5),
+        || {
+            lease(&api, laptop)["ddns"]["dhcid"].is_string()
+                && lease(&api, printer)["ddns"]["reverse"].is_string()
+        },
+    );
     let row = lease(&api, laptop);
+    let laptop_dhcid = from_hex(row["ddns"]["dhcid"].as_str().expect("the DHCID"));
     assert_eq!(row["ddns"]["forward"], "laptop.lan.example.test", "{row}");
     assert_eq!(row["ddns"]["reverse"], ptr_name(laptop), "{row}");
     assert!(row["ddns"].get("last_error").is_none(), "{row}");
@@ -396,32 +414,61 @@ fn ddns_writes_names_on_ack_refuses_a_stolen_name_and_removes_names_on_release_a
     let stolen = Message::parse(&relay.dora(&thief, Duration::from_secs(5)))
         .expect("parse")
         .yiaddr();
-    until("the refusal on the lease", Duration::from_secs(10), || {
-        lease(&api, stolen)["ddns"]["last_error"]
-            .as_str()
-            .is_some_and(|error| error.contains("name protection"))
-    });
+    until(
+        &server,
+        "the refusal on the lease",
+        Duration::from_secs(10),
+        || {
+            lease(&api, stolen)["ddns"]["last_error"]
+                .as_str()
+                .is_some_and(|error| error.contains("name protection"))
+        },
+    );
     assert!(a_answer(dns, "laptop.lan.example.test", laptop));
     assert!(gone(dns, &ptr_name(stolen), TYPE_PTR));
 
-    // The first client releases its address: its records go.
+    // The first client releases its address: its records go. The name is free then, and
+    // the client refused for it may take it as soon as the worker reads its lease again: on
+    // the lease's next change, or when a zone or the DHCP configuration changes, which makes
+    // the worker read every lease (docs/dhcp.md section 13.5). The release promises the
+    // removal of the first client's records, not that nobody holds the name afterwards.
     let mut release = Ask::new(MessageType::Release, 1);
     release.ciaddr = Some(laptop);
     release.server_id = ack.server_identifier().expect("54");
     relay.release(&release);
-    until(
-        "the records gone after the release",
-        Duration::from_secs(10),
-        || {
-            gone(dns, "laptop.lan.example.test", TYPE_A)
-                && gone(dns, "laptop.lan.example.test", TYPE_DHCID)
-                && gone(dns, &ptr_name(laptop), TYPE_PTR)
-        },
-    );
+    let released = Instant::now();
+    while holds(
+        &udp(dns, "laptop.lan.example.test", TYPE_A),
+        &laptop.octets(),
+    ) || holds(
+        &udp(dns, "laptop.lan.example.test", TYPE_DHCID),
+        &laptop_dhcid,
+    ) || !gone(dns, &ptr_name(laptop), TYPE_PTR)
+    {
+        assert!(
+            released.elapsed() < Duration::from_secs(10),
+            "the first client's records are not gone 10 s after its release; the lease: {}
+             the forward zone in the store: {}
+{}",
+            lease(&api, laptop),
+            api.get(&format!("/dns/zones/{forward}/records")).text,
+            server.diagnostics()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // When the name answers, it is the refused client's now.
+    let name = udp(dns, "laptop.lan.example.test", TYPE_A);
+    if rcode_and_answers(&name).1 > 0 {
+        assert!(
+            holds(&name, &stolen.octets()),
+            "the name went to a stranger"
+        );
+    }
     assert_eq!(lease(&api, laptop)["state"], "released");
 
     // The legacy client's lease runs out: the expiry removes its records.
     until(
+        &server,
         "the records gone after the expiry",
         Duration::from_secs(u64::from(LEASE_SECS) + 30),
         || gone(dns, "printer.lan.example.test", TYPE_A) && gone(dns, &ptr_name(printer), TYPE_PTR),

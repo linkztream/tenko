@@ -102,6 +102,7 @@ mod apply;
 // WP9.6: what goes to disk is compressed (ADR 0030).
 mod coalescer;
 mod compress;
+mod confirm;
 mod index;
 mod leadership;
 mod sm;
@@ -122,10 +123,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use openraft::{
-    BasicNode, ServerState,
-    error::{CheckIsLeaderError, Fatal, RaftError},
-};
+use openraft::{BasicNode, ServerState, error::Fatal};
 use tenko_core::{
     NodeId, Revision,
     audit::Digest,
@@ -140,6 +138,7 @@ use tracing::{Instrument as _, field::Empty};
 
 use self::{
     coalescer::{CoalescerStats, Hold, Queued, Refused},
+    confirm::{Confirmation, Confirmer},
     fsync::FsyncProbe,
     leadership::LeadershipState,
     log::LogStore,
@@ -526,6 +525,8 @@ struct Inner {
     /// State file bytes and live data bytes when the store opened.
     at_open: (u64, u64),
     coalescer: Arc<CoalescerStats>,
+    /// The rounds that confirm this node's leadership for linearizable reads.
+    confirmer: Arc<Confirmer>,
     /// Who leads, from the metrics (`Store::leadership`).
     leadership: Arc<LeadershipState>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
@@ -822,6 +823,7 @@ impl RaftStore {
             Arc::clone(&hold),
         );
         let isolation_after = config.isolation_after;
+        let confirmer = Arc::new(Confirmer::of_raft(raft.clone(), config.read_wait));
         let inner = Arc::new(Inner {
             config,
             raft,
@@ -840,6 +842,7 @@ impl RaftStore {
             snapshot_bytes: AtomicU64::new(0),
             at_open,
             coalescer: coalescer_stats,
+            confirmer,
             leadership: Arc::new(LeadershipState::new(isolation_after)),
             tasks: Mutex::new(vec![coalescer]),
             temp_dir,
@@ -1192,24 +1195,19 @@ impl RaftStore {
     pub async fn read_index(&self) -> Result<ReadIndex, ForwardError> {
         let inner = &self.inner;
         inner.check_running().map_err(ForwardError::Store)?;
-        let confirmed = tokio::time::timeout(inner.config.read_wait, inner.raft.get_read_log_id())
+        match inner
+            .confirm_leadership(Instant::now() + inner.config.read_wait)
             .await
-            .map_err(|_| ForwardError::Store(StoreError::Timeout))?;
-        match confirmed {
-            Ok((read, _)) => Ok(ReadIndex {
-                log_index: read.map(|log_id| log_id.index),
+        {
+            Confirmation::Leader { index } => Ok(ReadIndex {
+                log_index: index,
                 term: inner.raft.metrics().borrow().current_term,
                 leader: inner.me(),
             }),
-            Err(RaftError::APIError(CheckIsLeaderError::ForwardToLeader(forward))) => {
-                Err(ForwardError::NotLeader {
-                    leader: forward.leader_id,
-                })
-            }
-            Err(RaftError::APIError(CheckIsLeaderError::QuorumNotEnough(_))) => {
-                Err(ForwardError::Store(StoreError::NoQuorum))
-            }
-            Err(RaftError::Fatal(_)) => Err(ForwardError::Store(StoreError::ShuttingDown)),
+            Confirmation::NotLeader { leader } => Err(ForwardError::NotLeader { leader }),
+            Confirmation::NoQuorum => Err(ForwardError::Store(StoreError::NoQuorum)),
+            Confirmation::Timeout => Err(ForwardError::Store(StoreError::Timeout)),
+            Confirmation::ShuttingDown => Err(ForwardError::Store(StoreError::ShuttingDown)),
         }
     }
 
@@ -1862,16 +1860,15 @@ impl Inner {
             self.check_running()?;
             let leader = self.leader();
             match leader {
-                Some(id) if id == self.me() => {
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    match tokio::time::timeout(remaining, self.raft.ensure_linearizable()).await {
-                        Err(_) => return Err(StoreError::Timeout),
-                        Ok(Ok(_)) => return Ok(()),
-                        Ok(Err(RaftError::APIError(CheckIsLeaderError::ForwardToLeader(_)))) => {}
-                        Ok(Err(RaftError::APIError(_))) => return Err(StoreError::NoQuorum),
-                        Ok(Err(RaftError::Fatal(_))) => return Err(StoreError::ShuttingDown),
+                Some(id) if id == self.me() => match self.confirm_leadership(deadline).await {
+                    Confirmation::Leader { index } => {
+                        return self.wait_applied_index(index, deadline).await;
                     }
-                }
+                    Confirmation::NotLeader { .. } => {}
+                    Confirmation::NoQuorum => return Err(StoreError::NoQuorum),
+                    Confirmation::Timeout => return Err(StoreError::Timeout),
+                    Confirmation::ShuttingDown => return Err(StoreError::ShuttingDown),
+                },
                 Some(id) => match self.transport.forward_read_index(self.me(), id).await {
                     Ok(index) => return self.wait_applied_index(index.log_index, deadline).await,
                     Err(error) if error.not_queued() => {}
@@ -1888,6 +1885,48 @@ impl Inner {
                 return Err(StoreError::NoQuorum);
             }
             self.wait_for_leader_change(leader, leader_deadline).await;
+        }
+    }
+
+    /// Confirms this node's leadership for a linearizable read in a round shared with the
+    /// reads that wait at the same time ([`confirm`]), by `deadline` at most. A round that
+    /// a quorum did not answer within the heartbeat interval is not the end while this
+    /// leader's replication is acknowledged by a quorum (its quorum state accepts writes):
+    /// one late heartbeat answer of a loaded follower is not a lost quorum, so the next
+    /// round decides, within the read wait. An isolated leader fails at once.
+    async fn confirm_leadership(&self, deadline: Instant) -> Confirmation {
+        loop {
+            let mut round = self.confirmer.join();
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let waited = tokio::time::timeout(remaining, round.wait_for(Option::is_some))
+                .await
+                .map(|seen| seen.map(|outcome| (*outcome).unwrap_or(Confirmation::Timeout)));
+            let outcome = match waited {
+                Ok(Ok(outcome)) => outcome,
+                // The round went without an outcome (its task was dropped with its
+                // runtime): a new round decides, within the deadline.
+                Ok(Err(_)) => {
+                    if self.check_running().is_err() {
+                        return Confirmation::ShuttingDown;
+                    }
+                    if Instant::now() >= deadline {
+                        return Confirmation::Timeout;
+                    }
+                    tokio::task::yield_now().await;
+                    continue;
+                }
+                Err(_) => Confirmation::Timeout,
+            };
+            let in_contact = self.leadership.subscribe_quorum().borrow().accepts_writes();
+            if outcome != Confirmation::NoQuorum || !in_contact {
+                return outcome;
+            }
+            let pause = Duration::from_millis(self.config.timings.heartbeat_ms);
+            if Instant::now() + pause >= deadline {
+                return outcome;
+            }
+            tracing::debug!("a leadership round missed its quorum; the next one decides");
+            tokio::time::sleep(pause).await;
         }
     }
 
