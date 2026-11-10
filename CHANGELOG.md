@@ -41,6 +41,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Fixed
 
+- The lease view of the observations, when no follower keeps it current (a tool, a test), no longer drops the lease rows that ended longer ago than the observation retention by the day it was built: its readers pass the time they read at, and the retention applies at that time. A reader asking at an earlier time saw no lease facts once the clock had moved past that time plus the retention. The server's followed view is unchanged; it still leaves out at its start the rows past the retention by the clock.
 - An update of the audit export settings (`PUT /api/v1/settings/audit-export`) with more than 8 sinks is refused with `audit.export.too_many` before any of its sinks is examined; it was refused after every sink had been checked, with each sink's own problems listed beside the refusal. The batch routes of proposals, the DHCP settings of a pool and the language template accept the same input as before and no longer size a buffer by a count the request carries before that count is bounded. `tenko ca-root --fingerprint` refuses a root with another fingerprint inside the one fetch that accepts any server certificate, as `tenko node enroll` does, so no step of the command holds an unverified root; what the command accepts, prints and writes is unchanged.
 
 ### Security

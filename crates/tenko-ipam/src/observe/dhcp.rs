@@ -326,15 +326,22 @@ impl LeaseFacts {
         self.image.write().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Builds the view from the lease tables of `view` and installs it whole.
+    /// Builds the view from the lease tables of `view` and installs it whole, without the
+    /// rows that ended longer ago than the retention by the clock (the follower's start: the
+    /// view then serves the present).
     ///
     /// # Errors
     ///
     /// A storage or decoding failure of the scan.
     pub fn build(&self, view: &dyn ReadView) -> Result<(), StoreError> {
+        self.build_from(view, Some(Timestamp::now()))
+    }
+
+    /// Builds the view from the lease tables of `view`; with `cut`, the rows past the
+    /// retention at that time are not kept (the readers apply their own time either way).
+    fn build_from(&self, view: &dyn ReadView, cut: Option<Timestamp>) -> Result<(), StoreError> {
         let mut entries = HashMap::new();
-        // The rows past the retention are not kept (the start's cut, as the readers' own).
-        let now = Timestamp::now();
+        let kept = |entry: &Entry| cut.is_none_or(|now| self.retained(entry, now));
         let mut range = KeyRange::all();
         loop {
             let page = view.scan_typed(&tables::LEASES, range.clone(), PAGE, false)?;
@@ -342,7 +349,7 @@ impl LeaseFacts {
             let last = page.last().map(|(key, _, _)| tables::LEASES.key(key));
             for ((vrf, addr), lease, revision) in page {
                 if let Some(entry) = self.entry4(&lease, revision)
-                    && self.retained(&entry, now)
+                    && kept(&entry)
                 {
                     entries.insert((vrf, IpAddr::V4(addr)), entry);
                 }
@@ -359,7 +366,7 @@ impl LeaseFacts {
             let last = page.last().map(|(key, _, _)| tables::LEASES6.key(key));
             for ((vrf, addr), lease, revision) in page {
                 if let Some(entry) = entry6(&lease, revision)
-                    && self.retained(&entry, now)
+                    && kept(&entry)
                 {
                     entries.insert((vrf, IpAddr::V6(addr)), entry);
                 }
@@ -556,6 +563,9 @@ impl LeaseFacts {
     /// Makes sure the view covers `view` when no follower keeps it current (a tool, a test):
     /// builds it from `view` when it is older. A followed view is left to its follower.
     ///
+    /// This build cuts no row by the clock: its readers pass the time they read at, and the
+    /// retention applies at that time, not at the day the view was built.
+    ///
     /// # Errors
     ///
     /// A storage or decoding failure of the build.
@@ -563,7 +573,7 @@ impl LeaseFacts {
         if self.is_following() || self.read().revision >= view.revision() {
             return Ok(());
         }
-        self.build(view)
+        self.build_from(view, None)
     }
 
     /// Every fact the leases stand for, current or not, at `now`.
