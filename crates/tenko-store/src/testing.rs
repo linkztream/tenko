@@ -152,6 +152,7 @@ macro_rules! conformance_tests {
             audit_chain_is_continuous_and_verifies,
             audit_only_batches_are_recorded,
             scan_ranges_and_order,
+            scan_pages_stay_inside_their_range,
             deletes_and_tombstones,
             validation_rejects_bad_batches,
             watch_follows_live_commits,
@@ -1140,6 +1141,88 @@ pub mod conformance {
             .len(),
             0
         );
+    }
+
+    /// The next page of a prefix scan stays inside the prefix, whatever key the caller
+    /// continues from: a key below the prefix keeps the prefix's start, a key above it
+    /// keeps its end, and a key past the other end gives an empty page.
+    pub async fn scan_pages_stay_inside_their_range<F: StoreFactory>(factory: &F) {
+        let store = fresh(factory).await;
+        let mut b = batch();
+        for group in 0..=2_u8 {
+            for n in 1..=4_u64 {
+                b.put(OTHER, encode_key(&(group, n)), value("g"));
+            }
+        }
+        store.propose(b).await.expect("commit");
+
+        let view = view(store.as_ref()).await;
+        let prefix = encode_key(&(1_u8,));
+        // 1 for each key inside the prefix, 0 for each key outside it.
+        let groups = |rows: Vec<(Bytes, crate::api::Versioned)>| -> Vec<u8> {
+            rows.into_iter()
+                .map(|(k, _)| u8::from(k.starts_with(&prefix)))
+                .collect()
+        };
+        let middle = KeyRange::prefix(prefix.clone());
+        for below in [
+            Bytes::new(),
+            encode_key(&(0_u8, 3_u64)),
+            encode_key(&(0_u8,)),
+        ] {
+            let page = groups(
+                view.scan(&OTHER, middle.clone().after(below.clone()), 100, false)
+                    .expect("scan"),
+            );
+            assert_eq!(page, vec![1; 4], "after {below:?}");
+            let reverse = groups(
+                view.scan(&OTHER, middle.clone().after(below), 100, true)
+                    .expect("scan"),
+            );
+            assert_eq!(reverse, vec![1; 4]);
+        }
+        for above in [
+            encode_key(&(2_u8,)),
+            encode_key(&(2_u8, 3_u64)),
+            Bytes::from(vec![0xFF; 16]),
+        ] {
+            let back = groups(
+                view.scan(&OTHER, middle.clone().before(above.clone()), 100, true)
+                    .expect("scan"),
+            );
+            assert_eq!(back, vec![1; 4], "before {above:?}");
+            let forward = groups(
+                view.scan(&OTHER, middle.clone().before(above), 100, false)
+                    .expect("scan"),
+            );
+            assert_eq!(forward, vec![1; 4]);
+        }
+        for (range, what) in [
+            (
+                middle.clone().after(encode_key(&(2_u8, 3_u64))),
+                "after the end",
+            ),
+            (
+                middle.clone().after(encode_key(&(2_u8,))),
+                "after the end bound",
+            ),
+            (
+                middle.clone().before(encode_key(&(0_u8, 3_u64))),
+                "before the start",
+            ),
+            (
+                middle.clone().before(encode_key(&(1_u8,))),
+                "before the start bound",
+            ),
+        ] {
+            assert!(range.is_empty(), "{what}");
+            for reverse in [false, true] {
+                let page = view
+                    .scan(&OTHER, range.clone(), 100, reverse)
+                    .expect("scan");
+                assert!(page.is_empty(), "{what}, reverse {reverse}");
+            }
+        }
     }
 
     /// Deletes remove values, deleting an absent key changes nothing, and a re-created key

@@ -457,19 +457,43 @@ impl KeyRange {
         }
     }
 
-    /// Keys after `key` (exclusive), within the same upper bound: the next page of a
-    /// forward scan.
+    /// Keys after `key` (exclusive), within the same range: the next page of a forward
+    /// scan.
+    ///
+    /// The result never admits a key the range did not admit before: a `key` below the
+    /// range's start keeps the start, and a `key` at or beyond its end gives an empty
+    /// range ([`is_empty`](Self::is_empty)).
     #[must_use]
     pub fn after(mut self, key: impl Into<Bytes>) -> Self {
-        self.start = Bound::Excluded(key.into());
+        let key = key.into();
+        let narrows = match &self.start {
+            Bound::Included(start) => key >= *start,
+            Bound::Excluded(start) => key > *start,
+            Bound::Unbounded => true,
+        };
+        if narrows {
+            self.start = Bound::Excluded(key);
+        }
         self
     }
 
-    /// Keys before `key` (exclusive), within the same lower bound: the next page of a
-    /// reverse scan.
+    /// Keys before `key` (exclusive), within the same range: the next page of a reverse
+    /// scan.
+    ///
+    /// The result never admits a key the range did not admit before: a `key` above the
+    /// range's end keeps the end, and a `key` at or below its start gives an empty range
+    /// ([`is_empty`](Self::is_empty)).
     #[must_use]
     pub fn before(mut self, key: impl Into<Bytes>) -> Self {
-        self.end = Bound::Excluded(key.into());
+        let key = key.into();
+        let narrows = match &self.end {
+            Bound::Included(end) => key <= *end,
+            Bound::Excluded(end) => key < *end,
+            Bound::Unbounded => true,
+        };
+        if narrows {
+            self.end = Bound::Excluded(key);
+        }
         self
     }
 
@@ -1204,6 +1228,134 @@ mod tests {
         let page = KeyRange::prefix(vec![1]).after(vec![1, 5]);
         assert!(!page.contains(&[1, 5]));
         assert!(page.contains(&[1, 6]));
+    }
+
+    /// Keys of one and two bytes from `0x00` to `0x05`, to compare two ranges by the keys
+    /// they admit.
+    fn probe_keys() -> Vec<Vec<u8>> {
+        let mut keys = vec![vec![]];
+        for a in 0..=5_u8 {
+            keys.push(vec![a]);
+            for b in [0_u8, 5, 0xFF] {
+                keys.push(vec![a, b]);
+            }
+        }
+        keys
+    }
+
+    /// `narrowed` admits only keys `range` admits, and of those exactly the ones `keep`
+    /// accepts.
+    fn admits_only(range: &KeyRange, narrowed: &KeyRange, keep: impl Fn(&[u8]) -> bool) {
+        for key in probe_keys() {
+            assert_eq!(
+                narrowed.contains(&key),
+                range.contains(&key) && keep(&key),
+                "{key:?} in {narrowed:?} narrowed from {range:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn after_never_widens_the_range() {
+        let included = KeyRange::between(vec![2], vec![4]);
+        let excluded = KeyRange {
+            start: Bound::Excluded(Bytes::from_static(&[2])),
+            end: Bound::Included(Bytes::from_static(&[4])),
+        };
+        for range in [included, excluded] {
+            // Below the start: the start stays.
+            let below = range.clone().after(vec![1, 5]);
+            assert_eq!(below, range);
+            assert!(!below.contains(&[1, 6]));
+            // At the start: that key is out from now on.
+            let at = range.clone().after(vec![2]);
+            assert_eq!(at.start, Bound::Excluded(Bytes::from_static(&[2])));
+            admits_only(&range, &at, |key| key > &[2][..]);
+            // Inside: the start moves up to the key.
+            let inside = range.clone().after(vec![3]);
+            assert_eq!(inside.start, Bound::Excluded(Bytes::from_static(&[3])));
+            admits_only(&range, &inside, |key| key > &[3][..]);
+            // At and beyond the end: empty, never a range a scan reads from.
+            for key in [vec![4], vec![4, 0], vec![5]] {
+                let past = range.clone().after(key.clone());
+                assert!(past.is_empty(), "{past:?} after {key:?}");
+                admits_only(&range, &past, |_| false);
+            }
+        }
+        // Unbounded ends: the key becomes the start; the open end stays open.
+        let open = KeyRange::all().after(vec![3]);
+        assert_eq!(open.start, Bound::Excluded(Bytes::from_static(&[3])));
+        assert_eq!(open.end, Bound::Unbounded);
+        assert!(!open.is_empty());
+        admits_only(&KeyRange::all(), &open, |key| key > &[3][..]);
+        let to = KeyRange {
+            start: Bound::Unbounded,
+            end: Bound::Excluded(Bytes::from_static(&[4])),
+        };
+        assert!(to.clone().after(vec![4]).is_empty());
+        admits_only(&to, &to.clone().after(vec![1]), |key| key > &[1][..]);
+    }
+
+    #[test]
+    fn before_never_widens_the_range() {
+        let excluded = KeyRange::between(vec![2], vec![4]);
+        let included = KeyRange {
+            start: Bound::Excluded(Bytes::from_static(&[2])),
+            end: Bound::Included(Bytes::from_static(&[4])),
+        };
+        for range in [excluded, included] {
+            // Above the end: the end stays.
+            let above = range.clone().before(vec![5]);
+            assert_eq!(above, range);
+            assert!(!above.contains(&[4, 5]));
+            // At the end: that key is out from now on.
+            let at = range.clone().before(vec![4]);
+            assert_eq!(at.end, Bound::Excluded(Bytes::from_static(&[4])));
+            admits_only(&range, &at, |key| key < &[4][..]);
+            // Inside: the end moves down to the key.
+            let inside = range.clone().before(vec![3]);
+            assert_eq!(inside.end, Bound::Excluded(Bytes::from_static(&[3])));
+            admits_only(&range, &inside, |key| key < &[3][..]);
+            // At and below the start: empty.
+            for key in [vec![2], vec![1, 5], vec![]] {
+                let past = range.clone().before(key.clone());
+                assert!(past.is_empty(), "{past:?} before {key:?}");
+                admits_only(&range, &past, |_| false);
+            }
+        }
+        // Unbounded ends: the key becomes the end; the open start stays open.
+        let open = KeyRange::all().before(vec![3]);
+        assert_eq!(open.start, Bound::Unbounded);
+        assert_eq!(open.end, Bound::Excluded(Bytes::from_static(&[3])));
+        assert!(!open.is_empty());
+        admits_only(&KeyRange::all(), &open, |key| key < &[3][..]);
+        let from = KeyRange::prefix(vec![2]);
+        assert_eq!(from.clone().before(vec![4]), from);
+        admits_only(&from, &from.clone().before(vec![2, 5]), |key| {
+            key < &[2, 5][..]
+        });
+    }
+
+    #[test]
+    fn prefix_pages_stay_inside_the_prefix() {
+        let prefix = KeyRange::prefix(vec![2]);
+        for cursor in [vec![], vec![1], vec![1, 0xFF], vec![2]] {
+            admits_only(&prefix, &prefix.clone().after(cursor.clone()), |key| {
+                key > &cursor[..]
+            });
+        }
+        for cursor in [vec![3], vec![3, 0], vec![5], vec![2, 0xFF, 0xFF]] {
+            admits_only(&prefix, &prefix.clone().before(cursor.clone()), |key| {
+                key < &cursor[..]
+            });
+        }
+        assert!(prefix.clone().after(vec![3]).is_empty());
+        assert!(prefix.clone().before(vec![2]).is_empty());
+        // The last prefix has no successor: its end is open, its start still holds.
+        let last = KeyRange::prefix(vec![0xFF]);
+        assert_eq!(last.clone().after(vec![1]), last);
+        assert!(!last.clone().after(vec![0xFF, 1]).contains(&[0xFF, 1]));
+        assert!(last.clone().after(vec![0xFF, 1]).contains(&[0xFF, 2]));
     }
 
     #[test]
