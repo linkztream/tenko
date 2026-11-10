@@ -245,6 +245,7 @@ The move job becomes fully automatic for `reserved` hosts (the DNS step was alre
 - **Inventory sources**: Hyper-V and VMware vSphere (CONN-10, CONN-11).
 - **External actuators for coexistence**: DHCP (CONN-12) and DNS (CONN-13).
 - **Windows interop lab**: a Windows Server 2016 or later test domain (API-18).
+- **Notifications, discovery across segments and public DNS** (added by the owner on 2026-11-10): notification channels for every alarm, by e-mail and by a signed webhook (OPS-29); service discovery between network segments by an mDNS gateway on the probes and a Discovery Proxy (DNS-35); public DNS providers as plugins, Cloudflare first, with a public zone kept apart from an internal zone of the same name (CONN-22). None of them is a condition of release 0.1.0.
 - **Identity** (Slice 13, the owner's decisions ID-Q1 to ID-Q18 of 2026-10-25, moved here from Phase 5): OIDC sign-in, LDAP sign-in with group mapping, LDAPS set up from the UI by importing the domain controllers' certificate chain, and Kerberos sign-in to the web UI (IAM-11 to IAM-13), planned in [identity-plan.md](plans/identity-plan.md) and ADR 0026.
 - **The Windows takeover** (Slice 14, Phase 4's first slice, the owner's decisions WT-Q1 to WT-Q7 of 2026-11-01): the AD zones by zone transfer and a flip in place, the Windows DHCP scopes, reservations and leases by a mirror that a scheduled script on a controller pushes to the API, and a reversible takeover per scope that adopts the leases and the names Windows DHCP wrote, rehearsed first on a throwaway domain; planned in [windows-takeover-plan.md](plans/windows-takeover-plan.md) (MIG-04, MIG-08 partly, MIG-17).
 
@@ -310,3 +311,14 @@ These are non-blocking and are resolved during Phase 0.
 | Windows Server version in the reference environment | Query Resolution Policies require 2016 or later. Affects only the test lab. |
 | IPv6 in the reference home network today | Affects priority within Phase 3, not the data model. |
 | License for a possible publication | Decided on 2026-10-22: the Business Source License 1.1 with an internal-use grant and AGPL-3.0-or-later as the Change License, with a contributor license agreement (`LICENSE.md`, `CLA.md`, ADR 0022); the lawyer's review and the publication itself remain (API-20). |
+
+## Candidates, not planned
+
+Proposals that were weighed and are recorded so that they are not proposed again from nothing. None has a requirement, a phase or a builder; one becomes a requirement only by the owner's decision.
+
+| Candidate | What it would be | Why it waits |
+|---|---|---|
+| Wake-on-LAN from the host view | The probe of a segment sends the magic packet for a host of that segment, beside the RDP and SSH handoff (API-11). | Small and useful; not decided. |
+| NTP server role | Tenko serves time, where today it only hands out the addresses of time servers (DHCP-15) and depends on time itself (OPS-09). | A new role with its own attack surface; the router or the domain controllers serve time already. |
+| Boot file service | A TFTP and HTTP server for the boot files that the PXE options point at (DHCP-05). | Narrow use; a boot server exists wherever PXE is used today. |
+| RADIUS for the VLAN of a device | MAC authentication answered from IPAM intent, so that a device lands in its VLAN on any switch or access point that speaks RADIUS, not only through a network controller (CON-10). | A new security-critical protocol; a discussion of its own after release 0.1.0. |
