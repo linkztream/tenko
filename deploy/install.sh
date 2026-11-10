@@ -165,7 +165,10 @@ Answers (asked when --yes is not given; the default is in brackets):
   --admin <name>                      complete first-run setup with this administrator; the
                                       password from --password-stdin or TENKO_ADMIN_PASSWORD.
                                       Without it, setup happens in the browser with the token
-  --password-stdin                    read the administrator's password from standard input
+  --password-stdin                    read the administrator's password from standard input.
+                                      An administrator's password has at least 12 characters
+                                      and is not digits only, in every profile (never a PIN);
+                                      a shorter or numeric one is refused before installing
 
 The binary:
   --binary <file>                     install this file instead of downloading a release
@@ -304,6 +307,20 @@ as_tenko() {
 # Control characters, escape sequences and bytes outside ASCII are dropped.
 clean() { LC_ALL=C tr -cd '\n[:print:]' | cut -c1-400 | head -n "${1:-40}"; }
 
+# admin_secret_problem <secret>: what is wrong with the first administrator's password, or
+# nothing. An administrator's password has at least 12 characters and is not digits only, in
+# every profile (an administrator never signs in with a PIN). This is checked before anything
+# is installed; the server stays the authority for the rest (a breached password, a simple
+# pattern) and refuses those at setup. The secret itself is never printed.
+readonly ADMIN_MIN_LENGTH=12
+admin_secret_problem() {
+  if [[ "$1" =~ ^[0-9]+$ ]]; then
+    printf "it is digits only: an administrator's password is never a PIN (at least %d characters, not digits only)" "$ADMIN_MIN_LENGTH"
+  elif ((${#1} < ADMIN_MIN_LENGTH)); then
+    printf "it is too short: an administrator's password has at least %d characters" "$ADMIN_MIN_LENGTH"
+  fi
+}
+
 # valid_setup_token <text>: the shape of a setup token, four groups of five base32 characters.
 valid_setup_token() { [[ "$1" =~ ^[A-Z2-7]{5}(-[A-Z2-7]{5}){3}$ ]]; }
 valid_fingerprint() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
@@ -428,9 +445,10 @@ ask_yes_no() {
   [[ "${ans,,}" == y || "${ans,,}" == yes ]]
 }
 
-# ask_secret <var> <question>: twice, hidden, until both agree.
+# ask_secret <var> <question> [<check>]: twice, hidden, until both agree and <check> (a
+# function that prints what is wrong with the entry, or nothing) has nothing to say.
 ask_secret() {
-  local var="$1" q="$2" a="" b=""
+  local var="$1" q="$2" check="${3:-}" a="" b="" problem=""
   while true; do
     if use_whiptail; then
       a="$(whiptail --title "Tenko DDI" --passwordbox "$q" 10 76 3>&1 1>&2 2>&3 <"$TTY")" || canceled
@@ -443,8 +461,13 @@ ask_secret() {
       printf '\n' >"$TTY"
     fi
     if [[ -n "$a" && "$a" == "$b" ]]; then
-      printf -v "$var" '%s' "$a"
-      return 0
+      [[ -z "$check" ]] || problem="$("$check" "$a")"
+      if [[ -z "$problem" ]]; then
+        printf -v "$var" '%s' "$a"
+        return 0
+      fi
+      printf 'Refused, %s; again.\n' "$problem" >"$TTY"
+      continue
     fi
     printf 'The two entries differ or are empty; again.\n' >"$TTY"
   done
@@ -1302,11 +1325,7 @@ setup_answers() {
     if ((OPT_YES)) || [[ -z "$TTY" ]]; then
       die "$E_USAGE" "--admin needs the password: --password-stdin or TENKO_ADMIN_PASSWORD"
     fi
-    if [[ "$PROFILE" == home ]]; then
-      ask_secret PASSWORD "PIN of ${ADMIN} (the Home profile signs in with a PIN: four or more digits, no simple pattern)"
-    else
-      ask_secret PASSWORD "Password of ${ADMIN}"
-    fi
+    ask_secret PASSWORD "Password of ${ADMIN} (at least ${ADMIN_MIN_LENGTH} characters, not digits only; an administrator never signs in with a PIN)" admin_secret_problem
   fi
 }
 
@@ -3106,13 +3125,22 @@ parse_args() {
   valid_url "$GITHUB_API" ||
     die "$E_USAGE" "TENKO_GITHUB_API: an https URL (plain http only to an address of this host's loopback interface), not '${GITHUB_API}'"
   DATA_DIR="${OPT_DATA_DIR:-$DEFAULT_DATA_DIR}"
+  local password_from="" problem
   if ((OPT_PASSWORD_STDIN)); then
     IFS= read -r PASSWORD || true
     [[ -n "$PASSWORD" ]] || die "$E_USAGE" "--password-stdin: standard input has no password"
+    password_from="--password-stdin"
   elif [[ -n "${TENKO_ADMIN_PASSWORD:-}" ]]; then
     PASSWORD="$TENKO_ADMIN_PASSWORD"
+    password_from="TENKO_ADMIN_PASSWORD"
   fi
   unset TENKO_ADMIN_PASSWORD
+  # The administrator's password is refused here, before anything is installed, rather than
+  # by the server at the end of the installation.
+  if [[ -n "$PASSWORD" ]]; then
+    problem="$(admin_secret_problem "$PASSWORD")"
+    [[ -z "$problem" ]] || die "$E_USAGE" "${password_from}: the administrator's password is refused, ${problem}"
+  fi
 }
 
 main() {

@@ -122,7 +122,7 @@ Failures are kept in each controller's memory and forgotten after the lock's dur
 
 The PIN preset of Home and Lab takes digits only, at least six of them (IAM-03). A PIN is a choice for accounts without the admin role.
 
-**An administrator never signs in with a PIN.** An account with the admin role has a password of at least 12 characters that is not digits only, in every profile; where the profile asks for more (Hardened: 16), the stricter rule holds. This applies to the first administrator at first-run setup, to an administrator an administrator creates, to an administrator's own change and to a reset. An account that signs in with a PIN cannot be given the admin role until it has such a password.
+**An administrator never signs in with a PIN.** An account with the admin role has a password of at least 12 characters that is not digits only, in every profile; where the profile asks for more (Hardened: 16), the stricter rule holds. This applies to the first administrator at first-run setup, to an administrator an administrator creates, to an administrator's own change and to a reset. An account that signs in with a PIN cannot be given the admin role until it has such a password. The installer (`deploy/install.sh`), the Proxmox container script, the setup wizard and `tenko setup` say the rule where they ask for the first administrator's password; the installer and the Proxmox script refuse a shorter or numeric one before they install anything, and the server stays the authority for the rest (a breached password, a simple pattern).
 
 **How long a PIN holds.** A six-digit PIN has one million values; a guess needs half of them on average, 500,000. With the default policy:
 

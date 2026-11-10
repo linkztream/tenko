@@ -284,7 +284,8 @@ async function expectOk(method, path, body, headers) {
 /** First-run setup (the administrator password is random and never printed or stored). */
 async function setupAndSignIn() {
   const setupToken = readFileSync(join(controller.root, "data", "setup-token"), "utf8").trim();
-  const password = String(100000 + (randomBytes(4).readUInt32BE() % 900000));
+  // The administrator's password: at least 12 characters and not digits only, generated for the run, never printed.
+  const password = `Run-${randomBytes(9).toString("hex")}-Aa1`;
   controller.password = password;
   await expectOk("POST", "/setup", {
     setup_token: setupToken,

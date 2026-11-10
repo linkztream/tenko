@@ -21,7 +21,7 @@
   a Windows figure is the release build's and is labeled so.
 
   Nothing secret is written out: the setup token is read from the data directory, the
-  administrator PIN is generated for the run and never printed, and the server log is
+  administrator password is generated for the run and never printed, and the server log is
   redacted before it is copied to the output directory.
 
 .PARAMETER Binary
@@ -96,8 +96,9 @@ $api = "$base/api/v1"
 $roles = $Roles
 $withDhcp = (",$roles," -like '*,dhcp,*')
 
-# Throwaway administrator PIN for this run (Home profile: digits). Never printed.
-$pin = -join ((0..9) | Get-Random -Count 6)
+# The administrator's password for this run: at least 12 characters and not digits only,
+# generated for the run, never printed.
+$password = 'Run-' + [guid]::NewGuid().ToString('N').Substring(0, 18) + '-Aa1'
 
 $config = @"
 data_dir = '$dataDir'
@@ -208,7 +209,7 @@ try {
 
     # ---- setup ---------------------------------------------------------------------------
     $setup = @{ setup_token = $token; profile = 'home'; host_name = 'localhost'; language = 'en'
-        admin = @{ name = 'admin'; display_name = 'Bench'; password = $pin } }
+        admin = @{ name = 'admin'; display_name = 'Bench'; password = $password } }
     $null = Invoke-RestMethod -Method Post -Uri "$api/setup" -Headers @{ Origin = $base } -SkipCertificateCheck `
         -ContentType 'application/json' -Body ($setup | ConvertTo-Json -Compress) -SessionVariable session
     $script:session = $session

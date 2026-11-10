@@ -23,7 +23,7 @@ under `example.test`. Nothing leaves the process (no network at all; requests go
 One VRF, one /48 supernet, 100 /56 prefixes (role supernet) and 5 /64 leaf prefixes under each
 (500 leaves), 20 hosts per leaf: 10,000 hosts, each with one interface and one address.
 
-Setup uses the Home profile (PIN passwords, no second factor for administration): the Standard
+Setup uses the Home profile (no second factor for administration): the Standard
 profile asks administrators for a step-up that a benchmark cannot give. Scoped principals are
 users without a global role that hold only scoped grants (`subtree: true`), and sign in with a
 session cookie.

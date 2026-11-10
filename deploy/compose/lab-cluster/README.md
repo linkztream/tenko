@@ -60,7 +60,7 @@ the command that tears it down:
 KEEP=1 IMAGE=tenko:lab bash deploy/compose/lab-cluster/smoke.sh
 # open https://localhost:28443 and trust <work>/tls/ca.pem (the lab CA), or:
 curl --cacert <work>/tls/ca.pem https://localhost:28443/api/v1/health/ready
-# the administrator is lab-admin, with the PIN in <work>/admin-password (KEEP=1 only)
+# the administrator is lab-admin, with the password in <work>/admin-password (KEEP=1 only)
 LAB_DIR=<work> docker compose -f deploy/compose/lab-cluster/compose.yml \
   --profile probes --profile fault down --volumes
 ```

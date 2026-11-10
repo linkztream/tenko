@@ -71,9 +71,10 @@ API_HOST="${API_HOST:-localhost}"
 API_PORT="${API_PORT:-8443}"
 API_BASE="https://$API_HOST:$API_PORT"
 CA_FILE="${CA_FILE:-$DATA_DIR/tls/ca-root.pem}"
-# The administrator of the smoke installation: the PIN preset of the Home profile takes digits.
+# The administrator of the smoke installation. An administrator's password has at least 12
+# characters and is not digits only, in every profile; one is generated per run unless given.
 ADMIN_NAME="${ADMIN_NAME:-admin}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-739153}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-Run-$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')-Aa1}"
 MAX_EXPOSURE="${MAX_EXPOSURE:-2.5}"
 KEK_FILE="${KEK_FILE:-$CONFIG_DIR/kek.key}"
 SMOKE_KEK_FILE="${SMOKE_KEK_FILE:-}"

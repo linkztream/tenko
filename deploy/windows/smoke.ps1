@@ -45,8 +45,10 @@ Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $false
 
 # Test data: documentation values and a throwaway administrator of a throwaway installation.
+# An administrator's password has at least 12 characters and is not digits only, in every
+# profile; this one is generated per run and never printed.
 $AdminUser = 'admin'
-$AdminPassword = '739153'
+$AdminPassword = 'Run-' + [guid]::NewGuid().ToString('N').Substring(0, 18) + '-Aa1'
 # The next patch version of the running one, set in step 7 (as next_patch in
 # deploy/systemd/smoke.sh does).
 $NewVersion = $null

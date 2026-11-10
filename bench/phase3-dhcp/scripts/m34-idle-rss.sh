@@ -21,7 +21,7 @@
 # peak. Without `dhcp` in --roles no scopes and no leases are made: the baseline.
 #
 # Nothing secret is written out: the setup token is read from the data directory, the
-# administrator PIN is generated for the run and never printed, and the server log is
+# administrator password is generated for the run and never printed, and the server log is
 # redacted before it is copied to the output directory. Needs curl and python3.
 #
 # Usage:
@@ -207,9 +207,9 @@ note "roles: $ROLES; DNS on 127.0.0.1:$DNS_PORT; DHCP relay listener on 127.0.0.
   echo "workers = $WORKERS"
 } > "$CFG"
 
-# Throwaway administrator PIN for this run (Home profile: digits only). Never printed.
-new_pin() { shuf -i 0-9 -n 6 | tr -d '\n'; }
-PIN=$(new_pin)
+# The administrator's password for this run: at least 12 characters and not digits only,
+# generated for the run, never printed.
+PASSWORD=$(printf 'Run-%s-Aa1' "$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')")
 
 # ---- start --------------------------------------------------------------------------------
 "$BINARY" serve --roles "$ROLES" --config "$CFG" > "$OUTLOG" 2> "$ERRLOG" &
@@ -234,13 +234,9 @@ sample ready
 note "ready after $READY_AFTER s; RSS $LAST_RSS MiB, HWM $LAST_HWM MiB, anon $LAST_ANON MiB, file $LAST_FILE MiB"
 
 # ---- setup --------------------------------------------------------------------------------
-for _ in 1 2 3 4 5; do
-  COOKIE=$(curl -sk -D - -o "$WORKDIR/api.out" -H "Origin: $BASE" -H "Content-Type: application/json" \
-    --data "{\"setup_token\": \"$TOKEN\", \"profile\": \"home\", \"host_name\": \"localhost\", \"language\": \"en\", \"admin\": {\"name\": \"admin\", \"display_name\": \"Bench\", \"password\": \"$PIN\"}}" \
+COOKIE=$(curl -sk -D - -o "$WORKDIR/api.out" -H "Origin: $BASE" -H "Content-Type: application/json" \
+    --data "{\"setup_token\": \"$TOKEN\", \"profile\": \"home\", \"host_name\": \"localhost\", \"language\": \"en\", \"admin\": {\"name\": \"admin\", \"display_name\": \"Bench\", \"password\": \"$PASSWORD\"}}" \
     "$API/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1)
-  [ -z "$COOKIE" ] || break
-  PIN=$(new_pin) # a PIN the policy refuses (a trivial one): another
-done
 [ -n "$COOKIE" ] || die "setup failed: $(sed "s/$TOKEN/<token>/g" "$WORKDIR/api.out")"
 note "setup complete (Home profile), session open"
 sample setup

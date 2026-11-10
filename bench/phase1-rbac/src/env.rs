@@ -39,8 +39,9 @@ use tenko_vault::{Vault, testing::MemVault};
 
 /// The administrator's name.
 pub const ADMIN: &str = "admin";
-/// The administrator's invented passphrase (a six-digit PIN: the Home profile asks no second factor for administration).
-pub const ADMIN_PASSPHRASE: &str = "739104";
+/// The administrator's invented passphrase (at least 12 characters and not digits only: the server
+/// refuses a shorter or all-digit administrator secret in every profile).
+pub const ADMIN_PASSPHRASE: &str = "Run-Quartz-739104";
 
 /// Which store the stack runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -143,7 +144,7 @@ pub async fn build_stack(kind: StoreKind, data_root: &Path) -> Result<Stack> {
         tree.prefix(prefix).map(|(_, network)| network)
     }));
 
-    // First-run setup under the Home profile: PINs, and no second factor for administration
+    // First-run setup under the Home profile: no second factor for administration
     // (the Standard profile asks administrators for a step-up that a benchmark cannot give).
     let public = RequestCtx::system(SystemComponent::Api).at(Timestamp::now());
     let token = auth

@@ -153,6 +153,10 @@ status=0
 rows_failed=0
 summary=()
 
+# admin_password: a random password for a lab administrator. An administrator's password has
+# at least 12 characters and is not digits only, in every profile.
+admin_password() { printf 'Lab-%s-Aa1' "$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')"; }
+
 # WP9.1: the round dhcp6 (ROUNDS=dhcp6): its functions only; it runs in dhcp6_round below.
 # shellcheck source=deploy/compose/lab-dhcp/dhcp6.sh
 source "$here/dhcp6.sh"
@@ -355,8 +359,7 @@ lab_setup() {
   local token password setup
   token="$(compose exec -T tenko /usr/local/bin/tenko setup token --data-dir /var/lib/tenko | tr -d '\r\n')"
   [[ -n "$token" ]] || fail "setup: no setup token"
-  # The Lab profile's password policy is a PIN of digits.
-  password="$(od -An -N4 -tu4 /dev/urandom | tr -dc '0-9')"
+  password="$(admin_password)"
   setup="{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"labadmin\", \"display_name\": \"Lab Admin\", \"password\": \"$password\"}, \"host_name\": \"tenko.example.test\", \"language\": \"en\"}"
   cookie="$(curl -sS -D - -o "$work/api.out" -H "Origin: $api_base" -H "Content-Type: application/json" \
     --data "$setup" "$api_base/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1)"

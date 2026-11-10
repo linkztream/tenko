@@ -9,7 +9,7 @@ mod serve_support;
 
 use std::{fs, path::Path};
 
-use serve_support::{ADMIN, Node, Transport, run_tenko, wait_for_setup_token};
+use serve_support::{ADMIN, Node, PASSWORD, Transport, run_tenko, wait_for_setup_token};
 
 const CIDR: &str = "192.0.2.0/24";
 
@@ -270,9 +270,12 @@ fn an_untrusted_certificate_is_an_unreachable_server() {
 fn a_server_that_is_not_running_is_unreachable() {
     let node = Node::new();
     // The port was free a moment ago and nothing listens on it.
-    node.client_stdin(&["login", "--user", ADMIN, "--password-stdin"], "739153\n")
-        .assert_code(7)
-        .assert_stderr_contains("tenko login: error: cannot reach ");
+    node.client_stdin(
+        &["login", "--user", ADMIN, "--password-stdin"],
+        &format!("{PASSWORD}\n"),
+    )
+    .assert_code(7)
+    .assert_stderr_contains("tenko login: error: cannot reach ");
 }
 
 #[test]

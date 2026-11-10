@@ -82,9 +82,9 @@ $errLog = Join-Path $WorkDir 'server.err.log'
 $caRoot = Join-Path $dataDir 'tls\ca-root.pem'
 $url = "https://localhost:$Port"
 
-# Throwaway administrator PIN for this run (Home profile: digits only). Never printed.
-$digits = (0..9) | Get-Random -Count 6
-$pin = -join $digits
+# The administrator's password for this run: at least 12 characters and not digits only,
+# generated for the run, never printed.
+$password = 'Run-' + [guid]::NewGuid().ToString('N').Substring(0, 18) + '-Aa1'
 
 $kekBlock = ''
 if ($KekProvider -eq 'file') {
@@ -197,20 +197,11 @@ try {
     # ---- setup and login -----------------------------------------------------------------
     $env:TENKO_CREDENTIALS = $credFile
     $env:TENKO_SETUP_TOKEN = $token
-    $res = $null
-    for ($try = 1; $try -le 5; $try++) {
-        $res = Invoke-Tenko @('setup', '--url', $url, '--ca-file', $caRoot, '--admin', 'admin', '--host-name', 'localhost', '--password-stdin') $pin
-        if ($res.Code -eq 0) { break }
-        if ($res.Text -match 'trivial|policy|password') {
-            $pin = -join ((0..9) | Get-Random -Count 6)
-            continue
-        }
-        break
-    }
+    $res = Invoke-Tenko @('setup', '--url', $url, '--ca-file', $caRoot, '--admin', 'admin', '--host-name', 'localhost', '--password-stdin') $password
     Remove-Item Env:TENKO_SETUP_TOKEN -ErrorAction SilentlyContinue
     if ($res.Code -ne 0) { throw "tenko setup failed (status $($res.Code)): $($res.Text -replace [regex]::Escape($token), '<token>')" }
     Add-Summary 'setup complete'
-    $res = Invoke-Tenko @('login', '--url', $url, '--ca-file', $caRoot, '--user', 'admin', '--password-stdin') $pin
+    $res = Invoke-Tenko @('login', '--url', $url, '--ca-file', $caRoot, '--user', 'admin', '--password-stdin') $password
     if ($res.Code -ne 0) { throw "tenko login failed (status $($res.Code)): $($res.Text)" }
     Add-Summary 'login ok'
     $null = Read-Mem $serverPid 'setup'

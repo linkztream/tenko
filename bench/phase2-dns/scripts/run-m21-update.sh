@@ -200,8 +200,8 @@ tries=100
 while [ "$tries" -gt 0 ] && ! curl -sS -o /dev/null "$URL/api/v1/health" 2>/dev/null; do sleep 0.2; tries=$((tries - 1)); done
 
 # 2. Setup, key, list, zone.
-# The Home profile's password policy is a PIN of digits.
-PASSWORD="7$(printf '%07d' $((RANDOM * RANDOM % 10000000)))"
+# The administrator's password: at least 12 characters and not digits only, generated for the run, never printed.
+PASSWORD=$(printf 'Run-%s-Aa1' "$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')")
 SETUP="{\"setup_token\": \"$(head -n 1 "$WORK/data/setup-token" | tr -d '\r\n')\", \"profile\": \"home\", \"admin\": {\"name\": \"bench\", \"display_name\": \"Bench\", \"password\": \"$PASSWORD\"}, \"host_name\": \"localhost\", \"language\": \"en\"}"
 COOKIE="$(curl -sS -D - -o "$WORK/api.out" -H "Origin: $URL" -H "Content-Type: application/json" \
   --data "$SETUP" "$URL/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1)"

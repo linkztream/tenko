@@ -237,8 +237,8 @@ retry "$wait_secs" "controller-1 to become healthy" healthy controller-1
 ok "controller-1" "healthy"
 
 step "first-run setup through HAProxy"
-# The Home profile's password preset is the PIN: digits only.
-password="$(od -An -N8 -tu1 /dev/urandom | tr -d ' \n' | cut -c1-12)"
+# An administrator's password: at least 12 characters and not digits only, in every profile.
+password="Lab-$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')-Aa1"
 if [[ "$keep" == 1 ]]; then
   # For hand tests on a kept lab; the file goes with the work directory.
   (umask 077 && printf '%s\n' "$password" >"$work/admin-password")

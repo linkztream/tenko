@@ -57,7 +57,7 @@ setup_node() {
   local token password body
   token="$(compose exec -T "$1" /usr/local/bin/tenko setup token --data-dir /var/lib/tenko | tr -d '\r\n')"
   [[ -n "$token" ]] || fail "recursion: no setup token on $1"
-  password="$(od -An -N4 -tu4 /dev/urandom | tr -dc '0-9')"
+  password="$(admin_password)"
   body="{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"labadmin\", \"display_name\": \"Lab Admin\", \"password\": \"$password\"}, \"host_name\": \"$3\", \"language\": \"en\"}"
   curl -sS -D - -o "$work/api.out" -H "Origin: http://$2:8443" -H "Content-Type: application/json" \
     --data "$body" "http://$2:8443/api/v1/setup" | tr -d '\r' |

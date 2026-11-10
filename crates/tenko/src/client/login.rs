@@ -63,7 +63,8 @@ pub struct SetupArgs {
     pub language: String,
 
     /// Read the administrator's password from the first line of standard input instead of
-    /// asking for it.
+    /// asking for it. An administrator's password has at least 12 characters and is not
+    /// digits only, in every profile: an administrator never signs in with a PIN.
     #[arg(long)]
     pub password_stdin: bool,
 }
@@ -163,7 +164,10 @@ pub async fn setup(args: &SetupArgs) -> Result<Output, Failure> {
             false,
         )?,
     };
-    let password = read_secret(&format!("Password for {admin}: "), args.password_stdin)?;
+    let password = read_secret(
+        &format!("Password for {admin} (at least 12 characters, not digits only): "),
+        args.password_stdin,
+    )?;
     let request = SetupRequest {
         setup_token: token.to_dto(),
         profile: args.profile,

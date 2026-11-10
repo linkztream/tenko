@@ -164,7 +164,20 @@ prepare() {
   fi
 }
 
+# tenko_admin_secret_problem <secret>: what is wrong with the first administrator's password,
+# or nothing, as install.sh checks it (admin_secret_problem): at least 12 characters and not
+# digits only, in every profile. Checked here so that a refused password stops the run
+# before the container is created; the server stays the authority for the rest.
+tenko_admin_secret_problem() {
+  if [[ "$1" =~ ^[0-9]+$ ]]; then
+    printf "it is digits only: an administrator's password is never a PIN (at least 12 characters, not digits only)"
+  elif ((${#1} < 12)); then
+    printf "it is too short: an administrator's password has at least 12 characters"
+  fi
+}
+
 validate_settings() {
+  local problem
   [[ "$var_roles" == controller || "$var_roles" == controller,dns ]] ||
     echo "var_roles: controller or controller,dns, not '${var_roles}'"
   [[ "$var_modules" =~ ^(wizard|all|(ipam|dns|dhcp|discovery)(,(ipam|dns|dhcp|discovery))*)$ ]] ||
@@ -183,6 +196,10 @@ validate_settings() {
   [[ "$var_language" == en || "$var_language" == sv ]] || echo "var_language: en or sv, not '${var_language}'"
   [[ -z "$var_admin" || "$var_admin" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$ ]] ||
     echo "var_admin: a login name, not '${var_admin}'"
+  if [[ -n "$var_admin" && -n "$TENKO_ADMIN_PASSWORD" ]]; then
+    problem="$(tenko_admin_secret_problem "$TENKO_ADMIN_PASSWORD")"
+    [[ -z "$problem" ]] || echo "TENKO_ADMIN_PASSWORD: the administrator's password is refused, ${problem}"
+  fi
   [[ "$var_kek" =~ ^(auto|sealed|file)$ ]] || echo "var_kek: auto, sealed or file, not '${var_kek}'"
   [[ -z "$var_binary" || -f "$var_binary" ]] || echo "var_binary: no such file on this host: '${var_binary}'"
   [[ -n "$var_binary" || -n "${TENKO_RELEASE_TOKEN:-}" || "${TENKO_RELEASES_PUBLIC:-0}" == 1 ]] ||
@@ -193,7 +210,7 @@ validate_settings() {
 # before_create: the files to push, and the administrator's password when an
 # administrator is named.
 before_create() {
-  local answer
+  local answer problem
   tenko_setup_push
   [[ -n "$var_admin" && -z "$TENKO_ADMIN_PASSWORD" ]] || return 0
   if tenko_unattended; then
@@ -201,8 +218,14 @@ before_create() {
     var_admin=""
     return 0
   fi
-  answer="$(tenko_whiptail --title "${APP}: administrator" --passwordbox \
-    "Password of ${var_admin}, the first administrator.\n\nEmpty: complete setup in the browser with the setup token." 12 78)" || true
+  while true; do
+    answer="$(tenko_whiptail --title "${APP}: administrator" --passwordbox \
+      "Password of ${var_admin}, the first administrator: at least 12 characters, not digits only (an administrator never signs in with a PIN).\n\nEmpty: complete setup in the browser with the setup token." 14 78)" || true
+    [[ -n "$answer" ]] || break
+    problem="$(tenko_admin_secret_problem "$answer")"
+    [[ -n "$problem" ]] || break
+    tenko_whiptail --title "${APP}: administrator" --msgbox "Refused, ${problem}." 10 78 || true
+  done
   TENKO_ADMIN_PASSWORD="$answer"
   [[ -n "$answer" ]] || var_admin=""
 }

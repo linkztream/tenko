@@ -55,7 +55,7 @@ ones the controller issues tickets under.
 
 Every secret is generated per run into the work directory and removed with it: the
 controller's administrator password, alice's, the one-time password, the password of the
-reset before the import rows, Tenko's PIN and its key-encryption key. None is printed. They
+reset before the import rows, Tenko's administrator password and its key-encryption key. None is printed. They
 reach Tenko's API and `kinit` and `ktutil` from files or on standard input; inside the
 controller container `samba-tool` takes the passwords it sets as arguments, which only that
 container's processes see.

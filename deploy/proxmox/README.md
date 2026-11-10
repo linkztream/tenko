@@ -58,8 +58,8 @@ pushed into the container with `pct push`:
 # From a checkout of the repository on the host:
 bash deploy/proxmox/ct/tenko.sh --binary /root/tenko-0.2.0-linux-x86_64
 
-# The same, unattended, with a static address and first-run setup (Home: a PIN):
-read -rs TENKO_ADMIN_PASSWORD && export TENKO_ADMIN_PASSWORD     # type the PIN
+# The same, unattended, with a static address and first-run setup:
+read -rs TENKO_ADMIN_PASSWORD && export TENKO_ADMIN_PASSWORD     # type the password
 bash deploy/proxmox/ct/tenko.sh --yes --binary /root/tenko-0.2.0-linux-x86_64 \
   --ip 192.0.2.60/24 --gw 192.0.2.1 --admin admin --storage local-lvm
 
@@ -73,7 +73,11 @@ bash -c "$(curl -fsSL https://github.com/linkztream/tenko/releases/latest/downlo
 
 The dialog shows the container settings and the Tenko answers together; "Create" takes
 them, "Advanced" asks each one. With an administrator named, a password box asks for the
-password (or the PIN under Home); empty leaves setup to the browser. The last lines on the
+password; empty leaves setup to the browser. An administrator's password has at least 12
+characters and is not digits only, in every profile, Home included: an administrator never
+signs in with a PIN. The script refuses a shorter or numeric one before it creates the
+container (the box asks again; unattended, the run stops with the reason), and the server
+checks the rest (a breached password, a simple pattern) at setup. The last lines on the
 host are the container ID, its address, the URL and the setup token (or the
 administrator), and the commands to update and to snapshot. Snapshot the container before
 every upgrade: `pct snapshot <ctid> <name>`.
@@ -83,7 +87,7 @@ every upgrade: `pct snapshot <ctid> <name>`.
 | `--binary <file>` / `var_binary` | empty: download in the container | A binary on the host, pushed into the container |
 | `--ip`, `--gw` / `var_ip`, `var_gateway` | `dhcp` | The container's address |
 | `--ctid`, `--storage`, `--hostname` | the generic defaults below | The container's ID, root disk storage and host name (`tenko`) |
-| `--admin <name>` / `var_admin` | empty | First-run setup with this administrator; the password from `TENKO_ADMIN_PASSWORD` or a password box |
+| `--admin <name>` / `var_admin` | empty | First-run setup with this administrator; the password (at least 12 characters, not digits only) from `TENKO_ADMIN_PASSWORD` or a password box |
 | `--version` / `var_tenko_version` | `latest` | The release to download |
 | `--yes` / `var_unattended=yes` | | No dialogs |
 | `--dry-run` / `TENKO_DRY_RUN=1` | | Print the Proxmox commands instead of running them |

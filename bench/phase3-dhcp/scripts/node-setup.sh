@@ -73,7 +73,8 @@ TOML
     done
     curl -fsS "$base/api/v1/health/ready" >/dev/null || { echo "node-setup: not ready" >&2; exit 1; }
     token="$(bin/server setup token --data-dir "$dir/data" | tr -d '\r\n')"
-    password="$(od -An -N4 -tu4 /dev/urandom | tr -dc '0-9')"
+    # The administrator's password: at least 12 characters and not digits only, generated for the run, never printed.
+    password=$(printf 'Run-%s-Aa1' "$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')")
     cookie="$(curl -sS -D - -o "$dir/api.out" -H "Origin: $base" -H "Content-Type: application/json" \
       --data "{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"benchadmin\", \"display_name\": \"Bench\", \"password\": \"$password\"}, \"host_name\": \"node.example.test\", \"language\": \"en\"}" \
       "$base/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1)"

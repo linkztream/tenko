@@ -8,7 +8,7 @@
 #                                on a line of its own
 #
 # A body whose `password` is "@OTP@" gets the one-time password of the run from
-# /lab/secrets/otp, and the setup gets the administrator's PIN from /lab/secrets/tenko, so
+# /lab/secrets/otp, and the setup gets the administrator's password from /lab/secrets/tenko, so
 # that no secret is ever in an argument list or in the round's output.
 set -euo pipefail
 
@@ -18,7 +18,7 @@ out="$(mktemp)"
 trap 'rm -f "$out"' EXIT
 
 if [[ "$1" == setup ]]; then
-  body="$(printf '%s' "$body" | jq -c --rawfile pin /lab/secrets/tenko '.admin.password = ($pin | rtrimstr("\n"))')"
+  body="$(printf '%s' "$body" | jq -c --rawfile password /lab/secrets/tenko '.admin.password = ($password | rtrimstr("\n"))')"
   headers="$(mktemp)"
   status="$(printf '%s' "$body" | curl -sS -D "$headers" -o "$out" -w '%{http_code}' \
     -H "Origin: $base" -H 'Content-Type: application/json' --data-binary @- "$base/api/v1/setup")"

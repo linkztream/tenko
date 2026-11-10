@@ -495,6 +495,18 @@ CFG_END
     # The token: --token-stdin (the first line; the password next), the variables, --token.
     out="$(printf 'tok-from-stdin\npw-from-stdin\n' | (parse_args --yes --token-stdin --password-stdin 2>&1; printf 'token=%s password=%s flag=%s\n' "$OPT_TOKEN" "$PASSWORD" "$TOKEN_FLAG"))"
     has "$out" "token=tok-from-stdin password=pw-from-stdin flag=0" "--token-stdin: the first line is the token, the second the password"
+    # The administrator's password: at least 12 characters and not digits only, in every
+    # profile; refused by parse_args, before anything is installed, without the password.
+    out="$(printf '481273905162\n' | parse_case --yes --admin admin --password-stdin)"
+    has "$out" "rc=2" "a digits-only administrator password: exit 2"
+    has "$out" "--password-stdin: the administrator's password is refused, it is digits only" "and says why"
+    lacks "$out" "481273905162" "and does not print it"
+    out="$(TENKO_ADMIN_PASSWORD=Short-pw1 parse_case --yes --admin admin)"
+    has "$out" "rc=2" "a short administrator password: exit 2"
+    has "$out" "TENKO_ADMIN_PASSWORD: the administrator's password is refused, it is too short" "and says why"
+    out="$(TENKO_ADMIN_PASSWORD=Example-pass-4821 parse_case --yes --admin admin)"
+    has "$out" "rc=0" "an administrator password of 12 characters or more, not digits only: accepted"
+    expect "admin_secret_problem of a good password" "" "$(admin_secret_problem 'Example-pass-4821')"
     out="$(printf '\n' | parse_case --yes --token-stdin)"
     has "$out" "rc=2" "--token-stdin without a line: exit 2"
     out="$(export TENKO_INSTALL_TOKEN=tok-from-env GITHUB_TOKEN=other; parse_args --yes 2>&1; printf 'token=%s env=%s\n' "$OPT_TOKEN" "${TENKO_INSTALL_TOKEN:-unset}")"
@@ -975,8 +987,9 @@ EOF
   # file (Docker mounts a plain file there, which the installer could not replace by a link).
   in_sys 'umount /etc/resolv.conf 2>/dev/null; ln -sf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf'
   expect "/etc/resolv.conf is the stub's link" "../run/systemd/resolve/stub-resolv.conf" "$(in_sys 'readlink /etc/resolv.conf')"
-  # The Home profile signs in with a PIN: digits only, four or more, no simple pattern.
-  password="48213907"
+  # An administrator's password: at least 12 characters and not digits only, in every
+  # profile (Home included), generated per run.
+  password="Run-$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')-Aa1"
   args="--yes --binary /i/tenko --host-name tenko.example.test --forwarders 192.0.2.1"
 
   # Whether this container's service manager hands encrypted credentials to services (a

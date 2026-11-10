@@ -65,13 +65,17 @@ rerun with an existing `/etc/tenko/tenko.toml` it asks nothing and keeps the fil
 Unattended, every answer is a flag:
 
 ```
-printf '%s\n' "$ADMIN_PIN" | bash install.sh --yes --binary ./tenko-0.2.0-linux-x86_64 \
+printf '%s\n' "$ADMIN_PASSWORD" | bash install.sh --yes --binary ./tenko-0.2.0-linux-x86_64 \
   --roles controller,dns --host-name tenko.example.test --forwarders 192.0.2.1,192.0.2.2 \
   --admin admin --password-stdin
 ```
 
-Under the Home profile the first administrator signs in with a PIN (four or more digits,
-no simple pattern such as `1234`); the other profiles take a password.
+The first administrator signs in with a password of at least 12 characters that is not
+digits only, in every profile, Home included: an administrator never signs in with a PIN
+(under Home a PIN of six digits or more stays a choice for the other people). The installer
+refuses a shorter or numeric password with exit 2 before it installs anything, and the
+server checks the rest (a breached password, a simple pattern) at setup
+([../docs/SECURITY-PROFILES.md](../docs/SECURITY-PROFILES.md), "PINs").
 
 **Roles and the security profile.** Which roles a node runs is a runtime decision, made on
 the Nodes page of the web UI ([../docs/cluster.md](../docs/cluster.md), section 13). What a
@@ -112,7 +116,7 @@ sudo bash install.sh --prepare --roles controller,dns,probe    # Hardened: these
 | `--version latest\|<x.y.z>` | `latest` | The release to install |
 | `--language en\|sv` | `en` | The default UI language, with `--admin` |
 | `--admin <name>` | none | Complete first-run setup with this administrator |
-| `--password-stdin` | | The administrator's password or PIN from standard input (or `TENKO_ADMIN_PASSWORD`) |
+| `--password-stdin` | | The administrator's password from standard input (or `TENKO_ADMIN_PASSWORD`): at least 12 characters, not digits only, never a PIN; refused before installing otherwise |
 | `--binary <file>` | | Install this file instead of a download |
 | `--token-stdin` | `TENKO_INSTALL_TOKEN`, else `GITHUB_TOKEN` | The token for the private repository from the first line of standard input (with `--password-stdin` the password follows on the next line); the variables do the same. The token is never printed, and it reaches curl on its standard input, in no argument list. `--token <token>` still works but is deprecated with a warning: an argument is visible to every process on the host |
 | `--repo <owner/name>` | `linkztream/tenko` | The GitHub repository |

@@ -12,7 +12,7 @@ Measurement M15 of the Slice 3 plan (`docs/plans/slice-3-plan.md`, section 5), c
 - a controller: `tenko serve --config <file> --stop-on-eof` with the internal CA, the API on `127.0.0.1:<port>`, the cluster port on `127.0.0.1:<port>`, `[cluster] sync_kbps` (0 for the latency series, the cap for the cap series), air-gapped updates, no online breach check;
 - a probe: `tenko node enroll` with a token from `POST /api/v1/nodes/enrollments` and the CA fingerprint, then `tenko serve --roles probe --stop-on-eof` with `TENKO_LOG__LEVEL=info`.
 
-It bootstraps the administrator through `POST /api/v1/setup` (random PIN, never printed), signs in with a session cookie and keeps one TLS connection to the API open, so a measured request does not include a TLS handshake.
+It bootstraps the administrator through `POST /api/v1/setup` (a random password of at least 12 characters, never printed), signs in with a session cookie and keeps one TLS connection to the API open, so a measured request does not include a TLS handshake.
 
 Every configuration the script stores has the scanner switched off (`enabled = false`, `active = false`, every method `enabled = false`), and the prefixes in it are random addresses under the documentation prefix `2001:db8::/32`. The probe therefore scans nothing and sends nothing beyond loopback; at the end the script lists the probe's sockets from `/proc/<pid>/net` and warns about any that is not loopback. The test node is `probe-m15.example.test`, address `192.0.2.20`.
 

@@ -192,9 +192,9 @@ run_hook() {
   [ "$rc" -eq 0 ] || die "hook $what failed (status $rc)"
 }
 
-# Throwaway administrator PIN for this run (Home profile: digits only). Never printed.
-new_pin() { shuf -i 0-9 -n 6 | tr -d '\n'; }
-PIN=$(new_pin)
+# The administrator's password for this run: at least 12 characters and not digits only,
+# generated for the run, never printed.
+PASSWORD=$(printf 'Run-%s-Aa1' "$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')")
 
 # ---- start --------------------------------------------------------------------------------
 "$BINARY" serve --roles "$ROLES" --config "$CFG" > "$OUTLOG" 2> "$ERRLOG" &
@@ -226,17 +226,12 @@ note "ready after $READY_AFTER s; RSS $LAST_RSS MiB, HWM $LAST_HWM MiB, anon $LA
 
 # ---- setup and login ----------------------------------------------------------------------
 export TENKO_CREDENTIALS="$CRED"
-for try in 1 2 3 4 5; do
-  out=$(printf '%s\n' "$PIN" | TENKO_SETUP_TOKEN="$TOKEN" "$BINARY" setup --url "$URL" --ca-file "$CA" \
-        --admin admin --host-name localhost --password-stdin 2>&1)
-  rc=$?
-  [ "$rc" -eq 0 ] && break
-  if echo "$out" | grep -qiE 'trivial|policy|password'; then PIN=$(new_pin); continue; fi
-  break
-done
+out=$(printf '%s\n' "$PASSWORD" | TENKO_SETUP_TOKEN="$TOKEN" "$BINARY" setup --url "$URL" --ca-file "$CA" \
+      --admin admin --host-name localhost --password-stdin 2>&1)
+rc=$?
 [ "$rc" -eq 0 ] || die "tenko setup failed (status $rc): $(echo "$out" | sed "s/$TOKEN/<token>/g")"
 note "setup complete"
-out=$(printf '%s\n' "$PIN" | "$BINARY" login --url "$URL" --ca-file "$CA" --user admin --password-stdin 2>&1)
+out=$(printf '%s\n' "$PASSWORD" | "$BINARY" login --url "$URL" --ca-file "$CA" --user admin --password-stdin 2>&1)
 rc=$?
 [ "$rc" -eq 0 ] || die "tenko login failed (status $rc): $out"
 note "login ok"

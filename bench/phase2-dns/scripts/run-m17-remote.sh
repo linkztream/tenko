@@ -248,15 +248,14 @@ TOML
   setup)
     API="$1"; URL="https://localhost:$API"
     TOKEN=$(head -n 1 "$DATA/setup-token")
-    rc=1
-    for _ in 1 2 3 4 5; do
-      PIN=$(shuf -i 0-9 -n 8 | tr -d '\n')
-      printf '%s\n' "$PIN" | TENKO_SETUP_TOKEN="$TOKEN" "$BIN" setup --url "$URL" --ca-file "$CA" \
-        --admin bench --host-name localhost --password-stdin > "$RD/setup.out" 2>&1 && { rc=0; break; }
-      grep -qiE 'trivial|policy|password' "$RD/setup.out" || break
-    done
+    # The administrator's password: at least 12 characters and not digits only, generated
+    # for the run, never printed.
+    PASSWORD=$(printf 'Run-%s-Aa1' "$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')")
+    rc=0
+    printf '%s\n' "$PASSWORD" | TENKO_SETUP_TOKEN="$TOKEN" "$BIN" setup --url "$URL" --ca-file "$CA" \
+      --admin bench --host-name localhost --password-stdin > "$RD/setup.out" 2>&1 || rc=$?
     [ "$rc" -eq 0 ] || { sed "s/$TOKEN/<token>/g" "$RD/setup.out"; exit 1; }
-    printf '%s\n' "$PIN" | "$BIN" login --url "$URL" --ca-file "$CA" --user bench --password-stdin > /dev/null || exit 1
+    printf '%s\n' "$PASSWORD" | "$BIN" login --url "$URL" --ca-file "$CA" --user bench --password-stdin > /dev/null || exit 1
     "$BIN" dns zone create example.test --kind primary --ns ns1.example.test. --mname ns1.example.test. \
       --rname hostmaster@example.test --serial counter > /dev/null || exit 1
     start=$(date +%s.%N)

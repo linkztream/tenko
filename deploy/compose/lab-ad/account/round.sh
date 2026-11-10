@@ -35,7 +35,7 @@
 # Everything runs inside the lab network 198.51.100.0/24 (documentation addresses); nothing
 # is published on the host, and the API is reached from the client container, so the round
 # also runs where the host cannot reach a bridge network (Docker Desktop). Every secret (the
-# controller's administrator password, alice's, the one-time password, Tenko's PIN and its
+# controller's administrator password, alice's, the one-time password, Tenko's administrator password and its
 # key-encryption key) is generated per run into the work directory and removed with it; none
 # is printed. The acceptance of tickets by the TKEY handler is the round `gss` (WP13.2): this
 # round proves that the keys Tenko holds are the ones the controller issues tickets under.
@@ -129,7 +129,7 @@ printf 'Adm1n-%s' "$(secret)" >"$work/secrets/admin"
 printf 'Al1ce-%s' "$(secret)" >"$work/secrets/alice"
 printf 'Otp-%s' "$(secret)" >"$work/secrets/otp"
 printf 'Pass-%s' "$(secret)" >"$work/secrets/reset"
-od -An -N4 -tu4 /dev/urandom | tr -dc '0-9' >"$work/secrets/tenko"
+printf 'Run-%s' "$(secret)" >"$work/secrets/tenko"
 head -c 32 /dev/urandom | od -An -v -tx1 | tr -d ' \n' >"$work/secrets/kek"
 chmod 0444 "$work/secrets/"*
 umask 022

@@ -197,6 +197,17 @@ has "$out" "Web UI:        https://192.0.2.50:8443/" "final line: the URL"
 has "$out" "Administrator: admin" "final line: the administrator"
 has "$out" "--update 100" "final line: the update command"
 
+echo "== 6b. ct/tenko.sh: an administrator's password the rule refuses stops the run before the container"
+for case in "481273905162|it is digits only" "Short-pw1|it is too short"; do
+  bad="${case%%|*}" why="${case#*|}"
+  rc=0
+  out="$(tdry TENKO_ADMIN_PASSWORD="$bad" -- --binary "$fake_binary" --admin admin)" || rc=$?
+  ((rc != 0)) && pass "${why}: the run fails (exit ${rc})" || fail "${why}: exit 0"
+  has "$out" "TENKO_ADMIN_PASSWORD: the administrator's password is refused, ${why}" "${why}: says why"
+  lacks "$out" "[dry-run] pct create" "${why}: no container is created"
+  lacks "$out" "$bad" "${why}: the password appears nowhere in the output"
+done
+
 echo "== 7. ct/tenko.sh: a download in the container with a token"
 out="$(tdry GITHUB_TOKEN="$release_token" var_tenko_version=0.2.0 var_forwarders=192.0.2.1,192.0.2.2 var_roles=controller --)" || fail "exit $?"
 has "$out" "TENKO_INSTALL_ROLES=controller " "the roles"

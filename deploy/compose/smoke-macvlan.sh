@@ -178,9 +178,9 @@ client_health
 
 step "first-run setup and an enrollment token for the probe (commands run inside the controller)"
 url="https://$TENKO_CONTROLLER_IP:8443"
-# The defaults keep the Home profile, whose password preset is the PIN: digits only, 4 to 64
-# of them. A random PIN of 8 to 12 digits.
-password="$(od -An -N8 -tu1 /dev/urandom | tr -d ' \n' | cut -c1-12)"
+# The defaults keep the Home profile. An administrator's password has at least 12 characters
+# and is not digits only, in every profile: a random one per run.
+password="Run-$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')-Aa1"
 setup_token="$(compose exec -T tenko "$tenko_bin" setup token | tr -d '\r\n')"
 [[ -n "$setup_token" ]] || fail "no setup token"
 printf '%s\n' "$password" | compose exec -T -e "TENKO_SETUP_TOKEN=$setup_token" tenko \

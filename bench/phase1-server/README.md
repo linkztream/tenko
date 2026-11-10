@@ -23,7 +23,7 @@ Both do the same thing, in the same order:
    `tenko serve --roles controller --config <file>` with a fresh data directory.
 2. Read the setup token from the server console (it is passed to the CLI through the
    environment, never written to the results), run `tenko setup` and `tenko login` with a
-   password generated for the run (a six-digit PIN for the Home profile, passed on standard
+   password generated for the run (at least 12 characters and not digits only, passed on standard
    input).
 3. Create the data set: one /8 and four /16 supernets and /24 networks under them, 200
    prefixes in total by default.
