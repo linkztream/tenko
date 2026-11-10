@@ -22,6 +22,7 @@ const RULE_KINDS: readonly PolicyViolation["kind"][] = [
   "too_short",
   "too_long",
   "pin_digits_only",
+  "digits_only",
   "pattern_mismatch",
   "invalid_characters",
 ];
@@ -86,6 +87,8 @@ export function violationMessage(v: PolicyViolation): string {
       return t("errors.auth.password.too_long", { max: v.max });
     case "pin_digits_only":
       return t("errors.auth.password.pin_digits_only");
+    case "digits_only":
+      return t("errors.auth.password.digits_only");
     case "trivial":
       return t("errors.auth.password.trivial");
     case "context_specific":

@@ -331,6 +331,12 @@ pub struct PasswordCheck {
     /// The profile whose preset applies, during first-run setup.
     #[serde(default)]
     pub profile: Option<Profile>,
+    /// Check against the administrator rule as well (at least 12 characters, not digits
+    /// only, never a PIN): for an account that holds or is given the admin role. Default:
+    /// whether the caller administers when `user_name` is absent, otherwise no. During
+    /// first-run setup the rule always applies.
+    #[serde(default)]
+    pub administers: Option<bool>,
 }
 
 /// The result of the breached-password check (IAM-04).
@@ -569,6 +575,11 @@ pub struct UserInfo {
     pub factors: FactorSummary,
     /// The password must be changed.
     pub password_change_required: bool,
+    /// When a PIN stored before the six-digit minimum stops signing in, unless a sign-in
+    /// shows first that it meets the policy or the PIN is replaced. Absent for every other
+    /// secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_expires_at: Option<Timestamp>,
     /// The fixed UI language.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,

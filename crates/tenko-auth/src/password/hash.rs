@@ -8,7 +8,11 @@
 //! from the stored string, so a hash made with older parameters stays verifiable;
 //! [`needs_rehash`] tells the caller to store a new one after a successful login.
 
-use std::{fmt, sync::OnceLock};
+use std::{
+    collections::HashMap,
+    fmt,
+    sync::{Mutex, OnceLock, PoisonError},
+};
 
 use argon2::{
     ARGON2D_IDENT, ARGON2I_IDENT, ARGON2ID_IDENT, Algorithm, Argon2, Params, PasswordHasher,
@@ -44,6 +48,81 @@ const HARDENED: Params = match Params::new(65_536, 3, 1, Some(OUTPUT_LEN)) {
     Ok(params) => params,
     Err(_) => panic!("the hardened Argon2 parameters are valid"),
 };
+
+/// What one Argon2 computation costs: memory in KiB, passes and lanes. Ordered by memory,
+/// then passes, then lanes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct HashCost {
+    /// Memory in KiB.
+    pub m_kib: u32,
+    /// Passes.
+    pub t: u32,
+    /// Lanes.
+    pub p: u32,
+}
+
+impl HashCost {
+    /// The largest memory a dummy verification spends: 1 GiB. A stored hash beyond it is
+    /// not one Tenko made; the dummy does not follow it there.
+    pub const MAX_DUMMY_KIB: u32 = 1_048_576;
+    /// The most passes a dummy verification spends.
+    pub const MAX_DUMMY_PASSES: u32 = 16;
+    /// The most lanes a dummy verification spends.
+    pub const MAX_DUMMY_LANES: u32 = 8;
+
+    /// The cost of a strength.
+    pub fn of_strength(strength: HashStrength) -> Self {
+        let params = params(strength);
+        Self {
+            m_kib: params.m_cost(),
+            t: params.t_cost(),
+            p: params.p_cost(),
+        }
+    }
+
+    /// The cost stored in a hash, or `None` when it cannot be parsed.
+    pub fn of_hash(hash: &PasswordHash) -> Option<Self> {
+        let parsed = PhcHash::new(hash.as_str()).ok()?;
+        let params = Params::try_from(&parsed).ok()?;
+        Some(Self {
+            m_kib: params.m_cost(),
+            t: params.t_cost(),
+            p: params.p_cost(),
+        })
+    }
+
+    /// The larger of each component: a computation at least as expensive as both.
+    #[must_use]
+    pub fn at_least(self, other: Self) -> Self {
+        Self {
+            m_kib: self.m_kib.max(other.m_kib),
+            t: self.t.max(other.t),
+            p: self.p.max(other.p),
+        }
+    }
+
+    /// The memory in MiB, rounded up.
+    pub const fn mib(self) -> u32 {
+        self.m_kib.div_ceil(1024)
+    }
+
+    /// The cost a dummy verification may spend: capped at [`HashCost::MAX_DUMMY_KIB`],
+    /// [`HashCost::MAX_DUMMY_PASSES`] and [`HashCost::MAX_DUMMY_LANES`], and never below
+    /// the Argon2 minimum.
+    #[must_use]
+    pub fn for_dummy(self) -> Self {
+        let p = self.p.clamp(1, Self::MAX_DUMMY_LANES);
+        Self {
+            m_kib: self.m_kib.clamp(8 * p, Self::MAX_DUMMY_KIB),
+            t: self.t.clamp(1, Self::MAX_DUMMY_PASSES),
+            p,
+        }
+    }
+
+    fn params(self) -> Option<Params> {
+        Params::new(self.m_kib, self.t, self.p, Some(OUTPUT_LEN)).ok()
+    }
+}
 
 /// The Argon2 parameters of a strength, with a 32-byte output.
 pub fn params(strength: HashStrength) -> Params {
@@ -177,6 +256,51 @@ pub fn dummy_verify(normalized: &str, strength: HashStrength) {
             let _ = hash_password(normalized, strength);
         }
     }
+}
+
+/// Spends the cost of one verification at `cost` without a stored hash: the dummy for an
+/// unknown user name, at the strongest parameters among the stored hashes so that no
+/// account answers slower than a name that does not exist. Built once per cost (a few at
+/// most: the costs Tenko hashes with); if a dummy hash cannot be built, the call hashes the
+/// password at that cost instead.
+pub fn dummy_verify_at(normalized: &str, cost: HashCost) {
+    let cost = cost.for_dummy();
+    match dummy_hash_at(cost) {
+        Some(dummy) => {
+            let _ = verify_password(normalized, &dummy);
+        }
+        None => {
+            if let Some(params) = cost.params() {
+                let _ = random::array::<SALT_LEN>()
+                    .and_then(|salt| hash_with_salt(normalized, params, &salt));
+            }
+        }
+    }
+}
+
+/// The dummy hash at `cost`, built on first use. `None` if building it failed.
+fn dummy_hash_at(cost: HashCost) -> Option<PasswordHash> {
+    /// More distinct costs than this means stored hashes Tenko did not make; the oldest
+    /// entries make room.
+    const KEPT: usize = 8;
+    static CACHE: OnceLock<Mutex<HashMap<HashCost, PasswordHash>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(found) = cache
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&cost)
+    {
+        return Some(found.clone());
+    }
+    let params = cost.params()?;
+    let salt: [u8; SALT_LEN] = random::array().ok()?;
+    let built = hash_with_salt(DUMMY_PASSWORD, params, &salt).ok()?;
+    let mut cache = cache.lock().unwrap_or_else(PoisonError::into_inner);
+    if cache.len() >= KEPT {
+        cache.clear();
+    }
+    cache.insert(cost, built.clone());
+    Some(built)
 }
 
 /// The dummy hash of a strength, built on first use. `None` if building it failed.

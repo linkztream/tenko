@@ -4,22 +4,25 @@
 import { createEffect, createMemo, createSignal, For, Show, untrack } from "solid-js";
 import type { BreachMode, LockoutMode, MfaRequirement, PasswordPolicy, SessionLifetime } from "../api/types";
 import { Switch as SwitchControl } from "../components/Switch";
-import { t } from "../i18n";
+import { formatDuration, t } from "../i18n";
 import { FieldHelp, SelectField } from "./fields";
 import {
   AUDIT_EXPORT,
   AUDIT_EXPORT_DEFAULT,
+  LOCKOUT_MODES,
+  lockoutValue,
   REVEAL_DEFAULT,
   REVEAL_STEP_UP,
   UPDATES_DEFAULT,
   UPDATES_INSTALL,
   type AuditExport,
+  type LockoutValue,
   type RevealPolicy,
   type RevealStepUp,
   type UpdatesInstall,
   type UpdatesPolicy,
 } from "./toggles";
-import { customPolicy, DURATION_UNITS, splitDuration, toDays, toSeconds, type DurationUnit } from "./toggleEdit";
+import { customPolicy, DURATION_UNITS, lockPolicyOf, splitDuration, toDays, toSeconds, type DurationUnit } from "./toggleEdit";
 
 export interface EditorProps<T> {
   initial: T;
@@ -158,19 +161,156 @@ export function BreachEditor(props: EditorProps<BreachMode>) {
   );
 }
 
-export function LockoutEditor(props: EditorProps<LockoutMode>) {
-  const [value, setValue] = createSignal<LockoutMode>(untrack(() => props.initial));
-  createEffect(() => props.onDraft(value()));
-  const options: readonly LockoutMode[] = ["off", "progressive_delay", "delay_then_temporary_lock", "lock_until_unlock"];
+/** The profile's value next to a field, for the help line under it. */
+function withProfile(help: string, value: string): string {
+  return `${help} ${t("settings.security.lockout.profile_value", { value })}`;
+}
+
+export function LockoutEditor(props: EditorProps<LockoutValue> & { profileDefault?: unknown }) {
+  const init = untrack(() => lockoutValue(props.initial));
+  const reference = untrack(() => lockoutValue(props.profileDefault ?? props.initial));
+  const lock0 = splitDuration(init.lock_secs);
+  const [mode, setMode] = createSignal<LockoutMode>(init.mode);
+  const [attempts, setAttempts] = createSignal(String(init.attempts));
+  const [waits, setWaits] = createSignal(init.waits_secs.join(", "));
+  const [lock, setLock] = createSignal(String(lock0.amount));
+  const [lockUnit, setLockUnit] = createSignal<DurationUnit>(lock0.unit);
+  const [account, setAccount] = createSignal(String(init.account_max_delay_secs));
+  const [passkey, setPasskey] = createSignal(init.passkey_holds_lock);
+
+  const result = createMemo(() =>
+    lockPolicyOf({ attempts: attempts(), waits: waits(), lock: lock(), lockUnit: lockUnit(), account: account() }, passkey()),
+  );
+  createEffect(() => {
+    const policy = result().policy;
+    props.onDraft(policy ? { mode: mode(), ...policy } : undefined);
+  });
+
+  const locks = () => mode() === "delay_then_temporary_lock" || mode() === "lock_until_unlock";
+  const resetToProfile = () => {
+    const lock1 = splitDuration(reference.lock_secs);
+    setMode(reference.mode);
+    setAttempts(String(reference.attempts));
+    setWaits(reference.waits_secs.join(", "));
+    setLock(String(lock1.amount));
+    setLockUnit(lock1.unit);
+    setAccount(String(reference.account_max_delay_secs));
+    setPasskey(reference.passkey_holds_lock);
+  };
+
   return (
-    <SelectField
-      id="tg-lockout"
-      testid="field-lockout"
-      label={t("toggles.lockout.name")}
-      value={value()}
-      onChange={setValue}
-      options={options.map((v) => ({ value: v, label: t(`toggles.lockout.${v}`) }))}
-    />
+    <>
+      <SelectField
+        id="tg-lockout"
+        testid="field-lockout"
+        label={t("toggles.lockout.name")}
+        value={mode()}
+        onChange={setMode}
+        options={LOCKOUT_MODES.map((v) => ({ value: v, label: t(`toggles.lockout.${v}`) }))}
+        help={withProfile(t(`settings.security.lockout.mode_help.${mode()}`), t(`toggles.lockout.${reference.mode}`))}
+      />
+      <Show when={mode() !== "off"}>
+        <p class="muted" id="tg-lockout-explain">
+          {t("settings.security.lockout.explain")}
+        </p>
+        <div class="field">
+          <label for="tg-lock-attempts">{t("settings.security.lockout.attempts")}</label>
+          <input
+            id="tg-lock-attempts"
+            data-testid="field-lock_attempts"
+            class="input num"
+            inputmode="numeric"
+            autocomplete="off"
+            value={attempts()}
+            aria-invalid={result().errors.attempts ? "true" : undefined}
+            aria-describedby="tg-lock-attempts-help"
+            onInput={(e) => setAttempts(e.currentTarget.value)}
+          />
+          <FieldHelp
+            id="tg-lock-attempts-help"
+            help={withProfile(t("settings.security.lockout.attempts_help"), String(reference.attempts))}
+            error={result().errors.attempts ? t("settings.security.lockout.attempts_error") : undefined}
+          />
+        </div>
+        <div class="field">
+          <label for="tg-lock-waits">{t("settings.security.lockout.waits")}</label>
+          <input
+            id="tg-lock-waits"
+            data-testid="field-lock_waits"
+            class="input"
+            autocomplete="off"
+            spellcheck={false}
+            value={waits()}
+            aria-invalid={result().errors.waits ? "true" : undefined}
+            aria-describedby="tg-lock-waits-help"
+            onInput={(e) => setWaits(e.currentTarget.value)}
+          />
+          <FieldHelp
+            id="tg-lock-waits-help"
+            help={withProfile(t("settings.security.lockout.waits_help"), reference.waits_secs.join(", "))}
+            error={result().errors.waits ? t("settings.security.lockout.waits_error") : undefined}
+          />
+        </div>
+        <Show when={locks()}>
+          <DurationField
+            id="tg-lock-secs"
+            label={t("settings.security.lockout.lock")}
+            amount={lock()}
+            unit={lockUnit()}
+            onAmount={setLock}
+            onUnit={setLockUnit}
+            error={result().errors.lock ? t("settings.security.lockout.lock_error") : undefined}
+            help={withProfile(t("settings.security.lockout.lock_help"), formatDuration(reference.lock_secs))}
+          />
+        </Show>
+        <div class="field">
+          <label for="tg-lock-account">{t("settings.security.lockout.account")}</label>
+          <input
+            id="tg-lock-account"
+            data-testid="field-lock_account"
+            class="input num"
+            inputmode="numeric"
+            autocomplete="off"
+            value={account()}
+            aria-invalid={result().errors.account ? "true" : undefined}
+            aria-describedby="tg-lock-account-help"
+            onInput={(e) => setAccount(e.currentTarget.value)}
+          />
+          <FieldHelp
+            id="tg-lock-account-help"
+            help={withProfile(t("settings.security.lockout.account_help"), String(reference.account_max_delay_secs))}
+            error={result().errors.account ? t("settings.security.lockout.account_error") : undefined}
+          />
+        </div>
+        <Show when={locks()}>
+          <div class="field">
+            {/* The markup of components/Switch, which has no way to carry a test id on its input. */}
+            <label class="pref switch">
+              <span>{t("settings.security.lockout.passkey")}</span>
+              <input
+                id="tg-lock-passkey"
+                type="checkbox"
+                role="switch"
+                data-testid="field-passkey_holds_lock"
+                checked={passkey()}
+                onChange={(e) => setPasskey(e.currentTarget.checked)}
+              />
+              <small>
+                {withProfile(
+                  t("settings.security.lockout.passkey_hint"),
+                  reference.passkey_holds_lock ? t("common.yes") : t("common.no"),
+                )}
+              </small>
+            </label>
+          </div>
+        </Show>
+      </Show>
+      <div class="field">
+        <button type="button" class="btn sm ghost" data-testid="lockout-reset" onClick={resetToProfile}>
+          {t("settings.security.lockout.reset")}
+        </button>
+      </div>
+    </>
   );
 }
 

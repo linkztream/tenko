@@ -135,6 +135,20 @@ pub struct UserAuthz {
     pub break_glass: bool,
     /// A person or a service account.
     pub kind: UserKind,
+    /// The Argon2 cost of the stored password, if the account has one (the dummy
+    /// verification of an unknown name follows the strongest).
+    pub password_cost: Option<crate::password::hash::HashCost>,
+}
+
+impl UserAuthz {
+    /// Whether the account is a person who administers: the admin role, enabled, not the
+    /// break-glass account and not a service account.
+    fn administers(&self) -> bool {
+        self.roles.contains(&RoleName::Admin)
+            && !self.disabled
+            && !self.break_glass
+            && self.kind != UserKind::Service
+    }
 }
 
 /// What authorization needs to know about a token.
@@ -200,6 +214,25 @@ impl AuthImage {
     /// The user's authorization data.
     pub fn user(&self, id: UserId) -> Option<&UserAuthz> {
         self.users.get(&id)
+    }
+
+    /// Whether `id` is the last administrator: a person who administers (the admin role,
+    /// enabled, neither break-glass nor a service account) while no other such person
+    /// exists. The network never locks this account (TGL-07).
+    pub fn is_last_admin(&self, id: UserId) -> bool {
+        self.users.get(&id).is_some_and(UserAuthz::administers)
+            && !self
+                .users
+                .iter()
+                .any(|(other, user)| *other != id && user.administers())
+    }
+
+    /// The strongest Argon2 cost among the stored passwords, component by component.
+    pub fn strongest_password_cost(&self) -> Option<crate::password::hash::HashCost> {
+        self.users
+            .values()
+            .filter_map(|user| user.password_cost)
+            .reduce(crate::password::hash::HashCost::at_least)
     }
 
     /// The security settings.
@@ -421,6 +454,10 @@ impl AuthImage {
 
 fn user_authz(user: crate::model::UserRecord) -> UserAuthz {
     UserAuthz {
+        password_cost: user
+            .password
+            .as_ref()
+            .and_then(|password| crate::password::hash::HashCost::of_hash(&password.hash)),
         roles: user.roles,
         disabled: user.disabled,
         break_glass: user.break_glass,

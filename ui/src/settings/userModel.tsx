@@ -5,6 +5,13 @@ import type { FactorSummary, RoleName, UserInfo } from "../api/types";
 import { Icon } from "../components/Icon";
 import { availableLocales, formatDateTime, formatList, t } from "../i18n";
 
+const DAY_MS = 86_400_000;
+
+/** Whole days until a PIN that no sign-in has confirmed stops working; 0 or less once it has. */
+export function pinDaysLeft(expiresAt: string, now: number = Date.now()): number {
+  return Math.ceil((new Date(expiresAt).getTime() - now) / DAY_MS);
+}
+
 /** The status of an account: active, disabled, locked, break-glass, password change required. */
 export function UserStatus(props: { user: UserInfo }) {
   const quiet = () => !props.user.disabled && !props.user.lock;
@@ -43,6 +50,16 @@ export function UserStatus(props: { user: UserInfo }) {
           <Icon name="refresh" size="xs" />
           {t("settings.users.status.password_change")}
         </span>
+      </Show>
+      <Show when={props.user.pin_expires_at}>
+        {(at) => (
+          <span class="flag discrepancy" title={t("settings.users.status.pin_until", { time: formatDateTime(at()) })}>
+            <Icon name="clock" size="xs" />
+            {pinDaysLeft(at()) > 0
+              ? t("settings.users.status.pin_days", { days: pinDaysLeft(at()) })
+              : t("settings.users.status.pin_expired")}
+          </span>
+        )}
       </Show>
     </span>
   );

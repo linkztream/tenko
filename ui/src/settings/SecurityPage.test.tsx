@@ -1149,3 +1149,139 @@ describe("the test ids of the security page", () => {
     }
   });
 });
+
+describe("the lock policy (TGL-07)", () => {
+  it("shows the mode with a summary of the numbers in the value and the profile column", async () => {
+    await signInAs();
+    await openPage();
+    const summary = "Delay, then a temporary lock: 3 attempts, then waits up to 10 min, lock 30 min";
+    expect(within(row("TGL-07")).getAllByText(summary)).toHaveLength(2);
+    const policy = MOCK_PROFILE_MATRIX.home.lockout_policy!;
+    expect(formatToggle("lockout", { mode: "progressive_delay", ...policy })).toBe(
+      "Progressive delay: 3 attempts, then waits up to 10 min",
+    );
+    expect(formatToggle("lockout", { mode: "off", ...policy })).toBe("Off");
+  });
+
+  it("edits the mode and every number, shows the profile values and sends both members", async () => {
+    await signInAs();
+    await openPage();
+    const dialog = await openEditor("Lockout");
+    expect(within(dialog).getByText(/^An account gets the attempts below from one network/)).toBeTruthy();
+    const attempts = within(dialog).getByTestId("field-lock_attempts") as HTMLInputElement;
+    expect(attempts.value).toBe("3");
+    expect(within(dialog).getByText(/1 to 20 tries before the first wait\. Profile: 3\./)).toBeTruthy();
+    expect((within(dialog).getByTestId("field-lock_waits") as HTMLInputElement).value).toBe("10, 30, 180, 300, 600");
+    expect((within(dialog).getByLabelText("Lock period") as HTMLInputElement).value).toBe("30");
+    expect((within(dialog).getByTestId("field-lock_account") as HTMLInputElement).value).toBe("60");
+    const passkey = within(dialog).getByTestId("field-passkey_holds_lock") as HTMLInputElement;
+    expect(passkey.checked).toBe(false);
+
+    fireEvent.input(attempts, { target: { value: "5" } });
+    fireEvent.input(within(dialog).getByTestId("field-lock_waits"), { target: { value: "20, 60" } });
+    fireEvent.input(within(dialog).getByTestId("field-lock_account"), { target: { value: "0" } });
+    fireEvent.click(passkey);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.lockout).toBe("delay_then_temporary_lock");
+    expect(db.settings.lockout_policy).toEqual({
+      attempts: 5,
+      waits_secs: [20, 60],
+      lock_secs: 1800,
+      account_max_delay_secs: 0,
+      passkey_holds_lock: true,
+    });
+    expect(within(row("TGL-07")).getByText("Differs from the profile")).toBeTruthy();
+    expect(
+      within(row("TGL-07")).getByText("Delay, then a temporary lock: 5 attempts, then waits up to 1 min, lock 30 min"),
+    ).toBeTruthy();
+  });
+
+  it("names what is wrong with a number and keeps Save off until it is right", async () => {
+    await signInAs();
+    await openPage();
+    const dialog = await openEditor("Lockout");
+    const save = within(dialog).getByRole("button", { name: "Save setting" }) as HTMLButtonElement;
+    const attempts = within(dialog).getByTestId("field-lock_attempts");
+    fireEvent.input(attempts, { target: { value: "21" } });
+    expect(await within(dialog).findByText("Enter a whole number from 1 to 20.")).toBeTruthy();
+    expect(save.disabled).toBe(true);
+    fireEvent.input(attempts, { target: { value: "4" } });
+    const waits = within(dialog).getByTestId("field-lock_waits");
+    for (const bad of ["", "10, x", "0", "86401", "1,2,3,4,5,6,7,8,9,10,11"]) {
+      fireEvent.input(waits, { target: { value: bad } });
+      expect(await within(dialog).findByText(/^Enter 1 to 10 whole numbers of seconds/), bad).toBeTruthy();
+      expect(save.disabled, bad).toBe(true);
+    }
+    fireEvent.input(waits, { target: { value: "5, 15" } });
+    const account = within(dialog).getByTestId("field-lock_account");
+    fireEvent.input(account, { target: { value: "601" } });
+    expect(await within(dialog).findByText("Enter a whole number from 0 to 600.")).toBeTruthy();
+    fireEvent.input(account, { target: { value: "600" } });
+    await waitFor(() => expect(save.disabled).toBe(false));
+    const lock = within(dialog).getByLabelText("Lock period");
+    fireEvent.input(lock, { target: { value: "0" } });
+    expect(await within(dialog).findByText("Enter a duration from 1 minute to 1 day.")).toBeTruthy();
+    expect(save.disabled).toBe(true);
+    fireEvent.input(lock, { target: { value: "45" } });
+    await waitFor(() => expect(save.disabled).toBe(false));
+  });
+
+  it("goes back to the values of the profile with one button", async () => {
+    await signInAs("lab");
+    await openPage();
+    const dialog = await openEditor("Lockout");
+    fireEvent.change(within(dialog).getByLabelText("Lockout"), { target: { value: "lock_until_unlock" } });
+    fireEvent.input(within(dialog).getByTestId("field-lock_attempts"), { target: { value: "9" } });
+    fireEvent.click(within(dialog).getByTestId("lockout-reset"));
+    expect((within(dialog).getByLabelText("Lockout") as HTMLSelectElement).value).toBe("off");
+    // Off hides the numbers; they come back with the mode.
+    fireEvent.change(within(dialog).getByLabelText("Lockout"), { target: { value: "progressive_delay" } });
+    expect((within(dialog).getByTestId("field-lock_attempts") as HTMLInputElement).value).toBe("3");
+  });
+
+  it("resets the row to the mode and the numbers of the profile", async () => {
+    await signInAs();
+    db.settings = {
+      ...db.settings,
+      lockout: "lock_until_unlock",
+      lockout_policy: { ...MOCK_PROFILE_MATRIX.standard.lockout_policy!, attempts: 7 },
+    };
+    await openPage();
+    fireEvent.click(within(row("TGL-07")).getByRole("button", { name: "Reset to profile: Lockout" }));
+    await waitFor(() => expect(db.settings.lockout).toBe("delay_then_temporary_lock"));
+    expect(db.settings.lockout_policy?.attempts).toBe(3);
+  });
+
+  it("builds the request from a value of the toggle", () => {
+    expect(patchFor("lockout", { mode: "off", ...MOCK_PROFILE_MATRIX.lab.lockout_policy! })).toEqual({
+      lockout: "off",
+      lockout_policy: MOCK_PROFILE_MATRIX.lab.lockout_policy,
+    });
+  });
+});
+
+describe("the period of unconfirmed PINs", () => {
+  it("shows the default, saves another number and refuses one out of range", async () => {
+    await signInAs();
+    await openPage();
+    const section = screen.getByTestId("pin-period");
+    const days = within(section).getByTestId("field-unconfirmed_pin_days") as HTMLInputElement;
+    expect(days.value).toBe("30");
+    expect(within(section).getByText("1 to 365 days. The default is 30.")).toBeTruthy();
+    const save = within(section).getByTestId("pin-days-save") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    for (const bad of ["0", "366", "x", ""]) {
+      fireEvent.input(days, { target: { value: bad } });
+      expect(await within(section).findByText("Enter a whole number of days from 1 to 365."), bad).toBeTruthy();
+      expect(save.disabled, bad).toBe(true);
+    }
+    fireEvent.input(days, { target: { value: "90" } });
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(save);
+    await waitFor(() => expect(db.settings.unconfirmed_pin_days).toBe(90));
+    expect(await screen.findByText("Saved the period of unconfirmed PINs")).toBeTruthy();
+    fireEvent.click(within(section).getByTestId("pin-days-default"));
+    expect(days.value).toBe("30");
+  });
+});

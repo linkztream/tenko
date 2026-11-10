@@ -20,6 +20,7 @@ export type PasswordPolicy = S["PasswordPolicy"];
 export type MfaRequirement = S["MfaRequirement"];
 export type BreachMode = S["BreachMode"];
 export type LockoutMode = S["LockoutMode"];
+export type LockPolicy = S["LockPolicy"];
 export type SessionLifetime = S["SessionLifetime"];
 export type SecuritySettings = S["SecuritySettings"];
 /** One toggle with its markers. `value` and `profile_default` are JSON values. */

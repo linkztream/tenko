@@ -6,6 +6,7 @@ import type {
   Banner,
   BreachMode,
   LockoutMode,
+  LockPolicy,
   MfaRequirement,
   PasswordPolicy,
   Profile,
@@ -15,6 +16,20 @@ import type {
 
 const DAY = 86_400;
 const HOUR = 3_600;
+
+/** The lock policy of a profile (crates/tenko-auth/src/settings.rs): only Hardened lets the lock hold against a passkey. */
+function lockPolicy(passkeyHoldsLock: boolean): LockPolicy {
+  return {
+    attempts: 3,
+    waits_secs: [10, 30, 180, 300, 600],
+    lock_secs: 1_800,
+    account_max_delay_secs: 60,
+    passkey_holds_lock: passkeyHoldsLock,
+  };
+}
+
+/** Days an unconfirmed PIN from before the six-digit minimum keeps working. */
+export const UNCONFIRMED_PIN_DAYS_DEFAULT = 30;
 
 /** The toggle values of each profile. */
 export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
@@ -27,6 +42,8 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: 365,
     breach_check: "online",
     lockout: "progressive_delay",
+    lockout_policy: lockPolicy(false),
+    unconfirmed_pin_days: UNCONFIRMED_PIN_DAYS_DEFAULT,
     audit_export: "local",
   },
   standard: {
@@ -38,6 +55,8 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: 90,
     breach_check: "online",
     lockout: "delay_then_temporary_lock",
+    lockout_policy: lockPolicy(false),
+    unconfirmed_pin_days: UNCONFIRMED_PIN_DAYS_DEFAULT,
     audit_export: "optional",
   },
   hardened: {
@@ -49,6 +68,8 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: 30,
     breach_check: "offline_preferred",
     lockout: "lock_until_unlock",
+    lockout_policy: lockPolicy(true),
+    unconfirmed_pin_days: UNCONFIRMED_PIN_DAYS_DEFAULT,
     audit_export: "required",
   },
   lab: {
@@ -60,9 +81,16 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     token_max_days: null,
     breach_check: "off",
     lockout: "off",
+    lockout_policy: lockPolicy(false),
+    unconfirmed_pin_days: UNCONFIRMED_PIN_DAYS_DEFAULT,
     audit_export: "local",
   },
 };
+
+/** The lock policy of a settings object; settings without one follow their profile. */
+export function lockPolicyOf(settings: SecuritySettings): LockPolicy {
+  return structuredClone(settings.lockout_policy ?? PROFILE_MATRIX[settings.profile].lockout_policy ?? lockPolicy(false));
+}
 
 /** The values TGL-21 takes, from the weakest to the strongest. */
 export const AUDIT_EXPORT_VALUES: readonly NonNullable<SecuritySettings["audit_export"]>[] = ["local", "optional", "required"];
@@ -104,7 +132,7 @@ const LOCKOUT_RANK: Record<LockoutMode, number> = {
 export function policyMinLength(policy: PasswordPolicy): number {
   switch (policy.preset) {
     case "pin":
-      return 4;
+      return 6;
     case "standard":
       return 12;
     case "hardened":
@@ -175,6 +203,7 @@ function stable(value: unknown): string {
 /** The value of a setting as the toggle list reports it (JSON, `null` for no maximum). */
 function toggleValue(setting: ToggleSetting, settings: SecuritySettings): unknown {
   if (setting === "audit_export") return auditExportOf(settings);
+  if (setting === "lockout") return { mode: settings.lockout, ...lockPolicyOf(settings) };
   return setting === "token_max_days" ? (settings.token_max_days ?? null) : structuredClone(settings[setting]);
 }
 

@@ -11,6 +11,7 @@ import { Icon } from "../components/Icon";
 import { ErrorNotice, Notice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { formatList, t } from "../i18n";
+import { PinPeriod } from "./PinPeriod";
 import { ProfileDialog } from "./ProfileDialog";
 import { patchFor } from "./toggleEdit";
 import { ToggleDialog } from "./ToggleDialog";
@@ -181,6 +182,8 @@ export default function SecurityPage() {
               </div>
               <p class="muted">{t("settings.security.more", { shown: TOGGLES.length, total: TOGGLE_TOTAL })}</p>
             </section>
+
+            <PinPeriod view={v()} save={save} />
 
             <Show when={editing()}>
               {(def) => <ToggleDialog view={v()} def={def()} save={save} onClose={() => setEditing(undefined)} />}

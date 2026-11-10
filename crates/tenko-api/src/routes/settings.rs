@@ -244,8 +244,12 @@ mod tests {
         assert_eq!(changed.body["settings"]["profile"], "home");
         assert_eq!(toggle(&changed.body, "TGL-07")["deviates"], true);
         assert_eq!(
-            toggle(&changed.body, "TGL-07")["profile_default"],
+            toggle(&changed.body, "TGL-07")["profile_default"]["mode"],
             "progressive_delay"
+        );
+        assert_eq!(
+            toggle(&changed.body, "TGL-07")["value"]["mode"],
+            "lock_until_unlock"
         );
         assert_eq!(toggle(&changed.body, "TGL-06")["weaker_than_home"], true);
         assert_eq!(toggle(&changed.body, "TGL-01")["deviates"], false);
@@ -437,13 +441,13 @@ mod tests {
     async fn only_administrators_change_the_settings() {
         let (harness, admin) = Harness::installed().await;
         harness
-            .create_user(&admin, "vera", "5826", &["viewer"])
+            .create_user(&admin, "vera", "582641", &["viewer"])
             .await;
         harness
-            .create_user(&admin, "oscar", "7391", &["operator"])
+            .create_user(&admin, "oscar", "739158", &["operator"])
             .await;
-        let viewer = harness.login("vera", "5826").await;
-        let operator = harness.login("oscar", "7391").await;
+        let viewer = harness.login("vera", "582641").await;
+        let operator = harness.login("oscar", "739158").await;
 
         harness
             .call("GET", "/settings/security", Cookie(&viewer), None)

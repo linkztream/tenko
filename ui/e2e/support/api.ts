@@ -22,8 +22,8 @@ export type JobDetail = Schemas["JobDetail"];
 export const ADMIN = {
   name: "admin",
   displayName: "Ada Admin",
-  /** Digits only: the PIN preset of the Home and Lab profiles; not a common password. */
-  password: "739153",
+  /** At least 12 characters and not digits only: the first administrator never has a PIN, in any profile. */
+  password: "plover-quartz-mitten-58",
 } as const;
 
 export class ApiError extends Error {

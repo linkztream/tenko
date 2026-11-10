@@ -56,6 +56,7 @@ use tenko_vault::{MemVault, SecretBytes, SecretPurpose, SecretSpec, Vault};
 use tokio::sync::Barrier;
 
 const PASSPHRASE: &str = "marble comet violin saffron";
+const NEW_ADMIN_PASSWORD: &str = "lantern harbor quartz 4821";
 
 // ---------------------------------------------------------------------------------------
 // Helpers
@@ -417,7 +418,7 @@ async fn user_names_are_unique_case_insensitively() {
     create(
         &env,
         &admin,
-        &new_user("Alice", &[RoleName::Viewer], Some("6402")),
+        &new_user("Alice", &[RoleName::Viewer], Some("481273")),
     )
     .await;
     // A name beyond ASCII: case folding has to work for it as well.
@@ -449,7 +450,7 @@ async fn user_names_are_unique_case_insensitively() {
     assert_eq!(env.service.list_users(&admin).await.expect("list").len(), 3);
     // Logging in is case-insensitive in the same way.
     for spelling in ["alice", "ALICE", " Alice "] {
-        login(&env, spelling, "6402").await;
+        login(&env, spelling, "481273").await;
     }
 }
 
@@ -519,13 +520,13 @@ async fn an_initial_password_forces_a_change() {
     let info = create(
         &env,
         &admin,
-        &new_user("pelle", &[RoleName::Operator], Some("6402")),
+        &new_user("pelle", &[RoleName::Operator], Some("481273")),
     )
     .await;
     assert!(info.password_change_required);
     assert!(info.factors.password);
 
-    let first = login(&env, "pelle", "6402").await;
+    let first = login(&env, "pelle", "481273").await;
     assert!(first.info.flags.password_change_required);
     let authenticated = env
         .service
@@ -539,8 +540,8 @@ async fn an_initial_password_forces_a_change() {
         .change_password(
             &user_ctx,
             &PasswordChange {
-                current_password: Some(SecretString::new("6402")),
-                new_password: SecretString::new("8305"),
+                current_password: Some(SecretString::new("481273")),
+                new_password: SecretString::new("593618"),
                 remove_factors: false,
             },
         )
@@ -553,7 +554,7 @@ async fn an_initial_password_forces_a_change() {
             .expect("get")
             .password_change_required
     );
-    let second = login(&env, "pelle", "8305").await;
+    let second = login(&env, "pelle", "593618").await;
     assert!(!second.info.flags.password_change_required);
 }
 
@@ -562,9 +563,9 @@ async fn an_initial_password_must_meet_the_policy_and_a_refusal_creates_nothing(
     let (env, session) = TestEnv::installed(Profile::Home).await;
     let admin = ctx(&env, &session).await;
     for (password, violation) in [
-        ("12", PolicyViolation::TooShort { min: 4 }),
-        ("12ab", PolicyViolation::PinDigitsOnly),
-        ("0000", PolicyViolation::Trivial),
+        ("12", PolicyViolation::TooShort { min: 6 }),
+        ("12ab56", PolicyViolation::PinDigitsOnly),
+        ("000000", PolicyViolation::Trivial),
     ] {
         match env
             .service
@@ -587,7 +588,7 @@ async fn an_initial_password_must_meet_the_policy_and_a_refusal_creates_nothing(
     create(
         &env,
         &admin,
-        &new_user("pelle", &[RoleName::Viewer], Some("6402")),
+        &new_user("pelle", &[RoleName::Viewer], Some("481273")),
     )
     .await;
 }
@@ -717,17 +718,17 @@ async fn an_administrator_password_reset_forces_a_change_and_ends_the_sessions()
     let user = create(
         &env,
         &admin,
-        &new_user("pelle", &[RoleName::Operator], Some("6402")),
+        &new_user("pelle", &[RoleName::Operator], Some("481273")),
     )
     .await;
-    let old = login(&env, "pelle", "6402").await;
+    let old = login(&env, "pelle", "481273").await;
     let reset = env
         .service
         .update_user(
             &admin,
             user.id,
             &UserUpdate {
-                password: Some(SecretString::new("9157")),
+                password: Some(SecretString::new("720459")),
                 ..UserUpdate::default()
             },
             None,
@@ -742,11 +743,11 @@ async fn an_administrator_password_reset_forces_a_change_and_ends_the_sessions()
             .is_err()
     );
     assert!(matches!(
-        password_login(&env, "pelle", "6402").await,
+        password_login(&env, "pelle", "481273").await,
         Err(AuthError::InvalidCredentials)
     ));
     assert!(
-        login(&env, "pelle", "9157")
+        login(&env, "pelle", "720459")
             .await
             .info
             .flags
@@ -755,7 +756,7 @@ async fn an_administrator_password_reset_forces_a_change_and_ends_the_sessions()
     // The audit record names the change but never the value.
     let record = &audit_of(&env, "auth.user.update").await[0];
     let json = serde_json::to_string(record).expect("json");
-    assert!(!json.contains("9157"));
+    assert!(!json.contains("720459"));
 }
 
 #[tokio::test]
@@ -810,12 +811,12 @@ async fn disabling_a_user_ends_their_sessions_and_blocks_new_ones() {
     let user = create(
         &env,
         &admin,
-        &new_user("dora", &[RoleName::Operator], Some("6402")),
+        &new_user("dora", &[RoleName::Operator], Some("481273")),
     )
     .await;
-    let first = login(&env, "dora", "6402").await;
-    let second = login(&env, "dora", "6402").await;
-    let other = login(&env, ADMIN, ADMIN_PIN).await;
+    let first = login(&env, "dora", "481273").await;
+    let second = login(&env, "dora", "481273").await;
+    let other = login(&env, ADMIN, ADMIN_PASSWORD).await;
     let disabled = disable(&env, &admin, user.id, true).await;
     assert!(disabled.disabled);
     for ended in [&first, &second] {
@@ -832,12 +833,12 @@ async fn disabling_a_user_ends_their_sessions_and_blocks_new_ones() {
         .await
         .expect("untouched");
     assert!(matches!(
-        password_login(&env, "dora", "6402").await,
+        password_login(&env, "dora", "481273").await,
         Err(AuthError::InvalidCredentials)
     ));
     let enabled = disable(&env, &admin, user.id, false).await;
     assert!(!enabled.disabled);
-    login(&env, "dora", "6402").await;
+    login(&env, "dora", "481273").await;
     assert!(
         env.service
             .authenticate_credentials(&credentials(&first), env.now())
@@ -861,7 +862,7 @@ async fn an_administrator_cannot_disable_or_delete_themselves() {
     create(
         &env,
         &admin,
-        &new_user("boris", &[RoleName::Admin], Some("6402")),
+        &new_user("boris", &[RoleName::Admin], Some(ADMIN_PASSWORD)),
     )
     .await;
     assert!(matches!(
@@ -944,7 +945,7 @@ async fn the_last_administrator_cannot_be_disabled_demoted_or_deleted() {
     let boris = create(
         &env,
         &admin,
-        &new_user("boris", &[RoleName::Admin], Some("6402")),
+        &new_user("boris", &[RoleName::Admin], Some(ADMIN_PASSWORD)),
     )
     .await;
     disable(&env, &admin, boris.id, true).await;
@@ -1028,10 +1029,10 @@ async fn deleting_a_user_removes_their_sessions_tokens_credentials_and_seed() {
     let carol = create(
         &env,
         &admin,
-        &new_user("carol", &[RoleName::Operator], Some("6402")),
+        &new_user("carol", &[RoleName::Operator], Some("481273")),
     )
     .await;
-    let carol_session = login(&env, "carol", "6402").await;
+    let carol_session = login(&env, "carol", "481273").await;
     let carol_ctx = ctx(&env, &carol_session).await;
     let token = env
         .service
@@ -1080,7 +1081,7 @@ async fn deleting_a_user_removes_their_sessions_tokens_credentials_and_seed() {
         Err(AuthError::Unauthenticated)
     ));
     assert!(matches!(
-        password_login(&env, "carol", "6402").await,
+        password_login(&env, "carol", "481273").await,
         Err(AuthError::InvalidCredentials)
     ));
     assert!(
@@ -1206,11 +1207,11 @@ async fn revoking_all_sessions_of_a_user_ends_each_of_them() {
     let user = create(
         &env,
         &admin,
-        &new_user("mats", &[RoleName::Viewer], Some("6402")),
+        &new_user("mats", &[RoleName::Viewer], Some("481273")),
     )
     .await;
-    let first = login(&env, "mats", "6402").await;
-    let second = login(&env, "mats", "6402").await;
+    let first = login(&env, "mats", "481273").await;
+    let second = login(&env, "mats", "481273").await;
     assert_eq!(
         env.service
             .revoke_user_sessions(&admin, user.id)
@@ -1244,7 +1245,7 @@ async fn revoking_all_sessions_of_a_user_ends_each_of_them() {
             .expect_err("unknown"),
         AuthError::NotFound { kind: "user" }
     );
-    login(&env, "mats", "6402").await;
+    login(&env, "mats", "481273").await;
     let records = audit_of(&env, "auth.session.revoke").await;
     assert_eq!(records[0].draft.details.context["sessions"], "2");
 }
@@ -1261,10 +1262,10 @@ async fn operators_may_read_users_and_settings_but_cannot_administer() {
     create(
         &env,
         &admin,
-        &new_user("olga", &[RoleName::Operator], Some("6402")),
+        &new_user("olga", &[RoleName::Operator], Some("481273")),
     )
     .await;
-    let operator_session = login(&env, "olga", "6402").await;
+    let operator_session = login(&env, "olga", "481273").await;
     let operator = ctx(&env, &operator_session).await;
 
     assert_eq!(
@@ -1342,10 +1343,10 @@ async fn viewers_cannot_read_users_or_settings() {
     create(
         &env,
         &admin,
-        &new_user("vera", &[RoleName::Viewer], Some("6402")),
+        &new_user("vera", &[RoleName::Viewer], Some("481273")),
     )
     .await;
-    let viewer = ctx(&env, &login(&env, "vera", "6402").await).await;
+    let viewer = ctx(&env, &login(&env, "vera", "481273").await).await;
     let missing = DenyReason::MissingPermission;
     assert_eq!(
         denied_reason(env.service.list_users(&viewer).await),
@@ -1396,6 +1397,18 @@ async fn a_standard_administrator_needs_two_factors_for_administration() {
 // ---------------------------------------------------------------------------------------
 // Security settings
 // ---------------------------------------------------------------------------------------
+
+/// The value TGL-07 reports: the mode with the numbers of the default lock policy.
+fn lockout_value(mode: &str, passkey_holds_lock: bool) -> Value {
+    json!({
+        "mode": mode,
+        "attempts": 3,
+        "waits_secs": [10, 30, 180, 300, 600],
+        "lock_secs": 1800,
+        "account_max_delay_secs": 60,
+        "passkey_holds_lock": passkey_holds_lock,
+    })
+}
 
 /// The matrix of SECURITY-PROFILES.md: toggle id, setting and the value per profile in the
 /// order Home, Standard, Hardened, Lab.
@@ -1457,10 +1470,10 @@ fn expected_toggles() -> Vec<(&'static str, &'static str, [Value; 4])> {
             "TGL-07",
             "lockout",
             [
-                json!("progressive_delay"),
-                json!("delay_then_temporary_lock"),
-                json!("lock_until_unlock"),
-                json!("off"),
+                lockout_value("progressive_delay", false),
+                lockout_value("delay_then_temporary_lock", false),
+                lockout_value("lock_until_unlock", true),
+                lockout_value("off", false),
             ],
         ),
         (
@@ -1653,7 +1666,10 @@ async fn a_settings_change_writes_one_audit_record_with_each_changed_toggle() {
     assert_eq!(changes["TGL-05"], (json!(365), json!(30)));
     assert_eq!(
         changes["TGL-07"],
-        (json!("progressive_delay"), json!("off"))
+        (
+            lockout_value("progressive_delay", false),
+            lockout_value("off", false)
+        )
     );
 }
 
@@ -1686,7 +1702,10 @@ async fn switching_the_profile_records_the_profile_and_every_changed_toggle() {
         (json!("optional"), json!("administrators"))
     );
     assert_eq!(changes["TGL-05"], (json!(365), json!(90)));
-    assert_eq!(changes["TGL-07"].1, json!("delay_then_temporary_lock"));
+    assert_eq!(
+        changes["TGL-07"].1,
+        lockout_value("delay_then_temporary_lock", false)
+    );
     // Toggles that kept their value are not listed.
     for unchanged in ["TGL-03", "TGL-06"] {
         assert!(!changes.contains_key(unchanged), "{unchanged}");
@@ -1767,7 +1786,7 @@ async fn changing_the_settings_or_a_role_policy_needs_a_fresh_session() {
     assert_eq!(audit_of(&env, "auth.role_policy.update").await.len(), 0);
 
     // A fresh sign-in may.
-    let fresh = ctx(&env, &login(&env, ADMIN, ADMIN_PIN).await).await;
+    let fresh = ctx(&env, &login(&env, ADMIN, ADMIN_PASSWORD).await).await;
     env.service
         .update_security_settings(&fresh, &weaker, None)
         .await
@@ -1884,10 +1903,10 @@ async fn operators_cannot_change_settings() {
     create(
         &env,
         &admin,
-        &new_user("olga", &[RoleName::Operator], Some("6402")),
+        &new_user("olga", &[RoleName::Operator], Some("481273")),
     )
     .await;
-    let operator = ctx(&env, &login(&env, "olga", "6402").await).await;
+    let operator = ctx(&env, &login(&env, "olga", "481273").await).await;
     assert_eq!(
         denied_reason(
             env.service
@@ -2033,27 +2052,27 @@ async fn the_pin_preset_with_optional_mfa_is_allowed_while_the_vault_has_no_oper
 #[tokio::test]
 async fn a_passkey_session_keeps_its_rights_when_the_vault_gets_an_operator_secret() {
     let (env, session) = TestEnv::installed(Profile::Home).await;
-    let pin_admin = ctx(&env, &session).await;
+    // An operator may read the users and the settings and may reveal secrets; the
+    // administrator cannot be a PIN account any more.
+    env.pin_user(&session, "olga", vec![RoleName::Operator])
+        .await;
+    let pin_operator = ctx(&env, &login(&env, "olga", ADMIN_PIN).await).await;
     let mut key = SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::None);
-    register_passkey(&env, &pin_admin, &mut key)
+    register_passkey(&env, &pin_operator, &mut key)
         .await
         .expect("passkey");
     let passkey = passkey_login(&env, &mut key).await.expect("passkey login");
     assert_eq!(passkey.info.strength, AuthStrength::Passkey);
     put_operator_secret(&env).await;
-    // The PIN session lost its administrative rights with the vault's first secret.
+    // The PIN session lost its rights with the vault's first secret.
     assert_eq!(
-        denied_reason(env.service.list_users(&pin_admin).await),
+        denied_reason(env.service.list_users(&pin_operator).await),
         DenyReason::StepUpRequired {
             required: AuthStrength::Password
         }
     );
     assert_eq!(
-        denied_reason(
-            env.service
-                .update_security_settings(&pin_admin, &SettingsPatch::default(), None)
-                .await
-        ),
+        denied_reason(env.service.security_settings(&pin_operator).await),
         DenyReason::StepUpRequired {
             required: AuthStrength::Password
         }
@@ -2391,7 +2410,7 @@ fn home_setup(token: &str, admin: &str) -> SetupRequest {
         admin: SetupAdmin {
             name: admin.to_owned(),
             display_name: None,
-            password: SecretString::new(ADMIN_PIN),
+            password: SecretString::new(ADMIN_PASSWORD),
         },
         host_name: "tenko.example.test".to_owned(),
         language: "en".to_owned(),
@@ -2418,7 +2437,7 @@ async fn gated_installation() -> Gated {
     let second = service
         .create_user(
             &system,
-            &new_user("boris", &[RoleName::Admin], Some("6402")),
+            &new_user("boris", &[RoleName::Admin], Some(ADMIN_PASSWORD)),
         )
         .await
         .expect("a second administrator");
@@ -2538,7 +2557,7 @@ async fn concurrent_logins_of_one_account_both_succeed() {
                     None,
                     &PasswordLogin {
                         user_name: ADMIN.to_owned(),
-                        password: SecretString::new(ADMIN_PIN),
+                        password: SecretString::new(ADMIN_PASSWORD),
                         provider: None,
                     },
                 )
@@ -2634,7 +2653,6 @@ async fn a_hardened_lock_waits_for_an_administrator_and_raises_an_alarm() {
     register_passkey(&env, &ctx(&env, &setup).await, &mut key)
         .await
         .expect("passkey");
-    let passkey = passkey_login(&env, &mut key).await.expect("passkey login");
     let lena = create(
         &env,
         &env.public_ctx(),
@@ -2677,6 +2695,9 @@ async fn a_hardened_lock_waits_for_an_administrator_and_raises_an_alarm() {
         password_login(&env, "lena", PASSPHRASE).await,
         Err(AuthError::Throttled { .. })
     ));
+    // The administrator signs in with the passkey now: the waits before the lock outlast a
+    // Hardened session's idle time.
+    let passkey = passkey_login(&env, &mut key).await.expect("passkey login");
     let admin = ctx(&env, &passkey).await;
     env.service
         .unlock_user(&admin, lena.id)
@@ -2692,12 +2713,12 @@ async fn progressive_delay_never_locks_an_account() {
     let dora = create(
         &env,
         &admin,
-        &new_user("dora", &[RoleName::Operator], Some("6402")),
+        &new_user("dora", &[RoleName::Operator], Some("481273")),
     )
     .await;
     let mut delayed = 0;
     for _ in 0..25 {
-        match password_login(&env, "dora", "5827").await {
+        match password_login(&env, "dora", "384915").await {
             Err(AuthError::InvalidCredentials) => {}
             Err(AuthError::Throttled { retry_after }) => {
                 delayed += 1;
@@ -2716,8 +2737,9 @@ async fn progressive_delay_never_locks_an_account() {
             .lock,
         None
     );
-    env.clock.advance(Duration::from_secs(120));
-    login(&env, "dora", "6402").await;
+    // Without a lock the last wait of the schedule repeats: ten minutes.
+    env.clock.advance(Duration::from_secs(600));
+    login(&env, "dora", "481273").await;
 }
 
 #[tokio::test]
@@ -2727,16 +2749,16 @@ async fn the_lab_profile_has_no_lockout_at_all() {
     create(
         &env,
         &admin,
-        &new_user("dora", &[RoleName::Operator], Some("6402")),
+        &new_user("dora", &[RoleName::Operator], Some("481273")),
     )
     .await;
     for _ in 0..40 {
         assert!(matches!(
-            password_login(&env, "dora", "5827").await,
+            password_login(&env, "dora", "384915").await,
             Err(AuthError::InvalidCredentials)
         ));
     }
-    login(&env, "dora", "6402").await;
+    login(&env, "dora", "481273").await;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2765,7 +2787,7 @@ async fn an_absurd_session_lifetime_is_refused_or_the_session_still_works() {
         // Refusing an absurd lifetime is a correct way to keep the invariant.
         return;
     }
-    let fresh = login(&env, ADMIN, ADMIN_PIN).await;
+    let fresh = login(&env, ADMIN, ADMIN_PASSWORD).await;
     env.service
         .authenticate_credentials(&credentials(&fresh), env.now())
         .await
@@ -2811,12 +2833,12 @@ async fn administrative_changes_are_audited_with_the_acting_administrator() {
         "auth.user.create",
         env.service.create_user(
             &admin,
-            &new_user("olga", &[RoleName::Operator], Some("6402")),
+            &new_user("olga", &[RoleName::Operator], Some("481273")),
         ),
     )
     .await
     .expect("create");
-    login(&env, "olga", "6402").await;
+    login(&env, "olga", "481273").await;
     audited(
         &env,
         &actor,
@@ -2888,7 +2910,7 @@ async fn self_service_changes_are_audited_with_the_acting_user() {
         &actor,
         "auth.password.change",
         env.service
-            .change_password(&me, &password_change(ADMIN_PIN, "9157")),
+            .change_password(&me, &password_change(ADMIN_PASSWORD, NEW_ADMIN_PASSWORD)),
     )
     .await
     .expect("password");
@@ -2971,7 +2993,7 @@ async fn self_service_changes_are_audited_with_the_acting_user() {
     .await
     .expect("revoke token");
 
-    let other = login(&env, ADMIN, "9157").await;
+    let other = login(&env, ADMIN, NEW_ADMIN_PASSWORD).await;
     audited(
         &env,
         &actor,
@@ -3002,7 +3024,7 @@ async fn refusals_carry_stable_codes_statuses_and_parameters() {
     create(
         &env,
         &admin,
-        &new_user("olga", &[RoleName::Operator], Some("6402")),
+        &new_user("olga", &[RoleName::Operator], Some("481273")),
     )
     .await;
     let taken = env
@@ -3066,7 +3088,7 @@ async fn refusals_carry_stable_codes_statuses_and_parameters() {
     assert_coded(&lifetime, "auth.token.lifetime_exceeded", 422);
     assert_eq!(lifetime.params()["max_days"], "365");
 
-    let operator = ctx(&env, &login(&env, "olga", "6402").await).await;
+    let operator = ctx(&env, &login(&env, "olga", "481273").await).await;
     let forbidden = env
         .service
         .create_user(&operator, &new_user("eve", &[RoleName::Admin], None))
@@ -3130,16 +3152,16 @@ async fn expired_sessions_are_neither_listed_nor_counted() {
     let user = create(
         &env,
         &admin,
-        &new_user("dora", &[RoleName::Operator], Some("6402")),
+        &new_user("dora", &[RoleName::Operator], Some("481273")),
     )
     .await;
-    login(&env, "dora", "6402").await;
+    login(&env, "dora", "481273").await;
     // Home lets a session idle for seven days; nobody presents the forgotten one again, so
     // nothing deletes it. The administrator keeps working in between.
     env.clock.advance(Duration::from_secs(6 * 86_400));
     ctx(&env, &session).await;
     env.clock.advance(Duration::from_secs(2 * 86_400));
-    let again = login(&env, "dora", "6402").await;
+    let again = login(&env, "dora", "481273").await;
     let listed = env
         .service
         .list_sessions(&ctx(&env, &again).await)
@@ -3257,10 +3279,10 @@ async fn an_administrator_password_reset_revokes_the_accounts_tokens() {
     let user = create(
         &env,
         &admin,
-        &new_user("ivo", &[RoleName::Operator], Some("6402")),
+        &new_user("ivo", &[RoleName::Operator], Some("481273")),
     )
     .await;
-    let own = ctx(&env, &login(&env, "ivo", "6402").await).await;
+    let own = ctx(&env, &login(&env, "ivo", "481273").await).await;
     let token = env
         .service
         .create_token(
@@ -3277,7 +3299,7 @@ async fn an_administrator_password_reset_revokes_the_accounts_tokens() {
             &admin,
             user.id,
             &UserUpdate {
-                password: Some(SecretString::new("8305")),
+                password: Some(SecretString::new("593618")),
                 ..UserUpdate::default()
             },
             None,

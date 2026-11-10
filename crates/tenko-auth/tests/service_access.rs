@@ -28,7 +28,7 @@ use tenko_auth::{
         TokenRequest, UserCreate, UserInfo, types::SecretString,
     },
     settings::{Profile, SettingsPatch, TokenMaxLifetime},
-    testing::TestEnv,
+    testing::{TestEnv, env::ADMIN_PASSWORD},
 };
 use tenko_core::{
     Action, Anchors, ApiTokenId, AuthStrength, Coded, Credentials, Denied, DenyReason, ObjectKind,
@@ -59,10 +59,10 @@ const HOST_P1: ObjectRef = ObjectRef::new(ObjectKind::Host, Uuid::from_u128(0x32
 const HOST_P3: ObjectRef = ObjectRef::new(ObjectKind::Host, Uuid::from_u128(0x33));
 
 // Documentation PINs for the Home profile (all unlike each other, none sequential).
-const PIN_DANA: &str = "7391";
-const PIN_ERIN: &str = "6402";
-const PIN_FINN: &str = "5827";
-const PIN_GUS: &str = "3159";
+const PIN_DANA: &str = "593618";
+const PIN_ERIN: &str = "720459";
+const PIN_FINN: &str = "836251";
+const PIN_GUS: &str = "914063";
 
 fn prefix(id: PrefixId, subtree: bool) -> ScopeRule {
     ScopeRule::Prefix { id, subtree }
@@ -1541,8 +1541,9 @@ async fn a_mirror_scope_cannot_be_requested_through_the_token_api() {
     let error = result.expect_err("the mirror scope is refused");
     assert_eq!(error.code(), "auth.invalid_request");
     assert!(error.to_string().contains("mirror"), "{error}");
-    lab.user("mona", Some(PIN_DANA), &[RoleName::Admin]).await;
-    let ctx = lab.sign_in("mona", PIN_DANA).await;
+    lab.user("mona", Some(ADMIN_PASSWORD), &[RoleName::Admin])
+        .await;
+    let ctx = lab.sign_in("mona", ADMIN_PASSWORD).await;
     let result = lab
         .env
         .service
@@ -2011,8 +2012,9 @@ async fn an_unlock_on_one_service_clears_the_throttle_of_another_over_the_same_s
 #[tokio::test]
 async fn a_scoped_token_reads_its_owners_account_only_with_a_grant_that_reads_users() {
     let lab = Lab::new().await;
-    lab.user("mona", Some(PIN_DANA), &[RoleName::Admin]).await;
-    let ctx = lab.sign_in("mona", PIN_DANA).await;
+    lab.user("mona", Some(ADMIN_PASSWORD), &[RoleName::Admin])
+        .await;
+    let ctx = lab.sign_in("mona", ADMIN_PASSWORD).await;
     let metrics = lab
         .env
         .service

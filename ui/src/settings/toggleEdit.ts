@@ -1,8 +1,8 @@
 // Pure helpers of the toggle editors: the request body for a value, durations in the unit a
 // person thinks in, and the checks that the server makes as well (so the editor can say
 // what is wrong before anything is sent).
-import type { PasswordPolicy, SessionLifetime, SettingsPatch } from "../api/types";
-import type { ToggleSetting } from "./toggles";
+import type { LockPolicy, PasswordPolicy, SessionLifetime, SettingsPatch } from "../api/types";
+import { LOCK_LIMITS, lockoutValue, type ToggleSetting } from "./toggles";
 
 /** The PATCH body that sets one setting to `value` (a value as a toggle reports it). */
 export function patchFor(setting: ToggleSetting, value: unknown): SettingsPatch {
@@ -20,7 +20,7 @@ export function patchFor(setting: ToggleSetting, value: unknown): SettingsPatch 
     case "breach_check":
       return { breach_check: value as NonNullable<SettingsPatch["breach_check"]> };
     case "lockout":
-      return { lockout: value as NonNullable<SettingsPatch["lockout"]> };
+      return lockoutPatch(value);
     case "audit_export":
       return { audit_export: value as NonNullable<SettingsPatch["audit_export"]> };
     case "updates":
@@ -102,3 +102,85 @@ export function customPolicy(draft: PolicyDraft): { policy?: PasswordPolicy; err
   if (pattern !== "") policy.pattern = pattern;
   return { policy, errors };
 }
+
+/** The PATCH body for a TGL-07 value: the mode in `lockout`, the numbers in `lockout_policy`. */
+export function lockoutPatch(value: unknown): SettingsPatch {
+  const v = lockoutValue(value);
+  const { mode, ...policy } = v;
+  return { lockout: mode, lockout_policy: policy };
+}
+
+export type LockField = "attempts" | "waits" | "lock" | "account";
+
+export interface LockDraft {
+  attempts: string;
+  /** The waits in seconds, separated by commas. */
+  waits: string;
+  lock: string;
+  lockUnit: DurationUnit;
+  account: string;
+}
+
+function whole(text: string): number | undefined {
+  const s = text.trim();
+  return /^\d{1,7}$/.test(s) ? Number(s) : undefined;
+}
+
+/** The waits of the text field ("10, 30, 180"), or undefined unless 1 to 10 whole numbers of 1 to 86,400. */
+export function parseWaits(text: string): number[] | undefined {
+  const parts = text.split(",").map((x) => x.trim());
+  if (parts.length < LOCK_LIMITS.waits.min || parts.length > LOCK_LIMITS.waits.max) return undefined;
+  const out: number[] = [];
+  for (const part of parts) {
+    const n = whole(part);
+    if (n === undefined || n < LOCK_LIMITS.wait_secs.min || n > LOCK_LIMITS.wait_secs.max) return undefined;
+    out.push(n);
+  }
+  return out;
+}
+
+/** The lock policy of the form (without the mode), or the fields that are wrong (as the server checks them). */
+export function lockPolicyOf(
+  draft: LockDraft,
+  passkeyHoldsLock: boolean,
+): { policy?: LockPolicy; errors: Partial<Record<LockField, true>> } {
+  const errors: Partial<Record<LockField, true>> = {};
+  const attempts = whole(draft.attempts);
+  if (attempts === undefined || attempts < LOCK_LIMITS.attempts.min || attempts > LOCK_LIMITS.attempts.max) {
+    errors.attempts = true;
+  }
+  const waits = parseWaits(draft.waits);
+  if (waits === undefined) errors.waits = true;
+  const lock = toSeconds(draft.lock, draft.lockUnit);
+  if (lock === undefined || lock < LOCK_LIMITS.lock_secs.min || lock > LOCK_LIMITS.lock_secs.max) errors.lock = true;
+  const account = whole(draft.account);
+  if (
+    account === undefined ||
+    account < LOCK_LIMITS.account_max_delay_secs.min ||
+    account > LOCK_LIMITS.account_max_delay_secs.max
+  ) {
+    errors.account = true;
+  }
+  if (Object.keys(errors).length > 0 || attempts === undefined || waits === undefined || lock === undefined || account === undefined) {
+    return { errors };
+  }
+  return {
+    policy: {
+      attempts,
+      waits_secs: waits,
+      lock_secs: lock,
+      account_max_delay_secs: account,
+      passkey_holds_lock: passkeyHoldsLock,
+    },
+    errors,
+  };
+}
+
+/** The unconfirmed-PIN period in days, or undefined unless the text is a whole number from 1 to 365. */
+export function toPinDays(text: string): number | undefined {
+  const n = whole(text);
+  return n !== undefined && n >= 1 && n <= 365 ? n : undefined;
+}
+
+/** The days an unconfirmed PIN keeps working when the settings do not say. */
+export const UNCONFIRMED_PIN_DAYS_DEFAULT = 30;

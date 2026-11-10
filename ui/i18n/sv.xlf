@@ -262,7 +262,7 @@
         <segment><source>{seconds, plural, one {Try again in # second.} other {Try again in # seconds.}}</source><target>{seconds, plural, one {Försök igen om # sekund.} other {Försök igen om # sekunder.}}</target></segment>
       </unit>
       <unit id="auth.signin.throttle_explain">
-        <segment><source>After several wrong attempts, each new attempt waits a little longer.</source><target>Efter flera felaktiga försök får varje nytt försök vänta lite längre.</target></segment>
+        <segment><source>Too many attempts from this network.</source><target>För många försök från det här nätverket.</target></segment>
       </unit>
       <unit id="auth.signin.use_passkey">
         <segment><source>Use a passkey instead</source><target>Använd en nyckel i stället</target></segment>
@@ -2519,7 +2519,7 @@
         <segment><source>Passphrase</source><target>Lösenfras</target></segment>
       </unit>
       <unit id="setup.admin.password.placeholder.pin">
-        <segment><source>At least 4 digits</source><target>Minst 4 siffror</target></segment>
+        <segment><source>At least 6 digits</source><target>Minst 6 siffror</target></segment>
       </unit>
       <unit id="setup.admin.password.placeholder.password">
         <segment><source>At least 12 characters</source><target>Minst 12 tecken</target></segment>
@@ -3142,7 +3142,7 @@
         <segment><source>Password policy preset</source><target>Lösenordsregler</target></segment>
       </unit>
       <unit id="toggles.password_policy.pin">
-        <segment><source>PIN: digits only, at least 4</source><target>PIN-kod: bara siffror, minst 4</target></segment>
+        <segment><source>PIN: digits only, at least 6</source><target>PIN-kod: bara siffror, minst 6</target></segment>
       </unit>
       <unit id="toggles.password_policy.standard">
         <segment><source>Standard: at least 12 characters</source><target>Standard: minst 12 tecken</target></segment>

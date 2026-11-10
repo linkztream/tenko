@@ -152,6 +152,10 @@ origins = []
 rp_name = "Tenko DDI"
 # DER or PEM files with attestation roots of accepted hardware security keys (ADR 0010).
 attestation_roots = []
+# The memory, in MiB, that password hashing (Argon2id) may take at once; a sign-in beyond it
+# is refused at once ("try again in a second") instead of taking memory from DNS and DHCP.
+# Default: 64 MiB per processor, at least 2 and at most 8 processors (128 to 512 MiB).
+# password_hash_memory_mib = 256
 
 [hibp]
 # The breached-password check (IAM-04). Whether it runs is the TGL-06 toggle of the stored

@@ -44,7 +44,7 @@ import {
 import { createForwarder } from "../dns/forwarders/api";
 import { checkRule, splitUpstreams, type ForwardTransport, type Upstream } from "../dns/forwarders/model";
 import { generatePassword, generatorFor, type DnsChoice, type GeneratorKind } from "./generate";
-import { parseProxyList, validateHostName } from "./validate";
+import { ADMIN_MIN_LENGTH, forAdministrator, isDigitsOnly, parseProxyList, validateHostName } from "./validate";
 // WP8.6: the DHCP step.
 import { defaultPool, dhcpPlan, initialDhcp, saveDhcpScope, type DhcpOutcome, type DhcpPlan, type DhcpStepState } from "./dhcp";
 
@@ -354,8 +354,9 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
 
   // ---- The password and its live check
 
-  const policy = createMemo<PasswordPolicy>(
-    () => info(state.profile)?.settings.password_policy ?? PRESET_OF[state.profile],
+  // The first administrator never signs in with a PIN: the rule is the profile's, or Standard.
+  const policy = createMemo<PasswordPolicy>(() =>
+    forAdministrator(info(state.profile)?.settings.password_policy ?? PRESET_OF[state.profile]),
   );
   const generatorKind = createMemo(() => generatorFor(policy()));
   const breachOff = createMemo(() => (info(state.profile)?.settings.breach_check ?? "online") === "off");
@@ -375,6 +376,7 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
       password: state.password,
       user_name: state.userName.trim() === "" ? undefined : state.userName.trim(),
       profile: state.profile,
+      administers: true,
     }));
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -396,6 +398,8 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
   const checkStatus = createMemo<PasswordCheckStatus>(() => {
     const key = checkKey();
     if (key === null) return "idle";
+    // The administrator rule holds in every profile; the server says it again in the answer.
+    if (isDigitsOnly(state.password) || Array.from(state.password.normalize("NFKC")).length < ADMIN_MIN_LENGTH) return "bad";
     const c = check();
     if (c.key !== key) return "pending";
     if (c.error) return "error";

@@ -73,6 +73,9 @@ export function Admin() {
   return (
     <div>
       <p class="wz-lede">{t("setup.admin.lede")}</p>
+      <p class="wz-help" data-testid="admin-rule">
+        {t("setup.admin.rule")}
+      </p>
       <ProblemNotice step={2} />
 
       <div class="wz-form">

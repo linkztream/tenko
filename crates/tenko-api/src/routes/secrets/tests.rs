@@ -17,7 +17,7 @@ use tenko_auth::{
     settings::Profile,
     testing::{
         SoftAttestation, SoftAuthenticator, SoftKeyAlg, TestEnv,
-        env::{ADMIN_PASSWORD, ADMIN_PIN, HOST, ORIGIN},
+        env::{ADMIN_PASSWORD, HOST, ORIGIN},
     },
 };
 use tenko_core::{Authenticator, Timestamp};
@@ -32,7 +32,7 @@ use crate::{
 };
 
 /// A PIN for the users of the tests (PIN preset).
-pub(crate) const USER_PIN: &str = "7391";
+pub(crate) const USER_PIN: &str = "739158";
 /// A passphrase for the users of the tests (other presets).
 pub(crate) const USER_PASSPHRASE: &str = "marble comet violin saffron";
 
@@ -72,11 +72,7 @@ impl Harness {
             .expect("setup is open")
             .expose()
             .to_owned();
-        let password = if profile.defaults().password_policy.is_pin() {
-            ADMIN_PIN
-        } else {
-            ADMIN_PASSWORD
-        };
+        let password = ADMIN_PASSWORD;
         let body = json!({
             "setup_token": token,
             "profile": profile.as_str(),
@@ -537,24 +533,14 @@ async fn values_appear_only_in_the_reveal_and_never_in_the_audit_log() {
 }
 
 #[tokio::test]
-async fn a_pin_session_never_stores_or_reveals_and_a_pin_only_revealer_blocks_the_vault() {
+async fn a_pin_session_never_reveals_and_a_pin_only_revealer_blocks_the_vault() {
     let h = Harness::new(Profile::Home).await;
-    // The administrator's first session was a PIN login.
-    let pin_admin = h.login("admin", ADMIN_PIN).await;
+    // An administrator never has a PIN session, so the PIN session is an operator's.
+    h.create_user("olga", &["operator"]).await;
+    let pin_session = h.login("olga", USER_PIN).await;
     let body = json!({ "name": "x", "kind": "password", "value": "example-value" });
-    let refused = h
-        .call(
-            "POST",
-            "/secrets",
-            Credential::Cookie(&pin_admin),
-            Some(&body),
-        )
-        .await;
-    refused.assert_problem(403, "auth.step_up_required");
-    assert_eq!(refused.body["params"]["required"], "password");
 
     // An operator who signs in with a PIN alone keeps the vault from taking secrets.
-    h.create_user("olga", &["operator"]).await;
     let blocked = h
         .call(
             "POST",
@@ -575,8 +561,7 @@ async fn a_pin_session_never_stores_or_reveals_and_a_pin_only_revealer_blocks_th
     assert!(detail.contains("PIN coupling rule") && detail.contains("enroll a passkey"));
     // A viewer cannot reveal, so a PIN is fine for them.
     h.create_user("vera", &["viewer"]).await;
-    let olga_pin = h.login("olga", USER_PIN).await;
-    h.passkey_session(&olga_pin, "olga").await;
+    h.passkey_session(&pin_session, "olga").await;
     let id = h
         .call(
             "POST",
@@ -593,7 +578,7 @@ async fn a_pin_session_never_stores_or_reveals_and_a_pin_only_revealer_blocks_th
         .call(
             "POST",
             &reveal_path(&id),
-            Credential::Cookie(&pin_admin),
+            Credential::Cookie(&pin_session),
             None,
         )
         .await;

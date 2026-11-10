@@ -1,7 +1,7 @@
 //! Login ceremonies: password, TOTP and recovery code, WebAuthn (passkeys, security keys and
 //! break-glass), and logout.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tenko_core::{
     AuthStrength, MessageKey, ObjectRef, Principal, RequestCtx, Revision, SystemComponent, UserId,
@@ -10,7 +10,8 @@ use tenko_core::{
 use tenko_store::{ReadViewExt, WriteBatch};
 
 use super::{
-    AuthService, LoginOutcome, NewSession, actions, blocking,
+    AuthService, LoginOutcome, NewSession, actions,
+    guard::{Attempt, Slot, Step, throttled},
     types::{
         CodeLogin, PasswordLogin, SecondFactorMethod, WebAuthnLoginFinish, WebAuthnLoginOptions,
         WebAuthnLoginStart,
@@ -19,13 +20,13 @@ use super::{
 use crate::{
     challenge::{MAX_CODE_ATTEMPTS, Pending, StagedUse},
     error::AuthError,
-    lockout::{LockoutMode, LockoutPolicy, Retry, ThrottleKey},
+    lockout::{LockoutMode, LockoutPolicy, ThrottleKey},
     model::{
-        ALARMS, AccountLock, AlarmKind, AlarmRecord, CREDENTIAL_IDS, CREDENTIALS, PasswordKind,
-        USERS, UserRecord,
+        ALARMS, AlarmKind, AlarmRecord, CREDENTIAL_IDS, CREDENTIALS, PasswordKind, USERS,
+        UserRecord,
     },
     password::{
-        hash::{HashStrength, dummy_verify, hash_password, needs_rehash, verify_password},
+        hash::{HashCost, HashStrength, hash_password, needs_rehash, verify_password},
         policy::{PasswordContext, normalize},
     },
     random, recovery,
@@ -38,9 +39,6 @@ use crate::{
     },
 };
 
-/// Longest user name kept as a throttle key or audit context.
-const MAX_NAME_CHARS: usize = 128;
-
 /// The rate limit of the break-glass account: it is never locked out (IAM-09).
 fn break_glass_policy() -> LockoutPolicy {
     LockoutPolicy {
@@ -48,6 +46,7 @@ fn break_glass_policy() -> LockoutPolicy {
         free_attempts: 3,
         base_delay: Duration::from_secs(30),
         max_delay: Duration::from_secs(600),
+        schedule: crate::lockout::Schedule::NONE,
         lock_after: 0,
         lock_duration: Duration::ZERO,
         reset_after: Duration::from_secs(3_600),
@@ -55,7 +54,7 @@ fn break_glass_policy() -> LockoutPolicy {
 }
 
 fn break_glass_key(user: UserId) -> ThrottleKey {
-    ThrottleKey::Account(format!("\u{1}break-glass:{user}"))
+    ThrottleKey::BreakGlass(user)
 }
 
 /// The Argon2id parameters for the settings: stronger under the Hardened profile.
@@ -65,21 +64,6 @@ pub(super) fn hash_strength(settings: &SecuritySettings) -> HashStrength {
     } else {
         HashStrength::Baseline
     }
-}
-
-fn throttled(retry: Retry) -> AuthError {
-    AuthError::Throttled {
-        retry_after: retry.after.map(|after| after.as_secs().max(1)),
-    }
-}
-
-fn truncated(name: &str) -> String {
-    name.trim().chars().take(MAX_NAME_CHARS).collect()
-}
-
-/// The throttle key of an account, as the password step builds it.
-fn account_key(user: &UserRecord) -> ThrottleKey {
-    ThrottleKey::account(&truncated(&user.name))
 }
 
 /// The strength of a passkey login: a hardware key or a passkey with user verification,
@@ -134,56 +118,77 @@ impl AuthService {
         normalized: zeroize::Zeroizing<String>,
         strength: HashStrength,
         settings: &SecuritySettings,
+        now: tenko_core::Timestamp,
     ) -> Result<UserRecord, AuthError> {
         let mut updated = user.clone();
         if needs_rehash(&stored.hash, strength) {
             let candidate = normalized.clone();
-            let rehashed = blocking(move || hash_password(&candidate, strength)).await??;
-            if let Some(password) = updated.password.as_mut() {
-                password.hash = rehashed;
+            // A spent hashing budget postpones the rehash to a later sign-in rather than
+            // refusing a correct password.
+            match self
+                .hashing(
+                    HashCost::of_strength(strength),
+                    Slot::trusted(),
+                    move || hash_password(&candidate, strength),
+                )
+                .await
+            {
+                Ok(rehashed) => {
+                    if let Some(password) = updated.password.as_mut() {
+                        password.hash = rehashed?;
+                    }
+                }
+                Err(AuthError::Throttled { .. }) => {}
+                Err(error) => return Err(error),
             }
         }
         let host_name = view
             .get_typed(&crate::model::INSTALLATION, &())?
             .map(|(installation, _)| installation.host_name);
-        let violations = settings.password_policy.check(
+        // An administrator's secret is held to the administrator rule as well: an old
+        // administrator PIN is to be changed, and the change ends in a password.
+        let violations = settings.password_policy.check_for(
             normalized.as_str(),
             &PasswordContext {
                 user_name: &user.name,
                 display_name: Some(&user.display_name),
                 host_name: host_name.as_deref(),
             },
+            user.is_admin(),
         );
-        if !violations.is_empty() {
+        if violations.is_empty() {
+            // The secret meets the policy in force: a PIN from before the six-digit minimum
+            // that is long enough is no longer reported as one to change.
+            if let Some(password) = updated.password.as_mut()
+                && password.policy_checked_at.is_none()
+            {
+                password.policy_checked_at = Some(now);
+            }
+        } else {
             updated.password_change_required = true;
+        }
+        // Whether the secret could serve an administrator, noted once it is seen to.
+        if let Some(password) = updated.password.as_mut()
+            && !password.admin_rule_met
+            && settings
+                .password_policy
+                .check_for(
+                    normalized.as_str(),
+                    &PasswordContext {
+                        user_name: &user.name,
+                        display_name: Some(&user.display_name),
+                        host_name: host_name.as_deref(),
+                    },
+                    true,
+                )
+                .is_empty()
+        {
+            password.admin_rule_met = true;
         }
         Ok(updated)
     }
 
-    fn check_throttle(
-        &self,
-        account: &ThrottleKey,
-        ctx: &RequestCtx,
-        policy: &LockoutPolicy,
-    ) -> Result<(), AuthError> {
-        self.throttle
-            .check(account, policy, ctx.now)
-            .map_err(throttled)?;
-        if policy.mode != LockoutMode::Off
-            && let Some(ip) = ctx.source_ip
-        {
-            self.throttle
-                .check(
-                    &ThrottleKey::source(ip),
-                    &LockoutPolicy::source_policy(),
-                    ctx.now,
-                )
-                .map_err(throttled)?;
-        }
-        Ok(())
-    }
-
-    fn stage_alarm(
+    pub(super) fn stage_alarm(
         batch: &mut WriteBatch,
         ctx: &RequestCtx,
         kind: AlarmKind,
@@ -195,6 +200,8 @@ impl AuthService {
                 MessageKey::from_static("auth.alarm.break_glass_failure")
             }
             AlarmKind::AccountLocked => MessageKey::from_static("auth.alarm.account_locked"),
+            AlarmKind::SignInFailures => MessageKey::from_static("auth.alarm.sign_in_failures"),
+            AlarmKind::PinExpired => MessageKey::from_static("auth.alarm.pin_expired"),
         };
         tracing::warn!(?kind, user = ?user, source = ?ctx.source_ip, "security alarm");
         batch.put_typed(
@@ -209,66 +216,6 @@ impl AuthService {
             },
         )?;
         Ok(())
-    }
-
-    /// Records a failed login: in memory first, then one audit record (and a lock when the
-    /// policy says so). Always answers [`AuthError::InvalidCredentials`].
-    pub(super) async fn login_failed(
-        &self,
-        ctx: &RequestCtx,
-        account: &ThrottleKey,
-        user: Option<(&UserRecord, Revision)>,
-        action: AuditAction,
-        attempted: &str,
-        policy: &LockoutPolicy,
-    ) -> AuthError {
-        let outcome = self.throttle.record_failure(account, policy, ctx.now);
-        if policy.mode != LockoutMode::Off
-            && let Some(ip) = ctx.source_ip
-        {
-            self.throttle.record_failure(
-                &ThrottleKey::source(ip),
-                &LockoutPolicy::source_policy(),
-                ctx.now,
-            );
-        }
-        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), ctx.now);
-        batch.request = Some(ctx.request);
-        let objects = user
-            .map(|(user, _)| vec![ObjectRef::from(user.id)])
-            .unwrap_or_default();
-        batch.audit(
-            AuditDraft::failed(action, objects.clone(), &AuthError::InvalidCredentials)
-                .with_source_ip(ctx.source_ip)
-                .with_context("user_name", truncated(attempted)),
-        );
-        if let (Some(until), Some((user, revision))) = (outcome.locked_until, user) {
-            let mut locked = user.clone();
-            locked.lock = Some(AccountLock {
-                since: ctx.now,
-                until,
-                until_unlock: policy.mode == LockoutMode::LockUntilUnlock,
-            });
-            batch.expect_typed(&USERS, &user.id, Some(revision));
-            if let Err(error) = batch.put_typed(&USERS, &user.id, &locked) {
-                tracing::error!(%error, "could not encode a locked user");
-            }
-            batch.audit(
-                AuditDraft::success(actions::USER_LOCK, objects)
-                    .with_source_ip(ctx.source_ip)
-                    .with_context("until", until.to_rfc3339()),
-            );
-            if outcome.alert
-                && let Err(error) =
-                    Self::stage_alarm(&mut batch, ctx, AlarmKind::AccountLocked, Some(user.id))
-            {
-                tracing::error!(%error, "could not stage an alarm");
-            }
-        }
-        if let Err(error) = self.store.propose(batch).await {
-            tracing::warn!(%error, "could not record a failed login");
-        }
-        AuthError::InvalidCredentials
     }
 
     fn find_user_versioned(
@@ -296,12 +243,20 @@ impl AuthService {
         request: &PasswordLogin,
     ) -> Result<LoginOutcome, AuthError> {
         let settings = self.settings();
-        let policy = LockoutPolicy::for_mode(settings.lockout);
-        let account = ThrottleKey::account(&truncated(&request.user_name));
-        self.check_throttle(&account, ctx, &policy)?;
-
         let view = self.view().await?;
         let found = Self::find_user_versioned(view.as_ref(), &request.user_name)?;
+        // Every check before the hash treats a known and an unknown name alike: the keys
+        // are the name as typed and the client's network, and a stored lock is found by
+        // that name whether an account carries it or not.
+        let attempt = self.attempt(
+            &request.user_name,
+            found.as_ref().map(|(user, _)| user),
+            ctx,
+            &settings,
+        );
+        self.check_attempt(view.as_ref(), &attempt, Step::Password, ctx.now)?;
+        let slot = Slot::sign_in(ctx.source_ip, attempt.known);
+
         let normalized = normalize(request.password.expose());
         let strength = hash_strength(&settings);
         // An account of an external directory has no local password, whatever its record
@@ -314,39 +269,39 @@ impl AuthService {
                 && user.password.is_some()
         });
         let Some((user, revision)) = usable else {
-            let dummy = normalized.clone();
-            blocking(move || dummy_verify(&dummy, strength)).await?;
+            self.dummy_verification(normalized.clone(), strength, slot)
+                .await?;
             return Err(self
-                .login_failed(
-                    ctx,
-                    &account,
-                    None,
-                    actions::LOGIN_PASSWORD,
-                    &request.user_name,
-                    &policy,
-                )
+                .login_failed(ctx, &attempt, None, actions::LOGIN_PASSWORD)
                 .await);
         };
-        if let Some(lock) = user.active_lock(ctx.now) {
-            return Err(AuthError::Throttled {
-                retry_after: Some(lock.until.saturating_since(ctx.now).as_secs().max(1)),
-            });
-        }
         let Some(stored) = user.password.clone() else {
             return Err(AuthError::InvalidCredentials);
         };
         let candidate = normalized.clone();
         let hash = stored.hash.clone();
-        let verified = blocking(move || verify_password(&candidate, &hash)).await??;
-        if !verified {
+        let cost = HashCost::of_hash(&hash);
+        let started = Instant::now();
+        // The gate charges what an unknown name would cost, whatever this hash costs, so
+        // whether an attempt fits the budget does not tell a known name from an unknown one.
+        let verified = self
+            .hashing(self.dummy_cost(strength), slot, move || {
+                verify_password(&candidate, &hash)
+            })
+            .await?;
+        // A stored hash weaker than the dummy's answers no sooner than an unknown name.
+        self.pad_to_dummy(started, cost, strength).await;
+        // A PIN from before the six-digit minimum whose period ended without a sign-in that
+        // confirmed it answers like a wrong one: hashed, counted and audited alike.
+        if !verified?
+            || Self::pin_expired(view.as_ref(), &stored, &settings, attempt.guarded, ctx.now)?
+        {
             return Err(self
                 .login_failed(
                     ctx,
-                    &account,
+                    &attempt,
                     Some((&user, revision)),
                     actions::LOGIN_PASSWORD,
-                    &request.user_name,
-                    &policy,
                 )
                 .await);
         }
@@ -362,6 +317,7 @@ impl AuthService {
                 normalized,
                 strength,
                 &settings,
+                ctx.now,
             )
             .await?;
         let first = match stored.kind {
@@ -400,7 +356,7 @@ impl AuthService {
             ctx,
         ));
         let session = self.complete_login(batch, &updated, secret, record).await?;
-        self.throttle.record_success(&account);
+        self.attempt_succeeded(&attempt, ctx.now);
         Ok(LoginOutcome::Session(session))
     }
 
@@ -434,13 +390,14 @@ impl AuthService {
 
     /// Takes a second-factor challenge and loads its user. The challenge is refused when
     /// the store records it as used; the returned [`StagedUse`] goes into the batch that
-    /// completes the login. A persisted lock of the account refuses the attempt as the
-    /// password step does.
+    /// completes the login. The lock checks of the password step hold here too (the waits,
+    /// the account-wide delay and the stored lock), so a challenge opened before a lock
+    /// cannot go on guessing codes.
     async fn second_factor(
         &self,
         ctx: &RequestCtx,
         challenge_id: &str,
-    ) -> Result<(Pending, StagedUse, UserRecord, Revision), AuthError> {
+    ) -> Result<(Pending, StagedUse, UserRecord, Revision, Attempt), AuthError> {
         let view = self.view().await?;
         let (pending, staged) =
             self.ceremonies
@@ -452,17 +409,15 @@ impl AuthService {
         if user.disabled || user.break_glass {
             return Err(AuthError::InvalidCredentials);
         }
-        if let Some(lock) = user.active_lock(ctx.now) {
-            return Err(AuthError::Throttled {
-                retry_after: Some(lock.until.saturating_since(ctx.now).as_secs().max(1)),
-            });
-        }
-        Ok((pending, staged, user, revision))
+        let attempt = self.attempt(&user.name, Some(&user), ctx, &self.settings());
+        self.check_attempt(view.as_ref(), &attempt, Step::SecondFactor, ctx.now)?;
+        Ok((pending, staged, user, revision, attempt))
     }
 
     /// A wrong second-factor code: the challenge stays open for a few more attempts, and the
     /// failure counts on the account's key like a wrong password, so the policy's lock is
     /// reached across challenges.
+    #[allow(clippy::too_many_arguments)]
     async fn second_factor_failed(
         &self,
         ctx: &RequestCtx,
@@ -470,6 +425,7 @@ impl AuthService {
         pending: Pending,
         user: &UserRecord,
         revision: Revision,
+        attempt: &Attempt,
         action: AuditAction,
     ) -> AuthError {
         if let Pending::SecondFactor {
@@ -489,16 +445,8 @@ impl AuthService {
                 ctx.now,
             );
         }
-        let policy = LockoutPolicy::for_mode(self.settings().lockout);
-        self.login_failed(
-            ctx,
-            &account_key(user),
-            Some((user, revision)),
-            action,
-            &user.name,
-            &policy,
-        )
-        .await
+        self.login_failed(ctx, attempt, Some((user, revision)), action)
+            .await
     }
 
     /// `POST /auth/login/totp` (IAM-06).
@@ -513,11 +461,8 @@ impl AuthService {
         user_agent: Option<&str>,
         request: &CodeLogin,
     ) -> Result<LoginOutcome, AuthError> {
-        let (pending, staged, user, revision) =
+        let (pending, staged, user, revision, attempt) =
             self.second_factor(ctx, &request.challenge_id).await?;
-        let policy = LockoutPolicy::for_mode(self.settings().lockout);
-        let account = account_key(&user);
-        self.check_throttle(&account, ctx, &policy)?;
         let Some(factor) = user.totp.clone() else {
             return Err(AuthError::TotpNotEnrolled);
         };
@@ -541,6 +486,7 @@ impl AuthService {
                     pending,
                     &user,
                     revision,
+                    &attempt,
                     actions::LOGIN_TOTP,
                 )
                 .await);
@@ -560,7 +506,7 @@ impl AuthService {
                 None,
             )
             .await?;
-        self.throttle.record_success(&account);
+        self.attempt_succeeded(&attempt, ctx.now);
         Ok(outcome)
     }
 
@@ -575,11 +521,8 @@ impl AuthService {
         user_agent: Option<&str>,
         request: &CodeLogin,
     ) -> Result<LoginOutcome, AuthError> {
-        let (pending, staged, user, revision) =
+        let (pending, staged, user, revision, attempt) =
             self.second_factor(ctx, &request.challenge_id).await?;
-        let policy = LockoutPolicy::for_mode(self.settings().lockout);
-        let account = account_key(&user);
-        self.check_throttle(&account, ctx, &policy)?;
         let Some(index) = recovery::find(request.code.expose(), &user.recovery_codes) else {
             return Err(self
                 .second_factor_failed(
@@ -588,6 +531,7 @@ impl AuthService {
                     pending,
                     &user,
                     revision,
+                    &attempt,
                     actions::LOGIN_RECOVERY,
                 )
                 .await);
@@ -608,7 +552,7 @@ impl AuthService {
                 Some(("recovery_codes_left", left.to_string())),
             )
             .await?;
-        self.throttle.record_success(&account);
+        self.attempt_succeeded(&attempt, ctx.now);
         Ok(outcome)
     }
 
@@ -771,6 +715,13 @@ impl AuthService {
         if user.disabled {
             return Err(self.webauthn_failed(ctx, Some((&user, revision))).await);
         }
+        // A passkey cannot be guessed, so it signs in through the account's lock, except
+        // where the policy says the lock holds for it too (Hardened). The break-glass
+        // account has its own rate limit.
+        let attempt = self.attempt(&user.name, Some(&user), ctx, &self.settings());
+        if !user.break_glass {
+            self.check_passkey(view.as_ref(), &attempt, ctx.now)?;
+        }
         if user.break_glass {
             self.throttle
                 .check(&break_glass_key(user.id), &break_glass_policy(), ctx.now)
@@ -840,10 +791,8 @@ impl AuthService {
             .with_context("strength", strength.as_str()),
         );
         let session = self.complete_login(batch, &user, secret, record).await?;
-        if continuation {
-            // The passkey completed a password login: the account's failures clear.
-            self.throttle.record_success(&account_key(&user));
-        }
+        // The passkey completed a login from this network: its failures there clear.
+        self.attempt_succeeded(&attempt, ctx.now);
         Ok(session)
     }
 

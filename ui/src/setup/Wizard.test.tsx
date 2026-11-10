@@ -149,6 +149,34 @@ describe("first-run wizard", () => {
     await waitFor(() => expect(blocker()).toBe(""), { timeout: 3000 });
   });
 
+  it("states the administrator rule before anything is typed and refuses a PIN in every profile", async () => {
+    await start();
+    await passWelcome();
+    fireEvent.click(screen.getByRole("radio", { name: /^Home/ }));
+    next();
+    await heading("Administrator");
+    expect(
+      screen.getByText(
+        "The administrator signs in with a password of at least 12 characters that is not digits only, in every profile. A PIN is not accepted.",
+      ),
+    ).toBeTruthy();
+    // Home's preset is the PIN preset, but the first administrator never gets a PIN.
+    expect(screen.getByLabelText("Password")).toBeTruthy();
+    type("User name", "admin1");
+    type("Display name", "Admin One");
+    type("Password", "481273");
+    await waitFor(() => expect(blocker()).toBe("The password does not meet every item on the checklist yet."), {
+      timeout: 3000,
+    });
+    type("Password", "481273905162");
+    await waitFor(() => expect(screen.getByText("Use letters as well as digits; an administrator never signs in with a PIN.")).toBeTruthy(), {
+      timeout: 3000,
+    });
+    expect(blocker()).toBe("The password does not meet every item on the checklist yet.");
+    type("Password", GOOD_PASSWORD);
+    await waitFor(() => expect(blocker()).toBe(""), { timeout: 3000 });
+  });
+
   it("generates a password that meets the policy", async () => {
     await start();
     await passWelcome();

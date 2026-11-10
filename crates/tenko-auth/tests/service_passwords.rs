@@ -185,6 +185,13 @@ async fn add_user(env: &TestEnv, name: &str, role: RoleName, password: &str) -> 
         .expect("the user is created")
 }
 
+/// A non-administrator account whose password is the PIN `ADMIN_PIN`, signed in. An
+/// administrator never has a PIN, so the PIN behavior is tried on this account.
+async fn pin_session(env: &TestEnv, admin: &NewSession, name: &str, role: RoleName) -> NewSession {
+    env.pin_user(admin, name, vec![role]).await;
+    login(env, name, ADMIN_PIN).await
+}
+
 fn change(current: Option<&str>, new: &str) -> PasswordChange {
     PasswordChange {
         current_password: current.map(SecretString::new),
@@ -198,6 +205,7 @@ fn check(password: &str) -> PasswordCheck {
         password: SecretString::new(password),
         user_name: None,
         profile: None,
+        administers: None,
     }
 }
 
@@ -472,6 +480,7 @@ async fn policy_violations_come_back_with_the_whole_list() {
             vec![
                 PolicyViolation::TooShort { min: 12 },
                 PolicyViolation::Trivial,
+                PolicyViolation::DigitsOnly,
             ],
         ),
         (
@@ -500,11 +509,12 @@ async fn policy_violations_come_back_with_the_whole_list() {
 #[tokio::test]
 async fn the_pin_preset_reports_its_own_violations() {
     let (env, session) = TestEnv::installed(Profile::Home).await;
-    let ctx = ctx(&env, &session).await;
+    let pin_session = pin_session(&env, &session, "pia", RoleName::Operator).await;
+    let ctx = ctx(&env, &pin_session).await;
     for (pin, expected) in [
-        ("12", PolicyViolation::TooShort { min: 4 }),
-        ("48a2", PolicyViolation::PinDigitsOnly),
-        ("5555", PolicyViolation::Trivial),
+        ("12", PolicyViolation::TooShort { min: 6 }),
+        ("48a261", PolicyViolation::PinDigitsOnly),
+        ("555555", PolicyViolation::Trivial),
     ] {
         let violations = violations_of(
             env.service
@@ -515,7 +525,7 @@ async fn the_pin_preset_reports_its_own_violations() {
         assert!(violations.contains(&expected), "{pin:?}: {violations:?}");
     }
     env.service
-        .change_password(&ctx, &change(Some(ADMIN_PIN), "9157"))
+        .change_password(&ctx, &change(Some(ADMIN_PIN), "915738"))
         .await
         .expect("a valid PIN");
 }
@@ -690,7 +700,8 @@ async fn a_pin_under_the_pin_preset_is_not_checked_against_the_corpus() {
     // Every short numeric code is in the corpus, so the source reports them all.
     let source = FakeSource::new(&[(PIN, 5_000_000), (LONG_CODE, 7)]);
     let (env, session) = env_with(&source, Profile::Home).await;
-    let pin_ctx = ctx(&env, &session).await;
+    let pin_session = pin_session(&env, &session, "pia", RoleName::Operator).await;
+    let pin_ctx = ctx(&env, &pin_session).await;
     let result = env
         .service
         .check_password(Some(&pin_ctx), &check(PIN))
@@ -711,11 +722,15 @@ async fn a_pin_under_the_pin_preset_is_not_checked_against_the_corpus() {
         .await
         .expect("a PIN is accepted without the corpus lookup");
     assert_eq!(changed.breach_check, BreachStatus::NotApplicable);
-    assert_eq!(
-        source.seen(),
-        Vec::<String>::new(),
-        "the PIN was never looked up"
-    );
+    // Only the administrator's password was looked up, at setup; no PIN ever was.
+    let seen = source.seen();
+    for pin in [PIN, ADMIN_PIN] {
+        assert!(
+            !seen.contains(&sha1_hex_upper(pin)[..5].to_owned()),
+            "the PIN {pin} was never looked up"
+        );
+    }
+    assert_eq!(seen.len(), 1, "{seen:?}");
 
     // A 12-digit code is no PIN: under the Standard preset it is still checked.
     let (env, session) = env_with(&source, Profile::Standard).await;
@@ -736,12 +751,13 @@ async fn a_pin_under_the_pin_preset_is_not_checked_against_the_corpus() {
 
 #[tokio::test]
 async fn the_lab_profile_reports_off_and_never_contacts_the_source() {
-    let source = FakeSource::new(&[("1357", 99)]);
+    let source = FakeSource::new(&[("135792", 99)]);
     let (env, session) = env_with(&source, Profile::Lab).await;
-    let ctx = ctx(&env, &session).await;
+    let pin_session = pin_session(&env, &session, "pia", RoleName::Operator).await;
+    let ctx = ctx(&env, &pin_session).await;
     let result = env
         .service
-        .check_password(Some(&ctx), &check("1357"))
+        .check_password(Some(&ctx), &check("135792"))
         .await
         .expect("check");
     assert!(result.acceptable);
@@ -749,7 +765,7 @@ async fn the_lab_profile_reports_off_and_never_contacts_the_source() {
     assert_eq!(result.violations, []);
     let changed = env
         .service
-        .change_password(&ctx, &change(Some(ADMIN_PIN), "1357"))
+        .change_password(&ctx, &change(Some(ADMIN_PIN), "135792"))
         .await
         .expect("a breached PIN passes while the check is off");
     assert_eq!(changed.breach_check, BreachStatus::Off);
@@ -954,15 +970,29 @@ async fn the_policy_check_is_public_before_setup_and_applies_the_profiles_preset
         password: SecretString::new(password),
         user_name: None,
         profile,
+        administers: None,
     };
     let result = env
         .service
         .check_password(None, &with_profile("abc", Some(Profile::Home)))
         .await
         .expect("check");
-    assert_eq!(result.policy, PasswordPolicy::Pin);
-    assert!(result.violations.contains(&PolicyViolation::PinDigitsOnly));
+    // Before setup the check is of the first administrator's password, which is never a
+    // PIN: the Standard preset applies under every profile.
+    assert_eq!(result.policy, PasswordPolicy::Standard);
+    assert!(
+        result
+            .violations
+            .contains(&PolicyViolation::TooShort { min: 12 })
+    );
     assert!(!result.acceptable);
+    let pin = env
+        .service
+        .check_password(None, &with_profile(ADMIN_PIN, Some(Profile::Home)))
+        .await
+        .expect("check");
+    assert!(!pin.acceptable, "a PIN is no administrator password");
+    assert!(pin.violations.contains(&PolicyViolation::DigitsOnly));
 
     let result = env
         .service
@@ -991,7 +1021,7 @@ async fn the_policy_check_is_public_before_setup_and_applies_the_profiles_preset
     assert_eq!(good.breach_check, BreachStatus::Unavailable);
     let lab = env
         .service
-        .check_password(None, &with_profile("1357", Some(Profile::Lab)))
+        .check_password(None, &with_profile("135792", Some(Profile::Lab)))
         .await
         .expect("check");
     assert_eq!(lab.breach_check, BreachStatus::Off);
@@ -1005,6 +1035,7 @@ async fn the_policy_check_is_public_before_setup_and_applies_the_profiles_preset
                 password: SecretString::new(ADMIN_PASSWORD),
                 user_name: Some("plover".to_owned()),
                 profile: None,
+                administers: None,
             },
         )
         .await
@@ -1040,6 +1071,7 @@ async fn the_policy_check_needs_a_session_after_setup() {
                 password: SecretString::new("1357"),
                 user_name: None,
                 profile: Some(Profile::Lab),
+                administers: None,
             },
         )
         .await
@@ -1307,14 +1339,14 @@ async fn hardened_keeps_a_passkey_for_administrators_and_two_factors_for_everyon
 }
 
 #[tokio::test]
-async fn an_operator_secret_makes_the_totp_of_a_pin_administrator_indispensable() {
+async fn an_operator_secret_makes_the_totp_of_a_pin_operator_indispensable() {
     let (env, setup) = TestEnv::installed(Profile::Home).await;
-    let ctx = ctx(&env, &setup).await;
-    let (seed, _) = enroll_totp(&env, &ctx).await;
-    let fresh = totp_login(&env, ADMIN, ADMIN_PIN, &seed).await;
+    let olga = pin_session(&env, &setup, "olga", RoleName::Operator).await;
+    let (seed, _) = enroll_totp(&env, &ctx(&env, &olga).await).await;
+    let fresh = totp_login(&env, "olga", ADMIN_PIN, &seed).await;
     assert_eq!(fresh.info.strength, AuthStrength::PasswordTotp);
-    // Once the vault holds an operator secret a PIN alone no longer serves an administrator
-    // (IAM-07), so the second factor is what keeps the account usable.
+    // Once the vault holds an operator secret a PIN alone no longer serves an account that
+    // may reveal it (IAM-07), so the second factor is what keeps the account usable.
     put_operator_secret(&env).await;
     assert_eq!(
         env.service
@@ -1332,8 +1364,11 @@ async fn an_operator_secret_makes_the_totp_of_a_pin_administrator_indispensable(
 #[tokio::test]
 async fn a_pin_logs_in_as_pin_and_switching_the_preset_flags_a_change() {
     let (env, session) = TestEnv::installed(Profile::Home).await;
-    assert_eq!(session.info.strength, AuthStrength::Pin);
-    let before = login(&env, ADMIN, ADMIN_PIN).await;
+    // An administrator never signs in with a PIN, not even under the PIN preset.
+    assert_eq!(session.info.strength, AuthStrength::Password);
+    let pia = pin_session(&env, &session, "pia", RoleName::Operator).await;
+    let before = login(&env, "pia", ADMIN_PIN).await;
+    assert_eq!(pia.info.strength, AuthStrength::Pin);
     assert_eq!(before.info.strength, AuthStrength::Pin);
     assert!(!before.info.flags.password_change_required);
 
@@ -1349,7 +1384,7 @@ async fn a_pin_logs_in_as_pin_and_switching_the_preset_flags_a_change() {
         )
         .await
         .expect("switch the preset");
-    let after = login(&env, ADMIN, ADMIN_PIN).await;
+    let after = login(&env, "pia", ADMIN_PIN).await;
     assert_eq!(
         after.info.strength,
         AuthStrength::Pin,
@@ -1369,15 +1404,14 @@ async fn a_pin_logs_in_as_pin_and_switching_the_preset_flags_a_change() {
         .change_password(&after_ctx, &change(Some(ADMIN_PIN), ADMIN_PASSWORD))
         .await
         .expect("change");
-    let password = login(&env, ADMIN, ADMIN_PASSWORD).await;
+    let password = login(&env, "pia", ADMIN_PASSWORD).await;
     assert_eq!(password.info.strength, AuthStrength::Password);
     assert!(!password.info.flags.password_change_required);
     assert!(matches!(
-        password_login(&env, ADMIN, ADMIN_PIN).await,
+        password_login(&env, "pia", ADMIN_PIN).await,
         Err(AuthError::InvalidCredentials)
     ));
 }
-
 #[tokio::test]
 async fn a_password_set_under_a_strong_preset_is_not_a_pin() {
     let (env, session) = TestEnv::installed(Profile::Standard).await;
@@ -1442,6 +1476,7 @@ async fn home_with_a_six_character_preset() -> (TestEnv, NewSession) {
 #[tokio::test]
 async fn a_short_numeric_secret_is_a_pin_whatever_the_preset() {
     let (env, session) = home_with_a_six_character_preset().await;
+    let pia = pin_session(&env, &session, "pia", RoleName::Operator).await;
     let mut current = ADMIN_PIN;
     let cases = [
         ("483920", AuthStrength::Pin),
@@ -1450,26 +1485,24 @@ async fn a_short_numeric_secret_is_a_pin_whatever_the_preset() {
     ];
     for (secret, strength) in cases {
         env.service
-            .change_password(&ctx(&env, &session).await, &change(Some(current), secret))
+            .change_password(&ctx(&env, &pia).await, &change(Some(current), secret))
             .await
             .expect("change");
-        let again = login(&env, ADMIN, secret).await;
+        let again = login(&env, "pia", secret).await;
         assert_eq!(again.info.strength, strength, "{secret}");
         current = secret;
     }
 }
 
 #[tokio::test]
-async fn a_short_numeric_secret_does_not_administer_once_the_vault_holds_a_secret() {
+async fn a_short_numeric_secret_does_not_serve_an_operator_once_the_vault_holds_a_secret() {
     let (env, session) = home_with_a_six_character_preset().await;
+    let pia = pin_session(&env, &session, "pia", RoleName::Operator).await;
     env.service
-        .change_password(
-            &ctx(&env, &session).await,
-            &change(Some(ADMIN_PIN), "483920"),
-        )
+        .change_password(&ctx(&env, &pia).await, &change(Some(ADMIN_PIN), "483920"))
         .await
         .expect("change");
-    let numeric = login(&env, ADMIN, "483920").await;
+    let numeric = login(&env, "pia", "483920").await;
     put_operator_secret(&env).await;
     assert!(matches!(
         env.service.list_users(&ctx(&env, &numeric).await).await,
@@ -1483,11 +1516,11 @@ async fn a_short_numeric_secret_does_not_administer_once_the_vault_holds_a_secre
         )
         .await
         .expect("change");
-    let mixed = login(&env, ADMIN, "ab3d9x").await;
+    let mixed = login(&env, "pia", "ab3d9x").await;
     env.service
         .list_users(&ctx(&env, &mixed).await)
         .await
-        .expect("a password session administers");
+        .expect("a password session is served");
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1640,10 +1673,10 @@ async fn a_password_change_removes_the_other_factors_when_asked() {
 #[tokio::test]
 async fn setting_a_first_password_needs_a_fresh_session() {
     let (env, _) = TestEnv::installed(Profile::Home).await;
-    let pia = add_user(&env, "pia", RoleName::Operator, "5827").await;
-    let old = login(&env, "pia", "5827").await;
+    let pia = add_user(&env, "pia", RoleName::Operator, "582741").await;
+    let old = login(&env, "pia", "582741").await;
     env.clock.advance(Duration::from_secs(6 * 60));
-    let recent = login(&env, "pia", "5827").await;
+    let recent = login(&env, "pia", "582741").await;
     // The account loses its password, as one that signs in another way has none.
     let view = env.store.read(ReadConsistency::Local).await.expect("view");
     let (mut record, _) = view
@@ -1662,13 +1695,13 @@ async fn setting_a_first_password_needs_a_fresh_session() {
 
     assert_eq!(
         env.service
-            .change_password(&ctx(&env, &old).await, &change(None, "5820"))
+            .change_password(&ctx(&env, &old).await, &change(None, "582096"))
             .await
             .expect_err("stale"),
         AuthError::StepUpRequired { required: "fresh" }
     );
     env.service
-        .change_password(&ctx(&env, &recent).await, &change(None, "5820"))
+        .change_password(&ctx(&env, &recent).await, &change(None, "582096"))
         .await
         .expect("fresh");
     // The first password is audited as a change, and the refusal before it was not one.
@@ -1690,6 +1723,8 @@ async fn setting_a_first_password_needs_a_fresh_session() {
 #[tokio::test]
 async fn wrong_current_passwords_are_audited_and_the_lock_is_stored() {
     let (env, session) = TestEnv::installed(Profile::Standard).await;
+    // A second administrator: the network never locks the last one.
+    env.add_admin("boris", FRESH_PASSPHRASE).await;
     let user = session.info.user.id;
     let mut wrong = 0;
     for _ in 0..60 {
@@ -1739,10 +1774,12 @@ async fn wrong_current_passwords_are_audited_and_the_lock_is_stored() {
 #[tokio::test]
 async fn failed_sign_ins_and_wrong_current_passwords_share_one_lock() {
     let (env, session) = TestEnv::installed(Profile::Standard).await;
+    // A second administrator: the network never locks the last one.
+    env.add_admin("boris", FRESH_PASSPHRASE).await;
     let user = session.info.user.id;
     // Half of the failures are sign-ins.
     let mut failures = 0;
-    while failures < 5 {
+    while failures < 4 {
         match password_login(&env, ADMIN, "not the password").await {
             Err(AuthError::InvalidCredentials) => failures += 1,
             Err(AuthError::Throttled { retry_after }) => {
@@ -1838,15 +1875,15 @@ async fn stored_password(
 #[tokio::test]
 async fn a_directory_account_cannot_be_given_a_local_password() {
     let (env, admin_session) = TestEnv::installed(Profile::Home).await;
-    let dora = add_user(&env, "dora", RoleName::Operator, "5827").await;
-    let session = login(&env, "dora", "5827").await;
+    let dora = add_user(&env, "dora", RoleName::Operator, "582741").await;
+    let session = login(&env, "dora", "582741").await;
     make_external(&env, dora.id, None).await;
     let own = ctx(&env, &session).await;
-    for current in [None, Some("5827")] {
+    for current in [None, Some("582741")] {
         assert!(
             matches!(
                 env.service
-                    .change_password(&own, &change(current, "5820"))
+                    .change_password(&own, &change(current, "582096"))
                     .await,
                 Err(AuthError::Invalid {
                     field: "new_password",
@@ -1863,7 +1900,7 @@ async fn a_directory_account_cannot_be_given_a_local_password() {
                 &admin,
                 dora.id,
                 &tenko_auth::service::UserUpdate {
-                    password: Some(SecretString::new("5820")),
+                    password: Some(SecretString::new("582096")),
                     ..tenko_auth::service::UserUpdate::default()
                 },
                 None,
@@ -1882,11 +1919,11 @@ async fn a_directory_account_cannot_be_given_a_local_password() {
 #[tokio::test]
 async fn a_directory_account_never_signs_in_with_a_local_password() {
     let (env, _) = TestEnv::installed(Profile::Home).await;
-    let dora = add_user(&env, "dora", RoleName::Operator, "5827").await;
+    let dora = add_user(&env, "dora", RoleName::Operator, "582741").await;
     let forced = stored_password(&env, dora.id).await;
     assert!(forced.is_some());
     make_external(&env, dora.id, forced).await;
-    let refused = password_login(&env, "dora", "5827")
+    let refused = password_login(&env, "dora", "582741")
         .await
         .expect_err("the right local password");
     let wrong = password_login(&env, "dora", "0000")
@@ -1902,26 +1939,29 @@ async fn a_directory_account_never_signs_in_with_a_local_password() {
 #[tokio::test]
 async fn a_stored_lock_holds_for_a_password_change() {
     let (env, session) = TestEnv::installed(Profile::Standard).await;
-    let user = session.info.user.id;
-    let view = env.store.read(ReadConsistency::Local).await.expect("view");
-    let (mut record, _) = view
-        .get_typed(&tenko_auth::model::USERS, &user)
-        .expect("read")
-        .expect("the user");
-    record.lock = Some(tenko_auth::model::AccountLock {
-        since: env.now(),
-        until: env
-            .now()
-            .checked_add(Duration::from_secs(900))
-            .expect("time"),
-        until_unlock: false,
-    });
+    // A second administrator: the network never locks the last one.
+    env.add_admin("boris", FRESH_PASSPHRASE).await;
     let mut batch = tenko_store::WriteBatch::new(
         tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
         env.now(),
     );
     batch
-        .put_typed(&tenko_auth::model::USERS, &user, &record)
+        .put_typed(
+            &tenko_auth::model::LOCKS,
+            &(
+                tenko_auth::testing::env::ADMIN.to_owned(),
+                tenko_auth::testing::env::CLIENT.to_owned(),
+            ),
+            &tenko_auth::model::AccountLock {
+                since: env.now(),
+                until: env
+                    .now()
+                    .checked_add(Duration::from_secs(900))
+                    .expect("time"),
+                until_unlock: false,
+                network: Some(tenko_auth::testing::env::CLIENT.to_owned()),
+            },
+        )
         .expect("encode");
     env.store.propose(batch).await.expect("commit");
     let own = ctx(&env, &session).await;

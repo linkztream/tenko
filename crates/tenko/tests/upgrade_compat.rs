@@ -229,6 +229,10 @@ fn every_earlier_format_opens_with_its_objects() {
     );
 }
 
+/// The password of the administrator in the stored fixtures, which were written when a
+/// PIN was allowed for an administrator.
+const FIXTURE_PASSWORD: &str = "739153";
+
 fn dir_size(dir: &Path) -> u64 {
     fs::read_dir(dir).map_or(0, |entries| {
         entries
@@ -277,7 +281,14 @@ fn opens(format: u64, current: u64) -> bool {
 
     let mut server = node.start();
     let mut api = Api::new(&node);
-    api.login_password();
+    api.login_password_with(FIXTURE_PASSWORD);
+    // The stored administrator has a PIN, which the administrator rule no longer allows: the
+    // account must change it before anything else is open to it.
+    api.post_unkeyed(
+        "/auth/password",
+        &json!({ "current_password": FIXTURE_PASSWORD, "new_password": serve_support::PASSWORD }),
+    )
+    .expect(200);
     assert_eq!(
         objects(&api),
         expected["objects"],

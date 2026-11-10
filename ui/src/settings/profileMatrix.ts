@@ -8,6 +8,7 @@ import type { MfaRequirement, PasswordPolicy, Profile, SecuritySettings, Securit
 import {
   AUDIT_EXPORT_DEFAULT,
   auditExportOf,
+  lockoutOf,
   REVEAL_DEFAULT,
   revealOf,
   TOGGLES,
@@ -80,6 +81,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
 export function valueOf(settings: SecuritySettings, setting: ToggleSetting): unknown {
   if (setting === "audit_export") return auditExportOf(settings);
   if (setting === "updates") return updatesOf(settings);
+  if (setting === "lockout") return lockoutOf(settings);
   if (setting === "secret_reveal") return revealOf(settings);
   return setting === "token_max_days" ? (settings.token_max_days ?? null) : settings[setting];
 }

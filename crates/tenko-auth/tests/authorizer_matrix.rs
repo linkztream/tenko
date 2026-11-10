@@ -18,7 +18,7 @@ use tenko_core::{
 use tenko_vault::{SecretBytes, SecretPurpose, SecretSpec, Vault};
 
 const PASSPHRASE: &str = "marble comet violin saffron";
-const PIN: &str = "7391";
+const PIN: &str = "593618";
 
 const ACTIONS: [Action; 8] = [
     Action::Read,
@@ -521,7 +521,11 @@ async fn real_password_sessions_meet_or_miss_the_profile() {
     );
 
     let home = fixture(Profile::Home).await;
-    assert_eq!(home.admin.strength(), Some(AuthStrength::Pin));
+    // An administrator never signs in with a PIN, so the administrator's session is a
+    // password session even under Home; the others sign in with PINs.
+    assert_eq!(home.admin.strength(), Some(AuthStrength::Password));
+    assert_eq!(home.operator.strength(), Some(AuthStrength::Pin));
+    assert_eq!(home.viewer.strength(), Some(AuthStrength::Pin));
     for principal in [&home.admin, &home.operator, &home.viewer] {
         assert!(decide(&home, principal, Action::Read, ObjectKind::Prefix).is_ok());
     }
@@ -601,22 +605,24 @@ async fn an_operator_secret_ends_pin_only_administration_in_home_and_lab() {
 }
 
 #[tokio::test]
-async fn the_real_service_refuses_a_pin_administrator_once_the_vault_holds_a_secret() {
+async fn the_real_service_refuses_a_pin_session_once_the_vault_holds_a_secret() {
     let f = fixture(Profile::Home).await;
     let ctx = f.env.session_ctx(&f.admin_session).await.expect("ctx");
-    f.env.service.list_users(&ctx).await.expect("allowed first");
-    put_operator_secret(&f).await;
-    match f.env.service.list_users(&ctx).await {
-        Err(AuthError::Denied(denied)) => assert_eq!(
-            denied.reason,
-            DenyReason::StepUpRequired {
-                required: AuthStrength::Password
-            }
-        ),
-        other => panic!("expected a step-up refusal, got {other:?}"),
-    }
-    // Operators may reveal operator secrets, so their PIN sessions end the same way.
     let operator = f.env.session_ctx(&f.operator_session).await.expect("ctx");
+    f.env.service.list_users(&ctx).await.expect("allowed first");
+    f.env
+        .service
+        .list_users(&operator)
+        .await
+        .expect("allowed first for the operator");
+    put_operator_secret(&f).await;
+    // The administrator signs in with a password, which the secret does not outdate.
+    f.env
+        .service
+        .list_users(&ctx)
+        .await
+        .expect("a password session still administers");
+    // Operators may reveal operator secrets, so their PIN sessions end.
     match f.env.service.list_users(&operator).await {
         Err(AuthError::Denied(denied)) => assert_eq!(
             denied.reason,
@@ -865,19 +871,24 @@ async fn a_role_change_takes_effect_with_its_commit() {
         ObjectKind::Prefix,
         true,
     );
-    f.env
+    // The account signs in with a PIN, which an administrator never may.
+    match f
+        .env
         .service
         .set_user_roles(&admin, id, &[RoleName::Admin], None)
         .await
-        .expect("promote");
+    {
+        Err(AuthError::Invalid { field: "roles", .. }) => {}
+        other => panic!("expected a refusal of the admin role for a PIN account, got {other:?}"),
+    }
     let strong = with_strength(&f.operator, AuthStrength::HardwareKey);
     assert_decision(
         &f,
-        "promoted",
+        "refused",
         &strong,
         Action::Administer,
         ObjectKind::User,
-        true,
+        false,
     );
 }
 

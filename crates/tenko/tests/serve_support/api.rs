@@ -327,9 +327,16 @@ impl Api {
     /// is complete. Returns the answer (`authenticated` or `second_factor`).
     #[track_caller]
     pub fn login_password(&mut self) -> Value {
+        self.login_password_with(PASSWORD)
+    }
+
+    /// The password step of a login as the administrator with `password`, for a data
+    /// directory that another version of the tests set up.
+    #[track_caller]
+    pub fn login_password_with(&mut self, password: &str) -> Value {
         let reply = self.post_unkeyed(
             "/auth/login/password",
-            &json!({ "user_name": ADMIN, "password": PASSWORD }),
+            &json!({ "user_name": ADMIN, "password": password }),
         );
         let body = reply.expect(200);
         self.keep_cookie(&reply);

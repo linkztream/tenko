@@ -28,7 +28,7 @@ use tenko_auth::{
     settings::Profile,
     testing::{
         TestEnv,
-        env::{ADMIN, ADMIN_PIN, HOST},
+        env::{ADMIN, ADMIN_PASSWORD, HOST},
     },
 };
 use tenko_core::{
@@ -541,7 +541,7 @@ impl Rig {
                     admin: SetupAdmin {
                         name: ADMIN.to_owned(),
                         display_name: None,
-                        password: SecretString::new(ADMIN_PIN),
+                        password: SecretString::new(ADMIN_PASSWORD),
                     },
                     host_name: HOST.to_owned(),
                     language: "en".to_owned(),

@@ -74,6 +74,14 @@ export function fieldMessages(err: unknown, field: string): string[] {
   return err.fieldErrors.filter((fe) => fe.field === field).map((fe) => fieldErrorMessage(fe));
 }
 
+/** What the server said about one request field, as it said it (its detail), or the catalog message of the field error. */
+export function fieldRefusal(err: unknown, field: string): string | undefined {
+  if (!(err instanceof ApiError)) return undefined;
+  const fe = err.field(field);
+  if (!fe) return undefined;
+  return err.detail || fieldErrorMessage(fe);
+}
+
 /** After a refused change because someone else changed the same thing: the page has reloaded it. */
 export function ReloadedNote(props: { error: unknown }) {
   return (

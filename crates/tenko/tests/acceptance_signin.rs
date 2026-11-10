@@ -1,8 +1,9 @@
 //! Exit criterion E2 (IAM-03, IAM-06, IAM-09, OPS-22): signing in to a real `tenko serve`,
 //! through the public API, the way the sign-in page does.
 //!
-//! 1. The PIN preset of the Home profile end to end (IAM-03): setup with the PIN, sign out,
-//!    sign in with the PIN, and a wrong PIN refused with `auth.invalid_credentials`.
+//! 1. The PIN preset of the Home profile end to end (IAM-03): setup with a password (an
+//!    administrator never has a PIN), a person with a PIN signs in, and a wrong PIN is
+//!    refused with `auth.invalid_credentials`.
 //! 2. TOTP end to end (IAM-06): enroll an authenticator app, sign out, sign in with the
 //!    password and a code, and a wrong code and a replayed code refused.
 //! 3. A passkey in each TLS mode the harness can start (IAM-06, OPS-22), with the software
@@ -41,7 +42,14 @@ use tenko_auth::{
 /// The origin of the browser in the reverse-proxy mode: the public name, no port.
 const PUBLIC_ORIGIN: &str = "https://localhost";
 
-/// A PIN that is not the administrator's.
+/// The person with a PIN, who is not an administrator.
+const PERSON: &str = "pia";
+
+/// The PIN the administrator gives the person, and the one the person chooses.
+const INITIAL_PIN: &str = "482917";
+const PERSON_PIN: &str = "915372";
+
+/// A PIN that is not the person's.
 const WRONG_PIN: &str = "000001";
 
 /// The way a browser reaches the node.
@@ -157,9 +165,14 @@ impl Browser {
 
     /// The password step of a login as the administrator.
     fn password_step(&mut self, password: &str) -> Reply {
+        self.password_step_as(ADMIN, password)
+    }
+
+    /// The password step of a login as `name`.
+    fn password_step_as(&mut self, name: &str, password: &str) -> Reply {
         self.post(
             "/auth/login/password",
-            &json!({ "user_name": ADMIN, "password": password }),
+            &json!({ "user_name": name, "password": password }),
         )
     }
 
@@ -193,8 +206,8 @@ impl Browser {
     }
 }
 
-/// Starts a node on `transport`, completes first-run setup under the Home profile with the
-/// PIN, and returns the browser signed in by setup.
+/// Starts a node on `transport`, completes first-run setup under the Home profile with
+/// the administrator's password, and returns the browser signed in by setup.
 fn installed(transport: Transport) -> (Node, Proc, Api) {
     let mut node = Node::new().with_transport(transport);
     let server = node.start();
@@ -231,17 +244,18 @@ fn assert_session_cookie_flags(reply: &Reply) {
     }
 }
 
-/// IAM-03, E2: the PIN preset of the Home profile, end to end. A PIN is the administrator's
-/// password; sign-in with it gives a session of PIN strength, and a wrong PIN is refused with
-/// the documented code and no session.
+/// IAM-03, E2: the PIN preset of the Home profile, end to end. The administrator never has
+/// a PIN, in any profile: setup signs it in with a password. A person who is not an
+/// administrator signs in with a PIN of at least six digits and gets a session of PIN
+/// strength, and a wrong PIN is refused with the documented code and no session.
 #[test]
 fn e2_iam_03_the_pin_preset_signs_in_and_a_wrong_pin_is_refused() {
     let (node, _server, api) = installed(Transport::Plain);
     let mut browser = Browser::direct(api);
 
-    // Setup signed the administrator in with the PIN.
+    // Setup signed the administrator in with a password, not a PIN.
     let session = browser.session();
-    assert_eq!(session["strength"], "pin", "{session}");
+    assert_eq!(session["strength"], "password", "{session}");
     assert_eq!(session["profile"], "home", "{session}");
     assert_eq!(session["user"]["name"], ADMIN, "{session}");
     let settings = browser.get("/settings/security").expect(200);
@@ -250,26 +264,50 @@ fn e2_iam_03_the_pin_preset_signs_in_and_a_wrong_pin_is_refused() {
         "the Home profile selects the PIN preset (TGL-01): {settings}"
     );
 
-    // The preset accepts digits only.
-    let letters = browser
-        .post(
-            "/auth/password/check",
-            &json!({ "password": "a long passphrase with words" }),
-        )
-        .expect(200);
+    // The preset accepts digits only, six at least, from a person who is not an
+    // administrator.
+    let check = |browser: &mut Browser, password: &str, administers: bool| {
+        browser
+            .post(
+                "/auth/password/check",
+                &json!({ "password": password, "administers": administers }),
+            )
+            .expect(200)
+    };
+    let letters = check(&mut browser, "a long passphrase with words", false);
     assert_eq!(letters["acceptable"], false, "{letters}");
     assert_eq!(letters["policy"]["preset"], "pin", "{letters}");
-    let digits = browser
-        .post("/auth/password/check", &json!({ "password": "482916" }))
-        .expect(200);
+    let short = check(&mut browser, "4829", false);
+    assert_eq!(short["acceptable"], false, "{short}");
+    let digits = check(&mut browser, "482916", false);
     assert_eq!(digits["acceptable"], true, "{digits}");
+    // The same six digits are refused for an administrator.
+    let digits = check(&mut browser, "482916", true);
+    assert_eq!(digits["acceptable"], false, "{digits}");
 
-    // Sign out; the session is gone.
+    // The administrator creates a person with a PIN, who chooses their own at the first
+    // sign-in (the PIN the administrator gave is a one-time secret).
+    browser
+        .api
+        .post(
+            "/users",
+            &json!({ "name": PERSON, "password": INITIAL_PIN, "roles": ["operator"] }),
+        )
+        .expect(201);
+    browser.sign_out();
+    browser.assert_signed_out();
+    browser.password_step_as(PERSON, INITIAL_PIN).expect(200);
+    browser
+        .post(
+            "/auth/password",
+            &json!({ "current_password": INITIAL_PIN, "new_password": PERSON_PIN }),
+        )
+        .expect(200);
     browser.sign_out();
     browser.assert_signed_out();
 
     // A wrong PIN is refused with the documented code, and sets no session.
-    let wrong = browser.password_step(WRONG_PIN);
+    let wrong = browser.password_step_as(PERSON, WRONG_PIN);
     assert_eq!(wrong.status, 401, "a wrong PIN: {}", wrong.text);
     assert_eq!(wrong.code().as_deref(), Some("auth.invalid_credentials"));
     assert!(
@@ -279,16 +317,16 @@ fn e2_iam_03_the_pin_preset_signs_in_and_a_wrong_pin_is_refused() {
     browser.assert_signed_out();
 
     // The right PIN signs in, with PIN strength, one failure later.
-    let step = browser.password_step(PASSWORD);
+    let step = browser.password_step_as(PERSON, PERSON_PIN);
     let body = step.expect(200);
     assert_eq!(body["status"], "authenticated", "{body}");
     assert_eq!(body["session"]["strength"], "pin", "{body}");
     assert_session_cookie_flags(&step);
     let session = browser.session();
     assert_eq!(session["strength"], "pin", "{session}");
-    assert_eq!(session["user"]["name"], ADMIN, "{session}");
+    assert_eq!(session["user"]["name"], PERSON, "{session}");
 
-    // The command-line client signs in with the same PIN.
+    // The command-line client signs in as the administrator with the password.
     node.login().assert_code(0);
 }
 
@@ -478,7 +516,7 @@ fn e2_ops_22_iam_06_a_passkey_signs_in_behind_a_reverse_proxy() {
 
     // Setup left a session cookie in the client; use it behind the proxy.
     let session = browser.session();
-    assert_eq!(session["strength"], "pin", "{session}");
+    assert_eq!(session["strength"], "password", "{session}");
     passkey_round_trip(browser);
 }
 

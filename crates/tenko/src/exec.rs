@@ -17,7 +17,7 @@
 //!
 //! The commands covered are the ones that open the store or write under the data
 //! directory with the server stopped: `backup restore`, `backup create` of a stopped node
-//! (`--config` or `--data-dir`), `backup verify` (its work directory), `kek rotate`,
+//! (`--config` or `--data-dir`), `backup verify` (its work directory), `kek rotate`, `user unlock`,
 //! `upgrade check` and `upgrade layout`. `tenko serve` is not among them: the unit and
 //! the Windows service run it as the service account, and a container runs it as the
 //! owner of its own files.
@@ -29,6 +29,7 @@ use std::{
 
 use crate::{
     Cli, Command, backup::BackupCommand, config, kek::KekCommand, upgrade::UpgradeCommand,
+    user::UserCommand,
 };
 
 /// The error code of the refusal.
@@ -187,6 +188,13 @@ pub fn offline_paths(cli: &Cli) -> Option<Vec<PathBuf>> {
         } => paths.extend(args.work_dir.clone()),
         Command::Kek {
             action: KekCommand::Rotate(args),
+        } => {
+            if let Some(resolved) = data_dir(&args.config, &args.data_dir) {
+                paths.push(resolved.data_dir);
+            }
+        }
+        Command::User {
+            action: UserCommand::Unlock(args),
         } => {
             if let Some(resolved) = data_dir(&args.config, &args.data_dir) {
                 paths.push(resolved.data_dir);
@@ -496,6 +504,38 @@ mod tests {
         assert_eq!(line.lines().count(), 1, "{line}");
         #[cfg(unix)]
         assert!(line.contains(&refusal.as_owner()), "{line}");
+    }
+
+    #[test]
+    fn the_offline_unlock_runs_as_the_account_never_as_root_over_its_files() {
+        let (_dir, data) = data_dir();
+        let data_arg = data.to_str().expect("UTF-8");
+        let args = ["user", "unlock", "admin", "--data-dir", data_arg];
+        let cli = parse(&args);
+        let refusal = check(
+            &cli,
+            &facts(Some(true), root(), &data, account()),
+            &arguments(&args),
+        )
+        .expect("refused as root");
+        assert_eq!(refusal.command, "user unlock");
+        assert_eq!(refusal.path, data);
+        assert_eq!(
+            refusal.as_owner(),
+            format!(
+                "runuser -u tenko -- tenko user unlock admin --data-dir {}",
+                shell_word(data_arg)
+            )
+        );
+        // The account itself runs it.
+        assert!(
+            check(
+                &cli,
+                &facts(Some(false), account(), &data, account()),
+                &arguments(&args)
+            )
+            .is_none()
+        );
     }
 
     #[test]

@@ -96,6 +96,8 @@ const completeSetup = route("post", "/api/v1/setup", async (ctx) => {
     userName: name,
     displayName,
     hostName,
+    // The first administrator signs in with a password of at least 12 characters that is not digits only.
+    administers: true,
   });
   if (!check.acceptable) failPolicy("admin.password", check.violations);
 
@@ -128,7 +130,7 @@ const completeSetup = route("post", "/api/v1/setup", async (ctx) => {
   commit("admin", { objects: [{ kind: "user", id }], tables: ["auth.users", "auth.settings", "sys.installation"] }, [user]);
   db.settingsRevision = db.revision;
 
-  const session = startSession(user, passwordStrength(settings));
+  const session = startSession(user, passwordStrength(settings, password));
   const caFingerprint = tlsMode === "internal_ca" ? MOCK_CA_FINGERPRINT : null;
   // The document answers with the session; the fingerprint is a proposed extra.
   const result: SetupResult = { ...sessionInfo(session, user), ca_fingerprint: caFingerprint };

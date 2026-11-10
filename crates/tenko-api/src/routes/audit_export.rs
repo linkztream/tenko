@@ -390,7 +390,7 @@ mod tests {
 
     use super::super::auth::testkit::{Credential::*, Harness, Reply};
 
-    const PIN: &str = "7391";
+    const PIN: &str = "739158";
     const SETTINGS: &str = "/settings/audit-export";
 
     /// The installation with an administrator and, optionally, the export service.

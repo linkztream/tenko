@@ -12,13 +12,22 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{hibp::BreachMode, lockout::LockoutMode, password::policy::PasswordPolicy};
+use crate::{
+    hibp::BreachMode,
+    lockout::{LockPolicy, LockoutMode},
+    password::policy::PasswordPolicy,
+};
 
 /// The longest session lifetime TGL-04 accepts: one year.
 pub const MAX_SESSION_SECS: u64 = 366 * 86_400;
 
 /// The largest TGL-05 maximum (100 years); beyond it, use `unlimited`.
 pub const MAX_TOKEN_DAYS: u32 = 36_500;
+
+/// The default of [`SecuritySettings::unconfirmed_pin_days`].
+pub const DEFAULT_UNCONFIRMED_PIN_DAYS: u32 = 30;
+/// The longest period [`SecuritySettings::unconfirmed_pin_days`] accepts.
+pub const MAX_UNCONFIRMED_PIN_DAYS: u32 = 365;
 
 /// A security profile (API-10).
 #[derive(
@@ -67,6 +76,8 @@ impl Profile {
                 token_max_days: Some(365),
                 breach_check: BreachMode::Online,
                 lockout: LockoutMode::ProgressiveDelay,
+                lockout_policy: Some(LockPolicy::default()),
+                unconfirmed_pin_days: Some(DEFAULT_UNCONFIRMED_PIN_DAYS),
                 updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
                 audit_export: Some(AuditExport::Local),
@@ -83,6 +94,8 @@ impl Profile {
                 token_max_days: Some(90),
                 breach_check: BreachMode::Online,
                 lockout: LockoutMode::DelayThenTemporaryLock,
+                lockout_policy: Some(LockPolicy::default()),
+                unconfirmed_pin_days: Some(DEFAULT_UNCONFIRMED_PIN_DAYS),
                 updates: Some(UpdatePolicy::new(UpdateInstall::UiStepUp)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Fresh, false)),
                 audit_export: Some(AuditExport::Optional),
@@ -99,6 +112,8 @@ impl Profile {
                 token_max_days: Some(30),
                 breach_check: BreachMode::OfflinePreferred,
                 lockout: LockoutMode::LockUntilUnlock,
+                lockout_policy: Some(LockPolicy::hardened()),
+                unconfirmed_pin_days: Some(DEFAULT_UNCONFIRMED_PIN_DAYS),
                 updates: Some(UpdatePolicy::new(UpdateInstall::UploadOnly)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Passkey, true)),
                 audit_export: Some(AuditExport::Required),
@@ -115,6 +130,8 @@ impl Profile {
                 token_max_days: None,
                 breach_check: BreachMode::Off,
                 lockout: LockoutMode::Off,
+                lockout_policy: Some(LockPolicy::default()),
+                unconfirmed_pin_days: Some(DEFAULT_UNCONFIRMED_PIN_DAYS),
                 updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
                 audit_export: Some(AuditExport::Local),
@@ -279,6 +296,17 @@ pub struct SecuritySettings {
     pub breach_check: BreachMode,
     /// TGL-07: lockout.
     pub lockout: LockoutMode,
+    /// TGL-07: the numbers of the lock. `None` in settings stored before they could be
+    /// set: the profile's value applies ([`SecuritySettings::lockout_policy`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lockout_policy: Option<LockPolicy>,
+    /// Days a PIN stored before the six-digit minimum keeps working without a sign-in that
+    /// shows it meets the policy, counted from the upgrade (1 to 365). Afterwards it is
+    /// refused like a wrong PIN until an administrator resets it, or, for the last
+    /// administrator, until `tenko user unlock` on the host starts a new period. `None` in
+    /// settings stored before the rule: 30 days.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unconfirmed_pin_days: Option<u32>,
     /// TGL-23: the in-app update check and install. `None` in settings stored before the
     /// toggle existed: the profile's value applies ([`SecuritySettings::updates`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -324,6 +352,32 @@ impl SecuritySettings {
         self.updates
             .or_else(|| self.profile.defaults().updates)
             .unwrap_or(UpdatePolicy::new(UpdateInstall::UiStepUp))
+    }
+
+    /// The effective period of an unconfirmed PIN from before the six-digit minimum.
+    pub fn unconfirmed_pin_days(&self) -> u32 {
+        self.unconfirmed_pin_days
+            .unwrap_or(DEFAULT_UNCONFIRMED_PIN_DAYS)
+    }
+
+    /// The effective lock policy of TGL-07: the stored one, else the profile's.
+    pub fn lockout_policy(&self) -> LockPolicy {
+        self.lockout_policy
+            .clone()
+            .or_else(|| self.profile.defaults().lockout_policy)
+            .unwrap_or_default()
+    }
+
+    /// The value TGL-07 reports: the mode with the numbers of the lock.
+    fn lockout_toggle(&self) -> serde_json::Value {
+        let mut value = serde_json::to_value(self.lockout_policy()).unwrap_or_default();
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "mode".to_owned(),
+                serde_json::Value::String(self.lockout.as_str().to_owned()),
+            );
+        }
+        value
     }
 
     /// The effective TGL-21 value: the stored one, else the profile's.
@@ -402,12 +456,15 @@ impl SecuritySettings {
                 json(serde_json::to_value(profile.breach_check)),
                 self.breach_check == BreachMode::Off && home.breach_check != BreachMode::Off,
             ),
+            // Weaker than Home: no lockout at all, more attempts or shorter waits and locks
+            // than Home's, or no account-wide delay where Home has one.
             entry(
                 "TGL-07",
                 "lockout",
-                json(serde_json::to_value(self.lockout)),
-                json(serde_json::to_value(profile.lockout)),
-                self.lockout == LockoutMode::Off && home.lockout != LockoutMode::Off,
+                self.lockout_toggle(),
+                profile.lockout_toggle(),
+                (self.lockout == LockoutMode::Off && home.lockout != LockoutMode::Off)
+                    || self.lockout_policy().weaker_than(&home.lockout_policy()),
             ),
             // Home keeps the audit log local, the weakest value, so no value is weaker.
             entry(
@@ -462,6 +519,18 @@ impl SecuritySettings {
     /// [`crate::AuthError::Invalid`] naming the setting.
     pub fn validate(&self) -> Result<(), crate::AuthError> {
         self.password_policy.validate()?;
+        if let Some(policy) = &self.lockout_policy {
+            policy.validate()?;
+        }
+        if self
+            .unconfirmed_pin_days
+            .is_some_and(|days| days == 0 || days > MAX_UNCONFIRMED_PIN_DAYS)
+        {
+            return Err(crate::AuthError::invalid(
+                "unconfirmed_pin_days",
+                "the period must be 1 to 365 days",
+            ));
+        }
         if self.session.absolute_secs == 0
             || self.session.idle_secs == 0
             || self.session.idle_secs > self.session.absolute_secs
@@ -524,6 +593,12 @@ pub struct SettingsPatch {
     /// TGL-07.
     #[serde(default)]
     pub lockout: Option<LockoutMode>,
+    /// TGL-07: the numbers of the lock.
+    #[serde(default)]
+    pub lockout_policy: Option<LockPolicy>,
+    /// The period of an unconfirmed PIN from before the six-digit minimum, in days.
+    #[serde(default)]
+    pub unconfirmed_pin_days: Option<u32>,
     /// TGL-23.
     #[serde(default)]
     pub updates: Option<UpdatePolicy>,
@@ -575,6 +650,12 @@ impl SettingsPatch {
         if let Some(mode) = self.lockout {
             next.lockout = mode;
         }
+        if let Some(policy) = &self.lockout_policy {
+            next.lockout_policy = Some(policy.clone());
+        }
+        if let Some(days) = self.unconfirmed_pin_days {
+            next.unconfirmed_pin_days = Some(days);
+        }
         if let Some(updates) = self.updates {
             next.updates = Some(updates);
         }
@@ -601,6 +682,14 @@ pub fn changes(
             field: "profile".to_owned(),
             old: Some(old.profile.as_str().to_owned()),
             new: Some(new.profile.as_str().to_owned()),
+        });
+    }
+    if old.unconfirmed_pin_days() != new.unconfirmed_pin_days() {
+        changes.push(tenko_core::audit::FieldChange {
+            object: None,
+            field: "unconfirmed_pin_days".to_owned(),
+            old: Some(old.unconfirmed_pin_days().to_string()),
+            new: Some(new.unconfirmed_pin_days().to_string()),
         });
     }
     for (before, after) in old.toggles().into_iter().zip(new.toggles()) {
@@ -738,7 +827,74 @@ mod tests {
         let fields: Vec<&str> = audit.iter().map(|change| change.field.as_str()).collect();
         assert!(fields.contains(&"profile"));
         assert!(fields.contains(&"TGL-01"));
-        assert!(!fields.contains(&"TGL-07"));
+        // The mode stayed, but Hardened's lock also holds for a passkey.
+        assert!(fields.contains(&"TGL-07"));
+        assert!(next.lockout_policy().passkey_holds_lock);
+    }
+
+    #[test]
+    fn the_lock_policy_follows_the_profile_and_reports_with_its_mode() {
+        for profile in Profile::ALL {
+            let settings = profile.defaults();
+            assert_eq!(
+                settings.lockout_policy().passkey_holds_lock,
+                profile == Profile::Hardened,
+                "{profile:?}"
+            );
+            assert_eq!(settings.unconfirmed_pin_days(), 30);
+        }
+        // Settings stored before the policy could be set take the profile's.
+        let mut stored = serde_json::to_value(Profile::Hardened.defaults()).expect("json");
+        let object = stored.as_object_mut().expect("an object");
+        object.remove("lockout_policy");
+        object.remove("unconfirmed_pin_days");
+        let old: SecuritySettings = serde_json::from_value(stored).expect("older settings");
+        assert_eq!(old.lockout_policy(), LockPolicy::hardened());
+        assert_eq!(old.unconfirmed_pin_days(), DEFAULT_UNCONFIRMED_PIN_DAYS);
+        // TGL-07 reports the mode with the numbers.
+        let toggles = Profile::Standard.defaults().toggles();
+        let toggle = toggles.iter().find(|t| t.id == "TGL-07").expect("TGL-07");
+        assert_eq!(toggle.value["mode"], "delay_then_temporary_lock");
+        assert_eq!(toggle.value["attempts"], 3);
+        assert_eq!(
+            toggle.value["waits_secs"],
+            serde_json::json!([10, 30, 180, 300, 600])
+        );
+        assert_eq!(toggle.value["lock_secs"], 1_800);
+        assert_eq!(toggle.value["account_max_delay_secs"], 60);
+        // A weaker policy than Home's deviates and is weaker than Home.
+        let patched = SettingsPatch {
+            lockout_policy: Some(LockPolicy {
+                attempts: 10,
+                ..LockPolicy::default()
+            }),
+            ..SettingsPatch::default()
+        }
+        .apply(&Profile::Standard.defaults());
+        let banner = patched.banner();
+        assert_eq!(banner.deviations, vec!["TGL-07".to_owned()]);
+        assert!(banner.weaker_than_home);
+        // Out of bounds is refused.
+        let mut invalid = Profile::Standard.defaults();
+        invalid.lockout_policy = Some(LockPolicy {
+            attempts: 0,
+            ..LockPolicy::default()
+        });
+        assert!(invalid.validate().is_err());
+        let mut invalid = Profile::Standard.defaults();
+        invalid.unconfirmed_pin_days = Some(0);
+        assert!(invalid.validate().is_err());
+        invalid.unconfirmed_pin_days = Some(366);
+        assert!(invalid.validate().is_err());
+        // A changed period is audited.
+        let longer = SettingsPatch {
+            unconfirmed_pin_days: Some(60),
+            ..SettingsPatch::default()
+        }
+        .apply(&Profile::Home.defaults());
+        let audit = changes(&Profile::Home.defaults(), &longer);
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].field, "unconfirmed_pin_days");
     }
 
     #[test]

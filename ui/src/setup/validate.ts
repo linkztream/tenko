@@ -1,6 +1,7 @@
 // Client-side checks of the wizard's text fields. They only spare the operator a round trip;
 // the server checks everything again (`auth.setup.invalid_host_name`, `auth.invalid_request`,
 // `dns.forwarder.invalid` for the upstreams of the DNS step).
+import type { PasswordPolicy } from "../api/types";
 import { checkRule, needsTlsName, splitUpstreams, validTlsName, type ForwardTransport } from "../dns/forwarders/model";
 
 const OCTET = "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
@@ -143,4 +144,27 @@ function entriesProblem(input: DnsStepInput): DnsStepProblem | null {
     if (!/^\d+$/.test(input.cacheEntries.trim()) || n < 1 || n > MAX_CACHE_ENTRIES) return "entries";
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------------
+// The administrator's secret
+
+/** The shortest password of an administrator, in every profile. */
+export const ADMIN_MIN_LENGTH = 12;
+
+/**
+ * The preset the first administrator's password is checked against: the profile's preset, or
+ * Standard when that is the PIN preset or a Custom preset with a shorter minimum. The server
+ * adds that a password of digits only is refused (`auth.password.digits_only`).
+ */
+export function forAdministrator(policy: PasswordPolicy): PasswordPolicy {
+  if (policy.preset === "pin" || (policy.preset === "custom" && policy.min_length < ADMIN_MIN_LENGTH)) {
+    return { preset: "standard" };
+  }
+  return policy;
+}
+
+/** Whether a password is digits only, which an administrator never signs in with (a PIN in substance). */
+export function isDigitsOnly(password: string): boolean {
+  return password !== "" && /^[0-9]+$/.test(password.normalize("NFKC"));
 }

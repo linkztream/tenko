@@ -24,7 +24,9 @@ pub const PRODUCT_WORDS: &[&str] = &["tenko"];
 /// maximum of the Custom preset, in Unicode characters.
 pub const DEFAULT_MAX_LENGTH: usize = 256;
 
-const PIN_MIN_LENGTH: usize = 4;
+const PIN_MIN_LENGTH: usize = 6;
+/// The shortest password of an account that administers, in every profile.
+pub const ADMIN_MIN_LENGTH: usize = 12;
 const PIN_MAX_LENGTH: usize = 64;
 const STANDARD_MIN_LENGTH: usize = 12;
 const HARDENED_MIN_LENGTH: usize = 16;
@@ -103,6 +105,9 @@ pub enum PolicyViolation {
     },
     /// Contains control characters.
     InvalidCharacters,
+    /// Digits only, which an administrator's password may not be: an administrator never
+    /// signs in with a PIN.
+    DigitsOnly,
 }
 
 impl PolicyViolation {
@@ -110,6 +115,7 @@ impl PolicyViolation {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::TooShort { .. } => "auth.password.too_short",
+            Self::DigitsOnly => "auth.password.digits_only",
             Self::TooLong { .. } => "auth.password.too_long",
             Self::PinDigitsOnly => "auth.password.pin_digits_only",
             Self::Trivial => "auth.password.trivial",
@@ -254,6 +260,36 @@ impl PasswordPolicy {
         Ok(())
     }
 
+    /// The preset a new secret of an account is checked against. For an account that
+    /// administers it is the stricter of this preset and the administrator rule: a password
+    /// of at least [`ADMIN_MIN_LENGTH`] characters that is not digits only, never a PIN. The
+    /// PIN preset, and a Custom preset with a shorter minimum, give way to the Standard
+    /// preset; a stricter preset stays as it is.
+    #[must_use]
+    pub fn for_account(&self, administers: bool) -> Self {
+        if administers && (self.is_pin() || self.min_length() < ADMIN_MIN_LENGTH) {
+            Self::Standard
+        } else {
+            self.clone()
+        }
+    }
+
+    /// [`PasswordPolicy::check`] for a new secret of an account, with the administrator
+    /// rule when `administers` (see [`PasswordPolicy::for_account`]).
+    pub fn check_for(
+        &self,
+        password: &str,
+        context: &PasswordContext<'_>,
+        administers: bool,
+    ) -> Vec<PolicyViolation> {
+        let mut violations = self.for_account(administers).check(password, context);
+        let normalized = normalize(password);
+        if administers && !normalized.is_empty() && normalized.chars().all(|c| c.is_ascii_digit()) {
+            violations.push(PolicyViolation::DigitsOnly);
+        }
+        violations
+    }
+
     /// Checks a password against the policy and returns every violation, not only the
     /// first. The password is normalized first (see [`normalize`]). The order is:
     /// [`InvalidCharacters`](PolicyViolation::InvalidCharacters),
@@ -279,10 +315,14 @@ impl PasswordPolicy {
             violations.push(PolicyViolation::PinDigitsOnly);
         }
         let length = text.chars().count();
-        if length < self.min_length() {
-            violations.push(PolicyViolation::TooShort {
-                min: self.min_length(),
-            });
+        // A secret of digits only is a PIN whatever the preset, and a PIN has at least six.
+        let min = if !text.is_empty() && text.chars().all(|c| c.is_ascii_digit()) {
+            self.min_length().max(PIN_MIN_LENGTH)
+        } else {
+            self.min_length()
+        };
+        if length < min {
+            violations.push(PolicyViolation::TooShort { min });
         }
         if length > self.max_length() {
             violations.push(PolicyViolation::TooLong {
@@ -470,7 +510,7 @@ mod tests {
     #[test]
     fn presets_have_their_lengths() {
         let limits = |policy: &PasswordPolicy| (policy.min_length(), policy.max_length());
-        assert_eq!(limits(&PasswordPolicy::Pin), (4, 64));
+        assert_eq!(limits(&PasswordPolicy::Pin), (6, 64));
         assert_eq!(limits(&PasswordPolicy::Standard), (12, 256));
         assert_eq!(limits(&PasswordPolicy::Hardened), (16, 256));
         assert_eq!(limits(&custom(9, 99, None)), (9, 99));
@@ -696,6 +736,51 @@ mod tests {
     }
 
     #[test]
+    fn an_administrator_never_has_a_pin_and_at_least_twelve_characters() {
+        // The PIN preset and short Custom presets give way to Standard for an administrator.
+        assert_eq!(
+            PasswordPolicy::Pin.for_account(true),
+            PasswordPolicy::Standard
+        );
+        assert_eq!(
+            custom(8, 64, None).for_account(true),
+            PasswordPolicy::Standard
+        );
+        assert_eq!(PasswordPolicy::Pin.for_account(false), PasswordPolicy::Pin);
+        // A stricter preset stays.
+        assert_eq!(
+            PasswordPolicy::Hardened.for_account(true),
+            PasswordPolicy::Hardened
+        );
+        assert_eq!(custom(14, 64, None).for_account(true), custom(14, 64, None));
+        // Digits only is refused for an administrator whatever the length.
+        let digits = "739158624073915862";
+        assert_eq!(
+            PasswordPolicy::Pin.check_for(digits, &NO_CONTEXT, true),
+            [PolicyViolation::DigitsOnly]
+        );
+        assert_eq!(
+            PasswordPolicy::Pin.check_for("481273", &NO_CONTEXT, true),
+            [
+                PolicyViolation::TooShort { min: 12 },
+                PolicyViolation::DigitsOnly
+            ]
+        );
+        assert_eq!(
+            PasswordPolicy::Pin.check_for("481273", &NO_CONTEXT, false),
+            []
+        );
+        assert_eq!(
+            PasswordPolicy::Pin.check_for("plover quartz mitten", &NO_CONTEXT, true),
+            []
+        );
+        assert_eq!(
+            PolicyViolation::DigitsOnly.code(),
+            "auth.password.digits_only"
+        );
+    }
+
+    #[test]
     fn violations_come_in_the_documented_order() {
         let context = PasswordContext {
             user_name: "kestrel",
@@ -708,7 +793,7 @@ mod tests {
             [
                 PolicyViolation::InvalidCharacters,
                 PolicyViolation::PinDigitsOnly,
-                PolicyViolation::TooShort { min: 4 },
+                PolicyViolation::TooShort { min: 6 },
             ]
         );
         // Too short, trivial (a run), not matching the pattern.

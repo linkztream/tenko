@@ -155,7 +155,7 @@ const loginPassword = route("post", "/api/v1/auth/login/password", async (ctx) =
       expires_in: CHALLENGE_TTL_MS / 1000,
     });
   }
-  return ok(authenticated(user, passwordStrength(db.settings)));
+  return ok(authenticated(user, passwordStrength(db.settings, user.password)));
 });
 
 const loginTotp = route("post", "/api/v1/auth/login/totp", async (ctx) => {
@@ -381,6 +381,9 @@ const checkPasswordRoute = route("post", "/api/v1/auth/password/check", async (c
     const given = optString(body, "user_name");
     const named = given === undefined ? undefined : findUserByName(given);
     const subject = given === undefined ? principal.user : named;
+    // The administrator rule applies on request, or by default when the caller administers and names nobody else.
+    const asked = optBool(body, "administers");
+    const administers = asked ?? (given === undefined ? principal.user.roles.includes("admin") : false);
     return ok(
       checkPassword(password, {
         policy: db.settings.password_policy,
@@ -388,6 +391,7 @@ const checkPasswordRoute = route("post", "/api/v1/auth/password/check", async (c
         userName: given ?? principal.user.name,
         displayName: subject?.display_name ?? null,
         hostName: db.installation.host_name ?? db.node.name,
+        administers,
       }),
     );
   }
@@ -402,6 +406,8 @@ const checkPasswordRoute = route("post", "/api/v1/auth/password/check", async (c
       breach: settings.breach_check,
       userName: optString(body, "user_name"),
       hostName: db.node.name,
+      // Before setup the administrator rule always applies: the account being made is the first administrator.
+      administers: true,
     }),
   );
 });
@@ -419,11 +425,13 @@ const changePassword = route("post", "/api/v1/auth/password", async (ctx) => {
     userName: user.name,
     displayName: user.display_name,
     hostName: db.installation.host_name ?? db.node.name,
+    administers: user.roles.includes("admin"),
   });
   if (!result.acceptable) failPolicy("new_password", result.violations);
 
   user.password = next;
   user.password_change_required = false;
+  user.pin_expires_at = null;
   // The other sessions of the account end, and so do its personal and scoped tokens.
   const others = db.sessions.filter((s) => s.user_id === user.id && s.id !== session.id);
   db.sessions = db.sessions.filter((s) => !others.includes(s));

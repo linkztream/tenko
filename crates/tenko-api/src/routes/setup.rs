@@ -117,7 +117,7 @@ async fn complete_setup(
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use tenko_auth::testing::env::{ADMIN_PIN, HOST};
+    use tenko_auth::testing::env::{ADMIN_PASSWORD, HOST};
 
     use super::super::auth::testkit::{Credential::*, Harness};
 
@@ -126,7 +126,7 @@ mod tests {
         json!({
             "setup_token": token,
             "profile": "home",
-            "admin": { "name": "root", "display_name": "Root", "password": ADMIN_PIN },
+            "admin": { "name": "root", "display_name": "Root", "password": ADMIN_PASSWORD },
             "host_name": HOST,
             "language": "sv"
         })
@@ -189,7 +189,7 @@ mod tests {
         assert_eq!(reply.body["user"]["display_name"], "Root");
         assert_eq!(reply.body["roles"], json!(["admin"]));
         assert_eq!(reply.body["profile"], "home");
-        assert_eq!(reply.body["strength"], "pin");
+        assert_eq!(reply.body["strength"], "password");
         assert_eq!(reply.body["default_language"], "sv");
         let cookies = reply.set_cookies();
         assert_eq!(cookies.len(), 1);
@@ -206,7 +206,7 @@ mod tests {
                 cookies[0]
             );
         }
-        // Neither the token nor the PIN nor the cookie secret appears in the body.
+        // Neither the token nor the password nor the cookie secret appears in the body.
         let text = reply.body.to_string();
         assert!(!text.contains(&token) && !text.contains(&reply.session_secret()));
 
@@ -222,7 +222,7 @@ mod tests {
             .await
             .assert_status(200);
         // The administrator can log in again, and the settings are those of the profile.
-        harness.login("root", ADMIN_PIN).await;
+        harness.login("root", ADMIN_PASSWORD).await;
         let settings = harness
             .call("GET", "/settings/security", Cookie(&secret), None)
             .await;

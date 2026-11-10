@@ -84,6 +84,55 @@ describe("user administration", () => {
     expect(db.users.some((u) => u.name === "kim" && u.roles.includes("operator"))).toBe(true);
   });
 
+  it("shows the administrator rule when the admin role is chosen and the refusal of a PIN on the password", async () => {
+    await signInAs();
+    await openUsers();
+    fireEvent.click(screen.getByRole("button", { name: "Add user" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add user" });
+    const rule =
+      "An administrator signs in with a password of at least 12 characters that is not digits only, never with a PIN.";
+    expect(within(dialog).queryByText(rule)).toBeNull();
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /Administrator/ }));
+    expect(within(dialog).getByText(rule)).toBeTruthy();
+    fireEvent.input(within(dialog).getByLabelText("User name"), { target: { value: "kim" } });
+    fireEvent.input(within(dialog).getByLabelText("Initial password"), { target: { value: "481273905162" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add user" }));
+    expect(
+      await within(dialog).findByText("Use letters as well as digits; an administrator never signs in with a PIN."),
+    ).toBeTruthy();
+    expect(db.users.some((u) => u.name === "kim")).toBe(false);
+  });
+
+  it("shows the server's refusal to make an account with a PIN an administrator, as it comes", async () => {
+    await signInAs();
+    const sam = db.users.find((u) => u.name === "sam");
+    if (!sam) throw new Error("no sam");
+    sam.password = "593618";
+    await openDetail("sam");
+    fireEvent.click(await screen.findByRole("button", { name: "Change roles" }));
+    const dialog = await screen.findByRole("dialog", { name: "Change roles" });
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /Administrator/ }));
+    expect(within(dialog).getByText(/^An administrator signs in with a password of at least 12 characters/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save roles" }));
+    expect(await within(dialog).findByText(/this account signs in with a PIN; give it a password of at least 12 characters/)).toBeTruthy();
+    expect(db.users.find((u) => u.name === "sam")?.roles).not.toContain("admin");
+  });
+
+  it("marks a PIN that no sign-in has confirmed with its remaining days or as expired", async () => {
+    await signInAs();
+    const sam = db.users.find((u) => u.name === "sam");
+    const robin = db.users.find((u) => u.name === "robin");
+    if (!sam || !robin) throw new Error("no seed users");
+    sam.pin_expires_at = new Date(Date.now() + 9.5 * 86_400_000).toISOString();
+    sam.password_change_required = true;
+    robin.pin_expires_at = new Date(Date.now() - 86_400_000).toISOString();
+    const { table } = await openUsers();
+    const soon = within(rowOf(table, "sam")).getByText("PIN stops working in 10 days");
+    expect(soon.closest("[title]")?.getAttribute("title")).toMatch(/^The PIN stops working on .* unless a sign-in confirms it\.$/);
+    expect(within(rowOf(table, "sam")).getByText("Password change required")).toBeTruthy();
+    expect(within(rowOf(table, "robin")).getByText("PIN expired")).toBeTruthy();
+  });
+
   it("keeps the last administrator", async () => {
     await signInAs();
     await openDetail("alex");

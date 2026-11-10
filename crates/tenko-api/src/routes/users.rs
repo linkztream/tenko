@@ -435,7 +435,7 @@ mod tests {
                 Some(&json!({
                     "name": "ada",
                     "display_name": "Ada L",
-                    "password": "7391",
+                    "password": "739158",
                     "roles": ["operator"],
                     "language": "sv"
                 })),
@@ -461,7 +461,7 @@ mod tests {
         // The password is not part of any answer: no `password` member and no string equal to
         // it (a substring of the whole body could match a random id).
         assert!(user.get("password").is_none());
-        assert!(!holds_string(&created.body, "7391"));
+        assert!(!holds_string(&created.body, "739158"));
 
         let got = harness
             .call("GET", &format!("/users/{ada}"), Cookie(&admin), None)
@@ -483,7 +483,7 @@ mod tests {
         assert_eq!(names, ["ada", ADMIN]);
 
         // The new user can log in and has to change the password.
-        let session = harness.login("ada", "7391").await;
+        let session = harness.login("ada", "739158").await;
         let described = harness
             .call("GET", "/auth/session", Cookie(&session), None)
             .await;
@@ -501,7 +501,7 @@ mod tests {
     async fn a_taken_name_and_bad_values_are_refused() {
         let (harness, admin) = Harness::installed().await;
         harness
-            .create_user(&admin, "ada", "7391", &["viewer"])
+            .create_user(&admin, "ada", "739158", &["viewer"])
             .await;
         create(
             &harness,
@@ -567,7 +567,7 @@ mod tests {
                 "POST",
                 "/auth/login/password",
                 Anonymous,
-                Some(&json!({ "user_name": "nopass", "password": "7391" })),
+                Some(&json!({ "user_name": "nopass", "password": "739158" })),
             )
             .await
             .assert_problem(401, "auth.invalid_credentials");
@@ -578,7 +578,7 @@ mod tests {
     async fn if_match_guards_updates() {
         let (harness, admin) = Harness::installed().await;
         let ada = harness
-            .create_user(&admin, "ada", "7391", &["viewer"])
+            .create_user(&admin, "ada", "739158", &["viewer"])
             .await;
         let path = format!("/users/{}", id(&ada));
         let first = revision(&ada);
@@ -691,13 +691,13 @@ mod tests {
             )
             .await
             .assert_problem(400, "auth.invalid_request");
-        let session = harness.login("ada", "7391").await;
+        let session = harness.login("ada", "739158").await;
         let reset = harness
             .call(
                 "PATCH",
                 &path,
                 Cookie(&admin),
-                Some(&json!({ "password": "6402" })),
+                Some(&json!({ "password": "640283" })),
             )
             .await;
         reset.assert_status(200);
@@ -707,7 +707,7 @@ mod tests {
             .call("GET", "/auth/session", Cookie(&session), None)
             .await
             .assert_problem(401, "auth.unauthenticated");
-        let session = harness.login("ada", "6402").await;
+        let session = harness.login("ada", "640283").await;
         let disabled = harness
             .call(
                 "PATCH",
@@ -726,7 +726,7 @@ mod tests {
                 "POST",
                 "/auth/login/password",
                 Anonymous,
-                Some(&json!({ "user_name": "ada", "password": "6402" })),
+                Some(&json!({ "user_name": "ada", "password": "640283" })),
             )
             .await
             .assert_problem(401, "auth.invalid_credentials");
@@ -764,7 +764,7 @@ mod tests {
     async fn roles_are_replaced_and_the_last_administrator_is_protected() {
         let (harness, admin) = Harness::installed().await;
         let ada = harness
-            .create_user(&admin, "ada", "7391", &["viewer"])
+            .create_user(&admin, "ada", "739158", &["viewer"])
             .await;
         let ada_path = format!("/users/{}/roles", id(&ada));
 
@@ -835,16 +835,22 @@ mod tests {
             )
             .await
             .assert_problem(409, "users.last_administrator");
-        // ...until another one exists. Then the first loses the administration at once.
-        harness
+        // An account that signs in with a PIN cannot become an administrator.
+        let refused = harness
             .call(
                 "PUT",
                 &ada_path,
                 Cookie(&admin),
                 Some(&json!({ "roles": ["admin"] })),
             )
-            .await
-            .assert_status(200);
+            .await;
+        refused.assert_problem(400, "auth.invalid_request");
+        assert_eq!(refused.body["errors"][0]["field"], "roles");
+        // Once a second administrator exists, the first can give up the role at once.
+        harness
+            .env
+            .add_admin("grace", tenko_auth::testing::env::ADMIN_PASSWORD)
+            .await;
         harness
             .call(
                 "PUT",
@@ -870,10 +876,10 @@ mod tests {
     async fn users_are_deleted_but_not_the_caller() {
         let (harness, admin) = Harness::installed().await;
         let ada = harness
-            .create_user(&admin, "ada", "7391", &["viewer"])
+            .create_user(&admin, "ada", "739158", &["viewer"])
             .await;
         let path = format!("/users/{}", id(&ada));
-        let session = harness.login("ada", "7391").await;
+        let session = harness.login("ada", "739158").await;
 
         harness
             .call("DELETE", &path, Cookie(&admin), None)
@@ -893,7 +899,7 @@ mod tests {
             .await
             .assert_problem(401, "auth.unauthenticated");
         harness
-            .create_user(&admin, "ada", "7391", &["viewer"])
+            .create_user(&admin, "ada", "739158", &["viewer"])
             .await;
 
         let own = admin_id(&harness, &admin).await;
@@ -913,10 +919,10 @@ mod tests {
     async fn an_administrator_can_end_the_sessions_of_a_user() {
         let (harness, admin) = Harness::installed().await;
         let ada = harness
-            .create_user(&admin, "ada", "7391", &["viewer"])
+            .create_user(&admin, "ada", "739158", &["viewer"])
             .await;
-        let first = harness.login("ada", "7391").await;
-        let second = harness.login("ada", "7391").await;
+        let first = harness.login("ada", "739158").await;
+        let second = harness.login("ada", "739158").await;
         harness
             .call(
                 "DELETE",
@@ -952,7 +958,7 @@ mod tests {
     async fn a_locked_account_is_unlocked() {
         let (harness, admin) = Harness::installed().await;
         let ada = harness
-            .create_user(&admin, "ada", "7391", &["viewer"])
+            .create_user(&admin, "ada", "739158", &["viewer"])
             .await;
         harness
             .fail_logins_until_throttled("ada")
@@ -963,7 +969,7 @@ mod tests {
                 "POST",
                 "/auth/login/password",
                 Anonymous,
-                Some(&json!({ "user_name": "ada", "password": "7391" })),
+                Some(&json!({ "user_name": "ada", "password": "739158" })),
             )
             .await
             .assert_problem(429, "auth.throttled");
@@ -983,7 +989,7 @@ mod tests {
             unlocked.header("etag"),
             Some(etag(revision(&unlocked.body)).as_str())
         );
-        harness.login("ada", "7391").await;
+        harness.login("ada", "739158").await;
         harness
             .call(
                 "POST",
@@ -998,12 +1004,16 @@ mod tests {
     #[tokio::test]
     async fn a_viewer_cannot_administer() {
         let (harness, admin) = Harness::installed().await;
-        let ada = harness.create_user(&admin, "ada", "7391", &["admin"]).await;
+        let ada = harness
+            .env
+            .add_admin("ada", tenko_auth::testing::env::ADMIN_PASSWORD)
+            .await
+            .to_string();
         let viewer = harness
-            .create_user(&admin, "vera", "5826", &["viewer"])
+            .create_user(&admin, "vera", "582641", &["viewer"])
             .await;
-        let session = harness.login("vera", "5826").await;
-        let (ada, own) = (id(&ada), id(&viewer));
+        let session = harness.login("vera", "582641").await;
+        let own = id(&viewer);
 
         let attempts: Vec<(&str, String, Option<Value>)> = vec![
             ("GET", "/users".to_owned(), None),
@@ -1056,9 +1066,9 @@ mod tests {
     async fn roles_are_listed_for_any_authenticated_caller() {
         let (harness, admin) = Harness::installed().await;
         harness
-            .create_user(&admin, "oscar", "7391", &["operator"])
+            .create_user(&admin, "oscar", "739158", &["operator"])
             .await;
-        let operator = harness.login("oscar", "7391").await;
+        let operator = harness.login("oscar", "739158").await;
         for session in [&admin, &operator] {
             let roles = harness.call("GET", "/roles", Cookie(session), None).await;
             roles.assert_status(200);

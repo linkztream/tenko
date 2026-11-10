@@ -12,6 +12,9 @@ import { acceptLogin } from "./session";
 import { CeremonyError, signInWithPasskey, webauthnAvailable } from "./webauthn";
 import "./auth.css";
 
+/** The command for the one administrator of a server who is locked out; it is not translated. */
+const UNLOCK_COMMAND = "tenko user unlock <name>";
+
 type Stage = "passkey" | "password" | "second" | "break-glass";
 type SecondMethod = "totp" | "recovery";
 
@@ -61,6 +64,15 @@ export default function SignIn() {
       });
     }, 1000);
   };
+
+  /** The wait in plain units: minutes from one minute on, seconds below. */
+  const retryText = (): string =>
+    retryIn() >= 60
+      ? t("auth.signin.retry_in_minutes", { minutes: Math.ceil(retryIn() / 60) })
+      : t("auth.signin.retry_in", { seconds: retryIn() });
+
+  /** The static help for a locked-out account; it says nothing about any account. */
+  const unlockParts = (): string[] => t("auth.signin.locked_host", { command: "" }).split("");
 
   const fail = (err: unknown) => {
     if (isApiError(err, "auth.throttled")) {
@@ -270,7 +282,7 @@ export default function SignIn() {
                     <div class="note warn" role="status">
                       <Icon name="clock" size="sm" />
                       <span class="grow">
-                        <strong>{t("auth.signin.retry_in", { seconds: retryIn() })}</strong>{" "}
+                        <strong>{retryText()}</strong>{" "}
                         {t("auth.signin.throttle_explain")}
                       </span>
                     </div>
@@ -309,7 +321,9 @@ export default function SignIn() {
                     <div class="note warn" role="status">
                       <Icon name="clock" size="sm" />
                       <span class="grow">
-                        <strong>{t("auth.signin.retry_in", { seconds: retryIn() })}</strong>
+                        <strong>{retryText()}</strong>
+                        {" "}
+                        {t("auth.signin.throttle_explain")}
                       </span>
                     </div>
                   </Show>
@@ -380,6 +394,12 @@ export default function SignIn() {
               </Match>
             </Switch>
           </section>
+
+          <p class="help signin-locked" data-testid="signin-locked-help">
+            {t("auth.signin.locked_help")} {unlockParts()[0]}
+            <code class="mono">{UNLOCK_COMMAND}</code>
+            {unlockParts()[1]}
+          </p>
 
           <Show when={stage() !== "break-glass"}>
             <p class="break-glass-link">

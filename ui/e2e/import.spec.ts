@@ -5,10 +5,11 @@
 // `ip-plan.expected.json` and with what the API holds after the apply; the three CSV
 // exports are downloaded from the upload page.
 //
-// Credential columns are stored as operator secrets, which needs a session of password
-// strength or more (IAM-07): the main test raises the PIN session of `signedIn` with an
-// authenticator app first. A second test shows the blocker of the PIN session and the
-// choice to skip credentials; a third one the acknowledgment of a plan warning.
+// Credential columns are stored as operator secrets, which needs an administrator with a
+// session of password strength or more (IAM-07): the main test raises the password session of
+// `signedIn` with an authenticator app first. A second test shows the blocker of an operator
+// who signs in with a PIN (an administrator never does) and the choice to skip credentials; a
+// third one the acknowledgment of a plan warning.
 //
 // What the fixture does not exercise: no warning of the workbook needs an acknowledgment,
 // so `import-ack` appears in the third test only (a network on a nibble boundary).
@@ -17,6 +18,7 @@ import type { Download, Locator, Page } from "@playwright/test";
 import { ApiError, type Api, type Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { fixturePath, listAll, loadExpected, parseCsv, raiseSession, type Expected } from "./support/import";
+import { signInCreatedAccount } from "./support/accounts";
 import { prefixByCidr } from "./support/ipam";
 import { cell, withKey } from "./support/ui";
 
@@ -26,6 +28,9 @@ type Row = Schemas["PreviewRow"];
 type ItemKey = Schemas["ItemKey"];
 
 const WORKBOOK = "ip-plan.xlsx";
+/** The invented PINs of the operator (digits only, six of them, not a run or a repeat). */
+const OPERATOR_PIN = "482916";
+const OPERATOR_PIN_CHANGED = "739158";
 const ACTIONS = ["create", "update", "unchanged", "kept"] as const;
 
 /** The import id the wizard keeps in the URL. */
@@ -257,8 +262,8 @@ test("imports the IP plan workbook: mapping, preview, loss report, apply, job, e
   expect(expected.loss.entries).toHaveLength(13);
   expect(expected.proposals).toHaveLength(2);
 
-  // Operator secrets need a session of password strength or more.
-  expect(signedIn.session.strength).toBe("pin");
+  // Operator secrets need an administrator session of password strength or more.
+  expect(signedIn.session.strength).toBe("password");
   const raised = await raiseSession(api);
   expect(raised.strength).toBe("password_totp");
 
@@ -480,7 +485,13 @@ test("imports the IP plan workbook: mapping, preview, loss report, apply, job, e
 
 test("a PIN session cannot store credentials; skipping them lets the import through", async ({ page, api, signedIn }) => {
   const expected = loadExpected();
-  expect(signedIn.session.strength).toBe("pin");
+  expect(signedIn.session.strength).toBe("password");
+  // An operator may run imports but never hold secrets; this one signs in with a PIN (an
+  // administrator never does), in the browser as well, which shares the cookie.
+  const name = "olga";
+  await api.post("/users", { name, roles: ["operator"], password: OPERATOR_PIN }, { idempotencyKey: null });
+  await signInCreatedAccount(api, name, OPERATOR_PIN, OPERATOR_PIN_CHANGED);
+  expect((await api.session()).strength).toBe("pin");
 
   const id = await upload(page, fixturePath(WORKBOOK));
   await expect(page.getByTestId("import-option-credentials")).toBeChecked();
@@ -526,7 +537,7 @@ test("a PIN session cannot store credentials; skipping them lets the import thro
 });
 
 test("a plan warning needs an acknowledgment before the import can be applied", async ({ page, api, signedIn }) => {
-  expect(signedIn.session.strength).toBe("pin");
+  expect(signedIn.session.strength).toBe("password");
   // A network that does not end on a nibble boundary (documentation range, RFC 3849).
   const csv = "network,description\r\n2001:db8:4::/46,Documentation site\r\n";
   const id = await upload(page, { name: "networks.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
@@ -555,7 +566,7 @@ test("a plan warning needs an acknowledgment before the import can be applied", 
 });
 
 test("networks inside an existing network turn it into a supernet after an acknowledged step", async ({ page, api, signedIn }) => {
-  expect(signedIn.session.strength).toBe("pin");
+  expect(signedIn.session.strength).toBe("password");
   // 192.0.2.0/24 is a network without ranges; the import brings two networks inside it.
   await api.post("/prefixes", { cidr: "192.0.2.0/24" });
   expect((await prefixByCidr(api, "192.0.2.0/24"))?.role).toBe("network");
@@ -589,7 +600,7 @@ test("networks inside an existing network turn it into a supernet after an ackno
 });
 
 test("an import resumes from its URL and can be discarded", async ({ page, api, signedIn }) => {
-  expect(signedIn.session.strength).toBe("pin");
+  expect(signedIn.session.strength).toBe("password");
   const id = await upload(page, fixturePath(WORKBOOK));
 
   // A reload keeps the import: the id is in the URL and the wizard resumes at the mapping.

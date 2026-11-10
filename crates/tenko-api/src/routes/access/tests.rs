@@ -22,7 +22,7 @@ use tower::ServiceExt as _;
 use super::super::auth::testkit::{Credential, Credential::*, Harness, Reply};
 use crate::{API_BASE, sse::filter::ScopedEvents};
 
-const PIN: &str = "7391";
+const PIN: &str = "739158";
 
 /// The installation, its administrator and the objects in it.
 struct Lab {

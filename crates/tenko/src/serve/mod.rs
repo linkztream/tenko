@@ -2259,6 +2259,10 @@ async fn auth_config(resolved: &Resolved) -> Result<AuthConfig, StartError> {
         cookie_secure: !matches!(resolved.tls, TlsSpec::Plain),
         hibp_online,
         hibp_offline,
+        password_hash_memory_mib: config
+            .auth
+            .password_hash_memory_mib
+            .unwrap_or_else(tenko_auth::service::default_hash_memory_mib),
         ..AuthConfig::default()
     })
 }

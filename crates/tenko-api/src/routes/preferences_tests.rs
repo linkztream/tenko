@@ -25,10 +25,10 @@ fn layout() -> Value {
 async fn two_people() -> (Harness, String, String, String) {
     let (harness, admin) = Harness::installed().await;
     let user = harness
-        .create_user(&admin, "operator-1", "5937", &["operator"])
+        .create_user(&admin, "operator-1", "593718", &["operator"])
         .await;
     let id = user["id"].as_str().expect("an id").to_owned();
-    let operator = harness.login("operator-1", "5937").await;
+    let operator = harness.login("operator-1", "593718").await;
     (harness, admin, operator, id)
 }
 

@@ -11,7 +11,8 @@ import {
   type MockUser,
 } from "./db";
 import { policyFloor, sessionGrantsOf } from "./access-store";
-import { banner } from "./profiles";
+import { isPinLike } from "./policy";
+import { banner, lockPolicyOf } from "./profiles";
 import { Problem, fail } from "./reply";
 import { iso } from "./util";
 
@@ -23,8 +24,12 @@ export const STRENGTH_RANK: Readonly<Record<AuthStrength, number>> = {
   hardware_key: 4,
 };
 
-/** The strength a password login gives under the settings: `pin` for the PIN preset. */
-export function passwordStrength(settings: SecuritySettings): AuthStrength {
+/**
+ * The strength a password login gives: `pin` for a PIN (a digits-only secret under 12 characters),
+ * `password` for any other secret. Without the secret the PIN preset decides.
+ */
+export function passwordStrength(settings: SecuritySettings, secret?: string | null): AuthStrength {
+  if (typeof secret === "string") return isPinLike(secret.normalize("NFKC")) ? "pin" : "password";
   return settings.password_policy.preset === "pin" ? "pin" : "password";
 }
 
@@ -167,9 +172,9 @@ export function revokeUserSessions(userId: string): number {
 // ---------------------------------------------------------------------------------
 // Throttling of failed logins (IAM-05)
 
-/** Consecutive failures for one name that start the delay, and the delay in seconds. */
-export const THROTTLE_FAILURES = 3;
-export const THROTTLE_SECONDS = 20;
+// The wait after a failure follows the lock policy of the settings: `attempts` tries, then the waits in
+// order, then (in the modes that lock) a lock of `lock_secs`; in progressive delay the last wait
+// repeats. The mock counts per name; the server counts per network and per account.
 
 function throttleKey(name: string): string {
   return name.trim().toLowerCase();
@@ -190,13 +195,22 @@ export function checkThrottle(name: string): void {
   if (!entry) return;
   const now = Date.now();
   if (entry.locked_until > now) throw throttled(Math.ceil((entry.locked_until - now) / 1000));
-  // The delay is over: the count starts again.
-  if (entry.locked_until !== 0) db.throttle.delete(key);
+}
+
+/** The seconds the next failure waits after `failures` failures, or 0 while attempts are left. */
+function waitAfter(failures: number): number {
+  const policy = lockPolicyOf(db.settings);
+  const step = failures - policy.attempts;
+  if (step < 0) return 0;
+  const waits = policy.waits_secs;
+  if (step < waits.length) return waits[step] ?? 0;
+  if (db.settings.lockout === "progressive_delay") return waits[waits.length - 1] ?? 0;
+  return policy.lock_secs;
 }
 
 /**
- * Records a failed attempt for a name and fails: with `code` (401) until the third
- * consecutive failure, then with `auth.throttled` (429, `Retry-After: 20`).
+ * Records a failed attempt for a name and fails: with `code` (401) while the account has attempts
+ * left, then with `auth.throttled` (429, `Retry-After` the wait of the lock policy).
  */
 export function failAttempt(
   name: string,
@@ -207,9 +221,10 @@ export function failAttempt(
     const entry = db.throttle.get(key) ?? { failures: 0, locked_until: 0 };
     entry.failures += 1;
     db.throttle.set(key, entry);
-    if (entry.failures >= THROTTLE_FAILURES) {
-      entry.locked_until = Date.now() + THROTTLE_SECONDS * 1000;
-      throw throttled(THROTTLE_SECONDS);
+    const wait = waitAfter(entry.failures);
+    if (wait > 0) {
+      entry.locked_until = Date.now() + wait * 1000;
+      throw throttled(wait);
     }
   }
   return fail(code);

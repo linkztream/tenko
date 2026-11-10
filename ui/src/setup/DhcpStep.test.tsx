@@ -16,7 +16,7 @@ import { setLocale } from "../i18n";
 import { defaultPool, dhcpPlan, dhcpStepProblem, generateDhcpConfig, initialDhcp, leaseSecs, scopeLease, type DhcpStepState } from "./dhcp";
 import Wizard from "./Wizard";
 
-const PIN = "73920146";
+const PASSWORD = "quiet-orchard-ember-17";
 
 beforeEach(async () => {
   await setLocale("en");
@@ -71,7 +71,7 @@ async function toDhcp(options: { roles?: (container: HTMLElement) => void } = {}
   await heading("Administrator");
   type("User name", "admin1");
   type("Display name", "Admin One");
-  type(/^(Password|PIN|Passphrase)$/, PIN);
+  type(/^(Password|PIN|Passphrase)$/, PASSWORD);
   await waitFor(() => expect(blocker()).toBe(""), { timeout: 3000 });
   next();
   await heading("Host name and TLS");
@@ -304,7 +304,7 @@ async function toDhcpSwedish() {
   await waitFor(() => expect(screen.getByTestId("setup-card").dataset.key).toBe("admin"));
   fireEvent.input(document.getElementById("wz-user")!, { target: { value: "admin1" } });
   fireEvent.input(document.getElementById("wz-name")!, { target: { value: "Admin One" } });
-  fireEvent.input(document.getElementById("wz-pw")!, { target: { value: PIN } });
+  fireEvent.input(document.getElementById("wz-pw")!, { target: { value: PASSWORD } });
   await waitFor(() => expect(blocker()).toBe(""), { timeout: 3000 });
   go();
   await waitFor(() => expect(screen.getByTestId("setup-card").dataset.key).toBe("host"));

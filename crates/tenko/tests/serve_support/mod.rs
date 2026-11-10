@@ -95,9 +95,9 @@ pub const SHUTDOWN_LINES: [&str; 5] = [
 /// The login name of the administrator the tests create.
 pub const ADMIN: &str = "admin";
 
-/// The password of the administrator: digits only, as the PIN preset of the Home profile
-/// demands, and not on the list of common passwords.
-pub const PASSWORD: &str = "739153";
+/// The password of the administrator: at least 12 characters and not digits only, as the
+/// administrator rule demands under every profile, and not on the list of common passwords.
+pub const PASSWORD: &str = "plover quartz mitten ember";
 
 /// How long a server may take to become ready.
 pub const READY_TIMEOUT: Duration = Duration::from_secs(60);

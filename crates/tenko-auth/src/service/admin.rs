@@ -2,7 +2,7 @@
 
 use tenko_core::{
     Action, AuthStrength, ObjectKind, ObjectRef, RequestCtx, Revision, Timestamp, UserId,
-    audit::FieldChange,
+    audit::{AuditDraft, FieldChange},
 };
 use tenko_store::{KeyRange, ReadView, ReadViewExt, WriteBatch};
 
@@ -18,10 +18,9 @@ use super::{
 use crate::{
     authz::AuthImage,
     error::AuthError,
-    lockout::ThrottleKey,
     model::{
-        CREDENTIAL_IDS, CREDENTIALS, CredentialRecord, INSTALLATION, LAST_LOGINS, SETTINGS, TOKENS,
-        USER_NAMES, USER_TOKENS, USERS, UserRecord,
+        AccountLock, CREDENTIAL_IDS, CREDENTIALS, CredentialRecord, INSTALLATION, LAST_LOGINS,
+        LOCKS, SETTINGS, TOKENS, USER_NAMES, USER_TOKENS, USERS, UserRecord,
     },
     roles::{RoleName, satisfies},
     settings::{AuditExport, MfaRequirement, SecuritySettings, SettingsPatch, changes},
@@ -86,7 +85,8 @@ fn user_info(
     revision: Revision,
     credentials: &[CredentialRecord],
     last_login_at: Option<Timestamp>,
-    now: Timestamp,
+    lock: Option<AccountLock>,
+    pin_expires_at: Option<Timestamp>,
 ) -> UserInfo {
     UserInfo {
         id: user.id,
@@ -95,7 +95,7 @@ fn user_info(
         roles: user.roles.clone(),
         disabled: user.disabled,
         break_glass: user.break_glass,
-        lock: user.active_lock(now),
+        lock,
         factors: FactorSummary {
             password: user.password.is_some(),
             totp: user.totp.is_some(),
@@ -103,7 +103,14 @@ fn user_info(
             hardware_keys: credentials.iter().filter(|c| c.hardware_key).count(),
             recovery_codes: user.recovery_codes_left(),
         },
-        password_change_required: user.password_change_required,
+        // A PIN from before the six-digit minimum counts as one to change until a sign-in
+        // shows it is long enough.
+        password_change_required: user.password_change_required
+            || user
+                .password
+                .as_ref()
+                .is_some_and(crate::model::StoredPassword::unconfirmed_pin),
+        pin_expires_at,
         language: user.language.clone(),
         created_at: user.created_at,
         last_login_at,
@@ -113,16 +120,199 @@ fn user_info(
     }
 }
 
+/// Adds the unlock of `user` to `batch`: every stored lock of the name is removed, the lock
+/// of a record from before locks were per network is cleared, and `unlocked_at` is set so
+/// that every controller forgets the account's waits and locks in memory. Returns whether
+/// any lock was stored.
+fn stage_unlock(
+    batch: &mut WriteBatch,
+    view: &dyn ReadView,
+    user: &UserRecord,
+    revision: Revision,
+    now: Timestamp,
+) -> Result<bool, AuthError> {
+    let mut locked = user.lock.is_some();
+    for (key, _) in AuthService::stored_locks(view, &user.name)? {
+        batch.delete_typed(&LOCKS, &key);
+        locked = true;
+    }
+    let mut updated = user.clone();
+    updated.lock = None;
+    updated.unlocked_at = Some(now);
+    batch.expect_typed(&USERS, &user.id, Some(revision));
+    batch.put_typed(&USERS, &user.id, &updated)?;
+    Ok(locked)
+}
+
+/// An account is given the admin role only with a secret that meets the administrator rule
+/// (a password of at least 12 characters that is not digits only), or with none (a passkey
+/// account): an account that signs in with a PIN, or with a password not yet seen to meet
+/// the rule, is refused.
+///
+/// # Errors
+///
+/// [`AuthError::Invalid`] on `roles` naming what to do first.
+fn refuse_pin_administrator(user: &UserRecord) -> Result<(), AuthError> {
+    let Some(password) = user.password.as_ref() else {
+        return Ok(());
+    };
+    if password.kind == crate::model::PasswordKind::Pin {
+        return Err(AuthError::invalid(
+            "roles",
+            "this account signs in with a PIN; give it a password of at least 12 characters \
+             that is not digits only before making it an administrator",
+        ));
+    }
+    if !password.admin_rule_met {
+        return Err(AuthError::invalid(
+            "roles",
+            "this account's password is not known to have at least 12 characters and not only \
+             digits; set such a password, or sign in with it once, before making it an \
+             administrator",
+        ));
+    }
+    Ok(())
+}
+
+/// Removes the stored locks of `name` that a first batch could not hold (more than a
+/// listing's worth), in further batches until none is left.
+async fn delete_remaining_locks(
+    store: &dyn tenko_store::Store,
+    name: &str,
+    now: Timestamp,
+) -> Result<(), AuthError> {
+    // Each round removes a listing's worth; the rounds are bounded so a store that keeps
+    // refusing cannot hold the request forever.
+    for _ in 0..1_000 {
+        let view = store.read(tenko_store::ReadConsistency::Local).await?;
+        let locks = AuthService::stored_locks(view.as_ref(), name)?;
+        if locks.is_empty() {
+            return Ok(());
+        }
+        let mut batch = WriteBatch::new(
+            tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
+            now,
+        );
+        for (key, _) in &locks {
+            batch.delete_typed(&LOCKS, key);
+        }
+        store.propose(batch).await?;
+    }
+    Ok(())
+}
+
+/// What [`unlock_offline`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OfflineUnlock {
+    /// The account, by its stored name.
+    pub name: String,
+    /// The locks that held at the time and were lifted.
+    pub lifted: usize,
+    /// The account's PIN from before the six-digit minimum had passed the end of its
+    /// period; a new period started, and the PIN must be changed at the next sign-in.
+    pub pin_renewed: bool,
+}
+
+/// Unlocks the account named `name` in the store of a stopped controller (`tenko user
+/// unlock`): removes every stored lock of the name and sets `unlocked_at`, in one batch
+/// with the audit record `auth.user.unlock` (context `via: offline`). A PIN from before the
+/// six-digit minimum whose period has ended gets a new period and must be changed at the
+/// next sign-in. Any account can be unlocked this way, an administrator included; the waits
+/// a running server kept in memory end with that server.
+///
+/// # Errors
+///
+/// [`AuthError::NotFound`] for an unknown name, or the store's error.
+pub async fn unlock_offline(
+    store: &dyn tenko_store::Store,
+    name: &str,
+    now: Timestamp,
+) -> Result<OfflineUnlock, AuthError> {
+    let view = store.read(tenko_store::ReadConsistency::Local).await?;
+    let Some((id, _)) = view.get_typed(&crate::model::USER_NAMES, &UserRecord::name_key(name))?
+    else {
+        return Err(AuthError::NotFound { kind: "user" });
+    };
+    let (mut user, revision) = AuthService::load_user(view.as_ref(), id)?;
+    let pin_renewed =
+        AuthService::pin_expiry_of(view.as_ref(), &user)?.is_some_and(|end| now >= end);
+    if pin_renewed {
+        if let Some(password) = user.password.as_mut() {
+            password.pin_grace_from = Some(now);
+            password.pin_expiry_noticed_at = None;
+        }
+        user.password_change_required = true;
+    }
+    let lifted = AuthService::stored_locks(view.as_ref(), &user.name)?
+        .iter()
+        .filter(|(_, lock)| now < lock.until)
+        .count()
+        + usize::from(user.legacy_lock(now).is_some());
+    let mut batch = WriteBatch::new(
+        tenko_core::Principal::System {
+            component: tenko_core::SystemComponent::Auth,
+            on_behalf_of: None,
+        },
+        now,
+    );
+    stage_unlock(&mut batch, view.as_ref(), &user, revision, now)?;
+    batch.audit(
+        AuditDraft::success(actions::USER_UNLOCK, vec![ObjectRef::from(user.id)])
+            .with_context("via", "offline")
+            .with_context("locks", lifted.to_string())
+            .with_context("pin_renewed", pin_renewed.to_string()),
+    );
+    match store.propose(batch).await {
+        Ok(_) => {
+            delete_remaining_locks(store, &user.name, now).await?;
+            Ok(OfflineUnlock {
+                name: user.name,
+                lifted,
+                pin_renewed,
+            })
+        }
+        Err(tenko_store::StoreError::PreconditionFailed(_)) => Err(AuthError::Conflict),
+        Err(error) => Err(error.into()),
+    }
+}
+
 impl AuthService {
     fn user_object(id: UserId) -> ObjectRef {
         ObjectRef::from(id)
+    }
+
+    /// The end of the period of the account's unconfirmed PIN, if it has one.
+    fn pin_expiry_of(
+        view: &dyn ReadView,
+        user: &UserRecord,
+    ) -> Result<Option<Timestamp>, AuthError> {
+        let Some(stored) = user
+            .password
+            .as_ref()
+            .filter(|stored| stored.unconfirmed_pin())
+        else {
+            return Ok(None);
+        };
+        Ok(stored.pin_expires_at(
+            super::pins::pin_rule_since(view)?,
+            super::pins::stored_pin_days(view)?,
+        ))
     }
 
     fn info(view: &dyn ReadView, id: UserId, now: Timestamp) -> Result<UserInfo, AuthError> {
         let (user, revision) = Self::load_user(view, id)?;
         let credentials = Self::user_credentials(view, id)?;
         let last_login = view.get_typed(&LAST_LOGINS, &id)?.map(|(at, _)| at);
-        Ok(user_info(&user, revision, &credentials, last_login, now))
+        let lock = Self::shown_lock(view, &user, now)?;
+        let expires = Self::pin_expiry_of(view, &user)?;
+        Ok(user_info(
+            &user,
+            revision,
+            &credentials,
+            last_login,
+            lock,
+            expires,
+        ))
     }
 
     /// A password set by an administrator for another account, checked against the policy.
@@ -150,6 +340,7 @@ impl AuthService {
                     user_name: &user.name,
                     display_name: Some(&user.display_name),
                     host_name: host_name.as_deref(),
+                    administers: user.is_admin(),
                 },
                 ctx.now,
             )
@@ -288,12 +479,15 @@ impl AuthService {
         for (id, user, revision) in view.scan_typed(&USERS, KeyRange::all(), LIST_LIMIT, false)? {
             let credentials = Self::user_credentials(view.as_ref(), id)?;
             let last_login = view.get_typed(&LAST_LOGINS, &id)?.map(|(at, _)| at);
+            let lock = Self::shown_lock(view.as_ref(), &user, ctx.now)?;
+            let expires = Self::pin_expiry_of(view.as_ref(), &user)?;
             users.push(user_info(
                 &user,
                 revision,
                 &credentials,
                 last_login,
-                ctx.now,
+                lock,
+                expires,
             ));
         }
         users.sort_by_key(|user| user.name.to_lowercase());
@@ -353,6 +547,7 @@ impl AuthService {
                         user_name: &name,
                         display_name: Some(&display_name),
                         host_name: host_name.as_deref(),
+                        administers: roles.contains(&RoleName::Admin),
                     },
                     ctx.now,
                 )
@@ -454,6 +649,9 @@ impl AuthService {
             );
             updated.password_change_required = true;
             revoke = true;
+            // A reset answers a compromised account: the networks it signed in from lately are
+            // no longer trusted past the account-wide delay.
+            self.known_networks.forget(&user.name);
             fields.push(FieldChange {
                 object: None,
                 field: "password".to_owned(),
@@ -543,7 +741,8 @@ impl AuthService {
         }
         batch.audit(draft);
         self.commit(batch).await?;
-        self.throttle.unlock(&ThrottleKey::account(&user.name));
+        self.throttle.unlock_account(&user.name);
+        self.known_networks.forget(&user.name);
         Ok(())
     }
 
@@ -557,26 +756,20 @@ impl AuthService {
             .await?;
         let view = self.view().await?;
         let (user, revision) = Self::load_user(view.as_ref(), id)?;
-        self.throttle.unlock(&ThrottleKey::account(&user.name));
+        self.throttle.unlock_account(&user.name);
         // The record is written even without a persisted lock: the other controllers clear
         // their in-memory throttle when they see `unlocked_at` change (WP3.2). Only lifting
         // a persisted lock is an audited change of the account.
-        {
-            let mut updated = user.clone();
-            updated.lock = None;
-            updated.unlocked_at = Some(ctx.now);
-            let mut batch = WriteBatch::for_request(ctx);
-            batch.expect_typed(&USERS, &id, Some(revision));
-            batch.put_typed(&USERS, &id, &updated)?;
-            if user.lock.is_some() {
-                batch.audit(Self::audit(
-                    actions::USER_UNLOCK,
-                    vec![Self::user_object(id)],
-                    ctx,
-                ));
-            }
-            self.commit(batch).await?;
+        let mut batch = WriteBatch::for_request(ctx);
+        if stage_unlock(&mut batch, view.as_ref(), &user, revision, ctx.now)? {
+            batch.audit(Self::audit(
+                actions::USER_UNLOCK,
+                vec![Self::user_object(id)],
+                ctx,
+            ));
         }
+        self.commit(batch).await?;
+        delete_remaining_locks(self.store.as_ref(), &user.name, ctx.now).await?;
         Self::info(self.view().await?.as_ref(), id, ctx.now)
     }
 
@@ -643,6 +836,9 @@ impl AuthService {
             && Self::other_admins(view.as_ref(), id)? == 0
         {
             return Err(AuthError::LastAdministrator);
+        }
+        if roles.contains(&RoleName::Admin) && !user.is_admin() {
+            refuse_pin_administrator(&user)?;
         }
         let mut updated = user.clone();
         updated.roles.clone_from(&roles);

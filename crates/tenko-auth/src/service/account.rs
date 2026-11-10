@@ -10,7 +10,7 @@ use tenko_vault::{SecretBytes, SecretPurpose, SecretSpec};
 use zeroize::Zeroizing;
 
 use super::{
-    AuthService, FRESH_AUTHENTICATION, LIST_LIMIT, actions, blocking, effective_expiry,
+    AuthService, FRESH_AUTHENTICATION, LIST_LIMIT, actions, effective_expiry,
     login::hash_strength,
     types::{
         BreachStatus, CreatedToken, CredentialInfo, FactorEnrolled, PasswordChange,
@@ -24,7 +24,6 @@ use crate::{
     encoding::{base32_encode, base64url_decode, base64url_encode, hex_encode},
     error::AuthError,
     hibp::BreachOutcome,
-    lockout::{LockoutPolicy, ThrottleKey},
     model::{
         CREDENTIAL_IDS, CREDENTIALS, CredentialRecord, INSTALLATION, PasswordKind, SESSIONS,
         StoredPassword, TOKENS, TokenRecord, TotpFactor, USER_TOKENS, USERS, UserRecord,
@@ -60,7 +59,8 @@ pub(super) fn admits_pin(policy: &crate::password::policy::PasswordPolicy) -> bo
     if policy.is_pin() {
         return true;
     }
-    let length = policy.min_length().max(4);
+    // A digits-only secret has at least six digits under every preset.
+    let length = policy.min_length().max(6);
     if length >= PIN_LIKE_BELOW {
         return false;
     }
@@ -95,6 +95,9 @@ pub(super) struct PasswordOwner<'a> {
     pub user_name: &'a str,
     pub display_name: Option<&'a str>,
     pub host_name: Option<&'a str>,
+    /// The account administers (holds the admin role, or is about to): the administrator
+    /// rule applies ([`crate::password::policy::PasswordPolicy::for_account`]).
+    pub administers: bool,
 }
 
 pub(super) fn credential_info(record: &CredentialRecord) -> CredentialInfo {
@@ -145,19 +148,21 @@ impl AuthService {
         password: &str,
         owner: &PasswordOwner<'_>,
     ) -> (Vec<PolicyViolation>, BreachStatus) {
-        let mut violations = settings.password_policy.check(
+        let policy = settings.password_policy.for_account(owner.administers);
+        let mut violations = settings.password_policy.check_for(
             password,
             &PasswordContext {
                 user_name: owner.user_name,
                 display_name: owner.display_name,
                 host_name: owner.host_name,
             },
+            owner.administers,
         );
         let status = if settings.breach_check == crate::hibp::BreachMode::Off {
             BreachStatus::Off
         } else {
             let normalized = normalize(password);
-            if is_pin_like(&normalized) && admits_pin(&settings.password_policy) {
+            if is_pin_like(&normalized) && admits_pin(&policy) {
                 return (violations, BreachStatus::NotApplicable);
             }
             match self.breach_checker(settings).check(&normalized).await {
@@ -190,18 +195,45 @@ impl AuthService {
             return Err(AuthError::PasswordPolicy(violations));
         }
         let normalized = normalize(password.expose());
-        let kind = if settings.password_policy.is_pin() || is_pin_like(&normalized) {
+        let admin_rule_met = settings
+            .password_policy
+            .check_for(
+                password.expose(),
+                &crate::password::policy::PasswordContext {
+                    user_name: owner.user_name,
+                    display_name: owner.display_name,
+                    host_name: owner.host_name,
+                },
+                true,
+            )
+            .is_empty();
+        let kind = if settings
+            .password_policy
+            .for_account(owner.administers)
+            .is_pin()
+            || is_pin_like(&normalized)
+        {
             PasswordKind::Pin
         } else {
             PasswordKind::Password
         };
         let strength = hash_strength(settings);
-        let hash = blocking(move || hash_password(&normalized, strength)).await??;
+        let hash = self
+            .hashing(
+                crate::password::hash::HashCost::of_strength(strength),
+                super::guard::Slot::trusted(),
+                move || hash_password(&normalized, strength),
+            )
+            .await??;
         Ok((
             StoredPassword {
                 hash,
                 kind,
                 changed_at: now,
+                policy_checked_at: Some(now),
+                pin_grace_from: None,
+                pin_expiry_noticed_at: None,
+                admin_rule_met,
             },
             status,
         ))
@@ -357,16 +389,26 @@ impl AuthService {
         request: &PasswordCheck,
     ) -> Result<PasswordCheckResult, AuthError> {
         let installed = self.is_installed().await?;
-        let (settings, own_name, display_name) = if installed {
+        let (settings, own_name, display_name, administers) = if installed {
             let ctx = ctx.ok_or(AuthError::Unauthenticated)?;
             let user_id = ctx.principal.user().ok_or(AuthError::Unauthenticated)?;
             let (user, _) = Self::load_user(self.view().await?.as_ref(), user_id)?;
-            (self.settings(), Some(user.name), Some(user.display_name))
+            let administers = request
+                .administers
+                .unwrap_or(request.user_name.is_none() && user.is_admin());
+            (
+                self.settings(),
+                Some(user.name),
+                Some(user.display_name),
+                administers,
+            )
         } else {
+            // First-run setup creates the first administrator.
             (
                 request.profile.unwrap_or(Profile::Standard).defaults(),
                 None,
                 None,
+                true,
             )
         };
         let user_name = request.user_name.clone().or(own_name).unwrap_or_default();
@@ -379,6 +421,7 @@ impl AuthService {
                     user_name: &user_name,
                     display_name: display_name.as_deref(),
                     host_name: host_name.as_deref(),
+                    administers,
                 },
             )
             .await;
@@ -386,8 +429,54 @@ impl AuthService {
             acceptable: violations.is_empty(),
             violations,
             breach_check,
-            policy: settings.password_policy,
+            policy: settings.password_policy.for_account(administers),
         })
+    }
+
+    /// Checks the current password of a password change as a sign-in is checked: the lock
+    /// first (the stored lock of any controller included), then the hash; a wrong one is a
+    /// failed sign-in in substance, counted, audited and able to store a lock.
+    async fn verify_current_password(
+        &self,
+        ctx: &RequestCtx,
+        (user, revision): (&UserRecord, Revision),
+        stored: &crate::model::StoredPassword,
+        request: &PasswordChange,
+        settings: &SecuritySettings,
+    ) -> Result<(), AuthError> {
+        let attempt = self.attempt(&user.name, Some(user), ctx, settings);
+        self.check_attempt(
+            self.view().await?.as_ref(),
+            &attempt,
+            super::guard::Step::Password,
+            ctx.now,
+        )?;
+        let current = request
+            .current_password
+            .as_ref()
+            .ok_or(AuthError::PasswordIncorrect)?;
+        let candidate = normalize(current.expose());
+        let hash = stored.hash.clone();
+        let cost = crate::password::hash::HashCost::of_hash(&hash).unwrap_or_else(|| {
+            crate::password::hash::HashCost::of_strength(hash_strength(settings))
+        });
+        if !self
+            .hashing(cost, super::guard::Slot::trusted(), move || {
+                verify_password(&candidate, &hash)
+            })
+            .await??
+        {
+            self.login_failed(
+                ctx,
+                &attempt,
+                Some((user, revision)),
+                actions::PASSWORD_CHANGE,
+            )
+            .await;
+            return Err(AuthError::PasswordIncorrect);
+        }
+        self.attempt_succeeded(&attempt, ctx.now);
+        Ok(())
     }
 
     /// `POST /auth/password`: changes the user's password, ends their other sessions and
@@ -416,39 +505,8 @@ impl AuthService {
         }
         let settings = self.settings();
         if let Some(stored) = &user.password {
-            let policy = LockoutPolicy::for_mode(settings.lockout);
-            let account = ThrottleKey::account(&user.name);
-            self.throttle
-                .check(&account, &policy, ctx.now)
-                .map_err(|retry| AuthError::Throttled {
-                    retry_after: retry.after.map(|after| after.as_secs().max(1)),
-                })?;
-            // A lock stored on the account (by any controller) holds here as at sign-in.
-            if let Some(lock) = user.active_lock(ctx.now) {
-                return Err(AuthError::Throttled {
-                    retry_after: Some(lock.until.saturating_since(ctx.now).as_secs().max(1)),
-                });
-            }
-            let current = request
-                .current_password
-                .as_ref()
-                .ok_or(AuthError::PasswordIncorrect)?;
-            let candidate = normalize(current.expose());
-            let hash = stored.hash.clone();
-            if !blocking(move || verify_password(&candidate, &hash)).await?? {
-                // A failed sign-in in substance: counted, audited, a lock stored.
-                self.login_failed(
-                    ctx,
-                    &account,
-                    Some((&user, revision)),
-                    actions::PASSWORD_CHANGE,
-                    &user.name,
-                    &policy,
-                )
-                .await;
-                return Err(AuthError::PasswordIncorrect);
-            }
-            self.throttle.record_success(&account);
+            self.verify_current_password(ctx, (&user, revision), stored, request, &settings)
+                .await?;
         } else {
             Self::require_fresh(&session, ctx.now)?;
         }
@@ -461,6 +519,7 @@ impl AuthService {
                     user_name: &user.name,
                     display_name: Some(&user.display_name),
                     host_name: host_name.as_deref(),
+                    administers: user.is_admin(),
                 },
                 ctx.now,
             )

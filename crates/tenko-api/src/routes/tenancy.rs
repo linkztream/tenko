@@ -1357,7 +1357,7 @@ mod tests {
         use axum::Extension;
         use tenko_auth::testing::{
             TestEnv,
-            env::{ADMIN_PIN, HOST},
+            env::{ADMIN_PASSWORD, HOST},
         };
         use tenko_core::{Authenticator, Timestamp};
         use tenko_ipam::IpamService;
@@ -1394,7 +1394,7 @@ mod tests {
         let body = json!({
             "setup_token": token,
             "profile": "home",
-            "admin": { "name": "root", "password": ADMIN_PIN },
+            "admin": { "name": "root", "password": ADMIN_PASSWORD },
             "host_name": HOST,
             "language": "en"
         });

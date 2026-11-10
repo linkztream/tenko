@@ -4,6 +4,7 @@ import type { components } from "../generated/schema";
 import type {
   BreachMode,
   LockoutMode,
+  LockPolicy,
   MfaRequirement,
   PasswordPolicy,
   Profile,
@@ -27,7 +28,7 @@ import {
   type MockUser,
 } from "./db";
 import { ROLE_DESCRIPTIONS } from "./fixtures";
-import { checkPassword } from "./policy";
+import { checkPassword, isPinLike, normalizePassword } from "./policy";
 import { AUDIT_EXPORT_VALUES, profileSettings } from "./profiles";
 import { created, fail, noContent, ok } from "./reply";
 import { paginate, route, wholePage } from "./route";
@@ -94,6 +95,7 @@ const createUser = route("post", "/api/v1/users", async (ctx) => {
       userName: name,
       displayName,
       hostName: db.installation.host_name ?? db.node.name,
+      administers: roles.includes("admin"),
     });
     if (!result.acceptable) failPolicy("password", result.violations);
   }
@@ -162,6 +164,7 @@ const updateUser = route("patch", "/api/v1/users/{id}", async (ctx) => {
       userName: user.name,
       displayName: nextDisplay ?? user.display_name,
       hostName: db.installation.host_name ?? db.node.name,
+      administers: user.roles.includes("admin"),
     });
     if (!result.acceptable) failPolicy("password", result.violations);
   }
@@ -173,6 +176,7 @@ const updateUser = route("patch", "/api/v1/users/{id}", async (ctx) => {
     // An administrator's password is temporary: the user changes it at the next login.
     user.password = password;
     user.password_change_required = true;
+    user.pin_expires_at = null;
   }
   if (disabled === true || password !== undefined) revokeUserSessions(user.id);
   commit("admin", userChange(user), [user]);
@@ -205,6 +209,18 @@ const setUserRoles = route("put", "/api/v1/users/{id}/roles", async (ctx) => {
   if (user.break_glass) invalid("roles", "the break-glass account is always admin");
   if (isAdmin(user) && !roles.includes("admin") && !user.disabled && otherActiveAdmins(user.id).length === 0) {
     return fail("users.last_administrator");
+  }
+  // An account that signs in with a PIN cannot be given the admin role (an administrator never has a PIN).
+  if (
+    roles.includes("admin") &&
+    !user.roles.includes("admin") &&
+    user.password !== null &&
+    isPinLike(normalizePassword(user.password))
+  ) {
+    invalid(
+      "roles",
+      "this account signs in with a PIN; give it a password of at least 12 characters that is not digits only before making it an administrator",
+    );
   }
   user.roles = roles;
   commit("admin", userChange(user), [user]);
@@ -269,6 +285,38 @@ function parsePolicy(value: unknown): PasswordPolicy {
     policy.pattern = pattern as string;
   }
   return policy;
+}
+
+/** The lock policy of a PATCH (lockout_policy), checked against the bounds of the server. */
+function parseLockPolicy(value: unknown): LockPolicy {
+  if (!isRecord(value)) return invalid("lockout_policy", "an object is required");
+  const int = (key: string, min: number, max: number): number => {
+    const n = value[key];
+    if (typeof n !== "number" || !Number.isInteger(n) || n < min || n > max) {
+      return invalid("lockout_policy", `${key} must be a whole number from ${min} to ${max}`);
+    }
+    return n;
+  };
+  const attempts = int("attempts", 1, 20);
+  const waits = value.waits_secs;
+  if (!Array.isArray(waits) || waits.length < 1 || waits.length > 10) {
+    return invalid("lockout_policy", "waits_secs needs 1 to 10 entries");
+  }
+  for (const w of waits) {
+    if (typeof w !== "number" || !Number.isInteger(w) || w < 1 || w > 86_400) {
+      return invalid("lockout_policy", "each wait must be from 1 to 86400 seconds");
+    }
+  }
+  const lock = int("lock_secs", 60, 86_400);
+  const account = int("account_max_delay_secs", 0, 600);
+  if (typeof value.passkey_holds_lock !== "boolean") return invalid("lockout_policy", "passkey_holds_lock is required");
+  return {
+    attempts,
+    waits_secs: waits as number[],
+    lock_secs: lock,
+    account_max_delay_secs: account,
+    passkey_holds_lock: value.passkey_holds_lock,
+  };
 }
 
 function parseSession(value: unknown): SessionLifetime {
@@ -346,7 +394,17 @@ const updateSecuritySettings = route("patch", "/api/v1/settings/security", async
   if (body.session !== undefined) next.session = parseSession(body.session);
   if (body.token_max_lifetime !== undefined) next.token_max_days = parseTokenLifetime(body.token_max_lifetime);
   if (body.breach_check !== undefined) next.breach_check = oneOf(body.breach_check, BREACH, "breach_check");
-  if (body.lockout !== undefined) next.lockout = oneOf(body.lockout, LOCKOUT, "lockout");
+  if (body.lockout !== undefined && body.lockout !== null) next.lockout = oneOf(body.lockout, LOCKOUT, "lockout");
+  if (body.lockout_policy !== undefined && body.lockout_policy !== null) {
+    next.lockout_policy = parseLockPolicy(body.lockout_policy);
+  }
+  if (body.unconfirmed_pin_days !== undefined && body.unconfirmed_pin_days !== null) {
+    const days = body.unconfirmed_pin_days;
+    if (typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > 365) {
+      invalid("unconfirmed_pin_days", "a whole number of days from 1 to 365 is required");
+    }
+    next.unconfirmed_pin_days = days as number;
+  }
   // TGL-21; null means "no change", as on the server.
   if (body.audit_export !== undefined && body.audit_export !== null) {
     next.audit_export = oneOf(body.audit_export, AUDIT_EXPORT_VALUES, "audit_export");

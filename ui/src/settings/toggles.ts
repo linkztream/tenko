@@ -4,6 +4,7 @@
 import type {
   BreachMode,
   LockoutMode,
+  LockPolicy,
   MfaRequirement,
   PasswordPolicy,
   Profile,
@@ -129,6 +130,73 @@ export function formatReveal(value: unknown): string {
   });
 }
 
+/** TGL-07 (IAM-05): the lockout mode together with the numbers of the lock policy, as the toggle reports it. */
+export type LockoutValue = LockPolicy & { mode: LockoutMode };
+export const LOCKOUT_MODES: readonly LockoutMode[] = [
+  "off",
+  "progressive_delay",
+  "delay_then_temporary_lock",
+  "lock_until_unlock",
+];
+
+/** The bounds the server checks the numbers of the lock policy against. */
+export const LOCK_LIMITS = {
+  attempts: { min: 1, max: 20 },
+  waits: { min: 1, max: 10 },
+  wait_secs: { min: 1, max: 86_400 },
+  lock_secs: { min: 60, max: 86_400 },
+  account_max_delay_secs: { min: 0, max: 600 },
+} as const;
+
+function lockPolicy(passkeyHoldsLock: boolean): LockPolicy {
+  return {
+    attempts: 3,
+    waits_secs: [10, 30, 180, 300, 600],
+    lock_secs: 1_800,
+    account_max_delay_secs: 60,
+    passkey_holds_lock: passkeyHoldsLock,
+  };
+}
+
+/** The numbers of the lock policy in every profile; only Hardened lets the lock hold against a passkey. */
+export const LOCK_POLICY_DEFAULT: Readonly<Record<Profile, LockPolicy>> = {
+  home: lockPolicy(false),
+  standard: lockPolicy(false),
+  hardened: lockPolicy(true),
+  lab: lockPolicy(false),
+};
+
+/** TGL-07 of a settings object; settings without the numbers follow their profile. */
+export function lockoutOf(settings: SecuritySettings): LockoutValue {
+  return { mode: settings.lockout, ...structuredClone(settings.lockout_policy ?? LOCK_POLICY_DEFAULT[settings.profile]) };
+}
+
+/** The mode of a TGL-07 value; an older answer reports the mode string alone. */
+export function lockoutMode(value: unknown): LockoutMode {
+  if (typeof value === "string") return value as LockoutMode;
+  return ((value ?? {}) as { mode?: LockoutMode }).mode ?? "off";
+}
+
+/** The TGL-07 value as an object; a mode string alone gets the Home numbers. */
+export function lockoutValue(value: unknown): LockoutValue {
+  if (value && typeof value === "object") return value as LockoutValue;
+  return { mode: lockoutMode(value), ...structuredClone(LOCK_POLICY_DEFAULT.home) };
+}
+
+/** How TGL-07 reads, for example "Progressive delay: 3 attempts, then waits up to 10 min". */
+export function formatLockout(value: unknown): string {
+  const mode = lockoutMode(value);
+  const name = t(`toggles.lockout.${mode}`);
+  if (mode === "off" || typeof value !== "object" || value === null) return name;
+  const v = value as LockoutValue;
+  return t(mode === "progressive_delay" ? "toggles.lockout.value_delay" : "toggles.lockout.value_lock", {
+    mode: name,
+    attempts: v.attempts,
+    longest: formatDuration(Math.max(...v.waits_secs)),
+    lock: formatDuration(v.lock_secs),
+  });
+}
+
 export function formatPolicy(p: PasswordPolicy): string {
   switch (p.preset) {
     case "pin":
@@ -164,7 +232,7 @@ export function formatToggle(setting: string, value: unknown): string {
     case "breach_check":
       return t(`toggles.breach_check.${value as BreachMode}`);
     case "lockout":
-      return t(`toggles.lockout.${value as LockoutMode}`);
+      return formatLockout(value);
     case "audit_export":
       return t(`toggles.audit_export.${value as AuditExport}`);
     case "updates":
@@ -217,7 +285,7 @@ export function weakerThan(setting: string, value: unknown, home: unknown): bool
     case "breach_check":
       return value === "off" && home !== "off";
     case "lockout":
-      return LOCKOUT_RANK[value as LockoutMode] < LOCKOUT_RANK[home as LockoutMode];
+      return LOCKOUT_RANK[lockoutMode(value)] < LOCKOUT_RANK[lockoutMode(home)];
     case "audit_export":
       // Home keeps the audit log local, the weakest value there is, so no value is weaker.
       return false;
@@ -236,5 +304,6 @@ export function weakerThan(setting: string, value: unknown, home: unknown): bool
 export function settingValue(settings: SecuritySettings, setting: ToggleSetting): unknown {
   if (setting === "audit_export") return auditExportOf(settings);
   if (setting === "updates") return updatesOf(settings);
+  if (setting === "lockout") return lockoutOf(settings);
   return setting === "secret_reveal" ? revealOf(settings) : settings[setting];
 }

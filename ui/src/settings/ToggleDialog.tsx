@@ -3,7 +3,6 @@
 import { createSignal, Match, Show, Switch, untrack } from "solid-js";
 import type {
   BreachMode,
-  LockoutMode,
   MfaRequirement,
   PasswordPolicy,
   SecuritySettingsView,
@@ -29,7 +28,7 @@ import {
   TokenEditor,
   UpdatesEditor,
 } from "./ToggleEditors";
-import { formatToggle, weakerThan, type AuditExport, type RevealPolicy, type ToggleDef, type UpdatesPolicy } from "./toggles";
+import { formatToggle, lockoutValue, weakerThan, type AuditExport, type RevealPolicy, type ToggleDef, type UpdatesPolicy } from "./toggles";
 
 export function ToggleDialog(props: {
   view: SecuritySettingsView;
@@ -135,7 +134,7 @@ export function ToggleDialog(props: {
               <BreachEditor initial={initial as BreachMode} onDraft={onDraft} />
             </Match>
             <Match when={setting === "lockout"}>
-              <LockoutEditor initial={initial as LockoutMode} onDraft={onDraft} />
+              <LockoutEditor initial={lockoutValue(initial)} profileDefault={state()?.profile_default} onDraft={onDraft} />
             </Match>
             <Match when={setting === "audit_export"}>
               <AuditExportEditor initial={initial as AuditExport} onDraft={onDraft} />

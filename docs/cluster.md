@@ -627,7 +627,7 @@ The cluster key (`sys.cluster_key`) is 32 random bytes kept as a system secret i
 Two limits count on each controller separately and are not shared across the cluster:
 
 - **The API rate limiter** (`[rate_limit]`): each controller counts the requests it serves. Behind a load balancer that spreads a client over three controllers, the client gets up to three times the configured rate.
-- **The login throttle** (the pause after wrong passwords or codes, IAM-05): each controller counts the failed attempts it has seen. An attacker spread over three controllers gets up to three times the free attempts before the persisted account lock takes over; the lock is stored and replicated, so it holds on every controller at once, and unlocking the user lifts it on every controller.
+- **The login throttle** (the waits after wrong passwords or codes, IAM-05): each controller counts the failed attempts it has seen. An attacker spread over three controllers gets up to three times the attempts before a stored lock takes over. A lock is stored and replicated by the account's name and the client's network, for names that exist and for names that do not, so it holds on every controller at once and answers alike whether the account exists; unlocking the user lifts every lock of the account on every controller ([SECURITY-PROFILES.md](SECURITY-PROFILES.md#sign-in-lock-tgl-07)).
 
 A wrong second-factor code keeps its ceremony open on the controller that checked it, with the attempt counted; another controller counts the attempts of the same challenge afresh, so the attempts per challenge are bounded per controller in the same way. Every wrong code also counts toward the account's lock like a wrong password, and a correct password alone does not reset that count.
 

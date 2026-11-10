@@ -15,6 +15,7 @@
 //! | [`modules`] | the module switch of OPS-25 |
 //! | [`prepared`] | what the installer prepared the machine for, per role (`prepared-roles` beside `tenko.toml`) |
 //! | [`node`] | `tenko node`: enroll, status, renew, enrollment tokens; the cluster step of `tenko serve` and the data-plane node process |
+//! | [`user`] | `tenko user unlock`: lifts the sign-in locks of an account with the server stopped |
 //! | [`upgrade`] | `tenko upgrade`, the data-directory format and its migrations, in-app updates (OPS-23, OPS-24) |
 //! | [`plugin`] | `tenko plugin`: list, run a bundled plugin, conformance test; the connector service of `tenko serve` |
 //! | [`logging`] | `tracing` to standard error or a file, as text or JSON |
@@ -50,6 +51,7 @@ pub mod prepared;
 pub mod serve;
 pub mod telemetry;
 pub mod upgrade;
+pub mod user;
 
 /// Name of this crate as declared in its manifest.
 pub const CRATE_NAME: &str = "tenko";
@@ -100,6 +102,13 @@ pub enum Command {
         /// The `config` subcommand to run.
         #[command(subcommand)]
         action: ConfigCommand,
+    },
+
+    /// Account maintenance (run with the server stopped, as the service account).
+    User {
+        /// The `user` subcommand to run.
+        #[command(subcommand)]
+        action: user::UserCommand,
     },
 
     /// Key-encryption key maintenance (run with the server stopped).
@@ -311,6 +320,7 @@ impl Command {
                 action: kek::KekCommand::Rotate(_),
             } => "kek rotate",
             Command::Upgrade { action } => action.name(),
+            Command::User { action } => action.name(),
             Command::Service { action } => action.name(),
             Command::Roles {
                 action: RolesCommand::List,
@@ -384,6 +394,7 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             action: kek::KekCommand::Rotate(args),
         } => kek::rotate(args, out, err),
         Command::Upgrade { action } => upgrade::command(action, out, err),
+        Command::User { action } => user::command(action, out, err),
         Command::Service { action } => platform::command(action, out, err),
         Command::Roles {
             action: RolesCommand::List,

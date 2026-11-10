@@ -76,6 +76,8 @@ export interface MockUser {
   credentials: CredentialInfo[];
   recovery_codes: string[];
   password_change_required: boolean;
+  /** When a PIN from before the six-digit minimum that no sign-in has confirmed stops working. */
+  pin_expires_at?: string | null;
   language: string | null;
   created_at: string;
   last_login_at: string | null;
@@ -373,6 +375,7 @@ export function toUserInfo(user: MockUser): UserInfo {
     revision: user.revision,
   };
   if (user.language) info.language = user.language;
+  if (user.pin_expires_at) info.pin_expires_at = user.pin_expires_at;
   return info;
 }
 

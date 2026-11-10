@@ -1530,7 +1530,7 @@ mod tests {
         settings::Profile,
         testing::{
             SoftAttestation, SoftAuthenticator, SoftKeyAlg,
-            env::{ADMIN, ADMIN_PIN, ORIGIN},
+            env::{ADMIN, ADMIN_PASSWORD, ORIGIN},
         },
         totp::{self, TotpParams},
     };
@@ -1793,14 +1793,14 @@ mod tests {
                 "POST",
                 "/auth/login/password",
                 Anonymous,
-                Some(&json!({ "user_name": ADMIN, "password": ADMIN_PIN })),
+                Some(&json!({ "user_name": ADMIN, "password": ADMIN_PASSWORD })),
                 &[("User-Agent", "route-test/1.0")],
             )
             .await;
         reply.assert_status(200);
         assert_eq!(reply.body["status"], "authenticated");
         assert_eq!(reply.body["session"]["user"]["name"], ADMIN);
-        assert_eq!(reply.body["session"]["strength"], "pin");
+        assert_eq!(reply.body["session"]["strength"], "password");
         assert_eq!(reply.body["session"]["profile"], "home");
         assert_eq!(reply.header("cache-control"), Some("no-store"));
         let cookies = reply.set_cookies();
@@ -1881,7 +1881,7 @@ mod tests {
                 "POST",
                 "/auth/login/password",
                 Anonymous,
-                Some(&json!({ "user_name": ADMIN, "password": ADMIN_PIN })),
+                Some(&json!({ "user_name": ADMIN, "password": ADMIN_PASSWORD })),
             )
             .await;
         right.assert_problem(429, "auth.throttled");
@@ -1900,7 +1900,7 @@ mod tests {
         reply.assert_status(200);
         assert_eq!(reply.body["user"]["name"], ADMIN);
         assert_eq!(reply.body["roles"], json!(["admin"]));
-        assert_eq!(reply.body["strength"], "pin");
+        assert_eq!(reply.body["strength"], "password");
         assert_eq!(reply.body["flags"]["break_glass"], false);
         assert!(reply.body["session_id"].is_string());
         assert!(reply.body["expires_at"].is_string());
@@ -1922,7 +1922,7 @@ mod tests {
     #[tokio::test]
     async fn logout_removes_the_cookie_and_ends_the_session() {
         let (harness, admin) = Harness::installed().await;
-        let second = harness.login(ADMIN, ADMIN_PIN).await;
+        let second = harness.login(ADMIN, ADMIN_PASSWORD).await;
         let reply = harness
             .call("POST", "/auth/logout", Cookie(&second), None)
             .await;
@@ -1957,7 +1957,7 @@ mod tests {
     #[tokio::test]
     async fn sessions_are_listed_and_can_be_revoked() {
         let (harness, first) = Harness::installed().await;
-        let second = harness.login(ADMIN, ADMIN_PIN).await;
+        let second = harness.login(ADMIN, ADMIN_PASSWORD).await;
         let list = harness
             .call("GET", "/auth/sessions", Cookie(&second), None)
             .await;
@@ -2153,14 +2153,14 @@ mod tests {
     #[tokio::test]
     async fn the_password_is_changed_and_other_sessions_end() {
         let (harness, admin) = Harness::installed().await;
-        let other = harness.login(ADMIN, ADMIN_PIN).await;
+        let other = harness.login(ADMIN, ADMIN_PASSWORD).await;
 
         harness
             .call(
                 "POST",
                 "/auth/password",
                 Cookie(&admin),
-                Some(&json!({ "current_password": "0000", "new_password": "5936" })),
+                Some(&json!({ "current_password": "0000", "new_password": "mulberry anchor quill dune" })),
             )
             .await
             .assert_problem(403, "auth.password.incorrect");
@@ -2169,7 +2169,7 @@ mod tests {
                 "POST",
                 "/auth/password",
                 Cookie(&admin),
-                Some(&json!({ "current_password": ADMIN_PIN, "new_password": "abcd" })),
+                Some(&json!({ "current_password": ADMIN_PASSWORD, "new_password": "abcd" })),
             )
             .await;
         weak.assert_problem(422, "auth.password.policy");
@@ -2180,7 +2180,7 @@ mod tests {
                 "POST",
                 "/auth/password",
                 Cookie(&admin),
-                Some(&json!({ "current_password": ADMIN_PIN, "new_password": "5936" })),
+                Some(&json!({ "current_password": ADMIN_PASSWORD, "new_password": "mulberry anchor quill dune" })),
             )
             .await;
         changed.assert_status(200);
@@ -2200,17 +2200,17 @@ mod tests {
                 "POST",
                 "/auth/login/password",
                 Anonymous,
-                Some(&json!({ "user_name": ADMIN, "password": ADMIN_PIN })),
+                Some(&json!({ "user_name": ADMIN, "password": ADMIN_PASSWORD })),
             )
             .await
             .assert_problem(401, "auth.invalid_credentials");
-        harness.login(ADMIN, "5936").await;
+        harness.login(ADMIN, "mulberry anchor quill dune").await;
         harness
             .call(
                 "POST",
                 "/auth/password",
                 Anonymous,
-                Some(&json!({ "new_password": "5936" })),
+                Some(&json!({ "new_password": "mulberry anchor quill dune" })),
             )
             .await
             .assert_problem(401, "auth.unauthenticated");
@@ -2226,17 +2226,32 @@ mod tests {
     async fn the_password_check_is_public_only_while_setup_is_open() {
         let harness = Harness::fresh().await;
         let check = |password: &str| json!({ "password": password, "profile": "home" });
+        // A check for a caller that does not administer, which applies the PIN preset (before
+        // setup every check is for the administrator that setup creates).
+        let check_user = |password: &str| json!({ "password": password, "profile": "home", "administers": false });
         let open = harness
             .call(
                 "POST",
                 "/auth/password/check",
                 Anonymous,
-                Some(&check("4812")),
+                Some(&check("481265")),
             )
             .await;
         open.assert_status(200);
-        assert_eq!(open.body["acceptable"], true);
-        assert_eq!(open.body["policy"]["preset"], "pin");
+        // An administrator never has a PIN: the six digits are refused before setup.
+        assert_eq!(open.body["acceptable"], false);
+        let admin_ok = harness
+            .call(
+                "POST",
+                "/auth/password/check",
+                Anonymous,
+                Some(&check("mulberry anchor quill dune")),
+            )
+            .await;
+        admin_ok.assert_status(200);
+        assert_eq!(admin_ok.body["acceptable"], true);
+        // The policy shown is the one that applies to an administrator.
+        assert_eq!(open.body["policy"]["preset"], "standard");
         let weak = harness
             .call(
                 "POST",
@@ -2268,7 +2283,7 @@ mod tests {
                 "POST",
                 "/auth/password/check",
                 Anonymous,
-                Some(&check("4812")),
+                Some(&check("481265")),
             )
             .await
             .assert_problem(401, "auth.unauthenticated");
@@ -2277,11 +2292,22 @@ mod tests {
                 "POST",
                 "/auth/password/check",
                 Cookie(&admin),
-                Some(&check("4812")),
+                Some(&check_user("481265")),
             )
             .await;
         session.assert_status(200);
         assert_eq!(session.body["acceptable"], true);
+        // Asked for the administrator that the caller is, the same PIN is refused.
+        let as_admin = harness
+            .call(
+                "POST",
+                "/auth/password/check",
+                Cookie(&admin),
+                Some(&check("481265")),
+            )
+            .await;
+        as_admin.assert_status(200);
+        assert_eq!(as_admin.body["acceptable"], false);
         // The caller's own settings apply now, whatever the body says.
         assert_eq!(session.body["policy"]["preset"], "pin");
         harness
@@ -2289,7 +2315,7 @@ mod tests {
                 "POST",
                 "/auth/password/check",
                 Cookie("expired-or-wrong"),
-                Some(&check("4812")),
+                Some(&check("481265")),
             )
             .await
             .assert_problem(401, "auth.unauthenticated");
@@ -2401,7 +2427,7 @@ mod tests {
             .assert_problem(409, "auth.totp.already_enrolled");
 
         // The password step now asks for the second factor and sets no cookie.
-        let password = json!({ "user_name": ADMIN, "password": ADMIN_PIN });
+        let password = json!({ "user_name": ADMIN, "password": ADMIN_PASSWORD });
         let step = harness
             .call("POST", "/auth/login/password", Anonymous, Some(&password))
             .await;

@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="lock-policy">
+      <unit id="toggles.lockout.value_delay">
+        <notes><note category="description">TGL-07 in the table: the mode with the attempts and the longest wait. mode is the mode name.</note></notes>
+        <segment><source>{mode}: {attempts, plural, one {# attempt} other {# attempts}}, then waits up to {longest}</source><target>{mode}: {attempts, plural, one {# försök} other {# försök}}, sedan väntetider på upp till {longest}</target></segment>
+      </unit>
+      <unit id="toggles.lockout.value_lock">
+        <notes><note category="description">TGL-07 in the table for the modes that lock: the mode, the attempts, the longest wait and the lock period.</note></notes>
+        <segment><source>{mode}: {attempts, plural, one {# attempt} other {# attempts}}, then waits up to {longest}, lock {lock}</source><target>{mode}: {attempts, plural, one {# försök} other {# försök}}, sedan väntetider på upp till {longest}, spärr {lock}</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.profile_value">
+        <notes><note category="description">Added to the help of a field in the lockout editor; value is what the selected profile sets.</note></notes>
+        <segment><source>Profile: {value}.</source><target>Profilen: {value}.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.mode_help.off">
+        <segment><source>Failed sign-ins are not slowed down.</source><target>Misslyckade inloggningar bromsas inte.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.mode_help.progressive_delay">
+        <segment><source>After the allowed attempts every failure waits longer; the last wait repeats.</source><target>Efter de tillåtna försöken väntar varje misslyckat försök längre; den sista väntetiden upprepas.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.mode_help.delay_then_temporary_lock">
+        <segment><source>After the waits the account is locked for the lock period. The lock ends by itself.</source><target>Efter väntetiderna spärras kontot under spärrtiden. Spärren upphör av sig själv.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.mode_help.lock_until_unlock">
+        <segment><source>After the waits the account is locked for the lock period and administrators get an alarm. The lock ends by itself.</source><target>Efter väntetiderna spärras kontot under spärrtiden och administratörerna får ett larm. Spärren upphör av sig själv.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.explain">
+        <notes><note category="description">Explains the numbers below in the lockout editor.</note></notes>
+        <segment><source>An account gets the attempts below from one network (an IPv4 address or an IPv6 /64), then the waits in order and, in the modes that lock, a lock that ends by itself. Across all networks the account gets a delay of at most the ceiling below once it fails as often as one network may, and administrators get an alarm. The last administrator is never locked by the network. A passkey passes the lock unless the setting below holds it.</source><target>Ett konto får försöken nedan från ett nätverk (en IPv4-adress eller ett IPv6 /64), därefter väntetiderna i ordning och, i de lägen som spärrar, en spärr som upphör av sig själv. Över alla nätverk får kontot en fördröjning på högst taket nedan när det misslyckas lika många gånger som ett nätverk får, och administratörerna får ett larm. Den sista administratören spärras aldrig av nätverket. En passkey går igenom spärren om inte inställningen nedan låter spärren gälla.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.attempts">
+        <segment><source>Attempts from one network</source><target>Försök från ett nätverk</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.attempts_help">
+        <segment><source>1 to 20 tries before the first wait.</source><target>1 till 20 försök före första väntetiden.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.attempts_error">
+        <segment><source>Enter a whole number from 1 to 20.</source><target>Ange ett heltal från 1 till 20.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.waits">
+        <segment><source>Waits after the attempts</source><target>Väntetider efter försöken</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.waits_help">
+        <segment><source>Seconds, separated by commas, in order: 1 to 10 values, each from 1 to 86400.</source><target>Sekunder, avskilda med kommatecken, i ordning: 1 till 10 värden, vart och ett från 1 till 86400.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.waits_error">
+        <segment><source>Enter 1 to 10 whole numbers of seconds, each from 1 to 86400, separated by commas.</source><target>Ange 1 till 10 heltal i sekunder, vart och ett från 1 till 86400, avskilda med kommatecken.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.lock">
+        <segment><source>Lock period</source><target>Spärrtid</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.lock_help">
+        <segment><source>From 1 minute to 1 day. The lock always ends by itself.</source><target>Från 1 minut till 1 dygn. Spärren upphör alltid av sig själv.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.lock_error">
+        <segment><source>Enter a duration from 1 minute to 1 day.</source><target>Ange en tid från 1 minut till 1 dygn.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.account">
+        <segment><source>Account-wide delay ceiling (seconds)</source><target>Tak för fördröjning av hela kontot (sekunder)</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.account_help">
+        <segment><source>0 to 600; 0 switches the account-wide delay off.</source><target>0 till 600; 0 stänger av fördröjningen av hela kontot.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.account_error">
+        <segment><source>Enter a whole number from 0 to 600.</source><target>Ange ett heltal från 0 till 600.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.passkey">
+        <segment><source>The lock also holds for a passkey</source><target>Spärren gäller också för en passkey</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.passkey_hint">
+        <segment><source>Off: a passkey, which cannot be guessed, signs in through the lock.</source><target>Av: en passkey, som inte går att gissa, loggar in genom spärren.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.reset">
+        <segment><source>Use the profile's values</source><target>Använd profilens värden</target></segment>
+      </unit>
+      <unit id="settings.security.pin_days.heading">
+        <notes><note category="description">Section of the security settings page.</note></notes>
+        <segment><source>Unconfirmed PINs</source><target>Obekräftade PIN-koder</target></segment>
+      </unit>
+      <unit id="settings.security.pin_days.intro">
+        <segment><source>A PIN stored before the PIN minimum rose to six digits stops working this many days after the upgrade unless a sign-in confirms that it is long enough. An administrator then resets it. For the last administrator, run the command tenko user unlock with the account name on the host.</source><target>En PIN som sparades innan PIN-minimum höjdes till sex siffror slutar fungera så här många dagar efter uppgraderingen, om inte en inloggning visar att den är tillräckligt lång. Då återställer en administratör den. För den sista administratören: kör kommandot tenko user unlock med kontonamnet på värden.</target></segment>
+      </unit>
+      <unit id="settings.security.pin_days.label">
+        <segment><source>Days an unconfirmed PIN keeps working</source><target>Dagar en obekräftad PIN fungerar</target></segment>
+      </unit>
+      <unit id="settings.security.pin_days.help">
+        <segment><source>1 to 365 days. The default is {days}.</source><target>1 till 365 dagar. Standardvärdet är {days}.</target></segment>
+      </unit>
+      <unit id="settings.security.pin_days.error">
+        <segment><source>Enter a whole number of days from 1 to 365.</source><target>Ange ett helt antal dagar från 1 till 365.</target></segment>
+      </unit>
+      <unit id="settings.security.pin_days.use_default">
+        <segment><source>Use {days} days</source><target>Använd {days} dagar</target></segment>
+      </unit>
+      <unit id="settings.security.pin_days.saved">
+        <segment><source>Saved the period of unconfirmed PINs</source><target>Sparade tiden för obekräftade PIN-koder</target></segment>
+      </unit>
+      <unit id="settings.security.pin_days.value">
+        <segment><source>{days, plural, one {# day} other {# days}}</source><target>{days, plural, one {# dag} other {# dagar}}</target></segment>
+      </unit>
+      <unit id="auth.signin.retry_in_minutes">
+        <segment><source>{minutes, plural, one {Try again in # minute.} other {Try again in # minutes.}}</source><target>{minutes, plural, one {Försök igen om # minut.} other {Försök igen om # minuter.}}</target></segment>
+      </unit>
+      <unit id="auth.signin.locked_help">
+        <notes><note category="description">Always shown under the sign-in card, whatever the account.</note></notes>
+        <segment><source>Locked out or PIN no longer accepted? An administrator can reset it.</source><target>Utelåst, eller godtas PIN-koden inte längre? En administratör kan återställa den.</target></segment>
+      </unit>
+      <unit id="auth.signin.locked_host">
+        <notes><note category="description">command is the text of a command shown in code style.</note></notes>
+        <segment><source>On a server with a single administrator, run {command} on the host as the service account.</source><target>På en server med en enda administratör: kör {command} på värden som tjänstekontot.</target></segment>
+      </unit>
+      <unit id="setup.admin.rule">
+        <notes><note category="description">Shown above the fields of the administrator step, in every profile.</note></notes>
+        <segment><source>The administrator signs in with a password of at least 12 characters that is not digits only, in every profile. A PIN is not accepted.</source><target>Administratören loggar in med ett lösenord på minst 12 tecken som inte bara består av siffror, i alla profiler. En PIN godtas inte.</target></segment>
+      </unit>
+      <unit id="errors.auth.password.digits_only">
+        <segment><source>Use letters as well as digits; an administrator never signs in with a PIN.</source><target>Använd bokstäver och inte bara siffror; en administratör loggar aldrig in med en PIN.</target></segment>
+      </unit>
+      <unit id="settings.users.admin_rule">
+        <notes><note category="description">Shown when the admin role is involved in a user form.</note></notes>
+        <segment><source>An administrator signs in with a password of at least 12 characters that is not digits only, never with a PIN.</source><target>En administratör loggar in med ett lösenord på minst 12 tecken som inte bara består av siffror, aldrig med en PIN.</target></segment>
+      </unit>
+      <unit id="settings.users.status.pin_days">
+        <notes><note category="description">Mark on a user whose PIN from before the six-digit minimum is not yet confirmed.</note></notes>
+        <segment><source>{days, plural, one {PIN stops working in # day} other {PIN stops working in # days}}</source><target>{days, plural, one {PIN slutar fungera om # dag} other {PIN slutar fungera om # dagar}}</target></segment>
+      </unit>
+      <unit id="settings.users.status.pin_expired">
+        <segment><source>PIN expired</source><target>PIN har gått ut</target></segment>
+      </unit>
+      <unit id="settings.users.status.pin_until">
+        <notes><note category="description">Tooltip of the PIN mark; time is a date and time.</note></notes>
+        <segment><source>The PIN stops working on {time} unless a sign-in confirms it.</source><target>PIN slutar fungera {time} om inte en inloggning bekräftar den.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

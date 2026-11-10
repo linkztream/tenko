@@ -386,7 +386,7 @@ describe("session", () => {
     expect(other.body.status).toBe("authenticated");
   });
 
-  it("throttles after three failures and lifts after 20 seconds", async () => {
+  it("throttles after three failures, waits as the lock policy says and lifts", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
     const wrong = () => post("/api/v1/auth/login/password", { user_name: "sam", password: "wrong-password" });
@@ -395,13 +395,13 @@ describe("session", () => {
     expectProblem(await wrong(), 401, "auth.invalid_credentials");
     const third = await wrong();
     const problem = expectProblem(third, 429, "auth.throttled");
-    expect(problem.params).toEqual({ retry_after: "20" });
-    expect(third.res.headers.get("retry-after")).toBe("20");
+    expect(problem.params).toEqual({ retry_after: "10" });
+    expect(third.res.headers.get("retry-after")).toBe("10");
 
     // Even the right password waits, and the wait counts down.
     const early = await post("/api/v1/auth/login/password", { user_name: "sam", password: MOCK_PASSWORDS.sam });
-    expect(expectProblem(early, 429, "auth.throttled").params.retry_after).toBe("20");
-    vi.advanceTimersByTime(19_000);
+    expect(expectProblem(early, 429, "auth.throttled").params.retry_after).toBe("10");
+    vi.advanceTimersByTime(9_000);
     const late = await post("/api/v1/auth/login/password", { user_name: "SAM", password: MOCK_PASSWORDS.sam });
     expect(expectProblem(late, 429, "auth.throttled").params.retry_after).toBe("1");
     expect(late.res.headers.get("retry-after")).toBe("1");
@@ -761,13 +761,17 @@ describe("password", () => {
     const check = (password: string, profile?: string) =>
       post<PasswordCheckResult>("/api/v1/auth/password/check", { password, profile, user_name: "admin" });
 
-    const pin = await check("4821", "home");
+    // The first administrator never gets a PIN: Home's PIN preset gives way to Standard, and digits only is refused.
+    const pin = await check("481273", "home");
     expect(pin.status).toBe(200);
-    expect(pin.body).toMatchObject({ acceptable: true, violations: [], breach_check: "not_applicable", policy: { preset: "pin" } });
-
-    expect((await check("0000", "home")).body).toMatchObject({ violations: [{ kind: "trivial" }], breach_check: "not_applicable" });
-    expect((await check("12ab", "home")).body.violations).toEqual([{ kind: "pin_digits_only" }]);
-    expect((await check("12", "home")).body.violations).toEqual([{ kind: "too_short", min: 4 }, { kind: "trivial" }]);
+    expect(pin.body).toMatchObject({
+      acceptable: false,
+      violations: [{ kind: "too_short", min: 12 }, { kind: "digits_only" }],
+      policy: { preset: "standard" },
+    });
+    expect((await check("481273905162", "home")).body.violations).toEqual([{ kind: "digits_only" }]);
+    expect((await check("harbor-lantern-42", "home")).body).toMatchObject({ acceptable: true, violations: [], policy: { preset: "standard" } });
+    expect((await check("12ab", "home")).body.violations).toEqual([{ kind: "too_short", min: 12 }]);
 
     const standard = await check("short", "standard");
     expect(standard.body.violations).toEqual([{ kind: "too_short", min: 12 }]);
@@ -778,7 +782,7 @@ describe("password", () => {
     // The Lab profile does not check for breaches.
     const lab = await check("0000", "lab");
     expect(lab.body.breach_check).toBe("off");
-    expect(lab.body.violations).toEqual([{ kind: "trivial" }]);
+    expect(lab.body.violations).toEqual([{ kind: "too_short", min: 12 }, { kind: "trivial" }, { kind: "digits_only" }]);
   });
 
   it("needs a session once setup is closed", async () => {
@@ -1028,18 +1032,40 @@ describe("setup", () => {
     expect(again.body.status).toBe("authenticated");
   });
 
-  it("applies the PIN preset and the TLS choice", async () => {
+  it("refuses a PIN for the first administrator in every profile", async () => {
+    for (const profile of ["home", "lab", "standard"]) {
+      resetMockDb("setup");
+      const refused = expectProblem(
+        await post("/api/v1/setup", request({ profile, admin: { name: "pat", password: "481273" } })),
+        400,
+        "auth.password.policy",
+      );
+      expect(refused.errors).toEqual([
+        { field: "admin.password", code: "auth.password.too_short", params: { min: "12" } },
+        { field: "admin.password", code: "auth.password.digits_only" },
+      ]);
+      const digits = expectProblem(
+        await post("/api/v1/setup", request({ profile, admin: { name: "pat", password: "481273905162" } })),
+        400,
+        "auth.password.policy",
+      );
+      expect(digits.errors).toEqual([{ field: "admin.password", code: "auth.password.digits_only" }]);
+      expect((await get<SetupState>("/api/v1/setup")).body.open).toBe(true);
+    }
+  });
+
+  it("applies the profile and the TLS choice", async () => {
     resetMockDb("setup");
     const done = await post<SetupResult>(
       "/api/v1/setup",
       request({
         profile: "home",
-        admin: { name: "pat", password: "4821" },
+        admin: { name: "pat", password: "a-long-passphrase-42" },
         tls: { mode: "reverse_proxy", trusted_proxies: ["192.0.2.0/24"] },
       }),
     );
     expect(done.status).toBe(200);
-    expect(done.body.strength).toBe("pin");
+    expect(done.body.strength).toBe("password");
     expect(done.body.profile).toBe("home");
     expect(done.body.banner.lab).toBe(false);
     expect(done.body.ca_fingerprint ?? null).toBeNull();
@@ -1057,7 +1083,7 @@ describe("setup", () => {
     resetMockDb("setup");
     const done = await post<SetupResult>(
       "/api/v1/setup",
-      request({ profile: "lab", admin: { name: "pat", password: "1357" } }),
+      request({ profile: "lab", admin: { name: "pat", password: "a-long-passphrase-42" } }),
     );
     expect(done.status).toBe(200);
     expect(done.body.banner).toMatchObject({ lab: true, weaker_than_home: true });
@@ -1172,6 +1198,76 @@ describe("settings", () => {
       400,
       "sys.invalid_value",
     );
+  });
+
+  it("carries the lock policy and the period of unconfirmed PINs in the settings and in TGL-07", async () => {
+    resetMockDb("signed-in");
+    const SECURITY = "/api/v1/settings/security";
+    const view = await get<SecuritySettingsView>(SECURITY);
+    const defaults = {
+      attempts: 3,
+      waits_secs: [10, 30, 180, 300, 600],
+      lock_secs: 1800,
+      account_max_delay_secs: 60,
+      passkey_holds_lock: false,
+    };
+    expect(view.body.settings.lockout_policy).toEqual(defaults);
+    expect(view.body.settings.unconfirmed_pin_days).toBe(30);
+    expect(view.body.toggles.find((t) => t.id === "TGL-07")).toEqual({
+      id: "TGL-07",
+      setting: "lockout",
+      value: { mode: "delay_then_temporary_lock", ...defaults },
+      profile_default: { mode: "delay_then_temporary_lock", ...defaults },
+      deviates: false,
+      weaker_than_home: false,
+    });
+
+    // The mode and the numbers are two members of one PATCH.
+    const policy = { ...defaults, attempts: 5, waits_secs: [20, 60], lock_secs: 900, passkey_holds_lock: true };
+    const changed = await patch<SecuritySettingsView>(SECURITY, { lockout: "lock_until_unlock", lockout_policy: policy });
+    expect(changed.status).toBe(200);
+    expect(changed.body.settings).toMatchObject({ lockout: "lock_until_unlock", lockout_policy: policy });
+    expect(changed.body.toggles.find((t) => t.id === "TGL-07")).toMatchObject({
+      value: { mode: "lock_until_unlock", ...policy },
+      deviates: true,
+      weaker_than_home: false,
+    });
+    // Numbers alone keep the mode.
+    const only = await patch<SecuritySettingsView>(SECURITY, { lockout_policy: defaults });
+    expect(only.body.settings.lockout).toBe("lock_until_unlock");
+
+    // A profile switch restores both.
+    const hardened = await patch<SecuritySettingsView>(SECURITY, { profile: "hardened" });
+    expect(hardened.body.settings.lockout_policy).toEqual({ ...defaults, passkey_holds_lock: true });
+
+    const days = await patch<SecuritySettingsView>(SECURITY, { unconfirmed_pin_days: 90 });
+    expect(days.body.settings.unconfirmed_pin_days).toBe(90);
+  });
+
+  it("refuses a lock policy or a PIN period out of bounds", async () => {
+    resetMockDb("signed-in");
+    const SECURITY = "/api/v1/settings/security";
+    const good = { attempts: 3, waits_secs: [10], lock_secs: 60, account_max_delay_secs: 0, passkey_holds_lock: false };
+    expect((await patch(SECURITY, { lockout_policy: good })).status).toBe(200);
+    for (const bad of [
+      { ...good, attempts: 0 },
+      { ...good, attempts: 21 },
+      { ...good, waits_secs: [] },
+      { ...good, waits_secs: Array.from({ length: 11 }, () => 10) },
+      { ...good, waits_secs: [0] },
+      { ...good, waits_secs: [86_401] },
+      { ...good, lock_secs: 59 },
+      { ...good, lock_secs: 86_401 },
+      { ...good, account_max_delay_secs: 601 },
+      { ...good, account_max_delay_secs: -1 },
+    ]) {
+      expectProblem(await patch(SECURITY, { lockout_policy: bad }), 400, "auth.invalid_request");
+    }
+    for (const bad of [0, 366, 1.5, "30"]) {
+      expectProblem(await patch(SECURITY, { unconfirmed_pin_days: bad }), 400, "auth.invalid_request");
+    }
+    expect((await patch(SECURITY, { unconfirmed_pin_days: 365 })).status).toBe(200);
+    expect((await patch(SECURITY, { unconfirmed_pin_days: 1 })).status).toBe(200);
   });
 
   it("resets the toggles on a profile switch, then applies explicit toggles", async () => {
@@ -1367,6 +1463,58 @@ describe("users", () => {
     expect(rest.body.items.map((u) => u.name)).toEqual(["sam"]);
     expect(rest.body.next_cursor).toBeNull();
     expect((await get<Page<UserInfo>>("/api/v1/users?q=ROB")).body.items.map((u) => u.name)).toEqual(["robin"]);
+  });
+
+  it("applies the administrator rule to a created or reset administrator and to the password check", async () => {
+    resetMockDb("signed-in");
+    const create = (roles: string[], password: string) => post("/api/v1/users", { name: "kim", roles, password });
+
+    // A viewer may have a PIN under a PIN policy; an administrator never.
+    await patch("/api/v1/settings/security", { profile: "home" });
+    const pin = await create(["admin"], "481273");
+    const refused = expectProblem(pin, 400, "auth.password.policy");
+    expect(refused.errors).toEqual([
+      { field: "password", code: "auth.password.too_short", params: { min: "12" } },
+      { field: "password", code: "auth.password.digits_only" },
+    ]);
+    const digits = expectProblem(await create(["admin"], "481273905162"), 400, "auth.password.policy");
+    expect(digits.errors).toEqual([{ field: "password", code: "auth.password.digits_only" }]);
+    expect((await create(["viewer"], "481273")).status).toBe(201);
+    const lila = (await get<Page<UserInfo>>("/api/v1/users?q=kim")).body.items[0] as UserInfo;
+
+    // Resetting the password of an administrator applies it as well.
+    const reset = await patch(`/api/v1/users/${MOCK_USER_IDS.alex}`, { password: "593618" }, { headers: { "if-match": `"${INITIAL_REVISION}"` } });
+    expectProblem(reset, 400, "auth.password.policy");
+
+    // Giving the admin role to an account that signs in with a PIN is refused on the field roles.
+    const roles = await put(`/api/v1/users/${lila.id}/roles`, { roles: ["admin"] }, { headers: { "if-match": `"${lila.revision}"` } });
+    const problem = expectProblem(roles, 400, "auth.invalid_request");
+    expect(problem.errors?.[0]).toMatchObject({ field: "roles" });
+    expect(problem.detail).toContain("PIN");
+
+    // The check asks for the rule with administers; the caller's own role is the default.
+    const check = (extra: Record<string, unknown>) =>
+      post<PasswordCheckResult>("/api/v1/auth/password/check", { password: "481273905162", user_name: "someone", ...extra });
+    expect((await check({})).body.violations).toEqual([]);
+    const own = await post<PasswordCheckResult>("/api/v1/auth/password/check", { password: "481273905162" });
+    expect(own.body.violations).toEqual([{ kind: "digits_only" }]);
+    expect((await check({ administers: true })).body.violations).toEqual([{ kind: "digits_only" }]);
+  });
+
+  it("reports when a PIN from before the six-digit minimum stops working", async () => {
+    resetMockDb("signed-in");
+    const sam = db.users.find((u) => u.name === "sam");
+    if (!sam) throw new Error("no sam");
+    sam.pin_expires_at = "2026-12-01T00:00:00Z";
+    sam.password_change_required = true;
+    const one = await get<UserInfo>(`/api/v1/users/${MOCK_USER_IDS.sam}`);
+    expect(one.body).toMatchObject({ pin_expires_at: "2026-12-01T00:00:00Z", password_change_required: true });
+    const reset = await patch<UserInfo>(
+      `/api/v1/users/${MOCK_USER_IDS.sam}`,
+      { password: "harbor-lantern-42-quartz" },
+      { headers: { "if-match": `"${one.body.revision}"` } },
+    );
+    expect(reset.body.pin_expires_at ?? null).toBeNull();
   });
 
   it("creates a user, with a revision, and refuses a taken name", async () => {
@@ -1895,7 +2043,11 @@ describe("profiles", () => {
 
   it("finds Lab's lockout, breach check and token maximum weaker than Home", () => {
     const toggles = toggleStates(profileSettings("lab"));
-    expect(toggles.find((t) => t.id === "TGL-07")).toMatchObject({ value: "off", deviates: false, weaker_than_home: true });
+    expect(toggles.find((t) => t.id === "TGL-07")).toMatchObject({
+      value: { mode: "off", attempts: 3 },
+      deviates: false,
+      weaker_than_home: true,
+    });
     expect(weaker(profileSettings("lab"))).toEqual(["TGL-05", "TGL-06", "TGL-07"]);
     expect(banner(profileSettings("lab"))).toEqual({ lab: true, weaker_than_home: true, deviations: [] });
   });
@@ -1961,7 +2113,8 @@ describe("password policy", () => {
     checkPassword(password, { policy, breach: "online", ...extra }).violations;
 
   it("applies the length of each preset", () => {
-    expect(check("123", { preset: "pin" })).toEqual([{ kind: "too_short", min: 4 }, { kind: "trivial" }]);
+    expect(check("123", { preset: "pin" })).toEqual([{ kind: "too_short", min: 6 }, { kind: "trivial" }]);
+    expect(check("48127", { preset: "pin" })).toEqual([{ kind: "too_short", min: 6 }]);
     expect(check("8".repeat(65), { preset: "pin" })).toContainEqual({ kind: "too_long", max: 64 });
     expect(check("eleven-char", { preset: "standard" })).toEqual([{ kind: "too_short", min: 12 }]);
     expect(check("twelve-chars", { preset: "standard" })).toEqual([]);
@@ -1976,7 +2129,7 @@ describe("password policy", () => {
   it("counts characters, not bytes, after normalization", () => {
     // Accented letters and full-width digits written as code points.
     const accented = String.fromCodePoint(0xe5, 0xe4, 0xf6);
-    const fullWidth = String.fromCodePoint(0xff11, 0xff12, 0xff13, 0xff14);
+    const fullWidth = String.fromCodePoint(0xff11, 0xff12, 0xff13, 0xff14, 0xff15, 0xff16);
     expect(check(`${accented}-${accented}-${accented}!`, { preset: "standard" })).toEqual([]);
     expect(check(`${accented}-${accented}-${accented}`, { preset: "standard" })).toEqual([{ kind: "too_short", min: 12 }]);
     expect(check(fullWidth, { preset: "pin" })).toEqual([{ kind: "trivial" }]);
@@ -1984,8 +2137,8 @@ describe("password policy", () => {
   });
 
   it("requires digits for a PIN", () => {
-    expect(check("48a1", { preset: "pin" })).toEqual([{ kind: "pin_digits_only" }]);
-    expect(check("4821", { preset: "pin" })).toEqual([]);
+    expect(check("48a127", { preset: "pin" })).toEqual([{ kind: "pin_digits_only" }]);
+    expect(check("481273", { preset: "pin" })).toEqual([]);
   });
 
   it("finds trivial passwords", () => {

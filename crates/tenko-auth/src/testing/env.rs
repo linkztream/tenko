@@ -10,7 +10,7 @@ use tenko_vault::{MemVault, Vault};
 use crate::{
     clock::{Clock, MockClock},
     error::AuthError,
-    model::USERS,
+    model::{USERS, UserRecord},
     service::{AuthConfig, AuthService, NewSession, SetupAdmin, SetupRequest, types::SecretString},
     settings::Profile,
 };
@@ -24,8 +24,9 @@ pub const ADMIN: &str = "admin";
 /// A fake passphrase that passes every preset except PIN (16+ characters, no context
 /// words).
 pub const ADMIN_PASSWORD: &str = "plover quartz mitten ember";
-/// A fake PIN for the PIN preset.
-pub const ADMIN_PIN: &str = "4812";
+/// A fake PIN for the PIN preset. An administrator never signs in with a PIN, so it serves
+/// accounts without the admin role (see [`TestEnv::pin_user`]).
+pub const ADMIN_PIN: &str = "481273";
 /// The client address of test requests.
 pub const CLIENT: &str = "192.0.2.10";
 
@@ -78,7 +79,8 @@ impl TestEnv {
     }
 
     /// An installation set up under `profile` with the administrator [`ADMIN`] (password
-    /// [`ADMIN_PASSWORD`], or [`ADMIN_PIN`] under a PIN preset), and its first session.
+    /// [`ADMIN_PASSWORD`] in every profile: an administrator never signs in with a PIN), and
+    /// its first session.
     ///
     /// # Panics
     ///
@@ -100,11 +102,7 @@ impl TestEnv {
     /// If setup was already closed before the call.
     pub async fn setup(&self, profile: Profile) -> Result<NewSession, AuthError> {
         let token = self.service.prepare_setup().await?.expect("setup is open");
-        let password = if profile.defaults().password_policy.is_pin() {
-            ADMIN_PIN
-        } else {
-            ADMIN_PASSWORD
-        };
+        let password = ADMIN_PASSWORD;
         self.service
             .complete_setup(
                 &self.public_ctx(),
@@ -179,6 +177,82 @@ impl TestEnv {
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), self.now());
         batch.put_typed(&USERS, &user, &record).expect("encode");
         self.store.propose(batch).await.expect("commit");
+    }
+
+    /// Adds the administrator `name` with `password` by writing it to the store, so that
+    /// [`ADMIN`] is not the last administrator (the network never locks the last one).
+    /// Creating an administrator through the service needs a session of the profile's
+    /// strength, which tests of the lock are not about.
+    ///
+    /// # Panics
+    ///
+    /// If the password cannot be hashed or the store refuses the write.
+    pub async fn add_admin(&self, name: &str, password: &str) -> UserId {
+        use crate::{
+            model::{PasswordKind, StoredPassword, USER_NAMES},
+            password::{
+                hash::{HashStrength, hash_password},
+                policy::normalize,
+            },
+        };
+        let mut user = UserRecord::new(
+            name.to_owned(),
+            name.to_owned(),
+            vec![crate::roles::RoleName::Admin],
+            self.now(),
+        );
+        user.password = Some(StoredPassword {
+            hash: hash_password(&normalize(password), HashStrength::Baseline).expect("hash"),
+            kind: PasswordKind::Password,
+            changed_at: self.now(),
+            policy_checked_at: Some(self.now()),
+            pin_grace_from: None,
+            pin_expiry_noticed_at: None,
+            admin_rule_met: true,
+        });
+        let id = user.id;
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), self.now());
+        batch
+            .put_typed(&USER_NAMES, &UserRecord::name_key(name), &id)
+            .expect("encode");
+        batch.put_typed(&USERS, &id, &user).expect("encode");
+        self.store.propose(batch).await.expect("commit");
+        id
+    }
+
+    /// Creates the account `name` with `roles` and the PIN [`ADMIN_PIN`] through the service
+    /// as the administrator of `admin`, and clears its forced change: an account that signs
+    /// in with a PIN under a PIN preset. Returns its id.
+    ///
+    /// # Panics
+    ///
+    /// If the service refuses (for example under a preset that takes no PIN).
+    pub async fn pin_user(
+        &self,
+        admin: &NewSession,
+        name: &str,
+        roles: Vec<crate::roles::RoleName>,
+    ) -> UserId {
+        let ctx = self
+            .session_ctx(admin)
+            .await
+            .expect("the administrator's session");
+        let user = self
+            .service
+            .create_user(
+                &ctx,
+                &crate::service::UserCreate {
+                    name: name.to_owned(),
+                    display_name: None,
+                    password: Some(SecretString::new(ADMIN_PIN)),
+                    roles,
+                    language: None,
+                },
+            )
+            .await
+            .expect("a PIN user");
+        self.accept_password(user.id).await;
+        user.id
     }
 
     /// The context of a request on `session`.

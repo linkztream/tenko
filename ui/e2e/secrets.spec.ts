@@ -4,9 +4,10 @@
 // - The location: the secrets page is a tab of Settings at /settings/secrets (and
 //   /settings/secrets/<id>), reached from the other settings pages; the former /secrets address
 //   and everything under it redirects, for bookmarks and deep links.
-// - The PIN rule: a PIN session cannot store a secret, and with a stronger session the store
-//   is still refused while an operator signs in with a PIN alone (409 `vault.pin_coupling`,
-//   section 2); disabling that account lets the same form succeed.
+// - The PIN rule: an operator who signs in with a PIN cannot store a secret (403; an
+//   administrator never signs in with a PIN), and the administrator's own store is refused
+//   while an operator signs in with a PIN alone (409 `vault.pin_coupling`, section 2);
+//   disabling that account lets the same form succeed.
 // - Create and reveal under the rule of the Lab profile (`step_up: session`): the lists, the
 //   detail and the API never show the value; the reveal dialog copies it, shows it on
 //   request, clears the clipboard once the time the server names has passed (the page clock
@@ -17,9 +18,9 @@
 //   reveal repeats and succeeds in a new session of passkey strength.
 // - TGL-24 on /settings/security once the vault holds a secret, under Lab (a PIN may stand
 //   alone): the rule changes to `fresh` through the toggle dialog and a reveal follows it; MFA
-//   for everyone is accepted, and relaxing it again is refused before anything is sent and by
-//   the server (409 `settings.pin_coupling`): only a change of the password policy or of MFA
-//   can let a PIN stand alone.
+//   for everyone is accepted, and with an operator who has a PIN, relaxing it again is refused
+//   before anything is sent and by the server (409 `settings.pin_coupling`): only a change of
+//   the password policy or of MFA can let a PIN stand alone.
 // - Host credentials and the hand-off (section 5), with the host binding of TGL-24 on: binding a
 //   secret to a host, the secrets page that cannot reveal it, the reveal from the host view
 //   that names the host, the `ssh://` link the page hands to the operating system, the
@@ -28,9 +29,9 @@
 //   connect panel.
 // - Swedish: the secrets page, its reveal and edit dialogs and the credentials of a host.
 //
-// Arrangement: setup and the first sign-in come from the fixtures (a PIN session). Tests that
-// reveal replace it with a password-and-TOTP session through the API (`strongSession`; the
-// browser shares the cookie). Prefixes, hosts, addresses, and the secrets of the tests that do
+// Arrangement: setup and the first sign-in come from the fixtures (a password session; an
+// administrator never has a PIN). Tests that reveal replace it with a password-and-TOTP
+// session through the API (`strongSession`; the browser shares the cookie). Prefixes, hosts, addresses, and the secrets of the tests that do
 // not create one in the form come through the API. Secret writes are not jobs (docs/secrets.md
 // section 7), so no job page is involved in this area.
 //
@@ -44,6 +45,7 @@ import { readFile } from "node:fs/promises";
 import type { Locator, Page, Response } from "@playwright/test";
 import { ApiError, type Api, type Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
+import { signInCreatedAccount } from "./support/accounts";
 import { expectRendered } from "./support/i18n";
 import { ProbeNode } from "./support/probe";
 import type { TenkoServer } from "./support/server";
@@ -67,6 +69,8 @@ const NAS = {
 
 /** The invented PIN of the operator who keeps the vault closed (digits only, as the PIN preset wants). */
 const OPERATOR_PIN = "482916";
+/** What the operator changes it to, as the server demands for an initial password. */
+const OPERATOR_PIN_CHANGED = "739158";
 
 const HOST = "nas01.example.test";
 
@@ -81,9 +85,8 @@ async function problemOf(response: Response): Promise<Problem> {
 }
 
 /**
- * Replaces the PIN session of the browser context by one of password-and-TOTP strength: a PIN
- * session never reveals, and a secret needs a session that may reveal (docs/secrets.md
- * section 2). The browser shares the cookie; load a page afterwards.
+ * Replaces the password session of the browser context by one of password-and-TOTP strength,
+ * the strength the reveal and step-up scenarios rely on (docs/secrets.md section 2). The browser shares the cookie; load a page afterwards.
  */
 async function strongSession(api: Api): Promise<Authenticator> {
   const { authenticator } = await api.enrollTotp();
@@ -176,39 +179,42 @@ async function arrangeHost(api: Api): Promise<string> {
   return host;
 }
 
-test("a secret is refused for a PIN session and while an operator signs in with a PIN alone", async ({ page, api, signedIn }) => {
-  expect(signedIn.session.strength).toBe("pin");
+test("a secret is refused for an operator and while an operator signs in with a PIN alone", async ({ page, api, signedIn }) => {
+  expect(signedIn.session.strength).toBe("password");
   await page.goto("/settings/secrets");
   await expect(page.getByTestId("page-secrets")).toBeVisible();
   await expect(page.getByTestId("secrets-empty")).toBeVisible();
 
-  // The administrator's own session is a PIN session, which never reveals and so cannot store.
-  await page.getByTestId("secrets-create").click();
-  const form = page.getByTestId("dialog-secret-form");
-  await fillSecretForm(form, { name: NAS.name, username: NAS.username, value: NAS.value });
-  const [byPin] = await Promise.all([page.waitForResponse(isCreate), form.getByTestId("form-submit").click()]);
-  expect(byPin.status()).toBe(403);
-  const stepUp = await problemOf(byPin);
-  expect(stepUp.code).toBe("auth.step_up_required");
-  expect(stepUp.params?.required).toBe("password");
-  // The dialog stays open, takes the typed value out of the form and shows no secret.
-  await expect(form).toBeVisible();
-  await expect(form.getByTestId("field-value")).toHaveValue("");
-  await expect(page.getByTestId("secret")).toHaveCount(0);
-  expect((await api.get<Schemas["Page_OperatorSecretView"]>("/secrets")).items).toHaveLength(0);
-  await form.getByTestId("form-cancel").click();
-  await expect(form).toHaveCount(0);
-
-  // A stronger session for the administrator; an operator who signs in with a PIN alone.
-  await strongSession(api);
+  // An operator who signs in with a PIN (an administrator never does) reads and reveals but
+  // cannot store a secret: the store is refused for the role, whatever the session.
   const olga = await api.post<Schemas["UserInfo"]>(
     "/users",
     { name: "olga", roles: ["operator"], password: OPERATOR_PIN },
     { idempotencyKey: null },
   );
+  await signInCreatedAccount(api, "olga", OPERATOR_PIN, OPERATOR_PIN_CHANGED);
+  const pinSession = await api.session();
+  expect(pinSession.strength).toBe("pin");
+  const byOperator = await api
+    .post("/secrets", { kind: "password", name: NAS.name, username: NAS.username, value: NAS.value }, { idempotencyKey: null })
+    .then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+  expect(byOperator).toBeInstanceOf(ApiError);
+  expect((byOperator as ApiError).status).toBe(403);
+  expect((await api.get<Schemas["Page_OperatorSecretView"]>("/secrets")).items).toHaveLength(0);
+
+  // The administrator signs in again, with a password session.
+  await api.logout();
+  expect((await api.signIn()).strength).toBe("password");
+
+  // A stronger session for the administrator; olga still signs in with a PIN alone.
+  await strongSession(api);
   await page.goto("/settings/secrets");
   await expect(page.getByTestId("secrets-empty")).toBeVisible();
   await page.getByTestId("secrets-create").click();
+  const form = page.getByTestId("dialog-secret-form");
   await fillSecretForm(form, { name: NAS.name, username: NAS.username, value: NAS.value });
   const [coupled] = await Promise.all([page.waitForResponse(isCreate), form.getByTestId("form-submit").click()]);
   expect(coupled.status()).toBe(409);
@@ -235,7 +241,7 @@ test("a secret is refused for a PIN session and while an operator signs in with 
 });
 
 test("the former /secrets address redirects to the page under Settings, which is a tab of the settings pages", async ({ page, api, signedIn }) => {
-  expect(signedIn.session.strength).toBe("pin");
+  expect(signedIn.session.strength).toBe("password");
   await strongSession(api);
   const secret = await createSecret(api, { name: NAS.name, value: NAS.value, username: NAS.username });
 
@@ -269,7 +275,7 @@ test("a secret is created and revealed: the value reaches the clipboard, and no 
   server,
   signedIn,
 }) => {
-  expect(signedIn.session.strength).toBe("pin");
+  expect(signedIn.session.strength).toBe("password");
   await strongSession(api);
   // The clock of the page is faked so the 30 seconds of the clipboard can be skipped.
   await page.clock.install();
@@ -385,7 +391,7 @@ test("a reveal that needs a passkey asks for it in the dialog and succeeds in a 
   server,
   signedIn,
 }) => {
-  expect(signedIn.session.strength).toBe("pin");
+  expect(signedIn.session.strength).toBe("password");
   await strongSession(api);
   await grantClipboard(page, server);
 
@@ -455,7 +461,7 @@ test("TGL-24 changes on the settings page while the vault holds a secret, and MF
   server,
   signedIn,
 }) => {
-  expect(signedIn.session.strength).toBe("pin");
+  expect(signedIn.session.strength).toBe("password");
   await strongSession(api);
   const secret = await createSecret(api, { name: NAS.name, value: NAS.value, username: NAS.username });
   const before = await api.get<Schemas["SecuritySettingsView"]>("/settings/security");
@@ -502,6 +508,9 @@ test("TGL-24 changes on the settings page while the vault holds a secret, and MF
   expect(raised.status()).toBe(200);
   await expect(dialog).toHaveCount(0);
   expect((await api.get<Schemas["SecuritySettingsView"]>("/settings/security")).settings.mfa).toBe("everyone");
+
+  // An operator who may reveal and signs in with a PIN (the second factor now).
+  await api.post("/users", { name: "olga", roles: ["operator"], password: OPERATOR_PIN }, { idempotencyKey: null });
 
   // Relaxing it again would let a PIN stand alone: the dialog says so and sends nothing...
   const patches: string[] = [];
@@ -575,7 +584,7 @@ test.describe("the hand-off from the host page", () => {
     server,
     signedIn,
   }) => {
-    expect(signedIn.session.strength).toBe("pin");
+    expect(signedIn.session.strength).toBe("password");
     await strongSession(api);
     // TGL-24 with the host binding of the Hardened profile: a secret is revealed only from the
     // view of a host it is bound to.
@@ -744,7 +753,7 @@ test.describe("a Swedish browser", () => {
   test.use({ locale: "sv-SE" });
 
   test("shows the secrets page, its dialogs and the credentials of a host in Swedish", async ({ page, api, server, signedIn }, testInfo) => {
-    expect(signedIn.session.strength).toBe("pin");
+    expect(signedIn.session.strength).toBe("password");
     await strongSession(api);
     const secret = await createSecret(api, { name: NAS.name, value: NAS.value, username: NAS.username, tags: [...NAS.tags] });
     const host = await arrangeHost(api);

@@ -8,7 +8,10 @@ use std::{
 
 use tenko_auth::{
     clock::{Clock, MockClock},
-    lockout::{FailureOutcome, LockoutMode, LockoutPolicy, Retry, Throttle, ThrottleKey},
+    lockout::{
+        FailureOutcome, LockPolicy, LockoutMode, LockoutPolicy, Retry, Schedule, Throttle,
+        ThrottleKey,
+    },
 };
 use tenko_core::Timestamp;
 use utoipa::PartialSchema;
@@ -34,8 +37,26 @@ fn account(name: &str) -> ThrottleKey {
     ThrottleKey::account(name)
 }
 
+/// Doubling policies that exercise the engine: 5 free then 1 s doubling to 60 s (with a lock
+/// of 15 minutes at the tenth failure where the mode locks), and 3 free then 2 s doubling with
+/// a lock of 30 minutes at the fifth under `LockUntilUnlock`.
 fn policy(mode: LockoutMode) -> LockoutPolicy {
-    LockoutPolicy::for_mode(mode)
+    let doubling = |free, base, lock_after, lock, reset| LockoutPolicy {
+        mode,
+        free_attempts: free,
+        base_delay: base,
+        max_delay: secs(60),
+        schedule: Schedule::NONE,
+        lock_after,
+        lock_duration: lock,
+        reset_after: reset,
+    };
+    match mode {
+        LockoutMode::Off => LockoutPolicy::for_mode(LockoutMode::Off),
+        LockoutMode::ProgressiveDelay => doubling(5, secs(1), 0, Duration::ZERO, mins(15)),
+        LockoutMode::DelayThenTemporaryLock => doubling(5, secs(1), 10, mins(15), mins(60)),
+        LockoutMode::LockUntilUnlock => doubling(3, secs(2), 5, mins(30), mins(24 * 60)),
+    }
 }
 
 /// One failed attempt the way the service makes it: check first, wait out a delay, then
@@ -109,6 +130,7 @@ fn long_hold() -> LockoutPolicy {
         free_attempts: 0,
         base_delay: mins(60),
         max_delay: mins(60),
+        schedule: Schedule::NONE,
         lock_after: 0,
         lock_duration: Duration::ZERO,
         reset_after: mins(24 * 60),
@@ -130,7 +152,236 @@ fn held(throttle: &Throttle, key: &ThrottleKey, policy: &LockoutPolicy, now: Tim
 }
 
 #[test]
-fn presets_match_the_documented_values() {
+fn the_default_lock_policy_is_the_decided_one() {
+    let default = LockPolicy::default();
+    assert_eq!(default.attempts, 3);
+    assert_eq!(default.waits_secs, [10, 30, 180, 300, 600]);
+    assert_eq!(default.lock_secs, 1_800);
+    assert_eq!(default.account_max_delay_secs, 60);
+    assert!(!default.passkey_holds_lock);
+    assert!(LockPolicy::hardened().passkey_holds_lock);
+    assert_eq!(default.lock_threshold(), 8);
+    default.validate().expect("valid");
+
+    // Three attempts, then the waits in order, then the lock of 30 minutes.
+    let standard = LockoutPolicy::for_mode(LockoutMode::DelayThenTemporaryLock);
+    let delays: Vec<u64> = (1..=7).map(|n| standard.delay_after(n).as_secs()).collect();
+    assert_eq!(delays, [0, 0, 10, 30, 180, 300, 600]);
+    assert_eq!(standard.lock_after, 8);
+    assert_eq!(standard.lock_duration, mins(30));
+    // Waiting out the schedule never forgets the failures.
+    assert!(standard.reset_after >= mins(20));
+
+    // Without a lock the last wait repeats.
+    let home = LockoutPolicy::for_mode(LockoutMode::ProgressiveDelay);
+    assert_eq!(home.delay_after(8), secs(600));
+    assert_eq!(home.delay_after(u32::MAX), secs(600));
+}
+
+#[test]
+fn the_lock_sequence_of_the_default_policy() {
+    let throttle = Throttle::new(16);
+    let clock = MockClock::fixed();
+    let policy = LockoutPolicy::for_mode(LockoutMode::DelayThenTemporaryLock);
+    let key = ThrottleKey::account_source("alice", Some("192.0.2.7".parse().expect("ip")));
+    let delays: Vec<u64> = (1..=7)
+        .map(|_| attempt(&throttle, &key, &policy, &clock).delay.as_secs())
+        .collect();
+    assert_eq!(delays, [0, 0, 10, 30, 180, 300, 600]);
+    let locking = attempt(&throttle, &key, &policy, &clock);
+    assert!(locking.locked_until.is_some());
+    assert_eq!(locking.delay, mins(30));
+    // The lock is per network: the same account from another network is free.
+    let other = ThrottleKey::account_source("alice", Some("198.51.100.1".parse().expect("ip")));
+    assert!(throttle.check(&other, &policy, clock.now()).is_ok());
+    // It ends by itself.
+    clock.advance(mins(30));
+    assert!(throttle.check(&key, &policy, clock.now()).is_ok());
+}
+
+#[test]
+fn a_guarded_key_waits_but_never_locks() {
+    let throttle = Throttle::new(16);
+    let clock = MockClock::fixed();
+    let policy = LockoutPolicy::for_mode(LockoutMode::LockUntilUnlock);
+    let key = ThrottleKey::account_source("admin", None);
+    for n in 1..=20u32 {
+        while throttle.check_guarded(&key, &policy, clock.now()).is_err() {
+            clock.advance(secs(1));
+        }
+        let outcome = throttle.record_failure_guarded(&key, &policy, clock.now());
+        assert_eq!(outcome.locked_until, None, "failure {n}");
+        assert!(!outcome.alert);
+        assert!(outcome.delay <= mins(10));
+    }
+    // A lock the key held before the guard applied does not hold it.
+    let locked = ThrottleKey::account_source("other", None);
+    for _ in 0..8 {
+        throttle.record_failure(&locked, &policy, clock.now());
+    }
+    assert!(throttle.lock_of(&locked, clock.now()).is_some());
+    assert!(throttle.check(&locked, &policy, clock.now()).is_err());
+    clock.advance(mins(10));
+    assert!(
+        throttle
+            .check_guarded(&locked, &policy, clock.now())
+            .is_ok()
+    );
+}
+
+#[test]
+fn the_account_wide_delay_starts_at_the_lock_threshold_and_has_a_ceiling() {
+    let default = LockPolicy::default();
+    let wide = default.account_wide(LockoutMode::DelayThenTemporaryLock);
+    let delays: Vec<u64> = (1..=16).map(|n| wide.delay_after(n).as_secs()).collect();
+    assert_eq!(delays, [0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 4, 8, 16, 32, 60, 60]);
+    assert_eq!(wide.mode, LockoutMode::ProgressiveDelay, "it never locks");
+    // No ceiling, or mode off: counted, never delayed.
+    let none = LockPolicy {
+        account_max_delay_secs: 0,
+        ..LockPolicy::default()
+    };
+    assert_eq!(
+        none.account_wide(LockoutMode::DelayThenTemporaryLock)
+            .delay_after(u32::MAX),
+        Duration::ZERO
+    );
+    assert_eq!(
+        default.account_wide(LockoutMode::Off).delay_after(u32::MAX),
+        Duration::ZERO
+    );
+    // The alarm: at the threshold and each doubling.
+    let alarms: Vec<u32> = (1..=70).filter(|n| default.alarms_at(*n)).collect();
+    assert_eq!(alarms, [8, 16, 32, 64]);
+}
+
+#[test]
+fn lock_policies_out_of_bounds_are_refused() {
+    let base = LockPolicy::default;
+    for bad in [
+        LockPolicy {
+            attempts: 0,
+            ..base()
+        },
+        LockPolicy {
+            attempts: 21,
+            ..base()
+        },
+        LockPolicy {
+            waits_secs: Vec::new(),
+            ..base()
+        },
+        LockPolicy {
+            waits_secs: vec![10; 11],
+            ..base()
+        },
+        LockPolicy {
+            waits_secs: vec![0],
+            ..base()
+        },
+        LockPolicy {
+            waits_secs: vec![86_401],
+            ..base()
+        },
+        LockPolicy {
+            lock_secs: 59,
+            ..base()
+        },
+        LockPolicy {
+            lock_secs: 86_401,
+            ..base()
+        },
+        LockPolicy {
+            account_max_delay_secs: 601,
+            ..base()
+        },
+    ] {
+        assert!(bad.validate().is_err(), "{bad:?}");
+    }
+    // Unknown fields are refused, so a typo is not silently ignored.
+    assert!(
+        serde_json::from_str::<LockPolicy>(
+            r#"{"attempts":3,"waits_secs":[10],"lock_secs":60,"account_max_delay_secs":0,"passkey_holds_lock":false,"extra":1}"#
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn a_weaker_policy_is_recognized() {
+    let home = LockPolicy::default();
+    assert!(!home.weaker_than(&home));
+    let more_attempts = LockPolicy {
+        attempts: 5,
+        ..LockPolicy::default()
+    };
+    assert!(more_attempts.weaker_than(&home));
+    let shorter_waits = LockPolicy {
+        waits_secs: vec![10, 30],
+        ..LockPolicy::default()
+    };
+    assert!(shorter_waits.weaker_than(&home));
+    let stricter = LockPolicy {
+        attempts: 2,
+        lock_secs: 3_600,
+        ..LockPolicy::hardened()
+    };
+    assert!(!stricter.weaker_than(&home));
+    assert!(home.weaker_than(&LockPolicy::hardened()));
+}
+
+#[test]
+fn ipv6_sources_are_grouped_by_their_64() {
+    let first = ThrottleKey::source("2001:db8:1:2::1".parse().expect("ip"));
+    let same_64 = ThrottleKey::source("2001:db8:1:2:ffff:ffff:ffff:ffff".parse().expect("ip"));
+    let next_64 = ThrottleKey::source("2001:db8:1:3::1".parse().expect("ip"));
+    assert_eq!(first, same_64);
+    assert_ne!(first, next_64);
+    let mixed_case =
+        ThrottleKey::account_source("Alice", Some("2001:db8:1:2::1".parse().expect("ip")));
+    let lower_case =
+        ThrottleKey::account_source("alice", Some("2001:db8:1:2::9".parse().expect("ip")));
+    assert_eq!(mixed_case, lower_case);
+    // One /64 shares one spraying counter.
+    let throttle = Throttle::new(64);
+    let clock = MockClock::fixed();
+    let policy = LockoutPolicy::source_policy();
+    for n in 1..=20u16 {
+        let address = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 1, 2, 0, 0, 0, n));
+        throttle.record_failure(&ThrottleKey::source(address), &policy, clock.now());
+    }
+    let next = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 1, 2, 0, 0, 0, 999));
+    throttle.record_failure(&ThrottleKey::source(next), &policy, clock.now());
+    assert!(
+        throttle
+            .check(&ThrottleKey::source(next), &policy, clock.now())
+            .is_err()
+    );
+}
+
+#[test]
+fn unlocking_an_account_forgets_every_network() {
+    let throttle = Throttle::new(64);
+    let clock = MockClock::fixed();
+    let policy = LockoutPolicy::for_mode(LockoutMode::DelayThenTemporaryLock);
+    let first = ThrottleKey::account_source("bob", Some("192.0.2.1".parse().expect("ip")));
+    let second = ThrottleKey::account_source("BOB", Some("192.0.2.2".parse().expect("ip")));
+    let wide = ThrottleKey::account("bob");
+    let other = ThrottleKey::account_source("carol", None);
+    for key in [&first, &second, &wide, &other] {
+        for _ in 0..8 {
+            throttle.record_failure(key, &policy, clock.now());
+        }
+    }
+    throttle.unlock_account("Bob");
+    assert!(throttle.check(&first, &policy, clock.now()).is_ok());
+    assert!(throttle.check(&second, &policy, clock.now()).is_ok());
+    assert!(throttle.check(&wide, &policy, clock.now()).is_ok());
+    assert!(throttle.check(&other, &policy, clock.now()).is_err());
+}
+
+#[test]
+fn engine_policies_match_their_documented_values() {
     let home = policy(LockoutMode::ProgressiveDelay);
     assert_eq!(home.free_attempts, 5);
     assert_eq!(home.base_delay, secs(1));

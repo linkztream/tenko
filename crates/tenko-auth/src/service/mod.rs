@@ -22,13 +22,18 @@
 mod access;
 mod account;
 mod admin;
+mod guard;
 mod login;
+mod misses;
+mod pins;
 // U6 of the UI plan: the person's saved table layouts.
 mod preferences;
 pub mod reveal;
 mod setup;
 pub mod types;
 
+pub use admin::{OfflineUnlock, unlock_offline};
+pub use guard::default_hash_memory_mib;
 pub use reveal::{RevealGrant, STEP_UP_FRESH, STEP_UP_PASSKEY, check_step_up};
 
 use std::{
@@ -58,7 +63,7 @@ use crate::{
     challenge::Ceremonies,
     error::AuthError,
     hibp::{BreachChecker, HibpFilter, HibpRangeSource},
-    lockout::{Throttle, ThrottleKey},
+    lockout::Throttle,
     model::{
         CREDENTIALS, CredentialRecord, INSTALLATION, Installation, LAST_LOGINS, SCOPED_TOKENS,
         SESSIONS, SETTINGS, ScopedTokenRecord, SessionRecord, TOKENS, TokenRecord, USER_SESSIONS,
@@ -164,6 +169,10 @@ pub struct AuthConfig {
     pub throttle_capacity: usize,
     /// Open ceremonies kept in memory.
     pub ceremony_capacity: usize,
+    /// The memory, in MiB, that password computations in flight may take together
+    /// (`[auth] password_hash_memory_mib`); an attempt beyond it is refused at once with
+    /// `auth.throttled`. Default [`default_hash_memory_mib`].
+    pub password_hash_memory_mib: u32,
 }
 
 impl Default for AuthConfig {
@@ -178,6 +187,7 @@ impl Default for AuthConfig {
             hibp_offline: None,
             throttle_capacity: 100_000,
             ceremony_capacity: 10_000,
+            password_hash_memory_mib: default_hash_memory_mib(),
         }
     }
 }
@@ -191,6 +201,7 @@ impl std::fmt::Debug for AuthConfig {
             .field("attestation_roots", &self.attestation_roots.len())
             .field("hibp_online", &self.hibp_online.is_some())
             .field("hibp_offline", &self.hibp_offline.is_some())
+            .field("password_hash_memory_mib", &self.password_hash_memory_mib)
             .finish_non_exhaustive()
     }
 }
@@ -203,6 +214,10 @@ pub struct AuthService {
     index: Arc<AuthIndex>,
     scope: Arc<ScopeSupport>,
     throttle: Arc<Throttle>,
+    hash_gate: guard::HashGate,
+    dummy_timing: guard::DummyTiming,
+    known_networks: Arc<guard::KnownNetworks>,
+    misses: misses::Misses,
     ceremonies: Ceremonies,
     setup_token: Mutex<Option<SetupTokenVerifier>>,
     relying_party: ArcSwapOption<RelyingParty>,
@@ -274,7 +289,7 @@ const BREAK_GLASS_IDLE: Duration = Duration::from_secs(900);
 /// How recent the last full authentication must be for sensitive changes.
 pub const FRESH_AUTHENTICATION: Duration = Duration::from_secs(300);
 /// Largest number of rows read for a listing.
-const LIST_LIMIT: usize = 10_000;
+pub(super) const LIST_LIMIT: usize = 10_000;
 
 /// How often activity is written for a session with the idle lifetime `idle`.
 pub fn refresh_interval(idle: Duration) -> Duration {
@@ -296,6 +311,10 @@ impl AuthService {
         store.register_index(index.clone())?;
         let service = Arc::new(Self {
             throttle: Arc::new(Throttle::new(config.throttle_capacity)),
+            hash_gate: guard::HashGate::new(config.password_hash_memory_mib),
+            dummy_timing: guard::DummyTiming::default(),
+            known_networks: Arc::new(guard::KnownNetworks::default()),
+            misses: misses::Misses::default(),
             scope: Arc::new(ScopeSupport::default()),
             ceremonies: Ceremonies::new(config.ceremony_capacity),
             store,
@@ -308,6 +327,7 @@ impl AuthService {
         let installation = service.view().await?.get_typed(&INSTALLATION, &())?;
         service.configure_relying_party(installation.as_ref().map(|(i, _)| i))?;
         service.spawn_unlock_watch();
+        service.spawn_pin_sweep();
         Ok(service)
     }
 
@@ -633,9 +653,13 @@ impl AuthService {
         let mut found = view.get_typed(&SESSIONS, &hash)?;
         if found.is_none() {
             // A session created on another controller may not have reached this one's copy
-            // yet: read once more at the leader's commit index before refusing it.
-            if let Some(confirmed) = self.confirmed_view().await {
+            // yet: read once more at the leader's commit index before refusing it, unless
+            // the value was refused there a moment ago or too many such reads are under way.
+            if let Some(confirmed) = self.confirmed_view_for_miss(&hash, now).await {
                 found = confirmed.get_typed(&SESSIONS, &hash)?;
+                if found.is_none() {
+                    self.misses.remember(&hash, now);
+                }
                 view = confirmed;
             }
         }
@@ -716,16 +740,7 @@ impl AuthService {
             return Err(AuthError::Unauthenticated);
         }
         let hash = hash_secret(token);
-        let view = self.view().await?;
-        let mut found = Self::find_token(view.as_ref(), &hash)?;
-        let mut view = view;
-        if found.is_none()
-            && let Some(confirmed) = self.confirmed_view().await
-        {
-            // A token created on another controller: read at the leader's commit index.
-            found = Self::find_token(confirmed.as_ref(), &hash)?;
-            view = confirmed;
-        }
+        let (found, view) = self.lookup_token(&hash, now).await?;
         let settings = self.settings();
         match found {
             None => Err(AuthError::Unauthenticated),
@@ -812,6 +827,29 @@ impl AuthService {
         }
     }
 
+    /// The token stored under `hash` and the view it was found in: this controller's copy,
+    /// else (a token created on another controller) the leader's commit index, within the
+    /// bound of [`AuthService::confirmed_view_for_miss`].
+    async fn lookup_token(
+        &self,
+        hash: &Vec<u8>,
+        now: Timestamp,
+    ) -> Result<(Option<FoundToken>, Arc<dyn ReadView>), AuthError> {
+        let view = self.view().await?;
+        let found = Self::find_token(view.as_ref(), hash)?;
+        if found.is_some() {
+            return Ok((found, view));
+        }
+        let Some(confirmed) = self.confirmed_view_for_miss(hash, now).await else {
+            return Ok((None, view));
+        };
+        let found = Self::find_token(confirmed.as_ref(), hash)?;
+        if found.is_none() {
+            self.misses.remember(hash, now);
+        }
+        Ok((found, confirmed))
+    }
+
     /// The personal or scoped token stored under `hash`.
     fn find_token(view: &dyn ReadView, hash: &Vec<u8>) -> Result<Option<FoundToken>, AuthError> {
         if let Some((record, revision)) = view.get_typed(&TOKENS, hash)? {
@@ -831,9 +869,20 @@ impl AuthService {
         }
     }
 
-    /// A view at the commit index of the leader (a read index on a follower), or `None`
-    /// when the cluster cannot confirm one now.
-    async fn confirmed_view(&self) -> Option<Arc<dyn ReadView>> {
+    /// A view at the commit index of the leader (a read index on a follower) for a secret
+    /// this controller's copy does not hold, or `None` when the cluster cannot confirm one
+    /// now, when the same secret was refused after such a read a moment ago, or when
+    /// [`misses::CONFIRMING`] such reads are already under way. Unknown secrets therefore cost
+    /// the leader a bounded number of reads, whatever their rate.
+    async fn confirmed_view_for_miss(
+        &self,
+        hash: &[u8],
+        now: Timestamp,
+    ) -> Option<Arc<dyn ReadView>> {
+        if self.misses.recent(hash, now) {
+            return None;
+        }
+        let _slot = self.misses.confirming()?;
         self.store.read(ReadConsistency::Linearizable).await.ok()
     }
 
@@ -846,7 +895,8 @@ impl AuthService {
         };
         let store = Arc::clone(&self.store);
         let throttle = Arc::clone(&self.throttle);
-        handle.spawn(unlock_watch(store, throttle));
+        let known = Arc::clone(&self.known_networks);
+        handle.spawn(unlock_watch(store, throttle, known));
     }
 
     /// Loads a session of `user` by id.
@@ -1019,7 +1069,11 @@ fn token_expired(
 }
 
 /// The loop of [`AuthService::spawn_unlock_watch`]: ends when the store shuts down.
-async fn unlock_watch(store: Arc<dyn Store>, throttle: Arc<Throttle>) {
+async fn unlock_watch(
+    store: Arc<dyn Store>,
+    throttle: Arc<Throttle>,
+    known: Arc<guard::KnownNetworks>,
+) {
     let filter = WatchFilter::tables([USERS.name().clone()]);
     // Names by id, so that the throttle of a deleted account is cleared too.
     let mut names: HashMap<UserId, String> = HashMap::new();
@@ -1058,18 +1112,20 @@ async fn unlock_watch(store: Arc<dyn Store>, throttle: Arc<Throttle>) {
                         if let Some(at) = user.unlocked_at
                             && unlocked.get(&id) != Some(&at)
                         {
-                            throttle.unlock(&ThrottleKey::account(&user.name));
+                            throttle.unlock_account(&user.name);
                             unlocked.insert(id, at);
                         }
                         if let Some(old) = names.insert(id, user.name.clone())
                             && old != user.name
                         {
-                            throttle.unlock(&ThrottleKey::account(&old));
+                            throttle.unlock_account(&old);
+                            known.forget(&old);
                         }
                     }
                     Ok(None) => {
                         if let Some(name) = names.remove(&id) {
-                            throttle.unlock(&ThrottleKey::account(&name));
+                            throttle.unlock_account(&name);
+                            known.forget(&name);
                         }
                         unlocked.remove(&id);
                     }
@@ -1085,13 +1141,4 @@ async fn unlock_watch(store: Arc<dyn Store>, throttle: Arc<Throttle>) {
 
 fn role_names(roles: &[RoleName]) -> std::collections::BTreeSet<String> {
     roles.iter().map(|role| role.as_str().to_owned()).collect()
-}
-
-/// Runs a CPU-heavy closure (Argon2id) off the async workers.
-async fn blocking<T: Send + 'static>(
-    task: impl FnOnce() -> T + Send + 'static,
-) -> Result<T, AuthError> {
-    tokio::task::spawn_blocking(task)
-        .await
-        .map_err(|_| AuthError::internal("password hashing task failed"))
 }

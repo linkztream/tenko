@@ -137,3 +137,34 @@ describe("the toggle table", () => {
     }
   });
 });
+
+describe("TGL-07, the lock policy", () => {
+  it("reports the mode and the numbers of every profile, and agrees with the server mock", () => {
+    for (const profile of ["home", "standard", "hardened", "lab"] as const) {
+      const settings = profileSettings(profile);
+      expect(valueOf(settings, "lockout"), profile).toEqual({ mode: settings.lockout, ...settings.lockout_policy });
+      expect(valueOf(PROFILE_DEFAULTS[profile], "lockout"), profile).toEqual(valueOf(settings, "lockout"));
+    }
+    expect(valueOf(PROFILE_DEFAULTS.hardened, "lockout")).toMatchObject({ mode: "lock_until_unlock", passkey_holds_lock: true });
+    expect(valueOf(PROFILE_DEFAULTS.standard, "lockout")).toMatchObject({
+      attempts: 3,
+      waits_secs: [10, 30, 180, 300, 600],
+      lock_secs: 1800,
+      account_max_delay_secs: 60,
+      passkey_holds_lock: false,
+    });
+  });
+
+  it("plans the mode and the numbers of a profile switch as one change", () => {
+    const settings = profileSettings("standard");
+    const view: SecuritySettingsView = {
+      settings,
+      toggles: toggleStates(settings),
+      banner: { lab: false, weaker_than_home: false, deviations: [] },
+      vault_has_operator_secrets: false,
+    };
+    const change = planProfileChange(view, "hardened").find((c) => c.def.id === "TGL-07");
+    expect(change?.to).toMatchObject({ mode: "lock_until_unlock", passkey_holds_lock: true });
+    expect(planProfileChange(view, "standard").find((c) => c.def.id === "TGL-07")).toBeUndefined();
+  });
+});

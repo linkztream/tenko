@@ -8,7 +8,7 @@ use tenko_core::Timestamp;
 
 use crate::routes::auth::testkit::{Credential::Cookie, Harness};
 
-const PIN: &str = "7391";
+const PIN: &str = "739158";
 const PATH: &str = "/settings/reconciler";
 
 async fn lab() -> (Harness, String) {

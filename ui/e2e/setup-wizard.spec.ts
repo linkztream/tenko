@@ -48,7 +48,8 @@ async function completeWizard(page: Page, token: string, profile: "home" | "lab"
   await page.getByTestId("field-user-name").fill(ADMIN.name);
   await page.getByTestId("field-display-name").fill(ADMIN.displayName);
   await page.getByTestId("field-password").fill(ADMIN.password);
-  // The live password check against the profile's PIN preset clears the blocker.
+  // The administrator rule (12 characters, not digits only) holds in every profile and is stated up front.
+  await expect(page.getByTestId("admin-rule")).toBeVisible();
   await next(page, card, "host");
 
   await page.getByTestId("field-host-name").fill("localhost");
@@ -159,7 +160,7 @@ test.describe("first-run wizard over HTTPS with the internal CA", () => {
     const session = await api.session();
     expect(session.user.name).toBe(ADMIN.name);
     expect(session.profile).toBe("home");
-    expect(session.strength).toBe("pin");
+    expect(session.strength).toBe("password");
     expect((await api.get<Schemas["SetupState"]>("/setup")).open).toBe(false);
 
     // The account page offers the CA root while the internal CA serves; it is the PEM of

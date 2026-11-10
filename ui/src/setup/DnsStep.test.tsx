@@ -17,7 +17,6 @@ import { setLocale } from "../i18n";
 import Wizard from "./Wizard";
 
 const PASSWORD = "quiet-orchard-ember-17";
-const PIN = "73920146";
 
 beforeEach(async () => {
   await setLocale("en");
@@ -99,7 +98,7 @@ async function toRoles(profile: "home" | "standard" = "home") {
   await heading("Administrator");
   type("User name", "admin1");
   type("Display name", "Admin One");
-  type(/^(Password|PIN|Passphrase)$/, profile === "home" ? PIN : PASSWORD);
+  type(/^(Password|PIN|Passphrase)$/, PASSWORD);
   await waitFor(() => expect(blocker()).toBe(""), { timeout: 3000 });
   next();
   await heading("Host name and TLS");
@@ -439,7 +438,7 @@ describe("the DNS step of the wizard", () => {
     await heading("Administrator");
     type("User name", "admin1");
     type("Display name", "Admin One");
-    type(/^(Password|PIN|Passphrase)$/, PIN);
+    type(/^(Password|PIN|Passphrase)$/, PASSWORD);
     await waitFor(() => expect(blocker()).toBe(""), { timeout: 3000 });
     next();
     await heading("Host name and TLS");

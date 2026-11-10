@@ -2538,7 +2538,13 @@ impl Default for KekSection {
     }
 }
 
-/// `[auth]`: the WebAuthn relying party.
+/// The smallest `[auth] password_hash_memory_mib`: one computation at the baseline
+/// parameters (19 MiB) fits.
+pub const MIN_HASH_MEMORY_MIB: u32 = 19;
+/// The largest `[auth] password_hash_memory_mib`: 64 GiB.
+pub const MAX_HASH_MEMORY_MIB: u32 = 65_536;
+
+/// `[auth]`: the WebAuthn relying party and the bound on password hashing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuthSection {
@@ -2554,6 +2560,13 @@ pub struct AuthSection {
     /// DER or PEM files with attestation roots of accepted hardware keys (ADR 0010).
     #[serde(deserialize_with = "paths_or_list")]
     pub attestation_roots: Vec<PathBuf>,
+    /// The memory, in MiB, that password computations (Argon2id) in flight may take
+    /// together; a sign-in beyond it is refused at once with `auth.throttled` instead of
+    /// taking memory from DNS and DHCP. Default: 64 MiB (one computation at the Hardened
+    /// parameters) per processor, at least 2 and at most 8 processors, so 128 to 512 MiB.
+    /// 19 to 65,536.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password_hash_memory_mib: Option<u32>,
 }
 
 impl Default for AuthSection {
@@ -2563,6 +2576,7 @@ impl Default for AuthSection {
             origins: Vec::new(),
             rp_name: "Tenko DDI".to_owned(),
             attestation_roots: Vec::new(),
+            password_hash_memory_mib: None,
         }
     }
 }
@@ -3435,6 +3449,15 @@ impl Config {
         if let Some(rp_id) = &self.auth.rp_id {
             checked_host("auth.rp_id", rp_id)?;
         }
+        if self
+            .auth
+            .password_hash_memory_mib
+            .is_some_and(|mib| !(MIN_HASH_MEMORY_MIB..=MAX_HASH_MEMORY_MIB).contains(&mib))
+        {
+            return Err(ConfigError::invalid(format!(
+                "auth.password_hash_memory_mib must be {MIN_HASH_MEMORY_MIB} to {MAX_HASH_MEMORY_MIB}"
+            )));
+        }
         if self.sse.channel_capacity == 0 || self.sse.ring_capacity == 0 {
             return Err(ConfigError::invalid(
                 "sse.channel_capacity and sse.ring_capacity must be at least 1",
@@ -4231,6 +4254,38 @@ days = 400
         )
         .expect("the example parses");
         loaded.config.resolve().expect("the example is valid");
+    }
+
+    #[test]
+    fn the_password_hashing_bound_is_read_and_checked() {
+        let loaded = from_text(
+            "data_dir = \"/d\"
+[auth]
+password_hash_memory_mib = 256
+",
+            &[],
+        )
+        .expect("loads");
+        assert_eq!(loaded.config.auth.password_hash_memory_mib, Some(256));
+        loaded.config.resolve().expect("valid");
+        assert_eq!(Config::default().auth.password_hash_memory_mib, None);
+        for bad in [0, 18, 65_537] {
+            let loaded = from_text(
+                &format!(
+                    "data_dir = \"/d\"
+[auth]
+password_hash_memory_mib = {bad}
+"
+                ),
+                &[],
+            )
+            .expect("loads");
+            let error = loaded.config.resolve().expect_err("out of bounds");
+            assert!(
+                error.to_string().contains("password_hash_memory_mib"),
+                "{error}"
+            );
+        }
     }
 
     #[test]

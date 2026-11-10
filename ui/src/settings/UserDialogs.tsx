@@ -8,7 +8,7 @@ import { ConfirmDialog, Dialog } from "../components/Dialog";
 import { ErrorNotice, Notice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { availableLocales, t } from "../i18n";
-import { FieldHelp, fieldMessages, ReloadedNote } from "./fields";
+import { FieldHelp, fieldMessages, fieldRefusal, ReloadedNote } from "./fields";
 import { session } from "../auth/session";
 
 /** A confirmation whose action can fail: busy while it runs, the error inside the dialog. */
@@ -214,6 +214,7 @@ export function RolesDialog(props: {
     const b = [...props.user.roles].sort().join(",");
     return a === b;
   };
+  const rolesRefusal = () => fieldRefusal(error(), "roles");
   const losingAdmin = () => own() && props.user.roles.includes("admin") && !value().includes("admin");
 
   const submit = async (e: Event) => {
@@ -243,15 +244,18 @@ export function RolesDialog(props: {
       <form class="dialog-form" onSubmit={(e) => void submit(e)} novalidate>
         <h2 class="dialog-title">{t("settings.users.roles.title")}</h2>
         <div class="dialog-body">
-          <ErrorNotice error={error()} />
+          <ErrorNotice error={rolesRefusal() ? null : error()} />
           <ReloadedNote error={error()} />
           <RoleChoices
             idPrefix="ur"
             roles={props.roles}
             value={value()}
             onChange={setValue}
-            error={value().length === 0 ? t("settings.users.error.roles_required") : undefined}
+            error={value().length === 0 ? t("settings.users.error.roles_required") : rolesRefusal()}
           />
+          <Show when={value().includes("admin") && !props.user.roles.includes("admin")}>
+            <Notice kind="info">{t("settings.users.admin_rule")}</Notice>
+          </Show>
           <Show when={losingAdmin()}>
             <Notice kind="warn">{t("settings.users.roles.own_admin")}</Notice>
           </Show>
@@ -335,6 +339,11 @@ export function PasswordDialog(props: {
               onInput={(e) => setPassword(e.currentTarget.value)}
             />
             <FieldHelp id="up-password-help" help={t("settings.users.password.help")} error={fieldError()} />
+            <Show when={props.user.roles.includes("admin")}>
+              <p class="help" data-testid="admin-rule">
+                {t("settings.users.admin_rule")}
+              </p>
+            </Show>
           </div>
         </div>
         <div class="dialog-actions">

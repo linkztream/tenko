@@ -6150,6 +6150,11 @@ export interface components {
     schemas: {
         /** @description A persisted lock (IAM-05, TGL-07). */
         AccountLock: {
+            /**
+             * @description The client network the lock holds for: an IPv4 address or an IPv6 /64 (`::` when
+             *     the address was not known). Absent in locks stored before locks were per network.
+             */
+            network?: string | null;
             /** @description When the lock started. */
             since: components["schemas"]["Timestamp"];
             /** @description When it lifts by itself. */
@@ -12694,6 +12699,42 @@ export interface components {
             ttl_secs: number | null;
         };
         /**
+         * @description The lock policy an administrator sets (TGL-07, IAM-05): how many attempts an account
+         *     gets from one network, the waits after them, the lock that follows, the account-wide
+         *     ceiling and whether a passkey sign-in respects the lock. The mode ([`LockoutMode`])
+         *     decides whether the lock is applied at all.
+         */
+        LockPolicy: {
+            /**
+             * Format: int32
+             * @description The ceiling of the account-wide delay, in seconds (0 to 600; 0 switches the delay
+             *     off). The delay starts once the account fails, across every network, as often as
+             *     one network may before its lock; that is also when the alarm is raised.
+             */
+            account_max_delay_secs: number;
+            /**
+             * Format: int32
+             * @description Attempts an account has from one network before the first wait (1 to 20).
+             */
+            attempts: number;
+            /**
+             * Format: int32
+             * @description How long the lock holds, in seconds (one minute to one day). It always ends by itself.
+             */
+            lock_secs: number;
+            /**
+             * @description Whether the lock also holds for a passkey sign-in (Hardened). Otherwise a passkey,
+             *     which cannot be guessed, signs in through the lock.
+             */
+            passkey_holds_lock: boolean;
+            /**
+             * @description The waits between the next attempts, in seconds, in order (1 to 10 entries, each 1 s
+             *     to one day). The account is locked for that network after the last one, in the modes
+             *     that lock; in the others the last wait repeats.
+             */
+            waits_secs: number[];
+        };
+        /**
          * @description How failed logins are punished (TGL-07).
          *
          *     The security presets map onto the modes as Home to `ProgressiveDelay`, Standard to
@@ -17566,6 +17607,7 @@ export interface components {
                 owner?: components["schemas"]["UserId"] | null;
                 /** @description The password must be changed. */
                 password_change_required: boolean;
+                pin_expires_at?: components["schemas"]["Timestamp"] | null;
                 /** @description The revision for `If-Match`. */
                 revision: components["schemas"]["Revision"];
                 /** @description Global roles. */
@@ -17722,6 +17764,13 @@ export interface components {
         };
         /** @description `POST /auth/password/check`: live policy feedback. */
         PasswordCheck: {
+            /**
+             * @description Check against the administrator rule as well (at least 12 characters, not digits
+             *     only, never a PIN): for an account that holds or is given the admin role. Default:
+             *     whether the caller administers when `user_name` is absent, otherwise no. During
+             *     first-run setup the rule always applies.
+             */
+            administers?: boolean | null;
             /** @description The candidate password. */
             password: components["schemas"]["SecretString"];
             profile?: components["schemas"]["Profile"] | null;
@@ -18003,6 +18052,9 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "invalid_characters";
+        } | {
+            /** @enum {string} */
+            kind: "digits_only";
         };
         /**
          * @description What DHCP adds to an IPAM range of role `dhcp_pool` (`dhcp.pools`, key: the range):
@@ -21356,6 +21408,7 @@ export interface components {
             breach_check: components["schemas"]["BreachMode"];
             /** @description TGL-07: lockout. */
             lockout: components["schemas"]["LockoutMode"];
+            lockout_policy?: components["schemas"]["LockPolicy"] | null;
             /** @description TGL-02: MFA requirement. */
             mfa: components["schemas"]["MfaRequirement"];
             /** @description TGL-03: passkey required for administrators. */
@@ -21372,6 +21425,15 @@ export interface components {
              * @description TGL-05: API token maximum lifetime in days; `None` allows non-expiring tokens.
              */
             token_max_days?: number | null;
+            /**
+             * Format: int32
+             * @description Days a PIN stored before the six-digit minimum keeps working without a sign-in that
+             *     shows it meets the policy, counted from the upgrade (1 to 365). Afterwards it is
+             *     refused like a wrong PIN until an administrator resets it, or, for the last
+             *     administrator, until `tenko user unlock` on the host starts a new period. `None` in
+             *     settings stored before the rule: 30 days.
+             */
+            unconfirmed_pin_days?: number | null;
             updates?: components["schemas"]["UpdatePolicy"] | null;
         };
         /** @description `GET /settings/security`. */
@@ -21505,6 +21567,7 @@ export interface components {
             audit_export?: components["schemas"]["AuditExport"] | null;
             breach_check?: components["schemas"]["BreachMode"] | null;
             lockout?: components["schemas"]["LockoutMode"] | null;
+            lockout_policy?: components["schemas"]["LockPolicy"] | null;
             mfa?: components["schemas"]["MfaRequirement"] | null;
             /** @description TGL-03. */
             passkey_for_admins?: boolean | null;
@@ -21513,6 +21576,11 @@ export interface components {
             secret_reveal?: components["schemas"]["RevealPolicy"] | null;
             session?: components["schemas"]["SessionLifetime"] | null;
             token_max_lifetime?: components["schemas"]["TokenMaxLifetime"] | null;
+            /**
+             * Format: int32
+             * @description The period of an unconfirmed PIN from before the six-digit minimum, in days.
+             */
+            unconfirmed_pin_days?: number | null;
             updates?: components["schemas"]["UpdatePolicy"] | null;
         };
         /** @description The first administrator in `POST /setup`. */
@@ -23877,6 +23945,7 @@ export interface components {
             owner?: components["schemas"]["UserId"] | null;
             /** @description The password must be changed. */
             password_change_required: boolean;
+            pin_expires_at?: components["schemas"]["Timestamp"] | null;
             /** @description The revision for `If-Match`. */
             revision: components["schemas"]["Revision"];
             /** @description Global roles. */

@@ -262,7 +262,7 @@
         <segment><source>{seconds, plural, one {Try again in # second.} other {Try again in # seconds.}}</source></segment>
       </unit>
       <unit id="auth.signin.throttle_explain">
-        <segment><source>After several wrong attempts, each new attempt waits a little longer.</source></segment>
+        <segment><source>Too many attempts from this network.</source></segment>
       </unit>
       <unit id="auth.signin.use_passkey">
         <segment><source>Use a passkey instead</source></segment>
@@ -2519,7 +2519,7 @@
         <segment><source>Passphrase</source></segment>
       </unit>
       <unit id="setup.admin.password.placeholder.pin">
-        <segment><source>At least 4 digits</source></segment>
+        <segment><source>At least 6 digits</source></segment>
       </unit>
       <unit id="setup.admin.password.placeholder.password">
         <segment><source>At least 12 characters</source></segment>
@@ -3142,7 +3142,7 @@
         <segment><source>Password policy preset</source></segment>
       </unit>
       <unit id="toggles.password_policy.pin">
-        <segment><source>PIN: digits only, at least 4</source></segment>
+        <segment><source>PIN: digits only, at least 6</source></segment>
       </unit>
       <unit id="toggles.password_policy.standard">
         <segment><source>Standard: at least 12 characters</source></segment>

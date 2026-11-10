@@ -40985,6 +40985,13 @@
           "until_unlock"
         ],
         "properties": {
+          "network": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client network the lock holds for: an IPv4 address or an IPv6 /64 (`::` when\nthe address was not known). Absent in locks stored before locks were per network."
+          },
           "since": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "When the lock started."
@@ -58145,6 +58152,51 @@
         },
         "additionalProperties": false
       },
+      "LockPolicy": {
+        "type": "object",
+        "description": "The lock policy an administrator sets (TGL-07, IAM-05): how many attempts an account\ngets from one network, the waits after them, the lock that follows, the account-wide\nceiling and whether a passkey sign-in respects the lock. The mode ([`LockoutMode`])\ndecides whether the lock is applied at all.",
+        "required": [
+          "attempts",
+          "waits_secs",
+          "lock_secs",
+          "account_max_delay_secs",
+          "passkey_holds_lock"
+        ],
+        "properties": {
+          "account_max_delay_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The ceiling of the account-wide delay, in seconds (0 to 600; 0 switches the delay\noff). The delay starts once the account fails, across every network, as often as\none network may before its lock; that is also when the alarm is raised.",
+            "minimum": 0
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Attempts an account has from one network before the first wait (1 to 20).",
+            "minimum": 0
+          },
+          "lock_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How long the lock holds, in seconds (one minute to one day). It always ends by itself.",
+            "minimum": 0
+          },
+          "passkey_holds_lock": {
+            "type": "boolean",
+            "description": "Whether the lock also holds for a passkey sign-in (Hardened). Otherwise a passkey,\nwhich cannot be guessed, signs in through the lock."
+          },
+          "waits_secs": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The waits between the next attempts, in seconds, in order (1 to 10 entries, each 1 s\nto one day). The account is locked for that network after the last one, in the modes\nthat lock; in the others the last wait repeats."
+          }
+        },
+        "additionalProperties": false
+      },
       "LockoutMode": {
         "type": "string",
         "description": "How failed logins are punished (TGL-07).\n\nThe security presets map onto the modes as Home to `ProgressiveDelay`, Standard to\n`DelayThenTemporaryLock`, Hardened to `LockUntilUnlock` and Lab to `Off`.",
@@ -70182,6 +70234,17 @@
                   "type": "boolean",
                   "description": "The password must be changed."
                 },
+                "pin_expires_at": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "When a PIN stored before the six-digit minimum stops signing in, unless a sign-in\nshows first that it meets the policy or the PIN is replaced. Absent for every other\nsecret."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "revision": {
                   "$ref": "#/components/schemas/Revision",
                   "description": "The revision for `If-Match`."
@@ -70534,6 +70597,13 @@
           "password"
         ],
         "properties": {
+          "administers": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Check against the administrator rule as well (at least 12 characters, not digits\nonly, never a PIN): for an account that holds or is given the admin role. Default:\nwhether the caller administers when `user_name` is absent, otherwise no. During\nfirst-run setup the rule always applies."
+          },
           "password": {
             "$ref": "#/components/schemas/SecretString",
             "description": "The candidate password."
@@ -71351,6 +71421,21 @@
                 "type": "string",
                 "enum": [
                   "invalid_characters"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Digits only, which an administrator's password may not be: an administrator never\nsigns in with a PIN.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "digits_only"
                 ]
               }
             }
@@ -78897,6 +78982,17 @@
             "$ref": "#/components/schemas/LockoutMode",
             "description": "TGL-07: lockout."
           },
+          "lockout_policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LockPolicy",
+                "description": "TGL-07: the numbers of the lock. `None` in settings stored before they could be\nset: the profile's value applies ([`SecuritySettings::lockout_policy`])."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "mfa": {
             "$ref": "#/components/schemas/MfaRequirement",
             "description": "TGL-02: MFA requirement."
@@ -78935,6 +79031,15 @@
             ],
             "format": "int32",
             "description": "TGL-05: API token maximum lifetime in days; `None` allows non-expiring tokens.",
+            "minimum": 0
+          },
+          "unconfirmed_pin_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Days a PIN stored before the six-digit minimum keeps working without a sign-in that\nshows it meets the policy, counted from the upgrade (1 to 365). Afterwards it is\nrefused like a wrong PIN until an administrator resets it, or, for the last\nadministrator, until `tenko user unlock` on the host starts a new period. `None` in\nsettings stored before the rule: 30 days.",
             "minimum": 0
           },
           "updates": {
@@ -79299,6 +79404,17 @@
               }
             ]
           },
+          "lockout_policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LockPolicy",
+                "description": "TGL-07: the numbers of the lock."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "mfa": {
             "oneOf": [
               {
@@ -79371,6 +79487,15 @@
                 "type": "null"
               }
             ]
+          },
+          "unconfirmed_pin_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The period of an unconfirmed PIN from before the six-digit minimum, in days.",
+            "minimum": 0
           },
           "updates": {
             "oneOf": [
@@ -85340,6 +85465,17 @@
           "password_change_required": {
             "type": "boolean",
             "description": "The password must be changed."
+          },
+          "pin_expires_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When a PIN stored before the six-digit minimum stops signing in, unless a sign-in\nshows first that it meets the policy or the PIN is replaced. Absent for every other\nsecret."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revision": {
             "$ref": "#/components/schemas/Revision",

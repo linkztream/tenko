@@ -14,7 +14,7 @@ import { acknowledgeRecoveryCodes, signOut, withKey } from "./support/ui";
 import { addPlatformAuthenticator } from "./support/webauthn";
 
 test("password with TOTP, then a passkey enrolled and used to sign in", async ({ page, api, signedIn }) => {
-  expect(signedIn.session.strength).toBe("pin");
+  expect(signedIn.session.strength).toBe("password");
 
   // Enroll the authenticator app from the account page.
   await page.goto("/account");
@@ -32,7 +32,7 @@ test("password with TOTP, then a passkey enrolled and used to sign in", async ({
   expect(codes.length).toBeGreaterThanOrEqual(8);
   await expect(withKey(page, "account-totp-status", "on")).toBeVisible();
 
-  // Sign out; sign in with the PIN, then a wrong code, then the right one.
+  // Sign out; sign in with the password, then a wrong code, then the right one.
   await signOut(page);
   await page.getByTestId("signin-use-password").click();
   const passwordForm = page.getByTestId("signin-password-form");

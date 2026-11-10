@@ -1,7 +1,8 @@
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetMockDb } from "../api/mock/db";
+import { db, resetMockDb } from "../api/mock/db";
 import { MOCK_PASSWORDS, MOCK_RECOVERY_CODES, MOCK_TOTP_CODE } from "../api/mock/fixtures";
+import { PROFILE_MATRIX } from "../api/mock/profiles";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { locale, setLocale } from "../i18n";
@@ -114,6 +115,33 @@ describe("sign-in", () => {
     }
     expect(await screen.findByText(/Try again in \d+ seconds?\./)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("says the wait in minutes, and says nothing of the account", async () => {
+    db.settings.lockout_policy = { ...(db.settings.lockout_policy ?? PROFILE_MATRIX.standard.lockout_policy!), waits_secs: [180, 300] };
+    show();
+    signInWithPassword("nobody-here", "wrong-0");
+    await screen.findByRole("alert");
+    for (let i = 1; i < 3; i++) {
+      fireEvent.input(screen.getByLabelText("Password"), { target: { value: `wrong-${i}` } });
+      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    // A name that does not exist is throttled like any other, and the words do not tell the difference.
+    expect(await screen.findByText("Try again in 3 minutes.")).toBeTruthy();
+    expect(screen.getByText(/Too many attempts from this network\./)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/account.*(locked|exist)/i);
+  });
+
+  it("always shows how to get out of a lock, whatever the account", () => {
+    show();
+    const help = screen.getByTestId("signin-locked-help");
+    expect(help.textContent).toBe(
+      "Locked out or PIN no longer accepted? An administrator can reset it. On a server with a single administrator, run tenko user unlock <name> on the host as the service account.",
+    );
+    expect(help.querySelector("code")?.textContent).toBe("tenko user unlock <name>");
+    fireEvent.click(screen.getByRole("button", { name: "Use user name and password" }));
+    expect(screen.getByTestId("signin-locked-help")).toBeTruthy();
   });
 
   it("signs in with a passkey through the WebAuthn ceremony", async () => {

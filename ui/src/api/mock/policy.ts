@@ -31,6 +31,23 @@ export interface PasswordContext {
 export interface PasswordCheckInput extends PasswordContext {
   policy: PasswordPolicy;
   breach: BreachMode;
+  /** The account holds or is given the admin role: the administrator rule applies as well. */
+  administers?: boolean;
+}
+
+/** The shortest password of an administrator, in every profile. */
+export const ADMIN_MIN_LENGTH = 12;
+
+/**
+ * The preset a new secret of an account is checked against (`for_account` in
+ * crates/tenko-auth/src/password/policy.rs): for an administrator the PIN preset and a Custom
+ * preset with a shorter minimum give way to Standard; a stricter preset stays.
+ */
+export function policyForAccount(policy: PasswordPolicy, administers: boolean): PasswordPolicy {
+  if (administers && (policy.preset === "pin" || (policy.preset === "custom" && policy.min_length < ADMIN_MIN_LENGTH))) {
+    return { preset: "standard" };
+  }
+  return policy;
 }
 
 const BREACHED = new Set(BREACHED_PASSWORDS);
@@ -165,10 +182,14 @@ export function isBreached(password: string): boolean {
 
 /** Checks a candidate the way `POST /auth/password/check` answers. */
 export function checkPassword(password: string, input: PasswordCheckInput): PasswordCheckResult {
-  const violations = policyViolations(password, input.policy, input);
+  const administers = input.administers === true;
+  const policy = policyForAccount(input.policy, administers);
+  const violations = policyViolations(password, policy, input);
+  // An administrator never signs in with a PIN, whatever the length.
+  if (administers && /^[0-9]+$/.test(normalizePassword(password))) violations.push({ kind: "digits_only" });
   let breachCheck: BreachStatus = "off";
   if (input.breach !== "off") {
-    if (isPinLike(normalizePassword(password)) && input.policy.preset === "pin") {
+    if (isPinLike(normalizePassword(password)) && policy.preset === "pin") {
       // As the server: every short numeric code is in the corpus, so a PIN is not looked up.
       breachCheck = "not_applicable";
     } else if (isBreached(password)) {
@@ -182,7 +203,7 @@ export function checkPassword(password: string, input: PasswordCheckInput): Pass
     acceptable: violations.length === 0,
     violations,
     breach_check: breachCheck,
-    policy: structuredClone(input.policy),
+    policy: structuredClone(policy),
   };
 }
 

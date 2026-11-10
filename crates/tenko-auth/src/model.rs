@@ -83,6 +83,13 @@ pub const INSTALLATION: TableDef<(), Installation> = TableDef::new("auth.install
 pub const LAST_LOGINS: TableDef<UserId, Timestamp> = TableDef::new("auth.last_logins");
 /// Security alarms (break-glass use, locks with alert); routed to the `system` SSE topic.
 pub const ALARMS: TableDef<uuid::Uuid, AlarmRecord> = TableDef::new("auth.alarms");
+/// Sign-in locks by the lowercase user name and the client network they hold for
+/// (IAM-05, TGL-07). Written for every name a lock is reached on, existing or not, so a lock
+/// answers the same on every controller whether the account exists or not.
+pub const LOCKS: TableDef<(String, String), AccountLock> = TableDef::new("auth.locks");
+/// When this installation first ran with the six-digit PIN minimum: the start of the period
+/// of a PIN stored before it ([`StoredPassword::unconfirmed_pin`]).
+pub const PIN_RULE_SINCE: TableDef<(), Timestamp> = TableDef::new("auth.pin_rule_since");
 /// Scoped grants by id (IAM-01).
 pub const GRANTS: TableDef<GrantId, GrantRecord> = TableDef::new("auth.grants");
 /// MFA policies by role name (IAM-06); a role without a row follows the profile.
@@ -375,6 +382,46 @@ pub struct StoredPassword {
     pub kind: PasswordKind,
     /// When it was set.
     pub changed_at: Timestamp,
+    /// When the secret was last found to meet the password policy: when it was set, and at
+    /// a sign-in that checked it. Absent in records stored before the PIN minimum rose to
+    /// six digits; such a PIN is reported as one that must be changed until a sign-in shows
+    /// it is long enough.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_checked_at: Option<Timestamp>,
+    /// A new start of the period of an unconfirmed PIN, set by `tenko user unlock` for a PIN
+    /// whose period had ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_grace_from: Option<Timestamp>,
+    /// When administrators were told that the period of this unconfirmed PIN ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_expiry_noticed_at: Option<Timestamp>,
+    /// Whether the secret was found to meet the administrator rule (a password of at least
+    /// 12 characters that is not digits only) when it was set or at a sign-in. An account
+    /// is given the admin role only with such a secret, or with none.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub admin_rule_met: bool,
+}
+
+impl StoredPassword {
+    /// Whether the secret is a PIN that no sign-in has yet shown to meet the policy.
+    pub fn unconfirmed_pin(&self) -> bool {
+        self.kind == PasswordKind::Pin && self.policy_checked_at.is_none()
+    }
+
+    /// The end of the period of an unconfirmed PIN: `days` after the later of `since` (when
+    /// the installation first ran with the six-digit minimum) and a restart of the period.
+    /// `None` for a confirmed secret, or before `since` is known.
+    pub fn pin_expires_at(&self, since: Option<Timestamp>, days: u32) -> Option<Timestamp> {
+        if !self.unconfirmed_pin() {
+            return None;
+        }
+        let start = match (since, self.pin_grace_from) {
+            (Some(since), Some(grace)) => since.max(grace),
+            (Some(since), None) => since,
+            (None, _) => return None,
+        };
+        start.checked_add(std::time::Duration::from_secs(u64::from(days) * 86_400))
+    }
 }
 
 /// The TOTP factor of an account.
@@ -390,7 +437,7 @@ pub struct TotpFactor {
 }
 
 /// A persisted lock (IAM-05, TGL-07).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AccountLock {
     /// When the lock started.
     pub since: Timestamp,
@@ -398,6 +445,10 @@ pub struct AccountLock {
     pub until: Timestamp,
     /// Whether only an administrator should lift it early (Hardened).
     pub until_unlock: bool,
+    /// The client network the lock holds for: an IPv4 address or an IPv6 /64 (`::` when
+    /// the address was not known). Absent in locks stored before locks were per network.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
 }
 
 /// A local user.
@@ -426,7 +477,8 @@ pub struct UserRecord {
     /// The break-glass account (IAM-09): hardware security key only, rate limited, alarms.
     #[serde(default)]
     pub break_glass: bool,
-    /// A persisted lock.
+    /// A lock stored before locks were kept per client network ([`LOCKS`]). No longer
+    /// written or enforced; an unlock clears it.
     #[serde(default)]
     pub lock: Option<AccountLock>,
     /// The password must be changed at the next opportunity (it no longer meets the policy).
@@ -510,9 +562,10 @@ impl UserRecord {
         self.totp.is_some() || credentials > 0
     }
 
-    /// The lock in force at `now`, if any.
-    pub fn active_lock(&self, now: Timestamp) -> Option<AccountLock> {
-        self.lock.filter(|lock| now < lock.until)
+    /// The lock stored on the record itself before locks were per network, if it still
+    /// holds at `now`. Only shown, never enforced.
+    pub fn legacy_lock(&self, now: Timestamp) -> Option<AccountLock> {
+        self.lock.clone().filter(|lock| now < lock.until)
     }
 }
 
@@ -643,6 +696,12 @@ pub enum AlarmKind {
     BreakGlassFailure,
     /// An account was locked under the Hardened lockout mode (TGL-07).
     AccountLocked,
+    /// Failed sign-ins of an account, across every network, reached the number that locks
+    /// one network (TGL-07, IAM-05): someone may be guessing its password or PIN.
+    SignInFailures,
+    /// A PIN stored before the six-digit minimum was not confirmed by a sign-in within its
+    /// period and no longer signs in; an administrator resets it.
+    PinExpired,
 }
 
 /// A security alarm.

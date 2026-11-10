@@ -8,7 +8,7 @@ import type { RoleInfo, RoleName, UserCreate, UserInfo } from "../api/types";
 import { Dialog } from "../components/Dialog";
 import { ErrorNotice } from "../components/Notice";
 import { availableLocales, t } from "../i18n";
-import { FieldHelp, fieldMessages } from "./fields";
+import { FieldHelp, fieldMessages, fieldRefusal } from "./fields";
 import { RoleChoices } from "./UserDialogs";
 
 const MAX_NAME = 64;
@@ -45,8 +45,8 @@ export function AddUserDialog(props: {
   const displayError = () => serverField("display_name");
   const passwordError = () => serverField("password");
   const rolesError = () =>
-    serverField("roles") ?? (submitted() && roles().length === 0 ? t("settings.users.error.roles_required") : undefined);
-  const fieldErrored = () => nameTaken() || ["name", "display_name", "password", "roles"].some((f) => serverField(f));
+    fieldRefusal(error(), "roles") ?? (submitted() && roles().length === 0 ? t("settings.users.error.roles_required") : undefined);
+  const fieldErrored = () => nameTaken() || ["name", "display_name", "password", "roles"].some((f) => fieldRefusal(error(), f));
   const generalError = () => (error() && !fieldErrored() ? error() : null);
 
   const submit = async (e: Event) => {
@@ -119,6 +119,11 @@ export function AddUserDialog(props: {
               onInput={(e) => setPassword(e.currentTarget.value)}
             />
             <FieldHelp id="au-password-help" help={t("settings.users.field.password_help")} error={passwordError()} />
+            <Show when={roles().includes("admin")}>
+              <p class="help" data-testid="admin-rule">
+                {t("settings.users.admin_rule")}
+              </p>
+            </Show>
           </div>
           <div class="field">
             <label for="au-language">{t("settings.users.field.language")}</label>

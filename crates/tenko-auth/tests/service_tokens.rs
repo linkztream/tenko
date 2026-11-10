@@ -30,7 +30,7 @@ use tenko_store::{KeyRange, ReadConsistency, ReadViewExt, Store, tables};
 use tenko_vault::{SecretBytes, SecretPurpose, SecretSpec, Vault};
 
 const PASSPHRASE: &str = "marble comet violin saffron";
-const PIN: &str = "7391";
+const PIN: &str = "593618";
 const DAY: u64 = 86_400;
 
 fn password_for(profile: Profile) -> &'static str {
@@ -1002,7 +1002,13 @@ async fn hardened_needs_a_passkey_for_administrators_and_two_factors_for_everyon
 
 #[tokio::test]
 async fn an_operator_secret_in_the_vault_raises_the_bar_for_a_pin_session() {
-    let (env, session) = TestEnv::installed(Profile::Home).await;
+    let (env, admin) = TestEnv::installed(Profile::Home).await;
+    env.pin_user(&admin, "olga", vec![RoleName::Operator]).await;
+    let session = expect_session(
+        password_login(&env, "olga", tenko_auth::testing::env::ADMIN_PIN)
+            .await
+            .expect("login"),
+    );
     make_token(&env, &session, "before", None)
         .await
         .expect("a PIN session may create a token while the vault holds no operator secret");
@@ -1290,7 +1296,7 @@ async fn creating_a_service_account_token_needs_a_fresh_session() {
         AuthError::StepUpRequired { required: "fresh" }
     );
     let fresh = expect_session(
-        password_login(&env, ADMIN, tenko_auth::testing::env::ADMIN_PIN)
+        password_login(&env, ADMIN, ADMIN_PASSWORD)
             .await
             .expect("login"),
     );

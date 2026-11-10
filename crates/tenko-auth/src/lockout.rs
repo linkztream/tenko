@@ -5,21 +5,29 @@
 //! first. The service calls it in this order:
 //!
 //! 1. [`Throttle::check`] before anything else. On `Err(Retry)` the attempt is refused
-//!    without verifying the password and without a store access.
+//!    without verifying the password.
 //! 2. The credential is verified only when `check` allowed the attempt.
 //! 3. [`Throttle::record_success`] or [`Throttle::record_failure`]. Only when the
-//!    [`FailureOutcome`] carries `locked_until` does the service persist a lock on the user
-//!    record (and raise an alarm when `alert` is set).
+//!    [`FailureOutcome`] carries `locked_until` does the service persist a lock (and raise an
+//!    alarm when `alert` is set).
 //!
-//! A login of several steps is one attempt for the account's key. A wrong password and a
-//! wrong second-factor code (TOTP or recovery code) both count as a failure on it, so the
-//! policy's lock is reached after `lock_after` failures across any number of challenges. A
-//! correct password alone is not a success: the account's key is forgotten only when the
-//! whole login completes, when the last factor has passed and the session is written.
+//! A login of several steps is one attempt for the account's keys. A wrong password and a
+//! wrong second-factor code (TOTP or recovery code) both count as a failure on them, so the
+//! policy's lock is reached after its number of failures across any number of challenges. A
+//! correct password alone is not a success: the keys are forgotten only when the whole login
+//! completes, when the last factor has passed and the session is written.
 //!
-//! Two kinds of key are tracked side by side ([`ThrottleKey`]): one per account, with a
-//! policy chosen by [`LockoutMode`], and one per client address with
-//! [`LockoutPolicy::source_policy`], which slows password spraying across many accounts.
+//! Three kinds of key are tracked side by side ([`ThrottleKey`]):
+//!
+//! - [`ThrottleKey::AccountSource`], an account seen from one client network (an IPv4
+//!   address or an IPv6 /64): the attempts, the waits and the lock of [`LockPolicy`]. One
+//!   network cannot lock an account for the others.
+//! - [`ThrottleKey::Account`], the account across every network: a delay with a short
+//!   ceiling once the account fails more often than one network may ([`LockPolicy::account_wide`]),
+//!   which keeps a distributed guess slow without locking anyone out.
+//! - [`ThrottleKey::Source`], a client network across every account, with
+//!   [`LockoutPolicy::source_policy`], which slows password spraying.
+//!
 //! Unknown account names are keyed exactly like known ones, so throttling reveals nothing
 //! about which accounts exist.
 //!
@@ -40,7 +48,7 @@
 use std::{
     collections::HashMap,
     fmt,
-    net::IpAddr,
+    net::{IpAddr, Ipv6Addr},
     sync::{Mutex, MutexGuard, PoisonError},
     time::Duration,
 };
@@ -95,6 +103,45 @@ impl LockoutMode {
     }
 }
 
+/// The longest wait schedule a [`LockPolicy`] may hold.
+pub const MAX_WAITS: usize = 10;
+
+/// A fixed list of waits, the delays of a [`LockPolicy`] in place of doubling. Copyable, so
+/// [`LockoutPolicy`] stays a plain value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Schedule {
+    waits: [Duration; MAX_WAITS],
+    len: usize,
+}
+
+impl Schedule {
+    /// No schedule: the policy doubles its base delay.
+    pub const NONE: Self = Self {
+        waits: [Duration::ZERO; MAX_WAITS],
+        len: 0,
+    };
+
+    /// A schedule of up to [`MAX_WAITS`] waits; longer lists are cut there.
+    pub fn new(waits: &[Duration]) -> Self {
+        let mut schedule = Self::NONE;
+        for (slot, wait) in schedule.waits.iter_mut().zip(waits) {
+            *slot = *wait;
+        }
+        schedule.len = waits.len().min(MAX_WAITS);
+        schedule
+    }
+
+    /// The waits.
+    pub fn waits(&self) -> &[Duration] {
+        &self.waits[..self.len]
+    }
+
+    /// Whether the schedule is empty.
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
 /// The numbers behind a [`LockoutMode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LockoutPolicy {
@@ -102,10 +149,13 @@ pub struct LockoutPolicy {
     pub mode: LockoutMode,
     /// Failures before delays start. Failure `n <= free_attempts` has no delay.
     pub free_attempts: u32,
-    /// The first delay. It doubles with every further failure.
+    /// The first delay. It doubles with every further failure. Unused with a schedule.
     pub base_delay: Duration,
-    /// The longest delay.
+    /// The longest delay. Unused with a schedule.
     pub max_delay: Duration,
+    /// The delays in order, when set: failure `free_attempts + k` waits `schedule[k - 1]`,
+    /// and the last wait repeats.
+    pub schedule: Schedule,
     /// The failure that locks. Used by the modes that lock; a value of 0 counts as 1, so a
     /// locking mode never degrades into no lock at all.
     pub lock_after: u32,
@@ -118,59 +168,15 @@ pub struct LockoutPolicy {
 }
 
 impl LockoutPolicy {
-    /// The preset of a mode.
-    ///
-    /// | Mode | Free | Base | Max | Lock after | Lock for | Reset after |
-    /// |---|---|---|---|---|---|---|
-    /// | `ProgressiveDelay` | 5 | 1 s | 60 s | never | - | 15 min |
-    /// | `DelayThenTemporaryLock` | 5 | 1 s | 60 s | 10 | 15 min | 1 h |
-    /// | `LockUntilUnlock` | 3 | 2 s | 60 s | 5 | 30 min | 24 h |
-    /// | `Off` | - | - | - | never | - | - |
-    ///
-    /// `Off` is all zeros: nothing is delayed, locked or tracked.
+    /// The policy of an account seen from one network under `mode` with the default
+    /// [`LockPolicy`]: three attempts, waits of 10 s, 30 s, 3 min, 5 min and 10 min, then a
+    /// lock of 30 minutes in the modes that lock. `Off` delays and locks nothing.
     pub fn for_mode(mode: LockoutMode) -> Self {
-        match mode {
-            LockoutMode::Off => Self {
-                mode,
-                free_attempts: 0,
-                base_delay: Duration::ZERO,
-                max_delay: Duration::ZERO,
-                lock_after: 0,
-                lock_duration: Duration::ZERO,
-                reset_after: Duration::ZERO,
-            },
-            LockoutMode::ProgressiveDelay => Self {
-                mode,
-                free_attempts: 5,
-                base_delay: SECOND,
-                max_delay: MINUTE,
-                lock_after: 0,
-                lock_duration: Duration::ZERO,
-                reset_after: 15 * MINUTE,
-            },
-            LockoutMode::DelayThenTemporaryLock => Self {
-                mode,
-                free_attempts: 5,
-                base_delay: SECOND,
-                max_delay: MINUTE,
-                lock_after: 10,
-                lock_duration: 15 * MINUTE,
-                reset_after: HOUR,
-            },
-            LockoutMode::LockUntilUnlock => Self {
-                mode,
-                free_attempts: 3,
-                base_delay: 2 * SECOND,
-                max_delay: MINUTE,
-                lock_after: 5,
-                lock_duration: 30 * MINUTE,
-                reset_after: 24 * HOUR,
-            },
-        }
+        LockPolicy::default().per_source(mode)
     }
 
-    /// The policy for [`ThrottleKey::Source`]: per client address and independent of the
-    /// account, so one address trying many accounts (password spraying) is slowed down even
+    /// The policy for [`ThrottleKey::Source`]: per client network and independent of the
+    /// account, so one network trying many accounts (password spraying) is slowed down even
     /// though no single account fails often. 20 free attempts, then 1 s doubling up to 30 s,
     /// never a lock, forgotten after 15 minutes.
     ///
@@ -181,6 +187,7 @@ impl LockoutPolicy {
             free_attempts: 20,
             base_delay: SECOND,
             max_delay: 30 * SECOND,
+            schedule: Schedule::NONE,
             lock_after: 0,
             lock_duration: Duration::ZERO,
             reset_after: 15 * MINUTE,
@@ -189,14 +196,20 @@ impl LockoutPolicy {
 
     /// The delay before the next attempt after `failures` consecutive failures.
     ///
-    /// Failure `n <= free_attempts` gives zero; after that the delay is
+    /// Failure `n <= free_attempts` gives zero. After that a schedule gives its waits in
+    /// order and repeats the last one; without one the delay is
     /// `min(base_delay * 2^(n - free_attempts - 1), max_delay)`. The arithmetic saturates, so
     /// no failure count overflows. Mode `Off` always gives zero.
     pub fn delay_after(&self, failures: u32) -> Duration {
         if self.mode == LockoutMode::Off || failures <= self.free_attempts {
             return Duration::ZERO;
         }
-        let mut doublings = failures - self.free_attempts - 1;
+        let beyond = failures - self.free_attempts - 1;
+        if let Some(last) = self.schedule.waits().last() {
+            let index = usize::try_from(beyond).unwrap_or(usize::MAX);
+            return self.schedule.waits().get(index).copied().unwrap_or(*last);
+        }
+        let mut doublings = beyond;
         let mut delay = self.base_delay;
         // Terminates within about 95 rounds: from a non-zero start the delay saturates at
         // `Duration::MAX`, which is not below any `max_delay`. A zero delay stays zero.
@@ -208,14 +221,226 @@ impl LockoutPolicy {
     }
 }
 
-/// What is throttled: an account or a client address.
+/// The lock policy an administrator sets (TGL-07, IAM-05): how many attempts an account
+/// gets from one network, the waits after them, the lock that follows, the account-wide
+/// ceiling and whether a passkey sign-in respects the lock. The mode ([`LockoutMode`])
+/// decides whether the lock is applied at all.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LockPolicy {
+    /// Attempts an account has from one network before the first wait (1 to 20).
+    pub attempts: u32,
+    /// The waits between the next attempts, in seconds, in order (1 to 10 entries, each 1 s
+    /// to one day). The account is locked for that network after the last one, in the modes
+    /// that lock; in the others the last wait repeats.
+    pub waits_secs: Vec<u32>,
+    /// How long the lock holds, in seconds (one minute to one day). It always ends by itself.
+    pub lock_secs: u32,
+    /// The ceiling of the account-wide delay, in seconds (0 to 600; 0 switches the delay
+    /// off). The delay starts once the account fails, across every network, as often as
+    /// one network may before its lock; that is also when the alarm is raised.
+    pub account_max_delay_secs: u32,
+    /// Whether the lock also holds for a passkey sign-in (Hardened). Otherwise a passkey,
+    /// which cannot be guessed, signs in through the lock.
+    pub passkey_holds_lock: bool,
+}
+
+impl Default for LockPolicy {
+    /// The default of Home, Standard and Lab: three attempts, waits of 10 s, 30 s, 3 min,
+    /// 5 min and 10 min, a lock of 30 minutes, an account-wide ceiling of one minute, and a
+    /// passkey that passes the lock.
+    fn default() -> Self {
+        Self {
+            attempts: 3,
+            waits_secs: vec![10, 30, 180, 300, 600],
+            lock_secs: 1_800,
+            account_max_delay_secs: 60,
+            passkey_holds_lock: false,
+        }
+    }
+}
+
+impl LockPolicy {
+    /// The most attempts before the first wait.
+    pub const MAX_ATTEMPTS: u32 = 20;
+    /// The longest wait and the longest lock: one day.
+    pub const MAX_SECS: u32 = 86_400;
+    /// The shortest lock: one minute.
+    pub const MIN_LOCK_SECS: u32 = 60;
+    /// The highest account-wide ceiling: ten minutes.
+    pub const MAX_ACCOUNT_DELAY_SECS: u32 = 600;
+
+    /// The default of the Hardened profile: the numbers of [`LockPolicy::default`], and the
+    /// lock holds for a passkey as well.
+    pub fn hardened() -> Self {
+        Self {
+            passkey_holds_lock: true,
+            ..Self::default()
+        }
+    }
+
+    /// Whether this policy is weaker than `baseline` in any respect: more attempts before
+    /// the first wait or before the lock, less waiting in total, a shorter lock, a lower
+    /// account-wide ceiling, or a passkey that passes a lock the baseline holds.
+    pub fn weaker_than(&self, baseline: &Self) -> bool {
+        let total = |policy: &Self| -> u64 {
+            policy
+                .waits_secs
+                .iter()
+                .take(MAX_WAITS)
+                .map(|secs| u64::from(*secs))
+                .sum()
+        };
+        self.attempts > baseline.attempts
+            || self.lock_threshold() > baseline.lock_threshold()
+            || total(self) < total(baseline)
+            || self.lock_secs < baseline.lock_secs
+            || self.account_max_delay_secs < baseline.account_max_delay_secs
+            || (baseline.passkey_holds_lock && !self.passkey_holds_lock)
+    }
+
+    /// The failure from one network that locks the account: the attempts plus the waits.
+    pub fn lock_threshold(&self) -> u32 {
+        let waits = u32::try_from(self.waits_secs.len().min(MAX_WAITS)).unwrap_or(u32::MAX);
+        self.attempts.saturating_add(waits)
+    }
+
+    fn waits(&self) -> Vec<Duration> {
+        self.waits_secs
+            .iter()
+            .take(MAX_WAITS)
+            .map(|secs| Duration::from_secs(u64::from(*secs)))
+            .collect()
+    }
+
+    /// The policy of [`ThrottleKey::AccountSource`] under `mode`. Failures are forgotten
+    /// after the lock's duration without a failure, or twice the longest wait if that is
+    /// longer, so waiting out the schedule never resets it.
+    pub fn per_source(&self, mode: LockoutMode) -> LockoutPolicy {
+        if mode == LockoutMode::Off {
+            return LockoutPolicy {
+                mode,
+                free_attempts: 0,
+                base_delay: Duration::ZERO,
+                max_delay: Duration::ZERO,
+                schedule: Schedule::NONE,
+                lock_after: 0,
+                lock_duration: Duration::ZERO,
+                reset_after: Duration::ZERO,
+            };
+        }
+        let waits = self.waits();
+        let longest = waits.iter().max().copied().unwrap_or(Duration::ZERO);
+        let lock = Duration::from_secs(u64::from(self.lock_secs));
+        LockoutPolicy {
+            mode,
+            free_attempts: self.attempts.saturating_sub(1),
+            base_delay: Duration::ZERO,
+            max_delay: Duration::ZERO,
+            schedule: Schedule::new(&waits),
+            lock_after: self.lock_threshold(),
+            lock_duration: lock,
+            reset_after: lock.max(longest.saturating_mul(2)),
+        }
+    }
+
+    /// The policy of [`ThrottleKey::Account`]: no delay up to the lock threshold, then 1 s
+    /// doubling up to `account_max_delay_secs`, never a lock, forgotten after the lock's
+    /// duration (at least an hour) without a failure. Under `Off`, or with a ceiling of 0,
+    /// the failures are still counted (for the alarm) but never delay.
+    pub fn account_wide(&self, mode: LockoutMode) -> LockoutPolicy {
+        let ceiling = Duration::from_secs(u64::from(self.account_max_delay_secs));
+        let delays = mode != LockoutMode::Off && !ceiling.is_zero();
+        LockoutPolicy {
+            mode: LockoutMode::ProgressiveDelay,
+            free_attempts: if delays {
+                self.lock_threshold()
+            } else {
+                u32::MAX
+            },
+            base_delay: SECOND.min(ceiling),
+            max_delay: ceiling,
+            schedule: Schedule::NONE,
+            lock_after: 0,
+            lock_duration: Duration::ZERO,
+            reset_after: Duration::from_secs(u64::from(self.lock_secs)).max(HOUR),
+        }
+    }
+
+    /// Whether account-wide failure number `failures` raises the alarm: at the lock
+    /// threshold, and again each time the count doubles, so a long attack is reported
+    /// without one alarm per attempt.
+    pub fn alarms_at(&self, failures: u32) -> bool {
+        let threshold = self.lock_threshold().max(1);
+        failures >= threshold
+            && failures.is_multiple_of(threshold)
+            && (failures / threshold).is_power_of_two()
+    }
+
+    /// Checks the bounds of every number.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::AuthError::Invalid`] naming the field.
+    pub fn validate(&self) -> Result<(), crate::AuthError> {
+        let invalid = |reason: &'static str| crate::AuthError::invalid("lockout_policy", reason);
+        if self.attempts == 0 || self.attempts > Self::MAX_ATTEMPTS {
+            return Err(invalid("attempts must be 1 to 20"));
+        }
+        if self.waits_secs.is_empty() || self.waits_secs.len() > MAX_WAITS {
+            return Err(invalid("waits_secs must hold 1 to 10 waits"));
+        }
+        if self
+            .waits_secs
+            .iter()
+            .any(|secs| *secs == 0 || *secs > Self::MAX_SECS)
+        {
+            return Err(invalid("every wait must be 1 second to one day"));
+        }
+        if self.lock_secs < Self::MIN_LOCK_SECS || self.lock_secs > Self::MAX_SECS {
+            return Err(invalid("lock_secs must be one minute to one day"));
+        }
+        if self.account_max_delay_secs > Self::MAX_ACCOUNT_DELAY_SECS {
+            return Err(invalid("account_max_delay_secs must be 0 to 600"));
+        }
+        Ok(())
+    }
+}
+
+/// The client network of an address, as the throttle keys it: an IPv4 address as it is, an
+/// IPv6 address cut to its /64 (one subscriber or one link). An IPv4-mapped IPv6 address
+/// (`::ffff:a.b.c.d`) is the IPv4 address.
+pub fn source_network(addr: IpAddr) -> IpAddr {
+    match addr.to_canonical() {
+        IpAddr::V4(v4) => IpAddr::V4(v4),
+        IpAddr::V6(v6) => {
+            let bits = u128::from(v6) & !((1u128 << 64) - 1);
+            IpAddr::V6(Ipv6Addr::from(bits))
+        }
+    }
+}
+
+/// The stand-in network of a request whose client address is not known.
+pub const UNKNOWN_SOURCE: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+
+/// What is throttled: an account, a client network, or an account seen from one network.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ThrottleKey {
-    /// A user name, lowercased. Also used for names that do not exist, so the throttle
-    /// does not reveal which accounts exist. Build it with [`ThrottleKey::account`].
+    /// A user name, lowercased, across every network. Also used for names that do not
+    /// exist, so the throttle does not reveal which accounts exist. Build it with
+    /// [`ThrottleKey::account`].
     Account(String),
-    /// A client address. Build it with [`ThrottleKey::source`].
+    /// A client network ([`source_network`]). Build it with [`ThrottleKey::source`].
     Source(IpAddr),
+    /// A user name, lowercased, seen from one client network: the key the lock is counted
+    /// on. Build it with [`ThrottleKey::account_source`].
+    AccountSource(String, IpAddr),
+    /// The rate limit of the break-glass account. A variant of its own, so that no typed
+    /// user name can reach it.
+    BreakGlass(tenko_core::UserId),
+    /// Wrong setup tokens from one client network. A variant of its own, like
+    /// [`ThrottleKey::BreakGlass`].
+    Setup(IpAddr),
 }
 
 impl ThrottleKey {
@@ -224,10 +449,32 @@ impl ThrottleKey {
         Self::Account(user_name.to_lowercase())
     }
 
-    /// The key of a client address. An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) is the
-    /// same client as the IPv4 address.
+    /// The key of a client network: an IPv4 address, or the /64 of an IPv6 address. An
+    /// IPv4-mapped IPv6 address is the same client as the IPv4 address.
     pub fn source(addr: IpAddr) -> Self {
-        Self::Source(addr.to_canonical())
+        Self::Source(source_network(addr))
+    }
+
+    /// The key of an account seen from the network of `addr` ([`UNKNOWN_SOURCE`] when the
+    /// address is not known).
+    pub fn account_source(user_name: &str, addr: Option<IpAddr>) -> Self {
+        Self::AccountSource(
+            user_name.to_lowercase(),
+            addr.map_or(UNKNOWN_SOURCE, source_network),
+        )
+    }
+
+    /// The key of setup attempts from the network of `addr`.
+    pub fn setup(addr: Option<IpAddr>) -> Self {
+        Self::Setup(addr.map_or(UNKNOWN_SOURCE, source_network))
+    }
+
+    /// The account name of an account key.
+    fn account_name(&self) -> Option<&str> {
+        match self {
+            Self::Account(name) | Self::AccountSource(name, _) => Some(name),
+            Self::Source(_) | Self::BreakGlass(_) | Self::Setup(_) => None,
+        }
     }
 }
 
@@ -297,9 +544,10 @@ impl Tracked {
         self.locked_until.filter(|&until| now < until)
     }
 
-    /// Whether an attempt at `now` is allowed.
-    fn verdict(&self, policy: &LockoutPolicy, now: Timestamp) -> Result<(), Retry> {
-        if let Some(until) = self.active_lock(now) {
+    /// Whether an attempt at `now` is allowed. A guarded key ignores its lock and is held
+    /// by the delay alone.
+    fn verdict(&self, policy: &LockoutPolicy, now: Timestamp, guarded: bool) -> Result<(), Retry> {
+        if !guarded && let Some(until) = self.active_lock(now) {
             return Err(Retry {
                 after: remaining(until, now),
             });
@@ -380,6 +628,40 @@ impl Throttle {
         policy: &LockoutPolicy,
         now: Timestamp,
     ) -> Result<(), Retry> {
+        self.check_as(key, policy, now, false)
+    }
+
+    /// [`Throttle::check`] for a key the last-administrator guard covers: a lock the key
+    /// holds (from before the guard applied) is ignored, the delay still holds.
+    ///
+    /// # Errors
+    ///
+    /// [`Retry`] while the delay holds.
+    pub fn check_guarded(
+        &self,
+        key: &ThrottleKey,
+        policy: &LockoutPolicy,
+        now: Timestamp,
+    ) -> Result<(), Retry> {
+        self.check_as(key, policy, now, true)
+    }
+
+    /// The lock `key` holds at `now`, if any, ignoring its delay.
+    pub fn lock_of(&self, key: &ThrottleKey, now: Timestamp) -> Option<Retry> {
+        let table = self.table();
+        let tracked = table.get(key).filter(|tracked| tracked.is_live(now))?;
+        tracked.active_lock(now).map(|until| Retry {
+            after: remaining(until, now),
+        })
+    }
+
+    fn check_as(
+        &self,
+        key: &ThrottleKey,
+        policy: &LockoutPolicy,
+        now: Timestamp,
+        guarded: bool,
+    ) -> Result<(), Retry> {
         if policy.mode == LockoutMode::Off {
             return Ok(());
         }
@@ -388,7 +670,7 @@ impl Throttle {
             return Ok(());
         };
         if tracked.is_live(now) {
-            return tracked.verdict(policy, now);
+            return tracked.verdict(policy, now, guarded);
         }
         table.remove(key);
         Ok(())
@@ -405,6 +687,28 @@ impl Throttle {
         key: &ThrottleKey,
         policy: &LockoutPolicy,
         now: Timestamp,
+    ) -> FailureOutcome {
+        self.record_failure_as(key, policy, now, false)
+    }
+
+    /// [`Throttle::record_failure`] for a key the last-administrator guard covers: the
+    /// failure is counted and delays as usual, but it never locks, and a lock the key holds
+    /// does not stop the count. The last wait of the schedule repeats instead.
+    pub fn record_failure_guarded(
+        &self,
+        key: &ThrottleKey,
+        policy: &LockoutPolicy,
+        now: Timestamp,
+    ) -> FailureOutcome {
+        self.record_failure_as(key, policy, now, true)
+    }
+
+    fn record_failure_as(
+        &self,
+        key: &ThrottleKey,
+        policy: &LockoutPolicy,
+        now: Timestamp,
+        guarded: bool,
     ) -> FailureOutcome {
         if policy.mode == LockoutMode::Off {
             return FailureOutcome {
@@ -427,6 +731,9 @@ impl Throttle {
         tracked.failures = tracked.failures.saturating_add(1);
         let failures = tracked.failures;
 
+        if guarded {
+            tracked.locked_until = None;
+        }
         if let Some(until) = tracked.active_lock(now) {
             // Already locked: the lock neither restarts nor grows, and raises no second alarm.
             return FailureOutcome {
@@ -439,7 +746,7 @@ impl Throttle {
 
         tracked.last_failure = now;
         let delay = policy.delay_after(failures);
-        if policy.mode.locks() && failures >= policy.lock_after.max(1) {
+        if !guarded && policy.mode.locks() && failures >= policy.lock_after.max(1) {
             let until = add_saturating(now, policy.lock_duration);
             tracked.locked_until = Some(until);
             tracked.forget_at = until;
@@ -462,8 +769,9 @@ impl Throttle {
     /// Forgets `key` after a successful login: counter, delay and any lock.
     ///
     /// Call it once the login has completed (the last factor passed), never after a first
-    /// factor that a second one follows. Call it for the account key only. A success must not wipe the failures of the client
-    /// address, or one valid account would clear the spraying counter of its address.
+    /// factor that a second one follows. Call it for the account keys only. A success must
+    /// not wipe the failures of the client network, or one valid account would clear the
+    /// spraying counter of its network.
     pub fn record_success(&self, key: &ThrottleKey) {
         self.table().remove(key);
     }
@@ -471,6 +779,14 @@ impl Throttle {
     /// Administrator unlock: forgets `key` (counter, delay and lock).
     pub fn unlock(&self, key: &ThrottleKey) {
         self.table().remove(key);
+    }
+
+    /// Administrator unlock of an account: forgets every key of `user_name` (any case), the
+    /// account-wide one and one per network. Scans the table, which an unlock can afford.
+    pub fn unlock_account(&self, user_name: &str) {
+        let name = user_name.to_lowercase();
+        self.table()
+            .retain(|key, _| key.account_name() != Some(name.as_str()));
     }
 
     /// Seeds a persisted lock after a restart: `key` is locked until `until`. A lock that
@@ -566,20 +882,45 @@ mod tests {
         );
     }
 
+    /// A doubling policy: `free` free failures, then `base` doubling up to 60 s.
+    fn doubling(free: u32, base: Duration) -> LockoutPolicy {
+        LockoutPolicy {
+            mode: LockoutMode::ProgressiveDelay,
+            free_attempts: free,
+            base_delay: base,
+            max_delay: secs(60),
+            schedule: Schedule::NONE,
+            lock_after: 0,
+            lock_duration: Duration::ZERO,
+            reset_after: secs(900),
+        }
+    }
+
     #[test]
-    fn delay_schedule_of_the_progressive_presets() {
-        let policy = LockoutPolicy::for_mode(LockoutMode::ProgressiveDelay);
+    fn delay_schedule_of_doubling_policies() {
+        let policy = doubling(5, secs(1));
         let delays: Vec<u64> = (1..=14).map(|n| policy.delay_after(n).as_secs()).collect();
         assert_eq!(delays, [0, 0, 0, 0, 0, 1, 2, 4, 8, 16, 32, 60, 60, 60]);
 
-        let strict = LockoutPolicy::for_mode(LockoutMode::LockUntilUnlock);
+        let strict = doubling(3, secs(2));
         let delays: Vec<u64> = (1..=8).map(|n| strict.delay_after(n).as_secs()).collect();
         assert_eq!(delays, [0, 0, 0, 2, 4, 8, 16, 32]);
     }
 
     #[test]
+    fn a_schedule_gives_its_waits_in_order_then_repeats_the_last() {
+        let policy = LockoutPolicy::for_mode(LockoutMode::ProgressiveDelay);
+        let delays: Vec<u64> = (1..=9).map(|n| policy.delay_after(n).as_secs()).collect();
+        assert_eq!(delays, [0, 0, 10, 30, 180, 300, 600, 600, 600]);
+        assert_eq!(policy.delay_after(u32::MAX), secs(600));
+        let long: Vec<Duration> = (1..=12).map(secs).collect();
+        assert_eq!(Schedule::new(&long).waits().len(), MAX_WAITS);
+        assert!(Schedule::NONE.is_empty());
+    }
+
+    #[test]
     fn delay_never_overflows_for_huge_failure_counts() {
-        let mut policy = LockoutPolicy::for_mode(LockoutMode::ProgressiveDelay);
+        let mut policy = doubling(5, secs(1));
         assert_eq!(policy.delay_after(u32::MAX), secs(60));
 
         // The smallest base against the largest cap: saturates instead of wrapping.
@@ -601,7 +942,7 @@ mod tests {
 
     #[test]
     fn zero_base_delay_never_delays_and_terminates() {
-        let mut policy = LockoutPolicy::for_mode(LockoutMode::ProgressiveDelay);
+        let mut policy = doubling(5, secs(1));
         policy.free_attempts = 0;
         policy.base_delay = Duration::ZERO;
         assert_eq!(policy.delay_after(u32::MAX), Duration::ZERO);
@@ -609,7 +950,7 @@ mod tests {
 
     #[test]
     fn free_attempts_cover_every_failure_count() {
-        let mut policy = LockoutPolicy::for_mode(LockoutMode::ProgressiveDelay);
+        let mut policy = doubling(5, secs(1));
         policy.free_attempts = u32::MAX;
         assert_eq!(policy.delay_after(u32::MAX), Duration::ZERO);
         policy.free_attempts = 0;

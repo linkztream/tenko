@@ -846,6 +846,8 @@ export type MessageKey =
   | "auth.signin.ceremony.unsupported"
   | "auth.signin.insecure"
   | "auth.signin.lead"
+  | "auth.signin.locked_help"
+  | "auth.signin.locked_host"
   | "auth.signin.or"
   | "auth.signin.passkey"
   | "auth.signin.passkey_insecure"
@@ -854,6 +856,7 @@ export type MessageKey =
   | "auth.signin.product"
   | "auth.signin.recovery_code"
   | "auth.signin.retry_in"
+  | "auth.signin.retry_in_minutes"
   | "auth.signin.second_lead_recovery"
   | "auth.signin.second_lead_totp"
   | "auth.signin.second_title"
@@ -4084,6 +4087,7 @@ export type MessageKey =
   | "errors.auth.oidc.token_invalid"
   | "errors.auth.password.breached"
   | "errors.auth.password.context_specific"
+  | "errors.auth.password.digits_only"
   | "errors.auth.password.incorrect"
   | "errors.auth.password.invalid_characters"
   | "errors.auth.password.pattern_mismatch"
@@ -6870,11 +6874,40 @@ export type MessageKey =
   | "settings.security.consequence.weak_stays"
   | "settings.security.edit_row"
   | "settings.security.edit_title"
+  | "settings.security.lockout.account"
+  | "settings.security.lockout.account_error"
+  | "settings.security.lockout.account_help"
+  | "settings.security.lockout.attempts"
+  | "settings.security.lockout.attempts_error"
+  | "settings.security.lockout.attempts_help"
+  | "settings.security.lockout.explain"
+  | "settings.security.lockout.lock"
+  | "settings.security.lockout.lock_error"
+  | "settings.security.lockout.lock_help"
+  | "settings.security.lockout.mode_help.delay_then_temporary_lock"
+  | "settings.security.lockout.mode_help.lock_until_unlock"
+  | "settings.security.lockout.mode_help.off"
+  | "settings.security.lockout.mode_help.progressive_delay"
+  | "settings.security.lockout.passkey"
+  | "settings.security.lockout.passkey_hint"
+  | "settings.security.lockout.profile_value"
+  | "settings.security.lockout.reset"
+  | "settings.security.lockout.waits"
+  | "settings.security.lockout.waits_error"
+  | "settings.security.lockout.waits_help"
   | "settings.security.marker.differs"
   | "settings.security.marker.follows"
   | "settings.security.marker.weak"
   | "settings.security.more"
   | "settings.security.passkey.hint"
+  | "settings.security.pin_days.error"
+  | "settings.security.pin_days.heading"
+  | "settings.security.pin_days.help"
+  | "settings.security.pin_days.intro"
+  | "settings.security.pin_days.label"
+  | "settings.security.pin_days.saved"
+  | "settings.security.pin_days.use_default"
+  | "settings.security.pin_days.value"
   | "settings.security.policy.custom"
   | "settings.security.policy.max"
   | "settings.security.policy.max_error"
@@ -6988,6 +7021,7 @@ export type MessageKey =
   | "settings.users.add.title"
   | "settings.users.add_button"
   | "settings.users.added"
+  | "settings.users.admin_rule"
   | "settings.users.back"
   | "settings.users.break_glass.made"
   | "settings.users.break_glass.make_body"
@@ -7060,6 +7094,9 @@ export type MessageKey =
   | "settings.users.status.locked"
   | "settings.users.status.locked_manual"
   | "settings.users.status.password_change"
+  | "settings.users.status.pin_days"
+  | "settings.users.status.pin_expired"
+  | "settings.users.status.pin_until"
   | "settings.users.table"
   | "settings.users.unlocked"
   | "settings.users.you"
@@ -7098,6 +7135,7 @@ export type MessageKey =
   | "setup.admin.password.placeholder.password"
   | "setup.admin.password.placeholder.pin"
   | "setup.admin.password.show"
+  | "setup.admin.rule"
   | "setup.admin.user.help"
   | "setup.admin.user.invalid"
   | "setup.admin.user.label"
@@ -7682,6 +7720,8 @@ export type MessageKey =
   | "toggles.lockout.name"
   | "toggles.lockout.off"
   | "toggles.lockout.progressive_delay"
+  | "toggles.lockout.value_delay"
+  | "toggles.lockout.value_lock"
   | "toggles.mfa.administrators"
   | "toggles.mfa.everyone"
   | "toggles.mfa.name"
@@ -8139,7 +8179,9 @@ export interface MessageArgs {
   "audit_export.test_failed": { detail: string | number; ms: string | number };
   "audit_export.test_ok": { ms: string | number };
   "audit_export.warning.failing": { sinks: string | number };
+  "auth.signin.locked_host": { command: string | number };
   "auth.signin.retry_in": { seconds: number };
+  "auth.signin.retry_in_minutes": { minutes: number };
   "backup.create.done": { file: string | number };
   "backup.create.error.short": { min: number };
   "backup.create.passphrase_help": { min: number };
@@ -9395,7 +9437,11 @@ export interface MessageArgs {
   "settings.security.consequence.matches": { profile: string | number };
   "settings.security.edit_row": { name: string | number };
   "settings.security.edit_title": { name: string | number };
+  "settings.security.lockout.profile_value": { value: string | number };
   "settings.security.more": { shown: string | number; total: string | number };
+  "settings.security.pin_days.help": { days: string | number };
+  "settings.security.pin_days.use_default": { days: string | number };
+  "settings.security.pin_days.value": { days: number };
   "settings.security.profile.changes": { count: number };
   "settings.security.profile.deviations": { count: number };
   "settings.security.profile.reset_done": { profile: string | number };
@@ -9448,6 +9494,8 @@ export interface MessageArgs {
   "settings.users.sign_out.title": { name: string | number };
   "settings.users.signed_out": { name: string | number };
   "settings.users.status.locked": { time: string | number };
+  "settings.users.status.pin_days": { days: number };
+  "settings.users.status.pin_until": { time: string | number };
   "settings.users.unlocked": { name: string | number };
   "setup.admin.check.breach_off": { profile: string | number };
   "setup.admin.password.help.passphrase": { profile: string | number };
@@ -9522,6 +9570,8 @@ export interface MessageArgs {
   "shell.top.node_title": { lag: number; revision: string | number };
   "shell.top.profile": { profile: string | number };
   "shell.top.profile_title": { profile: string | number };
+  "toggles.lockout.value_delay": { attempts: number; longest: string | number; mode: string | number };
+  "toggles.lockout.value_lock": { attempts: number; lock: string | number; longest: string | number; mode: string | number };
   "toggles.password_policy.custom": { min: string | number };
   "toggles.secret_reveal.value": { bound: string; step_up: string | number };
   "toggles.session.value": { absolute: string | number; idle: string | number };
@@ -10448,6 +10498,8 @@ export const messageKeys: readonly MessageKey[] = [
   "auth.signin.ceremony.unsupported",
   "auth.signin.insecure",
   "auth.signin.lead",
+  "auth.signin.locked_help",
+  "auth.signin.locked_host",
   "auth.signin.or",
   "auth.signin.passkey",
   "auth.signin.passkey_insecure",
@@ -10456,6 +10508,7 @@ export const messageKeys: readonly MessageKey[] = [
   "auth.signin.product",
   "auth.signin.recovery_code",
   "auth.signin.retry_in",
+  "auth.signin.retry_in_minutes",
   "auth.signin.second_lead_recovery",
   "auth.signin.second_lead_totp",
   "auth.signin.second_title",
@@ -13686,6 +13739,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.auth.oidc.token_invalid",
   "errors.auth.password.breached",
   "errors.auth.password.context_specific",
+  "errors.auth.password.digits_only",
   "errors.auth.password.incorrect",
   "errors.auth.password.invalid_characters",
   "errors.auth.password.pattern_mismatch",
@@ -16472,11 +16526,40 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.security.consequence.weak_stays",
   "settings.security.edit_row",
   "settings.security.edit_title",
+  "settings.security.lockout.account",
+  "settings.security.lockout.account_error",
+  "settings.security.lockout.account_help",
+  "settings.security.lockout.attempts",
+  "settings.security.lockout.attempts_error",
+  "settings.security.lockout.attempts_help",
+  "settings.security.lockout.explain",
+  "settings.security.lockout.lock",
+  "settings.security.lockout.lock_error",
+  "settings.security.lockout.lock_help",
+  "settings.security.lockout.mode_help.delay_then_temporary_lock",
+  "settings.security.lockout.mode_help.lock_until_unlock",
+  "settings.security.lockout.mode_help.off",
+  "settings.security.lockout.mode_help.progressive_delay",
+  "settings.security.lockout.passkey",
+  "settings.security.lockout.passkey_hint",
+  "settings.security.lockout.profile_value",
+  "settings.security.lockout.reset",
+  "settings.security.lockout.waits",
+  "settings.security.lockout.waits_error",
+  "settings.security.lockout.waits_help",
   "settings.security.marker.differs",
   "settings.security.marker.follows",
   "settings.security.marker.weak",
   "settings.security.more",
   "settings.security.passkey.hint",
+  "settings.security.pin_days.error",
+  "settings.security.pin_days.heading",
+  "settings.security.pin_days.help",
+  "settings.security.pin_days.intro",
+  "settings.security.pin_days.label",
+  "settings.security.pin_days.saved",
+  "settings.security.pin_days.use_default",
+  "settings.security.pin_days.value",
   "settings.security.policy.custom",
   "settings.security.policy.max",
   "settings.security.policy.max_error",
@@ -16590,6 +16673,7 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.users.add.title",
   "settings.users.add_button",
   "settings.users.added",
+  "settings.users.admin_rule",
   "settings.users.back",
   "settings.users.break_glass.made",
   "settings.users.break_glass.make_body",
@@ -16662,6 +16746,9 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.users.status.locked",
   "settings.users.status.locked_manual",
   "settings.users.status.password_change",
+  "settings.users.status.pin_days",
+  "settings.users.status.pin_expired",
+  "settings.users.status.pin_until",
   "settings.users.table",
   "settings.users.unlocked",
   "settings.users.you",
@@ -16700,6 +16787,7 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.admin.password.placeholder.password",
   "setup.admin.password.placeholder.pin",
   "setup.admin.password.show",
+  "setup.admin.rule",
   "setup.admin.user.help",
   "setup.admin.user.invalid",
   "setup.admin.user.label",
@@ -17284,6 +17372,8 @@ export const messageKeys: readonly MessageKey[] = [
   "toggles.lockout.name",
   "toggles.lockout.off",
   "toggles.lockout.progressive_delay",
+  "toggles.lockout.value_delay",
+  "toggles.lockout.value_lock",
   "toggles.mfa.administrators",
   "toggles.mfa.everyone",
   "toggles.mfa.name",

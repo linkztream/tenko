@@ -20,6 +20,7 @@ use crate::{
     model::{INSTALLATION, Installation, SETTINGS, USER_NAMES, USERS, UserRecord},
     roles::RoleName,
     secret::SetupToken,
+    service::guard::throttled,
     settings::Profile,
 };
 
@@ -68,13 +69,25 @@ fn validated(
 }
 
 /// Wrong setup tokens tolerated before delays (the token has 100 bits; this only slows
-/// down noise).
+/// down noise): 5 free, then 1 s doubling up to a minute, never a lock.
 fn setup_policy() -> LockoutPolicy {
-    LockoutPolicy::for_mode(LockoutMode::ProgressiveDelay)
+    LockoutPolicy {
+        mode: LockoutMode::ProgressiveDelay,
+        free_attempts: 5,
+        base_delay: std::time::Duration::from_secs(1),
+        max_delay: std::time::Duration::from_secs(60),
+        schedule: crate::lockout::Schedule::NONE,
+        lock_after: 0,
+        lock_duration: std::time::Duration::ZERO,
+        reset_after: std::time::Duration::from_secs(15 * 60),
+    }
 }
 
-fn setup_key() -> ThrottleKey {
-    ThrottleKey::Account("\u{1}setup".to_owned())
+/// The key of setup attempts from the client of `ctx`: one per network (an IPv4 address or
+/// an IPv6 /64), so that nobody on the network can hold the operator back by sending wrong
+/// tokens from elsewhere.
+fn setup_key(ctx: &RequestCtx) -> ThrottleKey {
+    ThrottleKey::setup(ctx.source_ip)
 }
 
 impl AuthService {
@@ -140,17 +153,15 @@ impl AuthService {
             return Err(AuthError::SetupClosed);
         }
         self.throttle
-            .check(&setup_key(), &setup_policy(), ctx.now)
-            .map_err(|retry| AuthError::Throttled {
-                retry_after: retry.after.map(|after| after.as_secs().max(1)),
-            })?;
+            .check(&setup_key(ctx), &setup_policy(), ctx.now)
+            .map_err(throttled)?;
         let valid = self
             .setup_verifier()
             .as_ref()
             .is_some_and(|verifier| verifier.verify(request.setup_token.expose()));
         if !valid {
             self.throttle
-                .record_failure(&setup_key(), &setup_policy(), ctx.now);
+                .record_failure(&setup_key(ctx), &setup_policy(), ctx.now);
             return Err(AuthError::SetupTokenInvalid);
         }
         let (host_name, language, name, display_name) = validated(request, &self.index.image())?;
@@ -163,6 +174,8 @@ impl AuthService {
                     user_name: &name,
                     display_name: Some(&display_name),
                     host_name: Some(&host_name),
+                    // The first administrator: a password, never a PIN, in every profile.
+                    administers: true,
                 },
                 ctx.now,
             )
@@ -192,10 +205,9 @@ impl AuthService {
         batch.put_typed(&INSTALLATION, &(), &installation)?;
         batch.put_typed(&USER_NAMES, &key, &user.id)?;
         batch.put_typed(&USERS, &user.id, &user)?;
-        let strength = if settings.password_policy.is_pin() {
-            tenko_core::AuthStrength::Pin
-        } else {
-            tenko_core::AuthStrength::Password
+        let strength = match user.password.as_ref().map(|password| password.kind) {
+            Some(crate::model::PasswordKind::Pin) => tenko_core::AuthStrength::Pin,
+            _ => tenko_core::AuthStrength::Password,
         };
         let (secret, record) = self.stage_session(
             &mut batch,
@@ -225,7 +237,7 @@ impl AuthService {
             other => other?,
         };
         *self.setup_verifier() = None;
-        self.throttle.unlock(&setup_key());
+        self.throttle.unlock(&setup_key(ctx));
         self.configure_relying_party(Some(&installation))?;
         Ok(session)
     }

@@ -15,7 +15,7 @@ use tenko_auth::{
     settings::{Profile, SessionLifetime, SettingsPatch},
     testing::{
         SoftAttestation, SoftAuthenticator, SoftKeyAlg, TestEnv,
-        env::{ADMIN, ADMIN_PASSWORD, ADMIN_PIN, HOST, ORIGIN},
+        env::{ADMIN, ADMIN_PASSWORD, HOST, ORIGIN},
     },
     totp::{self, TotpParams},
     webauthn::WebAuthnError,
@@ -176,7 +176,7 @@ async fn sessions_expire_idle_and_absolute_and_end_at_logout() {
     assert!(matches!(
         ctx.principal,
         Principal::User {
-            strength: AuthStrength::Pin,
+            strength: AuthStrength::Password,
             ..
         }
     ));
@@ -189,7 +189,9 @@ async fn sessions_expire_idle_and_absolute_and_end_at_logout() {
     // fresh sign-in, a second session.
     let admin = env
         .session_ctx(&expect_session(
-            password_login(&env, ADMIN, ADMIN_PIN).await.expect("login"),
+            password_login(&env, ADMIN, ADMIN_PASSWORD)
+                .await
+                .expect("login"),
         ))
         .await
         .expect("ctx");
@@ -215,7 +217,11 @@ async fn sessions_expire_idle_and_absolute_and_end_at_logout() {
     ));
 
     // A new session: idle expiry after 10 minutes without activity.
-    let fresh = expect_session(password_login(&env, ADMIN, ADMIN_PIN).await.expect("login"));
+    let fresh = expect_session(
+        password_login(&env, ADMIN, ADMIN_PASSWORD)
+            .await
+            .expect("login"),
+    );
     env.clock.advance(Duration::from_secs(601));
     assert!(matches!(
         env.service
@@ -225,7 +231,11 @@ async fn sessions_expire_idle_and_absolute_and_end_at_logout() {
     ));
 
     // Logout removes the session.
-    let other = expect_session(password_login(&env, ADMIN, ADMIN_PIN).await.expect("login"));
+    let other = expect_session(
+        password_login(&env, ADMIN, ADMIN_PASSWORD)
+            .await
+            .expect("login"),
+    );
     let ctx = env.session_ctx(&other).await.expect("ctx");
     let cleared = env.service.logout(&ctx).await.expect("logout");
     assert!(cleared.contains("Max-Age=0"));
@@ -243,7 +253,11 @@ async fn sessions_expire_idle_and_absolute_and_end_at_logout() {
 #[tokio::test]
 async fn sessions_are_listed_and_revoked_and_stored_hashed() {
     let (env, first) = TestEnv::installed(Profile::Home).await;
-    let second = expect_session(password_login(&env, ADMIN, ADMIN_PIN).await.expect("login"));
+    let second = expect_session(
+        password_login(&env, ADMIN, ADMIN_PASSWORD)
+            .await
+            .expect("login"),
+    );
     let ctx = env.session_ctx(&second).await.expect("ctx");
     let sessions = env.service.list_sessions(&ctx).await.expect("list");
     assert_eq!(sessions.len(), 2);
@@ -280,6 +294,8 @@ async fn sessions_are_listed_and_revoked_and_stored_hashed() {
 #[tokio::test]
 async fn failed_logins_are_throttled_then_locked() {
     let (env, _) = TestEnv::installed(Profile::Standard).await;
+    // A second administrator: the network never locks the last one.
+    env.add_admin("boris", "lantern harbor quartz 4821").await;
     // Unknown and known accounts answer alike.
     assert!(matches!(
         password_login(&env, "nobody", "wrong").await,
@@ -298,27 +314,28 @@ async fn failed_logins_are_throttled_then_locked() {
             other => panic!("unexpected {other:?}"),
         }
         let view = env.store.read(ReadConsistency::Local).await.expect("view");
-        let user = view
-            .scan_typed(&tenko_auth::model::USERS, KeyRange::all(), 10, false)
-            .expect("users")
-            .into_iter()
-            .find(|(_, user, _)| user.name == ADMIN)
-            .expect("admin")
-            .1;
-        if user.lock.is_some() {
+        if view
+            .scan_typed(&tenko_auth::model::LOCKS, KeyRange::all(), 10, false)
+            .expect("locks")
+            .iter()
+            .any(|((name, _), _, _)| name == ADMIN)
+        {
             locked = true;
             break;
         }
     }
-    assert!(throttled > 0, "progressive delays apply before the lock");
-    assert!(locked, "Standard locks after ten failures");
+    assert_eq!(throttled, 5, "the five waits come before the lock");
+    assert!(
+        locked,
+        "Standard locks at the eighth failure from one network"
+    );
     // While locked, even the right password is refused without a hint.
     assert!(matches!(
         password_login(&env, ADMIN, ADMIN_PASSWORD).await,
         Err(AuthError::Throttled { .. })
     ));
     // The lock lifts after its duration.
-    env.clock.advance(Duration::from_secs(15 * 60 + 1));
+    env.clock.advance(Duration::from_secs(30 * 60 + 1));
     assert!(password_login(&env, ADMIN, ADMIN_PASSWORD).await.is_ok());
     let actions = audit_actions(&env).await;
     assert!(actions.contains(&"auth.user.lock".to_owned()));
@@ -327,7 +344,7 @@ async fn failed_logins_are_throttled_then_locked() {
             .iter()
             .filter(|a| *a == "auth.login.password")
             .count()
-            >= 10
+            >= 8
     );
 }
 
@@ -604,7 +621,7 @@ async fn break_glass_needs_an_attested_hardware_key_and_raises_alarms() {
             &UserCreate {
                 name: "emergency".to_owned(),
                 display_name: None,
-                password: Some(SecretString::new("7391")),
+                password: Some(SecretString::new(ADMIN_PASSWORD)),
                 roles: vec![tenko_auth::roles::RoleName::Admin],
                 language: None,
             },
@@ -612,7 +629,7 @@ async fn break_glass_needs_an_attested_hardware_key_and_raises_alarms() {
         .await
         .expect("create");
     let emergency = expect_session(
-        password_login(&env, "emergency", "7391")
+        password_login(&env, "emergency", ADMIN_PASSWORD)
             .await
             .expect("password login before designation"),
     );
@@ -629,7 +646,7 @@ async fn break_glass_needs_an_attested_hardware_key_and_raises_alarms() {
         user_id: user.id,
         enabled: true,
     };
-    // The PIN session of the admin is not strong enough to designate.
+    // The password session of the admin is not strong enough to designate.
     assert!(matches!(
         env.service.set_break_glass(&admin, &designate).await,
         Err(AuthError::StepUpRequired { .. })
@@ -674,7 +691,7 @@ async fn break_glass_needs_an_attested_hardware_key_and_raises_alarms() {
             .is_err()
     );
     assert!(matches!(
-        password_login(&env, "emergency", "7391").await,
+        password_login(&env, "emergency", ADMIN_PASSWORD).await,
         Err(AuthError::InvalidCredentials)
     ));
     // The hardware key logs it in, with a short session and an alarm.
@@ -715,7 +732,7 @@ async fn disabling_or_deleting_the_break_glass_account_needs_a_fresh_strong_sess
             &UserCreate {
                 name: "emergency".to_owned(),
                 display_name: None,
-                password: Some(SecretString::new("7391")),
+                password: Some(SecretString::new(ADMIN_PASSWORD)),
                 roles: vec![tenko_auth::roles::RoleName::Admin],
                 language: None,
             },
@@ -723,7 +740,7 @@ async fn disabling_or_deleting_the_break_glass_account_needs_a_fresh_strong_sess
         .await
         .expect("create");
     let emergency = expect_session(
-        password_login(&env, "emergency", "7391")
+        password_login(&env, "emergency", ADMIN_PASSWORD)
             .await
             .expect("password login before designation"),
     );
@@ -763,7 +780,7 @@ async fn disabling_or_deleting_the_break_glass_account_needs_a_fresh_strong_sess
         ..tenko_auth::service::UserUpdate::default()
     };
 
-    // The administrator's PIN session is not strong enough, however fresh.
+    // The administrator's password session is not strong enough, however fresh.
     assert!(matches!(
         env.service
             .update_user(&admin, user.id, &disable, None)
@@ -821,7 +838,6 @@ mod ceremony_rules {
         AuthConfig, AuthService,
         challenge::CeremonyKey,
         lockout::{LockoutMode, LockoutPolicy},
-        model::USERS,
     };
     use tenko_vault::Vault;
 
@@ -865,14 +881,10 @@ mod ceremony_rules {
 
     async fn locked(env: &TestEnv) -> bool {
         let view = env.store.read(ReadConsistency::Local).await.expect("view");
-        view.scan_typed(&USERS, KeyRange::all(), 10, false)
-            .expect("users")
+        view.scan_typed(&tenko_auth::model::LOCKS, KeyRange::all(), 10, false)
+            .expect("locks")
             .into_iter()
-            .find(|(_, user, _)| user.name == ADMIN)
-            .expect("admin")
-            .1
-            .active_lock(env.now())
-            .is_some()
+            .any(|((name, _), lock, _)| name == ADMIN && env.now() < lock.until)
     }
 
     /// A password login that waits out any delay and returns the second-factor challenge.
@@ -936,6 +948,8 @@ mod ceremony_rules {
 
     async fn wrong_codes_lock_the_account(profile: Profile) {
         let (env, session) = TestEnv::installed(profile).await;
+        // A second administrator: the network never locks the last one.
+        env.add_admin("boris", "lantern harbor quartz 4821").await;
         let ctx = env.session_ctx(&session).await.expect("ctx");
         let seed = enroll_totp(&env, &ctx).await;
         let policy = LockoutPolicy::for_mode(env.service.settings().lockout);
@@ -981,12 +995,13 @@ mod ceremony_rules {
         let ctx = env.session_ctx(&session).await.expect("ctx");
         let seed = enroll_totp(&env, &ctx).await;
         let policy = LockoutPolicy::for_mode(env.service.settings().lockout);
-        assert_eq!(policy.free_attempts, 5);
+        let free = policy.free_attempts;
+        assert_eq!(free, 2, "three attempts: two failures pass without a wait");
 
-        // Four wrong codes, then a complete login: the four are forgotten, so five more
-        // wrong codes stay within the free attempts.
+        // One wrong code, then a complete login: it is forgotten, so two more wrong codes
+        // stay within the free attempts.
         let mut challenge_id = challenge(&env).await;
-        for _ in 0..4 {
+        for _ in 0..free - 1 {
             one_wrong_code(&env, &seed, &mut challenge_id).await;
         }
         env.clock.advance(Duration::from_secs(30));
@@ -1006,7 +1021,7 @@ mod ceremony_rules {
                 .expect("complete login"),
         );
         let challenge_id = challenge(&env).await;
-        for _ in 0..5 {
+        for _ in 0..free {
             assert!(matches!(
                 env.service
                     .login_totp(
@@ -1022,7 +1037,7 @@ mod ceremony_rules {
             ));
         }
 
-        // A correct password does not clear them: the next wrong code is the sixth failure
+        // A correct password does not clear them: the next wrong code is the third failure
         // and the attempt after it waits.
         let challenge_id = challenge(&env).await;
         assert!(matches!(

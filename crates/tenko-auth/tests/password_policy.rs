@@ -187,26 +187,31 @@ fn pin_vectors() {
     let digits64 = "13572468".repeat(8);
     assert_eq!(digits64.len(), 64);
     run(vec![
-        case("a PIN", &p, "4829", &[]),
-        case("a PIN with a leading zero", &p, "0827", &[]),
+        case("a PIN", &p, "482961", &[]),
+        case("a PIN with a leading zero", &p, "082719", &[]),
         case("a long PIN", &p, "73920481", &[]),
-        case("one below the minimum", &p, "482", &[too_short(4)]),
-        case("empty", &p, "", &[too_short(4)]),
-        case("a letter", &p, "48a9", &[DIGITS_ONLY]),
-        case("a trailing space", &p, "4829 ", &[DIGITS_ONLY]),
-        case("a sign", &p, "-4829", &[DIGITS_ONLY]),
+        case("one below the minimum", &p, "48296", &[too_short(6)]),
+        case("empty", &p, "", &[too_short(6)]),
+        case("a letter", &p, "48a961", &[DIGITS_ONLY]),
+        case("a trailing space", &p, "482961 ", &[DIGITS_ONLY]),
+        case("a sign", &p, "-482961", &[DIGITS_ONLY]),
         case(
             "letters only and too short",
             &p,
             "xz",
-            &[DIGITS_ONLY, too_short(4)],
+            &[DIGITS_ONLY, too_short(6)],
         ),
-        case("a control character", &p, "48\n29", &[CONTROL, DIGITS_ONLY]),
+        case(
+            "a control character",
+            &p,
+            "48\n2961",
+            &[CONTROL, DIGITS_ONLY],
+        ),
         case(
             "control, not digits and short",
             &p,
             "ab\n",
-            &[CONTROL, DIGITS_ONLY, too_short(4)],
+            &[CONTROL, DIGITS_ONLY, too_short(6)],
         ),
         case("exactly the maximum", &p, digits64.clone(), &[]),
         case(
@@ -219,43 +224,43 @@ fn pin_vectors() {
         case(
             "fullwidth digits",
             &p,
-            "\u{ff10}\u{ff18}\u{ff12}\u{ff17}",
+            "\u{ff10}\u{ff18}\u{ff12}\u{ff17}\u{ff14}\u{ff11}",
             &[],
         ),
         case(
             "superscript digits",
             &p,
-            "\u{b2}\u{2074}\u{2076}\u{2078}",
+            "\u{b2}\u{2074}\u{2076}\u{2078}\u{2070}\u{b9}",
             &[],
         ),
         case(
             "fullwidth digits that form a run",
             &p,
-            "\u{ff11}\u{ff12}\u{ff13}\u{ff14}\u{ff15}",
+            "\u{ff11}\u{ff12}\u{ff13}\u{ff14}\u{ff15}\u{ff16}",
             &[TRIVIAL],
         ),
         // Other scripts' digits have no ASCII form under NFKC.
         case(
             "Arabic-Indic digits",
             &p,
-            "\u{663}\u{665}\u{667}\u{669}",
+            "\u{663}\u{665}\u{667}\u{669}\u{661}\u{660}",
             &[DIGITS_ONLY],
         ),
         // Trivial PINs.
-        case("repeated digit", &p, "0000", &[TRIVIAL]),
+        case("repeated digit", &p, "000000", &[TRIVIAL]),
         case("repeated digit, six times", &p, "777777", &[TRIVIAL]),
-        case("repeated pair", &p, "1212", &[TRIVIAL]),
+        case("repeated pair", &p, "121212", &[TRIVIAL]),
         case("repeated triple", &p, "123123", &[TRIVIAL]),
-        case("ascending run", &p, "1234", &[TRIVIAL]),
-        case("descending run", &p, "4321", &[TRIVIAL]),
+        case("ascending run", &p, "123456", &[TRIVIAL]),
+        case("descending run", &p, "654321", &[TRIVIAL]),
         case("a long ascending run", &p, "23456789", &[TRIVIAL]),
-        case("not a run: a gap", &p, "1235", &[]),
-        case("not a run: a pair swapped", &p, "1243", &[]),
-        case("not repeated: one digit differs", &p, "1213", &[]),
+        case("not a run: a gap", &p, "123579", &[]),
+        case("not a run: a pair swapped", &p, "124365", &[]),
+        case("not repeated: one digit differs", &p, "121213", &[]),
         case(
             "a PIN with the digits of the user name",
             &p,
-            "52468",
+            "524681",
             &[context(ContextKind::UserName)],
         )
         .in_context(PasswordContext {
@@ -563,7 +568,7 @@ fn control_character_vectors() {
         case(
             "in a PIN",
             &PasswordPolicy::Pin,
-            "12\t34",
+            "48\t2961",
             &[CONTROL, DIGITS_ONLY],
         ),
         case(
@@ -898,7 +903,7 @@ fn every_violation_has_a_stable_code() {
             "auth.password.too_short",
         ]
     );
-    assert_eq!(violations[2].params()["min"], "4");
+    assert_eq!(violations[2].params()["min"], "6");
 }
 
 #[test]
@@ -968,7 +973,7 @@ fn validate_vectors() {
 #[test]
 fn limits_of_the_presets() {
     let rows = [
-        (PasswordPolicy::Pin, 4, 64),
+        (PasswordPolicy::Pin, 6, 64),
         (PasswordPolicy::Standard, 12, 256),
         (PasswordPolicy::Hardened, 16, 256),
         (custom(9, 99, None), 9, 99),
