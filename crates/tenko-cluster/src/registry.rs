@@ -259,6 +259,25 @@ fn invalid_token() -> ClusterError {
     )
 }
 
+/// How an enrollment request reached the controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnrollTransport {
+    /// Over TLS: to this controller, or to a trusted reverse proxy that said so.
+    Https,
+    /// Over plain HTTP. Only the Lab profile accepts it ([`NodeRegistry::refuse_plain_http`]).
+    PlainHttp,
+}
+
+fn plain_http_refused() -> ClusterError {
+    ClusterError::new(
+        "cluster.enrollment.plain_http",
+        403,
+        "this controller accepts enrollment tokens only over HTTPS: the token crossed the \
+         network in clear text and is withdrawn; create a new token and enroll with the \
+         https:// URL of the controller (plain HTTP is accepted only under the Lab profile)",
+    )
+}
+
 fn wrong_controller() -> ClusterError {
     ClusterError::new(
         "cluster.enrollment.wrong_controller",
@@ -1029,13 +1048,96 @@ impl NodeRegistry {
         cx: &RequestCtx,
         request: EnrollRequest,
     ) -> Result<Enrolled, ClusterError> {
-        match self.try_enroll(cx, request).await {
+        self.enroll_over(cx, request, EnrollTransport::Https).await
+    }
+
+    /// [`Self::enroll`] for a request that arrived over `transport`. An enrollment over
+    /// plain HTTP is recorded with the context `transport: http`; the caller has checked
+    /// that the profile allows it.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::enroll`].
+    pub async fn enroll_over(
+        &self,
+        cx: &RequestCtx,
+        request: EnrollRequest,
+        transport: EnrollTransport,
+    ) -> Result<Enrolled, ClusterError> {
+        if transport == EnrollTransport::PlainHttp {
+            tracing::warn!(source = ?cx.source_ip, "an enrollment token arrived over plain HTTP (Lab profile)");
+        }
+        match self.try_enroll(cx, request, transport).await {
             Ok(enrolled) => Ok(enrolled),
             Err((error, token)) => {
                 self.audit_refusal(cx, &error, token).await;
                 Err(error)
             }
         }
+    }
+
+    /// Refuses an enrollment that arrived over plain HTTP where the profile does not allow it
+    /// (every profile but Lab), whatever the client was told: the refusal is audited with the
+    /// code `cluster.enrollment.plain_http`, and a token whose secret matches and that is
+    /// not used yet is withdrawn, since it crossed the network in clear text and anyone on
+    /// the path may hold it now. The refusal names the token only when its secret matched,
+    /// and counts among the refusals anyone can send otherwise. Returns the error to answer
+    /// with.
+    pub async fn refuse_plain_http(
+        &self,
+        cx: &RequestCtx,
+        request: &EnrollRequest,
+    ) -> ClusterError {
+        let error = plain_http_refused();
+        let mut proven = None;
+        if let Ok(token) = EnrollmentToken::parse(&request.token)
+            && self.withdraw_exposed(cx, &token).await
+        {
+            proven = Some(token.id());
+        }
+        self.audit_refusal(cx, &error, proven).await;
+        error
+    }
+
+    /// Deletes the pending token record of `token` when its secret matches, audited as
+    /// `cluster.enrollment.delete` with the reason `plain_http`. Returns whether the secret
+    /// matched (whether or not the token could still be withdrawn).
+    async fn withdraw_exposed(&self, cx: &RequestCtx, token: &EnrollmentToken) -> bool {
+        let id = token.id();
+        let Ok(view) = self.store.read(ReadConsistency::Local).await else {
+            return false;
+        };
+        let Ok(Some((record, revision))) = view.get_typed(&tables::ENROLLMENTS, &id) else {
+            return false;
+        };
+        drop(view);
+        if !record.digest.matches(token) {
+            return false;
+        }
+        if record.used.is_some() {
+            return true;
+        }
+        let mut batch = WriteBatch::for_request(cx);
+        batch.expect_typed(&tables::ENROLLMENTS, &id, Some(revision));
+        batch.delete_typed(&tables::ENROLLMENTS, &id);
+        batch.audit(
+            AuditDraft::success(
+                actions::ENROLLMENT_DELETE,
+                vec![ObjectRef::singleton(ObjectKind::Node)],
+            )
+            .with_source_ip(cx.source_ip)
+            .with_context("enrollment", id.to_string())
+            .with_context("reason", "plain_http"),
+        );
+        match self.store.propose(batch).await {
+            Ok(_) => {
+                tracing::warn!(enrollment = %id, "withdrew an enrollment token that arrived over plain HTTP");
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not withdraw an enrollment token that arrived over plain HTTP");
+            }
+        }
+        true
     }
 
     /// Audits a refused enrollment. In each [`Timings::refusal_window`] this controller
@@ -1058,6 +1160,7 @@ impl NodeRegistry {
             "cluster.protocol.unsupported" => "cluster.protocol.unsupported",
             "cluster.node.name_taken" => "cluster.node.name_taken",
             "cluster.ca.invalid_csr" => "cluster.ca.invalid_csr",
+            "cluster.enrollment.plain_http" => "cluster.enrollment.plain_http",
             _ => "cluster.enrollment.refused",
         };
         let window = self.timings().refusal_window;
@@ -1074,11 +1177,13 @@ impl NodeRegistry {
                 }
             };
             // Before the secret matched: the token is malformed, unknown, wrong or from
-            // another controller, which anyone can send.
+            // another controller, which anyone can send; so is a refusal over plain HTTP that
+            // names no token.
             let unproven = matches!(
                 error.code(),
                 "cluster.enrollment.invalid_token" | "cluster.enrollment.wrong_controller"
-            );
+            ) || (error.code() == "cluster.enrollment.plain_http"
+                && token.is_none());
             let recorded = if unproven {
                 &mut refusals.recorded
             } else {
@@ -1141,6 +1246,7 @@ impl NodeRegistry {
         &self,
         cx: &RequestCtx,
         request: EnrollRequest,
+        transport: EnrollTransport,
     ) -> Result<Enrolled, (ClusterError, Option<Uuid>)> {
         let token = EnrollmentToken::parse(&request.token).map_err(|_| (invalid_token(), None))?;
         // A `tnk2` token names the CA root of the controller that issued it: one that reached
@@ -1316,15 +1422,17 @@ impl NodeRegistry {
             batch.put_typed(&tables::NODE_NAMES, &name_key, &id)?;
             batch.expect_typed(&tables::NODES, &id, None);
             batch.put_typed(&tables::NODES, &id, &node_record)?;
-            batch.audit(
-                AuditDraft::success(actions::NODE_ENROLL, vec![ObjectRef::node(node)])
-                    .with_source_ip(cx.source_ip)
-                    .with_context("name", name.clone())
-                    .with_context("roles", role_list(&roles))
-                    .with_context("enrollment", token_id.to_string())
-                    .with_context("serial", issued.info.serial.clone())
-                    .with_context("not_after", issued.info.not_after.to_rfc3339()),
-            );
+            let mut draft = AuditDraft::success(actions::NODE_ENROLL, vec![ObjectRef::node(node)])
+                .with_source_ip(cx.source_ip)
+                .with_context("name", name.clone())
+                .with_context("roles", role_list(&roles))
+                .with_context("enrollment", token_id.to_string())
+                .with_context("serial", issued.info.serial.clone())
+                .with_context("not_after", issued.info.not_after.to_rfc3339());
+            if transport == EnrollTransport::PlainHttp {
+                draft = draft.with_context("transport", "http");
+            }
+            batch.audit(draft);
             Ok(batch)
         };
         let batch = build().map_err(with_token)?;

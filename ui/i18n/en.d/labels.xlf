@@ -1094,6 +1094,10 @@
         <notes><note category="description">What the audit action sys.update.rollback is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Roll back an update</source></segment>
       </unit>
+      <unit id="audit.action.sys.update.download">
+        <notes><note category="description">What the audit action sys.update.download is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Download an update</source></segment>
+      </unit>
       <unit id="audit.action.sys.update.upload">
         <notes><note category="description">What the audit action sys.update.upload is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Upload an update</source></segment>

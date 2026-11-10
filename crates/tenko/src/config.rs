@@ -2902,9 +2902,23 @@ pub const DEFAULT_UPDATE_SOURCE: &str =
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UpdatesSection {
-    /// The release manifest (`releases.json`). Release files are downloaded only from the
-    /// same scheme and host (the pinned source, R17). Default: the project's releases.
+    /// The release manifest (`releases.json`). Default: the project's releases. It must lie
+    /// inside [`Self::release_prefix`].
     pub source_url: String,
+    /// The pinned release location (R17): the URL prefix (scheme, host, port and path) that
+    /// the manifest URL, every release file and every redirect inside it must start with.
+    /// Default: for a source of the form
+    /// `https://<host>/<owner>/<repo>/releases/latest/download/<file>` the repository's
+    /// release path `https://<host>/<owner>/<repo>/releases/`; for any other source (a
+    /// mirror) the directory of `source_url`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_prefix: Option<String>,
+    /// Exact host names that a response from inside the release prefix may redirect to,
+    /// over HTTPS (the object storage of release hosting). Default:
+    /// `["release-assets.githubusercontent.com"]` while `source_url` is on `github.com`,
+    /// none otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_hosts: Option<Vec<String>>,
     /// Never contact the release source: no check, no download. New versions are installed
     /// from an uploaded manifest and release file. Default off.
     pub air_gapped: bool,
@@ -2931,6 +2945,8 @@ impl Default for UpdatesSection {
     fn default() -> Self {
         Self {
             source_url: DEFAULT_UPDATE_SOURCE.to_owned(),
+            release_prefix: None,
+            redirect_hosts: None,
             air_gapped: false,
             check_interval_hours: 24,
             prereleases: false,
@@ -2962,6 +2978,7 @@ impl UpdatesSection {
                 "updates.source_url must not contain whitespace",
             ));
         }
+        self.pin().map_err(ConfigError::invalid)?;
         if !(1..=720).contains(&self.check_interval_hours) {
             return Err(ConfigError::invalid(
                 "updates.check_interval_hours must be between 1 and 720",
@@ -2983,6 +3000,19 @@ impl UpdatesSection {
             ));
         }
         Ok(())
+    }
+
+    /// The pinned release location of these settings.
+    ///
+    /// # Errors
+    ///
+    /// The message of [`crate::upgrade::source::Pin::new`].
+    pub fn pin(&self) -> Result<crate::upgrade::source::Pin, String> {
+        crate::upgrade::source::Pin::new(
+            &self.source_url,
+            self.release_prefix.as_deref(),
+            self.redirect_hosts.as_deref(),
+        )
     }
 
     /// Whether the server runs in a container: the setting, or the marker files of Docker

@@ -316,6 +316,21 @@ fn a_release_is_installed_from_the_ui_and_confirmed() {
     assert_eq!(status["attempt"]["job_id"], job.as_str());
     let finished = api.get(&format!("/jobs/{job}")).ok();
     assert_eq!(finished["job"]["state"], "succeeded", "{finished}");
+    // The download is recorded with the URL the manifest named, the URL the file finally
+    // came from and the digest of what arrived.
+    let download = wait_for_audit(&api, "sys.update.download");
+    let context = &download["draft"]["details"]["context"];
+    let expected_url = source
+        .manifest_url()
+        .replace("releases.json", &asset_name());
+    assert_eq!(context["url"], expected_url.as_str(), "{download}");
+    assert_eq!(context["final_url"], expected_url.as_str(), "{download}");
+    assert_eq!(
+        context["sha256"].as_str().map(str::len),
+        Some(64),
+        "{download}"
+    );
+    assert_eq!(context["job"], job.as_str(), "{download}");
     let record = wait_for_audit(&api, "sys.update.confirm");
     assert_eq!(
         record["draft"]["details"]["context"]["to"], *NEW,

@@ -4,12 +4,23 @@
 //!
 //! | Store table | Key | Value |
 //! |---|---|---|
-//! | `sys.update_manifest` | `()` | the last manifest, where it came from and when ([`StoredManifest`]) |
+//! | `sys.update_manifest` | `()` | the last manifest fetched from the release source, and when ([`StoredManifest`]) |
+//! | `sys.update_manifest_uploaded` | `()` | the last manifest an administrator uploaded, and when ([`StoredManifest`]) |
 //! | `sys.update_seen` | user id | the version whose notes the user saw last ([`Seen`]) |
 //!
 //! A changed manifest is written once, so the journal turns it into one `admin` event for
 //! the UI. The check runs only when TGL-23 has it on and `updates.air_gapped` is off; it
 //! sends nothing but the running version.
+//!
+//! # The two manifests
+//!
+//! An install from the release source takes the file's URL and digest from the fetched
+//! manifest only. An uploaded manifest serves only installs of an uploaded file, which take
+//! the digest from the uploaded manifest, or from the fetched one for a version the upload
+//! lacks. Uploading a manifest needs the same fresh sign-in as an install (TGL-23). So a
+//! session that may not install cannot decide what a later install downloads. A manifest
+//! that an earlier version stored in `sys.update_manifest` as uploaded was accepted without
+//! that sign-in and decides nothing; the next upload removes it.
 //!
 //! An install is a job of kind `sys.update` with the steps of [`super::steps`]: the backup
 //! (when the request asked for one), fetch (not for uploads), verify, check and switch. When
@@ -73,8 +84,17 @@ use super::{
 };
 use crate::config::UpdatesSection;
 
-/// The stored manifest.
+/// The manifest fetched from the release source (and, written by an earlier version, an
+/// uploaded one, which [`StoredManifest::origin`] tells apart).
 pub const MANIFEST: TableDef<(), StoredManifest> = TableDef::new("sys.update_manifest");
+
+/// The manifest an administrator uploaded.
+pub const UPLOADED_MANIFEST: TableDef<(), StoredManifest> =
+    TableDef::new("sys.update_manifest_uploaded");
+
+/// The audit action of a downloaded release file: the URL the manifest named, the URL the
+/// file finally came from, its size and SHA-256.
+pub const DOWNLOAD_AUDIT: &str = "sys.update.download";
 
 /// The version whose notes each user saw last.
 pub const SEEN: TableDef<UserId, Seen> = TableDef::new("sys.update_seen");
@@ -160,6 +180,58 @@ pub struct StoredManifest {
     pub origin: ManifestOrigin,
     /// When.
     pub at: Timestamp,
+}
+
+/// The two stored manifests.
+#[derive(Debug, Clone, Default)]
+struct Manifests {
+    /// Fetched from the release source.
+    fetched: Option<StoredManifest>,
+    /// Uploaded by an administrator.
+    uploaded: Option<StoredManifest>,
+}
+
+impl Manifests {
+    /// The one stored last, which the status describes.
+    fn newest(&self) -> Option<&StoredManifest> {
+        match (&self.fetched, &self.uploaded) {
+            (Some(fetched), Some(uploaded)) if uploaded.at > fetched.at => Some(uploaded),
+            (Some(fetched), _) => Some(fetched),
+            (None, uploaded) => uploaded.as_ref(),
+        }
+    }
+
+    /// The releases of both, each version once (the fetched entry wins), newest first.
+    fn releases(&self) -> Vec<&Release> {
+        let mut releases: Vec<&Release> = self
+            .fetched
+            .iter()
+            .flat_map(|stored| stored.manifest.releases.iter())
+            .collect();
+        for release in self
+            .uploaded
+            .iter()
+            .flat_map(|stored| stored.manifest.releases.iter())
+        {
+            if !releases
+                .iter()
+                .any(|known| known.version == release.version)
+            {
+                releases.push(release);
+            }
+        }
+        releases.sort_by(|a, b| b.version.cmp(&a.version));
+        releases
+    }
+}
+
+/// Which manifest a version is looked up in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lookup {
+    /// An install from the release source: the fetched manifest only.
+    Source,
+    /// An install of an uploaded file: the uploaded manifest, then the fetched one.
+    Upload,
 }
 
 /// The version whose notes a user saw last.
@@ -322,9 +394,15 @@ impl Updates {
     ///
     /// # Errors
     ///
-    /// `update.fetch_failed` when the HTTP client cannot be built.
+    /// `update.fetch_failed` when the HTTP client cannot be built, `update.source_invalid`
+    /// when the pinned release location of `[updates]` is not usable (the configuration
+    /// check refuses such a file first).
     pub fn new(env: Environment, parts: Parts) -> Result<Self, CodedError> {
-        let source = Source::new(&parts.section.source_url)?;
+        let pin = parts
+            .section
+            .pin()
+            .map_err(|detail| CodedError::new("update.source_invalid", 500, detail))?;
+        let source = Source::new(pin)?;
         let changelog = match parse_changelog(CHANGELOG) {
             Ok(sections) => sections
                 .iter()
@@ -547,18 +625,62 @@ impl Updates {
             .map_err(|error| store_error(&error))
     }
 
-    /// Stores `manifest` unless the stored one has the same releases; a new one is one
-    /// `admin` event for the UI.
+    /// Both stored manifests. A manifest in `sys.update_manifest` that an earlier version
+    /// stored as uploaded is neither: it was accepted without the fresh sign-in an upload
+    /// needs now, so it decides nothing until it is uploaded again.
+    async fn manifests(&self) -> Result<Manifests, CodedError> {
+        let view = self
+            .inner
+            .store
+            .read(ReadConsistency::Local)
+            .await
+            .map_err(|error| store_error(&error))?;
+        let fetched = view
+            .get_typed(&MANIFEST, &())
+            .map_err(|error| store_error(&error))?
+            .map(|(stored, _)| stored)
+            .filter(|stored| stored.origin == ManifestOrigin::Fetched);
+        let uploaded = view
+            .get_typed(&UPLOADED_MANIFEST, &())
+            .map_err(|error| store_error(&error))?
+            .map(|(stored, _)| stored);
+        Ok(Manifests { fetched, uploaded })
+    }
+
+    /// Stores `manifest` in the table of its origin unless the stored one has the same
+    /// releases; a new one is one `admin` event for the UI. An upload also removes an
+    /// uploaded manifest an earlier version left in `sys.update_manifest`.
     async fn store_manifest(
         &self,
         ctx: &RequestCtx,
         manifest: ReleaseManifest,
         origin: ManifestOrigin,
     ) -> Result<(), CodedError> {
-        let current = self.stored_manifest().await?;
+        let table = match origin {
+            ManifestOrigin::Fetched => &MANIFEST,
+            ManifestOrigin::Uploaded => &UPLOADED_MANIFEST,
+        };
+        let view = self
+            .inner
+            .store
+            .read(ReadConsistency::Local)
+            .await
+            .map_err(|error| store_error(&error))?;
+        let current = view
+            .get_typed(table, &())
+            .map_err(|error| store_error(&error))?;
+        let legacy = match origin {
+            ManifestOrigin::Uploaded => view
+                .get_typed(&MANIFEST, &())
+                .map_err(|error| store_error(&error))?
+                .filter(|(stored, _)| stored.origin == ManifestOrigin::Uploaded),
+            ManifestOrigin::Fetched => None,
+        };
+        drop(view);
         if let Some((stored, _)) = &current
             && stored.manifest == manifest
             && stored.origin == origin
+            && legacy.is_none()
         {
             return Ok(());
         }
@@ -566,14 +688,10 @@ impl Updates {
             .latest(self.inner.section.prereleases)
             .map(|release| release.version.to_string());
         let mut batch = WriteBatch::for_request(ctx);
-        batch.expect_typed(
-            &MANIFEST,
-            &(),
-            current.as_ref().map(|(_, revision)| *revision),
-        );
+        batch.expect_typed(table, &(), current.as_ref().map(|(_, revision)| *revision));
         batch
             .put_typed(
-                &MANIFEST,
+                table,
                 &(),
                 &StoredManifest {
                     manifest,
@@ -582,6 +700,10 @@ impl Updates {
                 },
             )
             .map_err(|error| store_error(&error))?;
+        if let Some((_, revision)) = legacy {
+            batch.expect_typed(&MANIFEST, &(), Some(revision));
+            batch.delete_typed(&MANIFEST, &());
+        }
         if origin == ManifestOrigin::Uploaded {
             let mut details = AuditDetails::default();
             if let Some(latest) = &latest {
@@ -603,10 +725,10 @@ impl Updates {
     }
 
     /// The releases this binary knows notes for: the compiled-in changelog, then the stored
-    /// manifest for versions the changelog lacks.
+    /// manifests (fetched first) for versions the changelog lacks.
     fn notes_between(
         &self,
-        manifest: Option<&ReleaseManifest>,
+        manifests: &[ReleaseManifest],
         from: &ReleaseVersion,
         to: &ReleaseVersion,
     ) -> Vec<Release> {
@@ -617,7 +739,7 @@ impl Updates {
             .filter(|release| &release.version > from && &release.version <= to)
             .cloned()
             .collect();
-        if let Some(manifest) = manifest {
+        for manifest in manifests {
             for release in manifest.between(from, to) {
                 if !releases
                     .iter()
@@ -673,20 +795,26 @@ impl Updates {
     pub async fn status_now(&self) -> Result<UpdateStatus, CodedError> {
         let inner = &self.inner;
         let env = &inner.env;
-        let stored = self.stored_manifest().await?.map(|(stored, _)| stored);
+        let manifests = self.manifests().await?;
         let backup = self.backup_status().await;
-        let manifest = stored.as_ref().map(|stored| &stored.manifest);
         let prereleases = inner.section.prereleases;
-        let releases: Vec<Release> = manifest
-            .map(|manifest| {
-                manifest
-                    .newer_than(&env.running, prereleases)
-                    .into_iter()
-                    .cloned()
-                    .collect()
-            })
+        let offered = |release: &&Release| {
+            release.version > env.running && (prereleases || !release.version.is_prerelease())
+        };
+        // Both manifests feed the notes and the releases an upload may install.
+        let releases: Vec<Release> = manifests
+            .releases()
+            .into_iter()
+            .filter(offered)
+            .cloned()
+            .collect();
+        // What an install from the source may take: the fetched manifest only.
+        let fetched = manifests.fetched.as_ref().map(|stored| &stored.manifest);
+        let source_releases: Vec<&Release> = fetched
+            .map(|manifest| manifest.newer_than(&env.running, prereleases))
             .unwrap_or_default();
-        let latest = manifest
+        let latest = fetched
+            .or_else(|| manifests.uploaded.as_ref().map(|stored| &stored.manifest))
             .and_then(|manifest| manifest.latest(prereleases))
             .map(|release| release.version.clone());
         let policy = inner.policy.policy();
@@ -701,16 +829,17 @@ impl Updates {
             last_error: check_state.last_error.clone(),
         };
         drop(check_state);
-        let newest = releases.first();
+        let newest = source_releases.first();
         let structural = self.structural_block();
         let from_source_blocked = structural
             .or_else(|| (!policy.install.allows_download()).then_some(InstallBlock::UploadOnly))
             .or_else(|| inner.section.air_gapped.then_some(InstallBlock::AirGapped))
+            .or_else(|| fetched.is_none().then_some(InstallBlock::NotFetched))
             .or_else(|| newest.is_none().then_some(InstallBlock::UpToDate))
             .or_else(|| {
-                // No release of the manifest has a file for this platform at all, or only the
-                // newest one lacks it.
-                let published = manifest.is_some_and(|manifest| {
+                // No release of the fetched manifest has a file for this platform at all, or
+                // only the newest one lacks it.
+                let published = fetched.is_some_and(|manifest| {
                     manifest
                         .releases
                         .iter()
@@ -738,7 +867,7 @@ impl Updates {
             security: releases.iter().any(|release| release.security),
             requires_action: releases.iter().any(|release| release.requires_action),
             latest,
-            manifest: stored.as_ref().map(|stored| ManifestInfo {
+            manifest: manifests.newest().map(|stored| ManifestInfo {
                 origin: stored.origin,
                 at: stored.at,
                 releases: stored.manifest.releases.len(),
@@ -764,23 +893,37 @@ impl Updates {
         })
     }
 
-    /// The release and asset of `version` for this platform, newer than the running one.
+    /// The release and asset of `version` for this platform, newer than the running one: for
+    /// an install from the source from the fetched manifest only, for an upload from the
+    /// uploaded manifest and then the fetched one.
     async fn release_for(
         &self,
         version: &ReleaseVersion,
+        lookup: Lookup,
     ) -> Result<(Release, ReleaseAsset), CodedError> {
-        let stored = self.stored_manifest().await?.map(|(stored, _)| stored);
-        let release = stored
-            .as_ref()
-            .and_then(|stored| stored.manifest.release(version))
-            .cloned()
-            .ok_or_else(|| {
-                CodedError::new(
-                    "update.version_unknown",
-                    400,
-                    format!("the release manifest has no version {version}"),
-                )
-            })?;
+        let manifests = self.manifests().await?;
+        let find = |stored: Option<&StoredManifest>| {
+            stored.and_then(|stored| stored.manifest.release(version).cloned())
+        };
+        let release = match lookup {
+            Lookup::Source => find(manifests.fetched.as_ref()),
+            Lookup::Upload => {
+                find(manifests.uploaded.as_ref()).or_else(|| find(manifests.fetched.as_ref()))
+            }
+        }
+        .ok_or_else(|| {
+            let detail = match lookup {
+                Lookup::Source if find(manifests.uploaded.as_ref()).is_some() => format!(
+                    "the manifest fetched from the release source has no version {version}; \
+                     an uploaded manifest serves only uploaded release files"
+                ),
+                Lookup::Source => {
+                    format!("the manifest fetched from the release source has no version {version}")
+                }
+                Lookup::Upload => format!("the release manifest has no version {version}"),
+            };
+            CodedError::new("update.version_unknown", 400, detail)
+        })?;
         if release.version <= self.inner.env.running {
             return Err(CodedError::new(
                 "update.not_newer",
@@ -824,7 +967,8 @@ impl Updates {
             self.inner.section.ready_timeout_secs,
         )?;
         spec.node = Some(self.inner.env.node);
-        self.audit_install(ctx, &version, fetch, plan).await?;
+        self.audit_install(ctx, &version, &asset, fetch, plan)
+            .await?;
         let job_id = self
             .inner
             .engine
@@ -856,12 +1000,14 @@ impl Updates {
     }
 
     /// Writes `sys.update.install` before the job is submitted: who started which install,
-    /// from where, and what was decided about the backup before it (`recent` with its age,
-    /// `run`, or `skipped`). An install whose record cannot be written does not start.
+    /// from where (for an install from the source the URL of the file, resolved), the SHA-256
+    /// the file must have, and what was decided about the backup before it (`recent` with its
+    /// age, `run`, or `skipped`). An install whose record cannot be written does not start.
     async fn audit_install(
         &self,
         ctx: &RequestCtx,
         version: &ReleaseVersion,
+        asset: &ReleaseAsset,
         fetch: bool,
         plan: BackupPlan,
     ) -> Result<(), CodedError> {
@@ -872,6 +1018,10 @@ impl Updates {
             "from".to_owned(),
             if fetch { "source" } else { "upload" }.to_owned(),
         );
+        if fetch {
+            context.insert("url".to_owned(), self.inner.source.asset_url(asset)?);
+        }
+        context.insert("sha256".to_owned(), asset.sha256.clone());
         context.insert("backup".to_owned(), plan.as_str().to_owned());
         if let BackupPlan::Recent { age_seconds } = plan {
             context.insert("backup_age_seconds".to_owned(), age_seconds.to_string());
@@ -1009,7 +1159,7 @@ impl Updates {
         if let Some(block) = self.structural_block() {
             return Err(blocked(block));
         }
-        let (_, asset) = self.release_for(&version).await?;
+        let (_, asset) = self.release_for(&version, Lookup::Upload).await?;
         // Answered before a byte of the file is read.
         let plan = self.backup_plan(query.backup).await?;
         let part = self
@@ -1092,6 +1242,9 @@ impl UpdateService for Updates {
         manifest: ReleaseManifest,
     ) -> BoxFuture<'a, Result<UpdateStatus, CodedError>> {
         Box::pin(async move {
+            // The manifest decides which digest an uploaded file must have, so storing one
+            // needs what installing needs: a fresh sign-in where TGL-23 asks for one.
+            self.require_admin_policy(ctx).await?;
             self.store_manifest(ctx, manifest, ManifestOrigin::Uploaded)
                 .await?;
             self.status_now().await
@@ -1115,7 +1268,9 @@ impl UpdateService for Updates {
             if self.inner.section.air_gapped {
                 return Err(blocked(InstallBlock::AirGapped));
             }
-            let (_, asset) = self.release_for(&version).await?;
+            let (_, asset) = self.release_for(&version, Lookup::Source).await?;
+            // The URL is checked against the pinned source before anything starts.
+            self.inner.source.asset_url(&asset)?;
             let plan = self.backup_plan(request.backup).await?;
             self.start_job(ctx, version, asset, true, plan).await
         })
@@ -1151,14 +1306,19 @@ impl UpdateService for Updates {
                 .get_typed(&SEEN, &user)
                 .map_err(|error| store_error(&error))?
                 .map(|(seen, _)| seen.version);
-            let manifest = view
-                .get_typed(&MANIFEST, &())
-                .map_err(|error| store_error(&error))?
-                .map(|(stored, _)| stored.manifest);
+            let mut manifests = Vec::new();
+            for table in [&MANIFEST, &UPLOADED_MANIFEST] {
+                if let Some((stored, _)) = view
+                    .get_typed(table, &())
+                    .map_err(|error| store_error(&error))?
+                {
+                    manifests.push(stored.manifest);
+                }
+            }
             drop(view);
             let show = last_seen.as_ref().is_some_and(|seen| seen < &running);
             let releases = match (&last_seen, show) {
-                (Some(seen), true) => self.notes_between(manifest.as_ref(), seen, &running),
+                (Some(seen), true) => self.notes_between(&manifests, seen, &running),
                 _ => Vec::new(),
             };
             Ok(WhatsNew {
@@ -1475,7 +1635,7 @@ mod tests {
         assert!(!empty.update_available);
         assert_eq!(
             empty.install.from_source_blocked,
-            Some(InstallBlock::UpToDate)
+            Some(InstallBlock::NotFetched)
         );
         assert!(empty.manifest.is_none());
 
@@ -1500,13 +1660,21 @@ mod tests {
             1,
             "only releases newer than the running one"
         );
-        assert!(status.install.from_source, "{:?}", status.install);
+        assert_eq!(
+            status.install.from_source_blocked,
+            Some(InstallBlock::NotFetched),
+            "an uploaded manifest serves uploads only"
+        );
         assert!(status.install.upload);
         assert!(!status.install.step_up);
         assert_eq!(
             status.manifest.map(|info| info.origin),
             Some(ManifestOrigin::Uploaded)
         );
+        fetched(&updates, manifest()).await;
+        let status = updates.status_now().await.expect("status");
+        assert!(status.install.from_source, "{:?}", status.install);
+        assert_eq!(status.releases.len(), 1, "each version once");
     }
 
     #[tokio::test]
@@ -1611,6 +1779,9 @@ mod tests {
             Some("upload_only")
         );
 
+        // The blocks below are about installs from the source, which read the fetched
+        // manifest.
+        fetched(&upload_only, manifest()).await;
         let stale = service(&store, UpdateInstall::UiStepUp, false);
         let error = stale
             .install(&ctx, request("0.2.0", None))
@@ -1695,10 +1866,7 @@ mod tests {
         updates.register_steps(&mut engine);
         with_backups(&updates, aged(Some(60)));
         let ctx = admin();
-        updates
-            .put_manifest(&ctx, manifest())
-            .await
-            .expect("upload");
+        fetched(&updates, manifest()).await;
         let unknown = updates
             .install(&ctx, request("9.9.9", None))
             .await
@@ -1714,6 +1882,13 @@ mod tests {
             .await
             .expect("started");
         assert_eq!(started.version, version("0.2.0"));
+        // The record names the file the install takes and the digest it must have.
+        let (context, _) = install_audit(&store).await.expect("audited");
+        assert_eq!(
+            context.get("url").map(String::as_str),
+            Some("http://127.0.0.1:9/tenko-0.2.0-linux-x86_64")
+        );
+        assert_eq!(context.get("sha256"), Some(&"a".repeat(64)));
         let job = updates.inner.engine.job(started.job_id).await.expect("job");
         assert_eq!(
             job_steps(&job),
@@ -1742,11 +1917,168 @@ mod tests {
         let mut engine = updates.inner.engine.clone();
         updates.register_steps(&mut engine);
         let backups = with_backups(&updates, backups);
+        fetched(&updates, manifest()).await;
+        (store, updates, backups)
+    }
+
+    /// Stores `manifest` as the release source's answer.
+    async fn fetched(updates: &Updates, manifest: ReleaseManifest) {
+        updates
+            .store_manifest(
+                &RequestCtx::system(SystemComponent::Api),
+                manifest,
+                ManifestOrigin::Fetched,
+            )
+            .await
+            .expect("fetched");
+    }
+
+    #[tokio::test]
+    async fn an_uploaded_manifest_serves_uploads_only_and_needs_a_fresh_sign_in() {
+        let store = Arc::new(MemStore::default());
+        let ctx = admin();
+        // A session that may not install may not upload a manifest either.
+        let stale = service(&store, UpdateInstall::UiStepUp, false);
+        let error = stale
+            .put_manifest(&ctx, manifest())
+            .await
+            .expect_err("step-up");
+        assert_eq!(error.code, "auth.step_up_required");
+        assert!(stale.status_now().await.expect("status").manifest.is_none());
+
+        let updates = service(&store, UpdateInstall::UiStepUp, true);
+        updates
+            .put_manifest(&ctx, manifest())
+            .await
+            .expect("upload");
+        let status = updates.status_now().await.expect("status");
+        assert_eq!(
+            status.install.from_source_blocked,
+            Some(InstallBlock::NotFetched)
+        );
+        assert!(status.install.upload);
+        assert_eq!(
+            status.releases.len(),
+            1,
+            "the upload panel offers its releases"
+        );
+        // An install from the source never takes the uploaded manifest's URL or digest.
+        let error = updates
+            .install(&ctx, request("0.2.0", Some(PreUpdateBackup::Skip)))
+            .await
+            .expect_err("nothing fetched");
+        assert_eq!(error.code, "update.version_unknown");
+        assert!(
+            error.detail.contains("serves only uploaded release files"),
+            "{}",
+            error.detail
+        );
+        assert!(install_audit(&store).await.is_none(), "nothing started");
+        let (_, asset) = updates
+            .release_for(&version("0.2.0"), Lookup::Upload)
+            .await
+            .expect("an upload finds it");
+        assert_eq!(asset.sha256, "a".repeat(64));
+
+        // The fetched manifest decides installs from the source, the uploaded one uploads.
+        let mut source = manifest();
+        source.releases[0].assets[0].sha256 = "b".repeat(64);
+        fetched(&updates, source).await;
+        let service = &updates;
+        let digest = |lookup| async move {
+            service
+                .release_for(&version("0.2.0"), lookup)
+                .await
+                .expect("found")
+                .1
+                .sha256
+        };
+        assert_eq!(digest(Lookup::Source).await, "b".repeat(64));
+        assert_eq!(digest(Lookup::Upload).await, "a".repeat(64));
+        // A later upload never touches the fetched manifest.
+        let mut other = manifest();
+        other.releases[0].assets[0].sha256 = "c".repeat(64);
+        updates
+            .put_manifest(&admin(), other)
+            .await
+            .expect("upload again");
+        assert_eq!(digest(Lookup::Source).await, "b".repeat(64));
+        assert_eq!(digest(Lookup::Upload).await, "c".repeat(64));
+        let status = updates.status_now().await.expect("status");
+        assert!(status.install.from_source, "{:?}", status.install);
+        assert_eq!(
+            status.manifest.map(|info| info.origin),
+            Some(ManifestOrigin::Uploaded),
+            "the status describes the manifest stored last"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_uploaded_manifest_of_an_earlier_version_decides_nothing() {
+        let store = Arc::new(MemStore::default());
+        let updates = service(&store, UpdateInstall::Ui, true);
+        let mut batch = WriteBatch::for_request(&admin());
+        batch
+            .put_typed(
+                &MANIFEST,
+                &(),
+                &StoredManifest {
+                    manifest: manifest(),
+                    origin: ManifestOrigin::Uploaded,
+                    at: Timestamp::now(),
+                },
+            )
+            .expect("encode");
+        store.propose(batch).await.expect("stored");
+        let status = updates.status_now().await.expect("status");
+        assert_eq!(
+            status.install.from_source_blocked,
+            Some(InstallBlock::NotFetched)
+        );
+        assert!(
+            updates
+                .release_for(&version("0.2.0"), Lookup::Source)
+                .await
+                .is_err()
+        );
+        assert!(
+            updates
+                .release_for(&version("0.2.0"), Lookup::Upload)
+                .await
+                .is_err(),
+            "accepted without a fresh sign-in, it does not serve uploads either"
+        );
+        let status = updates.status_now().await.expect("status");
+        assert_eq!(status.releases, Vec::<Release>::new());
+        // An upload replaces it and removes the old row.
         updates
             .put_manifest(&admin(), manifest())
             .await
-            .expect("manifest");
-        (store, updates, backups)
+            .expect("upload");
+        assert!(updates.stored_manifest().await.expect("read").is_none());
+        assert!(
+            updates
+                .release_for(&version("0.2.0"), Lookup::Upload)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_release_file_outside_the_prefix_is_refused_before_the_install_starts() {
+        let store = Arc::new(MemStore::default());
+        let updates = service(&store, UpdateInstall::Ui, true);
+        with_backups(&updates, aged(Some(60)));
+        let mut elsewhere = manifest();
+        elsewhere.releases[0].assets[0].url =
+            "http://127.0.0.1:10/tenko-0.2.0-linux-x86_64".to_owned();
+        fetched(&updates, elsewhere).await;
+        let error = updates
+            .install(&admin(), request("0.2.0", None))
+            .await
+            .expect_err("outside the prefix");
+        assert_eq!(error.code, "update.source_mismatch");
+        assert!(install_audit(&store).await.is_none(), "nothing started");
     }
 
     #[tokio::test]
@@ -1843,9 +2175,7 @@ mod tests {
         // Without a backup service nothing can be backed up.
         let store = Arc::new(MemStore::default());
         let bare = service(&store, UpdateInstall::Ui, true);
-        bare.put_manifest(&admin(), manifest())
-            .await
-            .expect("manifest");
+        fetched(&bare, manifest()).await;
         assert_eq!(
             bare.status_now()
                 .await

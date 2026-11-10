@@ -91,6 +91,10 @@ pub enum InstallBlock {
     UploadOnly,
     /// `updates.air_gapped`: nothing is downloaded; upload the release file.
     AirGapped,
+    /// No manifest was fetched from the release source yet. An install from the source
+    /// takes the file's URL and digest from a fetched manifest only; an uploaded manifest
+    /// serves only uploaded release files.
+    NotFetched,
     /// The newest release has no file for this platform.
     NoAsset,
     /// The running version is the newest one.

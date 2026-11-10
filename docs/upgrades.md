@@ -1608,7 +1608,9 @@ The check is off when TGL-23 has the check off, and when `updates.air_gapped` is
 
 | Key | Default | Meaning |
 |---|---|---|
-| `source_url` | The project's `releases.json` | The manifest. An `https` URL; plain `http` is accepted for a loopback host only, for tests. |
+| `source_url` | The project's `releases.json` | The manifest. An `https` URL; plain `http` is accepted for a loopback host only, for tests. It must lie inside `release_prefix` |
+| `release_prefix` | The repository's release path, or the directory of `source_url` | The pinned release location (section 8.11): the URL prefix, with scheme, host, port and path, that the manifest, every release file and every redirect inside it must start with. For a source of the form `https://<host>/<owner>/<repo>/releases/latest/download/<file>` the default is `https://<host>/<owner>/<repo>/releases/`; for any other source (a mirror) the directory of `source_url`. A prefix without a final `/` gets one |
+| `redirect_hosts` | `["release-assets.githubusercontent.com"]` while `source_url` is on `github.com`, otherwise none | Exact host names, no wildcard, that a response from inside the prefix may redirect to over HTTPS (section 8.11) |
 | `air_gapped` | `false` | Never contact the release source: no check, no download (section 8.8) |
 | `check_interval_hours` | `24` | Hours between two checks, 1 to 720 |
 | `prereleases` | `false` | Offer pre-release versions |
@@ -1618,7 +1620,9 @@ The check is off when TGL-23 has the check off, and when `updates.air_gapped` is
 | `image` | `ghcr.io/linkztream/tenko` | The image the pull command names |
 
 Every key has an environment name: `TENKO_UPDATES__AIR_GAPPED`, `TENKO_UPDATES__SOURCE_URL`
-and so on.
+and so on. These keys live in `tenko.toml` and the unit, which only root (on Windows an
+administrator) can write: neither the service account nor the API can move the pinned release
+location.
 
 ### 8.2 The notice and the release notes
 
@@ -1675,7 +1679,8 @@ for an upload, whether it would start and why not. A refused install answers 409
 | `in_progress` | both | An install is running, or it waits for its restart or its confirmation. |
 | `upload_only` | source | TGL-23 allows uploaded files only (Hardened). |
 | `air_gapped` | source | `updates.air_gapped` is on. Upload the files (section 8.8). |
-| `unsupported_platform` | source | No release of the manifest has a file for this platform. Install by hand (section 7). |
+| `not_fetched` | source | No manifest was fetched from the release source yet; an uploaded one serves uploads only (section 8.8). Check for updates, or upload the release file. |
+| `unsupported_platform` | source | No release of the fetched manifest has a file for this platform. Install by hand (section 7). |
 | `no_asset` | source | The newest release has no file for this platform, although earlier ones had. |
 | `up_to_date` | source | The running version is the newest one. |
 
@@ -1763,9 +1768,10 @@ Every action of an update is attributable and recorded in the audit log, which i
 
 | Action | Written | Context |
 |---|---|---|
-| `sys.update.manifest` | When an administrator uploads a manifest that is stored | The newest version in it |
+| `sys.update.manifest` | When an administrator uploads a manifest that is stored (with a fresh sign-in where TGL-23 asks for one, as for an install) | The newest version in it |
 | `sys.update.upload` | When an uploaded release file matched the manifest | `version`, `sha256`, the source address |
-| `sys.update.install` | When an install is accepted, before its job is submitted; an install whose record cannot be written does not start | `version`, `from` (`source` or `upload`), `backup` (`recent` with `backup_age_seconds`, `run`, or `skipped`), the source address; the actor is the administrator who decided |
+| `sys.update.install` | When an install is accepted, before its job is submitted; an install whose record cannot be written does not start | `version`, `from` (`source` or `upload`), `url` (from the source: the release file's URL, resolved), `sha256` (the digest the file must have), `backup` (`recent` with `backup_age_seconds`, `run`, or `skipped`), the source address; the actor is the administrator who decided |
+| `sys.update.download` | When the fetch step of an install from the source has downloaded the release file; a download whose record cannot be written fails | `version`, `url` (the URL the manifest named), `final_url` (the URL the file came from after the redirects), `size`, `sha256` (of what arrived; the verify step compares it with the manifest), `job` |
 | `sys.upgrade.migrate` | At start, for each migration step; in a controller cluster by the leader, once every voter knows the format (section 3.7) | `from`, `to`, `summary`, `binary` |
 | `cluster.member.announce` | After a start of a cluster member, when its member record changed | The version, protocol majors, Raft wire version and data formats of its binary (section 3.7) |
 | `sys.update.confirm` | Once, by the new version, when the attempt is confirmed | `from`, `to`, `job` |
@@ -1787,8 +1793,9 @@ is air-gapped or not. To update:
 1. On a connected machine, download `releases.json`, `SHA256SUMS` and the release file for
    the platform, and verify the file (section 6.5).
 2. In the UI, on the page `/updates`, upload `releases.json`
-   (`PUT /api/v1/system/updates/manifest`). It is validated like a fetched manifest and
-   audited as `sys.update.manifest`. The page then shows the notes.
+   (`PUT /api/v1/system/updates/manifest`), with a fresh sign-in where TGL-23 asks for one,
+   as for an install. It is validated like a fetched manifest and audited as
+   `sys.update.manifest`. The page then shows the notes.
 3. Upload the release file for the version
    (`POST /api/v1/system/updates/upload?version=<version>`), with a fresh sign-in where
    TGL-23 asks for one. The body streams to disk, bounded by the size the manifest gives, and
@@ -1796,8 +1803,17 @@ is air-gapped or not. To update:
    `sys.update.upload`.
 4. The install job runs without the fetch step: verify, check, switch (section 8.5).
 
-The version must be in the stored manifest and newer than the running one, otherwise the
-upload is refused with `update.version_unknown` or `update.not_newer`.
+The version must be in the uploaded manifest (or, when the upload lacks it, in the manifest
+fetched from the release source) and newer than the running one, otherwise the upload is
+refused with `update.version_unknown` or `update.not_newer`.
+
+An uploaded manifest serves only installs of an uploaded file. It is stored in its own table,
+`sys.update_manifest_uploaded`, and an install from the release source never reads it: that
+install takes the file's URL and digest from the manifest fetched from the source only, and
+is blocked with `not_fetched` while none was fetched. So a session that may not install
+cannot decide what a later install downloads, and an upload never replaces what the source
+said. A manifest that an earlier version stored as uploaded was accepted without that fresh
+sign-in and decides nothing: upload it again.
 
 ### 8.9 Containers
 
@@ -1837,9 +1853,23 @@ A network service that replaces its own binary is a supply-chain path (R17,
 `docs/plans/phase-1-execution.md`). The design limits it in these ways:
 
 - **A pinned source.** The manifest comes from `updates.source_url`. A release file is
-  downloaded only from an address with the same scheme, host and port as that URL, whatever
-  the manifest says; a file elsewhere is refused with `update.source_mismatch`. The download
-  follows redirects, because release hosting redirects to its object storage. The manifest
+  downloaded only from an address inside the release prefix (`updates.release_prefix`:
+  scheme, host, port and path, by default the repository's release path), whatever the
+  manifest says; a file elsewhere, such as another repository on the same hosting site, is
+  refused with `update.source_mismatch` before the install starts. The check parses every
+  address with the URL type of the HTTP client (the WHATWG parser), not with a parser of its
+  own, and refuses what two readers could take apart differently: credentials, a backslash
+  and encoded separators. A mirror
+  is configured explicitly: its `source_url`, and its `release_prefix` when its files are
+  not beside the manifest. Redirects of the manifest and of the file are followed at most
+  three times, never from `https` to plain `http`, and only to an address inside the prefix
+  or on a host that `updates.redirect_hosts` names exactly; a listed host may send the client
+  only back into the prefix or to another listed host. The default lists the object storage
+  that the release hosting redirects its downloads to (`release-assets.githubusercontent.com`,
+  observed on 2026-11-10). That host is trusted because the pinned origin itself issued the
+  redirect over TLS, and the SHA-256 of the manifest decides whether what arrives is
+  installed. The client sends no cookie, no `Referer` and no header but `User-Agent` and
+  `Accept`, so nothing else crosses to another host. The manifest
   is bounded to 1 MiB and a file to the size the manifest gives, at most 512 MiB.
 - **A checksum now, a signature later.** The size and the SHA-256 are verified before the
   file becomes executable. The checksum comes from the same origin as the file, so it
@@ -1847,13 +1877,16 @@ A network service that replaces its own binary is a supply-chain path (R17,
   compromised origin. Signatures arrive with API-19 (section 6.6). Until then the Hardened
   profile takes only files that an administrator uploaded after checking them through
   another channel.
-- **An administrator with a fresh sign-in.** Installing needs the right to administer the
-  system, and under Standard and Hardened a step-up. An API token cannot satisfy it.
+- **An administrator with a fresh sign-in.** Installing, and uploading the manifest that an
+  upload is checked against, need the right to administer the system, and under Standard
+  and Hardened a step-up. An API token cannot satisfy it. An uploaded manifest never decides
+  an install from the source (section 8.8).
 - **A dry run before the switch.** The new binary must start, report the manifest's
   version, and migrate a copy of the real data.
 - **An automatic way back.** A version that does not become ready is switched back, with
   its migration undone (section 8.6).
-- **An audit trail.** Section 8.7.
+- **An audit trail.** Section 8.7: the install records the file's URL and digest, the
+  download the URL the file finally came from and the digest of what arrived.
 
 The price is that the service account can write the binaries it runs: the install is done
 by the server, so the server must be able to put a new executable in place. Hardened

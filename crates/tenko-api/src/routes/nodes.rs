@@ -11,7 +11,7 @@
 //! | `POST /nodes/enrollments` | 201 [`CreatedEnrollment`] with the token, `Cache-Control: no-store` | 400, 403 (`auth.step_up_required` for a controller token), 409 `cluster.node.name_taken`, 422 `cluster.enrollment.*`, `cluster.node.name` |
 //! | `GET /nodes/enrollments` | 200 [`EnrollmentList`], newest first, never a secret | 403 |
 //! | `DELETE /nodes/enrollments/{id}` | 204 | 403, 404 `cluster.enrollment.not_found` |
-//! | `POST /nodes/enroll` | 201 [`EnrollResponse`] (public: the token authenticates) | 400, 401 `cluster.enrollment.invalid_token`, `.used`, `.expired`; 403 `cluster.enrollment.roles`; 409 `cluster.protocol.unsupported`, `cluster.node.name_taken`; 422 `cluster.ca.invalid_csr`, `cluster.node.name`, `cluster.node.address` |
+//! | `POST /nodes/enroll` | 201 [`EnrollResponse`] (public: the token authenticates) | 400, 401 `cluster.enrollment.invalid_token`, `.used`, `.expired`; 403 `cluster.enrollment.roles`, `cluster.enrollment.plain_http`; 409 `cluster.protocol.unsupported`, `cluster.node.name_taken`; 422 `cluster.ca.invalid_csr`, `cluster.node.name`, `cluster.node.address` |
 //!
 //! # The service
 //!
@@ -26,7 +26,10 @@
 //! `controller` (a host that joins the controller cluster and receives the key encryption
 //! keys, R22) also needs a sign-in within the last five minutes, like installs, and lives
 //! at most an hour. `POST /nodes/enroll` takes no session: the single-use token is the
-//! credential, and every refusal is audited.
+//! credential, and every refusal is audited. A token that arrives over plain HTTP is
+//! accepted only under the Lab profile, and recorded with `transport: http`; under every
+//! other profile it is refused with 403 `cluster.enrollment.plain_http` and withdrawn, since
+//! it crossed the network in clear text.
 
 use std::sync::Arc;
 
@@ -38,16 +41,18 @@ use axum::{
     routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
+use tenko_auth::settings::Profile;
 use tenko_cluster::{
     error::ClusterError,
     model::{
         CreatedEnrollment, EnrollRequest, EnrollResponse, EnrollmentView, NewEnrollment, NodeView,
     },
-    registry::NodeRegistry,
+    registry::{EnrollTransport, NodeRegistry},
 };
 use tenko_core::{
     Action, CodedError, NodeId, ObjectKind, ObjectRef, Principal, ScopeFilter, error::codes,
 };
+use tenko_store::{ReadConsistency, ReadViewExt as _};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
@@ -402,6 +407,25 @@ async fn delete_enrollment(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// How the request reached this server: over plain HTTP when it came through a listener
+/// (a peer address is known) and neither the connection nor a trusted reverse proxy said
+/// HTTPS. A router used without a listener (tests) counts as HTTPS.
+fn transport(client: Option<&ClientInfo>) -> EnrollTransport {
+    match client {
+        Some(client) if client.peer.is_some() && !client.https => EnrollTransport::PlainHttp,
+        _ => EnrollTransport::Https,
+    }
+}
+
+/// The stored security profile; Standard when none is stored, so that a missing record
+/// never allows plain HTTP.
+async fn plain_http_profile(app: &AppState) -> Result<Profile, ApiError> {
+    let view = app.store.read(ReadConsistency::Local).await?;
+    Ok(view
+        .get_typed(&tenko_auth::model::SETTINGS, &())?
+        .map_or(Profile::Standard, |(settings, _)| settings.profile))
+}
+
 /// Enrolls a node: it presents its token and a certificate request over its own key, and
 /// gets its node id, its certificate (with the id and roles) and the CA root it trusts on
 /// the cluster port. The token is used up. `tenko node enroll` calls this.
@@ -416,21 +440,30 @@ async fn delete_enrollment(
         (status = 201, description = "The node, its certificate and the CA root (`Cache-Control: no-store`)", body = EnrollResponse),
         (status = 400, description = "The body is not valid JSON (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "The token is not valid (`cluster.enrollment.invalid_token`), was created by another controller (`cluster.enrollment.wrong_controller`), was used (`cluster.enrollment.used`) or expired (`cluster.enrollment.expired`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The token does not allow a requested role (`cluster.enrollment.roles`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The token does not allow a requested role (`cluster.enrollment.roles`), or it arrived over plain HTTP and the profile is not Lab (`cluster.enrollment.plain_http`; the token is withdrawn)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "No common protocol major (`cluster.protocol.unsupported`) or the name is taken (`cluster.node.name_taken`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The certificate request (`cluster.ca.invalid_csr`), the name (`cluster.node.name`) or the address (`cluster.node.address`) is not usable", body = ProblemDetails, content_type = "application/problem+json")
     ),
     security()
 )]
 async fn enroll_node(
+    State(app): State<AppState>,
     PublicCtx { ctx, .. }: PublicCtx,
+    client: Option<Extension<ClientInfo>>,
     registry: Registry,
     ApiJson(request): ApiJson<EnrollRequest>,
 ) -> Result<Response, ApiError> {
     let registry = registry_or_stub(registry, "POST", "/nodes/enroll")?;
     let mut cx = ctx;
     cx.principal = Principal::system(tenko_core::SystemComponent::Cluster);
-    let enrolled = registry.enroll(&cx, request).await.map_err(failed)?;
+    let transport = transport(client.as_ref().map(|Extension(client)| client));
+    if transport == EnrollTransport::PlainHttp && plain_http_profile(&app).await? != Profile::Lab {
+        return Err(failed(registry.refuse_plain_http(&cx, &request).await));
+    }
+    let enrolled = registry
+        .enroll_over(&cx, request, transport)
+        .await
+        .map_err(failed)?;
     let body = EnrollResponse {
         node: enrolled.node,
         certificate: enrolled.certificate_pem,
@@ -494,7 +527,14 @@ mod tests {
     }
 
     async fn router(authorizer: Option<Arc<dyn Authorizer>>, with_registry: bool) -> Router {
-        let store = Arc::new(MemStore::default());
+        router_on(Arc::new(MemStore::default()), authorizer, with_registry).await
+    }
+
+    async fn router_on(
+        store: Arc<MemStore>,
+        authorizer: Option<Arc<dyn Authorizer>>,
+        with_registry: bool,
+    ) -> Router {
         let vault = MemVault::with_store(store.clone());
         let ctx = RequestCtx::system(SystemComponent::Cluster);
         let ca = InternalCa::load_or_init(&*store, &vault, &ctx, CaPolicy::default())
@@ -819,6 +859,127 @@ mod tests {
         send(&router, "DELETE", "/nodes/1001", None)
             .await
             .assert_problem(404, "cluster.node.not_found");
+    }
+
+    /// A store whose security settings name `profile`.
+    async fn store_with_profile(profile: Profile) -> Arc<MemStore> {
+        let store = Arc::new(MemStore::default());
+        let mut batch =
+            tenko_store::WriteBatch::for_request(&RequestCtx::system(SystemComponent::Api));
+        batch
+            .put_typed(&tenko_auth::model::SETTINGS, &(), &profile.defaults())
+            .expect("settings");
+        store.propose(batch).await.expect("stored");
+        store
+    }
+
+    /// `POST /nodes/enroll` as a listener hands it on: from a peer, over plain HTTP.
+    async fn enroll_over_plain_http(router: &Router, body: &Value) -> Reply {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(format!("{API_BASE}/nodes/enroll"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request");
+        request.extensions_mut().insert(ClientInfo {
+            source_ip: Some("192.0.2.21".parse().expect("address")),
+            peer: Some("192.0.2.21:40000".parse().expect("peer")),
+            https: false,
+            host: None,
+            via_proxy: false,
+        });
+        let response = router.clone().oneshot(request).await.expect("response");
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        Reply {
+            status,
+            headers,
+            body: serde_json::from_slice(&bytes).expect("JSON body"),
+        }
+    }
+
+    /// The context of the audit records of `action`, oldest first.
+    async fn audit_contexts(
+        store: &MemStore,
+        action: &str,
+    ) -> Vec<std::collections::BTreeMap<String, String>> {
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        view.scan_typed(
+            &tenko_store::tables::AUDIT,
+            tenko_store::KeyRange::all(),
+            1000,
+            false,
+        )
+        .expect("audit")
+        .into_iter()
+        .filter(|(_, record, _)| record.draft.action.as_str() == action)
+        .map(|(_, record, _)| record.draft.details.context)
+        .collect()
+    }
+
+    #[tokio::test]
+    async fn plain_http_enrollment_is_refused_outside_lab_and_the_token_withdrawn() {
+        for profile in [Profile::Home, Profile::Standard, Profile::Hardened] {
+            let store = store_with_profile(profile).await;
+            let router = router_on(Arc::clone(&store), None, true).await;
+            let token_text = token(&router).await;
+            enroll_over_plain_http(&router, &enroll_request(&token_text))
+                .await
+                .assert_problem(403, "cluster.enrollment.plain_http");
+            // The token crossed the network in clear text: it is gone, also for HTTPS.
+            send(
+                &router,
+                "POST",
+                "/nodes/enroll",
+                Some(enroll_request(&token_text)),
+            )
+            .await
+            .assert_problem(401, "cluster.enrollment.invalid_token");
+            let withdrawn = audit_contexts(&store, "cluster.enrollment.delete").await;
+            assert!(
+                withdrawn
+                    .iter()
+                    .any(|context| context.get("reason").map(String::as_str) == Some("plain_http")),
+                "{profile:?}: {withdrawn:?}"
+            );
+        }
+        // Without stored settings the answer is the same: no profile allows it by default.
+        let router = router(None, true).await;
+        let token_text = token(&router).await;
+        enroll_over_plain_http(&router, &enroll_request(&token_text))
+            .await
+            .assert_problem(403, "cluster.enrollment.plain_http");
+    }
+
+    #[tokio::test]
+    async fn plain_http_enrollment_under_lab_is_recorded_with_its_transport() {
+        let store = store_with_profile(Profile::Lab).await;
+        let router = router_on(Arc::clone(&store), None, true).await;
+        let token_text = token(&router).await;
+        let enrolled = enroll_over_plain_http(&router, &enroll_request(&token_text)).await;
+        assert_eq!(enrolled.status, StatusCode::CREATED, "{}", enrolled.body);
+        let records = audit_contexts(&store, "cluster.node.enroll").await;
+        assert_eq!(records.len(), 1, "{records:?}");
+        assert_eq!(
+            records[0].get("transport").map(String::as_str),
+            Some("http")
+        );
+        // Over HTTPS the record has no transport entry.
+        let token_text = token(&router).await;
+        let enrolled = send(
+            &router,
+            "POST",
+            "/nodes/enroll",
+            Some(enroll_request(&token_text)),
+        )
+        .await;
+        assert_eq!(enrolled.status, StatusCode::CREATED, "{}", enrolled.body);
+        let records = audit_contexts(&store, "cluster.node.enroll").await;
+        assert_eq!(records.len(), 2, "{records:?}");
+        assert!(!records[1].contains_key("transport"), "{records:?}");
     }
 
     /// The enrollment request for `token` with a fresh certificate request.

@@ -269,8 +269,18 @@ event_log = "warn"
 # with a fresh sign-in; Hardened: uploaded release files only). The check sends nothing but
 # the running version. docs/upgrades.md describes the procedure and the layout that
 # installation from the UI needs.
-# The release manifest. Release files are downloaded from the same scheme and host only.
+# The release manifest.
 source_url = "https://github.com/linkztream/tenko/releases/latest/download/releases.json"
+# The pinned release location: the manifest, every release file and every redirect inside it
+# must start with this prefix (scheme, host, port and path). Default: for a source of the
+# form https://<host>/<owner>/<repo>/releases/latest/download/<file> the repository's
+# release path https://<host>/<owner>/<repo>/releases/; for a mirror the directory of
+# source_url. A mirror that keeps its files elsewhere on its host names the prefix here.
+# release_prefix = "https://mirror.example.test/tenko/"
+# Exact host names a response from inside the prefix may redirect to, over HTTPS (the object
+# storage of release hosting). Default: ["release-assets.githubusercontent.com"] while
+# source_url is on github.com, none otherwise.
+# redirect_hosts = []
 # Never contact the release source: no check, no download. Upload the manifest and the
 # release file in the UI instead.
 air_gapped = false

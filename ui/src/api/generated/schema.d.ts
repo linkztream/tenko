@@ -10849,7 +10849,7 @@ export interface components {
          * @description Why an installation path is not available.
          * @enum {string}
          */
-        InstallBlock: "container" | "cluster" | "layout_missing" | "unsupervised" | "unsupported_platform" | "upload_only" | "air_gapped" | "no_asset" | "up_to_date" | "in_progress";
+        InstallBlock: "container" | "cluster" | "layout_missing" | "unsupervised" | "unsupported_platform" | "upload_only" | "air_gapped" | "not_fetched" | "no_asset" | "up_to_date" | "in_progress";
         /**
          * @description How an administrator may install a new version (TGL-23).
          * @enum {string}
@@ -43313,7 +43313,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The token does not allow a requested role (`cluster.enrollment.roles`) */
+            /** @description The token does not allow a requested role (`cluster.enrollment.roles`), or it arrived over plain HTTP and the profile is not Lab (`cluster.enrollment.plain_http`; the token is withdrawn) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -51728,7 +51728,7 @@ export interface operations {
                     "application/json": components["schemas"]["InstallStarted"];
                 };
             };
-            /** @description The version is not in the manifest or not newer (`update.version_unknown`, `update.not_newer`) */
+            /** @description The version is not in the manifest fetched from the release source or not newer (`update.version_unknown`, `update.not_newer`), or its file is not under the pinned release prefix (`update.source_mismatch`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -51825,7 +51825,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not allowed (`auth.forbidden`) */
+            /** @description Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`) */
             403: {
                 headers: {
                     [name: string]: unknown;

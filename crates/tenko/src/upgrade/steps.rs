@@ -4,7 +4,7 @@
 //! | Step | What it does | Undo |
 //! |---|---|---|
 //! | `sys.update.backup` | writes and records a backup before the update (ADR 0023), wrapped to the configured recipient, when the request answered `backup: "run"`; a failed backup fails the job before anything changed | nothing: the backup stays |
-//! | `sys.update.fetch` | downloads the release file for this platform from the pinned source into `<data_dir>/updates/<version>/tenko.part` (not for uploads) | removes the file |
+//! | `sys.update.fetch` | downloads the release file for this platform from the pinned source into `<data_dir>/updates/<version>/tenko.part` (not for uploads), following redirects only inside the release prefix and to the listed redirect hosts, and audits `sys.update.download` with the requested URL, the final URL, the size and the SHA-256 of what arrived | removes the file |
 //! | `sys.update.verify` | compares size and SHA-256 with the manifest (and the signature with the feature `release-signatures`, off until API-19), then puts the file in place with its manifest entry | removes the version directory |
 //! | `sys.update.check` | asks the new binary for its version, copies the running state, and lets the new binary dry-run its migrations on the copy (`tenko upgrade check --disposable`) | nothing to undo |
 //! | `sys.update.switch` | records the attempt and points `current` at the new version (`previous` at the running one) | points `current` back |
@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use tenko_api::dto::release::{ReleaseAsset, ReleaseVersion};
 use tenko_core::{
     CodedError, MessageKey, ObjectKind, ObjectRef,
+    audit::{AuditAction, AuditDetails, AuditDraft},
     codec::{from_cbor, to_cbor},
     serde_util::HexBytes,
 };
@@ -35,7 +36,7 @@ use tenko_jobs::{
     GroupKey, JobEngine, JobKind, JobSpec, StepContext, StepError, StepHandler, StepKind,
     StepOutcome, StepPreview, StepSpec,
 };
-use tenko_store::{ReadView, format};
+use tenko_store::{ReadView, WriteBatch, format};
 
 use super::{
     layout::{CURRENT, PREVIOUS},
@@ -307,7 +308,7 @@ impl StepHandler for UpdateStep {
         let inner = self.inner()?;
         match self.kind {
             BACKUP => backup(&inner, &self::params(params)?, cx).await,
-            FETCH => fetch(&inner, self::params(params)?).await,
+            FETCH => fetch(&inner, self::params(params)?, cx).await,
             VERIFY => verify(&inner, &self::params(params)?),
             CHECK => check(&inner, &self::params(params)?).await,
             _ => switch(&inner, &self::params(params)?, cx.job),
@@ -375,17 +376,55 @@ async fn backup(inner: &Inner, params: &BackupParams, cx: &StepContext) -> Resul
     Ok(())
 }
 
-async fn fetch(inner: &Inner, params: AssetParams) -> Result<(), StepError> {
+/// Downloads the release file and records where it came from: `sys.update.download` with
+/// the URL the manifest named, the URL after the redirects, and the size and SHA-256 of what
+/// arrived, which the verify step then compares with the manifest. A download whose record
+/// cannot be written fails, and its file is removed.
+async fn fetch(inner: &Inner, params: AssetParams, cx: &StepContext) -> Result<(), StepError> {
     let path = inner
         .layout
         .prepare_staged(&params.version)
         .map_err(io_failed)?;
-    let staged = inner
+    let downloaded = inner
         .source
         .download(&params.asset, &path)
         .await
         .map_err(coded)?;
-    tracing::info!(version = %params.version, bytes = staged.size, "downloaded the release file");
+    let mut details = AuditDetails::default();
+    let context = &mut details.context;
+    context.insert("version".to_owned(), params.version.to_string());
+    context.insert("url".to_owned(), downloaded.requested.clone());
+    context.insert("final_url".to_owned(), downloaded.final_url.clone());
+    context.insert("size".to_owned(), downloaded.staged.size.to_string());
+    context.insert("sha256".to_owned(), downloaded.staged.sha256.clone());
+    context.insert("job".to_owned(), cx.job.to_string());
+    // Not a replay of the install request's idempotency key: a record of its own.
+    let mut request = cx.request.clone();
+    request.idempotency = None;
+    let mut batch = WriteBatch::for_request(&request);
+    batch.audit(AuditDraft {
+        details,
+        source_ip: cx.request.source_ip,
+        ..AuditDraft::success(
+            AuditAction::from_static(super::updates::DOWNLOAD_AUDIT),
+            Vec::new(),
+        )
+    });
+    if let Err(error) = inner.store.propose(batch).await {
+        let _ = std::fs::remove_file(&path);
+        return Err(failed(
+            "update.store",
+            503,
+            format!("the download could not be audited: {error}"),
+        ));
+    }
+    tracing::info!(
+        version = %params.version,
+        bytes = downloaded.staged.size,
+        url = %downloaded.requested,
+        final_url = %downloaded.final_url,
+        "downloaded the release file"
+    );
     Ok(())
 }
 

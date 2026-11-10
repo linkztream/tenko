@@ -4,10 +4,12 @@
 
 .DESCRIPTION
   Installs the given tenko.exe as a Windows service under a separate name, starts it,
-  checks the Event Log and the file log, installs the same binary as version 0.0.2
-  through the update API (the service exits with status 12 and the Service Control
-  Manager starts it again), stops it and removes it. Everything it creates is removed
-  at the end unless -Keep is given.
+  checks the Event Log and the file log, installs the same binary as the next patch version
+  of the running one through the update API, with a backup first (the answer
+  `backup: "run"` of ADR 0023; the service exits with status 12 and the Service Control
+  Manager starts it again), proves that the backup was recorded, written and finished
+  before the switch replaced the binary, stops the service and removes it. Everything it
+  creates is removed at the end unless -Keep is given.
 
   It needs PowerShell 7 in an elevated prompt (Run as administrator) and a DEBUG build:
   only debug builds honor TENKO_TEST_VERSION_FROM_LAYOUT, which lets one binary install
@@ -45,7 +47,9 @@ $PSNativeCommandUseErrorActionPreference = $false
 # Test data: documentation values and a throwaway administrator of a throwaway installation.
 $AdminUser = 'admin'
 $AdminPassword = '739153'
-$NewVersion = '0.0.2'
+# The next patch version of the running one, set in step 7 (as next_patch in
+# deploy/systemd/smoke.sh does).
+$NewVersion = $null
 $MarkerName = '.tenko-smoke'
 
 # ---------------------------------------------------------------------------------------
@@ -96,6 +100,12 @@ function Invoke-TenkoOk([string[]]$Arguments) {
     $result = Invoke-Tenko $Arguments
     if ($result.Output) { Write-Host $result.Output }
     Assert-That ($result.Code -eq 0) "tenko $($Arguments -join ' ') exited with status $($result.Code)"
+}
+
+# The next patch version of a plain SemVer version: 0.0.11 -> 0.0.12.
+function Get-NextPatch([string]$Version) {
+    if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)$') { throw "not a plain SemVer version: $Version" }
+    return '{0}.{1}.{2}' -f $Matches[1], $Matches[2], ([int64]$Matches[3] + 1)
 }
 
 function Get-FreePort {
@@ -447,7 +457,7 @@ ready_timeout_secs = 60
     Write-Host 'a second service over the data directory in use: refused'
 
     # 7 ----------------------------------------------------------------------------------
-    Write-Step "7/9 upgrade to $NewVersion through the update API (exit status 12, restart by the SCM)"
+    Write-Step '7/9 upgrade to the next patch version through the update API, with a backup first (exit status 12, restart by the SCM)'
     $Http = [TenkoSmokeTrust]::Create((Get-Content -LiteralPath $CaFile -Raw))
 
     $tokenFile = Join-Path $DataDir 'setup-token'
@@ -472,9 +482,19 @@ ready_timeout_secs = 60
     Assert-Api $status 200 'GET /system/updates'
     $platform = [string]$status.Json.platform
     Assert-That ($platform -match '^[a-z]+-[a-z0-9_]+$') "unexpected platform: $platform"
-    Assert-That ([string]$status.Json.running -ne $NewVersion) "the server already runs $NewVersion"
     $oldVersion = [string]$status.Json.running
-    Write-Host "running $oldVersion on $platform"
+    $NewVersion = Get-NextPatch $oldVersion
+    Write-Host "running $oldVersion on $platform; the release source will offer $NewVersion"
+
+    # A backup recipient in the backup settings, so that the install job takes its backup
+    # without a passphrase. The key file stays in the smoke's own directory.
+    $keyFile = Join-Path $ReleaseDir 'backup.key'
+    $keygen = Invoke-Tenko @('backup', 'keygen', '--out', $keyFile)
+    Assert-That ($keygen.Code -eq 0 -and $keygen.Output -match '(tkbr1:\S+)') "tenko backup keygen failed (status $($keygen.Code)): $($keygen.Output)"
+    $recipient = $Matches[1]
+    $settings = Invoke-Api 'PUT' '/system/backups/settings' @{ enabled = $false; interval_hours = 24; keep = 7; include_config = $true; recipient = $recipient } -Keyed
+    Assert-Api $settings 200 'PUT /system/backups/settings'
+    Write-Host "backup recipient $recipient in the backup settings"
 
     # The release is this same binary, offered as the next version.
     $assetName = "tenko-$NewVersion-$platform.exe"
@@ -549,9 +569,11 @@ ready_timeout_secs = 60
     Assert-That ((Get-Prop $install 'from_source') -eq $true) 'the install from the release source is not possible (see the line above)'
 
     $installStart = Get-Date
-    $started = Invoke-Api 'POST' '/system/updates/install' @{ version = $NewVersion } -Keyed
+    # The answer "run" makes a backup the first step of the install job (ADR 0023).
+    $started = Invoke-Api 'POST' '/system/updates/install' @{ version = $NewVersion; backup = 'run' } -Keyed
     Assert-Api $started 202 'POST /system/updates/install'
-    Write-Host "install job $($started.Json.job_id) started"
+    $jobId = [string]$started.Json.job_id
+    Write-Host "install job $jobId started with backup ""run"""
 
     # The server exits with status 12; the failure actions start it again after 10 s.
     $runningVersion = Wait-Until -TimeoutSec 240 -What "the service restarted by the SCM and running $NewVersion" -Test {
@@ -599,6 +621,35 @@ ready_timeout_secs = 60
     }
     Assert-That ([string]$attempt.running -eq $NewVersion) "GET /system/updates reports running $($attempt.running)"
     Write-Host "attempt confirmed: $($attempt.attempt.from) -> $($attempt.attempt.to)"
+
+    # The backup of ADR 0023: the first step of the job, finished before the switch step
+    # replaced the binary; recorded good with the reason before_update for the new version;
+    # its file in the target directory with the recorded size, written before the switch.
+    $detail = Invoke-Api 'GET' "/jobs/$jobId"
+    Assert-Api $detail 200 "GET /jobs/$jobId"
+    $steps = @($detail.Json.job.steps)
+    $backupStep = $steps[0]
+    Assert-That ([string]$backupStep.kind -eq 'sys.update.backup' -and [string]$backupStep.state.state -eq 'done') "the first step of job $jobId is $($backupStep.kind) ($($backupStep.state.state)), not a finished sys.update.backup"
+    $switchStep = @($steps | Where-Object { [string]$_.kind -eq 'sys.update.switch' })[0]
+    Assert-That ($null -ne $switchStep -and $null -ne (Get-Prop $switchStep 'started')) "job $jobId has no started switch step"
+    $backupDone = [DateTimeOffset]::Parse([string]$backupStep.finished)
+    $switchStart = [DateTimeOffset]::Parse([string]$switchStep.started)
+    Assert-That ($backupDone -le $switchStart) "the backup step finished at $backupDone, after the switch step started at $switchStart"
+    Write-Host "job $($jobId): sys.update.backup finished $backupDone, sys.update.switch started $switchStart"
+
+    $backups = Invoke-Api 'GET' '/system/backups'
+    Assert-Api $backups 200 'GET /system/backups'
+    $run = @(@($backups.Json.recent) | Where-Object { [string](Get-Prop $_ 'reason') -eq 'before_update' -and [string](Get-Prop $_ 'before_update') -eq $NewVersion })[0]
+    Assert-That ($null -ne $run) "no backup with the reason before_update for $($NewVersion): $($backups.Text)"
+    Assert-That ([string]$run.outcome -eq 'succeeded') "the backup before the update did not succeed: $($run | ConvertTo-Json -Compress -Depth 5)"
+    $backupFile = Join-Path ([string]$run.target_dir) ([string]$run.file)
+    Assert-That (Test-Path -LiteralPath $backupFile -PathType Leaf) "the backup file $backupFile does not exist"
+    $backupItem = Get-Item -LiteralPath $backupFile
+    Assert-That ($backupItem.Length -eq [int64]$run.bytes) "$backupFile has $($backupItem.Length) bytes, the record says $($run.bytes)"
+    $recorded = [DateTimeOffset]::Parse([string]$run.finished_at)
+    Assert-That ($recorded -le $switchStart) "the backup was recorded at $recorded, after the switch started at $switchStart"
+    Assert-That ([DateTimeOffset]$backupItem.LastWriteTimeUtc -le $switchStart) "$backupFile was written at $($backupItem.LastWriteTimeUtc), after the switch started at $switchStart"
+    Write-Host "backup $($backupFile): $($backupItem.Length) bytes, recorded $recorded, before the switch"
 
     # 8 ----------------------------------------------------------------------------------
     Write-Step '8/9 service stop'

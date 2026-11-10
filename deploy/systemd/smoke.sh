@@ -18,14 +18,24 @@
 #   4. checks that the key was loaded from the systemd credential, without a plain-file warning;
 #   5. checks LogsDirectory= (/var/log/tenko, owned by tenko, tenko.log written);
 #   6. stops the unit (clean exit) and starts it again;
-#   7. completes first-run setup through the API, installs this binary as the next version
-#      from a release source on the loopback interface, and waits for systemd to restart the
-#      service after exit status 12, for the new version to run and for its probation to end;
+#   7. completes first-run setup through the API, puts a backup recipient into the backup
+#      settings, installs this binary as the next version from a release source on the
+#      loopback interface with the answer `backup: "run"`, and waits for systemd to restart
+#      the service after exit status 12, for the new version to run and for its probation to
+#      end; then proves the backup of ADR 0023: a good backup with the reason
+#      `before_update` for the new version exists in its target directory, opens with the
+#      backup key, was the first step of the install job, and was finished before the switch
+#      step replaced the binary (the job's step times, and the file's time against the
+#      `current` link's);
 #   8. installs deploy/systemd/probe.conf and runs the roles controller,probe;
 #   9. runs deploy/install.sh unattended with --roles controller,dns,dhcp,probe (the installer
 #      puts the probe drop-in in place, identical to deploy/systemd/probe.conf, the process
 #      has CAP_NET_RAW and the log says which method the dhcp role probes an address with),
-#      then with --roles controller (the drop-in is removed);
+#      then with --roles controller (under Home every role stays prepared, so the drop-in
+#      stays, and the node runs the controller alone). A node that has started keeps
+#      its roles in the store (docs/cluster.md section 13.1), so steps 8 and 9 change the
+#      stored set through PUT /nodes/1/roles, as an administrator does, and the node restarts
+#      itself with exit status 12 to apply it;
 #  10. records `systemd-analyze security` (in $GITHUB_STEP_SUMMARY when set) and fails when
 #      the exposure is 2.5 or higher.
 # Each step prints "==> step". On failure the script prints the journal of the unit and the
@@ -37,6 +47,11 @@
 # python3, not jq.
 #
 # With SMOKE_LIB_ONLY=1 the file only defines its functions (for tests of the API helpers).
+#
+# SMOKE_KEK_FILE=1 keeps the key-encryption key in a plain file (/etc/tenko/kek.key) instead
+# of a systemd credential, for a host whose service manager does not hand encrypted
+# credentials to services (a systemd container under Docker Desktop, for example); step 4
+# then checks the file provider instead. CI never sets it.
 
 set -euo pipefail
 
@@ -60,7 +75,10 @@ CA_FILE="${CA_FILE:-$DATA_DIR/tls/ca-root.pem}"
 ADMIN_NAME="${ADMIN_NAME:-admin}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-739153}"
 MAX_EXPOSURE="${MAX_EXPOSURE:-2.5}"
+KEK_FILE="${KEK_FILE:-$CONFIG_DIR/kek.key}"
+SMOKE_KEK_FILE="${SMOKE_KEK_FILE:-}"
 WORK_DIR=""
+VERIFY_DIR=""
 COOKIE_JAR=""
 RELEASE_PORT=""
 RELEASE_PID=""
@@ -267,13 +285,128 @@ api_update_check() {
   printf '%s\n' "$status"
 }
 
-# Starts the install of VERSION; prints the job id.
+# Starts the install of VERSION with the answer "run" to "take a backup first?" (ADR 0023):
+# the job's first step takes the backup. Prints the job id.
 api_update_install() {
   local answer job
-  answer="$(api POST /system/updates/install "{\"version\": \"$1\"}")"
+  answer="$(api POST /system/updates/install "{\"version\": \"$1\", \"backup\": \"run\"}")"
   job="$(jget job_id <<< "$answer")"
   [[ -n "$job" ]] || die "the install returned no job id: $answer"
   printf '%s\n' "$job"
+}
+
+# Creates a backup key pair in DIR (the key file stays there) and puts its recipient into
+# the backup settings, so that the install job can take its backup without a passphrase.
+# Prints the key file.
+api_backup_recipient() {
+  local dir="$1" recipient body
+  recipient="$("$INSTALLED_BIN" backup keygen --out "$dir/backup.key" 2> /dev/null | head -n 1)"
+  [[ "$recipient" == tkbr1:* ]] || die "tenko backup keygen printed no recipient: $recipient"
+  body="$(python3 -c '
+import json, sys
+print(json.dumps({"enabled": False, "interval_hours": 24, "keep": 7,
+                  "include_config": True, "recipient": sys.argv[1]}))' "$recipient")"
+  api PUT /system/backups/settings "$body" > /dev/null
+  info "backup recipient $recipient in the backup settings" >&2
+  printf '%s\n' "$dir/backup.key"
+}
+
+# Seconds since the epoch of an RFC 3339 time.
+epoch_of() {
+  python3 -c '
+import datetime, sys
+text = sys.argv[1].replace("Z", "+00:00")
+print("%.6f" % datetime.datetime.fromisoformat(text).timestamp())' "$1"
+}
+
+# Proves the backup before the update of ADR 0023 for the install JOB of VERSION: its record
+# (reason before_update, the version, good), its file in the target directory, that it opens
+# with KEY_FILE, and that it was taken before the binary was replaced.
+prove_backup_before_switch() {
+  local job="$1" version="$2" key_file="$3" detail backups run file dir bytes
+  local backup_kind backup_state backup_done switch_start finished file_time link_time size
+  detail="$(api GET "/jobs/$job")"
+  backup_kind="$(jget job.steps.0.kind <<< "$detail")"
+  backup_state="$(jget job.steps.0.state.state <<< "$detail")"
+  [[ "$backup_kind" == sys.update.backup && "$backup_state" == "done" ]] \
+    || die "the first step of job $job is $backup_kind ($backup_state), not a finished sys.update.backup: $detail"
+  backup_done="$(jget job.steps.0.finished <<< "$detail")"
+  switch_start="$(python3 -c '
+import json, sys
+job = json.load(sys.stdin)["job"]
+steps = [s for s in job["steps"] if s["kind"] == "sys.update.switch"]
+print(steps[0].get("started") or "" if steps else "")' <<< "$detail")"
+  [[ -n "$backup_done" && -n "$switch_start" ]] || die "job $job lacks the step times: $detail"
+  awk -v b="$(epoch_of "$backup_done")" -v s="$(epoch_of "$switch_start")" 'BEGIN { exit !(b <= s) }' \
+    || die "the backup step finished at $backup_done, after the switch step started at $switch_start"
+  info "job $job: sys.update.backup finished $backup_done, sys.update.switch started $switch_start"
+
+  backups="$(api GET /system/backups)"
+  run="$(python3 -c '
+import json, sys
+status = json.load(sys.stdin)
+runs = [r for r in status.get("recent", [])
+        if r.get("reason") == "before_update" and r.get("before_update") == sys.argv[1]]
+print(json.dumps(runs[0]) if runs else "")' "$version" <<< "$backups")"
+  [[ -n "$run" ]] || die "no backup with the reason before_update for $version: $backups"
+  [[ "$(jget outcome <<< "$run")" == succeeded ]] || die "the backup before the update did not succeed: $run"
+  file="$(jget file <<< "$run")"
+  dir="$(jget target_dir <<< "$run")"
+  bytes="$(jget bytes <<< "$run")"
+  finished="$(jget finished_at <<< "$run")"
+  [[ -n "$file" && -n "$dir" ]] || die "the backup record names no file: $run"
+  # The file and the link live where the service account writes: they are looked at as that
+  # account, so that root follows no link it planted (ADR 0023, I2).
+  as_tenko() { runuser -u tenko -- "$@" < /dev/null; }
+  size="$(as_tenko stat -c %s "$dir/$file")" || die "the backup file $dir/$file does not exist"
+  [[ "$size" == "$bytes" ]] || die "$dir/$file has $size bytes, the record says $bytes"
+  awk -v b="$(epoch_of "$finished")" -v s="$(epoch_of "$switch_start")" 'BEGIN { exit !(b <= s) }' \
+    || die "the backup was recorded at $finished, after the switch started at $switch_start"
+  # The file was written before the link that names the new binary (lstat, not the target).
+  file_time="$(as_tenko stat -c %Y "$dir/$file")"
+  link_time="$(as_tenko stat -c %Y "$DATA_DIR/updates/current")"
+  ((file_time <= link_time)) || die "$dir/$file ($file_time) is newer than $DATA_DIR/updates/current ($link_time)"
+  info "backup $dir/$file: $bytes bytes, recorded $finished, before the switch"
+
+  # The restore point opens: verify it as the service account, with a copy of the key file
+  # in a directory that account creates, fills from standard input and removes itself.
+  VERIFY_DIR="$(as_tenko mktemp -d /tmp/tenko-smoke-verify.XXXXXX)" || die "cannot create a directory as tenko"
+  runuser -u tenko -- sh -c 'umask 077 && cat > "$1"' sh "$VERIFY_DIR/backup.key" < "$key_file"
+  if ! as_tenko env TMPDIR="$VERIFY_DIR" "$INSTALLED_BIN" backup verify "$dir/$file" \
+    --key-file "$VERIFY_DIR/backup.key" > "$WORK_DIR/verify.txt" 2>&1; then
+    cat "$WORK_DIR/verify.txt" >&2
+    die "tenko backup verify refused $dir/$file"
+  fi
+  info "tenko backup verify (as tenko): $(head -n 1 "$WORK_DIR/verify.txt")"
+  as_tenko rm -rf "$VERIFY_DIR"
+  VERIFY_DIR=""
+}
+
+# Sets the stored role set of this controller (node 1) through the API, as the web UI does,
+# and waits for the restart that applies it: under systemd the node exits with status 12
+# and is started again. The stored set decides over `roles` of tenko.toml and TENKO_ROLES.
+api_set_roles() {
+  local roles="$1" body restarts answer restart
+  body="$(python3 -c '
+import json, sys
+print(json.dumps({"roles": sys.argv[1].split(",")}))' "$roles")"
+  : > "$COOKIE_JAR"
+  api_login
+  restarts="$(svc NRestarts)"
+  answer="$(api PUT /nodes/1/roles "$body")"
+  restart="$(jget restart <<< "$answer")"
+  case "$restart" in
+    scheduled)
+      wait_for 60 "the node restarted itself for the roles $roles" \
+        bash -c "[[ \$(systemctl show -p NRestarts --value '$UNIT_NAME') -gt $restarts ]]"
+      ;;
+    none) ;;
+    *) die "PUT /nodes/1/roles answered restart: $restart: $answer" ;;
+  esac
+  wait_ready 120
+  wait_for 30 "the start log says the roles $roles come from the stored set" \
+    bash -c "journalctl '_SYSTEMD_INVOCATION_ID=$(svc InvocationID)' --no-pager | grep -q 'roles $roles (the node.s stored set)'"
+  info "the node runs the stored roles $roles"
 }
 
 # Waits for the probation of the new version to end (the attempt is confirmed). Fails when
@@ -358,12 +491,14 @@ cleanup() {
     stop_release_server
     systemctl stop "$UNIT_NAME" 2> /dev/null
     systemctl disable "$UNIT_NAME" 2> /dev/null
-    rm -f "$DROPIN_DIR/smoke.conf" "$DROPIN_DIR/smoke-roles.conf" "$DROPIN_DIR/probe.conf"
+    rm -f "$DROPIN_DIR/smoke.conf" "$DROPIN_DIR/smoke-roles.conf" "$DROPIN_DIR/probe.conf" \
+      "$DROPIN_DIR/smoke-kek-file.conf"
     rmdir "$DROPIN_DIR" 2> /dev/null
     systemctl daemon-reload
     systemctl reset-failed "$UNIT_NAME" 2> /dev/null
     [[ -n "$WORK_DIR" ]] && rm -rf "$WORK_DIR"
   fi
+  [[ -n "$VERIFY_DIR" ]] && runuser -u tenko -- rm -rf "$VERIFY_DIR" < /dev/null
   exit "$status"
 }
 
@@ -371,7 +506,7 @@ cleanup() {
 
 check_tools() {
   local tool
-  for tool in curl openssl python3 systemctl systemd-creds systemd-analyze journalctl sha256sum; do
+  for tool in curl openssl python3 systemctl systemd-creds systemd-analyze journalctl sha256sum runuser; do
     command -v "$tool" > /dev/null || die "$tool is needed and not installed"
   done
   [[ "$(id -u)" == 0 ]] || die "run as root (sudo bash $0 /path/to/tenko)"
@@ -406,6 +541,9 @@ file = "$LOG_FILE"
 source_url = "http://127.0.0.1:$RELEASE_PORT/releases.json"
 ready_timeout_secs = 60
 EOF
+  if [[ "$SMOKE_KEK_FILE" == 1 ]]; then
+    printf '\n[kek]\nprovider = "file"\npath = "%s"\n' "$KEK_FILE" >> "$CONFIG_FILE"
+  fi
   chown root:tenko "$CONFIG_FILE"
   chmod 0640 "$CONFIG_FILE"
 }
@@ -439,6 +577,24 @@ EOF
 }
 
 step_credential() {
+  if [[ "$SMOKE_KEK_FILE" == 1 ]]; then
+    step "2. create the key-encryption key as a plain file (SMOKE_KEK_FILE=1)"
+    (
+      umask 027
+      openssl rand -hex 32 > "$KEK_FILE"
+    )
+    chown root:tenko "$KEK_FILE"
+    chmod 0640 "$KEK_FILE"
+    # As the installer does where credentials are not delivered: no credential, and the
+    # [kek] section of tenko.toml decides.
+    cat > "$DROPIN_DIR/smoke-kek-file.conf" << 'EOF'
+[Service]
+LoadCredentialEncrypted=
+UnsetEnvironment=TENKO_KEK__PROVIDER TENKO_KEK__CREDENTIAL
+EOF
+    info "$KEK_FILE: $(stat -c '%a %U:%G %s bytes' "$KEK_FILE"), drop-in smoke-kek-file.conf"
+    return
+  fi
   step "2. create the key-encryption key as an encrypted credential (root path)"
   (
     umask 077
@@ -458,6 +614,12 @@ step_start() {
 }
 
 step_kek() {
+  if [[ "$SMOKE_KEK_FILE" == 1 ]]; then
+    step "4. the key came from the plain file (SMOKE_KEK_FILE=1: no credential check)"
+    wait_for 30 "the journal names the plain key file" \
+      bash -c "journalctl '_SYSTEMD_INVOCATION_ID=$(svc InvocationID)' --no-pager | grep -Eq 'PLAIN FILE|no OS protection'"
+    return
+  fi
   step "4. the key came from the systemd credential, not from a plain file"
   wait_for 30 "the journal shows the credential being loaded" \
     bash -c "journalctl '_SYSTEMD_INVOCATION_ID=$(svc InvocationID)' --no-pager | grep -q 'loaded the key-encryption key from a systemd credential'"
@@ -498,9 +660,12 @@ step_upgrade() {
   [[ -n "$before_version" ]] || die "tenko health --live reported no version"
   NEW_VERSION="$(next_patch "$before_version")"
   info "running $before_version; the release source will offer $NEW_VERSION"
-  [[ "$(api GET /system/kek | jget provider)" == systemd_credential ]] \
-    || die "the KEK provider is not systemd_credential: $(api GET /system/kek)"
-  info "GET /system/kek: provider systemd_credential"
+  local provider=systemd_credential key_file
+  [[ "$SMOKE_KEK_FILE" == 1 ]] && provider="file"
+  [[ "$(api GET /system/kek | jget provider)" == "$provider" ]] \
+    || die "the KEK provider is not $provider: $(api GET /system/kek)"
+  info "GET /system/kek: provider $provider"
+  key_file="$(api_backup_recipient "$WORK_DIR")"
 
   make_release "$WORK_DIR/release" "$NEW_VERSION" "$INSTALLED_BIN"
   start_release_server "$WORK_DIR/release" "$RELEASE_PORT"
@@ -508,12 +673,15 @@ step_upgrade() {
   info "the update check offers $NEW_VERSION (policy ui)"
   restarts_before="$(svc NRestarts)"
   job="$(api_update_install "$NEW_VERSION")"
-  info "install started, job $job"
+  info "install started with backup \"run\", job $job"
 
   wait_for 300 "systemd restarted the service (NRestarts above $restarts_before)" \
     bash -c "[[ \$(systemctl show -p NRestarts --value '$UNIT_NAME') -gt $restarts_before ]]"
-  wait_for 60 "the journal records the exit with status 12" \
-    bash -c "journalctl -u '$UNIT_NAME' --no-pager | grep -q 'status=12'"
+  # systemd logs the exit of a main process at debug level when SuccessExitStatus= counts
+  # it as a success, as it does 12, so the journal has no "status=12" line by default; the
+  # server says it on standard error before it exits.
+  wait_for 60 "the journal records the exit for the restart with status 12" \
+    bash -c "journalctl -u '$UNIT_NAME' --no-pager | grep -q 'stopped for a restart.*exit status 12'"
   wait_ready 180
   [[ "$(server_version)" == "$NEW_VERSION" ]] || die "the service runs $(server_version), not $NEW_VERSION"
   info "the service runs $NEW_VERSION; NRestarts=$(svc NRestarts), ExecMainStatus=$(svc ExecMainStatus)"
@@ -524,6 +692,7 @@ step_upgrade() {
   : > "$COOKIE_JAR"
   api_login
   api_wait_confirmed 180
+  prove_backup_before_switch "$job" "$NEW_VERSION" "$key_file"
   stop_release_server
 }
 
@@ -531,22 +700,18 @@ step_probe() {
   step "8. the probe drop-in: CAP_NET_RAW and the roles controller,probe"
   local pid caps
   install -m 0644 "$REPO_DIR/deploy/systemd/probe.conf" "$DROPIN_DIR/probe.conf"
-  cat > "$DROPIN_DIR/smoke-roles.conf" << 'EOF'
-[Service]
-Environment=TENKO_ROLES=controller,probe
-EOF
   systemctl daemon-reload
   systemctl show -p AmbientCapabilities -p CapabilityBoundingSet "$UNIT_NAME" | tee "$WORK_DIR/caps.txt"
   grep -qi '^AmbientCapabilities=.*cap_net_raw' "$WORK_DIR/caps.txt" || die "AmbientCapabilities lacks cap_net_raw"
   grep -qi '^CapabilityBoundingSet=.*cap_net_raw' "$WORK_DIR/caps.txt" || die "CapabilityBoundingSet lacks cap_net_raw"
-  svc_restart
-  wait_ready 120
+  api_set_roles controller,probe
   pid="$(svc MainPID)"
   caps="$(awk '/^CapEff:/ {print $2}' "/proc/$pid/status")"
   info "main pid $pid, CapEff=0x$caps"
   (((16#$caps & 0x2000) != 0)) || die "CAP_NET_RAW (bit 13) is not in CapEff of the process"
   info "CAP_NET_RAW is in the effective set of the running process"
-  rm -f "$DROPIN_DIR/probe.conf" "$DROPIN_DIR/smoke-roles.conf"
+  api_set_roles controller
+  rm -f "$DROPIN_DIR/probe.conf"
   systemctl daemon-reload
   svc_restart
   wait_ready 120
@@ -587,6 +752,7 @@ step_installer() {
   info "$DROPIN_DIR/probe.conf is in place, identical to deploy/systemd/probe.conf"
   systemctl show -p AmbientCapabilities --value "$UNIT_NAME" | grep -qi cap_net_raw \
     || die "AmbientCapabilities lacks cap_net_raw with the drop-in in place"
+  api_set_roles controller,dns,dhcp,probe
   pid="$(svc MainPID)"
   caps="$(awk '/^CapEff:/ {print $2}' "/proc/$pid/status")"
   (((16#$caps & 0x2000) != 0)) || die "CAP_NET_RAW (bit 13) is not in CapEff of the process (0x$caps)"
@@ -599,12 +765,17 @@ step_installer() {
     die "the log says conflict detection is off although the probe role runs"
   fi
 
+  # Back to the controller alone before the installer takes the probe drop-in away.
+  api_set_roles controller
   installer "$WORK_DIR/install-controller.log" --reconfigure --roles controller --modules all
-  [[ ! -e "$DROPIN_DIR/probe.conf" ]] || die "$DROPIN_DIR/probe.conf is still there after --reconfigure --roles controller"
-  if systemctl show -p AmbientCapabilities --value "$UNIT_NAME" | grep -qi cap_net_raw; then
-    die "AmbientCapabilities still has cap_net_raw after the drop-in was removed"
-  fi
-  info "--reconfigure --roles controller removed the drop-in; the controller runs as before"
+  # Outside Hardened the installer prepares every role (install.sh, its header): the probe
+  # drop-in stays, so that the probe role can be switched on again from the web interface,
+  # and the node runs the stored set, the controller alone.
+  cmp -s "$REPO_DIR/deploy/systemd/probe.conf" "$DROPIN_DIR/probe.conf" \
+    || die "$DROPIN_DIR/probe.conf is gone or differs after --reconfigure --roles controller under the Home profile"
+  invocation_journal | grep -q "roles controller (the node.s stored set)" \
+    || die "the node does not run the stored roles controller after --reconfigure --roles controller"
+  info "--reconfigure --roles controller keeps every role prepared (Home); the controller runs alone"
 }
 
 step_security() {

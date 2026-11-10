@@ -24525,7 +24525,7 @@
             }
           },
           "403": {
-            "description": "The token does not allow a requested role (`cluster.enrollment.roles`)",
+            "description": "The token does not allow a requested role (`cluster.enrollment.roles`), or it arrived over plain HTTP and the profile is not Lab (`cluster.enrollment.plain_http`; the token is withdrawn)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -35983,7 +35983,7 @@
             }
           },
           "400": {
-            "description": "The version is not in the manifest or not newer (`update.version_unknown`, `update.not_newer`)",
+            "description": "The version is not in the manifest fetched from the release source or not newer (`update.version_unknown`, `update.not_newer`), or its file is not under the pinned release prefix (`update.source_mismatch`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -36100,7 +36100,7 @@
             }
           },
           "403": {
-            "description": "Not allowed (`auth.forbidden`)",
+            "description": "Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -52975,6 +52975,7 @@
           "unsupported_platform",
           "upload_only",
           "air_gapped",
+          "not_fetched",
           "no_asset",
           "up_to_date",
           "in_progress"

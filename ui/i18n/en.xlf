@@ -7314,6 +7314,9 @@
       <unit id="updates.blocked.air_gapped">
         <segment><source>This installation is air-gapped and does not download releases. Install from an uploaded file.</source></segment>
       </unit>
+      <unit id="updates.blocked.not_fetched">
+        <segment><source>The release source has not answered yet. An uploaded release list serves only uploaded files; check for updates, or install from a file.</source></segment>
+      </unit>
       <unit id="updates.blocked.no_asset">
         <segment><source>The newest release has no file for this platform.</source></segment>
       </unit>
@@ -7339,7 +7342,7 @@
         <segment><source>Upload release list</source></segment>
       </unit>
       <unit id="updates.upload.manifest_help">
-        <segment><source>The file published with the release. At most 1 MB.</source></segment>
+        <segment><source>The file published with the release. At most 1 MB. It serves only files uploaded here; an install from the release source uses the list the server fetches itself.</source></segment>
       </unit>
       <unit id="updates.upload.manifest_done">
         <segment><source>Release list uploaded: {count, plural, one {# release} other {# releases}}.</source></segment>
@@ -7558,7 +7561,7 @@
         <segment><source>The server downloads nothing. An administrator uploads the release file, which the server checks against the release list.</source></segment>
       </unit>
       <unit id="errors.update.source_mismatch">
-        <segment><source>The release file does not come from the configured release source.</source></segment>
+        <segment><source>The release file is not under the configured release location (the pinned release source).</source></segment>
       </unit>
       <unit id="errors.update.io">
         <segment><source>The server could not read or write a file of the update.</source></segment>

@@ -22,6 +22,8 @@ export function blockedText(reason: InstallBlock | string, platform?: string): s
       return t("updates.blocked.upload_only");
     case "air_gapped":
       return t("updates.blocked.air_gapped");
+    case "not_fetched":
+      return t("updates.blocked.not_fetched");
     case "no_asset":
       return t("updates.blocked.no_asset");
     case "up_to_date":

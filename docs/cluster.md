@@ -74,7 +74,8 @@ tenko node enroll --controller https://ddi.example.net:8443 --token tnk2.… \
 
 | Option | Meaning |
 |---|---|
-| `--controller URL` | Required. The URL of the controller as administrators open it. A plain `http://` URL needs a `tnk2` token or `--ca-fingerprint`, because nothing else protects the token |
+| `--controller URL` | Required. The URL of the controller as administrators open it, `https://`. A plain `http://` URL is refused before the token is read, unless `--insecure-plain-http` is given |
+| `--insecure-plain-http` | Sends the token to a plain `http://` controller URL, for a Lab controller only (see below). A `tnk1` token then also needs `--ca-fingerprint` |
 | `--token`, `--token-file`, `TENKO_ENROLL_TOKEN` | The token, or a file whose first line is the token, or the environment variable |
 | `--ca-fingerprint` | The SHA-256 of the CA root, hexadecimal, colons allowed. The controller prints it at start (TLS mode a) and shows it with every token. A `tnk2` token carries it already: the option is then not needed, and when given it must agree with the token's fingerprint, else the command stops before it contacts the controller. With a `tnk1` token it is the only fingerprint |
 | `--name` | The node name; the name of the token wins when it has one. Default: the host name |
@@ -83,16 +84,47 @@ tenko node enroll --controller https://ddi.example.net:8443 --token tnk2.… \
 | `--data-dir`, `--config` | Where the node keeps its files |
 | `--force` | Enrolls a node that is enrolled already. It replaces the files on the node only; the old node stays registered until an administrator revokes it |
 
+**Plain HTTP.** Only a controller under the Lab profile serves plain HTTP (TGL-08), and only
+there may a token travel over it, as a choice the operator names with
+`--insecure-plain-http`. The CA fingerprint of a `tnk2` token does not protect the token on
+that path: it is checked against the root the controller sends, and the token leaves the
+node in the request body, in clear text. So **a listener on the path between the node and
+the controller obtains the token, and can enroll before the node does: it gets a node
+certificate with the token's roles, and with a controller token (`tenko cluster join`)
+every key-encryption key of the cluster, which opens every secret in its vault.** With the
+flag the command prints this warning:
+
+```
+warning: --insecure-plain-http: the enrollment token travels in clear text. Anyone who can
+read the traffic between this node and the controller obtains the token and can enroll
+before this node does: they get a node certificate with the token's roles, and with a
+controller token (tenko cluster join) every key-encryption key of the cluster, which opens
+every secret in its vault. The controller accepts this only under the Lab profile
+```
+
+The controller decides as well, whatever the node passed: an enrollment that reaches it over
+plain HTTP, directly or through a trusted reverse proxy that says so
+(`X-Forwarded-Proto: http`), is refused with 403 `cluster.enrollment.plain_http` unless the
+stored profile is Lab, and its token is withdrawn if it is not used yet, since it crossed the
+network in clear text (`cluster.enrollment.delete` with the reason `plain_http`). The
+withdrawal does not stop a listener that uses the token first; only the node's refusal,
+before anything is sent, does. A trusted reverse proxy that sends no `X-Forwarded-Proto`
+counts as HTTPS (TLS mode c), so a proxy that also accepts plain HTTP must set the header.
+Under Lab the enrollment is
+recorded with `transport: http` in `cluster.node.enroll`. A Lab controller that enrolls
+nodes over a network someone else can read should turn its built-in TLS on instead: the
+token's fingerprint then makes the internal CA safe without public certificates.
+
 The steps:
 
-1. The command checks the form of the token, and that `--ca-fingerprint`, when given, agrees with the fingerprint of a `tnk2` token.
+1. The command refuses a plain `http://` URL without `--insecure-plain-http`. It checks the form of the token, and that `--ca-fingerprint`, when given, agrees with the fingerprint of a `tnk2` token.
 2. It fetches `GET /api/v1/system/ca-root` without trusting the server yet and compares the SHA-256 of the root with the fingerprint of the token, or with `--ca-fingerprint` for a `tnk1` token. When they differ the command stops and names the first eight characters of both fingerprints: the token comes from another controller, or something answers in the controller's place. Only a `tnk1` token without the option trusts the root on first use and prints a warning with the fingerprint, which the administrator should compare with the one the controller printed (until 0.0.13). From then on the API connection trusts only that root. When the API certificate is imported or TLS ends at a reverse proxy, that route answers 404 and the system roots verify the API connection instead; the fingerprint is then checked against the CA root in the answer of step 4.
 3. The node generates an ECDSA P-256 key, which never leaves the node, and sends a PKCS#10 certificate request with the token, its name, roles, address, software version and the protocol majors it implements to `POST /api/v1/nodes/enroll`. The route is public: the token is the credential.
 4. The controller answers with the node id, the certificate, the CA root, the cluster endpoints and the heartbeat interval. The node checks the root against the fingerprint and against the root of step 2 once more and writes its files (section 1.4). If this last check fails, the node is registered on the controller but not set up on the node; the command says so, and the administrator revokes the node.
 
 Then `tenko serve --roles probe --data-dir <dir>` starts the node process. In Phase 1 only the `probe` role runs without the controller role; a node enrolled for `dns` or `dhcp` is registered, but its process refuses to start until those engines exist. A node needs neither the store nor the vault.
 
-The command exits with status 9 when a fingerprint does not match or `--ca-fingerprint` disagrees with the token, 6 when the controller refuses the token (401), 5 for other refusals of the API, 7 when the controller cannot be reached and 2 when the node is enrolled already.
+The command exits with status 9 when a fingerprint does not match or `--ca-fingerprint` disagrees with the token, 6 when the controller refuses the token (401), 5 for other refusals of the API, 7 when the controller cannot be reached and 2 when the node is enrolled already or the URL is plain `http://` without `--insecure-plain-http`.
 
 ### 1.3 What the controller checks
 
@@ -103,6 +135,7 @@ The command exits with status 9 when a fingerprint does not match or `--ca-finge
 | The token is unused | `cluster.enrollment.used` |
 | The token has not expired | `cluster.enrollment.expired` |
 | Every requested role is allowed by the token | `cluster.enrollment.roles` |
+| The request came over HTTPS, or the profile is Lab (the token of a refused one is withdrawn if it is not used yet) | `cluster.enrollment.plain_http` |
 | The node and the controller share a protocol major | `cluster.protocol.unsupported` |
 | The node name follows the rule of section 1.1 and no other node has it | `cluster.node.name`, `cluster.node.name_taken` |
 | The address is an IP address or a host name | `cluster.node.address` |
@@ -356,8 +389,8 @@ The edits (creating and deleting a token, enrollment, renewal, revocation) run a
 | Action | Written when | By |
 |---|---|---|
 | `cluster.enrollment.create` | A token was created; records its id, roles and expiry, never the token | The administrator |
-| `cluster.enrollment.delete` | A token was deleted; records its id and state | The administrator |
-| `cluster.node.enroll` | A node enrolled, or a request was refused with its error code. A controller records at most 10 refusals a minute one by one of requests that did not know a token's secret, and 10 more of requests that did (a used or expired token, a refused role or name); the rest of that minute become one record at its end with the code `cluster.enrollment.refusals` and the context `refusals` (how many), `codes` (how many of each code), `sources` (how many source addresses), `addresses` (the first 16 seen) and `since` | The new node, or the cluster component for a refusal |
+| `cluster.enrollment.delete` | A token was deleted; records its id and state. A token that arrived over plain HTTP outside the Lab profile is withdrawn with the reason `plain_http` | The administrator, or the cluster component for a withdrawn token |
+| `cluster.node.enroll` | A node enrolled, or a request was refused with its error code. An enrollment over plain HTTP (Lab only) records `transport: http`. A controller records at most 10 refusals a minute one by one of requests that did not know a token's secret, and 10 more of requests that did (a used or expired token, a refused role or name); the rest of that minute become one record at its end with the code `cluster.enrollment.refusals` and the context `refusals` (how many), `codes` (how many of each code), `sources` (how many source addresses), `addresses` (the first 16 seen) and `since` | The new node, or the cluster component for a refusal |
 | `cluster.node.renew` | A node renewed its certificate; records the new and the previous serial | The node |
 | `cluster.node.revoke` | A node was revoked; records the revoked serials | The administrator |
 | `cluster.node.version_mismatch` | A handshake was refused for want of a common major; at most once an hour per node and offer | The cluster component |
@@ -388,6 +421,7 @@ Up to 0.0.11 the enrollment codes were spelled with one l (`cluster.enrolment.*`
 | `cluster.enrollment.used` | 401 | The token was used already |
 | `cluster.enrollment.expired` | 401 | The token expired |
 | `cluster.enrollment.roles` | 403 at enrollment, 422 at creation | The token does not allow a requested role; a token for `controller` is refused |
+| `cluster.enrollment.plain_http` | 403 | The token arrived over plain HTTP and the profile is not Lab; the token is withdrawn if it is not used yet (section 1.2) |
 | `cluster.enrollment.lifetime` | 422 | `expires_in_secs` is outside 60 to 604,800 |
 | `cluster.enrollment.not_found` | 404 | No such token |
 | `cluster.enrollment.conflict` | 409 | Another enrollment happened at the same time; try again |
@@ -490,7 +524,7 @@ The first controller is an ordinary installation. Each further controller joins 
      --config /etc/tenko/tenko.toml
    ```
 
-   The command enrolls the host as a node with the role `controller` (node id 1001 and up, which is also its Raft id; the key is generated and sealed on the host, as for a probe), receives the key encryption keys and seals them with its own KEK provider, opens an empty store and its cluster port, asks to join, and waits until it has copied the cluster's data, from the log or as a snapshot (at most `--timeout-secs`, default 600). Then it writes `[node] id` and `address` and `[cluster] listen` into the configuration file, the one of `--config` or else `tenko.toml` in the data directory: a new file, or appended to one without `[node]` and `[cluster]` tables. When the file has such a table already, the command exits with status 2 and prints the lines to set there. `--address` is the cluster port as the other controllers reach it; `--listen` overrides where the port listens (default all addresses on that port). The default name is the host and port of `--address`, joined by a hyphen.
+   The command enrolls the host as a node with the role `controller` (node id 1001 and up, which is also its Raft id; the key is generated and sealed on the host, as for a probe), receives the key encryption keys and seals them with its own KEK provider, opens an empty store and its cluster port, asks to join, and waits until it has copied the cluster's data, from the log or as a snapshot (at most `--timeout-secs`, default 600). Then it writes `[node] id` and `address` and `[cluster] listen` into the configuration file, the one of `--config` or else `tenko.toml` in the data directory: a new file, or appended to one without `[node]` and `[cluster]` tables. When the file has such a table already, the command exits with status 2 and prints the lines to set there. `--address` is the cluster port as the other controllers reach it; `--listen` overrides where the port listens (default all addresses on that port). A plain `http://` controller URL is refused unless `--insecure-plain-http` is given, under the Lab profile only, and a listener on that path obtains every key encryption key of the cluster (section 1.2). The default name is the host and port of `--address`, joined by a hyphen.
 3. Start it with `tenko serve --config …`. It starts as a learner; the leader promotes it to a voter once it stays caught up (section 12.3).
 4. Repeat for the third controller. With one voter and one caught-up learner the leader waits; when the second learner has caught up, both become voters together, so the cluster goes from one voter straight to three.
 

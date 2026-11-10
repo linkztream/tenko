@@ -4,7 +4,7 @@
 // executable as published with the release, and the server checks its size and SHA-256
 // against the list.
 import { createSignal, createUniqueId, For, Show } from "solid-js";
-import { ApiError } from "../api/problem";
+import { ApiError, isApiError } from "../api/problem";
 import { ErrorNotice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { t } from "../i18n";
@@ -34,7 +34,8 @@ export function UploadPanel(props: {
   canInstall: boolean;
   onStatus: (status: UpdateStatus) => void;
   onStarted: (started: InstallStarted) => void;
-  /** Step-up and the other failures of the install are shown by the panel above. */
+  /** Step-up (of an install or a release list) and the other failures of the install are
+   *  shown by the panel above. */
   onFailure: (err: unknown) => void;
 }) {
   const ids = { manifest: createUniqueId(), version: createUniqueId(), file: createUniqueId() };
@@ -74,7 +75,10 @@ export function UploadPanel(props: {
       setVersion("");
       toast({ kind: "ok", title: t("updates.upload.manifest_done", { count: next.manifest?.releases ?? next.releases.length }) });
     } catch (err) {
-      setManifestError(err);
+      // Uploading a release list needs the same fresh sign-in as an install: the panel
+      // above asks for it.
+      if (isApiError(err, "auth.step_up_required")) props.onFailure(err);
+      else setManifestError(err);
     } finally {
       setManifestBusy(false);
     }

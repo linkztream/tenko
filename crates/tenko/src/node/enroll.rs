@@ -1,5 +1,8 @@
 //! `tenko node enroll`: the enrollment ceremony on a data-plane node (OPS-04).
 //!
+//! 0. A controller URL with plain `http://` is refused before the token is read, unless
+//!    `--insecure-plain-http` names the choice; the command then warns what a listener on
+//!    the path obtains, and the controller accepts it only under the Lab profile.
 //! 1. The node reads the token (flag, `TENKO_ENROLL_TOKEN` or a file) and checks its form.
 //!    A `tnk2` token carries the SHA-256 fingerprint of the controller's CA root;
 //!    `--ca-fingerprint`, when given as well, must agree with it, else the command stops
@@ -53,6 +56,46 @@ pub fn old_env_token() -> Option<String> {
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The flag that allows a plain `http://` controller URL.
+pub const PLAIN_HTTP_FLAG: &str = "--insecure-plain-http";
+
+/// What the command prints when the token goes over plain HTTP: what a listener on the path
+/// obtains. `docs/cluster.md` section 1.2 has the same text.
+pub const PLAIN_HTTP_WARNING: &str = "warning: --insecure-plain-http: the enrollment token \
+     travels in clear text. Anyone who can read the traffic between this node and the \
+     controller obtains the token and can enroll before this node does: they get a node \
+     certificate with the token's roles, and with a controller token (tenko cluster join) \
+     every key-encryption key of the cluster, which opens every secret in its vault. The \
+     controller accepts this only under the Lab profile";
+
+/// Checks the scheme of the controller URL before anything else: a plain `http://` URL
+/// needs `--insecure-plain-http`; with it, the warning to print.
+///
+/// # Errors
+///
+/// A usage failure for a plain `http://` URL without the flag. It comes before the token is
+/// read and before any network call.
+pub fn check_transport(
+    controller: &str,
+    insecure_plain_http: bool,
+) -> Result<Option<String>, Failure> {
+    if !controller.starts_with("http://") {
+        return Ok(None);
+    }
+    if insecure_plain_http {
+        return Ok(Some(PLAIN_HTTP_WARNING.to_owned()));
+    }
+    Err(Failure::new(
+        exit::USAGE,
+        format!(
+            "`{controller}` is plain HTTP: the enrollment token would travel in clear text, \
+             and anyone on the path could enroll with it first. Use the https:// URL of the \
+             controller; only for a Lab controller, which accepts nothing else over plain \
+             HTTP, pass {PLAIN_HTTP_FLAG}"
+        ),
+    ))
+}
+
 /// Arguments of `tenko node enroll`.
 #[derive(Debug, Clone, Args)]
 pub struct EnrollArgs {
@@ -97,6 +140,12 @@ pub struct EnrollArgs {
     /// Enroll again although this node is enrolled: the old identity is replaced.
     #[arg(long)]
     pub force: bool,
+
+    /// Send the token to a plain `http://` controller URL. A listener on the path then
+    /// obtains the token and can enroll first with its roles; a Lab controller accepts it,
+    /// any other refuses it. Without this flag an `http://` URL is refused.
+    #[arg(long)]
+    pub insecure_plain_http: bool,
 }
 
 /// A SHA-256 fingerprint in lower-case hexadecimal.
@@ -396,6 +445,7 @@ pub async fn run(args: &EnrollArgs) -> Result<Output, Failure> {
             format!("`{controller}` is not an http(s) URL such as https://ddi.example.net:8443"),
         ));
     }
+    let plain_http = check_transport(&controller, args.insecure_plain_http)?;
     let token = read_token(args)?;
     let trust = root_trust(token.ca_fingerprint(), args.ca_fingerprint.as_deref())?;
     if controller.starts_with("http://") && trust == RootTrust::FirstUse {
@@ -417,6 +467,7 @@ pub async fn run(args: &EnrollArgs) -> Result<Output, Failure> {
 
     // Step 2: the CA root, checked against the fingerprint.
     let mut notes = Vec::new();
+    notes.extend(plain_http);
     let api_root = match fetch_root(&controller, &trust).await? {
         Some((pem, note)) => {
             notes.extend(note);
@@ -607,6 +658,7 @@ mod tests {
             roles: None,
             address: None,
             force: false,
+            insecure_plain_http: false,
         }
     }
 
@@ -681,16 +733,49 @@ mod tests {
             failure.message
         );
         assert!(failure.message.contains(&other[..8]), "{}", failure.message);
-        // On plain HTTP the token's fingerprint is enough to go on (and then fail to connect).
-        let failure = run(&args(
-            dir.path(),
-            "http://127.0.0.1:9",
-            &token.to_text(),
-            None,
-        ))
-        .await
-        .expect_err("unreachable");
+    }
+
+    #[tokio::test]
+    async fn plain_http_is_refused_before_the_token_unless_the_flag_names_the_choice() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let token = tnk2(b"our root");
+        // Without the flag: refused before the token is read (a token that does not parse
+        // would otherwise be the failure) and before any network call.
+        let mut plain = args(dir.path(), "http://127.0.0.1:9", "not a token", None);
+        let failure = run(&plain).await.expect_err("refused");
+        assert_eq!(failure.status, exit::USAGE, "{}", failure.message);
+        assert!(
+            failure.message.contains(PLAIN_HTTP_FLAG),
+            "{}",
+            failure.message
+        );
+        assert!(
+            failure.message.contains("clear text"),
+            "{}",
+            failure.message
+        );
+        // With the flag the command goes on (and here fails to connect).
+        plain.token = Some(token.to_text().to_string());
+        plain.insecure_plain_http = true;
+        let failure = run(&plain).await.expect_err("unreachable");
         assert_eq!(failure.status, exit::UNREACHABLE, "{}", failure.message);
+        // The warning says what a listener on the path obtains.
+        let warning = check_transport("http://192.0.2.10:8443", true)
+            .expect("allowed")
+            .expect("a warning");
+        for part in [
+            "clear text",
+            "node certificate",
+            "key-encryption key",
+            "Lab profile",
+        ] {
+            assert!(warning.contains(part), "{part}: {warning}");
+        }
+        // HTTPS needs no flag and prints nothing.
+        assert_eq!(
+            check_transport("https://192.0.2.10:8443", false).expect("https"),
+            None
+        );
     }
 
     #[tokio::test]
@@ -717,16 +802,17 @@ mod tests {
             None
         );
         assert!(check_root(&root(b"another root"), &trust).is_err());
-        // A tnk1 token without the flag is refused on plain HTTP, before the network.
+        // A tnk1 token without the fingerprint flag is refused on plain HTTP, before the
+        // network, even with --insecure-plain-http.
         let dir = tempfile::tempdir().expect("a directory");
-        let failure = run(&args(
-            dir.path(),
-            "http://127.0.0.1:9",
-            &token.to_text(),
-            None,
-        ))
-        .await
-        .expect_err("refused");
+        let mut plain = args(dir.path(), "http://127.0.0.1:9", &token.to_text(), None);
+        plain.insecure_plain_http = true;
+        let failure = run(&plain).await.expect_err("refused");
         assert_eq!(failure.status, exit::USAGE, "{}", failure.message);
+        assert!(
+            failure.message.contains("CA fingerprint"),
+            "{}",
+            failure.message
+        );
     }
 }

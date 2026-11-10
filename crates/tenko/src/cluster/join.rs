@@ -101,6 +101,13 @@ pub struct JoinArgs {
     /// How long to wait for the copy of the cluster's data, in seconds.
     #[arg(long, value_name = "SECS", default_value_t = 600)]
     pub timeout_secs: u64,
+
+    /// Send the controller token to a plain `http://` URL. A listener on the path then
+    /// obtains the token and with it every key-encryption key of the cluster; a Lab
+    /// controller accepts it, any other refuses it. Without this flag an `http://` URL is
+    /// refused.
+    #[arg(long)]
+    pub insecure_plain_http: bool,
 }
 
 fn cluster_failure(status: u8, error: &ClusterError) -> Failure {
@@ -276,6 +283,7 @@ pub async fn run(args: &JoinArgs) -> Result<Output, Failure> {
             format!("--listen `{listen}` is not an address with a port"),
         )
     })?;
+    crate::node::enroll::check_transport(args.controller.trim(), args.insecure_plain_http)?;
     let token = read_token(args)?;
     let token_id = EnrollmentToken::parse(&token)
         .map_err(|error| Failure::new(exit::USAGE, error.to_string()))?
@@ -303,6 +311,7 @@ pub async fn run(args: &JoinArgs) -> Result<Output, Failure> {
             roles: Some(Role::Controller.as_str().to_owned()),
             address: Some(host),
             force: false,
+            insecure_plain_http: args.insecure_plain_http,
         })
         .await?;
         notes.extend(enrolled.stderr.lines().map(str::to_owned));

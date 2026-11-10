@@ -8,7 +8,7 @@
 //! |---|---|---|---|
 //! | `GET /system/updates` | read on the system | 200 [`UpdateStatus`] | |
 //! | `POST /system/updates/check` | administer the system | 200 [`UpdateStatus`] after asking the source | 409 `update.check_off`, 502 `update.fetch_failed` |
-//! | `PUT /system/updates/manifest` | administer the system | 200 [`UpdateStatus`] | 400 `update.manifest.*` |
+//! | `PUT /system/updates/manifest` | administer, step-up per TGL-23 | 200 [`UpdateStatus`] | 400 `update.manifest.*`, 403 `auth.step_up_required` |
 //! | `POST /system/updates/install` | administer, step-up per TGL-23 | 202 [`InstallStarted`] | 403 `auth.step_up_required`, 409 `update.install_blocked`, `update.backup_required`, 422 `backup.key.missing` |
 //! | `POST /system/updates/upload?version=&backup=` | administer, step-up per TGL-23 | 202 [`InstallStarted`] | 400 `update.checksum_mismatch`, 409 `update.install_blocked`, `update.backup_required`, 422 `backup.key.missing` |
 //! | `GET /system/updates/whats-new` | any signed-in user | 200 [`WhatsNew`] | |
@@ -20,6 +20,10 @@
 //! than an hour (`install.backup` of the status says how old the newest one is); otherwise
 //! it is refused with 409 `update.backup_required`. The Hardened profile refuses `"skip"`
 //! (TGL-37).
+//!
+//! An uploaded manifest serves only uploaded release files; an install from the source takes
+//! the file's URL and digest from the manifest fetched from the release source, and the URL
+//! must lie inside the pinned release prefix (`update.source_mismatch`).
 //!
 //! An install is a background job: download (or the uploaded file), SHA-256 verification
 //! against the manifest, a dry run of `tenko upgrade check` by the new binary against a copy
@@ -185,7 +189,10 @@ async fn check_updates(
 }
 
 /// Stores a release manifest (`releases.json`) uploaded by an administrator, for
-/// installations that never contact the release source. It replaces the stored manifest.
+/// installations that never contact the release source. It replaces the uploaded manifest
+/// and serves only uploaded release files (`POST /system/updates/upload`); an install from
+/// the source never uses it. It needs the same fresh sign-in as an install where TGL-23
+/// asks for one.
 #[utoipa::path(
     put,
     path = "/system/updates/manifest",
@@ -197,7 +204,7 @@ async fn check_updates(
         (status = 200, description = "The manifest is stored; the update status", body = UpdateStatus),
         (status = 400, description = "The manifest is invalid (`update.manifest.json`, `update.manifest.invalid`, `update.manifest.schema`, `update.manifest.project`, `update.manifest.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No update service (`update.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     ),
     security(("session" = []))
@@ -228,7 +235,7 @@ async fn put_update_manifest(
     request_body = InstallRequest,
     responses(
         (status = 202, description = "The install job started; follow it on the `jobs` topic", body = InstallStarted),
-        (status = 400, description = "The version is not in the manifest or not newer (`update.version_unknown`, `update.not_newer`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 400, description = "The version is not in the manifest fetched from the release source or not newer (`update.version_unknown`, `update.not_newer`), or its file is not under the pinned release prefix (`update.source_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`), or a backup must be taken first (`update.backup_required`, parameters `max_age_seconds`, `age_seconds` of the newest good backup when there is one, and `skip_allowed`: `false` when the profile refused `backup: \"skip\"`)", body = ProblemDetails, content_type = "application/problem+json"),

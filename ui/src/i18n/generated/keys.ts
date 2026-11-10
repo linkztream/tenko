@@ -579,6 +579,7 @@ export type MessageKey =
   | "audit.action.sys.diagnostics"
   | "audit.action.sys.modules.update"
   | "audit.action.sys.update.confirm"
+  | "audit.action.sys.update.download"
   | "audit.action.sys.update.install"
   | "audit.action.sys.update.manifest"
   | "audit.action.sys.update.rollback"
@@ -7883,6 +7884,7 @@ export type MessageKey =
   | "updates.blocked.in_progress"
   | "updates.blocked.layout_missing"
   | "updates.blocked.no_asset"
+  | "updates.blocked.not_fetched"
   | "updates.blocked.other"
   | "updates.blocked.settings_link"
   | "updates.blocked.unsupervised"
@@ -10179,6 +10181,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.sys.diagnostics",
   "audit.action.sys.modules.update",
   "audit.action.sys.update.confirm",
+  "audit.action.sys.update.download",
   "audit.action.sys.update.install",
   "audit.action.sys.update.manifest",
   "audit.action.sys.update.rollback",
@@ -17483,6 +17486,7 @@ export const messageKeys: readonly MessageKey[] = [
   "updates.blocked.in_progress",
   "updates.blocked.layout_missing",
   "updates.blocked.no_asset",
+  "updates.blocked.not_fetched",
   "updates.blocked.other",
   "updates.blocked.settings_link",
   "updates.blocked.unsupervised",

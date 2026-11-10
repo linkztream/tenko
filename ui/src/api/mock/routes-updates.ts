@@ -442,6 +442,9 @@ const putManifest = http.put("/api/v1/system/updates/manifest", async ({ request
   try {
     requireAdmin();
     requireService();
+    // A release list decides which file an upload must match: the same fresh sign-in as
+    // an install.
+    requireFreshSignIn();
     let body: unknown;
     try {
       body = JSON.parse(await request.text());

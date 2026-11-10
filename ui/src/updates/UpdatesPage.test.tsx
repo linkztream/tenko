@@ -541,6 +541,23 @@ describe("installing from files", () => {
     expect(await screen.findByTestId("updates-stepup")).toBeTruthy();
   });
 
+  it("explains a step-up answer to a release list as well, and keeps the releases", async () => {
+    await signInAdmin();
+    mockUpdates.airGapped = true;
+    mockUpdates.running = "0.2.0";
+    mockUpdates.stepUpSession = db.currentSessionId;
+    await openPage();
+    const manifest = {
+      releases: [{ version: "0.3.0", date: "2026-12-01", notes: "### Added\n- Something new.", assets: [] }],
+    };
+    const panel = screen.getByTestId("updates-upload-panel");
+    choose(within(panel).getByTestId("updates-manifest-file"), file(JSON.stringify(manifest), "releases.json"));
+    fireEvent.click(within(panel).getByTestId("updates-manifest-upload"));
+    expect(await screen.findByTestId("updates-stepup")).toBeTruthy();
+    expect(within(panel).queryByRole("alert")).toBeNull();
+    expect(document.querySelector(`[data-testid="update-release"][data-key="0.3.0"]`)).toBeNull();
+  });
+
   it("uploads a release list and shows the releases in it", async () => {
     await signInAdmin();
     mockUpdates.airGapped = true;
