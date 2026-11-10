@@ -142,7 +142,10 @@ bind_zones_setup() {
     sign expired.example.test -P -s 20200101000000 -e 20200301000000
     sign badsig.example.test
     sign keytrap.example.test -P
-    chmod 0644 *.signed'
+    chmod 0644 *.signed
+    chmod 0666 badsig.example.test.signed'
+  # The lab's shell rewrites this file, which BIND's user wrote in the container: on a Linux
+  # host the two are different users, hence the mode above (as for the zone files it copies).
   spoil_signature "$work/zones/badsig.example.test.signed" www.badsig.example.test >/dev/null
   {
     printf '// WP10.2: the zones BIND signs with its own keys (written by validation.sh).\n'
