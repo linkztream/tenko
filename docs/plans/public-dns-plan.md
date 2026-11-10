@@ -1,6 +1,6 @@
 # Public DNS plan: a public zone at a provider beside an internal zone of the same name
 
-- Status: Draft, for the owner's decisions (PD-Q1 to PD-Q12 in section 6 are open)
+- Status: Accepted on 2026-11-10: the owner took PD-Q1 to PD-Q12 of section 6 as recommended. The owner keeps PD-Q6 and PD-Q8 open to a better solution and has not yet scheduled the slice; no package starts before the owner says so
 - Date: 2026-11-10
 - Scope: CONN-22, added by the owner on 2026-11-10. Tenko manages the records of a public zone hosted at a DNS provider through the provider's API, by a plugin per provider, the first for Cloudflare. The public zone is a zone object of its own, kept apart from an internal zone of the same name, and the two are compared, never merged. Written against `main` at `fb0c8f57`. Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md). Exit criteria, measurements and risks continue the project's series: E81 onward, M71 onward and R151 onward (the Windows takeover plan ends at E80, M70 and R150)
 
@@ -350,6 +350,8 @@ WP15.0 first. Then WP15.1 and WP15.2 in parallel. Then WP15.3 and WP15.4 in para
 ## 6. Owner decisions
 
 Each question lists its options, the trade-offs in the owner's order (security, performance, usability, features) and one recommendation.
+
+**Decided by the owner (2026-11-10): every question as recommended.** PD-Q6 (the public names that internal clients need) and PD-Q8 (the source of the public address) stand as recommended until the owner returns to them; the owner may replace either with another solution before its package starts.
 
 **PD-Q1. How is a public zone represented beside an internal zone of the same name?**
 - Options: (a) a namespace of its own (`public_dns.*`), never fed to the `dns` role, joined to the internal zone by name only in a read-only comparison; (b) a new `ZoneKind::External` row in `dns.zones`, with the uniqueness of zone names relaxed per kind; (c) a scope `external` of the internal zone, synchronized to the provider.
