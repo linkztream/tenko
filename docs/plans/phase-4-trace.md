@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 4`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 4 --check`
 
-32 Phase 4 requirements; 5 named by at least one test, 27 not; 0 named by no test, measurement or document.
+35 Phase 4 requirements; 5 named by at least one test, 30 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -17,13 +17,15 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 | CONN-10 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0032-plugins-as-processes.md` |
 | CONN-11 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0032-plugins-as-processes.md` |
 | CONN-12 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0005-ipam-intent-hub.md`<br>`docs/adr/0034-zone-flip-and-adoption.md`<br>and 3 more |
-| CONN-13 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0005-ipam-intent-hub.md`<br>and 6 more |
+| CONN-13 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0005-ipam-intent-hub.md`<br>and 7 more |
+| CONN-22 | Should | - | - | `docs/ROADMAP.md`<br>`docs/plans/public-dns-plan.md` |
 | DNS-28 | Must | `crates/tenko-api/src/routes/dns/kerberos.rs::dns_28_every_route_checks_its_scope_first`<br>`crates/tenko-api/src/routes/dns/kerberos.rs::dns_28_the_account_routes_over_http`<br>`crates/tenko-api/src/routes/dns/owners.rs::dns_28_a_cursor_outside_the_zone_is_refused`<br>`crates/tenko-api/src/routes/dns/owners.rs::dns_28_a_zone_without_kerberos_keeps_no_owners`<br>`crates/tenko-api/src/routes/dns/owners.rs::dns_28_the_owner_routes_check_the_zone_scope_first`<br>and 90 more | - | `crates/tenko-api/src/routes/dns/kerberos.rs`<br>`crates/tenko-api/src/routes/dns/owners.rs`<br>`crates/tenko-dns/src/tkey/mod.rs`<br>`crates/tenko-dns/src/tsig.rs`<br>`crates/tenko-dns/src/update/apply.rs`<br>and 23 more |
 | DNS-29 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/active-directory.md`<br>`docs/adr/0034-zone-flip-and-adoption.md`<br>and 7 more |
 | DNS-30 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/active-directory.md`<br>`docs/plans/identity-plan.md`<br>and 3 more |
 | DNS-31 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-32 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-33 | Should | - | - | `docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
+| DNS-35 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md` |
 | IAM-11 | Must | - | - | `crates/tenko-api/src/routes/auth/providers.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0026-kerberos-and-directory-identity.md`<br>`docs/plans/identity-plan.md`<br>and 1 more |
 | IAM-12 | Must | - | - | `crates/tenko-api/src/routes/access/mappings.rs`<br>`crates/tenko-api/src/routes/auth/providers.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 3 more |
 | IAM-13 | Should | `crates/tenko-krb/src/acceptor/tests.rs::dns_28_recorded_exchanges_are_accepted` | - | `crates/tenko-api/src/routes/auth/providers.rs`<br>`crates/tenko-krb/src/acceptor/mod.rs`<br>`crates/tenko-krb/src/lib.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 3 more |
@@ -45,6 +47,7 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 | MIG-18 | Must | - | - | `docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/plans/identity-plan.md`<br>`docs/plans/windows-takeover-plan.md` |
 | OPS-11 | Must | `crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_a_ktpass_keytab_imports_and_works`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_adopt_takes_over_the_pre_staged_account`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_the_recorded_samba_adopt_replays_through_the_controller` | - | `crates/tenko-api/src/routes/dns/kerberos.rs`<br>`crates/tenko-dns/src/zone/kerberos.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/MIGRATION.md`<br>`docs/adr/0026-kerberos-and-directory-identity.md`<br>and 1 more |
 | OPS-12 | Should | - | - | `docs/plans/phase-3-status.md` |
+| OPS-29 | Must (MQTT: Should) | - | - | `docs/ROADMAP.md` |
 
 ## Exit criteria
 
@@ -79,11 +82,13 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 - CONN-11 (Should)
 - CONN-12 (Should)
 - CONN-13 (Should)
+- CONN-22 (Should)
 - DNS-29 (Must)
 - DNS-30 (Must)
 - DNS-31 (Must)
 - DNS-32 (Should)
 - DNS-33 (Should)
+- DNS-35 (Must)
 - IAM-11 (Must)
 - IAM-12 (Must)
 - IPAM-22 (Must)
@@ -101,6 +106,7 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 - MIG-17 (Must)
 - MIG-18 (Must)
 - OPS-12 (Should)
+- OPS-29 (Must (MQTT: Should))
 
 ### No test, measurement or document
 
