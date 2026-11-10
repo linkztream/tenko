@@ -225,6 +225,7 @@ pub(crate) fn import_report(report: ImportReport) -> ZoneFileImportReport {
                 detail: loss.detail,
             })
             .collect(),
+        claimable: report.claimable,
         serial: report.serial,
         revision: report.revision,
     }
@@ -265,6 +266,10 @@ pub(super) async fn import_dns_zone_file(
         scope: body.scope.unwrap_or_default(),
         text: body.zone_file,
         replace: body.replace,
+        dialect: match body.dialect.unwrap_or_default() {
+            super::ZoneFileDialect::Rfc1035 => tenko_dns::zone::zonefile::Dialect::Rfc1035,
+            super::ZoneFileDialect::Windows => tenko_dns::zone::zonefile::Dialect::Windows,
+        },
     };
     if query.dry_run.unwrap_or(false) {
         let report = service.preview_import(&cx, &request).await?;

@@ -19,6 +19,7 @@
 //! | [`acl`] | access lists |
 //! | [`keys`] | TSIG keys, the secret in the vault |
 //! | [`kerberos`] | the Kerberos account of secure updates: adopt, import, rotation, self-test, the watcher (WP13.3) |
+//! | [`ownership`] | the owners of names: the locator-name list, the owner view, release and assignment (WP13.4) |
 //! | [`jobs`] | the inline job of every change and the job runner stand-in |
 //! | [`views`] | views, their positions and the scope rule (WP6.4) |
 //! | [`secondary`] | secondary and catalog zones: transfers in as a leader service (WP6.1) |
@@ -50,6 +51,8 @@ pub mod journal;
 pub mod kerberos;
 // WP13.3: end.
 pub mod keys;
+// WP13.4: the owner view.
+pub mod ownership;
 pub mod records;
 // WP6.1: the leader service of secondary and catalog zones, and the read-only rule.
 pub mod secondary;
@@ -232,7 +235,7 @@ fn origin_index(origin: Origin) -> u8 {
     }
 }
 
-fn origin_added(zone: ZoneId, origin: Origin) -> CounterKey {
+pub(crate) fn origin_added(zone: ZoneId, origin: Origin) -> CounterKey {
     CounterKey::with("dns.rrsets.added", &(zone, origin_index(origin)))
 }
 
@@ -945,6 +948,8 @@ impl ZoneService {
             for (_, rrset, _) in &rows {
                 stage_delete(batch, rrset);
             }
+            // WP13.4: and its owners.
+            ownership::stage_scope_owners_delete(batch, view, zone.id, &scope.name)?;
             journal::stage_reset(batch, view, zone.id, &scope.name)?;
         }
         Ok(())
@@ -980,6 +985,9 @@ impl ZoneService {
                 for (_, rrset, _) in rows.iter().take(chunk) {
                     stage_delete(&mut batch, rrset);
                 }
+                // WP13.4: the owner rows of the zone go with it.
+                let owners_left = ownership::stage_zone_owners_delete(&mut batch, view, id, chunk)?;
+                let complete = complete && !owners_left;
                 for scope in &zone.scopes {
                     journal::stage_reset(&mut batch, view, id, &scope.name)?;
                 }
@@ -1017,12 +1025,19 @@ impl ZoneService {
                 self.config.import_chunk,
                 false,
             )?;
-            if rows.is_empty() {
-                return Ok(());
-            }
             let mut batch = WriteBatch::for_request(&system);
             for (_, rrset, _) in &rows {
                 stage_delete(&mut batch, rrset);
+            }
+            // WP13.4: and the owner rows.
+            let owners_left = ownership::stage_zone_owners_delete(
+                &mut batch,
+                view.as_ref(),
+                id,
+                self.config.import_chunk,
+            )?;
+            if rows.is_empty() && !owners_left && batch.is_empty() {
+                return Ok(());
             }
             self.store.propose(batch).await?;
         }
@@ -1043,7 +1058,8 @@ impl ZoneService {
         limit: usize,
     ) -> ZoneResult<RrSetPage> {
         let mut out = Vec::new();
-        let mut cursor = after.map(<[u8]>::to_vec);
+        let prefix = encode_key(&(zone.id, filter.scope.clone()));
+        let mut cursor = page_start(&prefix, after)?;
         let step = limit.clamp(64, 4096);
         loop {
             let mut range = rrset_range(zone.id, Some(&filter.scope), None);
@@ -1066,6 +1082,26 @@ impl ZoneService {
                 return Ok((out, None));
             }
         }
+    }
+}
+
+// WP13.4: a page's cursor stays inside the prefix it pages.
+/// The key a page continues after: the cursor's key, which must lie inside `prefix`. A
+/// key below the prefix would move the scan's start out of it (`KeyRange::after` replaces
+/// the lower bound), so it is refused rather than read.
+///
+/// # Errors
+///
+/// 400 `sys.invalid_cursor` for a key outside `prefix`.
+pub(crate) fn page_start(prefix: &[u8], after: Option<&[u8]>) -> ZoneResult<Option<Vec<u8>>> {
+    match after {
+        None => Ok(None),
+        Some(key) if key.starts_with(prefix) => Ok(Some(key.to_vec())),
+        Some(_) => Err(ZoneError::new(
+            "sys.invalid_cursor",
+            400,
+            "the cursor does not belong to this list",
+        )),
     }
 }
 
@@ -1258,7 +1294,7 @@ pub(crate) fn check_expect(expect: Option<Revision>, current: Revision) -> ZoneR
     }
 }
 
-fn internal_nothing_written() -> ZoneError {
+pub(crate) fn internal_nothing_written() -> ZoneError {
     ZoneError::new(
         tenko_core::error::codes::INTERNAL,
         500,

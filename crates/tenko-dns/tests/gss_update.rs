@@ -15,7 +15,7 @@ use tenko_core::{
     RequestCtx, SystemComponent,
     audit::AuditDraft,
     dns::{
-        AclEntry, DnsName, KerberosUpdate, NameOwner, NameOwnerKey, Origin, Ownership,
+        AclEntry, DnsName, KerberosUpdate, NameOwner, NameOwnerKey, Origin, OwnerSource, Ownership,
         PrincipalName, QueryTransport, Realm, RecordData, Rtype, ScopeName, SerialPolicy, Sid,
         SoaDefaults, TsigAlgorithm, UpdatePolicy, Zone, ZoneKind, tables::NAME_OWNERS,
     },
@@ -510,6 +510,10 @@ async fn dns_28_a_gss_tsig_update_records_its_principal_and_owner() {
 /// SIDs from a Windows source: a new name, an owned name, the owner, a privileged group, a member of
 /// `DnsUpdateProxy`, the locator names, a record of IPAM, a manual record, a TSIG update.
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the table of section 3.6 in one sequence"
+)]
 async fn dns_28_e46_the_ownership_table() {
     let lab = lab().await;
     let alice = lab.who(
@@ -617,7 +621,15 @@ async fn dns_28_e46_the_ownership_table() {
             .await,
         NOERROR
     );
-    assert_eq!(lab.owner("www.corp.example.test").await, None);
+    // WP13.4: a privileged principal that writes a name without an owner owns it, as the
+    // creator does on Windows; another principal cannot take it afterwards.
+    let www = lab.owner("www.corp.example.test").await.expect("owned");
+    assert_eq!(www.sid, Some(sid(1000)));
+    assert_eq!(
+        lab.gss(&bob, &Msg::default().add_a("www.corp.example.test", 3))
+            .await,
+        REFUSED
+    );
 }
 
 /// DNS-28, E46: a record imported from AD without an owner is claimed only by the host it
@@ -1040,6 +1052,7 @@ async fn dns_28_e46_sid_owners_wildcards_and_stale_owners() {
             principal: PrincipalName::parse("pc01$@CORP.EXAMPLE.TEST").expect("principal"),
             since: Timestamp::now(),
             hold_until: None,
+            how: OwnerSource::Created,
         },
     )
     .await;
@@ -1048,6 +1061,443 @@ async fn dns_28_e46_sid_owners_wildcards_and_stale_owners() {
         NOERROR
     );
     assert_eq!(lab.owner(gone).await.expect("owner").sid, Some(sid(1002)));
+}
+
+// WP13.4: the remaining rows of E46.
+
+/// The Windows file of the E46 table: `srv01` static (no aging mark), `ws05` and `ws06`
+/// dynamic (`[AGE:n]`), `mixed` with one dynamic and one static record, `txt01` an aged
+/// record of a type no client registers for itself, and a WINS record, which is a loss.
+const WINDOWS_FILE: &str = "\
+;  Database file corp.example.test.dns for corp.example.test zone.
+@                       [AGE:0] 3600 WINS L1 C900 ( 192.0.2.9 )
+srv01                   1200    A       192.0.2.10
+ws05                    [AGE:3660412]   1200    A       192.0.2.15
+ws06                    [AGE:3660413]   1200    A       192.0.2.16
+mixed                   [AGE:3660414]   1200    A       192.0.2.17
+                        1200    A       192.0.2.18
+txt01                   [AGE:3660415]   1200    TXT     \"an aged record of another type\"
+";
+
+/// Who acts in a row of the table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Actor {
+    /// PC01$, a member computer (SID 1001).
+    Pc01,
+    /// PC02$, another member computer (1002).
+    Pc02,
+    /// PC07$, the computer an administrator hands names to (1007).
+    Pc07,
+    /// DC01$, a domain controller (1000, Domain Controllers).
+    Dc,
+    /// An administrator (1500, Domain Admins).
+    Admin,
+    /// WS05$ (1005), the host a Windows file's dynamic record names.
+    Ws05,
+    /// WS06$ (1006), the owner a migration adapter read.
+    Ws06,
+    /// A rebuilt WS06$ under a new account (1099): the same name, another SID.
+    Ws06Rebuilt,
+    /// SRV01$ (1010), whose record is static in the file.
+    Srv01,
+    /// The TSIG key of the list.
+    Tsig,
+}
+
+/// What a row does.
+enum Do {
+    /// A signed update.
+    Update(Actor, Msg),
+    /// An administrator's release through the zone service.
+    Release(&'static str),
+    /// An administrator's assignment to PC07$ with its SID.
+    Assign(&'static str),
+    /// An administrator's assignment that the zone service refuses with this code.
+    AssignRefused(&'static str, &'static str),
+    /// A migration adapter's owner (MIG-06): WS06$ with its SID.
+    ImportOwner(&'static str),
+    /// An administrator adds a manual AAAA record through the API.
+    Manual(&'static str),
+}
+
+/// One row: what is done, the answer, and the owner of the name after it (by RID and how).
+struct Row {
+    what: &'static str,
+    name: &'static str,
+    action: Do,
+    expect: Option<Got>,
+    owner: Option<(u32, OwnerSource)>,
+}
+
+/// DNS-28, MIG-06, E46: the rows WP13.4 adds to the table of
+/// section 3.6, in one sequence on one zone: a controller's own name, a refresh, the
+/// static records beside an owner's, the Windows file's import marking, the owner of the
+/// Windows adapter, release and assignment.
+#[tokio::test]
+#[allow(clippy::too_many_lines, reason = "the table is the test")]
+async fn dns_28_e46_the_remaining_rows() {
+    let lab = lab().await;
+    // The Windows file first: what it marks `ad` and what it keeps `manual`.
+    let (job, preview) = lab
+        .zones
+        .start_import(
+            &cx(),
+            tenko_dns::zone::import::ImportRequest {
+                zone: lab.zone.id,
+                scope: ScopeName::DEFAULT,
+                text: WINDOWS_FILE.to_owned(),
+                replace: false,
+                dialect: tenko_dns::zone::zonefile::Dialect::Windows,
+            },
+        )
+        .await
+        .expect("import");
+    assert_eq!(preview.claimable, 2, "ws05 and ws06; mixed stays manual");
+    assert_eq!(preview.lost, 1, "the WINS record");
+    let direct = lab.zones.direct_jobs().expect("direct jobs");
+    let report =
+        tenko_dns::zone::import::report_of(&direct.job(job).expect("job")).expect("report");
+    assert_eq!(report.claimable, 2);
+    assert_eq!(
+        lab.rrset("txt01.corp.example.test", Rtype::TXT)
+            .await
+            .expect("imported")
+            .origin,
+        Origin::Manual,
+        "only A, AAAA and PTR records become claimable"
+    );
+    for (owner, origin) in [
+        ("srv01.corp.example.test", Origin::Manual),
+        ("ws05.corp.example.test", Origin::Ad),
+        ("ws06.corp.example.test", Origin::Ad),
+        ("mixed.corp.example.test", Origin::Manual),
+    ] {
+        assert_eq!(
+            lab.rrset(owner, Rtype::A).await.expect("imported").origin,
+            origin,
+            "{owner}"
+        );
+    }
+    let who = |actor: Actor| -> Option<Who> {
+        let (principal, rid, groups): (&str, u32, Vec<Sid>) = match actor {
+            Actor::Pc01 => ("pc01$@CORP.EXAMPLE.TEST", 1001, vec![sid(515)]),
+            Actor::Pc02 => ("pc02$@CORP.EXAMPLE.TEST", 1002, vec![sid(515)]),
+            Actor::Pc07 => ("pc07$@CORP.EXAMPLE.TEST", 1007, vec![sid(515)]),
+            Actor::Dc => ("dc01$@CORP.EXAMPLE.TEST", 1000, vec![sid(516)]),
+            Actor::Admin => ("administrator@CORP.EXAMPLE.TEST", 1500, vec![sid(512)]),
+            Actor::Ws05 => ("WS05$@CORP.EXAMPLE.TEST", 1005, vec![sid(515)]),
+            Actor::Ws06 => ("WS06$@CORP.EXAMPLE.TEST", 1006, vec![sid(515)]),
+            Actor::Ws06Rebuilt => ("WS06$@CORP.EXAMPLE.TEST", 1099, vec![sid(515)]),
+            Actor::Srv01 => ("SRV01$@CORP.EXAMPLE.TEST", 1010, vec![sid(515)]),
+            Actor::Tsig => return None,
+        };
+        Some(lab.who(principal, Some(sid(rid)), groups, "192.0.2.30"))
+    };
+    let pc01 = "pc01.corp.example.test";
+    let dc01 = "dc01.corp.example.test";
+    let ws05 = "ws05.corp.example.test";
+    let ws06 = "ws06.corp.example.test";
+    let spare = "spare.corp.example.test";
+    let created = OwnerSource::Created;
+    let rows = vec![
+        Row {
+            what: "a controller creates its host name and owns it",
+            name: dc01,
+            action: Do::Update(Actor::Dc, Msg::default().add_a(dc01, 2)),
+            expect: Some(NOERROR),
+            owner: Some((1000, created)),
+        },
+        Row {
+            what: "a member computer cannot take a controller's name",
+            name: dc01,
+            action: Do::Update(Actor::Pc02, Msg::default().add_a(dc01, 66)),
+            expect: Some(REFUSED),
+            owner: Some((1000, created)),
+        },
+        Row {
+            what: "TSIG cannot either",
+            name: dc01,
+            action: Do::Update(Actor::Tsig, Msg::default().add_a(dc01, 66)),
+            expect: Some(REFUSED),
+            owner: Some((1000, created)),
+        },
+        Row {
+            what: "a Domain Admin changes it, the owner stays",
+            name: dc01,
+            action: Do::Update(Actor::Admin, Msg::default().add_a(dc01, 3)),
+            expect: Some(NOERROR),
+            owner: Some((1000, created)),
+        },
+        Row {
+            what: "a member creates its own name",
+            name: pc01,
+            action: Do::Update(Actor::Pc01, Msg::default().add_a(pc01, 21)),
+            expect: Some(NOERROR),
+            owner: Some((1001, created)),
+        },
+        Row {
+            what: "an administrator adds a manual record beside it",
+            name: pc01,
+            action: Do::Manual(pc01),
+            expect: None,
+            owner: Some((1001, created)),
+        },
+        Row {
+            what: "a refresh (the same data again) keeps the owner",
+            name: pc01,
+            action: Do::Update(Actor::Pc01, Msg::default().add_a(pc01, 21)),
+            expect: Some(NOERROR),
+            owner: Some((1001, created)),
+        },
+        Row {
+            what: "the owner cannot delete the manual record beside its own",
+            name: pc01,
+            action: Do::Update(Actor::Pc01, Msg::default().delete_name(pc01)),
+            expect: Some(REFUSED),
+            owner: Some((1001, created)),
+        },
+        Row {
+            what: "a static record of the Windows file is not claimable by its host",
+            name: "srv01.corp.example.test",
+            action: Do::Update(
+                Actor::Srv01,
+                Msg::default().add_a("srv01.corp.example.test", 11),
+            ),
+            expect: Some(REFUSED),
+            owner: None,
+        },
+        Row {
+            what: "another host cannot claim a dynamic record of the file",
+            name: ws05,
+            action: Do::Update(Actor::Pc02, Msg::default().add_a(ws05, 66)),
+            expect: Some(REFUSED),
+            owner: None,
+        },
+        Row {
+            what: "its own host claims it",
+            name: ws05,
+            action: Do::Update(Actor::Ws05, Msg::default().add_a(ws05, 15)),
+            expect: Some(NOERROR),
+            owner: Some((1005, OwnerSource::Claimed)),
+        },
+        Row {
+            what: "the Windows adapter's owner (MIG-06) is written as imported",
+            name: ws06,
+            action: Do::ImportOwner(ws06),
+            expect: None,
+            owner: Some((1006, OwnerSource::Imported)),
+        },
+        Row {
+            what: "a rebuilt account of the same name is refused (the SID decides)",
+            name: ws06,
+            action: Do::Update(Actor::Ws06Rebuilt, Msg::default().add_a(ws06, 16)),
+            expect: Some(REFUSED),
+            owner: Some((1006, OwnerSource::Imported)),
+        },
+        Row {
+            what: "the imported owner refreshes its record",
+            name: ws06,
+            action: Do::Update(Actor::Ws06, Msg::default().add_a(ws06, 16)),
+            expect: Some(NOERROR),
+            owner: Some((1006, OwnerSource::Imported)),
+        },
+        Row {
+            what: "an administrator releases the claimed name",
+            name: ws05,
+            action: Do::Release(ws05),
+            expect: None,
+            owner: None,
+        },
+        Row {
+            what: "a released name is not open to any principal",
+            name: ws05,
+            action: Do::Update(Actor::Pc02, Msg::default().add_a(ws05, 66)),
+            expect: Some(REFUSED),
+            owner: None,
+        },
+        Row {
+            what: "its own host claims it again",
+            name: ws05,
+            action: Do::Update(Actor::Ws05, Msg::default().add_a(ws05, 15)),
+            expect: Some(NOERROR),
+            owner: Some((1005, OwnerSource::Claimed)),
+        },
+        Row {
+            what: "a name holding a manual record is not given an owner",
+            name: pc01,
+            action: Do::AssignRefused(pc01, "dns.owner.protected"),
+            expect: None,
+            owner: Some((1001, created)),
+        },
+        Row {
+            what: "an administrator hands the claimed name to PC07$",
+            name: ws05,
+            action: Do::Assign(ws05),
+            expect: None,
+            owner: Some((1007, OwnerSource::Assigned)),
+        },
+        Row {
+            what: "the old owner is refused",
+            name: ws05,
+            action: Do::Update(Actor::Ws05, Msg::default().add_a(ws05, 25)),
+            expect: Some(REFUSED),
+            owner: Some((1007, OwnerSource::Assigned)),
+        },
+        Row {
+            what: "the new owner changes it",
+            name: ws05,
+            action: Do::Update(Actor::Pc07, Msg::default().add_a(ws05, 27)),
+            expect: Some(NOERROR),
+            owner: Some((1007, OwnerSource::Assigned)),
+        },
+        Row {
+            what: "a name without records is held for the principal it is assigned to",
+            name: spare,
+            action: Do::Assign(spare),
+            expect: None,
+            owner: Some((1007, OwnerSource::Assigned)),
+        },
+        Row {
+            what: "another principal cannot create it within the hold",
+            name: spare,
+            action: Do::Update(Actor::Pc02, Msg::default().add_a(spare, 66)),
+            expect: Some(REFUSED),
+            owner: Some((1007, OwnerSource::Assigned)),
+        },
+        Row {
+            what: "the assigned principal creates it",
+            name: spare,
+            action: Do::Update(Actor::Pc07, Msg::default().add_a(spare, 77)),
+            expect: Some(NOERROR),
+            owner: Some((1007, OwnerSource::Assigned)),
+        },
+    ];
+    for row in rows {
+        let got = match row.action {
+            Do::Update(actor, msg) => Some(match who(actor) {
+                Some(who) => lab.gss(&who, &msg).await,
+                None => lab.tsig(&msg).await,
+            }),
+            Do::Manual(owner) => {
+                lab.zones
+                    .change_records(
+                        &cx(),
+                        lab.zone.id,
+                        &[Change {
+                            op: Op::Set,
+                            scope: ScopeName::DEFAULT,
+                            name: name(owner),
+                            rtype: Rtype::AAAA,
+                            ttl: Some(300),
+                            records: vec![RecordData::Aaaa {
+                                address: "2001:db8::1".parse().expect("address"),
+                            }],
+                            take_over: false,
+                            origin: Origin::Manual,
+                        }],
+                        false,
+                    )
+                    .await
+                    .expect(row.what);
+                None
+            }
+            Do::Release(owner) => {
+                lab.zones
+                    .release_owner(&cx(), lab.zone.id, &ScopeName::DEFAULT, &name(owner), None)
+                    .await
+                    .expect(row.what);
+                assert_eq!(
+                    lab.rrset(owner, Rtype::A).await.expect("records").origin,
+                    Origin::Ad,
+                    "{}: the records are claimable again",
+                    row.what
+                );
+                None
+            }
+            Do::Assign(owner) => {
+                lab.zones
+                    .assign_owner(
+                        &cx(),
+                        lab.zone.id,
+                        &tenko_dns::zone::ownership::OwnerAssignment {
+                            scope: ScopeName::DEFAULT,
+                            name: name(owner),
+                            principal: PrincipalName::parse("pc07$@CORP.EXAMPLE.TEST")
+                                .expect("principal"),
+                            sid: Some(sid(1007)),
+                            expect: None,
+                        },
+                    )
+                    .await
+                    .expect(row.what);
+                None
+            }
+            Do::AssignRefused(owner, code) => {
+                let error = lab
+                    .zones
+                    .assign_owner(
+                        &cx(),
+                        lab.zone.id,
+                        &tenko_dns::zone::ownership::OwnerAssignment {
+                            scope: ScopeName::DEFAULT,
+                            name: name(owner),
+                            principal: PrincipalName::parse("pc07$@CORP.EXAMPLE.TEST")
+                                .expect("principal"),
+                            sid: Some(sid(1007)),
+                            expect: None,
+                        },
+                    )
+                    .await
+                    .expect_err(row.what);
+                assert!(error.is(code), "{}: {error:?}", row.what);
+                None
+            }
+            Do::ImportOwner(owner) => {
+                let imported = lab
+                    .zones
+                    .import_owners(
+                        &cx(),
+                        lab.zone.id,
+                        &ScopeName::DEFAULT,
+                        &[
+                            tenko_dns::zone::ownership::ImportedOwner {
+                                name: name(owner),
+                                principal: PrincipalName::parse("WS06$@CORP.EXAMPLE.TEST")
+                                    .expect("principal"),
+                                sid: Some(sid(1006)),
+                            },
+                            tenko_dns::zone::ownership::ImportedOwner {
+                                name: name("_ldap._tcp.corp.example.test"),
+                                principal: PrincipalName::parse("dc01$@CORP.EXAMPLE.TEST")
+                                    .expect("principal"),
+                                sid: Some(sid(1000)),
+                            },
+                        ],
+                    )
+                    .await
+                    .expect(row.what);
+                assert_eq!(
+                    (imported.written, imported.skipped),
+                    (1, 1),
+                    "a locator name keeps no owner"
+                );
+                None
+            }
+        };
+        assert_eq!(got, row.expect, "{}", row.what);
+        let owner = lab.owner(row.name).await;
+        assert_eq!(
+            owner.as_ref().map(|owner| (owner.sid.clone(), owner.how)),
+            row.owner.map(|(rid, how)| (Some(sid(rid)), how)),
+            "{}",
+            row.what
+        );
+    }
+    // The manual AAAA beside pc01 is still there, and still manual.
+    assert_eq!(
+        lab.rrset(pc01, Rtype::AAAA).await.expect("kept").origin,
+        Origin::Manual
+    );
 }
 
 impl Lab {

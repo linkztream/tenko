@@ -720,6 +720,17 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("POST", "/dns/kerberos/check", "check_dns_kerberos"),
     ("POST", "/dns/kerberos/rotate", "rotate_dns_kerberos"),
     ("GET", "/dns/zones/{id}/owners", "list_dns_zone_owners"),
+    // WP13.4: the owner view.
+    (
+        "PUT",
+        "/dns/zones/{id}/owners/{name}",
+        "assign_dns_zone_owner",
+    ),
+    (
+        "DELETE",
+        "/dns/zones/{id}/owners/{name}",
+        "release_dns_zone_owner",
+    ),
     ("GET", "/auth/providers", "list_auth_providers"),
     ("POST", "/auth/providers", "create_auth_provider"),
     (

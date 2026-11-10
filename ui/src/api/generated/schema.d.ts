@@ -2593,12 +2593,36 @@ export interface paths {
         };
         /**
          * List the owners of a zone's names
-         * @description Scope: `dns.read`. One row per name with an owner (identity plan section 3.6): the SID when the ticket carried a PAC, the principal, since when, and the hold after the name's last record went. Empty for a zone without ownership.
+         * @description Scope: `dns.read`. One row per name with an owner (identity plan section 3.6), in name order: the SID when the ticket carried a PAC, the principal, since when, how the owner got the name (`created`, `claimed`, `assigned`, `imported`), and the hold after the name's last record went. `name` keeps the names at or below it, `owner` those of one owner by SID or principal. Empty for a zone without ownership.
          */
         get: operations["list_dns_zone_owners"];
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/zones/{id}/owners/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Give a name of a zone an owner
+         * @description Scope: `dns.write`. The name (absolute, inside the zone) gets the principal as its owner, replacing the owner it had (`If-Match` with the row's revision makes the change conditional); audited as `dns.owner.assign`. A name with records is owned from now; a name without records is held for the new owner for the zone's owner hold, so that it may create it. Locator and wildcard names keep no owner (`dns.owner.protected`); a zone without Kerberos settings keeps none (`dns.owner.off`).
+         */
+        put: operations["assign_dns_zone_owner"];
+        post?: never;
+        /**
+         * Release a name of a zone from its owner
+         * @description Scope: `dns.write`. The name's owner goes (`If-Match` with the row's revision makes the change conditional) and its dynamic records return to the origin `ad`: the next secure update that changes the name is held to the claim rule (the host the name carries, or a privileged principal), never taken by any principal the lists allow. To hand the name to a given principal, assign it instead. Audited as `dns.owner.release`; the records served do not change.
+         */
+        delete: operations["release_dns_zone_owner"];
         options?: never;
         head?: never;
         patch?: never;
@@ -14341,18 +14365,45 @@ export interface components {
             /** @description The canonical text of the source (`inventory:<connector id>`). */
             source_key: string;
         };
+        /** @description Body of `PUT /dns/zones/{id}/owners/{name}`. */
+        NameOwnerAssign: {
+            /** @description The new owner, a principal of one of the zone's realms (`PC07$@CORP.EXAMPLE.TEST`). */
+            principal: components["schemas"]["PrincipalName"];
+            scope?: components["schemas"]["ScopeName"] | null;
+            sid?: components["schemas"]["Sid"] | null;
+        };
         /** @description The owner of one name (identity plan section 3.6). */
         NameOwnerItem: {
             hold_until?: components["schemas"]["Timestamp"] | null;
+            /**
+             * @description How the owner got the name: `created` by its secure update, `claimed` (a name
+             *     imported without an owner, of its own host), `assigned` by an administrator, or
+             *     `imported` from the source of a migration.
+             */
+            how: components["schemas"]["OwnerSource"];
             /** @description The name. */
             name: components["schemas"]["DnsName"];
             /** @description The owner's principal. */
             principal: components["schemas"]["PrincipalName"];
+            /** @description The revision of the owner row, for `If-Match`. */
+            revision: components["schemas"]["Revision"];
             /** @description The zone scope. */
             scope: components["schemas"]["ScopeName"];
             sid?: components["schemas"]["Sid"] | null;
             /** @description Since when. */
             since: components["schemas"]["Timestamp"];
+        };
+        /** @description The answer of `DELETE /dns/zones/{id}/owners/{name}`. */
+        NameOwnerReleased: {
+            /**
+             * Format: int64
+             * @description The dynamic RRsets of the name that are claimable again (origin `ad`).
+             */
+            claimable: number;
+            /** @description The owner that was removed. */
+            owner: components["schemas"]["NameOwnerItem"];
+            /** @description The store revision of the write. */
+            revision: components["schemas"]["Revision"];
         };
         /**
          * @description A kind of source, as the name authority ranks them.
@@ -15505,6 +15556,11 @@ export interface components {
             /** @description The truth the source speaks for. */
             truth: components["schemas"]["Truth"];
         };
+        /**
+         * @description How a name got its owner.
+         * @enum {string}
+         */
+        OwnerSource: "created" | "claimed" | "assigned" | "imported";
         /**
          * @description Whether the ownership rules of section 3.6 apply to a zone (ID-Q8).
          * @enum {string}
@@ -16778,10 +16834,18 @@ export interface components {
             /** @description The items of this page, at most `limit` of them. */
             items: {
                 hold_until?: components["schemas"]["Timestamp"] | null;
+                /**
+                 * @description How the owner got the name: `created` by its secure update, `claimed` (a name
+                 *     imported without an owner, of its own host), `assigned` by an administrator, or
+                 *     `imported` from the source of a migration.
+                 */
+                how: components["schemas"]["OwnerSource"];
                 /** @description The name. */
                 name: components["schemas"]["DnsName"];
                 /** @description The owner's principal. */
                 principal: components["schemas"]["PrincipalName"];
+                /** @description The revision of the owner row, for `If-Match`. */
+                revision: components["schemas"]["Revision"];
                 /** @description The zone scope. */
                 scope: components["schemas"]["ScopeName"];
                 sid?: components["schemas"]["Sid"] | null;
@@ -24846,8 +24910,14 @@ export interface components {
             transfer?: components["schemas"]["TransferPolicy"] | null;
             update?: components["schemas"]["DnsUpdatePolicy"] | null;
         };
+        /**
+         * @description The dialect of a zone file.
+         * @enum {string}
+         */
+        ZoneFileDialect: "rfc1035" | "windows";
         /** @description `POST /dns/zones/{id}/records/import`: a zone file (RFC 1035 master format). */
         ZoneFileImport: {
+            dialect?: components["schemas"]["ZoneFileDialect"] | null;
             /** @description Replace the scope's records (`true`) or merge into them (`false`). */
             replace?: boolean;
             scope?: components["schemas"]["ScopeName"] | null;
@@ -24861,6 +24931,12 @@ export interface components {
              * @description RRsets added.
              */
             added: number;
+            /**
+             * Format: int64
+             * @description Of the RRsets added or replaced, those imported with the origin `ad` (a Windows
+             *     file's records with an aging mark): claimable by the host they name.
+             */
+            claimable?: number;
             /** @description Nothing was written. */
             dry_run: boolean;
             /** @description What the import could not take. */
@@ -37714,18 +37790,16 @@ export interface operations {
     list_dns_zone_owners: {
         parameters: {
             query?: {
-                /** @description Page size, 1 to 1,000 (default 100). */
-                limit?: number;
-                /** @description Opaque cursor from the previous page's `next_cursor`. */
-                cursor?: string;
-                /** @description Read at least this store revision (read-your-writes after a write). */
-                at_least?: number;
                 /** @description The zone scope; `default` when absent. */
                 scope?: components["schemas"]["ScopeName"];
                 /** @description Only the names at or below this name. */
                 name?: components["schemas"]["DnsName"];
-                /** @description Only the names of this owner, by SID or principal. */
+                /** @description Only the names of this owner, by SID or principal (without regard to case). */
                 owner?: string;
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
             };
             header?: never;
             path: {
@@ -37736,7 +37810,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description A page of owners by scope and name */
+            /** @description A page of owners by name */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -37745,7 +37819,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_NameOwnerItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`), or the scope does not exist (`dns.zone.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -37781,8 +37855,173 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DNS module does not run on this server (`dns.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    assign_dns_zone_owner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+                /** @description The name, absolute */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NameOwnerAssign"];
+            };
+        };
+        responses: {
+            /** @description The owner now */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NameOwnerItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`), the scope does not exist (`dns.zone.invalid`), or the owner is invalid: a name outside the zone, a realm the zone does not accept (`dns.owner.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone does not exist (`dns.zone.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone keeps no owners (`dns.owner.off`), the name keeps none (`dns.owner.protected`), or the DNS module does not run (`dns.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `If-Match` is not the owner row's revision */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    release_dns_zone_owner: {
+        parameters: {
+            query?: {
+                /** @description The zone scope; `default` when absent. */
+                scope?: components["schemas"]["ScopeName"];
+            };
+            header?: never;
+            path: {
+                /** @description Zone identifier (UUID) */
+                id: string;
+                /** @description The name, absolute */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The owner removed and the RRsets made claimable */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NameOwnerReleased"];
+                };
+            };
+            /** @description The request is malformed, the scope does not exist (`dns.zone.invalid`), or the name is outside the zone (`dns.owner.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone does not exist (`dns.zone.not_found`), or the name has no owner (`dns.owner.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone keeps no owners (`dns.owner.off`), the name keeps none (`dns.owner.protected`), or the DNS module does not run (`dns.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `If-Match` is not the owner row's revision */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };

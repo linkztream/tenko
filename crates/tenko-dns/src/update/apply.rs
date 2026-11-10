@@ -37,12 +37,16 @@
 //! | A locator name (every name of an `_msdcs` zone or under `_msdcs`, a first label `_ldap`, `_kerberos`, `_kpasswd`, `_gc`, `DomainDnsZones` or `ForestDnsZones`, the apex) | it is privileged | no owner is kept |
 //! | A wildcard name (`*` first) | it is privileged | no owner is kept |
 //! | Owned, the hold not passed | it is the owner (by SID when the owner has one, else by name), or privileged | the owner stays; the hold starts when the last record goes and ends when a record comes back |
-//! | Unowned with a manual, IPAM or DHCP record | it is privileged | no owner |
-//! | Unowned with a record imported from AD (origin `ad`) | it is privileged, or it claims its own host: `HOST$` claims `host.<zone>`, and a name whose records are PTR records pointing at `host.*` | a claimant becomes the owner |
+//! | Unowned with a manual, IPAM or DHCP record | it is privileged | it becomes the owner |
+//! | Unowned with a record imported from AD (origin `ad`) | it is privileged, or it claims its own host: `HOST$` claims `host.<zone>`, and a name whose records are PTR records pointing at `host` in its realm's DNS domain or below | it becomes the owner (`claimed` for a claimant) |
 //! | Unowned with dynamic records only, or new (no records, the hold passed, or an owner without a hold whose records went outside the update path) | the zone's lists allow it | it becomes the owner, unless it is a member of `DnsUpdateProxy` |
 //!
 //! Privileged principals are the members of the zone's privileged groups by SID from the
-//! PAC. An update signed with TSIG or unsigned takes no ownership and may not change a name
+//! PAC; a privileged principal that writes a name without an owner owns it, as the creator
+//! of a name does on Windows, so that no other principal can take a controller's or an
+//! administrator's name afterwards. Whoever changes a name without being privileged (its
+//! owner, its claimant, a `DnsUpdateProxy` member) changes no `manual`, `ipam` or `dhcp`
+//! RRset of it: those stay with privileged principals also beside the owner's records. An update signed with TSIG or unsigned takes no ownership and may not change a name
 //! that is owned and held; it removes an owner whose hold has passed. The owner rows are
 //! written in the same batch as the records, with their revisions expected, and the audit
 //! record carries the decision (`owner`, `privileged`, `claimed`, `proxy`) and the
@@ -58,8 +62,8 @@ use tenko_core::{
     ObjectRef, RequestCtx, Revision,
     audit::AuditDraft,
     dns::{
-        DnsName, NameOwner, NameOwnerKey, Origin, Rdata, RecordData, RrSet, RrSetKey, Rtype,
-        ScopeName, Zone, ZoneId, audit, check_apex, check_node,
+        DnsName, NameOwner, NameOwnerKey, Origin, OwnerSource, Rdata, RecordData, RrSet, RrSetKey,
+        Rtype, ScopeName, Zone, ZoneId, audit, check_apex, check_node,
         tables::{NAME_OWNERS, RRSETS},
     },
     ipam::Stamp,
@@ -129,49 +133,13 @@ struct OwnerState {
     after: Option<NameOwner>,
 }
 
-/// The first labels of the names Active Directory's controllers register (section 3.6).
-const LOCATOR_LABELS: [&str; 6] = [
-    "_ldap",
-    "_kerberos",
-    "_kpasswd",
-    "_gc",
-    "domaindnszones",
-    "forestdnszones",
-];
-
-/// Whether `name` is a locator name of `zone`: privileged principals only.
-fn is_locator(zone: &DnsName, name: &DnsName) -> bool {
-    if name == zone {
-        return true;
-    }
-    if zone
-        .labels()
-        .next()
-        .is_some_and(|label| label.eq_ignore_ascii_case("_msdcs"))
-    {
-        return true;
-    }
-    if name
-        .labels()
-        .any(|label| label.eq_ignore_ascii_case("_msdcs"))
-    {
-        return true;
-    }
-    name.labels().next().is_some_and(|first| {
-        LOCATOR_LABELS
-            .iter()
-            .any(|known| first.eq_ignore_ascii_case(known))
-    })
-}
+// WP13.4: the locator names are shared with the owner view (`zone::ownership`).
+use crate::zone::ownership::{is_locator, keeps_no_owner};
 
 /// Whether `identity` is `owner`: by SID when the owner has one (a ticket without a PAC,
 /// which has none, never matches it), by the principal's name otherwise.
 fn owns(owner: &NameOwner, identity: &GssIdentity) -> bool {
-    match (&owner.sid, &identity.sid) {
-        (Some(own), Some(other)) => own == other,
-        (Some(_), None) => false,
-        (None, _) => owner.principal == identity.principal,
-    }
+    owner.is_owner(&identity.principal, identity.sid.as_ref())
 }
 
 /// The host label a computer account may claim: `pc01` for `PC01$@REALM`.
@@ -182,18 +150,27 @@ fn own_host(identity: &GssIdentity) -> Option<String> {
         .then(|| host.to_ascii_lowercase())
 }
 
-/// Whether the RRsets of `name` carry `host`: the name is `host.<zone>`, or every record
-/// there is a PTR record whose target's first label is `host`.
+/// Whether the RRsets of `name` carry `host` of the domain `domain` (the DNS name of the
+/// claimant's realm): the name is `host.<zone>`, or every record there is a PTR record
+/// whose target is `host` in that domain or below it. A PTR to `host` in another domain
+/// names another computer, so it is not claimable (WP13.4).
 fn carries_host<'a>(
     zone: &DnsName,
     name: &DnsName,
     host: &str,
+    domain: Option<&DnsName>,
     rrsets: impl Iterator<Item = &'a RrSet> + Clone,
 ) -> bool {
     let first_is_host = |of: &DnsName| {
         of.labels()
             .next()
             .is_some_and(|label| label.eq_ignore_ascii_case(host))
+    };
+    let in_domain = |of: &DnsName| {
+        domain.is_some_and(|domain| {
+            of.parent()
+                .is_some_and(|parent| parent.is_subdomain_of(domain))
+        })
     };
     if first_is_host(name) && name.parent().as_ref() == Some(zone) {
         return true;
@@ -208,7 +185,9 @@ fn carries_host<'a>(
         };
         for record in records {
             match record {
-                RecordData::Ptr { target } if first_is_host(&target) => any = true,
+                RecordData::Ptr { target } if first_is_host(&target) && in_domain(&target) => {
+                    any = true;
+                }
                 _ => return false,
             }
         }
@@ -216,6 +195,20 @@ fn carries_host<'a>(
     any
 }
 // WP13.2: end.
+
+/// Whether `identity` claims `name` as its own host (`HOST$` of a realm whose DNS name
+/// holds the host), from the RRsets there.
+fn claims_own_host(
+    zone: &DnsName,
+    name: &DnsName,
+    identity: &GssIdentity,
+    rrsets: &[&RrSet],
+) -> bool {
+    let domain = DnsName::new(&identity.principal.realm().as_str().to_ascii_lowercase()).ok();
+    own_host(identity).is_some_and(|host| {
+        carries_host(zone, name, &host, domain.as_ref(), rrsets.iter().copied())
+    })
+}
 
 /// What became of one update.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,6 +264,11 @@ struct Planner<'v> {
     owners: BTreeMap<NodeKey, OwnerState>,
     /// The strongest decision of the last update planned.
     decision: Option<Decision>,
+    // WP13.4: what the decision of the name being changed allows.
+    /// Whether the operation planned now is a secure update's on a name it may change
+    /// without being privileged (as its owner, its claimant or a `DnsUpdateProxy` member):
+    /// then it changes no `manual`, `ipam` or `dhcp` RRset of the name.
+    unprivileged: bool,
 }
 
 /// The nodes of one scope, as the prerequisites see them.
@@ -383,6 +381,19 @@ impl Planner<'_> {
         let Some(existing) = existing else {
             return Ok(());
         };
+        // WP13.4: the static records of a name belong to privileged principals only, also
+        // beside the records its owner wrote (section 3.6).
+        if self.unprivileged
+            && matches!(
+                existing.origin,
+                Origin::Manual | Origin::Ipam | Origin::Dhcp
+            )
+        {
+            return Err(Stop::Refused(format!(
+                "{name} {rtype} is a static record ({}); only privileged principals change it",
+                origin_name(existing.origin)
+            )));
+        }
         if existing.origin == Origin::Dynamic
             || Origin::Dynamic.may_replace(existing.origin, &self.zone.update)
         {
@@ -528,10 +539,7 @@ impl Planner<'_> {
             if privileged {
                 return Ok(Decision::Privileged);
             }
-            let claims = own_host(identity).is_some_and(|host| {
-                carries_host(&self.zone.name, name, &host, rrsets.iter().copied())
-            });
-            return if claims {
+            return if claims_own_host(&self.zone.name, name, identity, &rrsets) {
                 Ok(Decision::Claimed)
             } else {
                 Err(Stop::Refused(format!(
@@ -569,15 +577,26 @@ impl Planner<'_> {
                 continue;
             };
             let live = state.after.take().filter(|owner| !owner.hold_passed(now));
-            state.after = match (decision, live, signer.gss()) {
-                (Decision::Owner | Decision::Claimed, None, Some(identity)) if has_records => {
-                    Some(NameOwner {
-                        sid: identity.sid.clone(),
-                        principal: identity.principal.clone(),
-                        since: now,
-                        hold_until: None,
-                    })
-                }
+            // WP13.4: a privileged principal that writes a name without an owner owns it,
+            // as the creator of a name does on Windows; only the names that keep no owner
+            // (locator and wildcard names) stay without one.
+            let owns_now = match decision {
+                Decision::Owner | Decision::Claimed => true,
+                Decision::Privileged => !keeps_no_owner(&self.zone.name, &key.1),
+                Decision::Unowned | Decision::Proxy => false,
+            };
+            state.after = match (owns_now, live, signer.gss()) {
+                (true, None, Some(identity)) if has_records => Some(NameOwner {
+                    sid: identity.sid.clone(),
+                    principal: identity.principal.clone(),
+                    since: now,
+                    hold_until: None,
+                    how: if *decision == Decision::Claimed {
+                        OwnerSource::Claimed
+                    } else {
+                        OwnerSource::Created
+                    },
+                }),
                 (_, Some(mut owner), _) => {
                     if has_records {
                         owner.hold_until = None;
@@ -810,9 +829,14 @@ impl Planner<'_> {
         // WP13.2: the ownership decision of each name, before its first operation.
         let mut decided: BTreeMap<NodeKey, Decision> = BTreeMap::new();
         for op in &message.updates {
-            let step = self
-                .own(item, op.name(), &mut decided)
-                .and_then(|()| self.apply_op(item, op, &mut undo));
+            let step = self.own(item, op.name(), &mut decided).and_then(|()| {
+                self.unprivileged = matches!(
+                    decided.get(&(item.scope.clone(), op.name().clone())),
+                    Some(Decision::Owner | Decision::Claimed | Decision::Proxy)
+                );
+                self.apply_op(item, op, &mut undo)
+            });
+            self.unprivileged = false;
             match step {
                 Ok(()) => {}
                 Err(Stop::Refused(reason)) => {
@@ -1027,6 +1051,7 @@ pub(crate) fn plan(
         ownership,
         owners: BTreeMap::new(),
         decision: None,
+        unprivileged: false,
     };
     let (outcomes, decisions) = planner.run(items, admit)?;
     let diff = planner.diff();
@@ -1168,7 +1193,7 @@ mod tests {
     }
 
     /// DNS-28, R122: `HOST$` claims `host.<zone>` and a name whose records are PTR records
-    /// to `host.*`; not a name in another place, a user principal, or a PTR to another host.
+    /// to `host` in the realm's domain; not a name in another place, a user principal, or a PTR to another host.
     #[test]
     fn dns_28_a_computer_claims_only_its_own_host() {
         let zone = name("corp.example.test");
@@ -1182,18 +1207,21 @@ mod tests {
             &zone,
             &at("pc01.corp.example.test"),
             &host,
+            Some(&zone),
             [&a].into_iter()
         ));
         assert!(!carries_host(
             &zone,
             &at("pc01.lab.corp.example.test"),
             &host,
+            Some(&zone),
             [&a].into_iter()
         ));
         assert!(!carries_host(
             &zone,
             &at("pc02.corp.example.test"),
             &host,
+            Some(&zone),
             [&a].into_iter()
         ));
         let reverse = name("2.0.192.in-addr.arpa");
@@ -1213,23 +1241,52 @@ mod tests {
             &[ptr("pc01.corp.example.test"), ptr("pc02.corp.example.test")],
         );
         let ptr_name = at("21.2.0.192.in-addr.arpa");
-        assert!(carries_host(&reverse, &ptr_name, &host, [&own].into_iter()));
+        assert!(carries_host(
+            &reverse,
+            &ptr_name,
+            &host,
+            Some(&zone),
+            [&own].into_iter()
+        ));
+        // WP13.4: a PTR to the same host label in another domain names another computer.
+        let elsewhere = rrset(
+            "24.2.0.192.in-addr.arpa",
+            Rtype::PTR,
+            &[ptr("pc01.other.example")],
+        );
         assert!(!carries_host(
             &reverse,
             &ptr_name,
             &host,
+            Some(&zone),
+            [&elsewhere].into_iter()
+        ));
+        assert!(!carries_host(
+            &reverse,
+            &ptr_name,
+            &host,
+            None,
+            [&own].into_iter()
+        ));
+        assert!(!carries_host(
+            &reverse,
+            &ptr_name,
+            &host,
+            Some(&zone),
             [&other].into_iter()
         ));
         assert!(!carries_host(
             &reverse,
             &ptr_name,
             &host,
+            Some(&zone),
             [&mixed].into_iter()
         ));
         assert!(!carries_host(
             &reverse,
             &ptr_name,
             &host,
+            Some(&zone),
             std::iter::empty()
         ));
     }

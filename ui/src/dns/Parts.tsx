@@ -6,6 +6,7 @@ import { Match, Show, Switch, type JSX } from "solid-js";
 import { ApiError, errorMessage } from "../api/problem";
 import { paths } from "../app/paths";
 import { ErrorNotice, Notice } from "../components/Notice";
+import { session } from "../auth/session";
 import { t } from "../i18n";
 import type { Origin, Zone, ZoneKind } from "./api";
 import { isReverse, servedNow, type CheckCode } from "./model";
@@ -127,7 +128,7 @@ export function fieldErrors(err: unknown): Record<string, string> {
   const field =
     err.code === "dns.zone.exists" || err.code === "dns.key.exists"
       ? "name"
-      : err.code === "dns.zone.invalid"
+      : err.code === "dns.zone.invalid" || err.code === "dns.owner.invalid"
         ? err.params.field
         : err.code === "sys.invalid_value"
           ? err.params.name
@@ -147,3 +148,33 @@ export function downloadText(name: string, text: string, type = "text/dns"): voi
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/** A checkbox with its help line. */
+export function Check(props: { id: string; label: string; help: string; checked: boolean; disabled: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <div class="field">
+      <label class="choice">
+        <input
+          type="checkbox"
+          id={`dns-f-${props.id}`}
+          checked={props.checked}
+          disabled={props.disabled}
+          aria-describedby={`dns-f-${props.id}-help`}
+          data-testid={`field-${props.id}`}
+          onChange={(e) => props.onChange(e.currentTarget.checked)}
+        />{" "}
+        <span>{props.label}</span>
+      </label>
+      <span class="help" id={`dns-f-${props.id}-help`}>
+        {props.help}
+      </span>
+    </div>
+  );
+}
+
+/** The profile in force, as TGL-09 names it. */
+export function profileInForce(): "home" | "standard" | "hardened" | "lab" {
+  const p = session()?.profile;
+  return p === "standard" || p === "hardened" || p === "lab" ? p : "home";
+}
+

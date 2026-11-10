@@ -5,8 +5,8 @@ section 3.19, ID-Q18): a Samba Active Directory domain controller provisioned wi
 own DNS, a Linux client with MIT Kerberos, and one Tenko DDI node that is the primary of the
 domain's zones and takes the secure dynamic updates (GSS-TSIG) of both. It is where the
 acceptance rows of E43, E47, E48 and E49 run, weekly on hosted runners and by hand; the
-Windows proof (E44) is the owner's lab and is not in containers ([r120-probe.md](r120-probe.md)
-has the steps of its first probe). It is a lab, not a deployment example: the realm is
+Windows proof (E44) is the owner's lab and is not in containers: its steps are
+[windows/README.md](windows/README.md), with the early probe of risk R120 as its step W5. It is a lab, not a deployment example: the realm is
 `LAB.EXAMPLE.TEST`, every address is a documentation value (`198.51.100.0/24`), every secret
 is generated per run, and the repository is public and so are the runners' logs, so nothing
 of a real domain is ever written here.
@@ -34,7 +34,7 @@ the controller exports.
 
 | Round | Script | Checks |
 |---|---|---|
-| `gss` | `gss.sh` (below) | E43: secure dynamic updates with GSS-TSIG from the controller and a Linux client |
+| `gss` | `gss.sh` (below) | E43: secure dynamic updates with GSS-TSIG from the controller and a Linux client; E46: the ownership rows a Samba controller can exercise |
 | `account` | [`account/round.sh`](account/README.md), with `account.override.yml` under the project `tenkoadaccount` | E45: the lifecycle of Tenko's Kerberos account (adopt, rotation, recovery, the self-test's findings, the keytab import) |
 
 The two rounds share the services of `compose.yml`; `account` runs the controller with a provisioning of its own (the pre-staged account, `faketime` for the skew row), so it is an override under its own project rather than services of this file.
@@ -75,6 +75,25 @@ The two rounds share the services of `compose.yml`; `account` runs the controlle
 | `gss.expired` | An update on a context past its lifetime (`[dns.gss] context_max_secs = 60` in the round): NOTAUTH with BADKEY |
 | `gss.second` | `bob` is REFUSED on the name `alice` created and owns |
 | `gss.ntlm` | A TKEY offer of NTLM alone is refused with BADKEY |
+
+Then the rows of E46 (the ownership of section 3.6 of the identity plan) that a Samba
+controller can exercise; the Rust tests (`crates/tenko-dns/tests/gss_update.rs`) hold every
+row of the table, these show the same against a real KDC and real `nsupdate -g` clients. The
+round creates two more computer accounts for them, `WSBOB$` and `SRV01$`.
+
+| Row | Check |
+|---|---|
+| `own.dc_host` | The controller owns the host name its `samba_dnsupdate` registered: the owner view lists `dc01` owned by `DC01$`, `created` |
+| `own.dc_refresh` | The controller's next registration succeeds and the owner stays |
+| `own.dc_refused` | A user (`alice`) is REFUSED on the controller's host record |
+| `own.locator` | A user is REFUSED on a locator name (`_ldap._tcp`) |
+| `own.admin` | The domain administrator changes a name it does not own; the owner stays `alice` |
+| `own.import` | A zone file in the Windows dialect imports: `wsbob` (an aging mark) and `srv01` (static) answer |
+| `own.claim_other` | Another principal (`bob`) cannot claim the imported dynamic name |
+| `own.claim` | `WSBOB$` claims its own imported name and owns it, `claimed` |
+| `own.static` | `SRV01$` cannot claim its static record |
+| `own.release` | After a release through the owner view, the name is not open to another principal |
+| `own.assign` | The name reassigned to `bob` with his SID: `bob` changes it and owns it, `assigned` |
 
 Every successful `nsupdate -g` row is also a check of the answers' signatures: `nsupdate`
 verifies the GSS-TSIG of the TKEY answer and of each update answer and reports a failure.

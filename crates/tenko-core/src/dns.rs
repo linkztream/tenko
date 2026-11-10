@@ -59,7 +59,7 @@ pub use recursion::{
 // WP13.0: the identity of a secure update.
 pub use identity::{
     EncryptionType, KerberosUpdate, KeyVersionMeta, KeyVersionState, KrbAccount, KrbFinding,
-    NameOwner, NameOwnerKey, Ownership, PrincipalName, Realm, Sid,
+    NameOwner, NameOwnerKey, OwnerSource, Ownership, PrincipalName, Realm, Sid,
 };
 // WP13.0: end.
 
@@ -273,8 +273,22 @@ pub mod codes {
     pub const GSS_REFUSED: &str = "dns.gss.refused";
     // WP13.0: end.
 
+    // WP13.4: the owner view (identity plan section 3.6).
+    /// The name has no owner in the zone scope (404). Params: `name`.
+    pub const OWNER_NOT_FOUND: &str = "dns.owner.not_found";
+    /// The zone keeps no owners: it has no Kerberos settings, or its ownership is `none`
+    /// (409).
+    pub const OWNER_OFF: &str = "dns.owner.off";
+    /// The name keeps no owner: a locator name or a wildcard, which only privileged
+    /// principals change (409). Params: `name`.
+    pub const OWNER_PROTECTED: &str = "dns.owner.protected";
+    /// The owner given is invalid: a realm the zone does not accept, or a malformed
+    /// principal or SID (400). Params: `field`, `reason`.
+    pub const OWNER_INVALID: &str = "dns.owner.invalid";
+    // WP13.4: end.
+
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 47] = [
+    pub const ALL: [&str; 51] = [
         ZONE_NOT_FOUND,
         ZONE_EXISTS,
         ZONE_INVALID,
@@ -328,6 +342,11 @@ pub mod codes {
         KRB_KDC_UNREACHABLE,
         KRB_PASSWORD_REFUSED,
         GSS_REFUSED,
+        // WP13.4
+        OWNER_NOT_FOUND,
+        OWNER_OFF,
+        OWNER_PROTECTED,
+        OWNER_INVALID,
     ];
 }
 
@@ -2421,8 +2440,15 @@ pub mod audit {
     pub const GSS_REFUSE: AuditAction = AuditAction::from_static("dns.gss.refuse");
     // WP13.0: end.
 
+    // WP13.4: the owner view (identity plan section 3.6).
+    /// An administrator (or a migration adapter) gave a name of a zone an owner.
+    pub const OWNER_ASSIGN: AuditAction = AuditAction::from_static("dns.owner.assign");
+    /// An administrator released a name from its owner: the name is claimable again.
+    pub const OWNER_RELEASE: AuditAction = AuditAction::from_static("dns.owner.release");
+    // WP13.4: end.
+
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 62] = [
+    pub const ALL: [&AuditAction; 64] = [
         &ZONE_CREATE,
         &ZONE_UPDATE,
         &ZONE_DELETE,
@@ -2490,6 +2516,9 @@ pub mod audit {
         &KRB_ACCOUNT_CHECK,
         &KRB_ACCOUNT_DELETE,
         &GSS_REFUSE,
+        // WP13.4
+        &OWNER_ASSIGN,
+        &OWNER_RELEASE,
     ];
 }
 

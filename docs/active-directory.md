@@ -1,8 +1,8 @@
 # Active Directory: taking over DNS and DHCP from the domain controllers
 
-This page is the runbook for moving the DNS zones of an Active Directory domain and the DHCP service off the domain controllers and onto Tenko DDI. It is for an operator who runs a small domain with the DNS Server and DHCP Server roles on the controllers, wants those roles gone from them, and keeps the directory itself where it is. It covers what Active Directory needs from DNS, the `_msdcs` zone, how the controllers register their records, what the missing GSS-TSIG costs until Phase 4, the steps in order with a check and a way back for each, and the rollback for each phase. Tenko is not joined to the domain and holds no directory data (CON-11); the controllers stay controllers.
+This page is the runbook for moving the DNS zones of an Active Directory domain and the DHCP service off the domain controllers and onto Tenko DDI. It is for an operator who runs a small domain with the DNS Server and DHCP Server roles on the controllers, wants those roles gone from them, and keeps the directory itself where it is. It covers what Active Directory needs from DNS, the `_msdcs` zone, how the controllers and the members register their records with secure dynamic updates (GSS-TSIG) and who owns each name, the steps in order with a check and a way back for each, and the rollback for each phase. Tenko is not joined to the domain and holds no directory data (CON-11); the controllers stay controllers.
 
-The migration pipeline of [MIGRATION.md](MIGRATION.md) (`tenko migrate plan`, `apply` and `verify` over the Windows adapter, MIG-06, MIG-08, MIG-17) ships in Phase 4, and so does GSS-TSIG (DNS-28, DNS-30). This runbook uses what ships today: a zone transfer in and a zone file import for the DNS data, RFC 2136 updates from the controllers' addresses, and scopes entered by hand from the Windows export for DHCP. Where the Phase 4 adapter will replace a manual step, the step says so. The commands are for Windows Server 2016 or later on the controllers.
+The migration pipeline of [MIGRATION.md](MIGRATION.md) (`tenko migrate plan`, `apply` and `verify` over the Windows adapter, MIG-06, MIG-08, MIG-17) ships later in Phase 4. This runbook uses what ships today: the zones exported by the Windows DNS Server and imported in Tenko's Windows dialect, which keeps the difference between the records clients registered and the ones an administrator made; secure dynamic updates with GSS-TSIG from the controllers and the members, signed with Kerberos (DNS-28, DNS-30), through a computer account whose keys Tenko holds; and scopes entered by hand from the Windows export for DHCP. Section 4 says what the secure footing is and when the older footing of unsigned updates from the controllers' addresses still fits. Where the Phase 4 adapter will replace a manual step, the step says so. The commands are for Windows Server 2016 or later on the controllers.
 
 Related: [dns.md](dns.md) (section 6 access lists, section 10.13 the transfer from Windows DNS, section 13 dynamic updates), [dnssec.md](dnssec.md), [dhcp.md](dhcp.md) (section 13 DDNS, section 17 the home cut-over), [SECURITY-PROFILES.md](SECURITY-PROFILES.md) (TGL-09, TGL-29), [dns-resolver.md](dns-resolver.md) (forwarding rules and the recursion access list), [MIGRATION.md](MIGRATION.md).
 
@@ -11,8 +11,10 @@ Contents:
 1. [The goal and the end state](#1-the-goal-and-the-end-state)
 2. [What Active Directory needs from DNS](#2-what-active-directory-needs-from-dns)
 3. [The `_msdcs` zone](#3-the-_msdcs-zone)
-4. [Unsecured updates, GSS-TSIG and the profiles](#4-unsecured-updates-gss-tsig-and-the-profiles)
+4. [Secure dynamic updates and the profiles](#4-secure-dynamic-updates-and-the-profiles)
    - [4.1 The Kerberos account of secure updates: pre-staging it](#41-the-kerberos-account-of-secure-updates-pre-staging-it)
+   - [4.2 Variant: unsigned updates from the controllers' addresses](#42-variant-unsigned-updates-from-the-controllers-addresses)
+   - [4.3 Variant: static registration](#43-variant-static-registration)
 5. [Prerequisites](#5-prerequisites)
 6. [The DNS steps](#6-the-dns-steps)
 7. [The DHCP steps](#7-the-dhcp-steps)
@@ -40,7 +42,8 @@ The goal is that nothing in the domain depends on the DNS Server or DHCP Server 
 | Area | End state |
 |---|---|
 | Zones | Tenko is the primary of `corp.example.test`, of `_msdcs.corp.example.test` (when AD has it as its own zone, section 3) and of the reverse zones. The DNS Server role is removed from both controllers |
-| Records of the controllers | The controllers' Netlogon service registers its SRV, CNAME and A records in Tenko by RFC 2136 update, from the controllers' addresses only (section 4) |
+| Records of the controllers | The controllers' Netlogon service registers its SRV, CNAME and A records in Tenko by secure dynamic update (GSS-TSIG), as the controllers' computer accounts, which are privileged (section 4) |
+| Records of the members | Every member, servers with a static address included, registers its own A and PTR records by secure dynamic update and owns them; another computer cannot change them |
 | Clients | Every client and server, the controllers included, resolves through Tenko. Option 6 of every scope names Tenko. No forwarding rule sends the domain to a controller |
 | DHCP | Tenko answers on all four networks. The Windows scopes are inactive, then the role is removed. Name protection is on (`conflict = protect`) |
 | DNSSEC | Off by default in Home; on per zone if you choose, with the DS at the parent (step 6) |
@@ -48,7 +51,7 @@ The goal is that nothing in the domain depends on the DNS Server or DHCP Server 
 
 The directory partitions `DomainDnsZones` and `ForestDnsZones` remain, because Microsoft does not let a DNS server leave them (section 6, step 9).
 
-The profile is Home. Home and Standard can host an AD zone this way; the Hardened profile cannot yet, and section 4 says why.
+Every profile can host an AD zone this way, Hardened included: the zones take secure updates only, and Hardened enforces that and the ownership rules on every zone with Kerberos settings (section 4).
 
 ## 2. What Active Directory needs from DNS
 
@@ -96,35 +99,45 @@ What this means for Tenko:
 | The delegation | In `corp.example.test`, the NS set at `_msdcs` names Tenko's name servers (`tenko1.corp.example.test`), and `tenko1.corp.example.test` has an A record in the domain zone. Only NS and glue may stand at a delegation point ([dns.md](dns.md) section 2). Tenko serves both zones itself, and a query is answered from the zone with the longest matching apex (check it, step 3), so the delegation is for other resolvers and for the structure AD expects |
 | SOA of each | Each zone has its own SOA. `mname` is `tenko1.corp.example.test` in both, because a Windows client finds the server to update by asking for the SOA of its name and sending the update to the `mname`. Serial policy `date_counter` |
 | NS of each | The apex NS set of both zones names Tenko's name server or servers and no controller. The import brings the controllers' NS records; step 3 replaces them |
-| Updates | Both zones need the access list of step 4: the controllers register their SRV, CNAME and A records in `_msdcs`, and their locator A record and the `_ldap`, `_kerberos` and `_kpasswd` records in the domain zone |
+| Updates | Both zones need the update policy of step 4: the controllers register their SRV, CNAME and A records in `_msdcs`, and their locator A record and the `_ldap`, `_kerberos` and `_kpasswd` records in the domain zone. Every name of the `_msdcs` zone is a locator name: only privileged principals (the controllers) change it |
 | Child domains | A child domain's own `_msdcs.<child domain>` records live in the child's zone; the rest of this page assumes a single domain |
 
-## 4. Unsecured updates, GSS-TSIG and the profiles
+## 4. Secure dynamic updates and the profiles
 
-Windows secures a dynamic update with GSS-TSIG (RFC 3645) over TKEY, with Kerberos as the only mechanism Windows clients and servers use. A zone in Active Directory defaults to accepting secure updates only, and then each record belongs to the account that created it. Tenko does not support GSS-TSIG until Phase 4 (DNS-28; [dns.md](dns.md) section 13.9), and a static TSIG key cannot stand in for it, since a Windows dynamic update client cannot sign with one.
+Windows secures a dynamic update with GSS-TSIG (RFC 3645): the client negotiates a security context with the DNS server through TKEY (RFC 2930), with a Kerberos ticket for the server's service principal name, and signs each update on that context. A zone in Active Directory defaults to accepting secure updates only, and each name then belongs to the account that created it. Tenko does the same ([dns.md](dns.md) sections 13.10 to 13.12); a static TSIG key cannot stand in for it, since a Windows dynamic update client cannot sign with one.
 
-Until then the AD zone takes unsigned updates, which the zone's update policy allows in the Home and Standard profiles:
+**The account.** Tenko holds the keys of one Active Directory computer account (`TENKO-DNS$` here) whose service principal name, `DNS/tenko1.corp.example.test`, is the name clients ask a ticket for: the `mname` of the zones' SOA. A domain administrator creates it once with the block of section 4.1 and a one-time password; Tenko changes the password at once, so that only Tenko knows it, keeps the AES keys in its vault, rotates the password every 30 days and tests the account every day ([dns.md](dns.md) section 13.10). Tenko joins nothing, holds no directory data and asks no controller while it takes an update: it decrypts the client's ticket with its keys, and the client's groups come from the ticket's PAC. Step 3a sets the account up.
 
-| Setting | Value for the AD zones |
+**The zone's policy.** A zone takes secure updates with one access list holding a Kerberos entry for the realm, a signature required, and the zone's Kerberos settings: the realm, the ownership rules, the privileged groups and the DnsUpdateProxy group. The Windows zone modes map onto it:
+
+| Windows (`DynamicUpdate`) | Tenko's update policy |
 |---|---|
-| `allowed` | One access list that holds the controllers' addresses as `/32` prefixes (and the `/128` of any IPv6 address a controller registers from) |
-| `require_tsig` | `false` |
-| `may_replace_ipam` | `false`, unless IPAM manages a name a controller registers (then an update of that name is refused with `dns.update.refused`) |
+| None | `allowed` empty |
+| Nonsecure and secure | A Kerberos entry and an entry of the controllers' addresses, `require_tsig` off (section 4.2) |
+| Secure only | A Kerberos entry for the realm, `require_tsig` on, the Kerberos settings with ownership `windows` |
 
-Home and Standard allow this per zone. Hardened refuses an unsigned update whatever the zone says (TGL-09), so a Hardened installation cannot host an AD zone that takes dynamic updates until GSS-TSIG ships. A Hardened installation can still serve the zone with static records (the variant below), and the Lab profile accepts unsigned updates by its nature.
+**Ownership.** In a zone with ownership on, Tenko keeps the owner of each name, as Windows keeps the owner of each `dnsNode` ([dns.md](dns.md) sections 13.11 and 13.12):
 
-What the access list protects against, and what it does not:
+| The name | Who may change it |
+|---|---|
+| A locator name (every name of the `_msdcs` zone, the `_ldap`, `_kerberos`, `_kpasswd` and `_gc` names, `DomainDnsZones`, `ForestDnsZones`, the domain's apex) or a wildcard | Privileged principals only; it keeps no owner |
+| A new name | Any principal of the realm; it becomes the owner (a member of DnsUpdateProxy leaves it without one) |
+| An owned name | The owner and privileged principals |
+| A name imported from the Windows export with an aging timestamp (a record a client registered, origin `ad`) | The computer it names, which claims it (`PC01$` claims `pc01.corp.example.test` and the PTR names that point at it), and privileged principals |
+| A static record (an administrator's, imported without a timestamp, or written in Tenko) | Privileged principals only; the owner of the name beside it does not change it |
 
-- It protects the zone from updates sent from any other address. A workstation, a phone or an IoT device cannot register a name or overwrite a locator record; its update is REFUSED and audited as `dns.update.refuse`.
-- It does not authenticate the sender. An update is accepted because of its source address, so a host on the same segment that sends from a controller's address (UDP is easy to forge) is accepted. GSS-TSIG signs each message with a Kerberos session key and does not have this weakness.
-- It does not bind a record to its creator. Windows secure update gives each record an owner, and Microsoft's own description is that a DHCP server that registers a name becomes the only account that may update it. Tenko tracks ownership per RRset by origin (`manual`, `dynamic`, `dhcp`, `ipam`, `transfer`, `dnssec`), not by account; from an allowed address an update can change any RRset except the ones owned by IPAM (unless `may_replace_ipam`), a transfer or the signer. The per-RRset ownership of the Windows zones is not carried by the import (the ACLs are only in the directory, [MIGRATION.md](MIGRATION.md) Known non-exportable data).
-- It does not stop a replay of a captured update, or a compromised controller.
+Privileged principals are the members of the groups the zone names by SID: Domain Admins (RID 512), Domain Controllers (516), Enterprise Admins (519) and DnsAdmins. A privileged principal that writes a name without an owner becomes its owner, as on Windows, so the controllers own their host records. The zone's **Owners** tab lists every owner, since when and how the name was taken, and lets an administrator release a name (it becomes claimable again by the computer it names) or give it to another account, for example after a computer was rebuilt under a new account.
 
-Compensate by keeping the controllers on a network segment where source addresses cannot be forged (a VLAN with the gateway's anti-spoofing enabled), by keeping the list to the controllers, by not adding client networks to it, and by watching `dns.update.refuse` and `dns.update.apply` in the audit log ([dns.md](dns.md) section 13.7).
+**What it protects against.** An update is signed with a key only the client and Tenko share for the context, so an address cannot be forged into an update, and a captured update is not accepted twice. A workstation cannot change a controller's record, a locator record, a server's record or another workstation's record. What it does not protect against: a compromised controller or administrator account, which is privileged on Windows too; and a member's own names, which its computer account may change.
 
-Member computers and servers with a static address cannot register themselves on this footing: their unsigned update is refused and their secure update cannot be negotiated. Tenko DHCP writes the names of DHCP clients itself, by the internal path that TGL-09 does not govern (TGL-29, [dhcp.md](dhcp.md) section 13), so those clients need nothing. Hosts with static addresses get their records by hand or from IPAM. Opening the list to the client networks would let them register, and would let every host in those networks overwrite any record of the zone, the locator records included; do not.
+**The profiles** (TGL-09, [SECURITY-PROFILES.md](SECURITY-PROFILES.md)):
 
-**Variant: static registration.** When the profile forbids unsigned updates, or you do not want them, switch the dynamic registration of the controllers off and keep the records in Tenko by hand. Setting `UseDynamicDns` to 0 in `HKLM\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters` makes Netlogon stop registering, and Microsoft says the records in `%SystemRoot%\System32\Config\Netlogon.dns` must then be registered manually; that file lists the records a controller needs, in zone file format, and `tenko dns import` reads it. Delete `Netlogon.dnb` and restart Netlogon for the setting to take effect. Cost: nothing re-registers by itself, so a changed controller address, a new controller or a moved global catalog needs a new import, and `dcdiag /test:dns` may report the missing dynamic registration.
+| Profile | AD zones |
+|---|---|
+| Home | Any mode per zone; nothing is set for you |
+| Standard | Secure only is the expected setting; "nonsecure and secure" is allowed per zone and shown as a deviation |
+| Hardened | Secure only on every zone that has Kerberos settings, with ownership on whatever the zone says; unsigned updates are refused everywhere |
+| Lab | Everything is allowed |
 
 ### 4.1 The Kerberos account of secure updates: pre-staging it
 
@@ -226,13 +239,39 @@ Keep the account out of clean-up scripts that disable inactive computer accounts
 
 **Variant: a keytab.** When the password should stay with the administrator, create the account (or a user account) and a keytab with `ktpass /out tenko.keytab /princ DNS/tenko1.corp.example.test@CORP.EXAMPLE.TEST /mapuser CORP\TENKO-DNS$ /crypto AES256-SHA1 /ptype KRB5_NT_PRINCIPAL /pass *`, and import it in the wizard or with `tenko dns kerberos import CORP.EXAMPLE.TEST tenko.keytab --spn DNS/tenko1.corp.example.test --name 'TENKO-DNS$'`. Tenko keeps the AES entries, refuses RC4 and DES entries, does not keep the file and does not rotate the password; a reset in AD needs a new keytab. Delete the keytab file after the import.
 
+### 4.2 Variant: unsigned updates from the controllers' addresses
+
+For a site that does not want a Tenko account in its directory, under Home or Standard, the AD zone can take unsigned updates from the controllers' addresses instead. Hardened refuses an unsigned update whatever the zone says (TGL-09), so this variant is not available there.
+
+| Setting | Value for the AD zones |
+|---|---|
+| `allowed` | One access list that holds the controllers' addresses as `/32` prefixes (and the `/128` of any IPv6 address a controller registers from) |
+| `require_tsig` | `false` |
+| `may_replace_ipam` | `false`, unless IPAM manages a name a controller registers (then an update of that name is refused with `dns.update.refused`) |
+
+What the access list protects against, and what it does not:
+
+- It protects the zone from updates sent from any other address. A workstation, a phone or an IoT device cannot register a name or overwrite a locator record; its update is REFUSED and audited as `dns.update.refuse`.
+- It does not authenticate the sender. An update is accepted because of its source address, so a host on the same segment that sends from a controller's address (UDP is easy to forge) is accepted. GSS-TSIG signs each message with a Kerberos session key and does not have this weakness.
+- It does not bind a name to its creator: from an allowed address an update can change any RRset except the ones owned by IPAM (unless `may_replace_ipam`), a transfer or the signer.
+- It does not stop a replay of a captured update, or a compromised controller.
+
+Compensate by keeping the controllers on a network segment where source addresses cannot be forged (a VLAN with the gateway's anti-spoofing enabled), by keeping the list to the controllers, by not adding client networks to it, and by watching `dns.update.refuse` and `dns.update.apply` in the audit log ([dns.md](dns.md) section 13.7).
+
+Member computers and servers with a static address cannot register themselves on this footing: their unsigned update is refused and their secure update cannot be negotiated. Tenko DHCP writes the names of DHCP clients itself, by the internal path that TGL-09 does not govern (TGL-29, [dhcp.md](dhcp.md) section 13), so those clients need nothing. Hosts with static addresses get their records by hand or from IPAM. Opening the list to the client networks would let every host in those networks overwrite any record of the zone, the locator records included; do not. With this variant, step 3a is skipped and step 4 sets the list above instead of the Kerberos policy.
+
+### 4.3 Variant: static registration
+
+When no dynamic update is wanted at all, switch the dynamic registration of the controllers off and keep the records in Tenko by hand. Setting `UseDynamicDns` to 0 in `HKLM\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters` makes Netlogon stop registering, and Microsoft says the records in `%SystemRoot%\System32\Config\Netlogon.dns` must then be registered manually; that file lists the records a controller needs, in zone file format, and `tenko dns import` reads it. Delete `Netlogon.dnb` and restart Netlogon for the setting to take effect. Cost: nothing re-registers by itself, so a changed controller address, a new controller or a moved global catalog needs a new import, and `dcdiag /test:dns` may report the missing dynamic registration.
+
 ## 5. Prerequisites
 
 | What | How | Checked by |
 |---|---|---|
-| The profile | Home or Standard. Settings, Security profile | The settings page names the profile |
+| The profile | Any; under Hardened only the secure footing (section 4.2 is refused there). Settings, Security profile | The settings page names the profile |
 | Tenko node | `roles = "controller,dns,dhcp"` (the `dhcp` role in relay mode, [dhcp.md](dhcp.md) section 17.1); a fixed address, `192.0.2.53`; UDP and TCP 53 and UDP 67 open from the networks that use it | `GET /api/v1/nodes/{id}/dns` and `/dhcp` report `serving` |
-| Time | The node's clock is synchronized (OPS-09); Kerberos on the controllers tolerates five minutes of skew | `w32tm /stripchart /computer:192.0.2.5` against the controllers |
+| Time | The node's clock is synchronized (OPS-09), best with the controllers as its time source: Kerberos refuses a ticket or an authenticator more than five minutes off | `w32tm /stripchart /computer:192.0.2.5` against the controllers; the account's self-test reports `dns.gss.clock_skew` |
+| Kerberos | The node reaches the controllers on TCP and UDP 88 and 464 (the account's adoption, rotation and daily self-test); a domain administrator, or an account delegated the rights of section 4.1, to run the block once | `Test-NetConnection 192.0.2.5 -Port 88` from a host on the node's network |
 | The controllers' addresses | Every address a controller can send an update from: its IPv4 address on the network that reaches Tenko, and any IPv6 address it registers. A multi-homed controller sends from the address of the interface that routes to Tenko | `Get-NetIPAddress` on each controller |
 | The state of AD DNS | The zones and their storage and replication scope, the forwarders, the aging settings, whether `_msdcs` is a zone of its own (section 3) | Output of the commands in step 1, saved |
 | A health baseline | `dcdiag /test:dns /v` and `repadmin /replsummary` pass before you start, so that a failure afterwards is yours | The saved output |
@@ -251,26 +290,55 @@ On a controller:
 ```powershell
 Get-DnsServerZone | Format-Table ZoneName, ZoneType, IsDsIntegrated, ReplicationScope, DynamicUpdate, SecureSecondaries
 Get-DnsServerForwarder
-Get-DnsServerZoneAging -Name corp.example.test
 foreach ($z in 'corp.example.test','_msdcs.corp.example.test','2.0.192.in-addr.arpa') {
+  Get-DnsServerZoneAging -Name $z
   Export-DnsServerZone -Name $z -FileName "$z.bak"
 }
-dnscmd /ZoneExport corp.example.test corp.example.test.dns
 Export-DhcpServer -ComputerName dc1.corp.example.test -File C:\export\dhcp.xml -Leases
 Get-DhcpServerv4Scope | Get-DhcpServerv4DnsSetting
 ```
 
-`Export-DnsServerZone` and `dnscmd /ZoneExport` write into `%SystemRoot%\System32\dns` on the server and take a file name, not a path. Microsoft says the exported file is for troubleshooting and is not in the format of a file-backed zone file, so keep these as the backup and as the way back, and bring the data into Tenko by zone transfer (step 2), which does not depend on that format. Copy the files off the controller. Keep `dhcp.xml`: it holds the scopes, options, reservations and leases that step 10 reads. List every zone that is AD-integrated; reverse zones are zones too.
+`Export-DnsServerZone` writes into `%SystemRoot%\System32\dns` on the server and takes a file name, not a path; keep these files as the backup and as the way back. Step 2 exports the zones once more, in the form Tenko imports. Copy the files off the controller. Keep `dhcp.xml`: it holds the scopes, options, reservations and leases that step 10 reads. List every zone that is AD-integrated; reverse zones are zones too.
 
-Check: the files exist and the `Get-DhcpServerv4DnsSetting` output shows `NameProtection` per scope, which step 10 needs.
+Check: the files exist and the `Get-DhcpServerv4DnsSetting` output shows `NameProtection` per scope, which step 10 needs. `Get-DnsServerZoneAging` shows whether aging is on for each zone: step 2 needs it on (see there).
 
 Way back: none needed; nothing was changed.
 
 ### Step 2. Bring the zones into Tenko, and build the scopes without serving them
 
-Tenko takes the zones by AXFR as secondary zones, exports them as zone files, and creates primary zones from the files. (A secondary zone cannot change kind; its records are read only.) The transfer has the access path and the limits of [dns.md](dns.md) section 10.13, and Windows DNS does not sign transfers, so the access rests on the address restriction on both sides.
+Tenko imports the zones from the files the Windows DNS Server exports, in its Windows dialect ([dns.md](dns.md) section 4). Those files mark each record that carries an aging timestamp, the records a client or a controller registered, with `[AGE:n]`; Tenko imports their A, AAAA and PTR records (the ones a client registers for itself) with the origin `ad` and without an owner, so that each computer claims its own names at its next registration (section 4), and keeps the records without a timestamp, an administrator's static records, as `manual`, which only privileged principals change. (A zone transfer carries no timestamps: everything it brings would be static, and no member could refresh its own name. When the in-place flip of a secondary zone exists, the takeover plan replaces this export and import by it.)
 
-On a controller, allow the transfer of each zone to the node and nothing else:
+Windows sets a timestamp only on records registered while aging is on for the zone. If step 1 showed aging off, turn it on and let the clients and the controllers register once more before the export (the controllers do every hour and at `nltest /dsregdns`; members at their next refresh, every 24 hours, or at `ipconfig /registerdns`):
+
+```powershell
+foreach ($z in 'corp.example.test','_msdcs.corp.example.test','2.0.192.in-addr.arpa') {
+  Set-DnsServerZoneAging -Name $z -Aging $true
+}
+Get-DnsServerResourceRecord -ZoneName corp.example.test | Where-Object { -not $_.Timestamp } |
+  Format-Table HostName, RecordType
+```
+
+The last command lists the records without a timestamp: they will be static in Tenko. A member's name in that list will not be claimable by the member; register it again first, or delete its record in Tenko after the import, so that the member registers it anew and owns it. Then export each zone; `dnscmd /ZoneExport` writes into `%SystemRoot%\System32\dns`:
+
+```powershell
+foreach ($z in 'corp.example.test','_msdcs.corp.example.test','2.0.192.in-addr.arpa') {
+  dnscmd /ZoneExport $z "$z.dns"
+}
+Select-String -Path "$env:SystemRoot\System32\dns\*.dns" -Pattern '\[AGE:' | Measure-Object
+```
+
+Copy the files to a host that reaches the node. On the node, one primary zone per file, a dry run, then the import:
+
+```
+tenko dns zone create corp.example.test --kind primary --ns tenko1.corp.example.test \
+  --mname tenko1.corp.example.test --rname hostmaster.corp.example.test --serial date_counter
+tenko dns import corp.example.test corp.example.test.dns --windows --dry-run
+tenko dns import corp.example.test corp.example.test.dns --windows
+```
+
+Repeat for `_msdcs.corp.example.test` and each reverse zone. Read the dry run: the records per type, `claimable by their hosts (origin ad)` with the count of the registered RRsets, and the losses. Records of a class other than IN, records outside the zone and names the model refuses (`dns.zonefile.class`, `.outside_zone`, `.data`) are listed and not imported; an AD zone should have none. WINS and WINS-R records, if the zone has them, are not served (CON-12) and are listed as `dns.zonefile.wins`. The SOA of the file becomes the zone's SOA (its `mname` is still `dc1` until step 3), and the NS set of the file replaces the zone's, so the apex NS names the controllers until step 3. An RRset that mixes records with and without a timestamp is imported as static.
+
+**Variant: by zone transfer.** For the address-list footing of section 4.2, where no name has an owner, the zones can also come by transfer: Tenko takes them by AXFR as secondary zones, exports them as zone files, and creates primary zones from the files. Every record is then `manual`. The transfer has the access path and the limits of [dns.md](dns.md) section 10.13; Windows DNS does not sign transfers, so the access rests on the address restriction on both sides. On a controller, allow the transfer of each zone to the node and nothing else:
 
 ```powershell
 foreach ($z in 'corp.example.test','_msdcs.corp.example.test','2.0.192.in-addr.arpa') {
@@ -288,29 +356,19 @@ POST /api/v1/dns/zones
  "source": {"primaries": [{"address": "192.0.2.5", "port": 53}]}}
 ```
 
-Repeat for `_msdcs.corp.example.test` and each reverse zone. Then, for each zone, compare the serials, export, remove the secondary zone, create the primary zone and import:
+Then, for each zone, compare the serials, export, remove the secondary zone, create the primary zone and import without `--windows`:
 
 ```
 tenko dns transfer status corp.example.test
 dig @192.0.2.5 corp.example.test SOA +short
-dig @192.0.2.53 corp.example.test SOA +short
 tenko dns export corp.example.test --file corp.example.test.zone
 tenko dns zone delete corp.example.test
 tenko dns zone create corp.example.test --kind primary --ns tenko1.corp.example.test \
   --mname tenko1.corp.example.test --rname hostmaster.corp.example.test --serial date_counter
-tenko dns import corp.example.test corp.example.test.zone --dry-run
 tenko dns import corp.example.test corp.example.test.zone
 ```
 
-The export route does not look at the zone kind. If a build refuses it, `dig @192.0.2.5 corp.example.test AXFR +noall +answer` gives the records; the second SOA that `dig` prints is reported as a loss (`dns.zonefile.soa`). Read the dry run: the records per type, and the losses. Records of a class other than IN, records outside the zone and names the model refuses (`dns.zonefile.class`, `.outside_zone`, `.data`) are listed and not imported; an AD zone should have none. WINS and WINS-R records, if the zone has them, are not served (CON-12). The import writes `manual` records. The SOA of the file becomes the zone's SOA (its `mname` is still `dc1` until step 3), and the NS set of the file replaces the zone's, so the apex NS names the controllers until step 3.
-
-Remove the transfer permission afterwards, so the controller does not keep notifying a node that no longer needs it:
-
-```powershell
-foreach ($z in 'corp.example.test','_msdcs.corp.example.test','2.0.192.in-addr.arpa') {
-  Set-DnsServerPrimaryZone -Name $z -SecureSecondaries NoTransfer -Notify NoNotify
-}
-```
+and remove the transfer permission afterwards (`Set-DnsServerPrimaryZone -Name $z -SecureSecondaries NoTransfer -Notify NoNotify`).
 
 Build the scopes now, so that step 10 is a switch and not an afternoon. A scope per network, its pool as an IPAM range of role `dhcp_pool` covering the same addresses as the Windows scope, the exclusions, the reservations as IPAM hosts of mode `reserved`, and the options of the Windows scope, exactly as in [dhcp.md](dhcp.md) section 17.1 (`Get-DhcpServerv4OptionValue -ScopeId 192.0.2.0 -All` lists them). The Windows adapter of Phase 4 (MIG-08) reads `dhcp.xml` and does this; until then it is manual. Option 6 is `192.0.2.53` and option 15 is `corp.example.test`:
 
@@ -321,9 +379,9 @@ tenko dhcp option set scope:<prefix-id> 3=c0000201 6=c0000235 15=636f72702e65786
 
 (`c0000201` is `192.0.2.1`, `c0000235` is `192.0.2.53`, the third value is `corp.example.test`.) A scope does not answer until the gateway relays to the node, so building them changes nothing on the networks. Leave DDNS for step 10.
 
-Check: `tenko dns zone list` shows the primary zones with their record counts; for a few names, `dig @192.0.2.53 <name>` and `dig @192.0.2.5 <name>` give the same answer; the audit log has `dns.zone.transfer_in` for each secondary and `dns.zone.export` for each export.
+Check: `tenko dns zone list` shows the primary zones with their record counts; `tenko dns record list corp.example.test --origin ad` lists the registered names and `--origin manual` the static ones; for a few names, `dig @192.0.2.53 <name>` and `dig @192.0.2.5 <name>` give the same answer; the audit log has `dns.record.import` for each import.
 
-Way back: delete the Tenko zones (`tenko dns zone delete`), and on the controllers set `-SecureSecondaries NoTransfer -Notify NoNotify`. The controllers' zones were never changed.
+Way back: delete the Tenko zones (`tenko dns zone delete`) (and with the transfer variant, on the controllers set `-SecureSecondaries NoTransfer -Notify NoNotify`). The controllers' zones were never changed.
 
 ### Step 3. Make Tenko a correct primary of the AD zones
 
@@ -339,7 +397,7 @@ The imported zone still names the controllers as its servers. Set the SOA and re
    "records": [{"type": "NS", "host": "tenko1.corp.example.test"}]}]}
 ```
 
-and for the `_msdcs` zone only the apex NS set. Leave the `_msdcs` change out of the domain zone's batch when AD has no zone of its own for it (section 3). Change the SOA `mname` of each zone to `tenko1.corp.example.test` with `PATCH /api/v1/dns/zones/{id}` (`{"soa": {"mname": "tenko1.corp.example.test", "rname": "hostmaster.corp.example.test"}}`). Leave the controllers' own A records (`dc1`, `dc2`) in the zone; they are ordinary hosts now. The aging timestamps of the Windows records are not carried (DNS-29 is Phase 4), so Tenko does not scavenge anything and the stale records of the old zone stay until you delete them.
+and for the `_msdcs` zone only the apex NS set. Leave the `_msdcs` change out of the domain zone's batch when AD has no zone of its own for it (section 3). Change the SOA `mname` of each zone to `tenko1.corp.example.test` with `PATCH /api/v1/dns/zones/{id}` (`{"soa": {"mname": "tenko1.corp.example.test", "rname": "hostmaster.corp.example.test"}}`). Leave the controllers' own A records (`dc1`, `dc2`) in the zone; they are ordinary hosts now. The aging timestamps of the Windows records decide their origin at the import and are not kept beyond it: Tenko does not scavenge yet (DNS-29), and the stale records of the old zone stay until you delete them.
 
 Check, from a client or the node:
 
@@ -355,22 +413,45 @@ The SOA of `_msdcs.corp.example.test` must come from the `_msdcs` zone, not from
 
 Way back: the zones are not used yet; repeat step 2 for a fresh copy.
 
-### Step 4. The access list and the update policy
+### Step 3a. Tenko's Kerberos account
 
-Create the access list and switch the update policy of the domain zone, the `_msdcs` zone and the reverse zones to it ([dns.md](dns.md) sections 6 and 13.2):
-
-```
-tenko dns acl create ad-controllers --entry 192.0.2.5/32 --entry 192.0.2.6/32
-```
+The account of section 4: run the block of section 4.1 once as a domain administrator, with the account name `TENKO-DNS`, the organizational unit of your service accounts, the SPN `DNS/tenko1.corp.example.test` (one `DNS/` SPN per Tenko node that is the primary of an AD zone) and a one-time password. Then, in Tenko, **DNS, Kerberos**, *Adopt a pre-staged account*, with the realm, the account name, the SPN, the controllers as KDCs and the one-time password; or:
 
 ```
+tenko dns kerberos adopt CORP.EXAMPLE.TEST 'TENKO-DNS$' --spn DNS/tenko1.corp.example.test \
+  --kdc 192.0.2.5 --kdc 192.0.2.6
+```
+
+which asks for the password on the terminal. List the KDCs rather than leaving Tenko to find them through `_kerberos._tcp`: the zones are Tenko's own from step 2, and the adoption must not depend on records in them.
+
+Check: `tenko dns kerberos status` lists the account, its key version (equal to `msDS-KeyVersionNumber` of `Get-ADComputer TENKO-DNS -Properties msDS-KeyVersionNumber`), the SPN, and no finding; the audit log has `dns.krb.account.adopt`. A finding names its cause ([dns.md](dns.md) section 13.10): `dns.gss.spn_missing` (the SPN is not on the account), `dns.gss.weak_etype` (the account is not AES only), `dns.gss.clock_skew`.
+
+Way back: `tenko dns kerberos delete` removes the keys from Tenko; the zones then refuse secure updates (a zone that still has the address list of section 4.2 falls back to it). Delete the computer account in the directory yourself (`Set-ADObject -ProtectedFromAccidentalDeletion $false`, then `Remove-ADComputer`).
+
+### Step 4. The update policy: secure only
+
+Create the access list of the realm and switch the update policy of the domain zone, the `_msdcs` zone and the reverse zones to secure only with the Windows ownership rules ([dns.md](dns.md) sections 6, 13.2 and 13.11). The SIDs of the privileged groups and of DnsUpdateProxy, on a controller:
+
+```powershell
+(Get-ADDomain).DomainSID.Value                # Domain Admins is <this>-512, Domain Controllers -516, Enterprise Admins -519
+(Get-ADGroup DnsAdmins).SID.Value
+(Get-ADGroup DnsUpdateProxy).SID.Value
+```
+
+```
+POST /api/v1/dns/acls
+{"name": "ad-corp", "entries": [{"kind": "kerberos", "realm": "CORP.EXAMPLE.TEST"}]}
+
 PATCH /api/v1/dns/zones/{id}
-{"update": {"allowed": ["<id of ad-controllers>"], "require_tsig": false, "may_replace_ipam": false}}
+{"update": {"allowed": ["<id of ad-corp>"], "require_tsig": true, "may_replace_ipam": false,
+  "kerberos": {"realms": ["CORP.EXAMPLE.TEST"], "ownership": "windows", "owner_hold_days": 14,
+    "privileged": ["<domain SID>-512", "<domain SID>-516", "<domain SID>-519", "<DnsAdmins SID>"],
+    "update_proxy": "<DnsUpdateProxy SID>"}}}
 ```
 
-The settings tab of a primary zone has the same fields in "Dynamic updates", and shows the profile's rule beside the switch. The list names only the controllers. Under Hardened the unsigned update stays refused (section 4). Leave `update.dhcp` unset: under Home it follows the profile and lets Tenko DHCP write into the zone, and under Standard set it to `true` on the forward zone and the reverse zones when step 10 turns DDNS on.
+The settings tab of a primary zone has the same fields in **Dynamic updates** and **Secure updates (Kerberos)** (its *Domain SID* button adds the three groups with fixed RIDs), and shows the profile's rule beside them. In a forest of several domains the Enterprise Admins SID is the forest root domain's; a child domain is its own realm (R134), with its own zone and settings. No address list is needed: a controller's update is accepted for its principal, not its address. A list of the controllers' addresses can still be kept as an extra condition, with `from` on the Kerberos entry (`{"kind": "kerberos", "realm": "CORP.EXAMPLE.TEST", "from": "192.0.2.0/26"}`). Leave `update.dhcp` unset: under Home it follows the profile and lets Tenko DHCP write into the zone, and under Standard set it to `true` on the forward zone and the reverse zones when step 10 turns DDNS on.
 
-Check: from a host that is not on the list, `nsupdate` of a test name is REFUSED and `dns.update.refuse` appears in the audit log. That the controllers' updates are accepted is checked in step 5.
+Check: from a host with `nsupdate` (BIND's tool, on Linux or WSL), an unsigned update of a test name is REFUSED and `dns.update.refuse` appears in the audit log; that the controllers' secure updates are accepted is checked in step 5. The zone's **Owners** tab is empty: no name has an owner until a secure update creates or claims it.
 
 ```
 nsupdate
@@ -379,8 +460,6 @@ nsupdate
 > update add updatetest.corp.example.test 60 IN A 192.0.2.250
 > send
 ```
-
-(`nsupdate` is the BIND tool; run it from a Linux host or WSL.)
 
 Way back: `PATCH` the zones' `update` to `{"allowed": [], "require_tsig": true}`; the list can then be deleted (`tenko dns acl delete`).
 
@@ -395,7 +474,7 @@ nltest /dsregdns
 ipconfig /registerdns
 ```
 
-(`ipconfig /registerdns` is right here: a controller has a static address and no DHCP server to negotiate with.) `nltest /dsregdns` refreshes the registration of all DNS records that are specific to the controller; restarting the Netlogon service does the same. The records are also re-registered when the service starts and, Microsoft documents, every hour. Check what the service thinks happened:
+(`ipconfig /registerdns` is right here: a controller has a static address and no DHCP server to negotiate with.) `nltest /dsregdns` refreshes the registration of all DNS records that are specific to the controller; restarting the Netlogon service does the same. The records are also re-registered when the service starts and, Microsoft documents, every hour. The controller negotiates a context with Tenko through TKEY over TCP, with a ticket for `DNS/tenko1.corp.example.test`, and signs its updates on it; with the default `UpdateSecurityLevel` it tries an unsigned update first, gets REFUSED, and sends the secure one (section 9). Check what the service thinks happened:
 
 ```powershell
 nltest /dsquerydns
@@ -404,7 +483,6 @@ nltest /dsquerydns
 Check in Tenko that the controllers' records arrived and who wrote them:
 
 ```
-GET /api/v1/dns/zones/{id}/records?name=_ldap&origin=dynamic
 dig @192.0.2.53 _ldap._tcp.dc._msdcs.corp.example.test SRV +short
 dig @192.0.2.53 _ldap._tcp.gc._msdcs.corp.example.test SRV +short
 dig @192.0.2.53 _gc._tcp.corp.example.test SRV +short
@@ -414,11 +492,15 @@ dig @192.0.2.53 gc._msdcs.corp.example.test A +short
 dig @192.0.2.53 _ldap._tcp.DomainDnsZones.corp.example.test SRV +short
 ```
 
-or the same with `nslookup -type=SRV _ldap._tcp.dc._msdcs.corp.example.test 192.0.2.53` or `Resolve-DnsName -Type SRV -Server 192.0.2.53 <name>`. Every query lists both controllers (the global catalog queries list the ones that are global catalog servers). The audit log has `dns.update.apply` with the controllers' addresses and `tenko_dns_updates_total{outcome="ok"}` rises; `refused` should not move. Then `nltest /dsgetdc:corp.example.test /force` and `nltest /dnsgetdc:corp.example.test /force` on a controller return a controller found through Tenko.
+or the same with `Resolve-DnsName -Type SRV -Server 192.0.2.53 <name>`. Every query lists both controllers (the global catalog queries list the ones that are global catalog servers). The audit log has `dns.update.apply` with the principal `DC1$@CORP.EXAMPLE.TEST`, its SID and the ownership decision `privileged`; `tenko_dns_updates_total{auth="gss",outcome="ok"}` rises; the zone's **Owners** tab lists `dc1.corp.example.test` owned by `DC1$`, and no locator name. Then `nltest /dsgetdc:corp.example.test /force` and `nltest /dnsgetdc:corp.example.test /force` on a controller return a controller found through Tenko.
 
-If the updates are refused or never arrive, `dns.update.refuse` names the reason (the address not on the list, an RRset owned by IPAM, a zone that is not primary here), and the DC's `Netlogon.log` in `%SystemRoot%\Debug` and event 5774 of the NETLOGON source say that a record could not be registered. A group policy that sets Update Security Level to secure only (value 256) stops the unsigned update; see section 9.
+If the updates are refused or never arrive: `dns.gss.refuse` names why a negotiation failed (a ticket under a key version Tenko does not hold, an RC4 ticket, a clock off by more than five minutes), `dns.update.refuse` why an update was refused (the realm not in the zone's settings, a name owned by another principal, a locator name written by a principal that is not privileged: check the SIDs of step 4), and the DC's `Netlogon.log` in `%SystemRoot%\Debug` and event 5774 of the NETLOGON source say that a record could not be registered. The account's findings (`tenko dns kerberos status`) cover the account's side.
 
 Do the second controller after the first checks out.
+
+**Secure only on the clients, too.** Once both controllers register, the update security level of the DNS client may be set to secure only by group policy (Computer Configuration, Administrative Templates, Network, DNS Client, *Update security level*: *Only secure*, `UpdateSecurityLevel` = 256), which saves the refused unsigned attempt; check with `nltest /dsregdns` and `nltest /dsquerydns` again.
+
+**The members register themselves.** Every member, servers with a static address included, registers its A and PTR records with a secure update at its start, every 24 hours and at `ipconfig /registerdns`, once its DNS server is Tenko (step 7): a name imported in step 2 with a timestamp is claimed by its computer at that registration, and a new name is owned by the computer that creates it. Nothing is added by hand. A member's static record that came over without a timestamp stays an administrator's, and a name holding one is given to no computer: delete the record in Tenko if the member should register it, and the member owns the name it registers next.
 
 Way back: set each controller's DNS list back to its own address (`Set-DnsClientServerAddress ... -ServerAddresses 192.0.2.5`) and run `nltest /dsregdns` again; the controller's own DNS Server answers the SOA with itself again and registers in its own zone. The records the controllers wrote into Tenko are harmless and go with the zone.
 
@@ -478,8 +560,9 @@ Keep both servers for a week: the controllers' DNS Server roles are installed an
 |---|---|---|
 | Who still asks the controllers | The query counters of the DNS Server service (Performance Monitor), or a packet capture on port 53 at a controller | Nothing from clients, only the controllers' own queries |
 | Who asks Tenko | Switch the query log on for the period (TGL-15, `[dns]` settings, [dns.md](dns.md) section 8) and read the clients' addresses | Every network |
-| Update refusals | The audit action `dns.update.refuse`, the metric `tenko_dns_updates_total{outcome="refused"}` | None from the controllers; one from a static host means that host tried to register (section 4) |
-| Updates written | `dns.update.apply`, `outcome="ok"` | The controllers' hourly registration, a quiet zone otherwise |
+| Update refusals | The audit actions `dns.update.refuse` and `dns.gss.refuse`, the metric `tenko_dns_updates_total{outcome="refused"}` | Unsigned attempts that a secure update follows, from hosts whose `UpdateSecurityLevel` is the default; nothing else. A refusal for ownership names the owner: a computer rebuilt under a new account needs its name released or given to it in the Owners tab |
+| The account | `tenko dns kerberos status`, the health findings `dns.gss.*` | No finding; the daily self-test passes |
+| Updates written | `dns.update.apply`, `outcome="ok"` | The controllers' hourly registration and the members' daily refresh; a refresh that changes nothing writes nothing |
 | The locator | `nltest /dsgetdc:corp.example.test /force` and `nltest /dnsgetdc:corp.example.test /force` from a controller and a member | A controller is found |
 | The health test | `dcdiag /test:dns /v` on each controller | The tests that read the zone data pass (see below) |
 | Replication | `repadmin /replsummary` | No errors; DNS does not carry AD replication, but a failed SRV lookup would show here first |
@@ -526,9 +609,9 @@ This part follows section 17 of [dhcp.md](dhcp.md), the home cut-over, step for 
 | `UpdateDnsRRForOlderClients` | `legacy_clients` |
 | `DisableDnsPtrRRUpdate` | `reverse = false` |
 
-Windows keeps its DNS credential for DHCP in the server, and its password is not carried; Tenko's DHCP writes through the zone service and needs none. The forward zone is the scope's domain name (option 15), which is `corp.example.test`. A zone takes DHCP updates by the zone's `update.dhcp`: unset follows the profile (Home yes, Standard no, [dhcp.md](dhcp.md) section 13.1).
+Windows keeps its DNS credential for DHCP in the server, and its password is not carried; Tenko's DHCP writes through the zone service and needs none (TGL-29). During a coexistence period, a Windows DHCP server that registers names for its clients in the secure-only zones should do so with a dedicated user account set as its DNS credential (`Set-DhcpServerDnsCredential`), Microsoft's guidance for DHCP on a controller with secure-only zones: without one it registers as the controller's computer account, which is privileged and would own every name it writes. Names it writes as a member of DnsUpdateProxy stay without an owner, so the client can take them over later. The forward zone is the scope's domain name (option 15), which is `corp.example.test`. A zone takes DHCP updates by the zone's `update.dhcp`: unset follows the profile (Home yes, Standard no, [dhcp.md](dhcp.md) section 13.1).
 
-**The records Windows DHCP wrote.** Tenko DHCP replaces only records it wrote itself: the origin rules ([dhcp.md](dhcp.md) section 13.4) refuse a name whose A record has the origin `manual` or `dynamic`. The A, DHCID and PTR records of DHCP clients that came over with the import are `manual`, and the ones Windows DHCP wrote during the parallel period are `dynamic`, so the first renewal of such a client would be refused. Before the first network is switched, delete them, so that Tenko writes them anew at the first renewal:
+**The records Windows DHCP wrote.** Tenko DHCP replaces only records it wrote itself: the origin rules ([dhcp.md](dhcp.md) section 13.4) refuse a name whose A record has the origin `manual`, `ad` or `dynamic`. The A, DHCID and PTR records of DHCP clients that came over with the import are `ad` (or `manual` without a timestamp), and the ones Windows DHCP wrote during the parallel period are `dynamic`, so the first renewal of such a client would be refused. Before the first network is switched, delete them, so that Tenko writes them anew at the first renewal:
 
 ```
 GET /api/v1/dns/zones/{id}/records?type=DHCID
@@ -563,7 +646,8 @@ Each phase can be undone alone until the one after it has begun; the later ones 
 | Clients repointed (step 7) | Option 6 on the scopes, static DNS settings, the controllers' lists, forwarding rules, the frozen zones on the controllers | Reverse each item in the order of its list: the frozen zones first (`-DynamicUpdate Secure`), then the controllers' lists back to their own address, the static settings, option 6 and the forwarding rules. Records registered in Tenko since are lost to the old copy: a client re-registers into the controller's zone at its next refresh or with `ipconfig /registerdns` |
 | Controllers registering in Tenko (step 5) | The controllers' DNS lists, and the records in Tenko | The controllers' own address back as the preferred server, then `nltest /dsregdns`. Nothing in the controllers' zones changed |
 | DNSSEC (step 6) | Keys, DS at the parent | Remove the DS, wait its TTL, `tenko dns dnssec disable` |
-| Zones and policy in Tenko (steps 2 to 4) | Only Tenko | Delete the zones in Tenko, delete the access list, remove the transfer permission on the controllers |
+| Kerberos account (step 3a) | A computer account in the directory; its keys in Tenko | `tenko dns kerberos delete`, then delete the computer account in the directory. The zones refuse secure updates from then on |
+| Zones and policy in Tenko (steps 2 to 4) | Only Tenko | Delete the zones in Tenko, delete the access list (and with the transfer variant, remove the transfer permission on the controllers) |
 
 If the whole project is abandoned at any point before step 9, nothing is left to undo on the controllers but the settings above; their DNS zones were frozen and can be unfrozen in one command.
 
@@ -573,9 +657,9 @@ These two were checked against Microsoft's pages (the Sources) because the steps
 
 ### How the controllers register their records, and which setting governs the fallback
 
-Netlogon registers the records of section 2 by dynamic update when the controller starts, when the Netlogon service starts and once an hour, and lists what it tries in `%SystemRoot%\System32\Config\Netlogon.dns`, which is also the list to register by hand after `UseDynamicDns` is set to 0; `nltest /dsregdns` refreshes the registration at once, `RegisterDnsARecords` and `DnsAvoidRegisterRecords` (or the group policy "Specify DC Locator DNS records not registered by the DCs") narrow it. The fallback from unsecured to secure update is the `UpdateSecurityLevel` value under `HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters` (group policy "Update Security Level", one of the DNS Client policies): 0, the default, sends an unsecured update first and a secure one when it is refused, 16 sends unsecured only, 256 secure only. Microsoft documents that value as a setting of the DNS client, lists the Netlogon service's switches separately, and no page found says that Netlogon follows `UpdateSecurityLevel` or has a security level of its own, so this page does not rely on it: it relies on the default sequence being tried and accepted at the first (unsecured) step, and step 5 checks that an unsigned update reaches Tenko and is accepted.
+Netlogon registers the records of section 2 by dynamic update when the controller starts, when the Netlogon service starts and once an hour, and lists what it tries in `%SystemRoot%\System32\Config\Netlogon.dns`, which is also the list to register by hand after `UseDynamicDns` is set to 0; `nltest /dsregdns` refreshes the registration at once, `RegisterDnsARecords` and `DnsAvoidRegisterRecords` (or the group policy "Specify DC Locator DNS records not registered by the DCs") narrow it. The fallback from unsecured to secure update is the `UpdateSecurityLevel` value under `HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters` (group policy "Update Security Level", one of the DNS Client policies): 0, the default, sends an unsecured update first and a secure one when it is refused, 16 sends unsecured only, 256 secure only. Microsoft documents that value as a setting of the DNS client, lists the Netlogon service's switches separately, and no page found says that Netlogon follows `UpdateSecurityLevel` or has a security level of its own, so this page does not rely on either: with the default the unsigned attempt is refused and the secure one accepted, with 256 only the secure one is sent, and step 5 checks the registration either way. The owner-run Windows lab records which of the two Netlogon sends ([deploy/compose/lab-ad/windows/](../deploy/compose/lab-ad/windows/README.md), E44).
 
-What happens when the zone's server is not Microsoft DNS: it must support SRV records and should support dynamic update, and Microsoft says a server without dynamic update works when the records of `Netlogon.dns` are added by hand. Microsoft also says that with a third-party server you lose the DNS console, Active Directory integration, secure dynamic update and aging and scavenging. Dynamic update with Tenko is therefore unsecured by necessity until GSS-TSIG ships; where the update is refused, Netlogon logs event 5774 and retries at its next hourly registration.
+What happens when the zone's server is not Microsoft DNS: it must support SRV records and should support dynamic update, and Microsoft says a server without dynamic update works when the records of `Netlogon.dns` are added by hand. Microsoft also says that with a third-party server you lose the DNS console, Active Directory integration, secure dynamic update and aging and scavenging. Tenko supports secure dynamic update (GSS-TSIG) itself, so of that list only the console, the directory integration and aging and scavenging are lost; where an update is refused, Netlogon logs event 5774 and retries at its next hourly registration.
 
 ### The `_msdcs.<forest root>` zone
 

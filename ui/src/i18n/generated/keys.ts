@@ -428,6 +428,8 @@ export type MessageKey =
   | "audit.action.dns.nta.create"
   | "audit.action.dns.nta.delete"
   | "audit.action.dns.nta.expire"
+  | "audit.action.dns.owner.assign"
+  | "audit.action.dns.owner.release"
   | "audit.action.dns.record.actuate"
   | "audit.action.dns.record.change"
   | "audit.action.dns.record.import"
@@ -3247,6 +3249,12 @@ export type MessageKey =
   | "dns.import.apply.rolled_back"
   | "dns.import.apply.running"
   | "dns.import.apply.serial"
+  | "dns.import.claimable"
+  | "dns.import.dialect.rfc1035"
+  | "dns.import.dialect.rfc1035_help"
+  | "dns.import.dialect.windows"
+  | "dns.import.dialect.windows_help"
+  | "dns.import.dialect_label"
   | "dns.import.fact.added"
   | "dns.import.fact.removed"
   | "dns.import.fact.replaced"
@@ -3605,6 +3613,7 @@ export type MessageKey =
   | "dns.loss.outside"
   | "dns.loss.soa"
   | "dns.loss.unsupported_type"
+  | "dns.loss.wins"
   | "dns.nav.acls"
   | "dns.nav.blocking"
   | "dns.nav.cache"
@@ -3706,6 +3715,48 @@ export type MessageKey =
   | "dns.origin.ipam"
   | "dns.origin.manual"
   | "dns.origin.transfer"
+  | "dns.owners.assign"
+  | "dns.owners.assign_action"
+  | "dns.owners.assign_hold"
+  | "dns.owners.assign_title"
+  | "dns.owners.assigned"
+  | "dns.owners.col.hold"
+  | "dns.owners.col.how"
+  | "dns.owners.col.name"
+  | "dns.owners.col.principal"
+  | "dns.owners.col.sid"
+  | "dns.owners.col.since"
+  | "dns.owners.current"
+  | "dns.owners.empty"
+  | "dns.owners.empty_body"
+  | "dns.owners.filter_label"
+  | "dns.owners.filter_name"
+  | "dns.owners.filter_owner"
+  | "dns.owners.held_until"
+  | "dns.owners.how.assigned"
+  | "dns.owners.how.claimed"
+  | "dns.owners.how.created"
+  | "dns.owners.how.imported"
+  | "dns.owners.how_hint.assigned"
+  | "dns.owners.how_hint.claimed"
+  | "dns.owners.how_hint.created"
+  | "dns.owners.how_hint.imported"
+  | "dns.owners.label"
+  | "dns.owners.name_help"
+  | "dns.owners.off"
+  | "dns.owners.principal_help"
+  | "dns.owners.principal_invalid"
+  | "dns.owners.reassign"
+  | "dns.owners.reassign_body"
+  | "dns.owners.reassign_title"
+  | "dns.owners.release"
+  | "dns.owners.release_body"
+  | "dns.owners.release_claimable"
+  | "dns.owners.release_reassign"
+  | "dns.owners.release_title"
+  | "dns.owners.released"
+  | "dns.owners.sid_help"
+  | "dns.owners.sid_invalid"
   | "dns.record.line_error"
   | "dns.records.any_origin"
   | "dns.records.any_type"
@@ -3884,6 +3935,36 @@ export type MessageKey =
   | "dns.update.default_home"
   | "dns.update.default_lab"
   | "dns.update.default_standard"
+  | "dns.update.kerberos.body"
+  | "dns.update.kerberos.domain_add"
+  | "dns.update.kerberos.domain_help"
+  | "dns.update.kerberos.domain_sid"
+  | "dns.update.kerberos.enable"
+  | "dns.update.kerberos.enable_help"
+  | "dns.update.kerberos.hold"
+  | "dns.update.kerberos.hold_help"
+  | "dns.update.kerberos.hold_invalid"
+  | "dns.update.kerberos.no_privileged"
+  | "dns.update.kerberos.ownership"
+  | "dns.update.kerberos.ownership_hardened"
+  | "dns.update.kerberos.ownership_help"
+  | "dns.update.kerberos.ownership_none"
+  | "dns.update.kerberos.ownership_windows"
+  | "dns.update.kerberos.privileged"
+  | "dns.update.kerberos.privileged_help"
+  | "dns.update.kerberos.privileged_remove"
+  | "dns.update.kerberos.proxy"
+  | "dns.update.kerberos.proxy_help"
+  | "dns.update.kerberos.realms"
+  | "dns.update.kerberos.realms_help"
+  | "dns.update.kerberos.realms_required"
+  | "dns.update.kerberos.rid_domain_admins"
+  | "dns.update.kerberos.rid_domain_controllers"
+  | "dns.update.kerberos.rid_enterprise_admins"
+  | "dns.update.kerberos.sid_add"
+  | "dns.update.kerberos.sid_invalid"
+  | "dns.update.kerberos.sid_label"
+  | "dns.update.kerberos.title"
   | "dns.update.may_replace_ipam"
   | "dns.update.may_replace_ipam_help"
   | "dns.update.require_tsig"
@@ -4045,6 +4126,7 @@ export type MessageKey =
   | "dns.zone.stub_hint"
   | "dns.zone.tab.dnssec"
   | "dns.zone.tab.history"
+  | "dns.zone.tab.owners"
   | "dns.zone.tab.records"
   | "dns.zone.tab.settings"
   | "dns.zone.tabs"
@@ -4238,6 +4320,10 @@ export type MessageKey =
   | "errors.dns.node.not_dns"
   | "errors.dns.nta.invalid"
   | "errors.dns.nta.not_found"
+  | "errors.dns.owner.invalid"
+  | "errors.dns.owner.not_found"
+  | "errors.dns.owner.off"
+  | "errors.dns.owner.protected"
   | "errors.dns.record.conflict"
   | "errors.dns.record.invalid"
   | "errors.dns.record.origin"
@@ -8680,6 +8766,7 @@ export interface MessageArgs {
   "dns.fwd.saved": { suffix: string | number };
   "dns.import.apply.progress": { done: string | number; total: string | number };
   "dns.import.apply.serial": { serial: string | number };
+  "dns.import.claimable": { count: number };
   "dns.import.fact.added": { count: number };
   "dns.import.fact.removed": { count: number };
   "dns.import.fact.replaced": { count: number };
@@ -8741,6 +8828,14 @@ export interface MessageArgs {
   "dns.nta.delete_body": { zone: string | number };
   "dns.nta.delete_title": { zone: string | number };
   "dns.nta.deleted": { zone: string | number };
+  "dns.owners.assigned": { name: string | number };
+  "dns.owners.held_until": { when: string | number };
+  "dns.owners.label": { zone: string | number };
+  "dns.owners.name_help": { zone: string | number };
+  "dns.owners.reassign_title": { name: string | number };
+  "dns.owners.release_body": { name: string | number; principal: string | number };
+  "dns.owners.release_title": { name: string | number };
+  "dns.owners.released": { count: number; name: string | number };
   "dns.record.line_error": { line: string | number; message: string | number };
   "dns.records.label": { zone: string | number };
   "dns.recursion.infra.of": { count: string | number; max: string | number };
@@ -8766,6 +8861,8 @@ export interface MessageArgs {
   "dns.update.default_home": { profile: string | number };
   "dns.update.default_lab": { profile: string | number };
   "dns.update.default_standard": { profile: string | number };
+  "dns.update.kerberos.ownership_hardened": { profile: string | number };
+  "dns.update.kerberos.privileged_remove": { sid: string | number };
   "dns.update.require_tsig_hardened": { profile: string | number };
   "dns.update.require_tsig_lab": { profile: string | number };
   "dns.upstream.counts": { answered: string | number; failed: string | number };
@@ -10080,6 +10177,8 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.dns.nta.create",
   "audit.action.dns.nta.delete",
   "audit.action.dns.nta.expire",
+  "audit.action.dns.owner.assign",
+  "audit.action.dns.owner.release",
   "audit.action.dns.record.actuate",
   "audit.action.dns.record.change",
   "audit.action.dns.record.import",
@@ -12899,6 +12998,12 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.import.apply.rolled_back",
   "dns.import.apply.running",
   "dns.import.apply.serial",
+  "dns.import.claimable",
+  "dns.import.dialect.rfc1035",
+  "dns.import.dialect.rfc1035_help",
+  "dns.import.dialect.windows",
+  "dns.import.dialect.windows_help",
+  "dns.import.dialect_label",
   "dns.import.fact.added",
   "dns.import.fact.removed",
   "dns.import.fact.replaced",
@@ -13257,6 +13362,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.loss.outside",
   "dns.loss.soa",
   "dns.loss.unsupported_type",
+  "dns.loss.wins",
   "dns.nav.acls",
   "dns.nav.blocking",
   "dns.nav.cache",
@@ -13358,6 +13464,48 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.origin.ipam",
   "dns.origin.manual",
   "dns.origin.transfer",
+  "dns.owners.assign",
+  "dns.owners.assign_action",
+  "dns.owners.assign_hold",
+  "dns.owners.assign_title",
+  "dns.owners.assigned",
+  "dns.owners.col.hold",
+  "dns.owners.col.how",
+  "dns.owners.col.name",
+  "dns.owners.col.principal",
+  "dns.owners.col.sid",
+  "dns.owners.col.since",
+  "dns.owners.current",
+  "dns.owners.empty",
+  "dns.owners.empty_body",
+  "dns.owners.filter_label",
+  "dns.owners.filter_name",
+  "dns.owners.filter_owner",
+  "dns.owners.held_until",
+  "dns.owners.how.assigned",
+  "dns.owners.how.claimed",
+  "dns.owners.how.created",
+  "dns.owners.how.imported",
+  "dns.owners.how_hint.assigned",
+  "dns.owners.how_hint.claimed",
+  "dns.owners.how_hint.created",
+  "dns.owners.how_hint.imported",
+  "dns.owners.label",
+  "dns.owners.name_help",
+  "dns.owners.off",
+  "dns.owners.principal_help",
+  "dns.owners.principal_invalid",
+  "dns.owners.reassign",
+  "dns.owners.reassign_body",
+  "dns.owners.reassign_title",
+  "dns.owners.release",
+  "dns.owners.release_body",
+  "dns.owners.release_claimable",
+  "dns.owners.release_reassign",
+  "dns.owners.release_title",
+  "dns.owners.released",
+  "dns.owners.sid_help",
+  "dns.owners.sid_invalid",
   "dns.record.line_error",
   "dns.records.any_origin",
   "dns.records.any_type",
@@ -13536,6 +13684,36 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.update.default_home",
   "dns.update.default_lab",
   "dns.update.default_standard",
+  "dns.update.kerberos.body",
+  "dns.update.kerberos.domain_add",
+  "dns.update.kerberos.domain_help",
+  "dns.update.kerberos.domain_sid",
+  "dns.update.kerberos.enable",
+  "dns.update.kerberos.enable_help",
+  "dns.update.kerberos.hold",
+  "dns.update.kerberos.hold_help",
+  "dns.update.kerberos.hold_invalid",
+  "dns.update.kerberos.no_privileged",
+  "dns.update.kerberos.ownership",
+  "dns.update.kerberos.ownership_hardened",
+  "dns.update.kerberos.ownership_help",
+  "dns.update.kerberos.ownership_none",
+  "dns.update.kerberos.ownership_windows",
+  "dns.update.kerberos.privileged",
+  "dns.update.kerberos.privileged_help",
+  "dns.update.kerberos.privileged_remove",
+  "dns.update.kerberos.proxy",
+  "dns.update.kerberos.proxy_help",
+  "dns.update.kerberos.realms",
+  "dns.update.kerberos.realms_help",
+  "dns.update.kerberos.realms_required",
+  "dns.update.kerberos.rid_domain_admins",
+  "dns.update.kerberos.rid_domain_controllers",
+  "dns.update.kerberos.rid_enterprise_admins",
+  "dns.update.kerberos.sid_add",
+  "dns.update.kerberos.sid_invalid",
+  "dns.update.kerberos.sid_label",
+  "dns.update.kerberos.title",
   "dns.update.may_replace_ipam",
   "dns.update.may_replace_ipam_help",
   "dns.update.require_tsig",
@@ -13697,6 +13875,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.zone.stub_hint",
   "dns.zone.tab.dnssec",
   "dns.zone.tab.history",
+  "dns.zone.tab.owners",
   "dns.zone.tab.records",
   "dns.zone.tab.settings",
   "dns.zone.tabs",
@@ -13890,6 +14069,10 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.dns.node.not_dns",
   "errors.dns.nta.invalid",
   "errors.dns.nta.not_found",
+  "errors.dns.owner.invalid",
+  "errors.dns.owner.not_found",
+  "errors.dns.owner.off",
+  "errors.dns.owner.protected",
   "errors.dns.record.conflict",
   "errors.dns.record.invalid",
   "errors.dns.record.origin",

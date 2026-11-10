@@ -83,7 +83,7 @@ After this slice, in the owner's order (WT-Q7 as amended on 2026-11-05): the Ker
 | [dns.md](../dns.md) section 1: "the name and the kind do not change"; a secondary cannot become a primary | WP14.2: the flip |
 | [MIGRATION.md](../MIGRATION.md) names PowerShell remoting for `tenko-connect-windows`; WT-Q1 rules it out for this source | WP14.3 |
 | [MIGRATION.md](../MIGRATION.md) and [dhcp-contracts.md](../dhcp-contracts.md) line 250: the "offer delay on the Tenko scope" does not exist | The loss report keeps `Delay`; the runbook does not use split scopes (section 2.7) |
-| [identity-plan.md](identity-plan.md) section 3.9: WP13.4 rewrites sections 4 to 6 of the runbook for GSS-TSIG | WP14.3 writes the mirror version first; WP13.4 revises it on top |
+| [identity-plan.md](identity-plan.md) section 3.9: WP13.4 rewrites sections 4 to 6 of the runbook for GSS-TSIG | WP13.4 wrote the GSS-TSIG runbook first (on 2026-11-10, with the zones imported from the Windows export); WP14.3 adds the mirror and the flip on top of it |
 | The `Ad` variant of `Origin`, set by nothing (identity plan section 1.5) | The flip sets it (section 2.6), in the meaning identity plan section 3.6 gives it |
 
 ### 1.6 Left out, with reasons

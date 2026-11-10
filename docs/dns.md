@@ -146,7 +146,7 @@ POST /api/v1/dns/zones/{id}/records/batch?dry_run=true
 
 ### Import
 
-`POST /dns/zones/{id}/records/import` takes `{"zone_file": "<text>", "scope": "default", "replace": false}`. The reader is Tenko's own (`tenko_dns::zone::zonefile`), RFC 1035 section 5 with the BIND conventions:
+`POST /dns/zones/{id}/records/import` takes `{"zone_file": "<text>", "scope": "default", "replace": false, "dialect": "rfc1035"}`. The reader is Tenko's own (`tenko_dns::zone::zonefile`), RFC 1035 section 5 with the BIND conventions:
 
 - an entry is `owner [ttl] [class] type data`, with blank lines, `;` comments, `(` `)` continuing an entry across lines, quoted strings and the escapes `\X` and `\DDD`; `@` is the origin, a name without a trailing dot is completed with the origin, and a line that starts with white space has the previous owner;
 - the TTL and the class come in either order and are optional; a record without a TTL takes `$TTL`, else the last TTL given, else 3600 s. A TTL (also `$TTL`, the four SOA timers and the RRSIG original TTL) is a number of seconds or a duration with BIND's units `w`, `d`, `h`, `m` and `s`, combined (`1h30m`);
@@ -161,10 +161,12 @@ The reader indexes the text only within checked bounds, keeps the limits of name
 
 With `dry_run=true` the answer (200) is the preview: the records per type the file brings (`types`), the RRsets the import would add, replace and, with `replace`, remove, and the losses. Without it the preview runs first (so a file that does not parse is refused at once), then the import starts as the background job `dns.import` and the answer is 202 with `job_id` and `Location: /api/v1/jobs/{id}`. The job has one step `dns.import.chunk` per 5,000 RRsets of the preview and a final step `dns.import.finish`; the steps done show the progress, and the final step's output is the report as JSON (hex in the job record): `added`, `replaced`, `removed`, `types`, the first 1,000 `losses` and `lost` (all of them), the new `serial` and the `revision`.
 
+**The Windows dialect (MIG-07).** The field `dialect` is `rfc1035` (the default) or `windows`, and `tenko dns import --windows` sets the latter. It reads a file the Windows DNS Server wrote: `dnscmd /ZoneExport`, or the file of a file-backed zone, `%SystemRoot%\System32\dns\<zone>.dns`. Windows writes `[AGE:n]` right after the owner name of a record that carries an aging timestamp; `n` is the number of hours since 1601-01-01 UTC. Above zero the record is aged, which Windows calls dynamic: a client or a controller registered it. At most ten digits are read, and a malformed mark is `dns.zonefile.invalid` with its line. WINS and WINS-R records, which Tenko does not serve (CON-12), are losses (`dns.zonefile.wins`) instead of syntax errors. An A, AAAA or PTR RRset whose records are all aged is written with the origin `ad` and no owner, and the report's `claimable` counts these RRsets. Every other RRset is written as `manual`: an RRset that mixes aged and static records, and an aged RRset of any other type (an NS set at a delegation, a TXT, an SRV), since a client registers only its own address and PTR records and the controllers' SRV and CNAME records stand at locator names anyway. Such an import also replaces the `ad` RRsets an earlier import wrote, and with `replace` removes the ones it did not write; it never replaces another origin. The timestamps themselves are not stored (aging and scavenging, DNS-29, are not built): the mark only decides the origin. In the RFC 1035 dialect a mark is the syntax error it is in any zone file. Section 13.12 says what the origin `ad` means for secure updates.
+
 How the file is merged, per owner name (records of one owner that follow each other form a group):
 
 - an RRset of the file replaces the stored RRset of its type, and one the store already holds with the same TTL and records is not written; a name the file lists again later is merged into what the import wrote before;
-- the import writes `manual` RRsets and never replaces an RRset of another origin: such an RRset is a loss (`dns.zonefile.origin`);
+- the import writes `manual` RRsets (in the Windows dialect also `ad` RRsets, see above) and never replaces an RRset of another origin: such an RRset is a loss (`dns.zonefile.origin`);
 - every RRset and every owner is checked with the rules of section 2; a broken one is a loss (`dns.zonefile.rule`);
 - the apex SOA of the file is not written as a record: its values become the scope's SOA (and the zone's `soa` settings for the default scope), and its serial is kept when it is newer than the scope's serial, else the serial moves by the zone's policy, once, at the end; an import that changes no RRset and no SOA value and brings no newer serial leaves the serial and the journal alone, so importing an export into its own zone gives the same file again;
 - with `replace`, the final step deletes the `manual` RRsets of the scope the import did not write, except the apex SOA and, when the file has no apex NS set, the apex NS.
@@ -176,6 +178,7 @@ The chunks do not expect the versions of what they replace: a change made while 
 ```
 tenko dns import example.test example.test.zone --dry-run
 tenko dns import example.test example.test.zone --replace
+tenko dns import corp.example.test corp.example.test.dns --windows
 ```
 
 ### Export (MIG-15)
@@ -656,7 +659,7 @@ tenko dns zone update example.test --catalog true
 - NOTIFY out waits for the `dns` role of its own process. In Phase 5 a remote `dns` node reports the revision it serves.
 - The transfer path reads the journal and writes its audit records through the store of its process, which holds while the role runs in the controller's process (Phase 2).
 - A transfer in of more than 20,000 changed RRsets is written in chunks, so it is not one commit and the zone may be served half changed while the write runs. One transfer holds at most 10 million records.
-- TSIG is a shared secret per key. GSS-TSIG is not supported (section 10.13).
+- TSIG is a shared secret per key. Transfers and NOTIFY take TSIG keys only; GSS-TSIG signs dynamic updates (section 13.11), not transfers (section 10.13).
 - Catalog member properties (`group`, `coo`) are not used. Member zones get the catalog's SOA defaults and no transfer policy of their own.
 - A zone deleted and created again gets a new catalog label.
 
@@ -689,7 +692,7 @@ POST /api/v1/dns/zones
 
 The SOA and the name servers of the zone come from the domain controller with the first transfer.
 
-**Without a key.** Windows DNS does not sign zone transfers with TSIG (it secures dynamic updates with GSS-TSIG, which Tenko supports from Phase 4, and restricts transfers by address). This zone therefore transfers without a TSIG key, and the access rests on the address restriction on both sides: the domain controller lists only `192.0.2.53`, and Tenko accepts a NOTIFY for the zone only from `192.0.2.10`. `require_tsig` is a setting of zones Tenko serves as primary, not of secondary zones, so it plays no part here. A transfer without a key can be read by anyone who can use the node's address on the path between the two servers, and it carries every record of the zone, including the hosts that registered themselves, so keep that path to the two servers.
+**Without a key.** Windows DNS does not sign zone transfers with TSIG (it secures dynamic updates with GSS-TSIG, which Tenko supports for updates as well, section 13.11, and restricts transfers by address). This zone therefore transfers without a TSIG key, and the access rests on the address restriction on both sides: the domain controller lists only `192.0.2.53`, and Tenko accepts a NOTIFY for the zone only from `192.0.2.10`. `require_tsig` is a setting of zones Tenko serves as primary, not of secondary zones, so it plays no part here. A transfer without a key can be read by anyone who can use the node's address on the path between the two servers, and it carries every record of the zone, including the hosts that registered themselves, so keep that path to the two servers.
 
 **What to check.**
 
@@ -1082,18 +1085,18 @@ The round `update` of [`deploy/compose/lab-dns`](../deploy/compose/lab-dns/READM
 ### 13.9 Limits
 
 - Updates are accepted for primary zones only; Tenko does not forward an update for a secondary zone to its primary (RFC 2136 section 6), it refuses it.
-- GSS-TSIG (the signature of Windows hosts in AD zones, RFC 3007 with RFC 3645) is section 13.11; it needs the account's keys on the node (section 13.10).
+- GSS-TSIG (the signature of Windows hosts in AD zones, RFC 3007 with RFC 3645) is section 13.11; it needs the account's keys on the node (section 13.10). The owners of names are section 13.12.
 - An update of the SOA is ignored rather than applied: the SOA follows the zone settings.
 - The prerequisites of an update read the RRsets of its names as the store holds them under the commit, and the write expects those RRsets unchanged; an RRset of another type that a concurrent write of the API creates at a name that should not be in use, in the same moment, is not caught by that expectation.
 - The `dns` role serves updates when it runs in the controller's process (Phase 2); the `Dns.Update` message of a remote node is Phase 5.
 - Beyond the admission bounds of section 13.5 (`update.in_flight`, `update.per_source`), the queue of 4,096 per zone and the rate limiter over UDP, no per-client rate limit applies to updates; a storm from one client is bounded by its access list and its key.
 
-### 13.10 Secure updates with GSS-TSIG: the contracts (WP13.0)
+### 13.10 Secure updates with GSS-TSIG: the Kerberos account
 
-Slice 13 ([identity-plan.md](plans/identity-plan.md), ADR 0026) gives Tenko GSS-TSIG (RFC 3645) for the secure dynamic updates of Windows clients and domain controllers: a TKEY exchange (RFC 2930) negotiates a Kerberos context with the keys of an AD computer account Tenko holds in its vault, every later update is signed on that context, and a name is owned by the principal that created it, with the Windows rules (plan section 3.6). WP13.0 put the contracts in place; TKEY, the signature and ownership are section 13.11, the account's wizard and its rotation WP13.3, the owner view and the Windows semantics WP13.4. What a reader sees today:
+Slice 13 ([identity-plan.md](plans/identity-plan.md), ADR 0026) gives Tenko GSS-TSIG (RFC 3645) for the secure dynamic updates of Windows clients and domain controllers: a TKEY exchange (RFC 2930) negotiates a Kerberos context with the keys of an AD computer account Tenko holds in its vault, every later update is signed on that context, and a name is owned by the principal that created it, with the Windows rules (plan section 3.6). TKEY, the signature and ownership are section 13.11, the owner view is section 13.12. This section is the model, the configuration and the account: what it is, how it is set up, rotated, checked and removed.
 
 - **The model.** A zone's `update` policy has `kerberos` (`DnsUpdatePolicy.kerberos`: the realms whose tickets the zone accepts, the ownership rule `windows` or `none`, the owner hold in days, the privileged groups and the DnsUpdateProxy group by SID). With it set, `require_tsig` means "a signature is required, TSIG or GSS-TSIG": the Windows modes map onto the policy (plan section 3.5; `windows_mode` in the model). An access list may hold an entry of kind `kerberos` (the realm, an optional name pattern such as `*$` for computer accounts, an optional prefix); such an entry matches a request signed with GSS-TSIG only, so a list of Kerberos entries alone refuses every TSIG or unsigned update. An RRset written by a secure update records the principal (`principal`), beside the TSIG key of a TSIG update (`key`). The owners live in `dns.name_owners`, the account's metadata in `dns.krb_accounts` ([dns-contracts.md](dns-contracts.md) section 12).
-- **The configuration** of a node's `dns` role, `[dns.gss]` in `tenko.toml` (`deploy/tenko.example.toml`), read and checked at start and consumed from WP13.2 on:
+- **The configuration** of a node's `dns` role, `[dns.gss]` in `tenko.toml` (`deploy/tenko.example.toml`), read and checked at start:
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -1103,8 +1106,73 @@ Slice 13 ([identity-plan.md](plans/identity-plan.md), ADR 0026) gives Tenko GSS-
 | `per_client_max` | 32 | Negotiations in flight per client address at most (1 to 1,024) |
 | `skew_secs` | 300 | Seconds of clock skew the acceptor allows between a client's authenticator and the node (1 to 900) |
 
-- **The routes, the CLI and the UI.** `GET /dns/kerberos`, `POST /dns/kerberos/adopt|import|check|rotate` and `DELETE /dns/kerberos` (`tenko dns kerberos status|adopt|import|check|rotate|delete`, the page DNS, Kerberos) and `GET /dns/zones/{id}/owners` answer 501 `sys.not_implemented` after the scope check until their packages build them. The codes `dns.krb.*` and `dns.gss.refused`, the audit actions `dns.krb.account.*` and `dns.gss.refuse`, the health findings `dns.gss.*` and the metric families `tenko_dns_tkey_total{outcome}`, `tenko_dns_gss_contexts{state}` and `tenko_dns_gss_establish_seconds` are declared in the same way.
-- **The profiles.** TGL-09's Slice 13 values (secure only on the zones the wizard enables under Standard, secure only with ownership on every zone with Kerberos under Hardened, everything under Lab) are applied by WP13.2 and WP13.8 ([SECURITY-PROFILES.md](SECURITY-PROFILES.md)).
+- **The profiles.** TGL-09's values (secure updates only on the zones the wizard enables under Standard, secure updates only with ownership on every zone with Kerberos settings under Hardened, everything under Lab) are in section 13.2 and in [SECURITY-PROFILES.md](SECURITY-PROFILES.md).
+
+**The account.** The keys come from one AD computer account, for example `TENKO-DNS$`, one per installation. It holds the service principal name (SPN) `DNS/<node fqdn>` of every node that is the primary of an AD zone (the name the zone's SOA `mname` gives), so that every node accepts with the same keys and a second node needs one more SPN, not another account. The account uses AES only (`msDS-SupportedEncryptionTypes` = 24): Tenko refuses RC4, DES and 3DES. Tenko joins nothing, holds no directory data and asks the directory for nothing but Kerberos tickets; no administrator credential is ever entered into it. An adoption or import while an account exists is refused with `dns.krb.account.exists`: delete the first.
+
+**Adopt (pre-staged, the usual way).** A domain administrator creates the account once with the static block of [active-directory.md](active-directory.md) section 4.1 (it sets the AES types, the SPNs and a one-time password; the block is printed there and versioned with the release, and not copied here). Then Tenko takes the account over:
+
+1. With the one-time password it gets a ticket for `kadmin/changepw` and changes the password with the change-password protocol (RFC 3244) to a random one of 120 printable characters that only Tenko knows.
+2. It derives the AES keys from that password with the salt the KDC names and writes them to the vault as a `pending` version, and only then sends the change request, so that a restart or a lost answer never leaves a changed password without its keys.
+3. It reads the new key version number back from the KDC, makes the keys `current`, forgets both passwords and runs the self-test.
+
+The name of an adopted account ends in `$`. The KDCs are listed (`host` or `host:port`) or, when none is listed, found through the SRV records `_kerberos._tcp.<realm>`. List them: the discovery relies on the DNS of the realm answering, which an account that does not work yet cannot help with. If the KDC refuses the one-time password, nothing becomes Tenko's and the answer is 422 `dns.krb.password.refused`.
+
+**Import (the variant).** When the password should stay with the administrator, the account is created with a keytab made with `ktpass` or `msktutil` and the keytab is imported. Tenko keeps the AES entries of the account and its SPNs (the highest key version is `current`, the others `previous`), refuses the others, does not keep the file, and does not own the password: it does not rotate it, and a password reset in AD needs a new keytab. A keytab that names only an SPN needs the account's name (`name`, `--name`).
+
+**Where the keys live.** In the vault, as one system secret of purpose `dns.krb` holding the key versions `current`, `previous` and `pending`. They are never revealed: not in an answer, an error, a finding, an audit record or a log line. The `dns` role watches the account and installs the keys into its TKEY handler, so a rotation reaches the acceptor without a restart; until an account is adopted or imported every TKEY query is REFUSED. A key set the acceptor refuses is recorded as the finding `dns.gss.self_test_failed` with the reason `install_refused`. No keytab file exists on disk.
+
+**Rotation.** For an account Tenko owns, the leader changes the password every `rotation_days`: 30 by default, 0 to 365 (0 switches it off and is allowed under the Lab profile only). A rotation is the job `dns.krb.rotate`: the new keys are written as `pending`, the change request is sent, the new key version is read back, the keys become `current` and the old ones `previous`. A `previous` version is kept for 12 hours, at most three, so that service tickets issued before a rotation (ten hours at most by AD's default) keep working. A change interrupted between the KDC taking the new password and Tenko committing it leaves the `pending` version in place, and the next start or self-test finishes it: Tenko asks the KDC for a ticket with the pending keys alone. When the KDC issues one, the change happened and is committed; when it refuses them and takes the current keys, the change did not happen and the pending version is dropped, but not before 15 minutes have passed; when no KDC answers, nothing moves. The acceptor holds the pending keys meanwhile, so a ticket issued under the new password is accepted at once. A failed rotation is tried again after an hour; after two failures in a row (one under Hardened) the finding `dns.gss.rotation_failed` is raised, and a successful rotation clears it.
+
+**The self-test** runs after an adoption, an import and a rotation, daily, and on demand: an AS exchange as the account (the keys are right, the account is enabled), a ticket from the KDC for each SPN and its acceptance by an acceptor holding the keys (the SPN maps to this account and the key version is held), the KDC's time against the node's, and the encryption type of the tickets. A KDC that does not answer is a finding, not an error. The findings of the last run are shown by `GET /dns/kerberos` and the health view:
+
+| Finding | Meaning | What to do |
+|---|---|---|
+| `dns.gss.clock_skew` | The node's clock differs from the KDC's by more than 60 s (Kerberos itself refuses 300 s) | Fix the time synchronization of the node |
+| `dns.gss.kvno_unknown` | The KDC issues a key version Tenko does not hold: the password was changed outside Tenko | Delete the account in Tenko and adopt it again with a new one-time password, or import a new keytab |
+| `dns.gss.rotation_failed` | The rotation failed and the old keys stay current | Read the finding's `reason`; usually the account is disabled or its password policy refuses the new password; the self-test names the cause |
+| `dns.gss.self_test_failed` | A step of the self-test failed. The `reason`: `keys_refused` (the password was reset outside Tenko), `disabled` (disabled or locked), `unknown` (not in the directory), `expired` (the password expired), `kdc_unreachable`, `kdc_error`, `reply`, `no_keys`, `realm`, `change_pending` (a password change waits to be finished), `token`, `continue`, `ticket_key` (the SPN is on another account, or the keys were derived with another salt), `tgs`, `install_refused`, or the outcome of the acceptor's refusal | Re-enable or re-create the account; for `keys_refused` as for `dns.gss.kvno_unknown` |
+| `dns.gss.spn_missing` | The KDC knows no account with the SPN | Add the SPN to the account (`setspn -S`) |
+| `dns.gss.spn_duplicate` | The SPN is held by another account as well: the KDC found it on more than one, or the ticket for it is under another account's key | Find the other holder (`setspn -Q`) and remove the SPN there |
+| `dns.gss.weak_etype` | The KDC issues RC4 tickets for the account | Set `msDS-SupportedEncryptionTypes` to 24 |
+| `dns.gss.context_limit` | The context table of a node stays full and negotiations are refused (section 13.11) | Raise `contexts_max` or `negotiating_max`, or find the client |
+
+A finding carries its parameters (`spn`, `kvno`, `held`, `skew_secs`, `etype`, `kdc_error`, `reason`, `failures`), and at most 32 are kept. `dns.gss.context_limit` comes from the TKEY handler, which raises it and the others of section 13.11 from refused negotiations, not from the self-test.
+
+**The routes, the CLI and the page.** The account is key material, so its routes take the scope `dns.keys`, and those that change it need an interactive session (a token is refused with 403):
+
+| Operation | Route | Scope | Interactive session | CLI |
+|---|---|---|---|---|
+| `get_dns_kerberos` | `GET /dns/kerberos` | `dns.keys` | no | `tenko dns kerberos status` |
+| `adopt_dns_kerberos` | `POST /dns/kerberos/adopt` | `dns.keys` | yes | `tenko dns kerberos adopt <realm> <name> --spn S... [--kdc K...] [--rotation-days D] [--password-stdin]` |
+| `import_dns_kerberos` | `POST /dns/kerberos/import` | `dns.keys` | yes | `tenko dns kerberos import <realm> <keytab file> --spn S... [--kdc K...] [--name N]` |
+| `check_dns_kerberos` | `POST /dns/kerberos/check` | `dns.keys` | no | `tenko dns kerberos check` |
+| `rotate_dns_kerberos` | `POST /dns/kerberos/rotate` | `dns.keys` | yes | `tenko dns kerberos rotate` |
+| `delete_dns_kerberos` | `DELETE /dns/kerberos` | `dns.keys` | yes | `tenko dns kerberos delete` |
+
+```
+POST /api/v1/dns/kerberos/adopt
+{"realm": "CORP.EXAMPLE.TEST", "name": "TENKO-DNS$", "password": "<the one-time password>",
+ "spns": ["DNS/ns1.corp.example.test"], "kdcs": ["dc1.corp.example.test"], "rotation_days": 30}
+
+tenko dns kerberos adopt CORP.EXAMPLE.TEST 'TENKO-DNS$' --spn DNS/ns1.corp.example.test --kdc dc1.corp.example.test
+```
+
+The one-time password is a field of the body, never of a URL; the CLI asks for it on the terminal or reads the first line of standard input with `--password-stdin`, and it is never a flag. The keytab goes in the body in base64url without padding (RFC 4648 section 5); the CLI reads the file. Adoption and import answer 201 with the status, and a rotation is a job (202 with `job_id`). The status holds the account without any key: realm, name, principal, SPNs, KDCs, whether Tenko owns the password, `rotation_days`, the key versions with their numbers and states, the last rotation, the next rotation, the last self-test, the findings, and the contexts of the node (`negotiating`, `established`, `refused_last_hour`). The page **DNS, Kerberos** of the web UI shows the same and has the wizard for adoption and import. A self-test that reaches no KDC stores the finding and answers 503 `dns.krb.kdc.unreachable`.
+
+| Code | Status | When |
+|---|---|---|
+| `dns.krb.account.not_found` | 404 | No account is set up |
+| `dns.krb.account.exists` | 409 | An account exists; delete it before adopting or importing another |
+| `dns.krb.account.invalid` | 400 | The settings are invalid (`field`, `reason`): a name without the `$` for an adoption, an empty password, `rotation_days` above 365 or 0 outside Lab, more than 64 SPNs |
+| `dns.krb.account.not_owned` | 409 | A rotation of an imported account |
+| `dns.krb.keytab.invalid` | 422 | The keytab is not base64url, does not parse, or holds no AES entry for the account |
+| `dns.krb.password.refused` | 422 | The KDC refused the one-time password or the password change |
+| `dns.krb.kdc.unreachable` | 503 | No KDC of the realm answered |
+
+**Audit.** `dns.krb.account.adopt`, `dns.krb.account.import`, `dns.krb.account.rotate` (a failed or undone rotation too), `dns.krb.account.check` (on a failure or a change of the findings only) and `dns.krb.account.delete`, each with the realm and the account's name and, where they apply, the key version numbers; never a password, a key or a keytab. The refusals of the TKEY handler are `dns.gss.refuse` with the code `dns.gss.refused`, and the metrics are those of section 13.11.
+
+**Delete.** `DELETE /dns/kerberos` removes the account's row and its keys from the vault. The account in the directory is the administrator's to delete (`Set-ADObject -ProtectedFromAccidentalDeletion $false`, then `Remove-ADComputer`). The `dns` role drops the keys and with them every context: a TKEY query is answered REFUSED and the secure updates of the zones with Kerberos settings are refused. A zone whose lists also name an address or a TSIG key keeps those. Adopt or import again to resume.
 
 ### 13.11 Secure updates with GSS-TSIG: TKEY, the signature and ownership
 
@@ -1146,9 +1214,11 @@ PATCH /api/v1/dns/zones/{id}
 | A locator name: every name of a zone whose apex starts with `_msdcs` or that has a label `_msdcs`, a first label `_ldap`, `_kerberos`, `_kpasswd`, `_gc`, `DomainDnsZones` or `ForestDnsZones`, and the apex | A privileged principal | No owner is kept |
 | A wildcard name (`*` as its first label), which answers every name of the zone that does not exist | A privileged principal | No owner is kept |
 | Owned, its hold not passed | The owner (by SID when the owner has one, so that a ticket without a PAC never matches it; by the principal's name when the owner has no SID, as for an MIT realm), or a privileged principal | The owner stays; when the last record goes the owner is held for `owner_hold_days` (14 by default), and a record that comes back within the hold ends it |
-| Without an owner, holding a `manual`, `ipam` or `dhcp` record | A privileged principal | No owner |
-| Without an owner, holding a record imported from AD (origin `ad`) | A privileged principal, or the computer the record names: `HOST$@REALM` claims `host.<zone>`, and a name whose records are all PTR records pointing at `host.*` | The claimant becomes the owner |
+| Without an owner, holding a `manual`, `ipam` or `dhcp` record | A privileged principal | It becomes the owner, as the creator of a name does on Windows |
+| Without an owner, holding a record imported from AD (origin `ad`) | A privileged principal, or the computer the record names: `HOST$@REALM` claims `host.<zone>`, and a name whose records are all PTR records pointing at `host` in its realm's DNS domain or below | The claimant becomes the owner |
 | Without an owner, holding dynamic records only, or new (no record, its owner's hold passed, or an owner without a hold whose records went outside the update path, through the API or an import) | A principal the zone's lists allow | It becomes the owner, unless it is a member of the `update_proxy` group (DnsUpdateProxy): then the name stays unowned and the next principal becomes its owner |
+
+Whoever changes a name without being privileged (its owner, its claimant, a DnsUpdateProxy member) changes none of its `manual`, `ipam` or `dhcp` RRsets, also beside its own records: those stay with privileged principals. A privileged principal that writes a name without an owner owns it, so that no other principal can take a controller's or an administrator's name afterwards; locator and wildcard names, as the first two rows say, keep no owner. The owners are listed, released and assigned as section 13.12 says.
 
 A privileged principal is a member of a group the Kerberos settings list in `privileged` (Domain Admins, RID 512; Domain Controllers, 516; Enterprise Admins, 519; DnsAdmins and others the operator adds), by the group SIDs of its ticket's PAC; no directory is asked on the update path. A principal of a realm without a PAC (MIT) has no groups and so is never privileged; it owns names by its principal name. An update signed with TSIG, or unsigned where the zone allows it, takes no ownership and is REFUSED on a name that is owned and held; it removes an owner whose hold has passed. A refusal names the owner's principal in the extended error. With `ownership = "none"` (outside Hardened) a zone keeps no owners and behaves as for TSIG.
 
@@ -1176,3 +1246,42 @@ nsupdate -g
 **The lab.** The round `gss` of [`deploy/compose/lab-ad`](../deploy/compose/lab-ad/README.md) (E43) has a Samba AD controller register its records with `samba_dnsupdate` and a Linux client add, replace and delete over UDP and TCP, and checks mutual authentication, the answers' signatures, BADKEY on an unknown and an expired context, BADTIME, a replay, a second principal on an owned name and an NTLM-only offer. The early probe with a real Windows controller (risk R120) is [r120-probe.md](../deploy/compose/lab-ad/r120-probe.md).
 
 **Limits.** Contexts are per node and not replicated (single node first; a client negotiates with the server it updates). Transfers (AXFR, IXFR) and NOTIFY take TSIG keys only, not GSS-TSIG. An update is checked against the realm's groups as its ticket's PAC lists them when the ticket was issued; a change of group membership reaches Tenko with the client's next ticket.
+
+### 13.12 Owners of names: the view, release and assignment, and imported records
+
+**The view.** `GET /api/v1/dns/zones/{id}/owners` (scope `dns.read`) lists the names that have an owner in a zone with ownership on, in name order and paged. The filters are `scope` (default `default`), `name` (the names at or below it) and `owner` (a SID or a principal, without regard to case). Each row is `{scope, name, sid, principal, since, how, hold_until, revision}`; `sid` is absent when the owner has none, and `hold_until` is set while the name has no records and is held for its owner. `how` says how the owner got the name:
+
+| `how` | The owner |
+|---|---|
+| `created` | Its secure update created the name, or wrote it while the name had no owner |
+| `claimed` | It claimed a name imported without an owner: its own host |
+| `assigned` | An administrator gave the name to it |
+| `imported` | A migration adapter read it from the source (MIG-06): the owner SID of a Windows `dnsNode` |
+
+The zone page of the web UI shows the same in its Owners tab. A zone without ownership has no rows.
+
+**Assign.** `PUT /api/v1/dns/zones/{id}/owners/{name}` (scope `dns.write`, `If-Match` with the row's revision optional) replaces the owner:
+
+```
+PUT /api/v1/dns/zones/{id}/owners/pc07.corp.example.test.
+{"scope": "default", "principal": "PC07$@CORP.EXAMPLE.TEST", "sid": "S-1-5-21-1000-2000-3000-1105"}
+```
+
+A name without records is held for the new owner for the zone's `owner_hold_days`, so that it may create the name. A name that holds a `manual`, `ipam` or `dhcp` record is refused (`dns.owner.protected`): those records are a privileged principal's, so delete them first if a computer should own the name. With a SID the owner is matched by the SID: a renamed account keeps the name, and a computer rebuilt with a new account does not. Without a SID the owner is matched by the principal's name. Audited as `dns.owner.assign`.
+
+**Release.** `DELETE /api/v1/dns/zones/{id}/owners/{name}?scope=` (scope `dns.write`, `If-Match` optional) removes the owner and returns the name's `dynamic` RRsets to the origin `ad`. The next secure update that changes the name is then held to the claim rule of section 13.11: `HOST$` claims `host.<zone>` and a name whose records are PTR records pointing at `host` in its realm's DNS domain or below, or a privileged principal changes it. No principal that the lists merely allow can take it. RRsets of other origins stay as they are. The answer is `{owner, claimable, revision}`: the owner removed and the number of RRsets made claimable. Use it for a computer rebuilt under a new account, or assign the name to the new account directly. Audited as `dns.owner.release`.
+
+Neither call changes what the zone serves: no serial step, no journal entry. A deleted zone, and a removed scope, take their owners with them. A page of the list reads at most 10,000 owner rows and then ends with a cursor, even when fewer rows matched; a cursor of another list is refused (`sys.invalid_cursor`).
+
+| Code | Status | When |
+|---|---|---|
+| `dns.owner.not_found` | 404 | The name has no owner in the scope (release) |
+| `dns.owner.off` | 409 | The zone has no Kerberos settings, or its ownership is `none` |
+| `dns.owner.protected` | 409 | A locator name or a wildcard, which keep no owner |
+| `dns.owner.invalid` | 400 | A name outside the zone, a realm the zone does not accept, a malformed principal or SID |
+
+**Records that come from AD.** A record is claimable only when its origin is `ad` and it has no owner. A zone file imported in the Windows dialect (section 4: `"dialect": "windows"`, `tenko dns import --windows`) writes the A, AAAA and PTR RRsets whose records all carry the aging mark `[AGE:n]` with the origin `ad` and no owner; static records (no mark, or `[AGE:0]`), an RRset that mixes both, and an aged RRset of another type stay `manual`, which only privileged principals change. A zone transfer or an RFC 1035 import brings everything in as `manual`, so a client could not refresh its own records in a zone with ownership on: bring an AD zone in by the Windows export.
+
+The migration adapter that reads a Windows directory writes the owner field of MIG-06 in one call, as owners with the `imported` source: up to 1,000 owners per call; locator and wildcard names are skipped, and a name outside the zone or of a realm the zone does not accept is refused.
+
+**Differences from Windows known so far.** Windows keeps a deleted node as a tombstone for its `TombstoneInterval`; Tenko holds the name for its owner for `owner_hold_days`. The Windows lab records the `TombstoneInterval` that Windows applies. The DnsUpdateProxy group is followed as Windows does. A domain controller can replace another controller's record, because controllers are privileged.

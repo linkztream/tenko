@@ -24,7 +24,10 @@
 #   6. runs the rows of E43 (README.md lists them): the controller's samba_dnsupdate, the
 #      client's nsupdate -g over UDP and TCP, and gss_client.py for mutual authentication,
 #      the signatures of the answers, BADKEY on an unknown and an expired context, BADTIME,
-#      a replay and an NTLM-only offer;
+#      a replay and an NTLM-only offer; then the rows of E46 that a Samba controller can
+#      exercise: the controller owns its host name, a domain administrator changes a name
+#      it does not own, a Windows zone file's dynamic record is claimed by its own host
+#      and its static record is not, the owner view, a release and a reassignment;
 #   7. tears everything down (containers, volumes, network, work directory), also when a
 #      step fails, after printing the logs of the services. KEEP=1 leaves the lab running.
 #
@@ -144,6 +147,10 @@ mkdir -p "$work/secrets" "$work/out"
 random_password >"$work/secrets/admin"
 random_password >"$work/secrets/alice"
 random_password >"$work/secrets/bob"
+# WP13.4: the computer accounts of the E46 rows: WSBOB$ (a dynamic record of the Windows
+# file) and SRV01$ (a static one).
+random_password >"$work/secrets/wsbob"
+random_password >"$work/secrets/srv01"
 head -c 32 /dev/urandom | od -An -v -tx1 | tr -d ' \n' >"$work/secrets/kek"
 chmod 0444 "$work/secrets/"*
 cat >"$work/secrets/krb5.conf" <<'KRB5'
@@ -238,6 +245,10 @@ samba samba-tool domain passwordsettings set --complexity=off --min-pwd-age=0 --
 samba samba-tool user create alice "$(cat "$work/secrets/alice")" >/dev/null
 samba samba-tool user create bob "$(cat "$work/secrets/bob")" >/dev/null
 samba samba-tool computer create TENKO-DNS >/dev/null
+for host in wsbob srv01; do
+  samba samba-tool computer create "${host^^}" >/dev/null
+  samba samba-tool user setpassword "${host^^}\$" --newpassword="$(cat "$work/secrets/$host")" >/dev/null
+done
 samba samba-tool spn add "$spn" 'TENKO-DNS$' >/dev/null
 samba bash -c 'base=$(ldbsearch -H /var/lib/samba/private/sam.ldb "(sAMAccountName=TENKO-DNS\$)" dn | sed -n "s/^dn: //p")
 printf "dn: %s\nchangetype: modify\nreplace: msDS-SupportedEncryptionTypes\nmsDS-SupportedEncryptionTypes: 24\n" "$base" | ldbmodify -H /var/lib/samba/private/sam.ldb >/dev/null'
@@ -342,3 +353,71 @@ row gss.expired "an update on a context past its lifetime (60 s) is NOTAUTH with
   expect_client "rcode=9 tsig_error=17 verified=0" update ws-alice.lab.example.test 198.51.100.47 --wait 65
 row gss.second "a second principal (bob) is REFUSED on the name alice owns" second_refused
 row gss.ntlm "a TKEY offer of NTLM alone is refused (BADKEY)" expect_client "rcode=0 tkey_error=17" ntlm
+
+# --- 7. the rows of E46 (WP13.4) -------------------------------------------------------
+step "the rows of E46"
+# kinit_computer <host>: a ticket as the computer account HOST$ with its password.
+kinit_computer() { in_client sh -c "kinit '${1^^}\$@$realm' </lab/secrets/$1 >/dev/null"; }
+kinit_admin() { in_client sh -c "kinit administrator@$realm </lab/secrets/admin >/dev/null"; }
+refused_update() { grep -q REFUSED <<<"$(nsupdate_g "$1" -g || true)"; }
+owners() { api GET "/dns/zones/$zone_id/owners" >/dev/null && printf '%s' "$api_body"; }
+# owner_of <name>: "principal how" of the name's owner, or nothing.
+owner_of() {
+  owners | json_field "' '.join(next(((i['principal'] + ' ' + i['how']) for i in d['items'] if i['name'] == '$1'), '').split())"
+}
+sid_of_user() { samba samba-tool user show "$1" --attributes=objectSid | sed -n 's/^objectSid: //p' | tr -d '\r'; }
+
+dc_owns_its_host() { [[ "$(owner_of dc01.lab.example.test)" == "DC01\$@$realm created" ]]; }
+dc_refreshes() { samba samba_dnsupdate --all-names >"$work/dnsupdate2.log" 2>&1 && dc_owns_its_host; }
+user_refused_on_dc() {
+  kinit_as alice && refused_update "update add dc01.lab.example.test 60 IN A 198.51.100.66" &&
+    [[ "$(dig_short dc01.lab.example.test A)" != *198.51.100.66* ]]
+}
+user_refused_on_locator() {
+  kinit_as alice && refused_update "update add _ldap._tcp.lab.example.test 600 IN SRV 0 100 389 ws-alice.lab.example.test."
+}
+admin_changes() {
+  kinit_admin && nsupdate_g "update add ws-alice.lab.example.test 60 IN A 198.51.100.48" -g >/dev/null &&
+    grep -q 198.51.100.48 <<<"$(dig_short ws-alice.lab.example.test A)" &&
+    [[ "$(owner_of ws-alice.lab.example.test)" == "alice@$realm created" ]]
+}
+# The Windows file: wsbob dynamic (an aging mark), srv01 static.
+windows_file='wsbob [AGE:3660412] 60 A 198.51.100.61\nsrv01 60 A 198.51.100.62\n'
+imports_windows() {
+  api POST "/dns/zones/$zone_id/records/import" "{\"zone_file\": \"$windows_file\", \"dialect\": \"windows\"}" >/dev/null &&
+    for _ in $(seq 1 30); do
+      [[ "$(dig_short wsbob.lab.example.test A)" == 198.51.100.61 && "$(dig_short srv01.lab.example.test A)" == 198.51.100.62 ]] && return 0
+      sleep 1
+    done
+  return 1
+}
+other_cannot_claim() { kinit_as bob && refused_update "update add wsbob.lab.example.test 60 IN A 198.51.100.66"; }
+host_claims() {
+  kinit_computer wsbob && nsupdate_g "update add wsbob.lab.example.test 60 IN A 198.51.100.63" -g >/dev/null &&
+    [[ "$(owner_of wsbob.lab.example.test)" == "WSBOB\$@$realm claimed" ]]
+}
+static_not_claimed() { kinit_computer srv01 && refused_update "update add srv01.lab.example.test 60 IN A 198.51.100.64"; }
+releases() {
+  api DELETE "/dns/zones/$zone_id/owners/ws-alice.lab.example.test" >/dev/null &&
+    [[ -z "$(owner_of ws-alice.lab.example.test)" ]] &&
+    kinit_as bob && refused_update "update add ws-alice.lab.example.test 60 IN A 198.51.100.65"
+}
+reassigns() {
+  local bob_sid
+  bob_sid="$(sid_of_user bob)"
+  api PUT "/dns/zones/$zone_id/owners/ws-alice.lab.example.test" "{\"principal\": \"bob@$realm\", \"sid\": \"$bob_sid\"}" >/dev/null &&
+    kinit_as bob && nsupdate_g "update add ws-alice.lab.example.test 60 IN A 198.51.100.65" -g >/dev/null &&
+    [[ "$(owner_of ws-alice.lab.example.test)" == "bob@$realm assigned" ]]
+}
+
+row own.dc_host "the controller owns the host name it registered (the owner view: DC01\$, created)" dc_owns_its_host
+row own.dc_refresh "the controller's next registration refreshes its names; the owner stays" dc_refreshes
+row own.dc_refused "a user cannot change the controller's host record" user_refused_on_dc
+row own.locator "a user cannot write a locator name (_ldap._tcp)" user_refused_on_locator
+row own.admin "a domain administrator changes a name it does not own; the owner stays alice" admin_changes
+row own.import "a Windows zone file imports: wsbob (aging mark) and srv01 (static) answer" imports_windows
+row own.claim_other "another principal cannot claim the imported dynamic name" other_cannot_claim
+row own.claim "WSBOB\$ claims its own imported name and owns it (claimed)" host_claims
+row own.static "SRV01\$ cannot claim its static record" static_not_claimed
+row own.release "a released name is not open to another principal" releases
+row own.assign "the name reassigned to bob with his SID: bob changes it and owns it (assigned)" reassigns

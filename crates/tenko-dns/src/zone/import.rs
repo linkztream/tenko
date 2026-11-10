@@ -36,6 +36,19 @@
 //! - With `replace`, the finish step deletes the `manual` RRsets of the scope the import
 //!   did not write, except the apex SOA and, when the file has no apex NS set, the apex NS.
 //!
+//! **A Windows file** ([`ImportRequest::dialect`] `windows`, WP13.4, identity plan section
+//! 3.6, MIG-07): an A, AAAA or PTR RRset all of whose records carry an aging mark
+//! (`[AGE:n]`, the records Windows calls dynamic) is written with the origin `ad` and
+//! without an owner, so that in a
+//! zone with ownership on only the host it names (or a privileged principal) may claim it;
+//! every other RRset is `manual` as above, a static record of a controller or a server
+//! among them. An RRset that mixes aged and static records stays `manual`: the static
+//! record wins, since a record no client registered must not become claimable. Such an
+//! import also replaces the `ad` RRsets an earlier import wrote, and with `replace` purges
+//! them too; it never replaces another origin. The RFC 1035 dialect, the default, writes
+//! `manual` only, whatever the zone's settings: a deployment without Active Directory sees
+//! no change.
+//!
 //! The batches of the chunks do not expect the versions of what they replace: a change
 //! made while an import runs may be overwritten by it. An import that one chunk holds and
 //! that changes at most [`JOURNAL_RECORDS`] records leaves one journal entry; a larger one
@@ -73,7 +86,7 @@ use uuid::Uuid;
 use super::{
     ZoneError, ZoneResult, ZoneService, holds_data, journal, journal_records, node, records,
     rrset_range, serial, soa_rrset, soa_serial, stage_delete, stage_put,
-    zonefile::{self, FileRecord, Item, Loss, Reader},
+    zonefile::{self, Dialect, FileRecord, Item, Loss, Reader},
 };
 
 /// Kind of the import job.
@@ -106,6 +119,9 @@ pub struct ImportRequest {
     pub text: String,
     /// Delete the scope's `manual` RRsets the file does not hold.
     pub replace: bool,
+    // WP13.4
+    /// The dialect of the file; [`Dialect::Windows`] marks the aged RRsets `ad`.
+    pub dialect: Dialect,
 }
 
 /// One loss of a report.
@@ -139,6 +155,11 @@ pub struct ImportReport {
     /// The serial after the write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial: Option<u32>,
+    // WP13.4
+    /// Of the RRsets added or replaced, those written with the origin `ad` (a Windows file's
+    /// aged RRsets), claimable by the host they name.
+    #[serde(default)]
+    pub claimable: u64,
     /// The revision of the final write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<Revision>,
@@ -163,6 +184,8 @@ struct Group {
     line: usize,
     name: Option<DnsName>,
     sets: BTreeMap<Rtype, (u32, Vec<tenko_core::dns::Rdata>)>,
+    /// The types whose records all carried an aging mark (WP13.4).
+    aged: BTreeMap<Rtype, bool>,
 }
 
 impl Group {
@@ -171,6 +194,8 @@ impl Group {
             self.line = record.line;
             self.name = Some(record.name.clone());
         }
+        let aged = self.aged.entry(record.rtype).or_insert(record.aged);
+        *aged = *aged && record.aged;
         let entry = self
             .sets
             .entry(record.rtype)
@@ -200,9 +225,14 @@ struct GroupReader {
 }
 
 impl GroupReader {
-    fn new(text: &str, apex: &DnsName, max_generate: u32) -> ZoneResult<Self> {
+    /// The reader of an import's file.
+    fn of(request: &ImportRequest, apex: &DnsName, max_generate: u32) -> ZoneResult<Self> {
+        Self::new(&request.text, apex, max_generate, request.dialect)
+    }
+
+    fn new(text: &str, apex: &DnsName, max_generate: u32, dialect: Dialect) -> ZoneResult<Self> {
         Ok(Self {
-            reader: Reader::new(text, apex, max_generate)?,
+            reader: Reader::with_dialect(text, apex, max_generate, dialect)?,
             apex: apex.clone(),
             pending: None,
             soa: None,
@@ -300,6 +330,45 @@ struct Merge<'a> {
     /// The file has an apex NS set (with `replace` the stored one goes).
     file_apex_ns: bool,
     stamp: &'a Stamp,
+    /// The dialect of the file (WP13.4).
+    dialect: Dialect,
+}
+
+impl Merge<'_> {
+    /// An RRset of the file: `manual`, or (WP13.4) `ad` without an owner for an aged
+    /// address or PTR RRset of a Windows file.
+    fn rrset(
+        &self,
+        name: &DnsName,
+        rtype: Rtype,
+        ttl: u32,
+        rdata: Vec<tenko_core::dns::Rdata>,
+        aged: bool,
+    ) -> RrSet {
+        let claimable = self.dialect == Dialect::Windows && claimable_type(rtype) && aged;
+        RrSet {
+            zone: self.zone.id,
+            scope: self.scope.clone(),
+            name: name.clone(),
+            rtype,
+            ttl,
+            rdata,
+            origin: if claimable {
+                Origin::Ad
+            } else {
+                Origin::Manual
+            },
+            key: None,
+            principal: None,
+            updated: self.stamp.clone(),
+        }
+    }
+
+    /// Whether the import writes over an RRset of `origin`: `manual`, and in the Windows
+    /// dialect `ad` too.
+    fn writes_over(&self, origin: Origin) -> bool {
+        origin == Origin::Manual || (self.dialect == Dialect::Windows && origin == Origin::Ad)
+    }
 }
 
 /// What one group writes: (stored, new) per RRset that changes, and the keys of every
@@ -320,7 +389,7 @@ impl GroupWrites {
 
 /// Whether a stored RRset already holds what the file brings: then nothing is written.
 fn unchanged(old: &RrSet, new: &RrSet) -> bool {
-    old.origin == Origin::Manual
+    old.origin == new.origin
         && old.key.is_none()
         && old.ttl == new.ttl
         && old.rdata.len() == new.rdata.len()
@@ -345,7 +414,7 @@ fn merge_group(
     for (rtype, (ttl, rdata)) in group.sets {
         let previous = stored.get(&rtype);
         if let Some((old, _)) = previous
-            && old.origin != Origin::Manual
+            && !merge.writes_over(old.origin)
         {
             report.lose(Loss {
                 line: group.line,
@@ -357,24 +426,18 @@ fn merge_group(
             });
             continue;
         }
-        let mut new = RrSet {
-            zone: merge.zone.id,
-            scope: merge.scope.clone(),
-            name: name.clone(),
-            rtype,
-            ttl,
-            rdata,
-            origin: Origin::Manual,
-            key: None,
-            principal: None,
-            updated: merge.stamp.clone(),
-        };
+        let aged = group.aged.get(&rtype).copied().unwrap_or(false);
+        let mut new = merge.rrset(&name, rtype, ttl, rdata, aged);
         let again = previous.is_some_and(|(_, revision)| *revision > merge.start);
         if let Some((old, _)) = previous
             && again
         {
-            // Written by this import before: the file lists the name again.
+            // Written by this import before: the file lists the name again. A static
+            // record of either listing keeps the RRset `manual`.
             new.ttl = old.ttl;
+            if old.origin == Origin::Manual {
+                new.origin = Origin::Manual;
+            }
             let mut union = old.rdata.clone();
             for data in new.rdata {
                 if !union.contains(&data) {
@@ -397,7 +460,7 @@ fn merge_group(
     let mut standing: BTreeMap<Rtype, RrSet> = BTreeMap::new();
     for (rtype, (old, revision)) in &stored {
         let stays = !merge.replace
-            || old.origin != Origin::Manual
+            || !merge.writes_over(old.origin)
             || *revision > merge.start
             || *rtype == Rtype::SOA
             || (*rtype == Rtype::NS && name == merge.zone.name && !merge.file_apex_ns);
@@ -428,9 +491,21 @@ fn merge_group(
             (Some(_), false) => report.replaced += 1,
             (None, false) => report.added += 1,
         }
+        if new.origin == Origin::Ad && !again {
+            report.claimable += 1;
+        }
         out.writes.push((old, new));
     }
     Ok(out)
+}
+
+/// The types a Windows client registers for itself (its A, AAAA and PTR records): the only
+/// ones a Windows file's aging mark makes claimable. A controller's SRV and CNAME records
+/// stand at locator names, which only privileged principals change anyway, and an aged
+/// record of another type (an NS set at a delegation, say) is kept static rather than
+/// handed to the computer its name happens to match.
+fn claimable_type(rtype: Rtype) -> bool {
+    matches!(rtype, Rtype::A | Rtype::AAAA | Rtype::PTR)
 }
 
 fn key_hash(name: &DnsName, rtype: Rtype) -> u64 {
@@ -441,8 +516,8 @@ fn key_hash(name: &DnsName, rtype: Rtype) -> u64 {
 }
 
 /// Whether the finish step of a `replace` import deletes this stored RRset.
-fn purged(zone: &Zone, rrset: &RrSet, file_apex_ns: bool) -> bool {
-    rrset.origin == Origin::Manual
+fn purged(zone: &Zone, rrset: &RrSet, file_apex_ns: bool, dialect: Dialect) -> bool {
+    (rrset.origin == Origin::Manual || (dialect == Dialect::Windows && rrset.origin == Origin::Ad))
         && !(rrset.name == zone.name
             && (rrset.rtype == Rtype::SOA || (rrset.rtype == Rtype::NS && !file_apex_ns)))
 }
@@ -504,7 +579,7 @@ impl ZoneService {
             dry_run: true,
             ..ImportReport::default()
         };
-        let mut groups = GroupReader::new(&request.text, &zone.name, self.config.max_generate)?;
+        let mut groups = GroupReader::of(request, &zone.name, self.config.max_generate)?;
         let mut seen: HashSet<u64> = HashSet::new();
         let mut writes = 0u64;
         // The preview cannot know whether the file has an apex NS set before it ends, so
@@ -516,6 +591,7 @@ impl ZoneService {
             start: view.revision(),
             file_apex_ns: true,
             stamp: &stamp,
+            dialect: request.dialect,
         };
         while let Some(group) = groups.next_group(&mut report)? {
             let group = merge_group(view.as_ref(), &merge, group, &mut report)?;
@@ -537,7 +613,7 @@ impl ZoneService {
                 for (key, versioned) in rows {
                     after = Some(key.to_vec());
                     let rrset: RrSet = RRSETS.decode(&versioned.value)?;
-                    if purged(&zone, &rrset, file_apex_ns)
+                    if purged(&zone, &rrset, file_apex_ns, request.dialect)
                         && !seen.contains(&key_hash(&rrset.name, rrset.rtype))
                     {
                         report.removed += 1;
@@ -779,7 +855,7 @@ impl StepHandler for ChunkStep {
                 .zone;
             check_target(&zone, &run.request.scope).map_err(coded)?;
             run.state = Some(RunState {
-                groups: GroupReader::new(&run.request.text, &zone.name, run.max_generate)
+                groups: GroupReader::of(&run.request, &zone.name, run.max_generate)
                     .map_err(coded)?,
                 zone,
                 start: view.revision(),
@@ -810,6 +886,7 @@ impl StepHandler for ChunkStep {
                 start: state.start,
                 file_apex_ns: true,
                 stamp: &stamp,
+                dialect: run.request.dialect,
             };
             while count < run.chunk {
                 let Some(group) = state.groups.next_group(&mut state.report).map_err(coded)? else {
@@ -954,7 +1031,7 @@ async fn finish(
                     .decode(&versioned.value)
                     .map_err(|error| StepError::coded(&error))?;
                 if versioned.revision <= state.start
-                    && purged(&state.zone, &rrset, file_apex_ns)
+                    && purged(&state.zone, &rrset, file_apex_ns, run.request.dialect)
                     && !state
                         .file_keys
                         .contains(&key_hash(&rrset.name, rrset.rtype))

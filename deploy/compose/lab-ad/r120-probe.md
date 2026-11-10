@@ -1,5 +1,9 @@
 # The early Windows probe of risk R120
 
+The probe is now step W5 of the Windows lab, [windows/README.md](windows/README.md), with the
+Kerberos account adopted through the block of the runbook rather than a keytab; this page
+keeps the stand-alone form for a probe outside the full lab.
+
 Risk R120 of the identity plan: Windows may do something in a secure dynamic update that no
 specification says (TKEY only over TCP, the retry after BADKEY, the reuse of a context, the
 TSIG digest of the first signed message). The probe has one real Windows domain controller

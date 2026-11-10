@@ -54,6 +54,18 @@
         <notes><note category="description">Button on the directory mappings page that leads back to the access settings.</note></notes>
         <segment><source>Back to access</source><target>Tillbaka till åtkomst</target></segment>
       </unit>
+      <unit id="errors.dns.owner.not_found">
+        <segment><source>The name has no owner in this zone.</source><target>Namnet har ingen ägare i denna zon.</target></segment>
+      </unit>
+      <unit id="errors.dns.owner.off">
+        <segment><source>The zone keeps no owners: give it Kerberos settings with the Windows ownership rules first.</source><target>Zonen håller inga ägare: ge den först Kerberos-inställningar med Windows ägarregler.</target></segment>
+      </unit>
+      <unit id="errors.dns.owner.protected">
+        <segment><source>This name keeps no owner: it is a locator name or a wildcard, which only privileged principals change.</source><target>Detta namn har ingen ägare: det är ett lokaliseringsnamn eller ett jokertecken, som bara privilegierade principaler ändrar.</target></segment>
+      </unit>
+      <unit id="errors.dns.owner.invalid">
+        <segment><source>The owner is not valid for this zone.</source><target>Ägaren är inte giltig för denna zon.</target></segment>
+      </unit>
       <unit id="errors.dns.krb.account.not_found">
         <segment><source>No Kerberos account is set up for this realm.</source><target>Inget Kerberos-konto är inställt för denna realm.</target></segment>
       </unit>

@@ -165,6 +165,7 @@ impl OldReader {
             rtype,
             ttl: record.ttl().as_secs(),
             rdata,
+            aged: false,
         })))
     }
 }

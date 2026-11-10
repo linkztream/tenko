@@ -26,6 +26,7 @@ import { appendAudit, principalNow } from "./audit-store";
 import { requireSession } from "./auth";
 import { commit, db, isAdmin, onMockReset, type MockUser } from "./db";
 import {
+  assignOwner,
   changeRecords,
   createAcl,
   createKey,
@@ -38,6 +39,8 @@ import {
   findAcl,
   findZone,
   importZoneFile,
+  listOwners,
+  releaseOwner,
   listRecords,
   listZones,
   seedDns,
@@ -212,9 +215,6 @@ const zones = [
       const zone = updateZone(state, context, ctx.params.id, body as Record<string, unknown>, ctx.ifMatch());
       // The catalog flag is not part of the shared model yet; the mock keeps what the PATCH says.
       if (typeof (body as Record<string, unknown>).catalog === "boolean") zone.catalog = (body as { catalog: boolean }).catalog;
-      // WP6.2: the update policy, kept as the PATCH says (the shared model leaves it out).
-      const update = (body as { update?: components["schemas"]["DnsUpdatePolicy"] | null }).update;
-      if (update) (zone as { update?: components["schemas"]["DnsUpdatePolicy"] }).update = update;
       // WP6.3: the signing policy, which the signer acts on at once here.
       const policy = (body as { dnssec?: components["schemas"]["DnssecPolicy"] | null }).dnssec;
       if (policy) {
@@ -233,6 +233,33 @@ const zones = [
       commit("dns", { deleted: [zoneRef(zone.id)], tables: ["dns.zones", "dns.rrsets"], kind: "dns.zone.changed" });
       appendAudit({ action: "dns.zone.delete", objects: [zoneRef(zone.id)], context: { name: zone.name } });
       return noContent();
+    }),
+  ),
+];
+
+// ---------------------------------------------------------------------------------
+// Name owners (secure dynamic updates; a zone keeps owners with Kerberos settings)
+
+const owners = [
+  route("get", "/api/v1/dns/zones/{id}/owners", (ctx) =>
+    guard("dns.read", () => {
+      const items = listOwners(state, ctx.params.id, { name: ctx.query("name"), owner: ctx.query("owner"), scope: ctx.query("scope") });
+      return ok(paginate(items, ctx.url, db.revision));
+    }),
+  ),
+  route("put", "/api/v1/dns/zones/{id}/owners/{name}", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.write", () => {
+      const owner = assignOwner(state, context, ctx.params.id, ctx.params.name, body as Record<string, unknown>, ctx.ifMatch());
+      write("dns.owner.assign", [zoneRef(ctx.params.id)], "dns.zone.changed", ["dns.zones"], { name: owner.name });
+      return ok(owner, etag(owner.revision)) as never;
+    });
+  }),
+  route("delete", "/api/v1/dns/zones/{id}/owners/{name}", (ctx) =>
+    guard("dns.write", () => {
+      const released = releaseOwner(state, context, ctx.params.id, ctx.params.name);
+      write("dns.owner.release", [zoneRef(ctx.params.id)], "dns.zone.changed", ["dns.zones"], { name: released.owner.name });
+      return ok(released) as never;
     }),
   ),
 ];
@@ -1081,7 +1108,7 @@ const anchorRoutes = [
 ];
 // WP10.4: end.
 
-export const dnsRoutes: HttpHandler[] = [...zones, ...transfer, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes, ...dnssec, ...blocking, ...anchorRoutes];
+export const dnsRoutes: HttpHandler[] = [...zones, ...owners, ...transfer, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes, ...dnssec, ...blocking, ...anchorRoutes];
 
 /** Every DNS operation answering 501, as the server does until WP4.2 lands (for `server.use`). */
 export const dnsStubs: HttpHandler[] = apiOperations

@@ -204,6 +204,8 @@ export const apiOperations = [
   { id: "flip_dns_zone", method: "post", path: "/api/v1/dns/zones/{id}/flip", tags: ["dns"], summary: "Flip a zone between secondary and primary in place" },
   { id: "list_dns_zone_journal", method: "get", path: "/api/v1/dns/zones/{id}/journal", tags: ["dns"], summary: "List the serial steps of a zone scope" },
   { id: "list_dns_zone_owners", method: "get", path: "/api/v1/dns/zones/{id}/owners", tags: ["dns"], summary: "List the owners of a zone's names" },
+  { id: "assign_dns_zone_owner", method: "put", path: "/api/v1/dns/zones/{id}/owners/{name}", tags: ["dns"], summary: "Give a name of a zone an owner" },
+  { id: "release_dns_zone_owner", method: "delete", path: "/api/v1/dns/zones/{id}/owners/{name}", tags: ["dns"], summary: "Release a name of a zone from its owner" },
   { id: "list_dns_records", method: "get", path: "/api/v1/dns/zones/{id}/records", tags: ["dns"], summary: "List the RRsets of a zone" },
   { id: "change_dns_records", method: "post", path: "/api/v1/dns/zones/{id}/records/batch", tags: ["dns"], summary: "Change RRsets of a zone in one batch" },
   { id: "export_dns_zone_file", method: "get", path: "/api/v1/dns/zones/{id}/records/export", tags: ["dns"], summary: "Export a zone as a zone file" },

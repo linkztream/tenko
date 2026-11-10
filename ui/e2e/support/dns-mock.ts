@@ -17,6 +17,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Page, Route } from "@playwright/test";
 import {
+  assignOwner,
   changeRecords,
   createAcl,
   createKey,
@@ -29,8 +30,10 @@ import {
   findAcl,
   findZone,
   importZoneFile,
+  listOwners,
   listRecords,
   listZones,
+  releaseOwner,
   seedDns,
   updateAcl,
   updateZone,
@@ -177,6 +180,11 @@ export class FakeDns {
         this.jobs.set(jobId, this.importJob(jobId, id, report));
         return route.fulfill({ status: 202, contentType: "application/json", headers: { Location: `/api/v1/jobs/${jobId}` }, body: JSON.stringify({ job_id: jobId }) });
       }
+    }
+    if (kind === "zones" && id !== undefined && sub === "owners") {
+      if (action === undefined && method === "GET") return page(listOwners(s, id, { name: q("name"), owner: q("owner"), scope: q("scope") }));
+      if (action !== undefined && method === "PUT") return json(200, assignOwner(s, c, id, action, body, ifMatch));
+      if (action !== undefined && method === "DELETE") return json(200, releaseOwner(s, c, id, action));
     }
     if (kind === "acls" && id === undefined) {
       if (method === "GET") return page([...s.acls].sort((a, b) => (a.name < b.name ? -1 : 1)));

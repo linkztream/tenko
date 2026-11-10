@@ -1,6 +1,7 @@
 // One zone (/dns/zones/:id/:tab?): its name, kind and serving state and the serial it serves,
 // the actions (import a zone file, export one, delete the zone) and four tabs: the records,
-// the settings (SOA, apex NS, serial policy), the history and DNSSEC (WP6.3). The zone follows the `dns`
+// the settings (SOA, apex NS, serial policy), the history and DNSSEC (WP6.3), and for a primary
+// zone the owners of its names (secure dynamic updates). The zone follows the `dns`
 // topic; a 501 of the API (WP4.2 not landed) or the module switched off shows the notice.
 import { A, useNavigate, useParams } from "@solidjs/router";
 import { createSignal, For, Match, Show, Switch } from "solid-js";
@@ -16,6 +17,7 @@ import { mayWriteDns } from "./access";
 import { DnsNav } from "./DnsNav";
 import { DnsProblem, downloadText, unavailable, ZoneChips } from "./Parts";
 import { dnsPaths, type ZoneTab } from "./paths";
+import { OwnersTab } from "./OwnersTab";
 import { RecordsTab } from "./RecordsTab";
 import { DeleteZoneDialog } from "./ZoneDialogs";
 import { DnssecTab } from "./dnssec/DnssecTab";
@@ -23,7 +25,7 @@ import { HistoryTab, SettingsTab } from "./ZoneSettings";
 import { errorMessage } from "../api/problem";
 import "./dns.css";
 
-const TABS: readonly ZoneTab[] = ["records", "settings", "history", "dnssec"];
+const TABS: readonly ZoneTab[] = ["records", "owners", "settings", "history", "dnssec"];
 
 export default function ZonePage() {
   const params = useParams<{ id: string; tab?: string }>();
@@ -116,7 +118,7 @@ export default function ZonePage() {
               }
             />
             <div class="tabs" role="tablist" aria-label={t("dns.zone.tabs")}>
-              <For each={TABS}>
+              <For each={TABS.filter((name) => name !== "owners" || z().kind === "primary")}>
                 {(name) => (
                   <button
                     type="button"
@@ -133,6 +135,9 @@ export default function ZonePage() {
             <Switch>
               <Match when={tab() === "records"}>
                 <RecordsTab zone={z()} onWritten={() => query.refetch()} />
+              </Match>
+              <Match when={tab() === "owners" && z().kind === "primary"}>
+                <OwnersTab zone={z()} />
               </Match>
               <Match when={tab() === "settings"}>
                 <SettingsTab

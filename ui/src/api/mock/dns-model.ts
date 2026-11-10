@@ -10,7 +10,7 @@
 // `DnsFailure` with the codes of docs/dns-contracts.md section 5. Documentation values only:
 // names under example.test, addresses of RFC 5737 and RFC 3849.
 import type { components } from "../generated/schema";
-import type { ImportReport, OriginCount, RecordChange, TypeCount, Zone } from "../../dns/types";
+import type { ImportReport, NameOwner, OriginCount, RecordChange, TypeCount, Zone } from "../../dns/types";
 import { canonical, inZone, parseRecord, rrsetKey, sameRecord, validName } from "../../dns/model";
 
 type S = components["schemas"];
@@ -54,6 +54,8 @@ export interface DnsState {
   rrsets: Map<string, DnsRrSet[]>;
   acls: S["AclItem"][];
   keys: S["KeyItem"][];
+  /** The owner of each name by zone id (zones with Kerberos settings keep owners). */
+  owners: Map<string, NameOwner[]>;
 }
 
 /** The fixed identifiers of the seed, for tests. */
@@ -315,6 +317,7 @@ export function seedDns(ctx: DnsContext): DnsState {
         used_by: [],
       },
     ],
+    owners: new Map(),
     keys: [
       {
         id: DNS_IDS.key.xfr,
@@ -418,6 +421,12 @@ export function updateZone(state: DnsState, ctx: DnsContext, id: string, body: R
   if (body.description !== undefined) zone.description = typeof body.description === "string" && body.description ? body.description : null;
   if (body.source !== undefined && body.source !== null) zone.source = body.source as S["SecondarySource"];
   if (body.transfer !== undefined && body.transfer !== null) zone.transfer = body.transfer as S["TransferPolicy"];
+  // The update policy is replaced whole, as the server does (a PATCH names every field to keep).
+  if (body.update !== undefined && body.update !== null) {
+    const update = body.update as S["DnsUpdatePolicy"];
+    checkKerberos(update.kerberos);
+    (zone as { update?: S["DnsUpdatePolicy"] }).update = update;
+  }
   bump(state, ctx, zone, ctx.nextRevision());
   refreshUse(state);
   return zone;
@@ -427,9 +436,126 @@ export function deleteZone(state: DnsState, ctx: DnsContext, id: string): DnsZon
   const zone = findZone(state, id);
   state.zones = state.zones.filter((z) => z.id !== id);
   state.rrsets.delete(id);
+  state.owners.delete(id);
   ctx.nextRevision();
   refreshUse(state);
   return zone;
+}
+
+// ---------------------------------------------------------------------------------
+// Name owners (secure dynamic updates)
+
+/** The server's checks of the Kerberos settings of an update policy, as refusals naming the field. */
+export function checkKerberos(kerberos: S["KerberosUpdate"] | null | undefined): void {
+  if (!kerberos) return;
+  const bad = (field: string, reason: string): never => fail(400, "dns.zone.invalid", { field: `update.kerberos.${field}`, reason });
+  const realms = kerberos.realms ?? [];
+  if (realms.length === 0) bad("realms", "at least one realm is needed");
+  if (new Set(realms).size !== realms.length) bad("realms", "a realm is named twice");
+  if (realms.some((r) => r !== r.toUpperCase())) bad("realms", "a realm is written in upper case");
+  const days = kerberos.owner_hold_days ?? 14;
+  if (!Number.isInteger(days) || days < 0 || days > 3650) bad("owner_hold_days", "from 0 to 3650 days");
+  const privileged = kerberos.privileged ?? [];
+  if (privileged.some((sid) => !SID_PATTERN.test(sid))) bad("privileged", "not a SID");
+  if (kerberos.update_proxy && !SID_PATTERN.test(kerberos.update_proxy)) bad("update_proxy", "not a SID");
+  if (kerberos.update_proxy && privileged.includes(kerberos.update_proxy)) bad("update_proxy", "the proxy group cannot be privileged");
+}
+
+const SID_PATTERN = /^S-1-\d+(-\d+)+$/;
+/** First labels that locate a service of the directory; such names keep no owner. */
+const LOCATOR_LABELS = new Set(["_ldap", "_kerberos", "_kpasswd", "_gc", "domaindnszones", "forestdnszones"]);
+
+/** Whether a name keeps no owner: the apex, a locator name (_msdcs, _ldap, ...) or a wildcard. */
+export function ownerProtected(zone: Pick<DnsZone, "name">, name: string): boolean {
+  if (name === zone.name) return true;
+  const labels = name.split(".");
+  return labels.includes("_msdcs") || LOCATOR_LABELS.has(labels[0] ?? "") || labels.includes("*");
+}
+
+function ownersOf(state: DnsState, zone: DnsZone): NameOwner[] {
+  const held = state.owners.get(zone.id);
+  if (held) return held;
+  const fresh: NameOwner[] = [];
+  state.owners.set(zone.id, fresh);
+  return fresh;
+}
+
+/** The Kerberos settings of a zone's update policy; the zone keeps owners only with them. */
+function zoneKerberos(zone: DnsZone): S["KerberosUpdate"] | null {
+  return (zone as { update?: S["DnsUpdatePolicy"] }).update?.kerberos ?? null;
+}
+
+export interface OwnerQuery {
+  name?: string | null;
+  owner?: string | null;
+  scope?: string | null;
+}
+
+/** The owners of a zone by name, filtered by subtree and by owner (SID or principal, any case). */
+export function listOwners(state: DnsState, id: string, query: OwnerQuery): NameOwner[] {
+  const zone = findZone(state, id);
+  const name = query.name ? canonical(query.name) : "";
+  const owner = (query.owner ?? "").trim().toLowerCase();
+  return [...ownersOf(state, zone)]
+    .filter((o) => !query.scope || o.scope === query.scope)
+    .filter((o) => name === "" || o.name === name || o.name.endsWith(`.${name}`))
+    .filter((o) => owner === "" || o.principal.toLowerCase().includes(owner) || (o.sid ?? "").toLowerCase() === owner)
+    .sort((a, b) => compareNames(a.name, b.name));
+}
+
+/** Gives a name to a principal (an administrator's assignment); a name without records is held for it. */
+export function assignOwner(
+  state: DnsState,
+  ctx: DnsContext,
+  id: string,
+  name: string,
+  body: Record<string, unknown>,
+  ifMatch: number | "*" | null,
+): NameOwner {
+  const zone = findZone(state, id);
+  const kerberos = zoneKerberos(zone);
+  if (!kerberos) return fail(409, "dns.owner.off", {}, "the zone has no Kerberos settings, so it keeps no owners");
+  const owner = canonical(name);
+  if (!validName(owner) || !inZone(owner, zone.name)) return fail(400, "dns.owner.invalid", { field: "name", reason: "the name is not a name of the zone" });
+  if (ownerProtected(zone, owner)) return fail(409, "dns.owner.protected", { name: owner }, "this name keeps no owner");
+  const principal = typeof body.principal === "string" ? body.principal.trim() : "";
+  const at = principal.lastIndexOf("@");
+  if (at < 1 || !kerberos.realms.includes(principal.slice(at + 1).toUpperCase())) {
+    return fail(400, "dns.owner.invalid", { field: "principal", reason: "the principal is not one of a realm of the zone" });
+  }
+  const sid = typeof body.sid === "string" && body.sid !== "" ? body.sid : null;
+  if (sid !== null && !SID_PATTERN.test(sid)) return fail(400, "dns.owner.invalid", { field: "sid", reason: "not a SID" });
+  const owners = ownersOf(state, zone);
+  const old = owners.find((o) => o.name === owner);
+  if (typeof ifMatch === "number" && old && ifMatch !== old.revision) {
+    return fail(412, "sys.store.precondition_failed", {}, "the owner changed since it was read; reload and retry");
+  }
+  const hasRecords = setsOf(state, zone).some((s) => s.name === owner);
+  const days = kerberos.owner_hold_days ?? 14;
+  const next: NameOwner = {
+    scope: "default",
+    name: owner,
+    principal,
+    ...(sid ? { sid } : {}),
+    since: new Date(ctx.now()).toISOString(),
+    how: "assigned",
+    ...(!hasRecords && days > 0 ? { hold_until: new Date(ctx.now() + days * DAY).toISOString() } : {}),
+    revision: ctx.nextRevision(),
+  };
+  state.owners.set(zone.id, [...owners.filter((o) => o.name !== owner), next]);
+  return next;
+}
+
+/** Removes the owner of a name; its dynamic RRsets (origin ad) are claimable again. */
+export function releaseOwner(state: DnsState, ctx: DnsContext, id: string, name: string): S["NameOwnerReleased"] {
+  const zone = findZone(state, id);
+  const owner = canonical(name);
+  const owners = ownersOf(state, zone);
+  const old = owners.find((o) => o.name === owner);
+  if (!old) return fail(404, "dns.owner.not_found", { name: owner });
+  state.owners.set(zone.id, owners.filter((o) => o !== old));
+  const claimable = setsOf(state, zone).filter((x) => x.name === owner && x.origin === "ad").length;
+  return { owner: old, claimable, revision: ctx.nextRevision() };
 }
 
 // ---------------------------------------------------------------------------------
@@ -580,6 +706,8 @@ interface FileRecord {
   type: string;
   ttl: number;
   data: RecordData;
+  /** The line had an aging mark (the Windows dialect): the RRset is claimable by its host. */
+  aged?: boolean;
 }
 
 /** Tokens of a zone file line with parentheses joined; comments are dropped, quoted strings kept. */
@@ -620,7 +748,7 @@ function logicalLines(text: string): { line: number; text: string }[] {
 }
 
 /** Parses a zone file for `zone`; unsupported content becomes losses, a broken line fails with 422. */
-export function parseZoneFile(text: string, zone: string): { records: FileRecord[]; losses: S["ImportLoss"][] } {
+export function parseZoneFile(text: string, zone: string, dialect: S["ZoneFileDialect"] = "rfc1035"): { records: FileRecord[]; losses: S["ImportLoss"][] } {
   let origin = zone;
   let defaultTtl = 3600;
   let last = zone;
@@ -630,6 +758,15 @@ export function parseZoneFile(text: string, zone: string): { records: FileRecord
   for (const { line, text: raw } of logicalLines(text)) {
     const startsBlank = /^\s/.test(raw);
     const tokens = raw.trim().split(/\s+/);
+    // The Windows dialect: [AGE:n] (dnscmd writes [Aging:n]) marks a record a host registered itself.
+    let aged = false;
+    if (dialect === "windows") {
+      const mark = tokens.findIndex((tok) => /^\[AG(E|ING):\d+\]$/i.test(tok));
+      if (mark >= 0) {
+        aged = true;
+        tokens.splice(mark, 1);
+      }
+    }
     const head = tokens[0] ?? "";
     if (head.startsWith("$")) {
       const directive = head.toUpperCase();
@@ -661,11 +798,15 @@ export function parseZoneFile(text: string, zone: string): { records: FileRecord
     }
     const type = (tokens[i] ?? "").toUpperCase();
     if (!type) broken(line, "the record has no type");
-    const rest = raw.trim().split(/\s+/).slice(i + 1).join(" ");
+    const rest = tokens.slice(i + 1).join(" ");
     last = owner;
     if (!validName(owner)) broken(line, `the owner ${owner} is not a valid name`);
     if (!inZone(owner, zone)) {
       losses.push({ line, code: "dns.import.outside", detail: `${owner} is outside the zone and was skipped` });
+      continue;
+    }
+    if (dialect === "windows" && (type === "WINS" || type === "WINSR")) {
+      losses.push({ line, code: "dns.zonefile.wins", detail: "WINS records are not kept" });
       continue;
     }
     if (type === "SOA") {
@@ -684,16 +825,17 @@ export function parseZoneFile(text: string, zone: string): { records: FileRecord
         continue;
       }
       broken(line, `the data of the ${type} record is not valid`);
-    } else records.push({ name: owner, type, ttl, data: parsed.data });
+    } else records.push({ name: owner, type, ttl, data: parsed.data, ...(aged ? { aged } : {}) });
   }
   return { records, losses };
 }
 
-function groupFile(records: readonly FileRecord[]): Map<string, { name: string; type: string; ttl: number; records: RecordData[] }> {
-  const sets = new Map<string, { name: string; type: string; ttl: number; records: RecordData[] }>();
+function groupFile(records: readonly FileRecord[]): Map<string, { name: string; type: string; ttl: number; records: RecordData[]; aged: boolean }> {
+  const sets = new Map<string, { name: string; type: string; ttl: number; records: RecordData[]; aged: boolean }>();
   for (const r of records) {
     const key = rrsetKey({ scope: "default", name: r.name, type: r.type });
-    const set = sets.get(key) ?? { name: r.name, type: r.type, ttl: r.ttl, records: [] };
+    const set = sets.get(key) ?? { name: r.name, type: r.type, ttl: r.ttl, records: [], aged: false };
+    set.aged ||= r.aged === true;
     if (!set.records.some((x) => sameRecord(x, r.data))) set.records.push(r.data);
     set.ttl = Math.min(set.ttl, r.ttl);
     sets.set(key, set);
@@ -712,13 +854,17 @@ export function importZoneFile(
   const zone = findZone(state, id);
   if (typeof body.zone_file !== "string") return fail(400, "sys.invalid_request", {}, "the zone file is missing");
   const replace = body.replace === true;
-  const { records, losses } = parseZoneFile(body.zone_file, zone.name);
+  if (body.dialect !== undefined && body.dialect !== null && body.dialect !== "rfc1035" && body.dialect !== "windows") {
+    return fail(400, "sys.invalid_request", {}, "the dialect is not rfc1035 or windows");
+  }
+  const { records, losses } = parseZoneFile(body.zone_file, zone.name, body.dialect === "windows" ? "windows" : "rfc1035");
   const fileSets = groupFile(records);
   const before = setsOf(state, zone);
   const was = new Map(before.map((s) => [rrsetKey(s), s]));
   let added = 0;
   let replaced = 0;
   let removed = 0;
+  let claimable = 0;
   const after = before.map((s) => ({ ...s }));
   for (const [key, set] of fileSets) {
     const old = was.get(key);
@@ -729,7 +875,8 @@ export function importZoneFile(
     if (!old) added += 1;
     else if (JSON.stringify(old.records) !== JSON.stringify(set.records) || old.ttl !== set.ttl) replaced += 1;
     else continue;
-    const next: DnsRrSet = { scope: "default", name: set.name, type: set.type, ttl: set.ttl, records: set.records, origin: "manual", key: null, updated: stamp(ctx) };
+    if (set.aged) claimable += 1;
+    const next: DnsRrSet = { scope: "default", name: set.name, type: set.type, ttl: set.ttl, records: set.records, origin: set.aged ? "ad" : "manual", key: null, updated: stamp(ctx) };
     const index = after.findIndex((s) => rrsetKey(s) === key);
     if (index >= 0) after[index] = next;
     else after.push(next);
@@ -746,7 +893,7 @@ export function importZoneFile(
   const counts = new Map<string, number>();
   for (const r of records) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);
   const types: TypeCount[] = [...counts.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([rtype, n]) => ({ rtype, records: n }));
-  const report: ImportReport = { added, replaced, removed, losses, types, dry_run: !write, revision: null, serial: null };
+  const report: ImportReport = { added, replaced, removed, claimable, losses, types, dry_run: !write, revision: null, serial: null };
   if (!write) return report;
   state.rrsets.set(zone.id, kept.sort(compareSets));
   bump(state, ctx, zone, ctx.nextRevision());

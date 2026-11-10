@@ -867,3 +867,96 @@ fn hostile_input_is_refused_or_read_without_a_panic() {
         "the generic data is longer than any record data"
     );
 }
+
+// WP13.4: the Windows dialect (MIG-07).
+
+fn read_windows(text: &str) -> ZoneResult<Vec<Item>> {
+    let mut reader = Reader::with_dialect(text, &apex(), 256, Dialect::Windows)?;
+    let mut items = Vec::new();
+    while let Some(item) = reader.next_item()? {
+        items.push(item);
+    }
+    Ok(items)
+}
+
+fn windows_records(text: &str) -> Vec<(String, bool)> {
+    read_windows(text)
+        .expect("the file reads")
+        .into_iter()
+        .filter_map(|item| match item {
+            Item::Record(record) => Some((record.name.to_string(), record.aged)),
+            Item::Loss(_) => None,
+        })
+        .collect()
+}
+
+/// MIG-07: a file the Windows DNS Server wrote: the aging mark after the owner (also on a
+/// line that continues the previous owner) makes a record aged when its hours are above
+/// zero; a record without one, or with `[AGE:0]`, is static.
+#[test]
+fn mig_07_the_aging_mark_of_a_windows_file() {
+    let text = "\
+@                       3600    NS      ns1.example.test.
+ws01                    [AGE:3660412]   1200    A       192.0.2.21
+                        [age:3660412]   1200    A       192.0.2.22
+srv01                   1200    A       192.0.2.10
+old                     [AGE:0] 1200    A       192.0.2.30
+_ldap._tcp              [AGE:3660413]   600     SRV     0 100 389 dc1.example.test.
+";
+    assert_eq!(
+        windows_records(text),
+        [
+            ("example.test".to_owned(), false),
+            ("ws01.example.test".to_owned(), true),
+            ("ws01.example.test".to_owned(), true),
+            ("srv01.example.test".to_owned(), false),
+            ("old.example.test".to_owned(), false),
+            ("_ldap._tcp.example.test".to_owned(), true),
+        ]
+    );
+}
+
+/// MIG-07: WINS and WINS-R records are losses of a Windows file, not syntax errors; data
+/// that reads `WINS` after a known type is data.
+#[test]
+fn mig_07_wins_records_are_losses_and_wins_as_data_is_data() {
+    let items = read_windows(
+        "@ WINS L1 C900 ( 192.0.2.9 )\n@ [AGE:0] 3600 WINS-R L1 C900 ( example.test. )\nnote TXT WINS\n",
+    )
+    .expect("reads");
+    let codes: Vec<&str> = items
+        .iter()
+        .map(|item| match item {
+            Item::Loss(loss) => loss.code,
+            Item::Record(_) => "record",
+        })
+        .collect();
+    assert_eq!(codes, [LOSS_WINS, LOSS_WINS, "record"]);
+}
+
+/// MIG-07: a malformed mark is a syntax error with its line; in the RFC 1035 dialect, the
+/// default, a mark is the syntax error it is in any other zone file.
+#[test]
+fn mig_07_a_malformed_mark_and_a_mark_outside_the_dialect() {
+    for (text, reason) in [
+        ("a [AGE:] 300 A 192.0.2.1\n", "digits only"),
+        ("a [AGE:12x] 300 A 192.0.2.1\n", "digits only"),
+        ("a [AGE:12345678901] 300 A 192.0.2.1\n", "digits only"),
+        ("a [AGE:9999999999] 300 A 192.0.2.1\n", "too large"),
+    ] {
+        let error = read_windows(text).expect_err(text);
+        assert!(error.is(codes::ZONE_FILE_INVALID), "{error:?}");
+        assert!(
+            error
+                .coded()
+                .params
+                .get("reason")
+                .is_some_and(|got| got.contains(reason)),
+            "{text}: {error:?}"
+        );
+    }
+    let (line, _) = error("ok 300 A 192.0.2.1\na [AGE:3660412] 300 A 192.0.2.1\n");
+    assert_eq!(line, 2);
+    // A second mark is no mark: the token is neither a TTL, a class nor a type.
+    assert!(read_windows("a [AGE:1] [AGE:2] 300 A 192.0.2.1\n").is_err());
+}

@@ -189,6 +189,34 @@ test("sets who may update a zone, with TSIG and the IPAM rule, on the settings t
   await expect(update.getByTestId("update-allow")).toHaveText(["internal"]);
 });
 
+// WP13.4: secure updates (Kerberos) on the settings tab, and the owners tab that follows from them.
+test("turns on secure updates with the standard groups and finds the owners tab", async ({ page, signedIn }) => {
+  void signedIn;
+  const fake = await FakeDns.install(page);
+  const domain = "S-1-5-21-1000-2000-3000";
+  await page.goto(`/dns/zones/${fake.zone("example.test")?.id}/owners`);
+  await expect(page.getByTestId("owners-off")).toBeVisible();
+  await page.getByTestId("zone-tab-settings").click();
+  const block = page.getByTestId("zone-settings").getByTestId("zone-kerberos");
+  await block.getByTestId("field-update.kerberos.enabled").check();
+  await expect(block.getByTestId("kerberos-no-privileged")).toBeVisible();
+  await block.getByTestId("field-update.kerberos.realms").fill("corp.example.test");
+  await block.getByTestId("field-update.kerberos.domain_sid").fill(domain);
+  await block.getByTestId("kerberos-domain-add").click();
+  await expect(block.getByTestId("kerberos-privileged")).toHaveCount(3);
+  await page.getByTestId("zone-settings").getByTestId("form-submit").click();
+  await expect(page.getByTestId("toast").first()).toBeVisible();
+  const patch = fake.sent.filter((x) => x.method === "PATCH").at(-1);
+  expect(patch?.body).toMatchObject({ update: { kerberos: { realms: ["CORP.EXAMPLE.TEST"], privileged: [`${domain}-512`, `${domain}-516`, `${domain}-519`] } } });
+  await page.getByTestId("zone-tab-owners").click();
+  await page.getByTestId("owner-assign").click();
+  const dialog = page.getByTestId("dialog-owner-assign");
+  await dialog.getByTestId("field-name").fill("pc07");
+  await dialog.getByTestId("field-principal").fill("PC07$@CORP.EXAMPLE.TEST");
+  await dialog.getByTestId("form-submit").click();
+  await expect(gridRow(page, "dns-owners", "pc07")).toContainText("PC07$@CORP.EXAMPLE.TEST");
+});
+
 test("offers a viewer the zones to read and nothing to change", async ({ page, api, signedIn }) => {
   void signedIn;
   const fake = await FakeDns.install(page);

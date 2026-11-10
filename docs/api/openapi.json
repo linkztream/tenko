@@ -16660,7 +16660,7 @@
           "dns"
         ],
         "summary": "List the owners of a zone's names",
-        "description": "Scope: `dns.read`. One row per name with an owner (identity plan section 3.6): the SID when the ticket carried a PAC, the principal, since when, and the hold after the name's last record went. Empty for a zone without ownership.",
+        "description": "Scope: `dns.read`. One row per name with an owner (identity plan section 3.6), in name order: the SID when the ticket carried a PAC, the principal, since when, how the owner got the name (`created`, `claimed`, `assigned`, `imported`), and the hold after the name's last record went. `name` keeps the names at or below it, `owner` those of one owner by SID or principal. Empty for a zone without ownership.",
         "operationId": "list_dns_zone_owners",
         "parameters": [
           {
@@ -16670,37 +16670,6 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "description": "Page size, 1 to 1,000 (default 100).",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int32",
-              "minimum": 0
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "description": "Opaque cursor from the previous page's `next_cursor`.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "at_least",
-            "in": "query",
-            "description": "Read at least this store revision (read-your-writes after a write).",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int64",
-              "minimum": 0
             }
           },
           {
@@ -16724,7 +16693,27 @@
           {
             "name": "owner",
             "in": "query",
-            "description": "Only the names of this owner, by SID or principal.",
+            "description": "Only the names of this owner, by SID or principal (without regard to case).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
             "required": false,
             "schema": {
               "type": "string"
@@ -16733,7 +16722,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A page of owners by scope and name",
+            "description": "A page of owners by name",
             "content": {
               "application/json": {
                 "schema": {
@@ -16743,7 +16732,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`), or the scope does not exist (`dns.zone.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16782,8 +16771,229 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DNS module does not run on this server (`dns.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/zones/{id}/owners/{name}": {
+      "put": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Give a name of a zone an owner",
+        "description": "Scope: `dns.write`. The name (absolute, inside the zone) gets the principal as its owner, replacing the owner it had (`If-Match` with the row's revision makes the change conditional); audited as `dns.owner.assign`. A name with records is owned from now; a name without records is held for the new owner for the zone's owner hold, so that it may create it. Locator and wildcard names keep no owner (`dns.owner.protected`); a zone without Kerberos settings keeps none (`dns.owner.off`).",
+        "operationId": "assign_dns_zone_owner",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Zone identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The name, absolute",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NameOwnerAssign"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The owner now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NameOwnerItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`), the scope does not exist (`dns.zone.invalid`), or the owner is invalid: a name outside the zone, a realm the zone does not accept (`dns.owner.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The zone does not exist (`dns.zone.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The zone keeps no owners (`dns.owner.off`), the name keeps none (`dns.owner.protected`), or the DNS module does not run (`dns.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "`If-Match` is not the owner row's revision",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Release a name of a zone from its owner",
+        "description": "Scope: `dns.write`. The name's owner goes (`If-Match` with the row's revision makes the change conditional) and its dynamic records return to the origin `ad`: the next secure update that changes the name is held to the claim rule (the host the name carries, or a privileged principal), never taken by any principal the lists allow. To hand the name to a given principal, assign it instead. Audited as `dns.owner.release`; the records served do not change.",
+        "operationId": "release_dns_zone_owner",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Zone identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The name, absolute",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "The zone scope; `default` when absent.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ScopeName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The owner removed and the RRsets made claimable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NameOwnerReleased"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed, the scope does not exist (`dns.zone.invalid`), or the name is outside the zone (`dns.owner.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The zone does not exist (`dns.zone.not_found`), or the name has no owner (`dns.owner.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The zone keeps no owners (`dns.owner.off`), the name keeps none (`dns.owner.protected`), or the DNS module does not run (`dns.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "`If-Match` is not the owner row's revision",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -61809,6 +62019,42 @@
           }
         }
       },
+      "NameOwnerAssign": {
+        "type": "object",
+        "description": "Body of `PUT /dns/zones/{id}/owners/{name}`.",
+        "required": [
+          "principal"
+        ],
+        "properties": {
+          "principal": {
+            "$ref": "#/components/schemas/PrincipalName",
+            "description": "The new owner, a principal of one of the zone's realms (`PC07$@CORP.EXAMPLE.TEST`)."
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScopeName",
+                "description": "The zone scope; `default` when absent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sid": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Sid",
+                "description": "Its SID (`(Get-ADComputer PC07).SID.Value`). With a SID the owner is matched by\nit, so a renamed account keeps the name; without one, by the principal's name."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "NameOwnerItem": {
         "type": "object",
         "description": "The owner of one name (identity plan section 3.6).",
@@ -61816,19 +62062,25 @@
           "scope",
           "name",
           "principal",
-          "since"
+          "since",
+          "how",
+          "revision"
         ],
         "properties": {
           "hold_until": {
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Timestamp",
-                "description": "Until when the owner is held after the name's last record went; absent while the\nname has records."
+                "description": "Until when the name is held for its owner: after its last record went, or for an\nassignment to a name without records; absent while the name has records."
               },
               {
                 "type": "null"
               }
             ]
+          },
+          "how": {
+            "$ref": "#/components/schemas/OwnerSource",
+            "description": "How the owner got the name: `created` by its secure update, `claimed` (a name\nimported without an owner, of its own host), `assigned` by an administrator, or\n`imported` from the source of a migration."
           },
           "name": {
             "$ref": "#/components/schemas/DnsName",
@@ -61838,6 +62090,10 @@
             "$ref": "#/components/schemas/PrincipalName",
             "description": "The owner's principal."
           },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "The revision of the owner row, for `If-Match`."
+          },
           "scope": {
             "$ref": "#/components/schemas/ScopeName",
             "description": "The zone scope."
@@ -61846,7 +62102,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Sid",
-                "description": "The owner's SID, when the ticket carried a PAC."
+                "description": "The owner's SID, when the ticket carried a PAC or the assignment named one."
               },
               {
                 "type": "null"
@@ -61856,6 +62112,31 @@
           "since": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "Since when."
+          }
+        }
+      },
+      "NameOwnerReleased": {
+        "type": "object",
+        "description": "The answer of `DELETE /dns/zones/{id}/owners/{name}`.",
+        "required": [
+          "owner",
+          "claimable",
+          "revision"
+        ],
+        "properties": {
+          "claimable": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The dynamic RRsets of the name that are claimable again (origin `ad`).",
+            "minimum": 0
+          },
+          "owner": {
+            "$ref": "#/components/schemas/NameOwnerItem",
+            "description": "The owner that was removed."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "The store revision of the write."
           }
         }
       },
@@ -65059,6 +65340,16 @@
           }
         }
       },
+      "OwnerSource": {
+        "type": "string",
+        "description": "How a name got its owner.",
+        "enum": [
+          "created",
+          "claimed",
+          "assigned",
+          "imported"
+        ]
+      },
       "Ownership": {
         "type": "string",
         "description": "Whether the ownership rules of section 3.6 apply to a zone (ID-Q8).",
@@ -68230,19 +68521,25 @@
                 "scope",
                 "name",
                 "principal",
-                "since"
+                "since",
+                "how",
+                "revision"
               ],
               "properties": {
                 "hold_until": {
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/Timestamp",
-                      "description": "Until when the owner is held after the name's last record went; absent while the\nname has records."
+                      "description": "Until when the name is held for its owner: after its last record went, or for an\nassignment to a name without records; absent while the name has records."
                     },
                     {
                       "type": "null"
                     }
                   ]
+                },
+                "how": {
+                  "$ref": "#/components/schemas/OwnerSource",
+                  "description": "How the owner got the name: `created` by its secure update, `claimed` (a name\nimported without an owner, of its own host), `assigned` by an administrator, or\n`imported` from the source of a migration."
                 },
                 "name": {
                   "$ref": "#/components/schemas/DnsName",
@@ -68252,6 +68549,10 @@
                   "$ref": "#/components/schemas/PrincipalName",
                   "description": "The owner's principal."
                 },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision",
+                  "description": "The revision of the owner row, for `If-Match`."
+                },
                 "scope": {
                   "$ref": "#/components/schemas/ScopeName",
                   "description": "The zone scope."
@@ -68260,7 +68561,7 @@
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/Sid",
-                      "description": "The owner's SID, when the ticket carried a PAC."
+                      "description": "The owner's SID, when the ticket carried a PAC or the assignment named one."
                     },
                     {
                       "type": "null"
@@ -88133,6 +88434,14 @@
           }
         }
       },
+      "ZoneFileDialect": {
+        "type": "string",
+        "description": "The dialect of a zone file.",
+        "enum": [
+          "rfc1035",
+          "windows"
+        ]
+      },
       "ZoneFileImport": {
         "type": "object",
         "description": "`POST /dns/zones/{id}/records/import`: a zone file (RFC 1035 master format).",
@@ -88140,6 +88449,17 @@
           "zone_file"
         ],
         "properties": {
+          "dialect": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ZoneFileDialect",
+                "description": "The dialect of the file: `rfc1035` (the default), or `windows` for a file the\nWindows DNS Server wrote (`dnscmd /ZoneExport`), whose records with an aging mark\n`[AGE:n]` are imported with the origin `ad` and without an owner."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "replace": {
             "type": "boolean",
             "description": "Replace the scope's records (`true`) or merge into them (`false`)."
@@ -88177,6 +88497,12 @@
             "type": "integer",
             "format": "int64",
             "description": "RRsets added.",
+            "minimum": 0
+          },
+          "claimable": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Of the RRsets added or replaced, those imported with the origin `ad` (a Windows\nfile's records with an aging mark): claimable by the host they name.",
             "minimum": 0
           },
           "dry_run": {

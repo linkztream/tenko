@@ -11,7 +11,7 @@
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { fetchAll } from "../api/paginate";
-import type { Acl, AclCreate, AclPatch, AuditRecord, BatchResult, DnsKey, ImportReport, KeyCreate, KeyCreated, Origin, RecordChange, RrSet, TransferStatus, Zone, ZoneCreate, ZonePatch } from "./types";
+import type { Acl, AclCreate, AclPatch, AuditRecord, BatchResult, DnsKey, ImportReport, KeyCreate, KeyCreated, NameOwner, NameOwnerAssign, NameOwnerReleased, Origin, RecordChange, RrSet, TransferStatus, Zone, ZoneCreate, ZoneFileDialect, ZonePatch } from "./types";
 
 export * from "./types";
 
@@ -90,6 +90,17 @@ function wireChange(change: RecordChange): RecordChange {
 export interface ImportInput {
   zoneFile: string;
   replace: boolean;
+  /** The dialect of the file; RFC 1035 when absent (then not sent). */
+  dialect?: ZoneFileDialect;
+}
+
+/** The request body of an import: the dialect goes out only when it is not the default. */
+function importBody(input: ImportInput) {
+  return {
+    zone_file: input.zoneFile,
+    replace: input.replace,
+    ...(input.dialect && input.dialect !== "rfc1035" ? { dialect: input.dialect } : {}),
+  };
 }
 
 /** The dry run of an import: what the file would add, replace and remove, and what it loses. */
@@ -97,7 +108,7 @@ export async function previewImport(id: string, input: ImportInput): Promise<Imp
   const answer = await api.post("/api/v1/dns/zones/{id}/records/import", {
     path: { id },
     query: { dry_run: true },
-    body: { zone_file: input.zoneFile, replace: input.replace },
+    body: importBody(input),
   });
   if ("job_id" in answer) {
     throw new Error("the dry run of an import answered with a job");
@@ -109,7 +120,7 @@ export async function previewImport(id: string, input: ImportInput): Promise<Imp
 export async function applyImport(id: string, input: ImportInput): Promise<{ jobId: string } | { report: ImportReport }> {
   const answer: unknown = await api.post("/api/v1/dns/zones/{id}/records/import", {
     path: { id },
-    body: { zone_file: input.zoneFile, replace: input.replace },
+    body: importBody(input),
   });
   if (answer && typeof answer === "object" && "job_id" in answer && typeof answer.job_id === "string") {
     return { jobId: answer.job_id };
@@ -152,6 +163,22 @@ export async function exportZoneFile(id: string): Promise<string> {
     headers: { Accept: "text/dns, text/plain" },
   });
   return typeof text === "string" ? text : "";
+}
+
+// ---------------------------------------------------------------------------------
+// Name owners (secure dynamic updates; scopes dns.read and dns.write)
+
+/** The route of the owners list, for the grid source. */
+export const OWNERS_PATH = "/api/v1/dns/zones/{id}/owners";
+
+/** Gives a name an owner (or replaces it); `revision` is the row's, when the person saw one. */
+export function assignOwner(zoneId: string, name: string, body: NameOwnerAssign, revision?: number): Promise<NameOwner> {
+  return api.put("/api/v1/dns/zones/{id}/owners/{name}", { path: { id: zoneId, name }, body, ifMatch: revision });
+}
+
+/** Removes the owner of a name; the dynamic records of the name become claimable by the host they name. */
+export function releaseOwner(zoneId: string, name: string): Promise<NameOwnerReleased> {
+  return api.delete("/api/v1/dns/zones/{id}/owners/{name}", { path: { id: zoneId, name } });
 }
 
 // ---------------------------------------------------------------------------------

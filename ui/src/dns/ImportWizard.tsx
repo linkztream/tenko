@@ -1,5 +1,5 @@
 // The zone file import (/dns/import/:id), in the steps of the spreadsheet import
-// (ui/src/import/**): choose or paste an RFC 1035 zone file, preview it (a dry run: RRsets
+// (ui/src/import/**): choose or paste a zone file (RFC 1035, or the Windows DNS export), preview it (a dry run: RRsets
 // added, replaced and removed, the records per type, and the loss report of what the file
 // brings that the zone will not keep), then apply it as a job whose progress follows the
 // `jobs` topic and whose last step keeps the final report.
@@ -14,7 +14,7 @@ import { ErrorNotice, Notice } from "../components/Notice";
 import { PageHead } from "../components/PageHead";
 import { formatNumber, t, tDynamic } from "../i18n";
 import { JobStateChip } from "../jobs/StateChip";
-import { applyImport, getZone, importReportOf, previewImport, type ImportReport } from "./api";
+import { applyImport, getZone, importReportOf, previewImport, type ImportReport, type ZoneFileDialect } from "./api";
 import { DnsNav } from "./DnsNav";
 import { DnsProblem, unavailable } from "./Parts";
 import { dnsPaths } from "./paths";
@@ -23,6 +23,7 @@ import "./dns.css";
 
 type Step = "upload" | "preview" | "apply" | "done";
 const STEPS: readonly Step[] = ["upload", "preview", "apply", "done"];
+const DIALECTS: readonly ZoneFileDialect[] = ["rfc1035", "windows"];
 const FINAL = new Set(["succeeded", "failed", "canceled", "rolled_back"]);
 /** The largest zone file the browser reads into the request (the server has its own limit). */
 export const MAX_ZONE_FILE_BYTES = 64 * 1024 * 1024;
@@ -44,6 +45,7 @@ export default function ImportWizard() {
   const [text, setText] = createSignal("");
   const [fileName, setFileName] = createSignal<string | null>(null);
   const [replace, setReplace] = createSignal(false);
+  const [dialect, setDialect] = createSignal<ZoneFileDialect>("rfc1035");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<unknown>();
   const [tooLarge, setTooLarge] = createSignal(false);
@@ -66,7 +68,7 @@ export default function ImportWizard() {
     setBusy(true);
     setError(undefined);
     try {
-      setPreview(await previewImport(id(), { zoneFile: text(), replace: replace() }));
+      setPreview(await previewImport(id(), { zoneFile: text(), replace: replace(), dialect: dialect() }));
       setStep("preview");
     } catch (err) {
       setError(err);
@@ -79,7 +81,7 @@ export default function ImportWizard() {
     setBusy(true);
     setError(undefined);
     try {
-      const answer = await applyImport(id(), { zoneFile: text(), replace: replace() });
+      const answer = await applyImport(id(), { zoneFile: text(), replace: replace(), dialect: dialect() });
       if ("jobId" in answer) {
         setJobId(answer.jobId);
         setStep("apply");
@@ -236,6 +238,26 @@ export default function ImportWizard() {
                     }}
                   />
                 </div>
+                <fieldset class="dns-modes" data-testid="import-dialect">
+                  <legend>{t("dns.import.dialect_label")}</legend>
+                  <For each={DIALECTS}>
+                    {(d) => (
+                      <label class="ackrow">
+                        <input
+                          type="radio"
+                          name="dns-import-dialect"
+                          checked={dialect() === d}
+                          data-testid={`field-dialect-${d}`}
+                          onChange={() => setDialect(d)}
+                        />
+                        {t(`dns.import.dialect.${d}`)}
+                      </label>
+                    )}
+                  </For>
+                  <p class="muted" data-testid="import-dialect-help">
+                    {t(`dns.import.dialect.${dialect()}_help`)}
+                  </p>
+                </fieldset>
                 <label class="ackrow">
                   <input type="checkbox" class="cb" checked={replace()} data-testid="field-replace" onChange={(e) => setReplace(e.currentTarget.checked)} />
                   {t("dns.import.upload.replace")}
@@ -341,16 +363,23 @@ function ReportFacts(props: { report: ImportReport }) {
     { key: "removed", value: props.report.removed },
   ] as const);
   return (
-    <div class="import-facts" data-testid="import-facts">
-      <For each={facts()}>
-        {(f) => (
-          <div data-testid="import-fact" data-key={f.key} data-count={f.value}>
-            <div class="big num">{formatNumber(f.value)}</div>
-            {t(`dns.import.fact.${f.key}`, { count: f.value })}
-          </div>
-        )}
-      </For>
-    </div>
+    <>
+      <div class="import-facts" data-testid="import-facts">
+        <For each={facts()}>
+          {(f) => (
+            <div data-testid="import-fact" data-key={f.key} data-count={f.value}>
+              <div class="big num">{formatNumber(f.value)}</div>
+              {t(`dns.import.fact.${f.key}`, { count: f.value })}
+            </div>
+          )}
+        </For>
+      </div>
+      <Show when={(props.report.claimable ?? 0) > 0}>
+        <p data-testid="import-claimable" data-count={props.report.claimable}>
+          {t("dns.import.claimable", { count: props.report.claimable ?? 0 })}
+        </p>
+      </Show>
+    </>
   );
 }
 
@@ -384,9 +413,9 @@ function TypeCounts(props: { report: ImportReport }) {
   );
 }
 
-/** The message of a loss code: `dns.import.unsupported_type` is `dns.loss.unsupported_type`. */
+/** The message of a loss code: `dns.import.unsupported_type` is `dns.loss.unsupported_type` (and `dns.zonefile.wins` is `dns.loss.wins`). */
 function lossKey(code: string): string {
-  return `dns.loss.${code.replace(/^dns\.import\./, "").replace(/\./g, "_")}`;
+  return `dns.loss.${code.replace(/^dns\.(import|zonefile)\./, "").replace(/\./g, "_")}`;
 }
 
 function Losses(props: { report: ImportReport }) {

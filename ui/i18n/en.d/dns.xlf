@@ -2437,6 +2437,258 @@
       <unit id="dns.dnssec.finding.other">
         <segment><source>DNSSEC warning</source></segment>
       </unit>
+      <unit id="dns.zone.tab.owners">
+        <notes><note category="description">Tab of the zone page: the owners of the names of a zone with secure dynamic updates.</note></notes>
+        <segment><source>Owners</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.title">
+        <notes><note category="description">Heading of the Kerberos part of the dynamic update section on the settings tab of a primary zone.</note></notes>
+        <segment><source>Secure updates (Kerberos)</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.body">
+        <segment><source>Windows computers and domain controllers register their names with GSS-TSIG updates signed by a Kerberos ticket. Switch this on to accept them from the realms below.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.enable">
+        <segment><source>Accept secure updates (GSS-TSIG)</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.enable_help">
+        <segment><source>Off: no Kerberos update is accepted and the zone keeps no owners.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.realms">
+        <notes><note category="description">Label: the Kerberos realms (Active Directory domains) a zone accepts tickets from.</note></notes>
+        <segment><source>Realms</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.realms_help">
+        <segment><source>The Kerberos realms whose tickets this zone accepts, in upper case and separated by commas, for example CORP.EXAMPLE.TEST. A child domain is its own realm.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.realms_required">
+        <segment><source>Name at least one realm.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.ownership">
+        <segment><source>Ownership</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.ownership_windows">
+        <segment><source>Windows rules: the creator owns a name</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.ownership_none">
+        <segment><source>No ownership: names have no owner</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.ownership_help">
+        <segment><source>With the Windows rules, the principal that creates a name owns it, and only that owner or a privileged group may change or delete its records.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.ownership_hardened">
+        <notes><note category="description">Argument: profile is the name of the security profile in force.</note></notes>
+        <segment><source>The profile {profile} enforces ownership whatever this setting says.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.hold">
+        <segment><source>Owner hold (days)</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.hold_help">
+        <segment><source>How long the owner of a removed name is kept before the name is new again, from 0 to 3650 days.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.hold_invalid">
+        <segment><source>Write a whole number of days from 0 to 3650.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.privileged">
+        <segment><source>Privileged groups</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.privileged_help">
+        <segment><source>Members of these groups may change any name whatever its owner. Add each group by its SID. DnsAdmins has no fixed RID: read its SID with (Get-ADGroup DnsAdmins).SID.Value.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.privileged_remove">
+        <notes><note category="description">Accessible name of the button that removes a privileged group; the argument is its SID.</note></notes>
+        <segment><source>Remove {sid}</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.sid_label">
+        <segment><source>SID of a privileged group</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.sid_add">
+        <segment><source>Add</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.sid_invalid">
+        <segment><source>A SID looks like S-1-5-21-1000-2000-3000-512.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.no_privileged">
+        <segment><source>No privileged group is set. No domain controller can then register its locator records (the _ldap, _kerberos and _msdcs names) in this zone.</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.domain_sid">
+        <segment><source>Domain SID</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.domain_add">
+        <segment><source>Add the standard groups</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.domain_help">
+        <segment><source>Read the domain SID with (Get-ADDomain).DomainSID.Value. Adds Domain Admins (-512), Domain Controllers (-516) and Enterprise Admins (-519).</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.rid_domain_admins">
+        <notes><note category="description">Name of a well-known Active Directory group (RID 512); kept in English in Windows.</note></notes>
+        <segment><source>Domain Admins</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.rid_domain_controllers">
+        <notes><note category="description">Name of a well-known Active Directory group (RID 516); kept in English in Windows.</note></notes>
+        <segment><source>Domain Controllers</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.rid_enterprise_admins">
+        <notes><note category="description">Name of a well-known Active Directory group (RID 519); kept in English in Windows.</note></notes>
+        <segment><source>Enterprise Admins</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.proxy">
+        <segment><source>DnsUpdateProxy group (SID)</source></segment>
+      </unit>
+      <unit id="dns.update.kerberos.proxy_help">
+        <segment><source>Optional. Names created by members of this group, such as DHCP servers that register on behalf of clients, are left without an owner. Read the SID with (Get-ADGroup DnsUpdateProxy).SID.Value.</source></segment>
+      </unit>
+      <unit id="dns.owners.off">
+        <segment><source>This zone keeps no owners because it has no Kerberos settings. Switch on secure updates (Kerberos) under Settings to let the creator of a name own it.</source></segment>
+      </unit>
+      <unit id="dns.owners.label">
+        <notes><note category="description">Accessible name of the table of owners; the argument is the zone.</note></notes>
+        <segment><source>Owners of the names in {zone}</source></segment>
+      </unit>
+      <unit id="dns.owners.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dns.owners.col.principal">
+        <notes><note category="description">Column: the Kerberos principal that owns the name.</note></notes>
+        <segment><source>Owner</source></segment>
+      </unit>
+      <unit id="dns.owners.col.sid">
+        <segment><source>SID</source></segment>
+      </unit>
+      <unit id="dns.owners.col.how">
+        <notes><note category="description">Column: how the owner got the name (created, claimed, assigned, imported).</note></notes>
+        <segment><source>How</source></segment>
+      </unit>
+      <unit id="dns.owners.col.since">
+        <segment><source>Since</source></segment>
+      </unit>
+      <unit id="dns.owners.col.hold">
+        <notes><note category="description">Column: until when a name is held for its owner after the owner was removed or assigned.</note></notes>
+        <segment><source>Hold</source></segment>
+      </unit>
+      <unit id="dns.owners.held_until">
+        <segment><source>Held until {when}</source></segment>
+      </unit>
+      <unit id="dns.owners.how.created">
+        <segment><source>Created</source></segment>
+      </unit>
+      <unit id="dns.owners.how.claimed">
+        <segment><source>Claimed</source></segment>
+      </unit>
+      <unit id="dns.owners.how.assigned">
+        <segment><source>Assigned</source></segment>
+      </unit>
+      <unit id="dns.owners.how.imported">
+        <segment><source>Imported</source></segment>
+      </unit>
+      <unit id="dns.owners.how_hint.created">
+        <segment><source>The owner created the name with a secure update.</source></segment>
+      </unit>
+      <unit id="dns.owners.how_hint.claimed">
+        <segment><source>The name was imported without an owner and the host it names claimed it.</source></segment>
+      </unit>
+      <unit id="dns.owners.how_hint.assigned">
+        <segment><source>An administrator gave the name to this owner.</source></segment>
+      </unit>
+      <unit id="dns.owners.how_hint.imported">
+        <segment><source>Taken over from the source of a migration.</source></segment>
+      </unit>
+      <unit id="dns.owners.filter_label">
+        <segment><source>Filter the owners</source></segment>
+      </unit>
+      <unit id="dns.owners.filter_name">
+        <segment><source>Name (and below)</source></segment>
+      </unit>
+      <unit id="dns.owners.filter_owner">
+        <segment><source>Owner or SID</source></segment>
+      </unit>
+      <unit id="dns.owners.empty">
+        <segment><source>No name has an owner</source></segment>
+      </unit>
+      <unit id="dns.owners.empty_body">
+        <segment><source>A name gets an owner when a Windows computer registers it with a secure update, or when you assign it.</source></segment>
+      </unit>
+      <unit id="dns.owners.assign_action">
+        <segment><source>Assign a name</source></segment>
+      </unit>
+      <unit id="dns.owners.assign_title">
+        <segment><source>Assign a name</source></segment>
+      </unit>
+      <unit id="dns.owners.assign">
+        <segment><source>Assign</source></segment>
+      </unit>
+      <unit id="dns.owners.reassign">
+        <segment><source>Reassign</source></segment>
+      </unit>
+      <unit id="dns.owners.reassign_title">
+        <segment><source>Reassign {name}</source></segment>
+      </unit>
+      <unit id="dns.owners.reassign_body">
+        <segment><source>Hand this name to another principal, for example the computer that should register it from now on.</source></segment>
+      </unit>
+      <unit id="dns.owners.current">
+        <segment><source>Current owner</source></segment>
+      </unit>
+      <unit id="dns.owners.name_help">
+        <segment><source>A name in {zone}, such as pc07 or pc07.{zone}.</source></segment>
+      </unit>
+      <unit id="dns.owners.principal_help">
+        <segment><source>The computer or user as Kerberos names it, NAME$@REALM for a computer, with a realm the zone accepts.</source></segment>
+      </unit>
+      <unit id="dns.owners.principal_invalid">
+        <segment><source>Write the principal as NAME$@REALM.</source></segment>
+      </unit>
+      <unit id="dns.owners.sid_help">
+        <segment><source>Optional. The security identifier of the account, for example S-1-5-21-1000-2000-3000-1105.</source></segment>
+      </unit>
+      <unit id="dns.owners.sid_invalid">
+        <segment><source>A SID looks like S-1-5-21-1000-2000-3000-1105.</source></segment>
+      </unit>
+      <unit id="dns.owners.assign_hold">
+        <segment><source>A name without records is held for this principal for the owner hold of the zone, so nobody else can take it meanwhile.</source></segment>
+      </unit>
+      <unit id="dns.owners.assigned">
+        <segment><source>Owner of {name} saved</source></segment>
+      </unit>
+      <unit id="dns.owners.release">
+        <segment><source>Release</source></segment>
+      </unit>
+      <unit id="dns.owners.release_title">
+        <segment><source>Release {name}?</source></segment>
+      </unit>
+      <unit id="dns.owners.release_body">
+        <segment><source>{principal} stops owning {name}.</source></segment>
+      </unit>
+      <unit id="dns.owners.release_claimable">
+        <segment><source>The dynamic records of the name become claimable again: the host the name belongs to (HOST$) or a privileged principal can register it anew, but no one else.</source></segment>
+      </unit>
+      <unit id="dns.owners.release_reassign">
+        <segment><source>To hand the name to a specific computer instead, use Reassign.</source></segment>
+      </unit>
+      <unit id="dns.owners.released">
+        <segment><source>{name} released, {count, plural, one {# RRset} other {# RRsets}} claimable</source></segment>
+      </unit>
+      <unit id="dns.import.dialect_label">
+        <segment><source>Format of the file</source></segment>
+      </unit>
+      <unit id="dns.import.dialect.rfc1035">
+        <segment><source>Zone file (RFC 1035)</source></segment>
+      </unit>
+      <unit id="dns.import.dialect.rfc1035_help">
+        <segment><source>A standard master file, as BIND and most servers write it.</source></segment>
+      </unit>
+      <unit id="dns.import.dialect.windows">
+        <segment><source>Windows DNS export (dnscmd /ZoneExport)</source></segment>
+      </unit>
+      <unit id="dns.import.dialect.windows_help">
+        <segment><source>Records with an aging mark are imported as claimable by their host; static records stay manual. WINS records are not kept.</source></segment>
+      </unit>
+      <unit id="dns.import.claimable">
+        <segment><source>{count, plural, one {# RRset is claimable by its host} other {# RRsets are claimable by their host}}</source></segment>
+      </unit>
+      <unit id="dns.loss.wins">
+        <segment><source>WINS records are not kept.</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

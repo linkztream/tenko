@@ -14,7 +14,7 @@
 //! | [`Sid`] | A Windows security identifier in its string form (`S-1-5-21-...`) |
 //! | [`KerberosUpdate`] | The Kerberos settings of a zone's update policy (section 3.5) |
 //! | [`Ownership`] | Whether the Windows ownership rules apply (section 3.6) |
-//! | [`NameOwner`], [`NameOwnerKey`] | The owner of a name in `dns.name_owners` |
+//! | [`NameOwner`], [`NameOwnerKey`], [`OwnerSource`] | The owner of a name in `dns.name_owners`, and how it got the name (WP13.4) |
 //! | [`KrbAccount`], [`KeyVersionMeta`] | The account and its key versions, metadata only |
 //! | [`KrbFinding`] | A finding of the account's self-test, bounded and cleaned (WP13.3) |
 
@@ -860,15 +860,64 @@ pub struct NameOwner {
     /// name has records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hold_until: Option<Timestamp>,
+    // WP13.4: how the ownership started, for the owner view.
+    /// How the owner came to own the name; `created` for rows written before the field.
+    #[serde(default)]
+    pub how: OwnerSource,
+}
+
+// WP13.4: the ways a name gets its owner (identity plan section 3.6).
+/// How a name got its owner.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum OwnerSource {
+    /// The principal's secure update created the name (or wrote it while it had no owner).
+    #[default]
+    Created,
+    /// The principal claimed a name imported without an owner: its own host name, or a
+    /// PTR name pointing at it.
+    Claimed,
+    /// An administrator assigned the name to the principal.
+    Assigned,
+    /// A migration adapter read the owner from the source (MIG-06: the owner SID of a
+    /// Windows `dnsNode`).
+    Imported,
+}
+
+impl OwnerSource {
+    /// The stable name, as in the API and the audit context.
+    pub const fn name(self) -> &'static str {
+        match self {
+            OwnerSource::Created => "created",
+            OwnerSource::Claimed => "claimed",
+            OwnerSource::Assigned => "assigned",
+            OwnerSource::Imported => "imported",
+        }
+    }
 }
 
 impl NameOwner {
-    /// Whether a principal with `sid` is this owner: by SID when both have one, by the
-    /// principal name otherwise.
+    /// Whether a principal with `sid` is this owner: by SID when the owner has one (a
+    /// principal without a SID, from a ticket without a PAC, never matches it, since its
+    /// name alone does not prove the account), by the principal name otherwise.
     pub fn is_owner(&self, principal: &PrincipalName, sid: Option<&Sid>) -> bool {
         match (&self.sid, sid) {
             (Some(own), Some(other)) => own == other,
-            _ => &self.principal == principal,
+            (Some(_), None) => false,
+            (None, _) => &self.principal == principal,
         }
     }
 
@@ -1431,6 +1480,7 @@ mod tests {
             principal: principal.clone(),
             since: at,
             hold_until: None,
+            how: OwnerSource::Created,
         };
         assert!(
             owner.is_owner(&renamed, Some(&sid)),
@@ -1438,8 +1488,8 @@ mod tests {
         );
         assert!(!owner.is_owner(&principal, Some(&other)));
         assert!(
-            owner.is_owner(&principal, None),
-            "without a SID the name decides"
+            !owner.is_owner(&principal, None),
+            "a principal without a SID never matches an owner with one"
         );
         assert!(!owner.hold_passed(later));
         let mit = NameOwner {
@@ -1447,6 +1497,7 @@ mod tests {
             principal: principal.clone(),
             since: at,
             hold_until: Some(later),
+            how: OwnerSource::Assigned,
         };
         assert!(mit.is_owner(&principal, Some(&sid)));
         assert!(!mit.is_owner(&renamed, Some(&sid)));

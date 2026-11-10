@@ -170,9 +170,15 @@ kvno_on_dc() {
   in_samba ldbsearch -H /var/lib/samba/private/sam.ldb '(sAMAccountName=TENKO-DNS$)' msDS-KeyVersionNumber |
     sed -n 's/^msDS-KeyVersionNumber: //p' | tr -d '\r'
 }
-codes() { jqb '[.findings[].code] | join(",")'; }
+# A problem answer has no findings: an empty list, which the rows below never take for a
+# clean self-test on its own (they require a 2xx answer as well).
+codes() { jqb '[(.findings // [])[].code] | join(",")'; }
+details() { jqb '[(.findings // [])[] | .code + ": " + .detail] | join("; ")'; }
 has_code() { [[ ",$(codes)," == *",$1,"* ]]; }
 no_findings() { [[ -z "$(codes)" ]]; }
+# The self-test answered (2xx) and found nothing.
+spn_listed() { in_samba samba-tool spn list 'TENKO-DNS$' | grep -qiF "$spn2"; }
+clean_check() { [[ "$api_status" == 2* ]] && no_findings; }
 otp_refused() { ! in_client bash -c "kinit 'TENKO-DNS\$@$realm' < /lab/secrets/otp >/dev/null 2>&1"; }
 no_otp() { ! grep -qF -f "$work/secrets/otp" <<<"$answers"; }
 check() { api POST /dns/kerberos/check '' || [[ "$api_status" == 503 ]]; }
@@ -197,9 +203,11 @@ row finding.spn_missing "the SPN no account holds is dns.gss.spn_missing" \
   test "$(jqb '[.findings[] | select(.code == "dns.gss.spn_missing") | .params.spn] | join(",")')" == "$spn2"
 
 in_samba samba-tool spn add "$spn2" 'TENKO-DNS$' >/dev/null
+# The SPN is on the account before the self-test asks the KDC for it.
+retry 30 "the controller to list $spn2" spn_listed
 check
 answers+="$api_body"
-row check.pass "with the SPN added the self-test passes" no_findings
+row check.pass "with the SPN added the self-test passes (HTTP $api_status; findings: $(details))" clean_check
 
 in_client bash -c "kinit alice@$realm < /lab/secrets/alice >/dev/null && kvno $spn1@$realm" >"$work/out/kvno1" 2>&1 || true
 row client.kvno "alice's ticket for $spn1 names version $held" grep -q "kvno = $held\$" "$work/out/kvno1"
@@ -318,7 +326,7 @@ keytab() { # keytab <kvno>: a keytab as ktpass writes it (the account and the SP
 }
 api POST /dns/kerberos/import "{\"realm\": \"$realm\", \"keytab\": \"$(keytab "$version")\", \"spns\": [\"$spn1\", \"$spn2\"], \"kdcs\": [\"198.51.100.2\"]}" ||
   fail "the import failed ($api_status): $api_body"
-row import.works "the ktpass-style keytab of version $version imports and the self-test passes ($(codes))" no_findings
+row import.works "the ktpass-style keytab of version $version imports and the self-test passes ($(details))" clean_check
 api DELETE /dns/kerberos '' || fail "the delete failed ($api_status)"
 api POST /dns/kerberos/import "{\"realm\": \"$realm\", \"keytab\": \"$(keytab "$((version + 5))")\", \"spns\": [\"$spn1\"], \"kdcs\": [\"198.51.100.2\"]}" ||
   fail "the second import failed ($api_status): $api_body"

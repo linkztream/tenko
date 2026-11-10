@@ -1,13 +1,12 @@
-//! The Kerberos account of secure dynamic updates and the owners of names (identity plan
-//! sections 3.1, 3.6 and 4.3; WP13.0 declared the routes, WP13.3 builds the account routes
-//! on the controller's account service, WP13.4 the owner view).
+//! The Kerberos account of secure dynamic updates (identity plan sections 3.1 and 4.3;
+//! WP13.0 declared the routes, WP13.3 builds them on the controller's account service). The
+//! owners of names are `owners.rs` (WP13.4).
 //!
 //! Area: dns. Owner: WP13.3 (the account routes). Requirements: DNS-28, OPS-09, OPS-11,
 //! IAM-16.
 //!
 //! The account is key material: its routes authorize on `dns_key` (the scope `dns.keys`,
-//! an interactive session for every change, like TSIG keys); the owners of a zone's names
-//! are read with the zone. The service is the `Arc<KerberosService>` extension the server
+//! an interactive session for every change, like TSIG keys). The service is the `Arc<KerberosService>` extension the server
 //! adds while the DNS module runs ([`Kerberos`]).
 //!
 //! | Endpoint | Scope | Purpose |
@@ -18,7 +17,6 @@
 //! | `POST /dns/kerberos/check` | `dns.keys` | Run the self-test now |
 //! | `POST /dns/kerberos/rotate` | `dns.keys`, interactive | Rotate the account's password now |
 //! | `DELETE /dns/kerberos` | `dns.keys`, interactive | Delete the account and its keys from Tenko |
-//! | `GET /dns/zones/{id}/owners` | `dns.read` | List the owners of the zone's names (paged; WP13.4) |
 //!
 //! The one-time password and the keytab arrive in the request body once and are never
 //! stored: the adopt changes the password to one only Tenko knows and derives the keys
@@ -30,33 +28,31 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
     Json,
-    extract::{FromRequestParts, Path, Query, State},
+    extract::{FromRequestParts, State},
     http::{StatusCode, request::Parts},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use tenko_auth::{authz::anywhere, encoding::base64url_decode, service::SecretString};
 use tenko_core::{
-    Action, CodedError, ObjectKind, ObjectRef, Timestamp,
-    dns::{DnsName, KeyVersionMeta, KrbAccount, PrincipalName, Realm, ScopeName, Sid, ZoneId},
+    Action, CodedError, ObjectKind, Timestamp,
+    dns::{KeyVersionMeta, KrbAccount, Realm},
 };
 use tenko_dns::zone::kerberos::{
     AdoptRequest, CheckOutcome, ImportRequest, KerberosService, Zeroizing,
 };
-use utoipa::{IntoParams, ToSchema};
+use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use super::{DnsJobStarted, Zones, parse_id};
+use super::{DnsJobStarted, Zones};
 use crate::{
-    dto::Page,
     extract::Ctx,
-    list::PageParams,
     problem::{ApiError, ProblemDetails},
-    routes::{auth::ApiJson, not_implemented},
+    routes::auth::ApiJson,
     state::AppState,
 };
 
-/// The routes of the Kerberos account and the owners.
+/// The routes of the Kerberos account.
 #[inline(never)]
 pub(super) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -65,7 +61,6 @@ pub(super) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(import_dns_kerberos))
         .routes(routes!(check_dns_kerberos))
         .routes(routes!(rotate_dns_kerberos))
-        .routes(routes!(list_dns_zone_owners))
 }
 
 /// The account service of the request, from the `Arc<KerberosService>` extension the
@@ -281,41 +276,6 @@ fn check_answer(status: StatusCode, outcome: CheckOutcome) -> Result<Response, A
         ));
     }
     Ok((status, Json(KerberosStatus::of(Some(outcome.account)))).into_response())
-}
-
-/// Filters of `GET /dns/zones/{id}/owners`.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, IntoParams, ToSchema)]
-#[into_params(parameter_in = Query)]
-pub struct OwnerParams {
-    /// The zone scope; `default` when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<ScopeName>,
-    /// Only the names at or below this name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<DnsName>,
-    /// Only the names of this owner, by SID or principal.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner: Option<String>,
-}
-
-/// The owner of one name (identity plan section 3.6).
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct NameOwnerItem {
-    /// The zone scope.
-    pub scope: ScopeName,
-    /// The name.
-    pub name: DnsName,
-    /// The owner's SID, when the ticket carried a PAC.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sid: Option<Sid>,
-    /// The owner's principal.
-    pub principal: PrincipalName,
-    /// Since when.
-    pub since: Timestamp,
-    /// Until when the owner is held after the name's last record went; absent while the
-    /// name has records.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hold_until: Option<Timestamp>,
 }
 
 #[utoipa::path(
@@ -536,35 +496,6 @@ async fn delete_dns_kerberos(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-#[utoipa::path(
-    get,
-    path = "/dns/zones/{id}/owners",
-    tag = "dns",
-    operation_id = "list_dns_zone_owners",
-    summary = "List the owners of a zone's names",
-    description = "Scope: `dns.read`. One row per name with an owner (identity plan section 3.6): the SID when the ticket carried a PAC, the principal, since when, and the hold after the name's last record went. Empty for a zone without ownership.",
-    params(("id" = String, Path, description = "Zone identifier (UUID)"), PageParams, OwnerParams),
-    responses(
-        (status = 200, description = "A page of owners by scope and name", body = Page<NameOwnerItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "The zone does not exist (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dns_zone_owners(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-    Query(_page): Query<PageParams>,
-    Query(_filters): Query<OwnerParams>,
-) -> Result<Response, ApiError> {
-    let zone: ZoneId = parse_id(&id)?;
-    app.authorize(&cx.principal, Action::Read, &ObjectRef::from(zone))?;
-    Err(not_implemented("GET", "/dns/zones/{id}/owners"))
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -576,7 +507,7 @@ mod tests {
     };
     use serde_json::{Value, json};
     use tenko_auth::{authz::anywhere, encoding::base64url_encode};
-    use tenko_core::{Action, Authorizer, ObjectKind, ObjectRef, dns::ZoneId};
+    use tenko_core::{Action, Authorizer, ObjectKind};
     use tenko_dns::zone::{
         ZoneConfig, ZoneService,
         kerberos::{KerberosConfig, KerberosService, RandomPasswords, SilentKdc, SystemClock},
@@ -593,8 +524,6 @@ mod tests {
         state::AppState,
     };
 
-    const ZONE: &str = "0190d1c2-0000-7000-8000-000000000001";
-    const STUB: &str = "sys.not_implemented";
     /// The keytab `ktutil` wrote for `TENKO-DNS$` (versions 2 and 3, both AES types).
     const KEYTAB: &[u8] =
         include_bytes!("../../../../tenko-krb/tests/fixtures/keytabs/computer-tenko-dns.keytab");
@@ -681,7 +610,7 @@ mod tests {
     }
 
     /// DNS-28: every route checks its scope first; without the account service the account
-    /// routes answer that the DNS module does not run, the owners route is still WP13.4's.
+    /// routes answer that the DNS module does not run.
     #[tokio::test]
     async fn dns_28_every_route_checks_its_scope_first() {
         let policy = Policy::new(true, true);
@@ -705,10 +634,6 @@ mod tests {
         send(&router, "DELETE", "/dns/kerberos", None)
             .await
             .assert_problem(409, disabled);
-        send(&router, "GET", &format!("/dns/zones/{ZONE}/owners"), None)
-            .await
-            .assert_problem(501, STUB);
-        let zone: ZoneId = ZONE.parse().expect("id");
         assert_eq!(
             policy.asked(),
             [
@@ -718,7 +643,6 @@ mod tests {
                 (Action::Execute, anywhere(ObjectKind::DnsKey)),
                 (Action::Update, anywhere(ObjectKind::DnsKey)),
                 (Action::Delete, anywhere(ObjectKind::DnsKey)),
-                (Action::Read, ObjectRef::from(zone)),
             ]
         );
     }
@@ -746,9 +670,6 @@ mod tests {
         )
         .await;
         assert_eq!(reply.status.as_u16(), 400, "{}", reply.body);
-        send(&router, "GET", "/dns/zones/not-a-uuid/owners", None)
-            .await
-            .assert_problem(400, "sys.invalid_request");
         assert_eq!(policy.asked().len(), 4, "{:?}", policy.asked());
     }
 

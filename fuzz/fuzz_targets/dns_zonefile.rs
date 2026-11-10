@@ -15,7 +15,7 @@ use tenko_core::{
 };
 use tenko_dns::zone::{
     records::{self, Change, Op},
-    zonefile::{self, Item, Reader},
+    zonefile::{self, Dialect, Item, Reader},
 };
 use tenko_store::{KeyRange, ReadView, StoreError, Versioned};
 
@@ -140,7 +140,8 @@ fn fixture() -> &'static Fixture {
 // The input is a zone file for `example.test`. It is read record by record (with
 // `$GENERATE` expanded and `$INCLUDE` refused); every record becomes an `add` change, the
 // changes are validated together as one batch against the apex SOA and NS set, and every
-// record read is written back in presentation form and read again.
+// record read is written back in presentation form and read again. The same text is then
+// read in the Windows dialect (the aging marks `[AGE:n]` and the WINS losses of WP13.4).
 fuzz_target!(|data: &[u8]| {
     let fixture = fixture();
     let text = String::from_utf8_lossy(data);
@@ -179,4 +180,13 @@ fuzz_target!(|data: &[u8]| {
         }
     }
     let _ = records::validate(&fixture.view, &fixture.zone, &changes, &fixture.cx);
+    if let Ok(mut windows) =
+        Reader::with_dialect(&text, &fixture.zone.name, 256, Dialect::Windows)
+    {
+        while let Ok(Some(item)) = windows.next_item() {
+            if let Item::Record(record) = item {
+                let _ = record.aged;
+            }
+        }
+    }
 });

@@ -1242,6 +1242,14 @@
         <notes><note category="description">What the audit action dns.gss.refuse is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Refuse a GSS-TSIG negotiation</source></segment>
       </unit>
+      <unit id="audit.action.dns.owner.assign">
+        <notes><note category="description">What the audit action dns.owner.assign is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Assign the owner of a DNS name</source></segment>
+      </unit>
+      <unit id="audit.action.dns.owner.release">
+        <notes><note category="description">What the audit action dns.owner.release is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Release a DNS name from its owner</source></segment>
+      </unit>
       <unit id="audit.action.dns.krb.account.adopt">
         <notes><note category="description">What the audit action dns.krb.account.adopt is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Take over a Kerberos computer account</source></segment>

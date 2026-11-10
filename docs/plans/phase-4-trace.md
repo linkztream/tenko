@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 4`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 4 --check`
 
-35 Phase 4 requirements; 3 named by at least one test, 32 not; 0 named by no test, measurement or document.
+32 Phase 4 requirements; 5 named by at least one test, 27 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -17,15 +17,13 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 | CONN-10 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0032-plugins-as-processes.md` |
 | CONN-11 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0032-plugins-as-processes.md` |
 | CONN-12 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0005-ipam-intent-hub.md`<br>`docs/adr/0034-zone-flip-and-adoption.md`<br>and 3 more |
-| CONN-13 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0005-ipam-intent-hub.md`<br>and 7 more |
-| CONN-22 | Should | - | - | `docs/ROADMAP.md`<br>`docs/plans/public-dns-plan.md` |
-| DNS-28 | Must | `crates/tenko-api/src/routes/dns/kerberos.rs::dns_28_every_route_checks_its_scope_first`<br>`crates/tenko-api/src/routes/dns/kerberos.rs::dns_28_the_account_routes_over_http`<br>`crates/tenko-core/src/dns/identity.rs::dns_28_findings_are_bounded_and_cleaned`<br>`crates/tenko-dns/src/respond.rs::dns_28_a_tkey_query_goes_to_the_update_path_after_the_admission`<br>`crates/tenko-dns/src/tkey/context.rs::dns_28_the_sequence_window_refuses_duplicates_and_old_numbers`<br>and 85 more | - | `crates/tenko-api/src/routes/dns/kerberos.rs`<br>`crates/tenko-dns/src/tkey/mod.rs`<br>`crates/tenko-dns/src/tsig.rs`<br>`crates/tenko-dns/src/update/apply.rs`<br>`crates/tenko-dns/src/zone/kerberos.rs`<br>and 22 more |
-| DNS-29 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/active-directory.md`<br>`docs/adr/0034-zone-flip-and-adoption.md`<br>and 6 more |
+| CONN-13 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0005-ipam-intent-hub.md`<br>and 6 more |
+| DNS-28 | Must | `crates/tenko-api/src/routes/dns/kerberos.rs::dns_28_every_route_checks_its_scope_first`<br>`crates/tenko-api/src/routes/dns/kerberos.rs::dns_28_the_account_routes_over_http`<br>`crates/tenko-api/src/routes/dns/owners.rs::dns_28_a_cursor_outside_the_zone_is_refused`<br>`crates/tenko-api/src/routes/dns/owners.rs::dns_28_a_zone_without_kerberos_keeps_no_owners`<br>`crates/tenko-api/src/routes/dns/owners.rs::dns_28_the_owner_routes_check_the_zone_scope_first`<br>and 90 more | - | `crates/tenko-api/src/routes/dns/kerberos.rs`<br>`crates/tenko-api/src/routes/dns/owners.rs`<br>`crates/tenko-dns/src/tkey/mod.rs`<br>`crates/tenko-dns/src/tsig.rs`<br>`crates/tenko-dns/src/update/apply.rs`<br>and 23 more |
+| DNS-29 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/active-directory.md`<br>`docs/adr/0034-zone-flip-and-adoption.md`<br>and 7 more |
 | DNS-30 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/active-directory.md`<br>`docs/plans/identity-plan.md`<br>and 3 more |
 | DNS-31 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-32 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-33 | Should | - | - | `docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
-| DNS-35 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md` |
 | IAM-11 | Must | - | - | `crates/tenko-api/src/routes/auth/providers.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0026-kerberos-and-directory-identity.md`<br>`docs/plans/identity-plan.md`<br>and 1 more |
 | IAM-12 | Must | - | - | `crates/tenko-api/src/routes/access/mappings.rs`<br>`crates/tenko-api/src/routes/auth/providers.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 3 more |
 | IAM-13 | Should | `crates/tenko-krb/src/acceptor/tests.rs::dns_28_recorded_exchanges_are_accepted` | - | `crates/tenko-api/src/routes/auth/providers.rs`<br>`crates/tenko-krb/src/acceptor/mod.rs`<br>`crates/tenko-krb/src/lib.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 3 more |
@@ -35,8 +33,8 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 | MIG-03 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0006-connector-architecture.md`<br>`docs/plans/windows-takeover-plan.md` |
 | MIG-04 | Must | - | - | `crates/tenko-api/src/routes/dns/flip.rs`<br>`crates/tenko-api/src/routes/migrate.rs`<br>`crates/tenko-core/src/migrate.rs`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>and 2 more |
 | MIG-05 | Must | - | - | `docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0006-connector-architecture.md`<br>`docs/plans/windows-takeover-plan.md` |
-| MIG-06 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/identity.rs`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/active-directory.md`<br>and 2 more |
-| MIG-07 | Must | - | - | `docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/plans/windows-takeover-plan.md` |
+| MIG-06 | Must | `crates/tenko-dns/tests/gss_update.rs`<br>`crates/tenko-dns/tests/gss_update.rs::dns_28_e46_the_remaining_rows` | - | `crates/tenko-api/src/routes/dns/owners.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/identity.rs`<br>`crates/tenko-dns/src/zone/ownership.rs`<br>`docs/MIGRATION.md`<br>and 5 more |
+| MIG-07 | Must | `crates/tenko-dns/src/zone/zonefile/tests.rs::mig_07_a_malformed_mark_and_a_mark_outside_the_dialect`<br>`crates/tenko-dns/src/zone/zonefile/tests.rs::mig_07_the_aging_mark_of_a_windows_file`<br>`crates/tenko-dns/src/zone/zonefile/tests.rs::mig_07_wins_records_are_losses_and_wins_as_data_is_data` | - | `crates/tenko-dns/src/zone/import.rs`<br>`crates/tenko-dns/src/zone/zonefile.rs`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/dns.md`<br>and 2 more |
 | MIG-08 | Must | - | - | `crates/tenko-api/src/routes/migrate.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-core/src/ir/dhcp.rs`<br>`crates/tenko-core/src/ir/mirror.rs`<br>`crates/tenko-core/src/migrate.rs`<br>and 10 more |
 | MIG-09 | Must | - | - | `docs/MIGRATION.md`<br>`docs/ROADMAP.md` |
 | MIG-10 | Must | - | - | `docs/MIGRATION.md`<br>`docs/ROADMAP.md` |
@@ -47,7 +45,6 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 | MIG-18 | Must | - | - | `docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/plans/identity-plan.md`<br>`docs/plans/windows-takeover-plan.md` |
 | OPS-11 | Must | `crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_a_ktpass_keytab_imports_and_works`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_adopt_takes_over_the_pre_staged_account`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_the_recorded_samba_adopt_replays_through_the_controller` | - | `crates/tenko-api/src/routes/dns/kerberos.rs`<br>`crates/tenko-dns/src/zone/kerberos.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/MIGRATION.md`<br>`docs/adr/0026-kerberos-and-directory-identity.md`<br>and 1 more |
 | OPS-12 | Should | - | - | `docs/plans/phase-3-status.md` |
-| OPS-29 | Must (MQTT: Should) | - | - | `docs/ROADMAP.md` |
 
 ## Exit criteria
 
@@ -56,7 +53,7 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 | E43 | In the lab (section 3.19): a Samba AD domain controller provisioned without its own DNS registers its locator records in a Tenko zone set to secure only through `samba_dnsupdate` (`nsupdate -g`), and a Linux client with `kinit` and `nsupdate -g` adds, replaces and deletes its records over UDP and TCP; the TKEY exchange completes with mutual authentication and every answer is signed and verifies at the client; an unsigned update is REFUSED, an update on an unknown or expired context is answered NOTAUTH with BADKEY, a skewed client gets BADTIME, a replayed signed update is refused, a second principal is refused on a name the first owns, and an offer of NTLM alone is refused | DNS-28, CON-03, TGL-09 | `crates/tenko-dns/src/tkey/tests.rs::dns_28_skew_and_an_unknown_key_version_are_refused_and_aggregated`<br>`crates/tenko-dns/tests/gss_update.rs`<br>`crates/tenko-dns/tests/gss_update.rs::dns_28_e43_tkey_then_a_signed_update_through_the_update_path`<br>`crates/tenko-dns/tests/gss_update.rs::dns_28_e43_unknown_expired_skewed_and_replayed` |
 | E44 | Owner-run Windows interop (API-18): on a Windows Server test domain (2022 or 2025, controllers without the DNS Server role, Tenko the primary of the domain zone and `_msdcs`, both secure only) every record of each controller's `Netlogon.dns` is registered by Netlogon with GSS-TSIG and refreshed at the hourly registration, also with `UpdateSecurityLevel` set to 256 by group policy; `dcdiag /test:dns` passes; a new Windows 11 client joins the domain through Tenko; a member server with a static address registers its A and PTR records with a secure update and refreshes them; another computer account cannot overwrite them; after a restart of the Tenko node mid-day, which drops its contexts, every client's next update succeeds after a new negotiation; packet captures of a client's and a controller's exchanges are committed to the lab directory | DNS-28, DNS-30, API-18, MIG-18 | - |
 | E45 | The service account: a pre-staged computer account with a one-time password is taken over by Tenko (the password changed by Tenko, the AES keys derived and stored as a system secret, no administrator credential entered into Tenko); a keytab made with `ktpass` imports and works; a rotation (forced in the lab, every 30 days by default) moves the key version, and tickets issued before it are still accepted until they expire; the self-test reports a missing SPN, a duplicate SPN, a key version Tenko does not hold, an RC4-only account and clock skew above 60 s, each as a health finding with its fix | DNS-28, OPS-09, OPS-11, IAM-16 | `crates/tenko-api/src/routes/dns/kerberos.rs::dns_28_the_account_routes_over_http`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_a_duplicate_spn_is_a_finding`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_a_key_version_tenko_does_not_hold_is_a_finding`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_a_ktpass_keytab_imports_and_works`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_a_missing_spn_is_a_finding`<br>and 8 more |
-| E46 | Ownership: the table-driven tests of section 3.6 pass (a new name, an owned name, the owner, a privileged group, a DnsUpdateProxy member, a claimable imported name, the locator names, a record of IPAM, a manual record, a scavenged name within and after its hold); imported records are governed by the owner SIDs of the Windows adapter (MIG-06) or by the claim rule; a secure update refreshes the aging timestamp (DNS-29) without changing the owner | DNS-28, DNS-29, MIG-06 | `crates/tenko-dns/tests/gss_update.rs::dns_28_e46_a_removed_name_is_held_for_its_owner`<br>`crates/tenko-dns/tests/gss_update.rs::dns_28_e46_an_imported_name_is_claimed_by_its_own_host`<br>`crates/tenko-dns/tests/gss_update.rs::dns_28_e46_sid_owners_wildcards_and_stale_owners`<br>`crates/tenko-dns/tests/gss_update.rs::dns_28_e46_the_ownership_table` |
+| E46 | Ownership: the table-driven tests of section 3.6 pass (a new name, an owned name, the owner, a privileged group, a DnsUpdateProxy member, a claimable imported name, the locator names, a record of IPAM, a manual record, a scavenged name within and after its hold); imported records are governed by the owner SIDs of the Windows adapter (MIG-06) or by the claim rule; a secure update refreshes the aging timestamp (DNS-29) without changing the owner | DNS-28, DNS-29, MIG-06 | `crates/tenko-dns/tests/gss_update.rs`<br>`crates/tenko-dns/tests/gss_update.rs::dns_28_e46_a_removed_name_is_held_for_its_owner`<br>`crates/tenko-dns/tests/gss_update.rs::dns_28_e46_an_imported_name_is_claimed_by_its_own_host`<br>`crates/tenko-dns/tests/gss_update.rs::dns_28_e46_sid_owners_wildcards_and_stale_owners`<br>`crates/tenko-dns/tests/gss_update.rs::dns_28_e46_the_ownership_table`<br>and 1 more |
 | E47 | OIDC sign-in against Keycloak in the lab and, owner-run, against Entra ID: groups or app roles map to roles and scopes, a user without a mapping is refused, removal from the group takes effect at the next sign-in; a wrong issuer, audience, nonce or state, an expired or unsigned ID token, a token signed with an algorithm off the allow-list and a replayed callback are refused; the profile's MFA rule holds through the provider's `amr` claim or through a Tenko factor | IAM-11, IAM-06, TGL-02 | - |
 | E48 | LDAP sign-in against the Samba AD controller over LDAPS and StartTLS: a nested group maps through `tokenGroups`, a disabled account and a removed group end the session at the next directory check, an empty password is refused without a bind, a filter value with special characters is escaped, plain LDAP is refused outside Lab and shows the clear-text warning in Lab, a certificate that does not verify is refused; the certificate setup (ID-Q13): the provider setup fetches the chain from the configured server, shows it with its fingerprints and pins it only after confirmation, a chain that changes later is refused and shown rather than pinned again, a pasted or uploaded PEM file and the system trust store work as the other two sources, and, as the acceptance test, LDAPS is configured against the lab's Samba AD controller with a private CA in under five minutes using only the UI | IAM-12, IAM-05 | - |
 | E49 | Kerberos sign-in to the web UI: `curl --negotiate` from a Linux client with a ticket in the lab and, owner-run, a domain-joined Edge with the site in its allow-list obtain a session whose roles come from the PAC's groups through the mappings | IAM-13 | - |
@@ -82,13 +79,11 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 - CONN-11 (Should)
 - CONN-12 (Should)
 - CONN-13 (Should)
-- CONN-22 (Should)
 - DNS-29 (Must)
 - DNS-30 (Must)
 - DNS-31 (Must)
 - DNS-32 (Should)
 - DNS-33 (Should)
-- DNS-35 (Must)
 - IAM-11 (Must)
 - IAM-12 (Must)
 - IPAM-22 (Must)
@@ -97,8 +92,6 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 - MIG-03 (Must)
 - MIG-04 (Must)
 - MIG-05 (Must)
-- MIG-06 (Must)
-- MIG-07 (Must)
 - MIG-08 (Must)
 - MIG-09 (Must)
 - MIG-10 (Must)
@@ -108,7 +101,6 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 - MIG-17 (Must)
 - MIG-18 (Must)
 - OPS-12 (Should)
-- OPS-29 (Must (MQTT: Should))
 
 ### No test, measurement or document
 

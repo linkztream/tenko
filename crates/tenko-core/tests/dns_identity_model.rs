@@ -11,8 +11,8 @@ use tenko_core::{
     codec::{decode_key, encode_key, from_cbor, to_cbor},
     dns::{
         Acl, AclEntry, AclId, DnsName, KerberosUpdate, KrbAccount, NameOwner, NameOwnerKey, Origin,
-        Ownership, PrincipalName, Realm, RrSet, ScopeName, Sid, UpdatePolicy, WindowsUpdateMode,
-        ZoneId, codes, identity, tables,
+        OwnerSource, Ownership, PrincipalName, Realm, RrSet, ScopeName, Sid, UpdatePolicy,
+        WindowsUpdateMode, ZoneId, codes, identity, tables,
     },
 };
 
@@ -214,6 +214,7 @@ fn name_owner_keys_order_by_zone_scope_and_name_and_the_tables_are_declared() {
         principal: principal("WS01$@CORP.EXAMPLE.TEST"),
         since: "2026-10-25T12:00:00Z".parse().expect("time"),
         hold_until: None,
+        how: OwnerSource::Claimed,
     };
     let encoded = tables::NAME_OWNERS.encode(&owner).expect("cbor");
     assert_eq!(tables::NAME_OWNERS.decode(&encoded).expect("cbor"), owner);
@@ -334,9 +335,11 @@ proptest! {
             principal: principal.clone(),
             since: "2026-10-25T12:00:00Z".parse::<Timestamp>().expect("time"),
             hold_until: None,
+            how: OwnerSource::Created,
         };
         prop_assert!(owner.is_owner(&principal, Some(&own)));
-        prop_assert!(owner.is_owner(&principal, None));
+        // A principal without a SID (no PAC) matches only an owner that has none either.
+        prop_assert_eq!(owner.is_owner(&principal, None), !with_sid);
         let _ = Ownership::default();
         let _ = Ipv4Addr::LOCALHOST;
     }

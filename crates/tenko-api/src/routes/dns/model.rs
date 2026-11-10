@@ -300,6 +300,25 @@ pub struct ZoneFileImport {
     /// Replace the scope's records (`true`) or merge into them (`false`).
     #[serde(default)]
     pub replace: bool,
+    // WP13.4
+    /// The dialect of the file: `rfc1035` (the default), or `windows` for a file the
+    /// Windows DNS Server wrote (`dnscmd /ZoneExport`), whose records with an aging mark
+    /// `[AGE:n]` are imported with the origin `ad` and without an owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialect: Option<ZoneFileDialect>,
+}
+
+// WP13.4: the dialect of an imported zone file.
+/// The dialect of a zone file.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZoneFileDialect {
+    /// RFC 1035 with BIND's `$GENERATE` and TTL units.
+    #[default]
+    Rfc1035,
+    /// A file of the Windows DNS Server: `[AGE:n]` marks the dynamic records, WINS and
+    /// WINS-R records are reported as losses.
+    Windows,
 }
 
 /// One line of a zone file that the import could not take as it is.
@@ -337,6 +356,10 @@ pub struct ZoneFileImportReport {
     pub types: Vec<ImportTypeCount>,
     /// What the import could not take.
     pub losses: Vec<ImportLoss>,
+    /// Of the RRsets added or replaced, those imported with the origin `ad` (a Windows
+    /// file's records with an aging mark): claimable by the host they name.
+    #[serde(default)]
+    pub claimable: u64,
     /// The serial after the write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial: Option<u32>,

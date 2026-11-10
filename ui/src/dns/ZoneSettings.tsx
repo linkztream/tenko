@@ -42,9 +42,9 @@ import {
 import { mayWriteDns } from "./access";
 import { canonical, hasSource, parseTtl, splitList, targetName, validName } from "./model";
 import { parseUpstream, upstreamText } from "./forwarders/model";
-import { describedBy, Field, fieldErrors } from "./Parts";
+import { Check, describedBy, Field, fieldErrors, profileInForce } from "./Parts";
+import { createKerberosDraft, kerberosOf, KerberosSection } from "./ZoneKerberos";
 import { paths } from "../app/paths";
-import { session } from "../auth/session";
 
 const SOA_NUMBERS = ["refresh", "retry", "expire", "minimum", "ttl"] as const;
 type SoaNumber = (typeof SOA_NUMBERS)[number];
@@ -237,29 +237,6 @@ function RowInput(props: {
         onInput={(e) => props.onInput(e.currentTarget.value)}
       />
     </Field>
-  );
-}
-
-/** A checkbox with its help line. */
-function Check(props: { id: string; label: string; help: string; checked: boolean; disabled: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <div class="field">
-      <label class="choice">
-        <input
-          type="checkbox"
-          id={`dns-f-${props.id}`}
-          checked={props.checked}
-          disabled={props.disabled}
-          aria-describedby={`dns-f-${props.id}-help`}
-          data-testid={`field-${props.id}`}
-          onChange={(e) => props.onChange(e.currentTarget.checked)}
-        />{" "}
-        <span>{props.label}</span>
-      </label>
-      <span class="help" id={`dns-f-${props.id}-help`}>
-        {props.help}
-      </span>
-    </div>
   );
 }
 
@@ -641,24 +618,40 @@ function TransferState(props: { zone: Zone }) {
 
 type UpdatePolicy = NonNullable<ZonePatch["update"]>;
 
-/** The update policy as the form edits it, every default filled in. */
-function updatePolicyOf(policy: UpdatePolicy | null | undefined) {
+/**
+ * The update policy as the form edits it, every default filled in. Fields the form does not
+ * edit (`dhcp`, and any the server adds) stay as the zone has them: a PATCH replaces the whole
+ * policy, so a rebuilt one would drop them.
+ */
+function updatePolicyOf(policy: UpdatePolicy | null | undefined): UpdatePolicy {
+  const { allowed, require_tsig, may_replace_ipam, kerberos, ...rest } = policy ?? {};
   return {
-    allowed: [...(policy?.allowed ?? [])],
-    require_tsig: policy?.require_tsig ?? true,
-    may_replace_ipam: policy?.may_replace_ipam ?? false,
+    allowed: [...(allowed ?? [])],
+    require_tsig: require_tsig ?? true,
+    may_replace_ipam: may_replace_ipam ?? false,
+    ...rest,
+    ...(kerberos ? { kerberos: kerberosOf(kerberos) } : {}),
   };
 }
 
 /** The update part of the settings form, with the part of the PATCH that changed. */
 function createUpdateDraft(zone: Zone) {
-  let policy0 = updatePolicyOf(zone.update);
-  const [allowed, setAllowed] = createSignal<string[]>(policy0.allowed);
-  const [requireTsig, setRequireTsig] = createSignal(policy0.require_tsig);
-  const [mayReplaceIpam, setMayReplaceIpam] = createSignal(policy0.may_replace_ipam);
+  let base = zone.update ?? {};
+  let policy0 = updatePolicyOf(base);
+  const [allowed, setAllowed] = createSignal<string[]>(policy0.allowed ?? []);
+  const [requireTsig, setRequireTsig] = createSignal(policy0.require_tsig ?? true);
+  const [mayReplaceIpam, setMayReplaceIpam] = createSignal(policy0.may_replace_ipam ?? false);
+  const kerberos = createKerberosDraft(base.kerberos);
+  /** The policy as the form has it now: the zone's own fields, with the edited ones replaced. */
+  const current = (): UpdatePolicy => {
+    const next: UpdatePolicy = { ...base, allowed: allowed(), require_tsig: requireTsig(), may_replace_ipam: mayReplaceIpam() };
+    if (kerberos.enabled()) next.kerberos = kerberos.value(base.kerberos);
+    else if (base.kerberos) next.kerberos = null;
+    return next;
+  };
   const fill = (patch: ZonePatch) => {
-    const now = updatePolicyOf({ allowed: allowed(), require_tsig: requireTsig(), may_replace_ipam: mayReplaceIpam() });
-    if (JSON.stringify(now) !== JSON.stringify(policy0)) patch.update = now;
+    const now = updatePolicyOf(current());
+    if (JSON.stringify(now) !== JSON.stringify(policy0)) patch.update = current();
   };
   return {
     allowed,
@@ -668,23 +661,19 @@ function createUpdateDraft(zone: Zone) {
     setRequireTsig,
     mayReplaceIpam,
     setMayReplaceIpam,
+    kerberos,
     fill,
     rebase: (saved: Zone) => {
-      policy0 = updatePolicyOf(saved.update);
+      base = saved.update ?? {};
+      policy0 = updatePolicyOf(base);
     },
   };
 }
 
 type UpdateDraft = ReturnType<typeof createUpdateDraft>;
 
-/** The profile in force, as TGL-09 names it. */
-function profileInForce(): "home" | "standard" | "hardened" | "lab" {
-  const p = session()?.profile;
-  return p === "standard" || p === "hardened" || p === "lab" ? p : "home";
-}
-
 /** The update section of a primary zone. */
-function UpdateSection(props: { draft: UpdateDraft; disabled: boolean }) {
+function UpdateSection(props: { draft: UpdateDraft; errors: Record<string, string>; disabled: boolean }) {
   const [acls] = createResource(() => listAcls().then((all) => all.items).catch((): Acl[] => []));
   const known = (): Acl[] => (acls.state === "ready" ? acls() ?? [] : []);
   const nameOf = (id: string) => known().find((a) => a.id === id)?.name ?? id;
@@ -768,6 +757,7 @@ function UpdateSection(props: { draft: UpdateDraft; disabled: boolean }) {
         disabled={props.disabled}
         onChange={props.draft.setMayReplaceIpam}
       />
+      <KerberosSection draft={props.draft.kerberos} errors={props.errors} disabled={props.disabled} />
     </section>
   );
 }
@@ -822,6 +812,7 @@ export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }
     if (textSource && servers === null) e.source = t("dns.settings.source_invalid");
     else if (textSource && servers?.length === 0) e.source = t("dns.zone.create.primaries_required");
     Object.assign(e, draft.check(secondary, transferable));
+    if (updatable) Object.assign(e, updateDraft.kerberos.check());
     setErrors(e);
     if (Object.keys(e).length > 0) return;
     setBusy(true);
@@ -948,7 +939,7 @@ export function SettingsTab(props: { zone: Zone; onSaved: (zone: Zone) => void }
         <TransferSection zone={props.zone} draft={draft} errors={errors()} disabled={readOnly()} />
       </Show>
       <Show when={updatable}>
-        <UpdateSection draft={updateDraft} disabled={readOnly()} />
+        <UpdateSection draft={updateDraft} errors={errors()} disabled={readOnly()} />
       </Show>
       <ErrorNotice error={error()} />
       <Show when={!readOnly()}>

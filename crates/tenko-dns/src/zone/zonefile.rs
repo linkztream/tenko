@@ -25,6 +25,16 @@
 //! the generic form of RFC 3597 (`\# length hex`). The parsed data goes through the
 //! model's own check ([`Rdata::from_wire`]).
 //!
+//! **The Windows dialect** (WP13.4, MIG-07). A file that the Windows DNS Server wrote
+//! (`dnscmd /ZoneExport`, or the `%SystemRoot%System32dns*.dns` file of a file-backed
+//! zone) marks each record that carries an aging timestamp with `[AGE:n]` after its owner
+//! name, `n` the hours since 1601-01-01 UTC: those are the records Windows calls dynamic,
+//! registered by a client or a controller. Read with [`Dialect::Windows`], the mark is taken
+//! (one per record, digits only, at most ten) and the record is [`FileRecord::aged`] when
+//! `n` is above zero; WINS and WINS-R records, which Tenko does not serve (CON-12), are
+//! losses rather than syntax errors. Read as [`Dialect::Rfc1035`], the default, a mark is
+//! the syntax error it is in any other zone file.
+//!
 //! A syntax error stops the read with `dns.zonefile.invalid`, the line of the token where
 //! it was found and a reason; so does a quote or a parenthesis still open at the end of
 //! the file (with the line that opened it). The losses: a record of a class other than
@@ -79,6 +89,52 @@ pub const LOSS_ORIGIN: &str = "dns.zonefile.origin";
 pub const LOSS_DUPLICATE: &str = "dns.zonefile.duplicate";
 /// The code of a loss: an SOA record that is not the apex SOA, or a second one.
 pub const LOSS_SOA: &str = "dns.zonefile.soa";
+// WP13.4: the Windows dialect.
+/// The code of a loss: a WINS or WINS-R record of a Windows file, which is not served.
+pub const LOSS_WINS: &str = "dns.zonefile.wins";
+
+/// The most digits of the hours of an `[AGE:n]` mark (`u32::MAX` hours is far past 2400).
+const MAX_AGE_DIGITS: usize = 10;
+
+/// The dialect a zone file is read in.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Dialect {
+    /// RFC 1035 with BIND's `$GENERATE` and TTL units: every zone file.
+    #[default]
+    Rfc1035,
+    /// A file the Windows DNS Server wrote: the `[AGE:n]` marks of its dynamic records are
+    /// read, and its WINS and WINS-R records are losses.
+    Windows,
+}
+
+/// The hours of an `[AGE:n]` mark, or `None` when the token is no mark.
+fn age_mark(token: &str) -> Option<Result<u32, String>> {
+    let inner = token.strip_prefix('[')?.strip_suffix(']')?;
+    let (label, hours) = inner.split_once(':')?;
+    if !label.eq_ignore_ascii_case("AGE") {
+        return None;
+    }
+    if hours.is_empty()
+        || hours.len() > MAX_AGE_DIGITS
+        || !hours.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Some(Err(format!(
+            "`{token}`: an aging mark is [AGE:n] with n the hours, digits only"
+        )));
+    }
+    Some(
+        hours
+            .parse::<u32>()
+            .map_err(|_| format!("`{token}`: the hours of an aging mark are too large")),
+    )
+}
+
+/// Whether a type token names a WINS or WINS-R record of a Windows file.
+fn is_wins(token: &str) -> bool {
+    ["WINS", "WINS-R", "WINSR"]
+        .iter()
+        .any(|known| token.eq_ignore_ascii_case(known))
+}
 
 /// The TTL of a record without one before any `$TTL` or TTL in the file.
 const DEFAULT_TTL: u32 = 3_600;
@@ -96,6 +152,10 @@ pub struct FileRecord {
     pub ttl: u32,
     /// The data, canonical.
     pub rdata: Rdata,
+    // WP13.4
+    /// In the Windows dialect: the record carried an aging timestamp (`[AGE:n]`, `n` above
+    /// zero), so Windows calls it dynamic. Always `false` in the RFC 1035 dialect.
+    pub aged: bool,
 }
 
 /// A record the import does not take, and why.
@@ -132,6 +192,8 @@ struct State {
     owner: Vec<u8>,
     /// The data of the current record in wire form.
     data: Vec<u8>,
+    /// The dialect (WP13.4).
+    dialect: Dialect,
 }
 
 /// Reads the records of a zone file one by one.
@@ -165,6 +227,20 @@ impl Reader {
     ///
     /// None today; the signature keeps room for checks before the first entry.
     pub fn new(text: &str, apex: &DnsName, max_generate: u32) -> ZoneResult<Self> {
+        Self::with_dialect(text, apex, max_generate, Dialect::Rfc1035)
+    }
+
+    /// A reader over `text` in `dialect` (WP13.4).
+    ///
+    /// # Errors
+    ///
+    /// None today; the signature keeps room for checks before the first entry.
+    pub fn with_dialect(
+        text: &str,
+        apex: &DnsName,
+        max_generate: u32,
+        dialect: Dialect,
+    ) -> ZoneResult<Self> {
         Ok(Self {
             text: text.to_owned(),
             lexer: Lexer::new(1),
@@ -177,6 +253,7 @@ impl Reader {
                 last_ttl: DEFAULT_TTL,
                 owner: Vec::new(),
                 data: Vec::new(),
+                dialect,
             },
             max_generate,
             done: false,
@@ -363,6 +440,51 @@ fn ttl_class_type(
 }
 
 impl State {
+    // WP13.4: the Windows dialect.
+    /// In the Windows dialect, the aging mark right after the owner (taken, moving `index`
+    /// past it): whether the record is aged; or the loss of a WINS or WINS-R record. Outside
+    /// the dialect: not aged.
+    fn windows_prefix(
+        &self,
+        src: &str,
+        tokens: &[lexer::Token],
+        index: &mut usize,
+        line: usize,
+    ) -> ZoneResult<Result<bool, Loss>> {
+        if self.dialect != Dialect::Windows {
+            return Ok(Ok(false));
+        }
+        let mut aged = false;
+        if let Some(token) = tokens.get(*index)
+            && !token.quoted
+            && let Some(mark) = age_mark(token.text(src))
+        {
+            let hours = mark.map_err(|reason| ZoneError::zone_file(token.line, reason))?;
+            aged = hours > 0;
+            *index += 1;
+        }
+        // The type comes within the first three tokens (`[ttl] [class] type`); a known
+        // type ends the search, so that data reading `WINS` is data.
+        let wins = tokens
+            .get(*index..)
+            .unwrap_or_default()
+            .iter()
+            .take(3)
+            .take_while(|token| token.quoted || types::parse(token.text(src)).is_none())
+            .find(|token| !token.quoted && is_wins(token.text(src)));
+        Ok(match wins {
+            Some(wins) => Err(Loss {
+                line,
+                code: LOSS_WINS,
+                detail: format!(
+                    "a {} record of a Windows zone is not served",
+                    wins.text(src).to_ascii_uppercase()
+                ),
+            }),
+            None => Ok(aged),
+        })
+    }
+
     /// One record entry.
     fn record(&mut self, src: &str, entry: &Entry) -> ZoneResult<Item> {
         let tokens = entry.tokens.as_slice();
@@ -387,6 +509,11 @@ impl State {
             index = 1;
         }
 
+        // WP13.4: the aging mark and the WINS records of a Windows file.
+        let aged = match self.windows_prefix(src, tokens, &mut index, line)? {
+            Ok(aged) => aged,
+            Err(loss) => return Ok(Item::Loss(loss)),
+        };
         let (ttl, class, rtype) = ttl_class_type(src, tokens, &mut index, last_line)?;
         let ttl = match ttl {
             Some(ttl) => {
@@ -451,6 +578,7 @@ impl State {
             rtype,
             ttl,
             rdata,
+            aged,
         }))
     }
 }

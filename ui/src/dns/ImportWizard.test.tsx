@@ -117,3 +117,67 @@ describe("the zone file import", () => {
     expect(screen.queryByTestId("import-upload")).toBeNull();
   });
 });
+
+// The Windows dialect: a file written by `dnscmd /ZoneExport`. Records with an aging mark are
+// imported as claimable by their host, static ones stay manual, WINS records are losses.
+const WINDOWS_FILE = [
+  "$ORIGIN example.test.",
+  "@        3600 IN SOA ns1 hostmaster ( 1 3600 900 1209600 300 )",
+  "pc07     [AGE:3612345] 1200 IN A 192.0.2.77",
+  "pc08     [AGE:3612399] 1200 IN A 192.0.2.78",
+  "fileserv 3600 IN A 192.0.2.79",
+  "@        0 IN WINS 192.0.2.10",
+  "",
+].join("\n");
+
+describe("the dialect of the file", () => {
+  it("offers the zone file and the Windows export, with what the Windows one does", async () => {
+    open();
+    const group = await screen.findByTestId("import-dialect");
+    expect((within(group).getByTestId("field-dialect-rfc1035") as HTMLInputElement).checked).toBe(true);
+    expect(within(group).getByTestId("import-dialect-help").textContent).toContain("standard master file");
+    fireEvent.click(within(group).getByTestId("field-dialect-windows"));
+    expect(within(group).getByText("Windows DNS export (dnscmd /ZoneExport)")).toBeTruthy();
+    expect(within(group).getByTestId("import-dialect-help").textContent).toContain("aging mark are imported as claimable by their host");
+    expect(within(group).getByTestId("import-dialect-help").textContent).toContain("static records stay manual");
+  });
+
+  it("sends the dialect and shows how many RRsets are claimable", async () => {
+    const writes = recordWrites();
+    open();
+    await paste(WINDOWS_FILE);
+    fireEvent.click(await screen.findByTestId("field-dialect-windows"));
+    fireEvent.click(screen.getByTestId("import-preview"));
+    const report = await screen.findByTestId("import-preview-report");
+    expect(within(report).getByTestId("import-claimable").dataset.count).toBe("2");
+    expect(within(report).getByTestId("import-claimable").textContent).toContain("2 RRsets are claimable by their host");
+    expect(within(report).getAllByTestId("import-loss").map((l) => l.dataset.code)).toContain("dns.zonefile.wins");
+    expect(within(report).getByText("WINS records are not kept.")).toBeTruthy();
+    fireEvent.click(within(report).getByTestId("import-apply"));
+    await waitFor(() => expect(screen.getByTestId("import-result").dataset.state).toBe("done"), { timeout: 4000 });
+    const sent = writes().filter((w) => w.url.includes("/records/import"));
+    expect(sent.map((w) => w.body?.dialect)).toEqual(["windows", "windows"]);
+    const sets = dnsState().rrsets.get(ZONE) ?? [];
+    expect(sets.find((s) => s.name === "pc07.example.test")?.origin).toBe("ad");
+    expect(sets.find((s) => s.name === "fileserv.example.test")?.origin).toBe("manual");
+    expect(within(screen.getByTestId("import-result")).getByTestId("import-claimable").dataset.count).toBe("2");
+  });
+
+  it("does not send a dialect for a plain zone file and shows no claimable line", async () => {
+    const writes = recordWrites();
+    open();
+    await paste(FILE);
+    fireEvent.click(screen.getByTestId("import-preview"));
+    const report = await screen.findByTestId("import-preview-report");
+    expect(within(report).queryByTestId("import-claimable")).toBeNull();
+    expect(writes().find((w) => w.url.includes("/records/import"))?.body).not.toHaveProperty("dialect");
+  });
+
+  it("speaks Swedish", async () => {
+    await setLocale("sv");
+    open();
+    const group = await screen.findByTestId("import-dialect");
+    fireEvent.click(within(group).getByTestId("field-dialect-windows"));
+    expect(within(group).getByTestId("import-dialect-help").textContent).toContain("åldringsmarkering");
+  });
+});

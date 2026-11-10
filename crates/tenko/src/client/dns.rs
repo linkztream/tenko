@@ -1035,6 +1035,11 @@ pub struct ImportArgs {
     /// Show what the import would do without writing.
     #[arg(long)]
     pub dry_run: bool,
+    /// The file is a Windows DNS Server export (`dnscmd /ZoneExport`): its records with an
+    /// aging mark `[AGE:n]` are imported with the origin `ad`, claimable by the host they
+    /// name, and its WINS records are reported as losses.
+    #[arg(long)]
+    pub windows: bool,
     /// Seconds to wait for the import job.
     #[arg(long, value_name = "SECONDS", default_value_t = 300)]
     pub wait_secs: u64,
@@ -2155,6 +2160,13 @@ fn render_report(report: &Value) -> String {
         count("replaced"),
         count("removed"),
     );
+    if count("claimable") > 0 {
+        let _ = writeln!(
+            out,
+            "claimable by their hosts (origin ad): {} RRset(s)",
+            count("claimable")
+        );
+    }
     let types = type_counts(report);
     if !types.is_empty() {
         let list: Vec<String> = types
@@ -2276,6 +2288,9 @@ async fn import(target: &Target, args: &ImportArgs) -> Result<Output, Failure> {
     let client = target.connect().await?;
     let zone = resolve_zone(&client, &args.zone).await?;
     let mut body = json!({ "zone_file": zone_file, "replace": args.replace });
+    if args.windows {
+        body["dialect"] = json!("windows");
+    }
     if let Some(scope) = &args.scope {
         body["scope"] = json!(scope);
     }
