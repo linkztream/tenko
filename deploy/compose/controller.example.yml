@@ -46,6 +46,9 @@ services:
     build:
       context: ../..
       dockerfile: deploy/Dockerfile
+      # Empty: a full build. A value unique to this checkout reuses the cargo cache
+      # (deploy/Dockerfile says why).
+      args: { TENKO_BUILD_TREE: "${TENKO_BUILD_TREE:-}" }
     image: tenko:local
     restart: unless-stopped
     # The server finishes open requests, stops its jobs and makes the store durable.

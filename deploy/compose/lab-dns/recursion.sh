@@ -293,7 +293,10 @@ recursion() {
   step "round recursion: iterative resolution from the lab root, then validation (E33)"
   if [[ -z "${QUIRK_IMAGE:-}" ]]; then
     export QUIRK_IMAGE=tenko-quirk:lab
-    docker build -f "$here/quirk.Dockerfile" -t "$QUIRK_IMAGE" "$repo"
+    # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
+    tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
+    docker build -f "$here/quirk.Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
+      -t "$QUIRK_IMAGE" "$repo"
   fi
   write_authority_config
   compose --profile recursion up -d --no-build authority quirk-noedns quirk-case quirk-tc \

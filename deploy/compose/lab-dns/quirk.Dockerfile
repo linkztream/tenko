@@ -34,12 +34,18 @@ RUN rustup toolchain install \
 COPY . .
 # The target directory is a cache mount and is not part of the image layer, so the binary
 # is copied out to /out inside the same RUN.
+# The target directory belongs to one checkout: without TENKO_BUILD_TREE the build has a
+# directory of its own, a full build (deploy/Dockerfile explains the argument).
+ARG TENKO_BUILD_TREE=
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release --locked --target x86_64-unknown-linux-musl \
-        -p tenko-dns --example authoritative \
-    && mkdir -p /out \
-    && cp target/x86_64-unknown-linux-musl/release/examples/authoritative /out/quirk
+    --mount=type=cache,id=tenko-quirk-target-${TENKO_BUILD_TREE:-unshared},target=/src/target-tree \
+    set -eu; \
+    if [ -n "$TENKO_BUILD_TREE" ]; then target=/src/target-tree; else target=/tmp/tenko-target; fi; \
+    CARGO_TARGET_DIR="$target" cargo build --release --locked --target x86_64-unknown-linux-musl \
+        -p tenko-dns --example authoritative; \
+    mkdir -p /out; \
+    cp "$target/x86_64-unknown-linux-musl/release/examples/authoritative" /out/quirk; \
+    rm -rf /tmp/tenko-target
 
 # The binary is static and needs no libc; nothing else belongs in the image.
 FROM gcr.io/distroless/static-debian12:nonroot

@@ -787,7 +787,10 @@ fi
 if [[ "$node" == tenko ]]; then
   if ((build_tenko)); then
     step "build $TENKO_IMAGE from deploy/Dockerfile (the static musl binary)"
-    docker build -f "$repo/deploy/Dockerfile" -t "$TENKO_IMAGE" "$repo"
+    # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
+    tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
+    docker build -f "$repo/deploy/Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
+      -t "$TENKO_IMAGE" "$repo"
   else
     docker image inspect "$TENKO_IMAGE" >/dev/null 2>&1 || fail "image $TENKO_IMAGE not found"
   fi
@@ -795,7 +798,10 @@ if [[ "$node" == tenko ]]; then
 else
   if ((build_example)); then
     step "build $EXAMPLE_IMAGE from example.Dockerfile (the example server, static musl)"
-    docker build -f "$here/example.Dockerfile" -t "$EXAMPLE_IMAGE" "$repo"
+    # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
+    tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
+    docker build -f "$here/example.Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
+      -t "$EXAMPLE_IMAGE" "$repo"
   else
     docker image inspect "$EXAMPLE_IMAGE" >/dev/null 2>&1 || fail "image $EXAMPLE_IMAGE not found"
   fi

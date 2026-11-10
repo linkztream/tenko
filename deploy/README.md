@@ -632,6 +632,8 @@ data volume protects nothing.
 - `compose/controller.example.yml`: the controller on a bridge network with ports 8443 and
   8444 published, the key as a Docker secret, the settings as environment variables, a
   read-only root file system, and a commented variant behind a reverse proxy.
+  The three example files that build `deploy/Dockerfile` do a full build by default;
+  exporting `TENKO_BUILD_TREE` to a value unique to the checkout reuses the build cache.
 - `compose/macvlan.example.yml`: the controller and a separate probe service on a macvlan
   network, each with its own address on the segment. Nothing is published. The DHCP role
   will need layer-2 access to the client segment, so the bridge network does not work for

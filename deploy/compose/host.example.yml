@@ -67,6 +67,9 @@ services:
     build:
       context: ../..
       dockerfile: deploy/Dockerfile
+      # Empty: a full build. A value unique to this checkout reuses the cargo cache
+      # (deploy/Dockerfile says why).
+      args: { TENKO_BUILD_TREE: "${TENKO_BUILD_TREE:-}" }
     image: tenko:local
     # Controller plus the probe role in one process.
     command: ["--roles", "controller,probe"]

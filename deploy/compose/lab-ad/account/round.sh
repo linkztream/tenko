@@ -115,7 +115,10 @@ trap teardown EXIT
 # ---------------------------------------------------------------------------------------
 step "images and secrets"
 if ! docker image inspect "$TENKO_IMAGE" >/dev/null 2>&1; then
-  docker build -f "$repo/deploy/Dockerfile" -t "$TENKO_IMAGE" "$repo"
+  # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
+  tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
+  docker build -f "$repo/deploy/Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
+    -t "$TENKO_IMAGE" "$repo"
 fi
 docker build -q -f "$here/samba.Dockerfile" -t "$SAMBA_IMAGE" "$here" >/dev/null
 docker build -q -f "$here/client.Dockerfile" -t "$CLIENT_IMAGE" "$here" >/dev/null

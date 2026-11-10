@@ -18,11 +18,17 @@ COPY rust-toolchain.toml ./
 RUN rustup toolchain install \
     && rustup target add x86_64-unknown-linux-musl
 COPY . .
+# The target directory belongs to one checkout: without TENKO_BUILD_TREE the build has a
+# directory of its own, a full build (deploy/Dockerfile explains the argument).
+ARG TENKO_BUILD_TREE=
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p tenko-dhcp --example dhcp_server \
-        --target x86_64-unknown-linux-musl \
-    && cp target/x86_64-unknown-linux-musl/release/examples/dhcp_server /dhcp_server
+    --mount=type=cache,id=tenko-dhcp-example-target-${TENKO_BUILD_TREE:-unshared},target=/src/target-tree \
+    set -eu; \
+    if [ -n "$TENKO_BUILD_TREE" ]; then target=/src/target-tree; else target=/tmp/tenko-target; fi; \
+    CARGO_TARGET_DIR="$target" cargo build --release --locked -p tenko-dhcp --example dhcp_server \
+        --target x86_64-unknown-linux-musl; \
+    cp "$target/x86_64-unknown-linux-musl/release/examples/dhcp_server" /dhcp_server; \
+    rm -rf /tmp/tenko-target
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /dhcp_server /usr/local/bin/dhcp_server

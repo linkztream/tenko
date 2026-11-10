@@ -77,6 +77,9 @@ services:
     build:
       context: ../..
       dockerfile: deploy/Dockerfile
+      # Empty: a full build. A value unique to this checkout reuses the cargo cache
+      # (deploy/Dockerfile says why).
+      args: { TENKO_BUILD_TREE: "${TENKO_BUILD_TREE:-}" }
     image: ${TENKO_IMAGE:-tenko:local}
     # Phase 1: the controller. When the DNS and DHCP roles arrive, run
     # ["--roles", "controller,dns,dhcp", "--config", "/etc/tenko/tenko.toml"].

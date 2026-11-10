@@ -316,7 +316,10 @@ docker info >/dev/null 2>&1 || fail "cannot talk to the Docker daemon"
 
 if ((built_here)); then
   step "build the image $TENKO_IMAGE (UI bundle and release binary; this takes a while)"
-  docker build -f "$repo/deploy/Dockerfile" -t "$TENKO_IMAGE" "$repo"
+  # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
+  tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
+  docker build -f "$repo/deploy/Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
+    -t "$TENKO_IMAGE" "$repo"
 else
   step "use the existing image $TENKO_IMAGE"
   docker image inspect "$TENKO_IMAGE" >/dev/null 2>&1 || fail "image $TENKO_IMAGE not found"

@@ -762,7 +762,10 @@ dhcp6_round() {
   ok "networkd" "$NETWORKD_IMAGE (systemd-networkd as a DHCPv6 client)"
   if ((build_tenko)); then
     step "build $TENKO_IMAGE from deploy/Dockerfile (the static musl binary)"
-    docker build -f "$repo/deploy/Dockerfile" -t "$TENKO_IMAGE" "$repo"
+    # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
+    tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
+    docker build -f "$repo/deploy/Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
+      -t "$TENKO_IMAGE" "$repo"
   else
     docker image inspect "$TENKO_IMAGE" >/dev/null 2>&1 || fail "image $TENKO_IMAGE not found"
   fi

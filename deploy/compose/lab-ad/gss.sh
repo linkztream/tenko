@@ -132,7 +132,10 @@ random_password() { printf 'Lab-%s-Aa1' "$(od -An -N9 -tx1 /dev/urandom | tr -d 
 step "images"
 export TENKO_IMAGE="${TENKO_IMAGE:-tenko:lab}"
 if ! docker image inspect "$TENKO_IMAGE" >/dev/null 2>&1; then
-  docker build -f "$docker_repo/deploy/Dockerfile" -t "$TENKO_IMAGE" "$docker_repo"
+  # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
+  tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
+  docker build -f "$docker_repo/deploy/Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
+    -t "$TENKO_IMAGE" "$docker_repo"
 fi
 
 # --- 2. the work directory -------------------------------------------------------------
