@@ -318,6 +318,7 @@ Proposals that were weighed and are recorded so that they are not proposed again
 
 | Candidate | What it would be | Why it waits |
 |---|---|---|
+| Home Assistant in both directions | The Home Assistant plugin, which reads inventory today (CONN-04), also delivers Tenko's alarms and state to Home Assistant as entities, and later takes selected actions from it. An MQTT channel for notifications was weighed as another way to the same end (retained state and a notice when Tenko itself is gone, against a broker to run and a new surface if Tenko ever listened). | The signed webhook of OPS-29 covers the need until then, for example through an automation tool in front of Home Assistant; anything that lets Home Assistant act on Tenko needs its own security design first. |
 | Wake-on-LAN from the host view | The probe of a segment sends the magic packet for a host of that segment, beside the RDP and SSH handoff (API-11). | Small and useful; not decided. |
 | NTP server role | Tenko serves time, where today it only hands out the addresses of time servers (DHCP-15) and depends on time itself (OPS-09). | A new role with its own attack surface; the router or the domain controllers serve time already. |
 | Boot file service | A TFTP and HTTP server for the boot files that the PXE options point at (DHCP-05). | Narrow use; a boot server exists wherever PXE is used today. |
