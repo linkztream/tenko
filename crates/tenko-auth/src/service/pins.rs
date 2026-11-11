@@ -183,6 +183,9 @@ impl AuthService {
                 if let Err(error) = service.prune_ended_locks(SystemClock.now()).await {
                     tracing::debug!(%error, "ended sign-in locks could not be removed");
                 }
+                if let Err(error) = service.prune_known_devices(SystemClock.now()).await {
+                    tracing::debug!(%error, "ended known devices could not be removed");
+                }
                 drop(service);
                 tokio::time::sleep(SWEEP_EVERY).await;
             }

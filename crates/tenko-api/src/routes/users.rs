@@ -16,7 +16,9 @@
 //! | `PATCH /users/{id}` | 200 `UserInfo` | optional `If-Match` |
 //! | `DELETE /users/{id}` | 204 | |
 //! | `POST /users/{id}/unlock` | 200 `UserInfo` | |
-//! | `DELETE /users/{id}/sessions` | 204 | |
+//! | `DELETE /users/{id}/sessions` | 204 | also forgets the known devices |
+//! | `GET /users/{id}/known-devices` | 200 page of `KnownDeviceInfo` | not paginated |
+//! | `DELETE /users/{id}/known-devices`, `/users/{id}/known-devices/{device}` | 204 | |
 //! | `PUT /users/{id}/roles` | 200 `UserInfo` | optional `If-Match` |
 //! | `GET /roles` | 200 page of `RoleInfo` | any authenticated caller |
 //! | `PUT /system/break-glass` | 200 `UserInfo` | needs a fresh, strong authentication |
@@ -27,8 +29,9 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use tenko_auth::model::KnownDeviceId;
 use tenko_auth::service::{
-    BreakGlassChange, RoleInfo, RolesUpdate, UserCreate, UserInfo, UserUpdate,
+    BreakGlassChange, KnownDeviceInfo, RoleInfo, RolesUpdate, UserCreate, UserInfo, UserUpdate,
 };
 use tenko_core::UserId;
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -44,6 +47,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(get_user, update_user, delete_user))
         .routes(routes!(unlock_user))
         .routes(routes!(revoke_user_sessions))
+        .routes(routes!(list_user_known_devices, forget_user_known_devices))
+        .routes(routes!(forget_user_known_device))
         .routes(routes!(set_user_roles))
         .routes(routes!(list_roles))
         .routes(routes!(set_break_glass))
@@ -248,7 +253,8 @@ async fn unlock_user(
     ))
 }
 
-/// Ends every session of a user.
+/// Signs a user out everywhere: ends every session of the user and forgets the account's
+/// known devices.
 #[utoipa::path(
     delete,
     path = "/users/{id}/sessions",
@@ -257,7 +263,7 @@ async fn unlock_user(
     summary = "Revoke every session of a user",
     params(("id" = String, Path, description = "User identifier")),
     responses(
-        (status = 204, description = "The sessions ended"),
+        (status = 204, description = "The sessions ended and the known devices are forgotten"),
         (status = 400, description = "The identifier is not a UUID (`sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such user (`users.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
@@ -273,6 +279,98 @@ async fn revoke_user_sessions(
 ) -> Result<StatusCode, RouteError> {
     let id = id.parse::<UserId>()?;
     service.revoke_user_sessions(&ctx, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Lists the known devices of a user, last sign-in first: the browsers that completed a
+/// sign-in of the account in the last 30 days and pass its account-wide delay. Nothing
+/// describes a device.
+#[utoipa::path(
+    get,
+    path = "/users/{id}/known-devices",
+    tag = "users",
+    operation_id = "list_user_known_devices",
+    summary = "List the known devices of a user",
+    params(("id" = String, Path, description = "User identifier")),
+    responses(
+        (status = 200, description = "Every known device of the account (`current` is always false)", body = Page<KnownDeviceInfo>),
+        (status = 400, description = "The identifier is not a UUID (`sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such user (`users.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        Unauthenticated,
+        Forbidden,
+        Unavailable
+    ),
+    security(("session" = []))
+)]
+async fn list_user_known_devices(
+    State(app): State<AppState>,
+    Svc(service): Svc,
+    Ctx(ctx): Ctx,
+    Path(id): Path<String>,
+) -> Result<Json<Page<KnownDeviceInfo>>, RouteError> {
+    let id = id.parse::<UserId>()?;
+    Ok(page(&app, service.user_known_devices(&ctx, id).await?))
+}
+
+/// Forgets every known device of a user.
+#[utoipa::path(
+    delete,
+    path = "/users/{id}/known-devices",
+    tag = "users",
+    operation_id = "forget_user_known_devices",
+    summary = "Forget every known device of a user",
+    params(("id" = String, Path, description = "User identifier")),
+    responses(
+        (status = 204, description = "The devices are no longer known"),
+        (status = 400, description = "The identifier is not a UUID (`sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such user (`users.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        Unauthenticated,
+        Forbidden,
+        Unavailable
+    ),
+    security(("session" = []))
+)]
+async fn forget_user_known_devices(
+    Svc(service): Svc,
+    Ctx(ctx): Ctx,
+    Path(id): Path<String>,
+) -> Result<StatusCode, RouteError> {
+    let id = id.parse::<UserId>()?;
+    service.forget_user_known_devices(&ctx, id, None).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Forgets one known device of a user.
+#[utoipa::path(
+    delete,
+    path = "/users/{id}/known-devices/{device}",
+    tag = "users",
+    operation_id = "forget_user_known_device",
+    summary = "Forget one known device of a user",
+    params(
+        ("id" = String, Path, description = "User identifier"),
+        ("device" = String, Path, description = "Known device identifier")
+    ),
+    responses(
+        (status = 204, description = "The device is no longer known"),
+        (status = 400, description = "An identifier is not a UUID (`sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such user (`users.not_found`) or known device (`auth.known_device.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        Unauthenticated,
+        Forbidden,
+        Unavailable
+    ),
+    security(("session" = []))
+)]
+async fn forget_user_known_device(
+    Svc(service): Svc,
+    Ctx(ctx): Ctx,
+    Path((id, device)): Path<(String, String)>,
+) -> Result<StatusCode, RouteError> {
+    let id = id.parse::<UserId>()?;
+    let device = device.parse::<KnownDeviceId>()?;
+    service
+        .forget_user_known_devices(&ctx, id, Some(device))
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

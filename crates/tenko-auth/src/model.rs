@@ -23,11 +23,18 @@
 //! | `auth.scoped_tokens` | SHA-256 of the token | [`ScopedTokenRecord`] (IAM-10) |
 //! | `auth.user_scoped_tokens` | ([`UserId`], [`ApiTokenId`]) | SHA-256 of the token |
 //! | `auth.preferences` | ([`UserId`], key) | [`StoredPreference`] (the person's saved table layouts) |
+//! | `auth.known_devices` | SHA-256 of the device mark | [`KnownDeviceRecord`] |
+//! | `auth.user_known_devices` | ([`UserId`], SHA-256 of the device mark) | [`KnownDeviceId`] |
 //! | `auth.providers`, `auth.mappings`, `auth.oidc_flows`, `auth.external_ids` | see [`crate::directory`] | directory sign-in (WP13.0) |
 //!
 //! Scoped grants, role policies and scoped tokens live in tables that builds before
 //! WP3.2 do not read: after a rollback a scoped grant or token grants nothing instead of
 //! being read as a global one (plan section 2.1, R25).
+//!
+//! `auth.known_devices` and `auth.user_known_devices` are additive too: a build before them
+//! neither reads nor writes them, so it never sets or honors a device mark, and a backup
+//! taken before them restores with every device unknown. They hold the digest of a mark,
+//! never the mark itself.
 //!
 //! `auth.preferences` is additive in the same way: a build before it does not read the
 //! table, and a backup taken before it restores with the table empty, so every table shows
@@ -109,9 +116,19 @@ pub fn preference_keys_counter(user: UserId) -> tenko_core::CounterKey {
     tenko_core::CounterKey::with("auth.preferences", &user)
 }
 
+/// Known devices by the SHA-256 of their mark (`crate::service::devices`).
+pub const KNOWN_DEVICES: TableDef<Vec<u8>, KnownDeviceRecord> = TableDef::new("auth.known_devices");
+/// The marks of each user, by the digest, with the device's id: for listing and removal.
+/// Every record of [`KNOWN_DEVICES`] has its own row, so removing an account's rows removes
+/// every mark it has, also two made by sign-ins of one browser at the same moment.
+pub const USER_KNOWN_DEVICES: TableDef<(UserId, Vec<u8>), KnownDeviceId> =
+    TableDef::new("auth.user_known_devices");
+
 tenko_core::id_type! {
     /// Identifier of a scoped grant.
     GrantId,
+    /// Identifier of a known device; it stays the same when the device's mark is renewed.
+    KnownDeviceId,
 }
 
 /// What kind of account a user record is (IAM-10).
@@ -615,6 +632,30 @@ pub struct SessionRecord {
     // WP13.0: end.
 }
 
+/// A device that completed a sign-in of the account: its browser holds a mark whose
+/// SHA-256 keys this record. The mark only lets attempts from the device pass the
+/// account-wide delay; it authenticates nothing. Nothing describes the device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnownDeviceRecord {
+    /// The id used in listings and removal.
+    pub id: KnownDeviceId,
+    /// The account.
+    pub user: UserId,
+    /// When the device first completed a sign-in of the account.
+    pub known_since: Timestamp,
+    /// When this mark was issued: the device's last completed sign-in.
+    pub issued_at: Timestamp,
+    /// When the mark ends.
+    pub expires_at: Timestamp,
+    /// When the account's password was set as the mark was issued: a later password change
+    /// or reset ends the mark, also one made by a build that does not know marks.
+    #[serde(default)]
+    pub password_changed_at: Option<Timestamp>,
+    /// Failed attempts made with the mark since it was issued; at the budget it is spent.
+    #[serde(default)]
+    pub failures: u32,
+}
+
 /// A personal API token (IAM-10). Stored under the SHA-256 of the token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenRecord {
@@ -696,8 +737,9 @@ pub enum AlarmKind {
     BreakGlassFailure,
     /// An account was locked under the Hardened lockout mode (TGL-07).
     AccountLocked,
-    /// Failed sign-ins of an account, across every network, reached the number that locks
-    /// one network (TGL-07, IAM-05): someone may be guessing its password or PIN.
+    /// Failed sign-ins of an account, across every network, reached the policy's
+    /// `alarm_after_failures`, or doubled since (TGL-07, IAM-05): someone may be guessing its
+    /// password or PIN.
     SignInFailures,
     /// A PIN stored before the six-digit minimum was not confirmed by a sign-in within its
     /// period and no longer signs in; an administrator resets it.

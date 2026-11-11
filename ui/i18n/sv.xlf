@@ -262,7 +262,7 @@
         <segment><source>{seconds, plural, one {Try again in # second.} other {Try again in # seconds.}}</source><target>{seconds, plural, one {Försök igen om # sekund.} other {Försök igen om # sekunder.}}</target></segment>
       </unit>
       <unit id="auth.signin.throttle_explain">
-        <segment><source>Too many attempts from this network.</source><target>För många försök från det här nätverket.</target></segment>
+        <segment><source>Too many attempts. A passkey, or a browser or network you have signed in from before, may let you in sooner.</source><target>För många försök. En nyckel, eller en webbläsare eller ett nätverk som du har loggat in från tidigare, kan släppa in dig snabbare.</target></segment>
       </unit>
       <unit id="auth.signin.use_passkey">
         <segment><source>Use a passkey instead</source><target>Använd en nyckel i stället</target></segment>
@@ -2081,7 +2081,7 @@
         <segment><source>Sign out everywhere</source><target>Logga ut överallt</target></segment>
       </unit>
       <unit id="settings.users.action.sign_out_help">
-        <segment><source>Ends every session of {name} on every device.</source><target>Avslutar alla sessioner för {name} på alla enheter.</target></segment>
+        <segment><source>Ends every session of {name} on every device and forgets the known devices of {name}.</source><target>Avslutar alla sessioner för {name} på alla enheter och glömmer {name}s kända enheter.</target></segment>
       </unit>
       <unit id="settings.users.action.password">
         <segment><source>Set a new password</source><target>Ange nytt lösenord</target></segment>
@@ -2174,7 +2174,7 @@
         <segment><source>Sign {name} out everywhere?</source><target>Logga ut {name} överallt?</target></segment>
       </unit>
       <unit id="settings.users.sign_out.body">
-        <segment><source>Every session of {name} ends on every device. {name} can sign in again.</source><target>Alla sessioner för {name} avslutas på alla enheter. {name} kan logga in igen.</target></segment>
+        <segment><source>Every session of {name} ends on every device, and the known devices of {name} are forgotten. {name} can sign in again.</source><target>Alla sessioner för {name} avslutas på alla enheter och {name}s kända enheter glöms. {name} kan logga in igen.</target></segment>
       </unit>
       <unit id="settings.users.sign_out.confirm">
         <segment><source>Sign {name} out everywhere</source><target>Logga ut {name} överallt</target></segment>

@@ -262,7 +262,7 @@
         <segment><source>{seconds, plural, one {Try again in # second.} other {Try again in # seconds.}}</source></segment>
       </unit>
       <unit id="auth.signin.throttle_explain">
-        <segment><source>Too many attempts from this network.</source></segment>
+        <segment><source>Too many attempts. A passkey, or a browser or network you have signed in from before, may let you in sooner.</source></segment>
       </unit>
       <unit id="auth.signin.use_passkey">
         <segment><source>Use a passkey instead</source></segment>
@@ -2081,7 +2081,7 @@
         <segment><source>Sign out everywhere</source></segment>
       </unit>
       <unit id="settings.users.action.sign_out_help">
-        <segment><source>Ends every session of {name} on every device.</source></segment>
+        <segment><source>Ends every session of {name} on every device and forgets the known devices of {name}.</source></segment>
       </unit>
       <unit id="settings.users.action.password">
         <segment><source>Set a new password</source></segment>
@@ -2174,7 +2174,7 @@
         <segment><source>Sign {name} out everywhere?</source></segment>
       </unit>
       <unit id="settings.users.sign_out.body">
-        <segment><source>Every session of {name} ends on every device. {name} can sign in again.</source></segment>
+        <segment><source>Every session of {name} ends on every device, and the known devices of {name} are forgotten. {name} can sign in again.</source></segment>
       </unit>
       <unit id="settings.users.sign_out.confirm">
         <segment><source>Sign {name} out everywhere</source></segment>

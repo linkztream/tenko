@@ -40,13 +40,15 @@
 //!
 //! | Endpoint | Success | Notes |
 //! |---|---|---|
-//! | `POST /auth/login/password`, `/auth/login/totp`, `/auth/login/recovery` | 200 `LoginResponse` | `Set-Cookie` when the login is complete |
+//! | `POST /auth/login/password`, `/auth/login/totp`, `/auth/login/recovery` | 200 `LoginResponse` | `Set-Cookie` (the session and the device) when the login is complete |
 //! | `POST /auth/webauthn/login/start` | 200 `WebAuthnLoginOptions` | the body is optional |
-//! | `POST /auth/webauthn/login/finish` | 200 `LoginResponse` | `Set-Cookie` |
+//! | `POST /auth/webauthn/login/finish` | 200 `LoginResponse` | `Set-Cookie` (the session and the device) |
 //! | `POST /auth/logout` | 204 | `Set-Cookie` that removes the cookie |
 //! | `GET /auth/session` | 200 `SessionInfo` | |
 //! | `GET /auth/sessions`, `/auth/webauthn/credentials`, `/auth/tokens` | 200 page | not paginated |
 //! | `DELETE /auth/sessions/{id}`, `/auth/tokens/{id}`, `/auth/webauthn/credentials/{id}`, `/auth/totp` | 204 | |
+//! | `GET /auth/known-devices` | 200 page | not paginated; a session only |
+//! | `DELETE /auth/known-devices`, `/auth/known-devices/{id}` | 204 | a session only |
 //! | `POST /auth/password` | 200 `PasswordChanged` | |
 //! | `POST /auth/password/check` | 200 `PasswordCheckResult` | public while setup is open |
 //! | `POST /auth/totp/enroll/start` | 200 `TotpEnrollment` | the seed is shown once |
@@ -83,12 +85,13 @@ use axum::{
 use serde::{Serialize, de::DeserializeOwned};
 use tenko_auth::{
     AuthError, AuthService, LoginOutcome, NewSession,
+    model::KnownDeviceId,
     service::{
-        CodeLogin, CreatedToken, CredentialInfo, FactorEnrolled, LoginResponse, PasswordChange,
-        PasswordChanged, PasswordCheck, PasswordCheckResult, PasswordLogin, RecoveryCodes,
-        SessionInfo, SessionSummary, TokenInfo, TokenRequest, TotpEnrollFinish, TotpEnrollment,
-        WebAuthnLoginFinish, WebAuthnLoginOptions, WebAuthnLoginStart, WebAuthnRegisterFinish,
-        WebAuthnRegisterOptions, WebAuthnRegisterStart,
+        CodeLogin, CreatedToken, CredentialInfo, FactorEnrolled, KnownDeviceInfo, LoginResponse,
+        PasswordChange, PasswordChanged, PasswordCheck, PasswordCheckResult, PasswordLogin,
+        RecoveryCodes, SessionInfo, SessionSummary, TokenInfo, TokenRequest, TotpEnrollFinish,
+        TotpEnrollment, WebAuthnLoginFinish, WebAuthnLoginOptions, WebAuthnLoginStart,
+        WebAuthnRegisterFinish, WebAuthnRegisterOptions, WebAuthnRegisterStart,
     },
 };
 use tenko_core::{
@@ -100,7 +103,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
     dto::Page,
-    extract::{ClientInfo, Ctx, Https},
+    extract::{ClientInfo, Ctx, Https, KnownDevices},
     problem::{ApiError, ProblemDetails, codes as api_codes},
     state::AppState,
 };
@@ -122,6 +125,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(get_session))
         .routes(routes!(list_sessions))
         .routes(routes!(revoke_session))
+        .routes(routes!(list_known_devices, forget_known_devices))
+        .routes(routes!(forget_known_device))
         .routes(routes!(change_password))
         .routes(routes!(check_password))
         .routes(routes!(totp_enroll_start))
@@ -418,11 +423,21 @@ pub(crate) fn secret_json<T: Serialize>(
     set_cookie: Option<&str>,
     body: &T,
 ) -> Result<Response, RouteError> {
+    secret_json_cookies(status, set_cookie, body)
+}
+
+/// [`secret_json`] with every `Set-Cookie` value of `cookies` (a sign-in sets the session
+/// cookie and the device cookie).
+pub(crate) fn secret_json_cookies<'a, T: Serialize>(
+    status: StatusCode,
+    cookies: impl IntoIterator<Item = &'a str>,
+    body: &T,
+) -> Result<Response, RouteError> {
     let mut response = (status, Json(body)).into_response();
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    if let Some(cookie) = set_cookie {
+    for cookie in cookies {
         response
             .headers_mut()
             .append(header::SET_COOKIE, cookie_value(cookie)?);
@@ -490,8 +505,8 @@ pub(crate) fn if_match(headers: &HeaderMap) -> Result<Option<Revision>, ApiError
 /// The answer of a complete or pending login step: the JSON of the [`LoginResponse`] and,
 /// for a session, its cookie.
 fn login_answer(outcome: LoginOutcome, https: bool) -> Result<Response, RouteError> {
-    let (body, cookie) = outcome.into_response(https);
-    secret_json(StatusCode::OK, cookie.as_deref(), &body)
+    let (body, cookies) = outcome.into_response(https);
+    secret_json_cookies(StatusCode::OK, cookies.iter().map(String::as_str), &body)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -509,7 +524,7 @@ fn login_answer(outcome: LoginOutcome, https: bool) -> Result<Response, RouteErr
     request_body = PasswordLogin,
     responses(
         (status = 200, description = "The login is complete (`status: authenticated`) or a second factor is required (`status: second_factor`)", body = LoginResponse,
-            headers(("Set-Cookie" = String, description = "The session cookie (HttpOnly, SameSite=Strict, Path=/): `__Host-tenko_session` with Secure over HTTPS, `tenko_session` over plain HTTP (Lab); only when the login is complete"))),
+            headers(("Set-Cookie" = String, description = "Only when the login is complete: the session cookie (HttpOnly, SameSite=Strict, Path=/), `__Host-tenko_session` with Secure over HTTPS, `tenko_session` over plain HTTP (Lab); and the device cookie of the same form, `__Host-tenko_device` or `tenko_device`, whose mark lets this browser pass the account-wide delay of the sign-in lock for 30 days"))),
         (status = 400, description = "The body is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "The user name or password was not accepted (`auth.invalid_credentials`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Too many failed attempts, or the account is locked (`auth.throttled`); `Retry-After` gives the seconds", body = ProblemDetails, content_type = "application/problem+json"),
@@ -521,11 +536,12 @@ async fn login_password(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
     Https(https): Https,
+    KnownDevices(marks): KnownDevices,
     ApiJson(request): ApiJson<PasswordLogin>,
 ) -> Result<Response, RouteError> {
     login_answer(
         service
-            .login_password(&ctx, user_agent.as_deref(), &request)
+            .login_password_from(&ctx, user_agent.as_deref(), &marks, &request)
             .await?,
         https,
     )
@@ -553,11 +569,12 @@ async fn login_totp(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
     Https(https): Https,
+    KnownDevices(marks): KnownDevices,
     ApiJson(request): ApiJson<CodeLogin>,
 ) -> Result<Response, RouteError> {
     login_answer(
         service
-            .login_totp(&ctx, user_agent.as_deref(), &request)
+            .login_totp_from(&ctx, user_agent.as_deref(), &marks, &request)
             .await?,
         https,
     )
@@ -585,11 +602,12 @@ async fn login_recovery(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
     Https(https): Https,
+    KnownDevices(marks): KnownDevices,
     ApiJson(request): ApiJson<CodeLogin>,
 ) -> Result<Response, RouteError> {
     login_answer(
         service
-            .login_recovery(&ctx, user_agent.as_deref(), &request)
+            .login_recovery_from(&ctx, user_agent.as_deref(), &marks, &request)
             .await?,
         https,
     )
@@ -642,14 +660,16 @@ async fn webauthn_login_finish(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
     Https(https): Https,
+    KnownDevices(marks): KnownDevices,
     ApiJson(request): ApiJson<WebAuthnLoginFinish>,
 ) -> Result<Response, RouteError> {
     let session: NewSession = service
-        .webauthn_login_finish(&ctx, user_agent.as_deref(), &request)
+        .webauthn_login_finish_from(&ctx, user_agent.as_deref(), &marks, &request)
         .await?;
-    secret_json(
+    let cookies = session.set_cookies(https);
+    secret_json_cookies(
         StatusCode::OK,
-        Some(&session.set_cookie(https)),
+        cookies.iter().map(String::as_str),
         &LoginResponse::Authenticated {
             session: session.info,
         },
@@ -756,6 +776,82 @@ async fn revoke_session(
 ) -> Result<StatusCode, RouteError> {
     let id = id.parse::<SessionId>()?;
     service.revoke_session(&ctx, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------------------
+// Known devices
+// ---------------------------------------------------------------------------------------
+
+/// Lists the known devices of the current user, last sign-in first: the browsers that
+/// completed a sign-in of the account in the last 30 days and pass its account-wide delay.
+/// Nothing describes a device; `current` marks the browser of the request.
+#[utoipa::path(
+    get,
+    path = "/auth/known-devices",
+    tag = "auth",
+    operation_id = "list_known_devices",
+    summary = "List the known devices of the current user",
+    responses(
+        (status = 200, description = "Every known device of the account; `current` marks this browser", body = Page<KnownDeviceInfo>),
+        Unauthenticated,
+        Unavailable
+    ),
+    security(("session" = []))
+)]
+async fn list_known_devices(
+    State(app): State<AppState>,
+    Svc(service): Svc,
+    Ctx(ctx): Ctx,
+    KnownDevices(marks): KnownDevices,
+) -> Result<Json<Page<KnownDeviceInfo>>, RouteError> {
+    Ok(page(&app, service.list_known_devices(&ctx, &marks).await?))
+}
+
+/// Forgets every known device of the current user: each meets the account-wide delay again
+/// until its next completed sign-in.
+#[utoipa::path(
+    delete,
+    path = "/auth/known-devices",
+    tag = "auth",
+    operation_id = "forget_known_devices",
+    summary = "Forget every known device of the current user",
+    responses(
+        (status = 204, description = "The devices are no longer known"),
+        Unauthenticated,
+        Unavailable
+    ),
+    security(("session" = []))
+)]
+async fn forget_known_devices(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<StatusCode, RouteError> {
+    service.forget_known_devices(&ctx, None).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Forgets one known device of the current user.
+#[utoipa::path(
+    delete,
+    path = "/auth/known-devices/{id}",
+    tag = "auth",
+    operation_id = "forget_known_device",
+    summary = "Forget one known device of the current user",
+    params(("id" = String, Path, description = "Known device identifier")),
+    responses(
+        (status = 204, description = "The device is no longer known"),
+        (status = 400, description = "The identifier is not a UUID (`sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "The user has no such known device (`auth.known_device.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        Unauthenticated,
+        Unavailable
+    ),
+    security(("session" = []))
+)]
+async fn forget_known_device(
+    Svc(service): Svc,
+    Ctx(ctx): Ctx,
+    Path(id): Path<String>,
+) -> Result<StatusCode, RouteError> {
+    let id = id.parse::<KnownDeviceId>()?;
+    service.forget_known_devices(&ctx, Some(id)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1751,8 +1847,9 @@ mod tests {
                 checked += 1;
             }
         }
-        // WP13.0: the eleven operations of the providers and the directory sign-in.
-        assert_eq!(checked, 51, "every endpoint of the four areas");
+        // WP13.0: the eleven operations of the providers and the directory sign-in; the six
+        // of the known devices.
+        assert_eq!(checked, 57, "every endpoint of the four areas");
     }
 
     #[tokio::test]
@@ -1850,6 +1947,10 @@ mod tests {
         let cookie = plain.set_cookies()[0];
         assert!(cookie.starts_with("tenko_session="), "{cookie}");
         assert!(!cookie.contains("Secure"), "{cookie}");
+        // The device cookie beside it, under the plain name too.
+        let device = plain.set_cookies()[1];
+        assert!(device.starts_with("tenko_device="), "{device}");
+        assert!(!device.contains("Secure"), "{device}");
         // Over HTTPS the `__Host-` cookie: Secure, Path=/, no Domain.
         let reply = harness
             .send(testkit::over_https(testkit::request(
@@ -1867,18 +1968,26 @@ mod tests {
         assert_eq!(reply.body["session"]["profile"], "home");
         assert_eq!(reply.header("cache-control"), Some("no-store"));
         let cookies = reply.set_cookies();
-        assert_eq!(cookies.len(), 1);
+        assert_eq!(cookies.len(), 2, "the session and the device: {cookies:?}");
         let cookie = cookies[0];
         assert!(cookie.starts_with("__Host-tenko_session="), "{cookie}");
-        assert!(!cookie.contains("Domain"), "{cookie}");
-        for attribute in [
-            "HttpOnly",
-            "SameSite=Strict",
-            "Secure",
-            "Path=/",
-            "Max-Age=",
-        ] {
-            assert!(cookie.contains(attribute), "{attribute} in {cookie}");
+        assert!(
+            cookies[1].starts_with("__Host-tenko_device="),
+            "{}",
+            cookies[1]
+        );
+        assert!(cookies[1].contains("Max-Age=2592000"), "{}", cookies[1]);
+        for cookie in &cookies {
+            assert!(!cookie.contains("Domain"), "{cookie}");
+            for attribute in [
+                "HttpOnly",
+                "SameSite=Strict",
+                "Secure",
+                "Path=/",
+                "Max-Age=",
+            ] {
+                assert!(cookie.contains(attribute), "{attribute} in {cookie}");
+            }
         }
         // The secret is not in the body, and the cookie works.
         let secret = reply.session_secret();
@@ -1981,6 +2090,87 @@ mod tests {
             .call("GET", "/auth/session", Bearer("tnk_unknown"), None)
             .await
             .assert_problem(401, "auth.unauthenticated");
+    }
+
+    /// The value of the cookie `name=` among the `Set-Cookie` values of `reply`.
+    fn set_cookie_value(reply: &testkit::Reply, name: &str) -> String {
+        reply
+            .set_cookies()
+            .iter()
+            .find_map(|cookie| cookie.strip_prefix(&format!("{name}=")))
+            .and_then(|rest| rest.split(';').next())
+            .unwrap_or_else(|| panic!("a {name} cookie"))
+            .to_owned()
+    }
+
+    /// The device cookie is read by the name of the request's scheme only, as the session
+    /// cookie is: `__Host-tenko_device` over HTTPS, `tenko_device` over plain HTTP.
+    #[tokio::test]
+    async fn the_device_cookie_is_read_by_the_name_of_the_scheme() {
+        let (harness, _) = Harness::installed().await;
+        let login = json!({ "user_name": ADMIN, "password": ADMIN_PASSWORD });
+        let reply = harness
+            .send(testkit::over_https(testkit::request(
+                "POST",
+                "/auth/login/password",
+                Anonymous,
+                Some(&login),
+                &[],
+            )))
+            .await;
+        reply.assert_status(200);
+        let secret = reply.session_secret();
+        let mark = set_cookie_value(&reply, "__Host-tenko_device");
+        let current = |name: &'static str, https: bool| {
+            // One `Cookie` header, as a browser sends it; `over_https` renames the session.
+            let header = format!("tenko_session={secret}; {name}={mark}");
+            let request = testkit::request(
+                "GET",
+                "/auth/known-devices",
+                Anonymous,
+                None,
+                &[("Cookie", header.as_str())],
+            );
+            let request = if https {
+                testkit::over_https(request)
+            } else {
+                request
+            };
+            let harness = &harness;
+            async move {
+                let list = harness.send(request).await;
+                list.assert_status(200);
+                list.body["items"][0]["current"].as_bool()
+            }
+        };
+        assert_eq!(current("__Host-tenko_device", true).await, Some(true));
+        assert_eq!(current("tenko_device", true).await, Some(false));
+        assert_eq!(current("tenko_device", false).await, Some(true));
+        assert_eq!(current("__Host-tenko_device", false).await, Some(false));
+        // An administrator forgets them; the list is empty.
+        harness
+            .send(testkit::request(
+                "DELETE",
+                "/auth/known-devices",
+                Cookie(&secret),
+                None,
+                &[],
+            ))
+            .await
+            .assert_status(204);
+        let list = harness
+            .call("GET", "/auth/known-devices", Cookie(&secret), None)
+            .await;
+        assert_eq!(list.body["items"], json!([]));
+        harness
+            .call(
+                "DELETE",
+                &format!("/auth/known-devices/{}", uuid::Uuid::now_v7()),
+                Cookie(&secret),
+                None,
+            )
+            .await
+            .assert_problem(404, "auth.known_device.not_found");
     }
 
     #[tokio::test]
@@ -2558,7 +2748,11 @@ mod tests {
             .await;
         recovered.assert_status(200);
         assert_eq!(recovered.body["status"], "authenticated");
-        assert_eq!(recovered.set_cookies().len(), 1);
+        assert_eq!(
+            recovered.set_cookies().len(),
+            2,
+            "the session and the device"
+        );
         let step = harness
             .call("POST", "/auth/login/password", Anonymous, Some(&password))
             .await;
@@ -2877,6 +3071,9 @@ mod tests {
             "logout",
             "get_session",
             "revoke_session",
+            "list_known_devices",
+            "forget_known_devices",
+            "forget_known_device",
             "change_password",
             "totp_enroll_start",
             "totp_enroll_finish",
@@ -2891,6 +3088,9 @@ mod tests {
             "delete_user",
             "unlock_user",
             "revoke_user_sessions",
+            "list_user_known_devices",
+            "forget_user_known_devices",
+            "forget_user_known_device",
             "set_user_roles",
             "set_break_glass",
             "update_security_settings",
@@ -2974,8 +3174,9 @@ mod tests {
                 schema_refs(operation, &mut refs);
             }
         }
-        // WP13.0: the eleven operations of the providers and the directory sign-in.
-        assert_eq!(operations, 51);
+        // WP13.0: the eleven operations of the providers and the directory sign-in; the six
+        // of the known devices.
+        assert_eq!(operations, 57);
         // Every schema the operations name exists, and so does everything those name.
         let mut pending: Vec<String> = refs.iter().cloned().collect();
         while let Some(name) = pending.pop() {

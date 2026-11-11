@@ -129,7 +129,9 @@ describe("sign-in", () => {
     }
     // A name that does not exist is throttled like any other, and the words do not tell the difference.
     expect(await screen.findByText("Try again in 3 minutes.")).toBeTruthy();
-    expect(screen.getByText(/Too many attempts from this network\./)).toBeTruthy();
+    expect(
+      screen.getByText(/A passkey, or a browser or network you have signed in from before, may let you in sooner\./),
+    ).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/account.*(locked|exist)/i);
   });
 

@@ -22,6 +22,7 @@
 mod access;
 mod account;
 mod admin;
+pub mod devices;
 mod guard;
 mod login;
 mod misses;
@@ -33,6 +34,9 @@ mod setup;
 pub mod types;
 
 pub use admin::{OfflineUnlock, unlock_offline};
+pub use devices::{
+    DEVICE_COOKIE, DeviceCookie, DeviceMarks, HOST_DEVICE_COOKIE, device_cookie_name,
+};
 pub use guard::default_hash_memory_mib;
 pub use reveal::{RevealGrant, STEP_UP_FRESH, STEP_UP_PASSKEY, check_step_up};
 
@@ -97,6 +101,9 @@ pub mod actions {
     pub const LOGOUT: AuditAction = AuditAction::from_static("auth.logout");
     /// A session ended by its user or an administrator.
     pub const SESSION_REVOKE: AuditAction = AuditAction::from_static("auth.session.revoke");
+    /// Known devices of an account were removed; context `known_devices`: how many.
+    pub const KNOWN_DEVICE_REMOVE: AuditAction =
+        AuditAction::from_static("auth.known_device.remove");
     /// A password change.
     pub const PASSWORD_CHANGE: AuditAction = AuditAction::from_static("auth.password.change");
     /// TOTP enrolled.
@@ -217,6 +224,7 @@ pub struct AuthService {
     hash_gate: guard::HashGate,
     dummy_timing: guard::DummyTiming,
     known_networks: Arc<guard::KnownNetworks>,
+    devices_in_flight: devices::DevicesInFlight,
     misses: misses::Misses,
     ceremonies: Ceremonies,
     setup_token: Mutex<Option<SetupTokenVerifier>>,
@@ -240,6 +248,8 @@ pub struct NewSession {
     pub info: SessionInfo,
     /// How long the cookie lives: the session's lifetime.
     pub max_age: Duration,
+    /// The device cookie to set beside it (`devices`), when the sign-in issued a mark.
+    pub device: Option<DeviceCookie>,
 }
 
 impl NewSession {
@@ -247,6 +257,14 @@ impl NewSession {
     /// ([`session_cookie_name`]).
     pub fn set_cookie(&self, https: bool) -> String {
         session_cookie(self.secret.expose(), self.max_age, https)
+    }
+
+    /// Every `Set-Cookie` value of the sign-in: the session cookie, and the device cookie
+    /// when a mark was issued.
+    pub fn set_cookies(&self, https: bool) -> Vec<String> {
+        let mut cookies = vec![self.set_cookie(https)];
+        cookies.extend(self.device.as_ref().map(|device| device.set_cookie(https)));
+        cookies
     }
 }
 
@@ -303,17 +321,17 @@ pub enum LoginOutcome {
 }
 
 impl LoginOutcome {
-    /// The JSON answer and, for a session, the `Set-Cookie` value for a request over HTTPS
-    /// or plain HTTP.
-    pub fn into_response(self, https: bool) -> (LoginResponse, Option<String>) {
+    /// The JSON answer and, for a session, the `Set-Cookie` values for a request over
+    /// HTTPS or plain HTTP ([`NewSession::set_cookies`]).
+    pub fn into_response(self, https: bool) -> (LoginResponse, Vec<String>) {
         match self {
             Self::Session(session) => {
-                let cookie = session.set_cookie(https);
+                let cookies = session.set_cookies(https);
                 (
                     LoginResponse::Authenticated {
                         session: session.info,
                     },
-                    Some(cookie),
+                    cookies,
                 )
             }
             Self::SecondFactor {
@@ -325,7 +343,7 @@ impl LoginOutcome {
                     methods,
                     expires_in: crate::challenge::CEREMONY_TTL.as_secs(),
                 },
-                None,
+                Vec::new(),
             ),
         }
     }
@@ -363,6 +381,7 @@ impl AuthService {
             hash_gate: guard::HashGate::new(config.password_hash_memory_mib),
             dummy_timing: guard::DummyTiming::default(),
             known_networks: Arc::new(guard::KnownNetworks::default()),
+            devices_in_flight: devices::DevicesInFlight::default(),
             misses: misses::Misses::default(),
             scope: Arc::new(ScopeSupport::default()),
             ceremonies: Ceremonies::new(config.ceremony_capacity),
@@ -629,18 +648,27 @@ impl AuthService {
         })
     }
 
-    /// Finishes a login: the session, its cookie and its description.
+    /// Finishes a login: the session, its cookie and its description, and with `marks`
+    /// (the device cookie of a sign-in; `None` for setup) a new mark of the device in the
+    /// same write.
     async fn complete_login(
         &self,
         mut batch: WriteBatch,
         user: &UserRecord,
         secret: BearerSecret,
         record: SessionRecord,
+        marks: Option<&DeviceMarks>,
     ) -> Result<NewSession, AuthError> {
         batch.put_typed(&LAST_LOGINS, &user.id, &record.created_at)?;
         // Sessions of the account that have ended are removed with the login.
         let settings = self.settings();
         let view = self.view().await?;
+        let device = match marks {
+            Some(marks) => {
+                Self::stage_known_device(view.as_ref(), &mut batch, user, marks, record.created_at)?
+            }
+            None => None,
+        };
         let ended: Vec<_> = Self::user_sessions(view.as_ref(), user.id)?
             .into_iter()
             .filter(|(_, session)| effective_expiry(session, &settings).0 <= record.created_at)
@@ -653,6 +681,7 @@ impl AuthService {
             secret,
             info,
             max_age,
+            device,
         })
     }
 

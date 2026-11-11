@@ -16,6 +16,9 @@
 //! Codes of the personal preferences (`crate::preferences`): `auth.preference.not_found`
 //! (404), `auth.preference.too_large` (413, a document over 16 KiB) and
 //! `auth.preference.limit` (409, a new key beyond the 64 of a person).
+//!
+//! Codes of the known devices (`crate::service::devices`): `auth.known_device.not_found`
+//! (404, no such known device of the account).
 
 use std::{borrow::Cow, collections::BTreeMap};
 
@@ -233,6 +236,7 @@ impl Coded for AuthError {
                 "grant" => "auth.grant.not_found",
                 "service_account" => "auth.service_account.not_found",
                 "preference" => "auth.preference.not_found",
+                "known_device" => "auth.known_device.not_found",
                 _ => "auth.not_found",
             },
             Self::UserNameTaken => "users.name_taken",

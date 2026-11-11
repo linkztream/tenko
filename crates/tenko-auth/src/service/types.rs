@@ -305,6 +305,23 @@ pub struct SessionSummary {
     pub current: bool,
 }
 
+/// A known device in `GET /auth/known-devices` and `GET /users/{id}/known-devices`: a
+/// browser that completed a sign-in of the account and passes its account-wide delay.
+/// Nothing describes the device; the dates tell the devices apart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct KnownDeviceInfo {
+    /// The id, for removal.
+    pub id: crate::model::KnownDeviceId,
+    /// When the device first completed a sign-in of the account.
+    pub known_since: Timestamp,
+    /// The device's last completed sign-in.
+    pub last_sign_in: Timestamp,
+    /// When it stops being known unless it signs in again.
+    pub expires_at: Timestamp,
+    /// Whether it is the browser of the request.
+    pub current: bool,
+}
+
 /// `POST /auth/password`.
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct PasswordChange {

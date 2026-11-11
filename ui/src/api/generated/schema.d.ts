@@ -391,6 +391,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/known-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the known devices of the current user */
+        get: operations["list_known_devices"];
+        put?: never;
+        post?: never;
+        /** Forget every known device of the current user */
+        delete: operations["forget_known_devices"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/known-devices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Forget one known device of the current user */
+        delete: operations["forget_known_device"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login/password": {
         parameters: {
             query?: never;
@@ -5905,6 +5940,41 @@ export interface paths {
         head?: never;
         /** Update a user */
         patch: operations["update_user"];
+        trace?: never;
+    };
+    "/api/v1/users/{id}/known-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the known devices of a user */
+        get: operations["list_user_known_devices"];
+        put?: never;
+        post?: never;
+        /** Forget every known device of a user */
+        delete: operations["forget_user_known_devices"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/known-devices/{device}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Forget one known device of a user */
+        delete: operations["forget_user_known_device"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/users/{id}/roles": {
@@ -12426,6 +12496,25 @@ export interface components {
             /** @description Whether it is on (or asked to be on). */
             stopped: boolean;
         };
+        /** Format: uuid */
+        KnownDeviceId: string;
+        /**
+         * @description A known device in `GET /auth/known-devices` and `GET /users/{id}/known-devices`: a
+         *     browser that completed a sign-in of the account and passes its account-wide delay.
+         *     Nothing describes the device; the dates tell the devices apart.
+         */
+        KnownDeviceInfo: {
+            /** @description Whether it is the browser of the request. */
+            current: boolean;
+            /** @description When it stops being known unless it signs in again. */
+            expires_at: components["schemas"]["Timestamp"];
+            /** @description The id, for removal. */
+            id: components["schemas"]["KnownDeviceId"];
+            /** @description When the device first completed a sign-in of the account. */
+            known_since: components["schemas"]["Timestamp"];
+            /** @description The device's last completed sign-in. */
+            last_sign_in: components["schemas"]["Timestamp"];
+        };
         /** @description A language the UI offers to everyone (`GET /i18n/languages`). */
         LanguageInfo: {
             /** @description Whether the UI has the language built in. */
@@ -16982,6 +17071,33 @@ export interface components {
                 id: components["schemas"]["DnsKeyId"];
                 /** @description The key name. */
                 name: components["schemas"]["DnsName"];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_KnownDeviceInfo: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description Whether it is the browser of the request. */
+                current: boolean;
+                /** @description When it stops being known unless it signs in again. */
+                expires_at: components["schemas"]["Timestamp"];
+                /** @description The id, for removal. */
+                id: components["schemas"]["KnownDeviceId"];
+                /** @description When the device first completed a sign-in of the account. */
+                known_since: components["schemas"]["Timestamp"];
+                /** @description The device's last completed sign-in. */
+                last_sign_in: components["schemas"]["Timestamp"];
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -27414,6 +27530,137 @@ export interface operations {
             };
         };
     };
+    list_known_devices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every known device of the account; `current` marks this browser */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_KnownDeviceInfo"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    forget_known_devices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The devices are no longer known */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    forget_known_device: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Known device identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The device is no longer known */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The identifier is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The user has no such known device (`auth.known_device.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     login_password: {
         parameters: {
             query?: never;
@@ -27430,7 +27677,7 @@ export interface operations {
             /** @description The login is complete (`status: authenticated`) or a second factor is required (`status: second_factor`) */
             200: {
                 headers: {
-                    /** @description The session cookie (HttpOnly, SameSite=Strict, Path=/): `__Host-tenko_session` with Secure over HTTPS, `tenko_session` over plain HTTP (Lab); only when the login is complete */
+                    /** @description Only when the login is complete: the session cookie (HttpOnly, SameSite=Strict, Path=/), `__Host-tenko_session` with Secure over HTTPS, `tenko_session` over plain HTTP (Lab); and the device cookie of the same form, `__Host-tenko_device` or `tenko_device`, whose mark lets this browser pass the account-wide delay of the sign-in lock for 30 days */
                     "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };
@@ -54310,6 +54557,208 @@ export interface operations {
             };
         };
     };
+    list_user_known_devices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description User identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every known device of the account (`current` is always false) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_KnownDeviceInfo"];
+                };
+            };
+            /** @description The identifier is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such user (`users.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    forget_user_known_devices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description User identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The devices are no longer known */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The identifier is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such user (`users.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    forget_user_known_device: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description User identifier */
+                id: string;
+                /** @description Known device identifier */
+                device: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The device is no longer known */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An identifier is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such user (`users.not_found`) or known device (`auth.known_device.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     set_user_roles: {
         parameters: {
             query?: never;
@@ -54408,7 +54857,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The sessions ended */
+            /** @description The sessions ended and the known devices are forgotten */
             204: {
                 headers: {
                     [name: string]: unknown;

@@ -18,9 +18,10 @@
 //! controller.
 //!
 //! A network from which the account completed a sign-in in the last 30 days is a known
-//! network of the account ([`KnownNetworks`], in memory per controller): the account-wide
-//! delay does not hold it back, so failures from elsewhere cannot keep the real user out
-//! by taking each slot the delay frees.
+//! network of the account ([`KnownNetworks`], in memory per controller), and a browser that
+//! completed one holds a mark of a known device (`super::devices`, stored): the account-wide
+//! delay holds back neither, so failures from elsewhere cannot keep the real user out by
+//! taking each turn the delay frees. A mark has a budget of failures of its own.
 //!
 //! # Hashing
 //!
@@ -366,6 +367,9 @@ pub(super) struct Attempt {
     pub(super) guarded: bool,
     /// The account completed a sign-in from this network lately.
     pub(super) known: bool,
+    /// The mark of a known device of the account that the request carries
+    /// ([`AuthService::recognize_device`]).
+    pub(super) device: Option<super::devices::DeviceUse>,
     /// The mode of TGL-07.
     pub(super) mode: LockoutMode,
     /// The numbers of TGL-07.
@@ -373,6 +377,12 @@ pub(super) struct Attempt {
 }
 
 impl Attempt {
+    /// Whether the account-wide delay lets the attempt pass: it comes from a known network,
+    /// or carries the mark of a known device.
+    pub(super) fn exempt(&self) -> bool {
+        self.known || self.device.is_some()
+    }
+
     fn per_source_key(&self) -> ThrottleKey {
         ThrottleKey::account_source(&self.name, self.source)
     }
@@ -406,6 +416,7 @@ impl AuthService {
             source: ctx.source_ip,
             guarded: user.is_some_and(|user| image.is_last_admin(user.id)),
             known: self.known_networks.contains(name, ctx.source_ip, ctx.now),
+            device: None,
             mode: settings.lockout,
             policy: settings.lockout_policy(),
         }
@@ -498,10 +509,11 @@ impl AuthService {
             }));
         }
         // The account-wide delay holds back every network the account has not completed a
-        // sign-in from lately, at the password and at the second factor, for every account:
-        // limits per network do not stop guesses from endlessly many networks. It never
-        // locks. It comes last, because an allowed attempt takes its turn.
-        if attempt.known {
+        // sign-in from lately and every browser without a mark of the account, at the
+        // password and at the second factor, for every account: limits per network do not
+        // stop guesses from endlessly many networks. It never locks. It comes last, because
+        // an allowed attempt takes its turn.
+        if attempt.exempt() {
             return Ok(None);
         }
         self.throttle
@@ -610,11 +622,17 @@ impl AuthService {
         let objects = user
             .map(|(user, _)| vec![ObjectRef::from(user.id)])
             .unwrap_or_default();
-        batch.audit(
-            AuditDraft::failed(action, objects.clone(), &AuthError::InvalidCredentials)
-                .with_source_ip(ctx.source_ip)
-                .with_context("user_name", attempt.name.clone()),
-        );
+        let mut draft = AuditDraft::failed(action, objects.clone(), &AuthError::InvalidCredentials)
+            .with_source_ip(ctx.source_ip)
+            .with_context("user_name", attempt.name.clone());
+        // A failure with the mark of a known device counts on the mark; at its budget the
+        // mark is spent.
+        if attempt.mode != LockoutMode::Off
+            && let Some(mark) = self.count_mark_failure(attempt, ctx.now).await
+        {
+            draft = draft.with_context("known_device", mark.as_str());
+        }
+        batch.audit(draft);
         if let Some(until) = outcome.locked_until {
             let first = match self.stage_lock(&mut batch, ctx, attempt, until).await {
                 Ok(first) => first,

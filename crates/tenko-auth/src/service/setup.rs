@@ -232,7 +232,10 @@ impl AuthService {
             .with_context("host_name", host_name)
             .with_context("administrator", user.name.clone()),
         );
-        let session = match self.complete_login(batch, &user, secret, record).await {
+        let session = match self
+            .complete_login(batch, &user, secret, record, None)
+            .await
+        {
             Err(AuthError::Conflict) => return Err(AuthError::SetupClosed),
             other => other?,
         };

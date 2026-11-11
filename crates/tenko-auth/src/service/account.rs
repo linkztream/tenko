@@ -541,8 +541,9 @@ impl AuthService {
             .collect();
         let mut batch = WriteBatch::for_request(ctx);
         Self::stage_revoke(&mut batch, &others);
-        // A token made with the old password does not outlive it.
+        // A token made with the old password does not outlive it, nor does a known device.
         let tokens = Self::stage_tokens_end(view.as_ref(), &mut batch, user.id)?;
+        let devices = Self::stage_known_devices_end(view.as_ref(), &mut batch, user.id)?;
         if request.remove_factors {
             if let Some(factor) = &user.totp {
                 self.vault.stage_delete(&mut batch, ctx, factor.secret);
@@ -562,7 +563,8 @@ impl AuthService {
             ctx,
         )
         .with_context("sessions_revoked", others.len().to_string())
-        .with_context("tokens_revoked", tokens.to_string());
+        .with_context("tokens_revoked", tokens.to_string())
+        .with_context("known_devices", devices.to_string());
         if request.remove_factors {
             draft = draft.with_context("factors_removed", "true");
         }

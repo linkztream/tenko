@@ -10,7 +10,7 @@ use tenko_core::{
 use tenko_store::{ReadViewExt, WriteBatch};
 
 use super::{
-    AuthService, LoginOutcome, NewSession, actions,
+    AuthService, DeviceMarks, LoginOutcome, NewSession, actions,
     guard::{Attempt, Slot, throttled},
     types::{
         CodeLogin, PasswordLogin, SecondFactorMethod, WebAuthnLoginFinish, WebAuthnLoginOptions,
@@ -253,20 +253,34 @@ impl AuthService {
         user_agent: Option<&str>,
         request: &PasswordLogin,
     ) -> Result<LoginOutcome, AuthError> {
+        self.login_password_from(ctx, user_agent, &DeviceMarks::default(), request)
+            .await
+    }
+
+    /// [`AuthService::login_password`] from a browser that carries `marks`: the mark of a
+    /// known device of the account passes the account-wide delay, and a completed sign-in
+    /// renews it.
+    ///
+    /// # Errors
+    ///
+    /// As [`AuthService::login_password`].
+    pub async fn login_password_from(
+        &self,
+        ctx: &RequestCtx,
+        user_agent: Option<&str>,
+        marks: &DeviceMarks,
+        request: &PasswordLogin,
+    ) -> Result<LoginOutcome, AuthError> {
         let settings = self.settings();
         let view = self.view().await?;
         let found = Self::find_user_versioned(view.as_ref(), &request.user_name)?;
         // Every check before the hash treats a known and an unknown name alike: the keys
         // are the name as typed and the client's network, and a stored lock is found by
         // that name whether an account carries it or not.
-        let attempt = self.attempt(
-            &request.user_name,
-            found.as_ref().map(|(user, _)| user),
-            ctx,
-            &settings,
-        );
+        let user = found.as_ref().map(|(user, _)| user);
+        let attempt = self.attempt_from(view.as_ref(), &request.user_name, user, ctx, marks)?;
         let turn = self.check_attempt(view.as_ref(), &attempt, ctx.now)?;
-        let slot = Slot::sign_in(ctx.source_ip, attempt.known);
+        let slot = Slot::sign_in(ctx.source_ip, attempt.exempt());
 
         let normalized = normalize(request.password.expose());
         let strength = hash_strength(&settings);
@@ -363,7 +377,9 @@ impl AuthService {
             vec![ObjectRef::from(user.id), ObjectRef::from(record.id)],
             ctx,
         ));
-        let session = self.complete_login(batch, &updated, secret, record).await?;
+        let session = self
+            .complete_login(batch, &updated, secret, record, Some(marks))
+            .await?;
         self.attempt_succeeded(&attempt, ctx.now);
         Ok(LoginOutcome::Session(session))
     }
@@ -405,6 +421,7 @@ impl AuthService {
         &self,
         ctx: &RequestCtx,
         challenge_id: &str,
+        marks: &DeviceMarks,
     ) -> Result<(Pending, StagedUse, UserRecord, Revision, Attempt), AuthError> {
         let view = self.view().await?;
         let (pending, staged) =
@@ -417,7 +434,7 @@ impl AuthService {
         if user.disabled || user.break_glass {
             return Err(AuthError::InvalidCredentials);
         }
-        let attempt = self.attempt(&user.name, Some(&user), ctx, &self.settings());
+        let attempt = self.attempt_from(view.as_ref(), &user.name, Some(&user), ctx, marks)?;
         // Every code takes a turn of the account-wide delay. A code held back keeps its
         // challenge until the challenge's own end, which this does not prolong.
         if let Err(error) = self.check_attempt(view.as_ref(), &attempt, ctx.now) {
@@ -479,8 +496,26 @@ impl AuthService {
         user_agent: Option<&str>,
         request: &CodeLogin,
     ) -> Result<LoginOutcome, AuthError> {
-        let (pending, staged, user, revision, attempt) =
-            self.second_factor(ctx, &request.challenge_id).await?;
+        self.login_totp_from(ctx, user_agent, &DeviceMarks::default(), request)
+            .await
+    }
+
+    /// [`AuthService::login_totp`] from a browser that carries `marks`
+    /// ([`AuthService::login_password_from`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`AuthService::login_totp`].
+    pub async fn login_totp_from(
+        &self,
+        ctx: &RequestCtx,
+        user_agent: Option<&str>,
+        marks: &DeviceMarks,
+        request: &CodeLogin,
+    ) -> Result<LoginOutcome, AuthError> {
+        let (pending, staged, user, revision, attempt) = self
+            .second_factor(ctx, &request.challenge_id, marks)
+            .await?;
         let Some(factor) = user.totp.clone() else {
             return Err(AuthError::TotpNotEnrolled);
         };
@@ -516,7 +551,7 @@ impl AuthService {
         let outcome = self
             .finish_second_factor(
                 ctx,
-                user_agent,
+                (user_agent, marks),
                 updated,
                 revision,
                 &staged,
@@ -539,8 +574,26 @@ impl AuthService {
         user_agent: Option<&str>,
         request: &CodeLogin,
     ) -> Result<LoginOutcome, AuthError> {
-        let (pending, staged, user, revision, attempt) =
-            self.second_factor(ctx, &request.challenge_id).await?;
+        self.login_recovery_from(ctx, user_agent, &DeviceMarks::default(), request)
+            .await
+    }
+
+    /// [`AuthService::login_recovery`] from a browser that carries `marks`
+    /// ([`AuthService::login_password_from`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`AuthService::login_totp`].
+    pub async fn login_recovery_from(
+        &self,
+        ctx: &RequestCtx,
+        user_agent: Option<&str>,
+        marks: &DeviceMarks,
+        request: &CodeLogin,
+    ) -> Result<LoginOutcome, AuthError> {
+        let (pending, staged, user, revision, attempt) = self
+            .second_factor(ctx, &request.challenge_id, marks)
+            .await?;
         let Some(index) = recovery::find(request.code.expose(), &user.recovery_codes) else {
             return Err(self
                 .second_factor_failed(
@@ -562,7 +615,7 @@ impl AuthService {
         let outcome = self
             .finish_second_factor(
                 ctx,
-                user_agent,
+                (user_agent, marks),
                 updated,
                 revision,
                 &staged,
@@ -580,7 +633,7 @@ impl AuthService {
     async fn finish_second_factor(
         &self,
         ctx: &RequestCtx,
-        user_agent: Option<&str>,
+        (user_agent, marks): (Option<&str>, &DeviceMarks),
         user: UserRecord,
         revision: Revision,
         staged: &StagedUse,
@@ -614,7 +667,8 @@ impl AuthService {
         }
         batch.audit(draft);
         Ok(LoginOutcome::Session(
-            self.complete_login(batch, &user, secret, record).await?,
+            self.complete_login(batch, &user, secret, record, Some(marks))
+                .await?,
         ))
     }
 
@@ -713,6 +767,23 @@ impl AuthService {
         user_agent: Option<&str>,
         request: &WebAuthnLoginFinish,
     ) -> Result<NewSession, AuthError> {
+        self.webauthn_login_finish_from(ctx, user_agent, &DeviceMarks::default(), request)
+            .await
+    }
+
+    /// [`AuthService::webauthn_login_finish`] from a browser that carries `marks`: the
+    /// completed sign-in renews the device's mark of the account.
+    ///
+    /// # Errors
+    ///
+    /// As [`AuthService::webauthn_login_finish`].
+    pub async fn webauthn_login_finish_from(
+        &self,
+        ctx: &RequestCtx,
+        user_agent: Option<&str>,
+        marks: &DeviceMarks,
+        request: &WebAuthnLoginFinish,
+    ) -> Result<NewSession, AuthError> {
         let view = self.view().await?;
         let (pending, staged) =
             self.ceremonies
@@ -741,13 +812,12 @@ impl AuthService {
         // where the policy says the lock holds for it too (Hardened). The break-glass
         // account has its own rate limit.
         let attempt = self.attempt(&user.name, Some(&user), ctx, &self.settings());
-        if !user.break_glass {
-            self.check_passkey(view.as_ref(), &attempt, ctx.now)?;
-        }
         if user.break_glass {
             self.throttle
                 .check(&break_glass_key(user.id), &break_glass_policy(), ctx.now)
                 .map_err(throttled)?;
+        } else {
+            self.check_passkey(view.as_ref(), &attempt, ctx.now)?;
         }
         let Some((credential, credential_revision)) =
             view.get_typed(&CREDENTIALS, &(owner, credential_id.clone()))?
@@ -812,7 +882,8 @@ impl AuthService {
             .with_context("credential", updated_credential.label.clone())
             .with_context("strength", strength.as_str()),
         );
-        let session = self.complete_login(batch, &user, secret, record).await?;
+        let session = self.complete_login(batch, &user, secret, record, Some(marks));
+        let session = session.await?;
         // The passkey completed a login from this network: its failures there clear.
         self.attempt_succeeded(&attempt, ctx.now);
         Ok(session)

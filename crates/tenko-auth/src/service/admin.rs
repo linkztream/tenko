@@ -670,6 +670,8 @@ impl AuthService {
         batch.put_typed(&USERS, &id, &updated)?;
         if revoke {
             Self::stage_revoke(&mut batch, &Self::user_sessions(view.as_ref(), id)?);
+            // A reset or a disabled account ends the account's known devices too.
+            Self::stage_known_devices_end(view.as_ref(), &mut batch, id)?;
         }
         let grants = if updated.disabled && !user.disabled {
             Self::stage_disable(view.as_ref(), &mut batch, id)?
@@ -726,6 +728,7 @@ impl AuthService {
         Self::stage_scoped_token_removal(view.as_ref(), &mut batch, id)?;
         let grants = Self::stage_grant_removal(view.as_ref(), &mut batch, id)?;
         batch.delete_typed(&LAST_LOGINS, &id);
+        Self::stage_known_devices_end(view.as_ref(), &mut batch, id)?;
         Self::stage_preference_removal(view.as_ref(), &mut batch, id)?;
         for credential in Self::user_credentials(view.as_ref(), id)? {
             batch.delete_typed(&CREDENTIAL_IDS, &credential.credential_id);
@@ -773,7 +776,8 @@ impl AuthService {
         Self::info(self.view().await?.as_ref(), id, ctx.now)
     }
 
-    /// `DELETE /users/{id}/sessions`: ends every session of the user.
+    /// `DELETE /users/{id}/sessions`: ends every session of the user and forgets the
+    /// account's known devices, so it is signed out everywhere.
     ///
     /// # Errors
     ///
@@ -795,9 +799,11 @@ impl AuthService {
             .count();
         let mut batch = WriteBatch::for_request(ctx);
         Self::stage_revoke(&mut batch, &sessions);
+        let devices = Self::stage_known_devices_end(view.as_ref(), &mut batch, id)?;
         batch.audit(
             Self::audit(actions::SESSION_REVOKE, vec![Self::user_object(id)], ctx)
-                .with_context("sessions", live.to_string()),
+                .with_context("sessions", live.to_string())
+                .with_context("known_devices", devices.to_string()),
         );
         self.commit(batch).await?;
         Ok(live)
@@ -932,9 +938,11 @@ impl AuthService {
             }
             updated.break_glass = true;
             updated.roles = vec![RoleName::Admin];
-            // Its password sessions and tokens end: from now on only the key logs it in.
+            // Its password sessions, tokens and known devices end: from now on only the
+            // key logs it in.
             Self::stage_revoke(&mut batch, &Self::user_sessions(view.as_ref(), id)?);
             Self::stage_token_removal(view.as_ref(), &mut batch, id)?;
+            Self::stage_known_devices_end(view.as_ref(), &mut batch, id)?;
         } else {
             updated.break_glass = false;
             Self::stage_revoke(

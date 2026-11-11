@@ -208,6 +208,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "auth_device_cookie"
+path = "fuzz_targets/auth_device_cookie.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "webauthn_certificate"
 path = "fuzz_targets/webauthn_certificate.rs"
 test = false

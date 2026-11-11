@@ -19,7 +19,9 @@ use axum::{
     extract::{ConnectInfo, FromRef, FromRequestParts},
     http::{HeaderMap, Uri, header, request::Parts},
 };
-use tenko_auth::service::{HOST_SESSION_COOKIE, session_cookie_name};
+use tenko_auth::service::{
+    DeviceMarks, HOST_SESSION_COOKIE, device_cookie_name, session_cookie_name,
+};
 use tenko_core::{
     AuthFailure, Authenticated, Credentials, IdempotencyKey, InvalidValue, Principal, RequestCtx,
     RequestId, SystemComponent, Timestamp, auth::SESSION_COOKIE,
@@ -193,6 +195,27 @@ impl<S: Send + Sync> FromRequestParts<S> for Https {
         _state: &S,
     ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
         std::future::ready(Ok(Self(ClientInfo::from_parts(parts).https)))
+    }
+}
+
+/// The marks of known devices the request carries: its device cookie of the request's
+/// scheme only (`__Host-tenko_device` over HTTPS, `tenko_device` over plain HTTP), as the
+/// session cookie is read. A missing or malformed cookie yields no marks.
+#[derive(Debug, Clone, Default)]
+pub struct KnownDevices(pub DeviceMarks);
+
+impl<S: Send + Sync> FromRequestParts<S> for KnownDevices {
+    type Rejection = std::convert::Infallible;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        let https = ClientInfo::from_parts(parts).https;
+        let marks = cookie(&parts.headers, device_cookie_name(https))
+            .map(DeviceMarks::parse)
+            .unwrap_or_default();
+        std::future::ready(Ok(Self(marks)))
     }
 }
 
