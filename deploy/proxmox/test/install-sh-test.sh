@@ -55,6 +55,20 @@ unit_checks() {
     trap - ERR
     expect "the embedded unit is deploy/systemd/tenko.service" "same" \
       "$(cmp -s <(unit_text) "$unit" && echo same || echo differs)"
+    # The memory cap: the prepared roles' budgets, never above nine tenths of the host.
+    expect "memory budget of controller" "2048" "$(memory_budget_mib controller)"
+    expect "memory budget of every role" "7936" "$(memory_budget_mib controller,dns,dhcp,probe)"
+    expect "memory budget of controller,dhcp" "2560" "$(memory_budget_mib controller,dhcp)"
+    mem="$(memory_dropin controller,dns 65536)"
+    has "$mem" "MemoryMax=7168M" "a large host: MemoryMax= is the budget"
+    has "$mem" "MemoryHigh=6451M" "MemoryHigh= is nine tenths of MemoryMax="
+    lacks "$mem" "is less" "a large host: the budget applies"
+    mem="$(memory_dropin controller,dns,dhcp,probe 2048)"
+    has "$mem" "MemoryMax=1843M" "a 2 GiB container: nine tenths of its memory"
+    has "$mem" "nine tenths of this host's 2048 MiB is less" "the drop-in says why"
+    has "$(memory_dropin controller 0)" "MemoryMax=2048M" "an unknown host size: the budget"
+    has "$(memory_dropin controller 4096)" "systemctl edit tenko" "the drop-in says how to change it"
+    expect "the host's memory is read" "yes" "$(m="$(host_memory_mib)"; [[ "$m" =~ ^[0-9]+$ ]] && ((m > 0)) && echo yes || echo no)"
     expect "version_cmp 0.2.0 0.10.0" "-1" "$(version_cmp 0.2.0 0.10.0)"
     expect "version_cmp 0.3.0 0.3.0-rc.1" "1" "$(version_cmp 0.3.0 0.3.0-rc.1)"
     expect "version_cmp 0.3.0-rc.2 0.3.0-rc.10" "-1" "$(version_cmp 0.3.0-rc.2 0.3.0-rc.10)"

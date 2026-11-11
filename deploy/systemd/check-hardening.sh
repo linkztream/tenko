@@ -23,6 +23,8 @@
 #                   /srv/tenko as the example directory
 #   kek-file.conf   the drop-in deploy/install.sh writes when the key-encryption key is not
 #                   a systemd credential (step_unit)
+#   memory.conf     the drop-in deploy/install.sh writes with the memory cap of the roles
+#                   (step_memory), here with the budget of every role
 #   all             tenko.service with every drop-in above at once
 # The two installer drop-ins are written here as deploy/install.sh writes them; CI runs this
 # check when either file changes, so a change to their text there must be made here too.
@@ -35,8 +37,21 @@
 # commit, with the reason in the commit message. A newer systemd may score the same unit
 # differently; measure again when the runner image moves to one.
 #
-# Exit status: 0 every score is below its gate, 1 a score reached its gate or a drop-in has
-# no gate, 2 the tools or files are missing or a score could not be read.
+# A score alone lets a setting that matters slip through while the total stays low, so each
+# combination's settings are also read as the service manager would merge them (the unit,
+# then its drop-ins in order, an empty assignment resetting a list) and must hold exactly:
+#   User=tenko and Group=tenko, no DynamicUser= and no PermissionsStartOnly=;
+#   no Exec*= command with a "+" or "!" prefix (one that would run with root's privileges or
+#   without the sandbox);
+#   NoNewPrivileges=yes and PrivateIPC=yes;
+#   NoExecPaths=/ and ExecPaths= exactly the list below, plus the data directory's two
+#   entries where the drop-in data-dir.conf is staged;
+#   ReadWritePaths= exactly none, or the data directory where data-dir.conf is staged.
+# Widening any of them is a deliberate change of this file in the same commit.
+#
+# Exit status: 0 every score is below its gate and every setting holds, 1 a score reached its
+# gate, a setting does not hold or a drop-in has no gate, 2 the tools or files are missing or
+# a score could not be read.
 
 set -euo pipefail
 
@@ -47,8 +62,13 @@ declare -A GATE=(
   [dhcp-direct.conf]=1.7
   [data-dir.conf]=1.5
   [kek-file.conf]=1.5
+  [memory.conf]=1.5
   [all]=1.7
 )
+# What the service may execute (tenko.service, "Execution"), and the data directory of the
+# example data-dir.conf.
+readonly EXEC_PATHS="/usr -/var/lib/tenko/updates -/var/lib/tenko/plugins"
+readonly EXAMPLE_DATA_DIR=/srv/tenko
 # The ceiling of the weekly smoke for the unit alone (deploy/systemd/smoke.sh, MAX_EXPOSURE).
 readonly UNIT_CEILING=2.5
 
@@ -82,6 +102,7 @@ installer_dropin() {
       echo "[Service]"
       echo "Environment=TENKO_DATA_DIR=/srv/tenko"
       echo "ReadWritePaths=/srv/tenko"
+      echo "ExecPaths=-/srv/tenko/updates -/srv/tenko/plugins"
       echo "ExecStart="
       echo "ExecStart=/srv/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml"
       ;;
@@ -92,6 +113,15 @@ installer_dropin() {
       echo "[Service]"
       echo "LoadCredentialEncrypted="
       echo "UnsetEnvironment=TENKO_KEK__PROVIDER TENKO_KEK__CREDENTIAL"
+      ;;
+    memory.conf)
+      echo "# Written by the Tenko installer: the memory cap of the roles controller, dns, dhcp, probe"
+      echo "# (budget 7936 MiB)."
+      echo "# To change it, run systemctl edit tenko and set MemoryHigh= and MemoryMax= under"
+      echo "# [Service] (infinity removes the cap); the installer rewrites this file, not the override."
+      echo "[Service]"
+      echo "MemoryHigh=7142M"
+      echo "MemoryMax=7936M"
       ;;
     *) die "no installer drop-in named $1" ;;
   esac
@@ -104,7 +134,7 @@ for file in "$UNIT_DIR"/*.conf; do
   dropins+=("$(basename "$file")")
 done
 shopt -u nullglob
-dropins+=(data-dir.conf kek-file.conf)
+dropins+=(data-dir.conf kek-file.conf memory.conf)
 
 # stage <name> <drop-in>...: a tree with the unit and the given drop-ins.
 stage() {
@@ -125,9 +155,136 @@ stage() {
 failed=0
 rows=()
 
+# service_lines <root>: the [Service] assignments of the staged unit and then of its drop-ins
+# in the order of their names, as the service manager reads them, one "Key=value" per line.
+service_lines() {
+  local root="$1" file LC_ALL=C
+  for file in "$root/etc/systemd/system/tenko.service" "$root/etc/systemd/system/tenko.service.d"/*.conf; do
+    [[ -f "$file" ]] || continue
+    awk '/^[[:space:]]*[#;]/ { next }
+      /^[[:space:]]*\[/ { section = $0; gsub(/[[:space:]]/, "", section); next }
+      section == "[Service]" && /=/ { sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print }' "$file"
+  done
+}
+
+# last_value <lines> <key>: the value of the last assignment of the key, or nothing.
+last_value() {
+  grep -E "^$2=" <<< "$1" | tail -n 1 | cut -d= -f2-
+}
+
+# list_value <lines> <key>: the merged list of a list setting (an empty assignment resets
+# it), sorted and without duplicates, separated by spaces.
+list_value() {
+  local line value words=() out=()
+  while IFS= read -r line; do
+    value="${line#*=}"
+    if [[ -z "$value" ]]; then
+      out=()
+    else
+      read -ra words <<< "$value"
+      out+=("${words[@]}")
+    fi
+  done < <(grep -E "^$2=" <<< "$1")
+  ((${#out[@]})) || return 0
+  printf '%s\n' "${out[@]}" | LC_ALL=C sort -u | paste -sd ' ' -
+}
+
+# sorted_words <words>: the words sorted and without duplicates, separated by spaces.
+sorted_words() {
+  local words
+  read -ra words <<< "$1"
+  ((${#words[@]})) || return 0
+  printf '%s\n' "${words[@]}" | LC_ALL=C sort -u | paste -sd ' ' -
+}
+
+# settings_problems <root> <with the data-dir drop-in: 0 or 1>: one line per setting that
+# does not hold, nothing when every one does.
+settings_problems() {
+  local root="$1" data_dir="$2" lines want got line command prefix
+  lines="$(service_lines "$root")"
+  [[ "$(last_value "$lines" User)" == tenko ]] || echo "User= is '$(last_value "$lines" User)', not tenko"
+  [[ "$(last_value "$lines" Group)" == tenko ]] || echo "Group= is '$(last_value "$lines" Group)', not tenko"
+  grep -qE '^DynamicUser=' <<< "$lines" && echo "DynamicUser= is set"
+  grep -qE '^PermissionsStartOnly=' <<< "$lines" && echo "PermissionsStartOnly= is set"
+  while IFS= read -r line; do
+    command="${line#*=}"
+    [[ -n "$command" ]] || continue
+    prefix="${command%%[!-@:+!|]*}"
+    [[ "$prefix" == *[+!]* ]] && echo "a command runs with a '+' or '!' prefix: $line"
+  done < <(grep -E '^Exec(Start|StartPre|StartPost|Condition|Reload|Stop|StopPost)=' <<< "$lines")
+  [[ "$(last_value "$lines" NoNewPrivileges)" == yes ]] || echo "NoNewPrivileges= is not yes"
+  [[ "$(last_value "$lines" PrivateIPC)" == yes ]] || echo "PrivateIPC= is not yes"
+  [[ "$(list_value "$lines" NoExecPaths)" == / ]] || echo "NoExecPaths= is '$(list_value "$lines" NoExecPaths)', not /"
+  want="$EXEC_PATHS"
+  ((data_dir)) && want+=" -${EXAMPLE_DATA_DIR}/updates -${EXAMPLE_DATA_DIR}/plugins"
+  want="$(sorted_words "$want")"
+  got="$(list_value "$lines" ExecPaths)"
+  [[ "$got" == "$want" ]] || echo "ExecPaths= is '$got', not '$want'"
+  want=""
+  ((data_dir)) && want="$EXAMPLE_DATA_DIR"
+  got="$(list_value "$lines" ReadWritePaths)"
+  [[ "$got" == "$want" ]] || echo "ReadWritePaths= is '$got', not '$want'"
+  return 0
+}
+
+# check_settings <combination> <root> <with the data-dir drop-in: 0 or 1>
+check_settings() {
+  local problems
+  problems="$(settings_problems "$2" "$3")"
+  if [[ -z "$problems" ]]; then
+    echo "PASS $1: the settings hold"
+  else
+    echo "FAIL $1: $(paste -sd ';' - <<< "$problems")"
+    failed=1
+  fi
+}
+
+# The settings check finds what it is for: each change below, made to a staged copy of the
+# unit, must be refused. A check that passed one of them would pass the same change in the
+# shipped unit.
+self_test() {
+  local root case probe ok=1
+  local -a cases=(
+    's|^ExecStartPre=/|ExecStartPre=+/|'
+    's|^ExecStart=/|ExecStart=!/|'
+    's|^ExecStart=/|ExecStart=-!!/|'
+    's|^User=tenko|User=root|'
+    's|^Group=tenko|Group=root|'
+    's|^NoNewPrivileges=yes|NoNewPrivileges=yes\nPermissionsStartOnly=yes|'
+    's|^PrivateIPC=yes|PrivateIPC=no|'
+    's|^NoExecPaths=/|NoExecPaths=|'
+    's|^ExecPaths=.*|&\nExecPaths=/var/lib/tenko|'
+    's|^ProtectHome=yes|&\nReadWritePaths=/etc|'
+    's|^NoNewPrivileges=yes|&\nDynamicUser=yes|'
+  )
+  root="$(stage self-test)"
+  probe="$(settings_problems "$root" 0)"
+  if [[ -n "$probe" ]]; then
+    echo "FAIL self-test: the unchanged unit does not pass: $probe"
+    failed=1
+    return
+  fi
+  for case in "${cases[@]}"; do
+    cp "$UNIT_DIR/tenko.service" "$root/etc/systemd/system/tenko.service"
+    sed -i -E "$case" "$root/etc/systemd/system/tenko.service"
+    if cmp -s "$UNIT_DIR/tenko.service" "$root/etc/systemd/system/tenko.service"; then
+      echo "FAIL self-test: '$case' changes nothing in the unit"
+      ok=0
+    elif [[ -z "$(settings_problems "$root" 0)" ]]; then
+      echo "FAIL self-test: the settings check passes a unit changed by '$case'"
+      ok=0
+    fi
+  done
+  if ((ok)); then
+    echo "PASS self-test: the settings check refuses each of ${#cases[@]} weakened copies of the unit"
+  else
+    failed=1
+  fi
+}
+
 # check <combination> <drop-in>...
 check() {
-  local combo="$1" root report line score gate
+  local combo="$1" root report line score gate data_dir=0
   shift
   gate="${GATE[$combo]:-}"
   if [[ -z "$gate" ]]; then
@@ -137,6 +294,8 @@ check() {
     return
   fi
   root="$(stage "$combo" "$@")"
+  [[ " $* " == *" data-dir.conf "* ]] && data_dir=1
+  check_settings "$combo" "$root" "$data_dir"
   report="$WORK/$combo.txt"
   # The exit status is that of --threshold (100 by default), not of the gate.
   systemd-analyze security --offline=true --no-pager --root="$root" tenko.service > "$report" 2>&1 || true
@@ -158,6 +317,7 @@ check() {
 }
 
 echo "$version"
+self_test
 check unit
 for name in "${dropins[@]}"; do
   check "$name" "$name"
@@ -177,7 +337,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 fi
 
 if ((failed)); then
-  echo "The hardening check failed: a score reached its gate, or a drop-in has no gate." >&2
+  echo "The hardening check failed: a score reached its gate, a setting does not hold, or a drop-in has no gate." >&2
   exit 1
 fi
-echo "Every combination is below its gate."
+echo "Every combination is below its gate, and its settings hold."

@@ -103,6 +103,7 @@ readonly DROPIN_KEK=/etc/systemd/system/tenko.service.d/kek-file.conf
 readonly DROPIN_DATA=/etc/systemd/system/tenko.service.d/data-dir.conf
 readonly DROPIN_PROBE=/etc/systemd/system/tenko.service.d/probe.conf
 readonly DROPIN_DHCP=/etc/systemd/system/tenko.service.d/dhcp-direct.conf
+readonly DROPIN_MEMORY=/etc/systemd/system/tenko.service.d/memory.conf
 # The dependency check works on these two (the tests point them at a directory of their own;
 # they are set here, never from the environment).
 PREP_DROPINS="$DROPIN_DIR" PREP_RECORD="$PREPARED_FILE"
@@ -2218,6 +2219,25 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
+# Execution: nothing is executable for the service but the paths below, so a file the
+# account writes anywhere else (the store, the logs, /tmp, the rest of the data directory)
+# never runs, even when the account was taken over. Each path, who writes it and why:
+#   /usr                       root (read-only here, ProtectSystem=strict): /usr/local/bin/tenko
+#                              of ExecStartPre=, and the system programs the service starts
+#                              (ip and ping for the probe role, systemd-creds for the
+#                              KEK providers that seal, the interpreter or libraries of an
+#                              installed plugin)
+#   /var/lib/tenko/updates     the service (the update layout, docs/upgrades.md section 9):
+#                              the versions it installed, `current` that ExecStart= runs, and
+#                              the new version that an update's dry run starts
+#   /var/lib/tenko/plugins     an administrator (docs/plugins.md section 10): installed
+#                              plugins, which the service starts. This entry goes when
+#                              plugins run in a unit of their own (ADR 0032)
+# A leading "-": the path may not exist yet (the layout is made by ExecStartPre=). A data
+# directory elsewhere adds its own two entries in the installer's drop-in data-dir.conf.
+# deploy/systemd/check-hardening.sh asserts this exact list.
+NoExecPaths=/
+ExecPaths=/usr -/var/lib/tenko/updates -/var/lib/tenko/plugins
 
 # Kernel and process isolation
 ProtectHostname=yes
@@ -2234,6 +2254,9 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 RemoveIPC=yes
+# An IPC namespace of its own: no System V IPC object or POSIX message queue of the host is
+# reachable, and the service uses none.
+PrivateIPC=yes
 # No core dumps: process memory holds the unsealed KEK and data keys.
 LimitCORE=0
 
@@ -2383,6 +2406,68 @@ dhcp_direct_wanted() {
   toml_section_text "$cfg" dhcp | grep -qE 'mode[[:space:]]*=[[:space:]]*"direct"'
 }
 
+# ── The memory cap ──────────────────────────────────────────────────────────────────────────
+# The unit caps the service's memory so that a run-away process (a flood of work, a leak) is
+# restarted by systemd instead of pushing the host into swap or making the kernel kill
+# another service; every role of the node stops with it while it restarts. The cap is the
+# sum of the prepared roles' budgets in MiB, each the measured peak of its documented load
+# with room (deploy/README.md, "The memory cap", gives the measurements), and never above
+# nine tenths of the host's memory: a cap above that protects nothing.
+#   controller  2048  idle about 100; password hashing up to 512 (64 MiB per processor, 8 at
+#                     most); a zone-file import of up to 1 GiB; the store's caches
+#   dns         5120  a start with 7.2 million RRsets holds the zone image (3.7 GiB) and the
+#                     index (0.9 GiB) at once; the resolver cache is 128 MiB at most
+#   dhcp         512  100,000 leases: the table about 20, the store's share 34 to 47
+#   probe        256  bounded scan state; not measured on its own
+# MemoryHigh= is nine tenths of MemoryMax=: above it the kernel reclaims and slows the
+# service down before the hard cap restarts it. An operator changes both with
+# `systemctl edit tenko` (an override sorts after this drop-in and wins over it;
+# MemoryMax=infinity and MemoryHigh=infinity remove the cap), and a rerun of the installer
+# rewrites this drop-in, never the override.
+memory_budget_mib() {
+  local role mib=0
+  for role in ${1//,/ }; do
+    case "$role" in
+    controller) mib=$((mib + 2048)) ;;
+    dns) mib=$((mib + 5120)) ;;
+    dhcp) mib=$((mib + 512)) ;;
+    probe) mib=$((mib + 256)) ;;
+    esac
+  done
+  echo "$mib"
+}
+
+# host_memory_mib: MemTotal of /proc/meminfo in MiB (in a container with lxcfs, the
+# container's memory), or 0 when it cannot be read.
+host_memory_mib() {
+  awk '/^MemTotal:[[:space:]]+[0-9]+ kB$/ { print int($2 / 1024); found = 1 } END { if (!found) print 0 }' /proc/meminfo 2>/dev/null || echo 0
+}
+
+# memory_dropin <roles> <host MiB>: the text of the drop-in memory.conf.
+memory_dropin() {
+  local roles="$1" host="$2" budget max high
+  budget="$(memory_budget_mib "$roles")"
+  max="$budget"
+  ((host > 0 && host * 9 / 10 < max)) && max=$((host * 9 / 10))
+  high=$((max * 9 / 10))
+  echo "# Written by the Tenko installer: the memory cap of the roles ${roles//,/, }"
+  echo "# (budget ${budget} MiB$( ((max < budget)) && echo ", nine tenths of this host's ${host} MiB is less"))."
+  echo "# To change it, run systemctl edit tenko and set MemoryHigh= and MemoryMax= under"
+  echo "# [Service] (infinity removes the cap); the installer rewrites this file, not the override."
+  echo "[Service]"
+  echo "MemoryHigh=${high}M"
+  echo "MemoryMax=${max}M"
+}
+
+step_memory() {
+  [[ -d "$DROPIN_DIR" ]] || run install -d -m 0755 "$DROPIN_DIR"
+  if memory_dropin "$PREPARE_ROLES" "$(host_memory_mib)" | put "$DROPIN_MEMORY" 0644 root:root; then
+    ok "Capped the service's memory at $(sed -n 's/^MemoryMax=//p' "$DROPIN_MEMORY" 2>/dev/null || echo "the roles' budget") (${DROPIN_MEMORY})"
+    UNIT_CHANGED=1
+  fi
+  return 0
+}
+
 step_unit() {
   local changed=0
   [[ -d /etc/systemd/system ]] || run install -d -m 0755 /etc/systemd/system
@@ -2410,6 +2495,7 @@ step_unit() {
       echo "[Service]"
       echo "Environment=TENKO_DATA_DIR=${DATA_DIR}"
       echo "ReadWritePaths=${DATA_DIR}"
+      echo "ExecPaths=-${DATA_DIR}/updates -${DATA_DIR}/plugins"
       echo "ExecStart="
       echo "ExecStart=${DATA_DIR}/updates/current/tenko serve --config ${CONFIG}"
     } | put "$DROPIN_DATA" 0644 root:root && changed=1
@@ -2980,6 +3066,7 @@ uninstall() {
   [[ -f "$DROPIN_DATA" ]] && run rm -f "$DROPIN_DATA"
   [[ -f "$DROPIN_PROBE" ]] && run rm -f "$DROPIN_PROBE"
   [[ -f "$DROPIN_DHCP" ]] && run rm -f "$DROPIN_DHCP"
+  [[ -f "$DROPIN_MEMORY" ]] && run rm -f "$DROPIN_MEMORY"
   [[ -d "$DROPIN_DIR" ]] && [[ -z "$(ls -A "$DROPIN_DIR")" ]] && run rmdir "$DROPIN_DIR"
   [[ -f "$UNIT" ]] && run rm -f "$UNIT"
   ((SYSTEMD)) && run systemctl daemon-reload
@@ -3201,6 +3288,7 @@ main() {
   step_config_check
   step_unit
   step_prepare
+  step_memory
   step_start
   step_setup
   step_use_self
@@ -3246,6 +3334,8 @@ prepare_only() {
     ok "Everything the prepared roles need is in place"
     exit 0
   fi
+  # The cap follows the prepared roles, which --prepare --roles may have changed.
+  step_memory
   if ((SYSTEMD)); then
     ((UNIT_CHANGED)) && run systemctl daemon-reload
     if ((ACTIVE)) && ((UNIT_CHANGED || NEED_RESTART)); then

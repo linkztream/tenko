@@ -2005,6 +2005,15 @@ that an administrator, a package or a configuration tool has replaced by a newer
 that restarting the unit completes a manual upgrade (section 7.3, step 5). It never moves
 `current` back.
 
+The unit lets the service execute files only under `/usr` (the bootstrap binary and the
+system programs it starts), `updates/` of the data directory (the versions of the layout,
+`current`, and the new version that an update's dry run starts from `updates/<version>/`)
+and `plugins/` of the data directory (installed plugins): `NoExecPaths=/` with
+`ExecPaths=/usr -/var/lib/tenko/updates -/var/lib/tenko/plugins`, and the installer's
+drop-in adds the same two entries for a data directory elsewhere. A file the service
+account writes anywhere else, in the store, the logs or `/tmp`, cannot be executed by the
+service. `deploy/README.md`, "What the service may execute", lists who writes each path.
+
 Status 12 is a request for a restart (an installed update, a switch back, a changed
 module set) and is always restarted; `SuccessExitStatus=12` makes it count as a success, so
 the journal does not log it as a failure of the unit. The unit sets `TENKO_SUPERVISED=1`, which tells tenko

@@ -508,6 +508,53 @@ install -m 0644 deploy/systemd/tenko.service /etc/systemd/system/tenko.service
 systemctl daemon-reload && systemctl enable --now tenko
 ```
 
+**What the service may execute.** The unit sets `NoExecPaths=/` and names the only paths
+whose files the service may execute (`ExecPaths=`). Nothing else the `tenko` account can
+write (the store, the logs, `/tmp`, the rest of the data directory) can be executed by the
+service, even by an attacker who controls the account:
+
+| Path | Written by | Run by the service, and why |
+|---|---|---|
+| `/usr` | root (read-only for the service, `ProtectSystem=strict`) | `/usr/local/bin/tenko` in `ExecStartPre=`; the system programs the service starts: `ip` and `ping` for the probe role, `systemd-creds` for the key providers that seal, the interpreter or libraries of an installed plugin |
+| `/var/lib/tenko/updates` | the service (the update layout, [../docs/upgrades.md](../docs/upgrades.md) section 9) | `current`, which `ExecStart=` runs; the new version that an update's dry run starts from `updates/<version>/` |
+| `/var/lib/tenko/plugins` | an administrator ([../docs/plugins.md](../docs/plugins.md) section 10) | installed plugins. This row goes when plugins run in a unit of their own ([../docs/adr/0032-plugins-as-processes.md](../docs/adr/0032-plugins-as-processes.md)) |
+
+The two entries under `/var/lib/tenko` start with `-`, because the layout and the plugin
+directory may not exist yet. With `--data-dir`, the installer's drop-in `data-dir.conf` adds
+the same two entries under that directory. `systemd/check-hardening.sh` asserts this exact
+list, and the unit's other settings that keep the account in its place (`User=tenko`, no `+`
+or `!` command prefix, `ReadWritePaths=`, `PrivateIPC=yes`), besides the exposure score.
+
+**The memory cap.** `install.sh` writes the drop-in `tenko.service.d/memory.conf` with
+`MemoryMax=` and `MemoryHigh=` for the roles the machine is prepared for, so that a process
+that runs away (a flood of work, a leak) is restarted by systemd instead of pushing the host
+into swap or making the kernel kill another service. Every role of the node stops while it
+restarts. `MemoryMax=` is the sum of the roles' budgets below, but never more than nine
+tenths of the host's memory (the container's, in a container); `MemoryHigh=` is nine tenths
+of `MemoryMax=`, above which the kernel reclaims memory and slows the service before the
+hard cap restarts it. The budgets are the measured peaks at each role's documented load,
+with room:
+
+| Role | Budget | What it covers |
+|---|---|---|
+| controller | 2048 MiB | about 100 MiB idle with every role (OPS-15 measurements, static musl build); password hashing up to 512 MiB (`[auth] password_hash_memory_mib`, 64 MiB per processor, 8 at most); a zone-file import of up to 1 GiB; the store's caches |
+| dns | 5120 MiB | a start with 7.2 million RRsets holds the zone image (3.7 GiB) and the index (0.9 GiB) at once ([../docs/dns.md](../docs/dns.md), the M18 measurements); the resolver cache is 128 MiB at most |
+| dhcp | 512 MiB | 100,000 leases: the lease table about 20 MiB, the store's share 34 to 47 MiB (M30) |
+| probe | 256 MiB | the bounded state of the scans; not measured on its own |
+
+A node prepared for every role (outside the Hardened profile) gets 7936 MiB, or nine tenths
+of a smaller host: 1843 MiB in the Proxmox container's default 2 GiB. To change the cap,
+run `systemctl edit tenko` and set both under `[Service]`, for example `MemoryHigh=3G` and
+`MemoryMax=4G`; `infinity` removes the cap. The override sorts after `memory.conf` and wins
+over it, and a rerun of the installer rewrites `memory.conf` (with the roles of that run)
+but never the override. A node that hits the cap shows `oom-kill` in
+`systemctl status tenko` and `journalctl -u tenko`; raise the cap if its load is real. Two
+things to know: the cap is computed from the host's memory when the installer runs, so after
+giving the host or container more memory, run the installer again (or set the cap with
+`systemctl edit tenko`); and an update installed from the web UI checks the new version on a
+copy of the data directory in the same service, so its memory counts against the cap too: a
+node that runs close to its cap should get more room before an update.
+
 **The key-encryption key.** The vault encrypts secrets with a key-encryption key (KEK). On
 Linux the default provider runs `systemd-creds encrypt` itself, which the unprivileged
 `tenko` account cannot do without a TPM2 it may open; where sealing fails the KEK becomes a
@@ -575,7 +622,7 @@ and `AF_PACKET` (layer-2 sockets for the raw scan methods, which do not run yet)
 other hardening setting stays. The probe works without it; the capability only makes
 `tenko node scan status` report raw sockets as available (see
 [../docs/scanning.md](../docs/scanning.md), section 9). `systemd-analyze security` rates
-the unit 1.2 without the drop-in and 1.6 with it.
+the unit 1.4 without the drop-in and 1.6 with it (systemd 255).
 
 **The dhcp role.** UDP 67 is below 1024 and covered by the base unit's
 `CAP_NET_BIND_SERVICE`, so relay mode needs no change. Direct mode (the broadcasts of clients
@@ -796,8 +843,9 @@ capability. To check on a given host, from inside the container, in this order:
   unit then fails to start with status 226/NAMESPACE or 218/CAPABILITIES (`journalctl -u
   tenko`). The typical ones are `PrivateDevices=`, `ProtectKernelTunables=`,
   `ProtectKernelModules=`, `ProtectKernelLogs=`, `ProtectControlGroups=`, `ProtectClock=`,
-  `ProtectProc=`, `ProtectHostname=`, `PrivateTmp=` and `ProtectSystem=` (mount namespaces
-  need a container that allows them), `RestrictNamespaces=` and `SystemCallFilter=`. Do not
+  `ProtectProc=`, `ProtectHostname=`, `PrivateTmp=`, `ProtectSystem=` and
+  `NoExecPaths=` (mount namespaces need a container that allows them), `PrivateIPC=` (an
+  IPC namespace), `RestrictNamespaces=` and `SystemCallFilter=`. Do not
   edit the unit; relax only the failing options in a drop-in, one at a time, and keep the
   rest:
 

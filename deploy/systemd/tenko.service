@@ -162,6 +162,25 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
+# Execution: nothing is executable for the service but the paths below, so a file the
+# account writes anywhere else (the store, the logs, /tmp, the rest of the data directory)
+# never runs, even when the account was taken over. Each path, who writes it and why:
+#   /usr                       root (read-only here, ProtectSystem=strict): /usr/local/bin/tenko
+#                              of ExecStartPre=, and the system programs the service starts
+#                              (ip and ping for the probe role, systemd-creds for the
+#                              KEK providers that seal, the interpreter or libraries of an
+#                              installed plugin)
+#   /var/lib/tenko/updates     the service (the update layout, docs/upgrades.md section 9):
+#                              the versions it installed, `current` that ExecStart= runs, and
+#                              the new version that an update's dry run starts
+#   /var/lib/tenko/plugins     an administrator (docs/plugins.md section 10): installed
+#                              plugins, which the service starts. This entry goes when
+#                              plugins run in a unit of their own (ADR 0032)
+# A leading "-": the path may not exist yet (the layout is made by ExecStartPre=). A data
+# directory elsewhere adds its own two entries in the installer's drop-in data-dir.conf.
+# deploy/systemd/check-hardening.sh asserts this exact list.
+NoExecPaths=/
+ExecPaths=/usr -/var/lib/tenko/updates -/var/lib/tenko/plugins
 
 # Kernel and process isolation
 ProtectHostname=yes
@@ -178,6 +197,9 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 RemoveIPC=yes
+# An IPC namespace of its own: no System V IPC object or POSIX message queue of the host is
+# reachable, and the service uses none.
+PrivateIPC=yes
 # No core dumps: process memory holds the unsealed KEK and data keys.
 LimitCORE=0
 
