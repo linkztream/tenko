@@ -25,7 +25,7 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 | DNS-31 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-32 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-33 | Should | - | - | `docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
-| DNS-35 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md` |
+| DNS-35 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/discovery-plan.md` |
 | IAM-11 | Must | - | - | `crates/tenko-api/src/routes/auth/providers.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0026-kerberos-and-directory-identity.md`<br>`docs/plans/identity-plan.md`<br>and 1 more |
 | IAM-12 | Must | - | - | `crates/tenko-api/src/routes/access/mappings.rs`<br>`crates/tenko-api/src/routes/auth/providers.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 3 more |
 | IAM-13 | Should | `crates/tenko-krb/src/acceptor/tests.rs::dns_28_recorded_exchanges_are_accepted` | - | `crates/tenko-api/src/routes/auth/providers.rs`<br>`crates/tenko-krb/src/acceptor/mod.rs`<br>`crates/tenko-krb/src/lib.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 3 more |
