@@ -1,6 +1,6 @@
 # Service discovery plan: an mDNS gateway between segments and a Discovery Proxy
 
-- Status: Draft, waiting for the owner's decisions (SD-Q1 to SD-Q14 of section 6); no package starts before the owner says so
+- Status: Accepted by the owner on 2026-11-11: SD-Q1 to SD-Q14 of section 6 as recommended, with the owner's condition that the whole function is easy to turn off completely in the settings (designed in section 2.17). Not scheduled: by SD-Q14 (a) the slice takes a free builder slot after the work release 0.1.0 waits for, and no package starts before the owner says so
 - Date: 2026-11-11
 - Scope: DNS-35, added by the owner on 2026-11-10. Service discovery across network segments, off by default and governed by a policy per service type and per ordered pair of networks, in two parts that can be built one after the other: (a) an mDNS gateway on the probes, (b) a Discovery Proxy served by Tenko's DNS server. Written against `main` at `cbe6c27a`. Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md). Exit criteria, measurements and risks continue the project's series: E100 onward, M77 onward and R175 onward (the public DNS plan ends at E88, M72 and R159; the notifications plan takes E89 to E99, M73 to M76 and R160 to R174)
 
@@ -56,7 +56,7 @@ Contents:
 5. **The Discovery Proxy (part b).** The same records are served by Tenko's DNS server as unicast DNS-SD under a subdomain per link (for example `iot.sd.example.test`), with the browsing domains that let clients find those subdomains.
 6. **The host view** shows the services each device announces and where they cross. **The firewall view** lists the unicast flows a client needs to use what it discovered, and can test whether they pass; Tenko never changes a firewall.
 
-**What stays.** Nothing is bridged at layer 2 and no multicast packet crosses a link. The probes keep their role (SCAN-01, SCAN-02) and their systemd grant (section 2.16). The DNS server's query path stays memory-only (ADR 0009 decision 5, ADR 0017 decision 2). The function is off by default in every profile, and with no rule nothing crosses.
+**What stays.** Nothing is bridged at layer 2 and no multicast packet crosses a link. The probes keep their role (SCAN-01, SCAN-02) and their systemd grant (section 2.16). The DNS server's query path stays memory-only (ADR 0009 decision 5, ADR 0017 decision 2). The function is off by default in every profile, with no rule nothing crosses, and one master switch in the settings turns the whole function off at once (section 2.17).
 
 ### 1.2 Exit criteria
 
@@ -76,6 +76,7 @@ Contents:
 | E111 | The security rows `sd.*` of section 4 pass on the release binary | DNS-35 | WP17.6 |
 | E112 | The owner's check list of section 9.2 with real devices, recorded without real names | DNS-35 | WP17.6 (owner-run) |
 | E113 | The flow test (lab): with the router allowing TCP 631 to the printer and dropping the receiver's port, the test from `probe-lan` reports *reachable* for the first and *no answer* with `sd.flow_blocked` for the second; a second test within the hour is refused; one audit record per test; no packet from Tenko reaches the router's own addresses | DNS-35, SCAN-04 | WP17.1, WP17.2, WP17.6 |
+| E114 | Off means nothing crosses (lab, section 2.17): with rules for both parts carrying, a browser and `dig` asking without pause, and the switch turned off once each from the Security page, the API and the CLI: within 2 s of the commit no packet from either probe announces, answers or asks for a carried name except goodbyes, every carried PTR has its goodbye within 2 s and every carried record within the goodbye bound of section 2.17, the proxy's subdomains and browsing names answer NXDOMAIN within 2 s, `sd.services` is empty, learn mode has ended, and links and rules are unchanged. With `probe-lan` cut from the controller first and the switch then turned off, `probe-lan` falls silent within 120 s of its last statement without a goodbye, and sends the goodbyes within 2 s of reaching a controller again; a probe restarted while cut off sends nothing. Turning the switch on finds the printer again on `lan` within 10 s. A change without a sign-in within five minutes is refused, under Hardened also one without the passkey; one audit record per change with the old and the new value; the dashboard shows the state while on (Playwright) | DNS-35, TGL-24 | WP17.1, WP17.2, WP17.4, WP17.5, WP17.6 |
 
 **The trace.** `scripts/requirement-trace.mjs` reads exit criteria as `E` and one or two digits (its lines 216, 286 and 323), so E100 onward is not traced until the script accepts three digits; WP17.0 widens the pattern when this plan joins the Phase 4 list of the script (section 10).
 
@@ -185,7 +186,7 @@ The destination probe is the responder for what it carries: it speaks from its o
 | Tiebreaking and conflict: the loser renames itself (sections 8.2 and 9) | **Never renamed, never defended.** A conflict during probing, or a later announcement of the same unique name with other data by a host of the link, makes the gateway withdraw that name's records (goodbye) and raise `sd.conflict` naming both devices. It does not answer probes of others for a carried name, so a host of the link that probes the name finds it free and takes it. The host of the link always wins. The gateway probes the name again only after the local host's records have expired or been withdrawn, and at most once an hour. Section 9 says a responder that loses MUST choose a new name and probe again; withdrawing instead is a deliberate deviation, recorded in CONFORMANCE |
 | Announcing: at least two unsolicited responses one second apart, up to eight with the interval at least doubling (section 8.3) | Two announcements after probing; then only answers to questions, no periodic announcements |
 | The cache-flush bit on unique records, never on shared records, known-answer lists or legacy unicast answers (section 10.2) | Set on carried SRV, TXT, A, AAAA and NSEC after probing; never on PTR |
-| Goodbye: the record with TTL 0, which receivers treat as TTL 1 (section 10.1) | Sent when the source device sends its goodbye, when a rule or a device is removed from a rule, when a toggle of section 3.4 is turned off, when the record leaves the bounds, and when the probe stops |
+| Goodbye: the record with TTL 0, which receivers treat as TTL 1 (section 10.1) | Sent when the source device sends its goodbye, when a rule or a device is removed from a rule, when a toggle of section 3.4 or the master switch is turned off (section 2.17), when the record leaves the bounds, and when the probe stops |
 | Negative answers by NSEC for the types a unique name lacks (section 6.1) | Synthesized for each carried host name and instance name, listing the types it carries (block 0 only, as section 6.1 asks) |
 | TTLs: 120 s for records whose name is a host name (A, AAAA) or whose data contains one (SRV), 75 minutes (4,500 s) for others, here PTR and TXT (section 10); a querier refreshes at 80 percent of the TTL | Carried with the TTL that remains of the original, never longer, never above those two values |
 
@@ -251,6 +252,7 @@ mDNS is unauthenticated: every number below bounds what one device, one link or 
 | Store writes of `sd.services` | Changes only, at most 50 per second per link; the row's `valid_until` rewritten at most every 15 minutes | TTL refreshes are not changes; 15 minutes is the observations' refresh interval |
 | Carried TTL | The remaining TTL, at most 120 s for A, AAAA and SRV and 4,500 s for PTR and TXT | RFC 6762 section 10 |
 | Discovery Proxy interests | Only for names under a subdomain and of a type a rule names; 1 per name and type per 10 s, 10 per second per subdomain; a queue of 256 that never makes a query wait and drops new interests when it is full or no controller is reachable | A client allowed to ask could otherwise make the source probe query the untrusted link at the client's pace |
+| The master switch's lease | Stated by the controller every 15 s; a probe without a statement "on" for 120 s falls silent | Section 2.17: the same 120 s that bounds the addresses and SRV records a client holds (section 2.9) |
 | Learn mode | 1,024 rows per link, ends after 24 hours | Long enough to see devices that announce rarely; bounded for privacy (section 2.12) |
 | Discovery Proxy answers | TTL 10 s; at most 512 instances in a browse answer (UDP truncates to the EDNS size and the client retries over TCP) | RFC 8766 section 5.5.1; the per-link bound above |
 
@@ -259,7 +261,7 @@ mDNS is unauthenticated: every number below bounds what one device, one link or 
 CONTRIBUTING rule 5 keeps the data plane independent of the control plane. The gateway's data comes through the controller by design (SD-Q1), so the question is what the destination probe does with what it already holds:
 
 - **Policy is kept.** The probe's part of the configuration (its links, the types to listen for and report, learn mode) arrives through `Config.Watch` and is kept in `state.cbor`, as every node configuration is.
-- **Carried records are kept in memory only**, and served until their own TTL runs out; nothing new crosses; no goodbye is sent, because the device may well still exist and a goodbye would remove it from every client cache at once. The exposure after a revocation the probe did not hear is bounded by the TTL: 120 s for the addresses and the SRV record (without which a client cannot connect), 75 minutes for the PTR and TXT records (with which a client still lists the service).
+- **Carried records are kept in memory only**, and served until their own TTL runs out or the master switch's lease lapses, whichever comes first (120 s after the last statement from a controller, section 2.17); nothing new crosses; no goodbye is sent, because the device may well still exist and a goodbye would remove it from every client cache at once. The exposure after a revocation the probe did not hear is bounded by the lease and the TTL: the probe answers for at most 120 s, and a client keeps the addresses and the SRV record (without which it cannot connect) for at most 120 s after that, and the PTR and TXT records (with which it still lists the service) for at most their own TTL, 75 minutes. The lease is the owner's condition applied to this decision: a controller restart or upgrade under two minutes rides through as SD-Q5 (a) has it, a longer outage takes the carried services off the destination link.
 - **After the connection returns** the controller streams the current set; the probe announces what is new, sends goodbyes for what is gone, and is complete within 10 s (E107).
 - **A probe that restarts** starts with nothing carried and waits for the controller. **A probe that stops** sends goodbyes for everything it carries (RFC 6762 section 10.1).
 - **The Discovery Proxy** answers from `sd.services` rows whose `valid_until` has not passed. Today the DNS server runs in the controller's process, so "the controller down" means the probes cannot reach it while it runs, or that it is stopped and nothing answers at all; in Phase 5, with separate DNS nodes, it means the DNS node keeps its copy of the table. In both cases the rows stop being refreshed, and 30 minutes (two refresh intervals) later the subdomains answer with no records.
@@ -288,11 +290,11 @@ RFC 8766 describes a server that is authoritative for a subdomain per link and a
 
 ### 2.11 Policy, learn mode, roles and audit (SD-Q3, SD-Q13)
 
-**Defaults.** Off in every profile: no link exists after installation, and a link without rules carries nothing. The two parts are separate toggles (section 3.4).
+**Defaults.** Off in every profile: the master switch is off after installation (section 2.17), no link exists, and a link without rules carries nothing. The two parts are separate toggles under the master switch (section 3.4).
 
 **Learn mode** is turned on per link by a person and ends by itself after 24 hours. The probe listens continuously and reports a summary per (device, type): instance names, port, first and last heard, the size of the TXT data, whether its addresses would pass section 2.6. The UI lists them with the rule each would need, and "Allow" creates that rule with the device filled in; nothing crosses before the rule is saved. Learn mode keeps its rows in the memory of the controller the probe is connected to (section 2.12); on a single node that is all there is, and in a cluster the API gathers the rows from each controller over the cluster's internal API (built with the Phase 5 cluster data plane, not here).
 
-**The gateway's own traffic and TGL-18.** The gateway sends mDNS queries on the source link and answers on the destination link. That is the service the operator turned on per pair, governed by the two toggles of section 3.4, not scanning: TGL-18 (active probing) does not apply to it, and under Hardened the administrator's enabling of a pair is the explicit consent. The flow test of section 2.13 is scanning and does follow TGL-18.
+**The gateway's own traffic and TGL-18.** The gateway sends mDNS queries on the source link and answers on the destination link. That is the service the operator turned on per pair, governed by the master switch and the two part toggles of section 3.4, not scanning: TGL-18 (active probing) does not apply to it, and under Hardened the administrator's enabling of a pair is the explicit consent. The flow test of section 2.13 is scanning and does follow TGL-18.
 
 **Devices in a rule (SD-Q3).** A rule names its devices: an IPAM host, a MAC address or an address of the source link. Under Home and Standard a rule may instead say "any device of the source link"; then a device crossing for the first time raises the finding `sd.new_device` (info) with the device and the rule, so that a person sees it. Under Hardened a rule must name its devices.
 
@@ -346,6 +348,7 @@ The gateway itself needs no firewall rule between the segments: both probes talk
 | The destination probe as a foothold: a device on the untrusted link reaches a process with a leg on the trusted link | Only on a probe with two links (SD-Q6), which Hardened refuses for the two links of one pair; the probes of separate links share no process |
 | Privacy: names of people and their devices crossing or kept | Section 2.12 |
 | The proxy reveals the untrusted segment's devices to anyone who can query the DNS server | The derived ACL (section 2.10) |
+| An operator must stop every crossing at once (an incident, a doubt about a device, a misbehaving rule), also while a probe cannot reach its controller | The master switch: one click turns both parts off on every link, the probes withdraw what they announced within the goodbye bound, and a probe cut off from its controller falls silent within 120 s by its lease (section 2.17, E114) |
 
 **The Hardened profile** (SD-Q13, proposed): both parts off until an administrator turns them on per ordered pair with the passkey step-up; rules name their devices; announcements for other addresses refused; learn mode administrators only; the reachability test only where TGL-18 is enabled for the segment; the Discovery Proxy's ACL as derived, without "any"; a probe with both links of a pair refused; instance names shown to `sd.read` holders only and kept with the site's shortest personal-data retention.
 
@@ -370,6 +373,30 @@ Measured by M77 to M80 (section 5.2), in the lab with the flood generator and on
 
 **Capabilities.** The gateway needs what `probe.conf` grants today (`CAP_NET_RAW` for `SO_BINDTODEVICE` on kernels before 5.7) and no new address family; the base unit and the other roles are untouched. No new drop-in and no change of the hardening gates. `probe.conf` is optional today (the probe's passive methods work without it); on a kernel before 5.7 the gateway needs it, and a link cannot be enabled on a probe that reports it cannot bind to its interface (the probe says so in its configuration report, and the UI tells the operator to install the drop-in, which is a host change by root at the operator's hand, as ADR 0023 has it).
 
+### 2.17 The master switch (the owner's condition)
+
+The owner accepted the plan on the condition that the whole function is easy to turn off completely in the settings. That condition is designed here as one switch.
+
+**One switch above everything else.** *Service discovery across segments* (proposed TGL-44, section 3.4) is a site setting above the links, the rules and the two part toggles: while it is off, neither part runs on any link, whatever they say. It is off after installation in every profile, and a change of profile sets it off again, as a new profile resets every toggle (SECURITY-PROFILES.md). Links and rules may be edited while it is off; they carry nothing until it is on.
+
+**Where it is.** On the Security settings page (`/settings/security`) among the profile's toggles, where an administrator looks for a security setting, and the same control at the top of the services page (`/discovery/services`), where the links and rules are managed. One click opens a confirmation that says what will happen: turning off, "Every probe stops carrying announcements and questions and withdraws what it announced for other devices. The Discovery Proxy's names stop answering. Links and rules are kept."; turning on, how many rules over how many pairs and service types will carry again. The CLI (`tenko sd off`, `tenko sd on`, `tenko sd status`) and the API (`PATCH /settings/security`, the field joining `SettingsPatch`) do the same.
+
+**Who may change it, and the trail.** What a change of the security settings needs today: an administrator, with a sign-in within the last five minutes (`auth.step_up_required`), and under Hardened with a passkey or hardware key, as SD-Q13 asks of every enabling there. Every change is audited as every toggle change is, with the principal and the old and new value (NEVER-02, NEVER-03); the record of a change to off also names how many rules, pairs and carried instances it stopped. While the switch is on, the dashboard's security panel shows a line "Service discovery across segments: on" with the number of pairs and of carried instances, linked to the services page. On is a feature the operator chose, not a security setting weaker than Home, so it does not raise the warning banner of SECURITY-PROFILES.md; the dashboard line is its signal.
+
+**What turning it off does, in order, with the times.**
+
+1. **At the commit** of the setting, in the same store transaction: the rows of `sd.services` are deleted (they hold TXT values; nothing is kept while off), learn mode ends on every link and its rows leave the controller's memory, and new heard records, interests and flow tests are refused with `sd.disabled`. The facts `Observed::Service` stay, with their own retention (section 2.12).
+2. **The Discovery Proxy**, within 1 s: the DNS server drops the synthesized subdomains, their delegation in the parent zone and the browsing names at its next snapshot swap, and empties its interest queue; queries for those names then get what the parent zone answers without them (NXDOMAIN). Today the DNS server runs in the controller's process; with separate DNS nodes in Phase 5 the DNS node takes the switch through `Config.Watch` and holds the same lease as a probe (below).
+3. **The probes**, within 1 s for every probe connected to a controller: every controller sees the setting change in the store (today the one controller, at once) and sends the directive `Switch { on: false, revision }` on each probe's exchange stream. A probe that receives it stops at once: no query or interest on its source links, no report of heard records, no flow test, and on its destination links no announcement and no answer for any carried name. It then sends the goodbyes for every record it announced, PTR records first (they remove every carried instance from the clients' browse lists), then SRV, A and AAAA, then TXT, within the gateway's send bound of section 2.8, which holds on purpose so that turning off cannot be turned into a flood: all PTR goodbyes within 1 s; all goodbyes within 1 s for a typical home link (100 instances) and within 12 s at the bounds (512 instances with 1,300-byte TXT records, 64 KiB per second). It then drops the carried records and the link cache from memory. The scanner's passive listening (SCAN-02, under its own settings) goes on; it carries nothing.
+
+So, counted from the commit: nothing new crosses after 2 s, every carried instance is gone from browse lists within 2 s, and every carried record has had its goodbye within 13 s (E114).
+
+**A probe that cannot reach its controller: the lease.** Off must not wait for connectivity. The gateway on a probe therefore runs only under a lease: a controller states the switch with `Switch { on, revision }` when the exchange stream opens and every 15 s after; a probe that has had no statement "on" for 120 s by its monotonic clock falls silent by itself, exactly as on the directive except that it sends no goodbye (SD-Q5: it cannot tell an outage from a revocation). It keeps the records it announced, unanswered and only until their TTL would have run out, so that it can send their goodbyes within 2 s of reaching a controller that states off or no longer lists them. The revision is the setting's revision in the store: a probe ignores a statement older than one it has already seen, so a lagging controller in a cluster cannot turn a probe back on. The lease is never written to `state.cbor`: a probe that restarts starts off and stays silent until a controller states on. 120 s is the TTL of the addresses and SRV records a client needs to connect (section 2.9), so a client on the destination link can reach a carried service through anything Tenko said for at most 4 minutes after the switch went off, even through a cut-off probe; a probe that can reach its controller is silent within 2 s.
+
+**Turning it on again** restores every link and rule as stored: the controller states on, the probes take up their links, the source probes ask once for the rules' types (one aggregated query per link) instead of waiting for the next announcements, and the carried services are back on the destination links within 10 s (E114). Learn mode does not restart by itself; a person starts it.
+
+**Where it is built.** The switch lands with the first packages that can make anything cross, so that no build ever carries a record without it: WP17.0 puts it in the contracts (the toggle row, the settings field, the `Switch` directive, the code `sd.disabled`, the labels); WP17.2 builds it in the controller (the setting, the deletion, the directive, the statements every 15 s, the refusals) and its control on the Security page; WP17.1 builds the lease in the probe's exchange client, where every directive arrives, before the source side sends a single query. WP17.3 and WP17.4, which announce and answer, are built on it and carry their halves of E114 in their acceptance; WP17.5 adds the control on the services page and the dashboard line; WP17.6 proves it in the lab round `off` and the security row `sd.off_switch`.
+
 ## 3. Contracts and shared files (WP17.0)
 
 ### 3.1 Types (`tenko-core`)
@@ -378,21 +405,23 @@ Measured by M77 to M80 (section 5.2), in the lab with the flood generator and on
 
 ### 3.2 Protocol
 
-`crates/tenko-cluster/proto/tenko/cluster/v1/discovery.proto` (new): service `ServiceDiscovery` with `Exchange(stream ProbeEvent) returns (stream GatewayDirective)`. `ProbeEvent` is one of `Heard` (link, normalized instance, attribution, remaining TTL), `Gone` (goodbye or expiry), `Interest` (destination link, name, type), `LearnSummary`, `Conflict`, `RepeaterSeen`, `FlowResult`. `GatewayDirective` is one of `Carry` (destination link, instance), `Withdraw`, `Ask` (source link, name, type), `ProbeAddresses` (the addresses other probes hold inside the receiving probe's own links, for section 2.3, and nothing else), `TestFlow`. The probe's links and learn settings travel in its node configuration through `Config.Watch`, validated by the same code as the API (and covered by the fuzz target `node_config_payloads`). Within the cluster protocol's current version, additive.
+`crates/tenko-cluster/proto/tenko/cluster/v1/discovery.proto` (new): service `ServiceDiscovery` with `Exchange(stream ProbeEvent) returns (stream GatewayDirective)`. `ProbeEvent` is one of `Heard` (link, normalized instance, attribution, remaining TTL), `Gone` (goodbye or expiry), `Interest` (destination link, name, type), `LearnSummary`, `Conflict`, `RepeaterSeen`, `FlowResult`. `GatewayDirective` is one of `Carry` (destination link, instance), `Withdraw`, `Ask` (source link, name, type), `ProbeAddresses` (the addresses other probes hold inside the receiving probe's own links, for section 2.3, and nothing else), `TestFlow`, `Switch` (on or off with the setting's revision: the master switch's directive and its lease statement every 15 s, section 2.17). The probe's links and learn settings travel in its node configuration through `Config.Watch`, validated by the same code as the API (and covered by the fuzz target `node_config_payloads`). Within the cluster protocol's current version, additive.
 
 ### 3.3 Store, API, CLI, codes
 
 - The namespace `sd` with `sd.links`, `sd.rules`, `sd.services` (one row per carried or proxied instance per link, written on change) and `sd.flows` (the last test per device and port). `sd.services` joins the `dns` role's subset when DNS nodes leave the controller's process (Phase 5); today the DNS server reads the store directly. Whether the namespace needs data format 7 is WP17.0's first decision (R175).
 - Routes under `/api/v1/service-discovery/`: `links` (CRUD and learn start and stop), `rules` (CRUD), `learn/{link}` (the summary), `services` (list, by link, by device), `flows` (list, test). Permissions as section 2.11.
-- CLI: `tenko sd link|rule|learn|services|flows`.
-- Codes `sd.*` (among them `sd.no_rule`, `sd.pair_same_link`, `sd.devices_required`, `sd.prefix_taken`, `sd.step_up_required`, `sd.label_invalid`); audit actions of section 2.11; findings `sd.flood`, `sd.conflict`, `sd.lookalike`, `sd.foreign_link` (an event for a link of another node), `sd.proxy_forwarder`, `sd.repeater_detected`, `sd.oversized`, `sd.unattributed`, `sd.no_routable_address`, `sd.new_device`, `sd.flow_blocked`, `sd.exchange_throttled`; metric families `tenko_sd_*` (packets heard and dropped by reason, records carried per link, interests, queries sent, packets sent, conflicts, mutes). Every audit action gets its English unit and Swedish target in `ui/i18n/<language>.d/labels.xlf` (the label catalog test).
+- The master switch as a field of `SettingsPatch` and `SecuritySettingsView` (`PATCH /settings/security`, section 2.17), with the existing step-up and audit.
+- CLI: `tenko sd link|rule|learn|services|flows|on|off|status`.
+- Codes `sd.*` (among them `sd.disabled`, `sd.no_rule`, `sd.pair_same_link`, `sd.devices_required`, `sd.prefix_taken`, `sd.step_up_required`, `sd.label_invalid`); audit actions of section 2.11; findings `sd.flood`, `sd.conflict`, `sd.lookalike`, `sd.foreign_link` (an event for a link of another node), `sd.proxy_forwarder`, `sd.repeater_detected`, `sd.oversized`, `sd.unattributed`, `sd.no_routable_address`, `sd.new_device`, `sd.flow_blocked`, `sd.exchange_throttled`; metric families `tenko_sd_*` (packets heard and dropped by reason, records carried per link, interests, queries sent, packets sent, conflicts, mutes). Every audit action gets its English unit and Swedish target in `ui/i18n/<language>.d/labels.xlf` (the label catalog test).
 
 ### 3.4 Toggles
 
-Two rows in [SECURITY-PROFILES.md](../SECURITY-PROFILES.md) (proposed TGL-42 and TGL-43: ADR 0032 proposes TGL-40 and the notifications plan TGL-41; the lead numbers them):
+Three rows in [SECURITY-PROFILES.md](../SECURITY-PROFILES.md) (proposed TGL-42 for the mDNS gateway, TGL-43 for the Discovery Proxy and TGL-44 for the master switch above both: ADR 0032 proposes TGL-40 and the notifications plan TGL-41; the lead numbers them):
 
 | Toggle | Home | Standard | Hardened | Lab |
 |---|---|---|---|---|
+| Service discovery across segments, the master switch (section 2.17) | Off; an administrator with a sign-in within five minutes may turn it on or off | Off; as Home | Off; as Home, the sign-in with a passkey or hardware key | Off; as Home |
 | mDNS gateway between links | Off; `sd.write` may enable per pair | Off; as Home | Off unless an administrator enables it per ordered pair with the step-up; devices listed | Off; as Home |
 | Discovery Proxy | Off; `sd.write` may enable per link | Off; as Home | Off unless an administrator enables it per link with the step-up; derived ACL only | Off; as Home |
 
@@ -412,6 +441,7 @@ It must decide:
 6. The behavior without the controller (SD-Q5).
 7. Tenko never changes a firewall (SD-Q12).
 8. The defaults, the toggles and the Hardened rules (SD-Q13), and the gateway as a Linux probe function within the grant of `probe.conf` (ADR 0023 unchanged).
+9. The master switch, the owner's condition: one setting above both parts, off by default, that stops every probe and the proxy at once, and the probe's lease of 120 s that makes off hold without a controller (section 2.17).
 
 ## 4. Work packages
 
@@ -420,58 +450,59 @@ The packages own these trees, one package per file: `crates/tenko-core/src/sd.rs
 #### WP17.0 The contracts and the ADR (3 builder-days)
 
 - **Requirements:** DNS-35.
-- **Owns:** section 3 in code: the types with property tests, the protocol file and its conversions, the `Observed::Service` variant (with the lead), the namespace and its tables, the route stubs answering 501, the CLI stubs, codes, audit actions with their labels, findings, metric families, the two toggle rows, the UI route stub; the data format decision; the ADR as Proposed; `scripts/requirement-trace.mjs` widened to three-digit exit criteria with this plan in the Phase 4 list (with the lead).
+- **Owns:** section 3 in code: the types with property tests, the protocol file and its conversions, the `Observed::Service` variant (with the lead), the namespace and its tables, the route stubs answering 501, the CLI stubs, codes, audit actions with their labels, findings, metric families, the three toggle rows, the master switch's settings field and `Switch` directive (section 2.17), the UI route stub; the data format decision; the ADR as Proposed; `scripts/requirement-trace.mjs` widened to three-digit exit criteria with this plan in the Phase 4 list (with the lead).
 - **Depends on:** the owner's decisions SD-Q1 to SD-Q6 and SD-Q9 to SD-Q13 (the contracts encode them); SD-Q7, SD-Q8 and SD-Q14 can follow.
 - **Acceptance:** the workspace builds; the protocol round-trips; the label catalog test passes; the trace regenerated and `--check` passes for phases 1 to 4.
 
 #### WP17.1 The mDNS codec, the link listener and the probe's source side (8 builder-days)
 
 - **Requirements:** DNS-35, SCAN-01, SCAN-02, SCAN-04.
-- **Owns:** `crates/tenko-scan/src/mdns/**` (the message model and codec on `domain`, the bounds, the per-link sockets for both families, the packet checks of section 2.3, attribution through the neighbor table, the rate limiter and the bounded link cache), `crates/tenko-scan/src/sd/source/**` (the exchange client on the probe, reporting heard records and learn summaries, executing `Ask` and the refresh queries of section 2.5, the flow test executor of section 2.13), the move of the scanner's mDNS parsing and passive listener onto it (`crates/tenko-scan/src/dns/message.rs`, `dns/mdns.rs`, `methods/names.rs`) with every existing fixture test still passing, `fuzz/fuzz_targets/mdns_message.rs` (and the hook in `scan_dns_message.rs`), the fixtures of section 3.5 with WP17.6.
+- **Owns:** `crates/tenko-scan/src/mdns/**` (the message model and codec on `domain`, the bounds, the per-link sockets for both families, the packet checks of section 2.3, attribution through the neighbor table, the rate limiter and the bounded link cache), `crates/tenko-scan/src/sd/source/**` (the exchange client on the probe with the master switch's lease of section 2.17, built before anything else in it, reporting heard records and learn summaries, executing `Ask` and the refresh queries of section 2.5, the flow test executor of section 2.13), the move of the scanner's mDNS parsing and passive listener onto it (`crates/tenko-scan/src/dns/message.rs`, `dns/mdns.rs`, `methods/names.rs`) with every existing fixture test still passing, `fuzz/fuzz_targets/mdns_message.rs` (and the hook in `scan_dns_message.rs`), the fixtures of section 3.5 with WP17.6.
 - **Depends on:** WP17.0.
 - **Content:** first, the builder confirms on the lab's kernel whether `SO_BINDTODEVICE` needs `CAP_NET_RAW` and records it in the module's documentation.
-- **Acceptance:** E100, E101; E106's source half (the limiter and the cache under the flood); E113's probe half.
+- **Acceptance:** E100, E101; E106's source half (the limiter and the cache under the flood); E113's probe half; E114's lease (silent within 120 s without a controller, silent after a restart until stated on, goodbyes on reconnecting) with a test clock.
 
-#### WP17.2 The controller: policy, the service table, learn mode and flows (6 builder-days)
+#### WP17.2 The controller: the master switch, policy, the service table, learn mode and flows (7 builder-days)
 
-- **Requirements:** DNS-35, IPAM-12.
-- **Owns:** `crates/tenko-scan/src/sd/control/**` (the exchange server with the binding of events to the sending node, the strict re-validation, the policy engine, the refusal of names the destination link uses and of lookalike names, the writer of `sd.services` with its rate and `valid_until`, the fan-out to destination probes, learn mode, the ingest of `Observed::Service` facts, the findings, the flow catalog and the test orchestration), `crates/tenko-scan/data/sd-flows.toml`, `crates/tenko-api/src/routes/sd/**`, `crates/tenko/src/cli/sd*`, `fuzz/fuzz_targets/sd_exchange.rs`.
+- **Requirements:** DNS-35, IPAM-12, TGL-24.
+- **Owns:** `crates/tenko-scan/src/sd/control/**` (the master switch of section 2.17, built first: the setting with its step-up and audit, the deletion of `sd.services` and the end of learn mode at its commit, the `Switch` directive and the statements every 15 s, the refusals with `sd.disabled`; the exchange server with the binding of events to the sending node, the strict re-validation, the policy engine, the refusal of names the destination link uses and of lookalike names, the writer of `sd.services` with its rate and `valid_until`, the fan-out to destination probes, learn mode, the ingest of `Observed::Service` facts, the findings, the flow catalog and the test orchestration), `crates/tenko-scan/data/sd-flows.toml`, `crates/tenko-api/src/routes/sd/**`, `crates/tenko/src/cli/sd*`, `fuzz/fuzz_targets/sd_exchange.rs`, the master switch's field in the security settings and its row on the Security page (with the lead: `crates/tenko-auth/src/settings.rs` and the toggle editor under `ui/src/settings/` are shared files).
 - **Depends on:** WP17.0; parallel to WP17.1 (the exchange is tested with recorded `ProbeEvent` messages).
 - **Content:** the flow catalog's entries are read from the vendors' public documentation, each with the source and the date; an entry that cannot be confirmed is left out.
-- **Acceptance:** E102, E109 (the store half), E113's controller half; the route tests of [api/README.md](../api/README.md).
+- **Acceptance:** E102, E109 (the store half), E113's controller half, E114's controller half (the deletion, the directive within 1 s, the refusals, the step-up, the audit, on restoring every rule); the route tests of [api/README.md](../api/README.md).
 
 #### WP17.3 The gateway's destination side on the probe (7 builder-days)
 
 - **Requirements:** DNS-35.
 - **Owns:** `crates/tenko-scan/src/sd/gateway/**` (the responder: probing, announcing, answering with the delays, known-answer and duplicate suppression, QU and legacy unicast, synthesized NSEC, goodbyes; interests for questions it cannot answer fresh; the loop guards; the send bounds; repeater detection; conflict yielding and the hourly re-probing; the behavior without the controller and at stop), its hooks in WP17.1's exchange client, the wiring in the probe's serve path (with the lead).
 - **Depends on:** WP17.1 and WP17.2.
-- **Acceptance:** E103, E104, E105, E106, E107 in the lab of WP17.6; unit tests of every row of section 2.4's table against recorded packets.
+- **Acceptance:** E103, E104, E105, E106, E107 in the lab of WP17.6; E114's destination half (silent at once on the directive, the goodbyes in their order within the send bound); unit tests of every row of section 2.4's table against recorded packets.
 
 #### WP17.4 The Discovery Proxy in the DNS server (6 builder-days)
 
 - **Requirements:** DNS-35, DNS-20.
 - **Owns:** `crates/tenko-dns/src/sd/**` (the synthesized zone kind and its snapshot built from `sd.services`, the rich-text and LDH subdomains, the name rewriting and address suppression, SOA and NS, the delegation in the parent zone's snapshot and transfers, the browsing names in the search-domain and reverse zones, the derived ACL and the forwarder finding, the answers of RFC 8766 sections 6.3 and 6.4, the bounded interest queue), the zone kind's hook in the serving path (with the lead: a shared hot path), the rows of [CONFORMANCE.md](../CONFORMANCE.md) for RFC 6762, 6763, 8766 and 8765, a section of [dns.md](../dns.md), `bench/sd/proxy/**` (M80).
 - **Depends on:** WP17.0 for everything tested against fixture rows; WP17.2 for the interest's path to the controller, end to end. Parallel to WP17.1 to WP17.3.
-- **Acceptance:** E108; the query path's no-allocation test with the new zone kind; M80.
+- **Acceptance:** E108; E114's proxy half (the subdomains, the delegation and the browsing names gone within 1 s of the switch, the interest queue emptied; with separate DNS nodes, the lease); the query path's no-allocation test with the new zone kind; M80.
 
 #### WP17.5 The UI and the host view (5 builder-days)
 
 - **Requirements:** DNS-35.
-- **Owns:** `ui/src/discovery/services/**` (links with their prefixes and learn mode; the learn view with "Allow"; rules as a list and as a matrix of ordered pairs; the services that cross, by link and by device; flows with the copyable text and the test), `ui/src/hosts/HostServices.tsx` and its one line in `HostView.tsx` (with the lead), the mock API, the texts in English and Swedish; Playwright tests.
+- **Owns:** `ui/src/discovery/services/**` (links with their prefixes and learn mode; the learn view with "Allow"; rules as a list and as a matrix of ordered pairs; the services that cross, by link and by device; flows with the copyable text and the test; the master switch at the top of the page with its confirmation), `ui/src/hosts/HostServices.tsx` and its one line in `HostView.tsx` (with the lead), the line in the dashboard's security panel (`ui/src/dashboard/SecurityPanel.tsx`, with the lead), the mock API, the texts in English and Swedish; Playwright tests.
 - **Depends on:** WP17.2's routes (the mock first).
-- **Acceptance:** E109 (the view), E110.
+- **Acceptance:** E109 (the view), E110, E114's views (the switch on both pages with its confirmation, the dashboard line while on).
 
-#### WP17.6 The lab, the security rows, the measurements and the check list (6 builder-days, plus the owner's hour)
+#### WP17.6 The lab, the security rows, the measurements and the check list (7 builder-days, plus the owner's hour)
 
 - **Requirements:** DNS-35.
 - **Owns:** `deploy/compose/lab-mdns/**`, the rows below in `deploy/security/`, `bench/sd/**` except `bench/sd/proxy/` (M77 to M79 and the owner's check), `docs/service-discovery.md` (the operator's page), `docs/plans/discovery-exit.md`, the owner's check list as `deploy/compose/lab-mdns/owner-check.md`.
 - **Depends on:** WP17.0 for the lab skeleton; WP17.3 and WP17.4 for the rounds.
-- **The lab** (no device of the owner needed): bridge networks `servers` (`198.51.100.0/24`), `lan` (`192.0.2.0/26`, `2001:db8:10::/64`) and `iot` (`192.0.2.64/26`, `2001:db8:11::/64`); containers `controller` (`tenko:lab`, roles `controller,dns`), `probe-lan` and `probe-iot` (`tenko:lab`, role `probe`, each on its segment and on `servers`), `router` (joined to `lan` and `iot`, forwarding with an `nftables` rule set that allows one flow and drops another, for the flow test), `responder` on `iot` (Avahi publishing a printer and a receiver with `avahi-publish`, and python-zeroconf for scripted announcements, goodbyes, conflicts and TXT changes), `browser` on `lan` (`avahi-browse`, a python-zeroconf browser, `dig`), `local` on `lan` (a host that claims a carried name, for E104), `reflector` (Avahi with `enable-reflector=yes`, joined to both, for E105, in its own compose profile), `flood` on `iot` (a Python script with plain sockets that builds the hostile packets of E106; no packet tool is installed) and `capture` (`tcpdump`, writing the captures that become the fixtures of section 3.5). The images are built from `debian:13-slim` with the Debian packages `avahi-daemon`, `avahi-utils`, `python3-zeroconf`, `dnsutils`, `tcpdump` and `nftables`; Avahi runs with `enable-dbus=no` **(unconfirmed that the publishing tools work without D-Bus; if not, the image starts `dbus-daemon`)**. Multicast between containers of one bridge network works without configuration (the bridge floods it). The script is `smoke.sh` with rounds `gateway`, `proxy`, `loops`, `flood`, `outage`, `flows`, printing PASS, FAIL and SKIP lines as the other labs do.
+- **The lab** (no device of the owner needed): bridge networks `servers` (`198.51.100.0/24`), `lan` (`192.0.2.0/26`, `2001:db8:10::/64`) and `iot` (`192.0.2.64/26`, `2001:db8:11::/64`); containers `controller` (`tenko:lab`, roles `controller,dns`), `probe-lan` and `probe-iot` (`tenko:lab`, role `probe`, each on its segment and on `servers`), `router` (joined to `lan` and `iot`, forwarding with an `nftables` rule set that allows one flow and drops another, for the flow test), `responder` on `iot` (Avahi publishing a printer and a receiver with `avahi-publish`, and python-zeroconf for scripted announcements, goodbyes, conflicts and TXT changes), `browser` on `lan` (`avahi-browse`, a python-zeroconf browser, `dig`), `local` on `lan` (a host that claims a carried name, for E104), `reflector` (Avahi with `enable-reflector=yes`, joined to both, for E105, in its own compose profile), `flood` on `iot` (a Python script with plain sockets that builds the hostile packets of E106; no packet tool is installed) and `capture` (`tcpdump`, writing the captures that become the fixtures of section 3.5). The images are built from `debian:13-slim` with the Debian packages `avahi-daemon`, `avahi-utils`, `python3-zeroconf`, `dnsutils`, `tcpdump` and `nftables`; Avahi runs with `enable-dbus=no` **(unconfirmed that the publishing tools work without D-Bus; if not, the image starts `dbus-daemon`)**. Multicast between containers of one bridge network works without configuration (the bridge floods it). The script is `smoke.sh` with rounds `gateway`, `proxy`, `loops`, `flood`, `outage`, `flows`, `off` (the master switch of E114: off from the UI, the API and the CLI while both parts carry, then off while `probe-lan` is cut from the controller by a network disconnect, then a probe restart while cut off, then on again), printing PASS, FAIL and SKIP lines as the other labs do.
 - **The rows:**
 
   | Row | What is checked |
   |---|---|
-  | `sd.off_by_default` | A fresh installation of each profile carries nothing and answers no proxy subdomain |
+  | `sd.off_by_default` | A fresh installation of each profile carries nothing and answers no proxy subdomain; the master switch is off, and a change of profile sets it off |
+  | `sd.off_switch` | The `off` round: after the switch goes off, no packet from a probe other than a goodbye mentions a carried name after 2 s (capture grep), the cut-off probe is silent within 120 s, and the proxy's names answer NXDOMAIN; the change needs the step-up and leaves one audit record |
   | `sd.direction` | A rule `iot` to `lan` carries nothing from `lan` to `iot`, through the gateway and the proxy |
   | `sd.attribution` | Off-link address records and announcements for another device's address are not carried |
   | `sd.no_defense` | No packet from a probe answers another host's probe for a carried name (capture grep) |
@@ -482,15 +513,15 @@ The packages own these trees, one package per file: `crates/tenko-core/src/sd.rs
   | `sd.no_firewall_change` | No packet from Tenko is addressed to the router's own addresses; the only packets the router forwards from Tenko are the flow test's connections (capture) |
   | `sd.foreign_link` | A probe whose exchange names a link of another node is refused and the finding raised |
 
-- **Acceptance:** E105, E106, E111, E113 (the lab round); E112 (owner-run).
+- **Acceptance:** E105, E106, E111, E113 (the lab round), E114 (the `off` round); E112 (owner-run).
 
-Total: 41 builder-days. The gateway first: WP17.0, then WP17.1 and WP17.2 in parallel, WP17.3, WP17.6 (24 days on the critical path). The Discovery Proxy first: WP17.0, then WP17.1, WP17.2 and WP17.4 in parallel, then WP17.6's proxy round (17 days). WP17.5 runs beside either from the mock.
+Total: 43 builder-days. The gateway first: WP17.0, then WP17.1 and WP17.2 in parallel, WP17.3, WP17.6 (25 days on the critical path). The Discovery Proxy first: WP17.0, then WP17.1, WP17.2 and WP17.4 in parallel, then WP17.6's proxy and `off` rounds (18 days). WP17.5 runs beside either from the mock.
 
 ## 5. Order, measurements and exit checks
 
 ### 5.1 Order
 
-WP17.0 first. Then WP17.1, WP17.2 and WP17.4 in parallel (disjoint files: `tenko-scan/src/mdns` with `tenko-scan/src/sd/source`, `tenko-scan/src/sd/control` with the API and CLI, `tenko-dns/src/sd`). Then WP17.3. WP17.5 follows the routes over the mock; WP17.6 builds the lab skeleton after WP17.0 and runs its rounds as WP17.3 and WP17.4 land. The two parts are separable: the gateway alone is WP17.0 to WP17.3, WP17.5 without the proxy pages and WP17.6 without the proxy round; the proxy alone is WP17.0, WP17.1 (the listener, the cache and the source side), WP17.2, WP17.4, and WP17.6's proxy round. DNS-35 is no condition of 0.1.0 (ROADMAP), so the slice takes a builder slot only when one is free (SD-Q14). WP17.0 and WP17.1 with learn mode are useful alone: they show what each segment announces before anything is decided about crossing.
+WP17.0 first. The master switch is built at the start of WP17.1 (the lease) and WP17.2 (the setting and the directive), so it exists before any package can make a record cross (section 2.17). Then WP17.1, WP17.2 and WP17.4 in parallel (disjoint files: `tenko-scan/src/mdns` with `tenko-scan/src/sd/source`, `tenko-scan/src/sd/control` with the API and CLI, `tenko-dns/src/sd`). Then WP17.3. WP17.5 follows the routes over the mock; WP17.6 builds the lab skeleton after WP17.0 and runs its rounds as WP17.3 and WP17.4 land. The two parts are separable: the gateway alone is WP17.0 to WP17.3, WP17.5 without the proxy pages and WP17.6 without the proxy round; the proxy alone is WP17.0, WP17.1 (the listener, the cache and the source side), WP17.2, WP17.4, and WP17.6's proxy round. DNS-35 is no condition of 0.1.0 (ROADMAP), so the slice takes a builder slot only when one is free (SD-Q14). WP17.0 and WP17.1 with learn mode are useful alone: they show what each segment announces before anything is decided about crossing.
 
 ### 5.2 Measurements
 
@@ -504,6 +535,8 @@ WP17.0 first. Then WP17.1, WP17.2 and WP17.4 in parallel (disjoint files: `tenko
 ## 6. Owner decisions
 
 Each question lists its options, the trade-offs in the owner's order (security, performance, usability, features) and one recommendation.
+
+**Decided by the owner (2026-11-11): every question as recommended, with one condition.** In the owner's words (translated): "mDNS routing must be easy to turn off completely in the settings panel". Section 2.17 designs it as one master switch above both parts (proposed TGL-44), proven by E114 and step 8 of the check list; its lease bounds SD-Q5 (a) to 120 s without a controller (section 2.9). The slice is not scheduled: by SD-Q14 (a) it takes a free builder slot after the work release 0.1.0 waits for, and no package starts before the owner says so.
 
 **SD-Q1. How do announcements travel from one segment's probe to the other's?**
 - Options: (a) as validated, normalized records through the controller and the store (section 2.2); (b) directly between the two probes over a new mTLS connection; (c) only within one probe that has an interface on both segments, as a repeater does.
@@ -577,14 +610,14 @@ Each question lists its options, the trade-offs in the owner's order (security, 
 
 ## 7. Requirement rows touched
 
-No new requirement IDs. Proposed edits, applied with the decisions:
+No new requirement IDs. Edits:
 
-| Row | Today | Proposed |
+| Row | Before | Edit |
 |---|---|---|
-| DNS-35 | "... only the listed service types and devices cross ..." | Adds: "What crosses is validated records, never packets; announcements carry the original names, and a host of the destination link always keeps its name. Tenko lists the flows the firewall must allow and never changes a firewall." |
+| DNS-35 | "... only the listed service types and devices cross ..." | Applied on 2026-11-11, the owner's condition: "One setting turns the whole function off at once." Proposed, applied by WP17.0 with the ADR: "What crosses is validated records, never packets; announcements carry the original names, and a host of the destination link always keeps its name. Tenko lists the flows the firewall must allow and never changes a firewall." |
 | SCAN-02 | "Passive discovery first: ARP/NDP, mDNS and LLDP." | Unchanged; the scanning document notes that the mDNS listener joins both groups per interface |
 
-[CONFORMANCE.md](../CONFORMANCE.md): 6762 stays Partial with the gateway's behavior and its deliberate deviations (never defends, withdraws instead of renaming after a conflict, accepts multicast packets only from sources inside the link's prefixes or link-local); 6763 notes the browsing names served; 8766 becomes Partial with the deviations of section 2.10 (cache-only answers with an interest on a miss, no reverse mapping, no DNSSEC, no LLQ or Push, no browsing names under `.local`); a new row for 8765 as Not planned in this slice. ROADMAP: the Phase 4 line for DNS-35 links this plan. SECURITY-PROFILES.md: the two toggles of section 3.4.
+[CONFORMANCE.md](../CONFORMANCE.md): 6762 stays Partial with the gateway's behavior and its deliberate deviations (never defends, withdraws instead of renaming after a conflict, accepts multicast packets only from sources inside the link's prefixes or link-local); 6763 notes the browsing names served; 8766 becomes Partial with the deviations of section 2.10 (cache-only answers with an interest on a miss, no reverse mapping, no DNSSEC, no LLQ or Push, no browsing names under `.local`); a new row for 8765 as Not planned in this slice. ROADMAP: the Phase 4 line for DNS-35 links this plan. SECURITY-PROFILES.md: the three toggles of section 3.4.
 
 ## 8. Risks
 
@@ -613,7 +646,8 @@ No new requirement IDs. Proposed edits, applied with the decisions:
 
 | When | Action |
 |---|---|
-| Before WP17.0 | Decide SD-Q1 to SD-Q14 |
+| Done 2026-11-11 | SD-Q1 to SD-Q14 decided as recommended, with the master switch as the condition |
+| Before WP17.0 | Say when the slice starts (SD-Q14: a free builder slot after the 0.1.0 work) |
 | Before the check list | Place a probe on the untrusted segment (a small VM or device with the `probe` role and its drop-in), or give the existing node an interface on it if SD-Q6 allows |
 | Before the check list | Note which of the firewall's mDNS repeater settings are on; turn the repeater off for the pair under test during the check |
 | During the check list | Allow on the firewall the flows the flows view lists for the devices under test, and nothing wider |
@@ -628,18 +662,19 @@ The results are recorded in `bench/sd/results/<date>-owner-check.md` with device
 4. **Direction.** *Check:* on the untrusted segment, a browser app (or the learn view of the trusted link) shows none of the trusted segment's services.
 5. **A home-automation device**, if one discovers by mDNS: the same as step 3.
 6. **Restart the controller.** *Check:* the devices stay listed on the phone during the restart, and casting still starts afterwards.
-7. **Remove the rules.** *Check:* within a few seconds the devices disappear from the phone's lists.
-8. **The Discovery Proxy**, if built: with the proxy enabled for the printer's rule, on a laptop whose system browses by unicast DNS: *Check:* the printer is listed under the untrusted link's subdomain, and `dig PTR _ipp._tcp.<label>.sd.<search domain>` from the laptop answers; from a host on the untrusted segment the same query is refused.
-9. **Restore.** Turn the firewall's repeater back on if it was on before, or leave it off and keep the rules; note which.
+7. **Remove the rules.** *Check:* within a few seconds the devices disappear from the phone's lists. Then add the rules of steps 2 and 3 again.
+8. **The master switch.** On the Security settings page, turn *Service discovery across segments* off: one click and a confirmation, after the recent sign-in. *Check:* the switch was easy to find there and on the services page; within a few seconds the printer and the casting device disappear from the phone's and the laptop's lists, and the dashboard no longer shows the function as on; the rules are still listed on the services page; the audit log has one record of the change. Turn it on again. *Check:* both devices are listed again within about 10 seconds, without editing a rule.
+9. **The Discovery Proxy**, if built: with the proxy enabled for the printer's rule, on a laptop whose system browses by unicast DNS: *Check:* the printer is listed under the untrusted link's subdomain, and `dig PTR _ipp._tcp.<label>.sd.<search domain>` from the laptop answers; from a host on the untrusted segment the same query is refused.
+10. **Restore.** Turn the firewall's repeater back on if it was on before, or leave it off and keep the rules; note which.
 
-**To undo at any point:** delete the rules or turn the toggle off; carried records disappear at once (goodbyes) from the trusted segment. The firewall was changed only by the owner.
+**To undo at any point:** turn the master switch off (or delete the rules); carried records disappear within seconds (goodbyes) from the trusted segment. The firewall was changed only by the owner.
 
 ## 10. Documents this slice writes
 
 | Document | Package |
 |---|---|
 | The ADR for service discovery across segments (proposed 0037) | WP17.0 |
-| [SECURITY-PROFILES.md](../SECURITY-PROFILES.md): the two toggles | WP17.0 |
+| [SECURITY-PROFILES.md](../SECURITY-PROFILES.md): the three toggles | WP17.0 |
 | `scripts/requirement-trace.mjs`: three-digit exit criteria, this plan in the Phase 4 list | WP17.0 (with the lead) |
 | [scanning.md](../scanning.md): the link listener, IPv6 and per-interface reception; section 2.5 and its table for intrusion detection systems, which say that Tenko never answers or announces, corrected for a probe with a link (the gateway answers for other hosts' names, which such a system can read as mDNS spoofing) | WP17.1 |
 | [node-sync.md](../node-sync.md): the `ServiceDiscovery.Exchange` stream | WP17.2 |
