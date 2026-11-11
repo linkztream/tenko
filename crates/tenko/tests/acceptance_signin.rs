@@ -252,7 +252,7 @@ fn assert_session_cookie_flags(reply: &Reply) {
 /// strength, and a wrong PIN is refused with the documented code and no session.
 #[test]
 fn e2_iam_03_the_pin_preset_signs_in_and_a_wrong_pin_is_refused() {
-    let (node, _server, api) = installed(Transport::Plain);
+    let (node, mut server, api) = installed(Transport::Plain);
     let mut browser = Browser::direct(api);
 
     // Setup signed the administrator in with a password, not a PIN.
@@ -330,6 +330,7 @@ fn e2_iam_03_the_pin_preset_signs_in_and_a_wrong_pin_is_refused() {
 
     // The command-line client signs in as the administrator with the password.
     node.login().assert_code(0);
+    server.stop().assert_graceful_shutdown();
 }
 
 /// IAM-06, E2: TOTP end to end. After enrollment the password alone is no longer enough:
@@ -337,7 +338,7 @@ fn e2_iam_03_the_pin_preset_signs_in_and_a_wrong_pin_is_refused() {
 /// gives a session of password-and-TOTP strength.
 #[test]
 fn e2_iam_06_totp_enrolls_and_signs_in_and_a_wrong_or_replayed_code_is_refused() {
-    let (_node, _server, api) = installed(Transport::Plain);
+    let (_node, mut server, api) = installed(Transport::Plain);
     let mut browser = Browser::direct(api);
 
     let mut totp = browser.api.enroll_totp();
@@ -393,6 +394,7 @@ fn e2_iam_06_totp_enrolls_and_signs_in_and_a_wrong_or_replayed_code_is_refused()
     assert_eq!(replay.status, 401, "a replayed code: {}", replay.text);
     assert_eq!(replay.code().as_deref(), Some("auth.invalid_credentials"));
     browser.assert_signed_out();
+    server.stop().assert_graceful_shutdown();
 }
 
 /// Registers a passkey for the signed-in administrator, signs out, signs in with the
@@ -494,7 +496,7 @@ fn passkey_round_trip(mut browser: Browser) {
 /// headers of the trusted proxy make the origin of the request.
 #[test]
 fn e2_ops_22_iam_06_a_passkey_signs_in_behind_a_reverse_proxy() {
-    let (_node, _server, api) = installed(Transport::Plain);
+    let (_node, mut server, api) = installed(Transport::Plain);
     let browser = Browser::behind_proxy(api);
 
     // Without the proxy's headers the public origin is foreign: the CSRF guard refuses it.
@@ -520,30 +522,33 @@ fn e2_ops_22_iam_06_a_passkey_signs_in_behind_a_reverse_proxy() {
     let session = browser.session();
     assert_eq!(session["strength"], "password", "{session}");
     passkey_round_trip(browser);
+    server.stop().assert_graceful_shutdown();
 }
 
 /// OPS-22 (a), IAM-06, E2: a passkey over HTTPS with a certificate from the internal CA,
 /// on `https://localhost:<port>`.
 #[test]
 fn e2_ops_22_iam_06_a_passkey_signs_in_with_the_internal_ca() {
-    let (_node, _server, api) = installed(Transport::InternalCa);
+    let (_node, mut server, api) = installed(Transport::InternalCa);
     assert!(
         api.origin().starts_with("https://localhost:"),
         "{}",
         api.origin()
     );
     passkey_round_trip(Browser::direct(api));
+    server.stop().assert_graceful_shutdown();
 }
 
 /// OPS-22 (b), IAM-06, E2: a passkey over HTTPS with an imported certificate (a leaf of a
 /// test CA for `localhost`), on `https://localhost:<port>`.
 #[test]
 fn e2_ops_22_iam_06_a_passkey_signs_in_with_an_imported_certificate() {
-    let (_node, _server, api) = installed(Transport::Imported);
+    let (_node, mut server, api) = installed(Transport::Imported);
     assert!(
         api.origin().starts_with("https://localhost:"),
         "{}",
         api.origin()
     );
     passkey_round_trip(Browser::direct(api));
+    server.stop().assert_graceful_shutdown();
 }
