@@ -97,6 +97,23 @@ function Invoke-Tenko([string[]]$Arguments) {
     [pscustomobject]@{ Code = $LASTEXITCODE; Output = $output.TrimEnd() }
 }
 
+# Runs another tenko.exe with no standard input; never throws on a non-zero status.
+function Invoke-TenkoAs([string]$Exe, [string[]]$Arguments) {
+    $output = $null | & $Exe @Arguments 2>&1 | Out-String
+    [pscustomobject]@{ Code = $LASTEXITCODE; Output = $output.TrimEnd() }
+}
+
+# Requires the guard's refusal of the offline commands (exit status 2, `exec.unsafe_owner`):
+# a privileged token, the file named by $Subject, and, when $Owner is given, that owner.
+function Assert-Refused($Result, [string]$Subject, [string]$Owner, [string]$What) {
+    $text = $Result.Output
+    $has = { param($part) $text.IndexOf($part, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
+    $ok = $Result.Code -eq 2 -and (& $has '[exec.unsafe_owner] refusing to run with a privileged token (') -and (& $has $Subject)
+    # The owner is printed as its name and, in parentheses, its SID.
+    if ($Owner) { $ok = $ok -and (& $has "belongs to $Owner (") }
+    Assert-That $ok "$What was not refused by the guard over $Subject$(if ($Owner) { " of $Owner" }) (status $($Result.Code)): $text"
+}
+
 # Runs the binary and requires status 0; echoes its output.
 function Invoke-TenkoOk([string[]]$Arguments) {
     $result = Invoke-Tenko $Arguments
@@ -946,6 +963,24 @@ ready_timeout_secs = 60
             @(Find-SmokeEvent 'tenko service stopped' $stopStamp | Where-Object { $_.Level -eq 4 }).Count -gt 0
         })
     Write-Host 'stopped, "tenko service stopped" is in the Event Log'
+    # The guard of the offline commands (ADR 0023) refuses this elevated script over the
+    # service's own files, with the line that names the owner: the service's binary, which
+    # the update wrote, and the backup directory, which the service wrote.
+    $serviceBinary = Join-Path $DataDir 'updates\current\tenko.exe'
+    $backupsDir = [string]$run.target_dir
+    $verify = @('backup', 'verify', $backupFile, '--work-dir', $backupsDir)
+    $refused = Invoke-TenkoAs $serviceBinary $verify
+    Assert-Refused $refused "this executable" "NT SERVICE\$Name" "$serviceBinary $($verify -join ' ')"
+    Write-Host "the service's binary, elevated: $($refused.Output)"
+    $binaryOwner = (Get-Acl -LiteralPath $Binary).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    $refused = Invoke-TenkoAs $Binary $verify
+    if ($binaryOwner -in 'S-1-5-32-544', 'S-1-5-18') {
+        Assert-Refused $refused "the directory $backupsDir" "NT SERVICE\$Name" "tenko $($verify -join ' ')"
+    } else {
+        # A binary this account owns is refused first, by its own owner.
+        Assert-Refused $refused "this executable" '' "tenko $($verify -join ' ')"
+    }
+    Write-Host "the tested binary over the backup directory, elevated: $($refused.Output)"
 
     # 9 ----------------------------------------------------------------------------------
     Write-Step '9/9 service uninstall'
