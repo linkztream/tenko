@@ -1,6 +1,6 @@
 # Notifications plan: every alarm reaches people who are not signed in
 
-- Status: Draft, waiting for the owner's decisions (NT-Q1 to NT-Q16 of section 6). No package starts before the owner has answered them and scheduled the slice
+- Status: Accepted on 2026-11-11: the owner took NT-Q1 to NT-Q16 of section 6 as recommended. By NT-Q15 (a) the slice waits for a free builder slot after the Windows takeover's exit and the Kerberos line's WP13.4, the webhook first and MQTT last; no package starts before the owner says so
 - Date: 2026-11-11
 - Scope: OPS-29, added by the owner on 2026-11-10. Every alarm of the product can be delivered through channels an administrator configures: e-mail by SMTP submission over TLS (Must), an outgoing HTTPS webhook with a signed JSON body (Must), and MQTT as a publish-only channel with retained state and a last will (Should). The delivery path is the one the general event webhooks of API-06 (Phase 5) will build on. Written against `main` at `cbe6c27a`. Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md). Exit criteria, measurements and risks continue the project's series: E89 to E99, M73 to M76 and R160 to R174 (the public DNS plan ends at E88, M72 and R159; the discovery plan of the same day starts at E100, M77 and R175)
 
@@ -454,6 +454,8 @@ WP16.0 first. Then WP16.1 and WP16.2 in parallel (disjoint files). Then WP16.3 a
 
 Each question lists its options, the trade-offs under the owner's four headings in order (security, performance, usability, features) and one recommendation.
 
+**Decided by the owner (2026-11-11): every question as recommended.** This includes NT-Q5 (a), the local path on every controller, whose secret read without a quorum section 2.7 shows from the code, and NT-Q9 (a), plain HTTP under Home only as a named choice per channel, held to the detail level `minimal`. Where a recommendation names a fallback, the fallback is part of the plan, not an open question: the `lettre` library of NT-Q10 (b) replaces the own SMTP client if the live test meets a server the client cannot handle within a day's work (R169), and OAuth 2.0 sign-in for SMTP is a later package when a user needs Microsoft 365 or Google without app passwords (NT-Q11).
+
 **NT-Q1. One alarm model, or notifications straight from each source?**
 - Options: (a) one alarm layer above the sources (section 2.1): a stored alarm with code, severity, area, dedup key and state, kept in step by an evaluator that follows the existing tables and every controller's warnings; (b) each source calls the notification path itself; (c) deliver the findings list as it is.
 - Security: (a) gives the auth alarms, which no page shows today, a list and one place where what leaves the product is decided; (b) spreads that decision over every source crate; (c) has no state to deliver a clear from. Performance: (a) costs an evaluator round every 15 s (M73); (b) costs nothing extra; (c) re-derives findings on every read. Usability: (a) gives one dedup, hold-down and acknowledgment rule; (b) gives each source its own; (c) mixes work items (a waiting proposal) with news. Features: (b) leaves the next source to remember the call.
@@ -574,7 +576,7 @@ ROADMAP: the Phase 4 line for OPS-29 links this plan. SECURITY-PROFILES.md: the 
 
 | When | Action |
 |---|---|
-| Before WP16.0 | Decide NT-Q1 to NT-Q16 |
+| Before WP16.0 | Decide NT-Q1 to NT-Q16 (done on 2026-11-11, all as recommended); say when the slice starts |
 | Before the live test | Prepare a webhook endpoint in the flow tool (the documentation's snippet checks the signature), a submission account (the owner's own relay or an app password), and on the broker a user for Tenko with publish rights below one prefix only |
 | After the live test | Set the routes the owner wants (for example: `critical` immediately by e-mail and webhook, everything else as a daily digest) |
 
