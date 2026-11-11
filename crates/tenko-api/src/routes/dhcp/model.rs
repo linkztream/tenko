@@ -36,6 +36,11 @@ pub struct DhcpSettingsItem {
     pub effective_conflict_detection: bool,
     /// The same for the lease history retention in days (P3-Q13).
     pub effective_history_days: u32,
+    /// Whether every sender is trusted as a relay agent: no `trusted_relays` set under the
+    /// Lab profile. Outside Lab an unset list trusts no relay.
+    pub effective_trust_any_relay: bool,
+    /// The limits in force: the stored ones over the profile's (zero: off).
+    pub effective_limits: DhcpEffectiveLimits,
     /// The store revision of the row (the `ETag`).
     pub revision: Revision,
 }
@@ -58,6 +63,46 @@ pub struct DhcpSettingsUpdate {
     /// History retention in days; none follows the profile.
     #[serde(default)]
     pub history_days: Option<u32>,
+    /// The trusted relay agents, as prefixes of the addresses they send from (at most 256,
+    /// without host bits); left out keeps the stored list.
+    #[serde(default)]
+    #[schema(value_type = Option<Vec<String>>, example = json!(["192.0.2.1/32"]))]
+    pub trusted_relays: Option<Vec<ipnet::IpNet>>,
+    /// Unsets the trusted relays, so that the profile decides again (every sender under
+    /// Lab, none otherwise); refused together with `trusted_relays`.
+    #[serde(default)]
+    pub clear_trusted_relays: bool,
+    /// The limits per client and per scope, replaced whole (a field left out of them
+    /// follows the profile); left out keeps the stored limits.
+    #[serde(default)]
+    pub limits: Option<tenko_core::dhcp::DhcpLimits>,
+}
+
+/// The limits in force (`docs/dhcp.md` section 14.9); zero turns one off.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DhcpEffectiveLimits {
+    /// DHCPv4 active bindings per MAC address and scope.
+    pub leases_per_mac: u32,
+    /// DHCPv6 address bindings per DUID and scope.
+    pub addresses_per_duid: u32,
+    /// DHCPv6 delegated prefixes per DUID and scope.
+    pub prefixes_per_duid: u32,
+    /// New clients a scope offers an address to per second.
+    pub offers_per_second: u32,
+    /// The renewal cache, percent of the lease time.
+    pub renew_cache_percent: u8,
+}
+
+impl From<tenko_dhcp::limits::Limits> for DhcpEffectiveLimits {
+    fn from(limits: tenko_dhcp::limits::Limits) -> Self {
+        Self {
+            leases_per_mac: limits.leases_per_mac,
+            addresses_per_duid: limits.addresses_per_duid,
+            prefixes_per_duid: limits.prefixes_per_duid,
+            offers_per_second: limits.offers_per_second,
+            renew_cache_percent: limits.renew_cache_percent,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1111,6 +1156,110 @@ pub struct DhcpNodeStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(example = "000400000000000000000000000000000001")]
     pub server_duid: Option<String>,
+    /// The trusted relays as the node applies them: the senders it refused and, while no
+    /// list is set, the networks its lease rows say were served through a relay.
+    #[serde(default)]
+    pub relays: DhcpRelayReport,
+    /// The limits per client and per scope as the node applies them, and their refusals.
+    #[serde(default)]
+    pub limits: DhcpLimitReport,
+}
+
+/// The limits of a node and the requests they refused since the role started.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct DhcpLimitReport {
+    /// The limits in force.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective: Option<DhcpEffectiveLimits>,
+    /// The refusals, the most frequent first (at most 32).
+    #[serde(default)]
+    pub refused: Vec<DhcpLimitRefusal>,
+    /// Refusals not kept in `refused`.
+    #[serde(default)]
+    pub unlogged: u64,
+}
+
+/// Requests a limit refused.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DhcpLimitRefusal {
+    /// The limit: `leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`,
+    /// `offers_per_second`, `conflicts_per_mac` or `conflict_share`.
+    #[schema(example = "leases_per_mac")]
+    pub limit: String,
+    /// The client: a MAC address, a DUID in hexadecimal; absent for a limit of the scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "00:00:5e:00:53:01")]
+    pub client: Option<String>,
+    /// The scope.
+    pub scope: PrefixId,
+    /// The scope's network, when the node serves it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "192.0.2.0/24")]
+    pub network: Option<ipnet::IpNet>,
+    /// The limit's value.
+    pub cap: u32,
+    /// What the client (or the scope) held at the last refusal.
+    pub held: u32,
+    /// Refusals.
+    pub count: u64,
+    /// The first refusal.
+    pub first: Timestamp,
+    /// The last refusal.
+    pub last: Timestamp,
+}
+
+/// What a node reports about relay agents (`dhcp.settings.trusted_relays`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct DhcpRelayReport {
+    /// Whether a list is set.
+    pub listed: bool,
+    /// Whether every sender is trusted (no list, under Lab).
+    pub trust_any: bool,
+    /// The senders refused as relays since the role started, the most refused first (at
+    /// most 32).
+    #[serde(default)]
+    pub refused: Vec<DhcpRefusedRelay>,
+    /// Refusals not kept in `refused`.
+    #[serde(default)]
+    pub unlogged: u64,
+    /// While no list is set: the networks the lease rows say were served through a relay,
+    /// with the relay addresses they name. Information only: nothing is trusted from it.
+    #[serde(default)]
+    pub relayed: Vec<DhcpRelayedNetwork>,
+}
+
+/// A sender the node refused as a relay agent.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DhcpRefusedRelay {
+    /// The address the requests came from: the address to trust.
+    #[schema(value_type = String, example = "192.0.2.1")]
+    pub source: IpAddr,
+    /// The relay address the requests named (`giaddr`, or the link address of the
+    /// outermost DHCPv6 relay).
+    #[schema(value_type = String, example = "192.0.2.1")]
+    pub relay: IpAddr,
+    /// Refusals.
+    pub count: u64,
+    /// The first refusal.
+    pub first: Timestamp,
+    /// The last refusal.
+    pub last: Timestamp,
+    /// Whether the address is a relay address of the lease rows (the relay the operator
+    /// knows).
+    pub seen_before: bool,
+}
+
+/// A network the lease rows say was served through a relay.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DhcpRelayedNetwork {
+    /// The scope.
+    pub scope: PrefixId,
+    /// Its network.
+    #[schema(value_type = String, example = "192.0.2.0/24")]
+    pub network: ipnet::IpNet,
+    /// The relay addresses of its rows.
+    #[schema(value_type = Vec<String>, example = json!(["192.0.2.1"]))]
+    pub relays: Vec<IpAddr>,
 }
 
 /// Whether the router advertisement check runs.

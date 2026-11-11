@@ -936,3 +936,95 @@ async fn hardened_refuses_replace_at_the_write() {
         .await
         .expect("replace under Home");
 }
+
+async fn trusted_relays(world: &World) -> Option<Vec<ipnet::IpNet>> {
+    let view = world.service.view(None).await.expect("view");
+    ConfigService::settings(view.as_ref())
+        .expect("settings")
+        .settings
+        .trusted_relays
+}
+
+#[tokio::test]
+async fn the_trusted_relays_are_kept_sorted_cleared_on_request_and_checked() {
+    use super::settings::SettingsChange;
+    let world = self::world().await;
+    let prefixes = |list: &[&str]| -> Vec<ipnet::IpNet> {
+        list.iter()
+            .map(|text| text.parse().expect("a prefix"))
+            .collect()
+    };
+    assert_eq!(trusted_relays(&world).await, None);
+    world
+        .service
+        .update_settings(
+            &cx(),
+            SettingsChange {
+                trusted_relays: Some(prefixes(&[
+                    "198.51.100.1/32",
+                    "192.0.2.1/32",
+                    "198.51.100.1/32",
+                ])),
+                ..SettingsChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("a list");
+    assert_eq!(
+        trusted_relays(&world).await,
+        Some(prefixes(&["192.0.2.1/32", "198.51.100.1/32"]))
+    );
+    // A change that does not name the list keeps it (an older client cannot cut relays off).
+    world
+        .service
+        .update_settings(
+            &cx(),
+            SettingsChange {
+                authoritative: Some(false),
+                ..SettingsChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("another field");
+    assert_eq!(trusted_relays(&world).await.map(|list| list.len()), Some(2));
+    for (change, field) in [
+        (
+            SettingsChange {
+                trusted_relays: Some(prefixes(&["192.0.2.1/24"])),
+                ..SettingsChange::default()
+            },
+            "trusted_relays",
+        ),
+        (
+            SettingsChange {
+                trusted_relays: Some(Vec::new()),
+                clear_trusted_relays: true,
+                ..SettingsChange::default()
+            },
+            "clear_trusted_relays",
+        ),
+    ] {
+        let error = world
+            .service
+            .update_settings(&cx(), change, None)
+            .await
+            .expect_err("refused");
+        let text = format!("{error:?}");
+        assert!(text.contains(field), "{text}");
+    }
+    world
+        .service
+        .update_settings(
+            &cx(),
+            SettingsChange {
+                clear_trusted_relays: true,
+                ..SettingsChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("cleared");
+    assert_eq!(trusted_relays(&world).await, None);
+}

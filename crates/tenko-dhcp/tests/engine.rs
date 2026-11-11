@@ -157,8 +157,18 @@ fn rows() -> Vec<Row> {
         ),
         row(
             "discover from a link without a scope is dropped",
-            with(ask(Discover, 0x30), |a| a.giaddr = Some(ip("233.252.0.1"))),
+            with(ask(Discover, 0x30), |a| a.giaddr = Some(ip("198.18.0.1"))),
             Expect::Drop(DropReason::NoScope),
+        ),
+        row(
+            "discover with a multicast giaddr is dropped as malformed",
+            with(ask(Discover, 0x30), |a| a.giaddr = Some(ip("233.252.0.1"))),
+            Expect::Drop(DropReason::Malformed),
+        ),
+        row(
+            "discover with a broadcast giaddr is dropped as malformed",
+            with(ask(Discover, 0x30), |a| a.giaddr = Some(ip("255.255.255.255"))),
+            Expect::Drop(DropReason::Malformed),
         ),
         row(
             "discover with the broadcast flag on the listener's link is broadcast",

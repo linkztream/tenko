@@ -50,6 +50,10 @@ fn start(store: Arc<MemLease6Store>, relay_port: u16) -> (Dhcp6Server, SharedLea
         server_duid: SERVER_DUID.to_vec(),
         pending: 16,
         offers: 64,
+        // Lab: the relay on loopback is trusted as every sender was before the relay list.
+        guard: std::sync::Arc::new(tenko_dhcp::guard::Guard::new(
+            tenko_dhcp::guard::DhcpProfile::Lab,
+        )),
         ..Server6Config::default()
     };
     let drive_store = Arc::clone(&store);

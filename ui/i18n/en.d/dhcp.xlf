@@ -1258,6 +1258,156 @@
       <unit id="dhcp.settings.history_days_help">
         <segment><source>1 to 3650 days.</source></segment>
       </unit>
+      <unit id="dhcp.settings.relays">
+        <segment><source>Trusted relay agents</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_follow">
+        <segment><source>Trusted relay agents follow the security profile</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_trust_any">
+        <segment><source>Under the Lab profile every sender is trusted as a relay agent, so any host that reaches this server can be served from any scope. List the relay agents to close this.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_none">
+        <segment><source>No relay agent is trusted: only clients on this server's own links are served.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_list">
+        <segment><source>Relay agent addresses</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_list_help">
+        <segment><source>One address or prefix per line, such as 192.0.2.1 or 2001:db8::1. Use the addresses the relay agents send their requests from; routers often send from the interface toward this server, not from the giaddr. Relayed requests from any other sender are dropped. An empty list trusts no relay agent.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_seen">
+        <segment><source>Relay agents this server has seen</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_seen_relayed">
+        <segment><source>These networks reached this server through a relay agent, and no relay agent is trusted yet:</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_seen_relayed_item">
+        <segment><source>{network} through {relays}</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_refused_label">
+        <segment><source>Senders refused as relay agents</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_col_source">
+        <segment><source>Sender</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_col_relay">
+        <segment><source>Relay address named</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_col_count">
+        <segment><source>Refusals</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_col_last">
+        <segment><source>Last seen</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_known">
+        <segment><source>Known relay</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_trust">
+        <segment><source>Trust</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_trust_label">
+        <segment><source>Trust {source} as a relay agent</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_trusted">
+        <segment><source>{source} is now a trusted relay agent</source></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_unlogged">
+        <segment><source>{count, plural, one {# more refusal was not kept.} other {# more refusals were not kept.}}</source></segment>
+      </unit>
+      <unit id="dhcp.check.relays_format">
+        <segment><source>Line {line}: {text} is not an IPv4 or IPv6 address or prefix.</source></segment>
+      </unit>
+      <unit id="dhcp.check.relays_host_bits">
+        <segment><source>Line {line}: {text} has host bits set. Write {suggest} for one relay agent, or give the network address of the prefix.</source></segment>
+      </unit>
+      <unit id="dhcp.check.relays_count">
+        <segment><source>At most {max} prefixes.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits">
+        <segment><source>Limits per client and per scope</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_help">
+        <segment><source>A client over a limit gets no new address and keeps the ones it holds. A network boot chain uses up to four DHCPv4 bindings of one MAC address, and a wireless bridge one per client behind it, so raise the limit per MAC address for bridges with many clients. 0 turns a limit off.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_follow">
+        <segment><source>Limits follow the security profile</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_effective">
+        <segment><source>In force now: bindings per MAC address {mac}; addresses per DUID {addresses}, prefixes per DUID {prefixes}; new clients a second per scope {offers}; renewal cache {cache}.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_leases_per_mac">
+        <segment><source>Bindings per MAC address</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_addresses_per_duid">
+        <segment><source>Addresses per DUID</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_prefixes_per_duid">
+        <segment><source>Prefixes per DUID</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_offers_per_second">
+        <segment><source>New clients per second</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_renew_cache">
+        <segment><source>Renewal cache (percent of the lease time)</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_conflicts_per_mac">
+        <segment><source>Conflict marks per MAC address</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_conflict_share">
+        <segment><source>Conflict marks per scope</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_leases_per_mac_help">
+        <segment><source>DHCPv4 bindings one MAC address holds in a scope across its client identifiers. 0 to {max}.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_addresses_per_duid_help">
+        <segment><source>DHCPv6 addresses (IA_NA) one DUID holds in a scope. 0 to {max}.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_prefixes_per_duid_help">
+        <segment><source>DHCPv6 delegated prefixes one DUID holds in a scope. 0 to {max}.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_offers_per_second_help">
+        <segment><source>New clients a scope offers an address to each second, with a burst of ten seconds' worth. A client that holds a lease is not counted. 0 to {max}.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_renew_cache_help">
+        <segment><source>A renewal within this share of its lease time since the last commit is answered from the stored lease, with no write. 0 to {max}.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_refused">
+        <segment><source>Requests the limits refused</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_refused_label">
+        <segment><source>Requests the limits refused</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_limit">
+        <segment><source>Limit</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_client">
+        <segment><source>Client</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_network">
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_held">
+        <segment><source>Held</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_count">
+        <segment><source>Refusals</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_last">
+        <segment><source>Last refusal</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_held">
+        <segment><source>holds {held} of {cap}</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_offer_note">
+        <segment><source>New clients wait for the scope's offer rate, not for its pool: after a power cut a large scope may need more than the burst.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_unlogged">
+        <segment><source>{count, plural, one {# more refusal was not kept.} other {# more refusals were not kept.}}</source></segment>
+      </unit>
+      <unit id="dhcp.check.limits_range">
+        <segment><source>Enter a whole number from 0 to {max}.</source></segment>
+      </unit>
       <unit id="dhcp.settings.save">
         <segment><source>Save</source></segment>
       </unit>

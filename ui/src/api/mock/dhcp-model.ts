@@ -10,7 +10,7 @@
 // history, reservation, export, node and reconcile routes stay with the 501 stubs. Documentation
 // values only: names under example.test, addresses of RFC 5737.
 import type { components } from "../generated/schema";
-import { compareIp, containsIp, formatIp, parseCidr, parseIp } from "../../ipam/ip";
+import { compareCidr, compareIp, containsIp, formatCidr, formatIp, parseCidr, parseIp } from "../../ipam/ip";
 import { canonical, validName } from "../../dns/model";
 import { bitsOfSize, checkMacPattern, parseHex, validDhcpName } from "../../dhcp/model";
 import { MAX_LEASE_SECS, NIL_ID } from "../../dhcp/types";
@@ -211,9 +211,44 @@ function checkDdns(value: unknown, field: string): DdnsPolicy {
 // ---------------------------------------------------------------------------------
 // Settings
 
+/** The trusted relay prefixes as the server stores them: sorted, without duplicates, no host bits, at most 256. */
+function checkTrustedRelays(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) return invalid("dhcp.settings.invalid", "trusted_relays", "a list of prefixes");
+  if (value.length > 256) return invalid("dhcp.settings.invalid", "trusted_relays", "at most 256 prefixes");
+  const cidrs = value.map((v) => {
+    const c = parseCidr(v as string);
+    return c === null ? invalid("dhcp.settings.invalid", "trusted_relays", `${String(v)} is not a prefix without host bits`) : c;
+  });
+  cidrs.sort(compareCidr);
+  return cidrs.map(formatCidr).filter((p, i, all) => all.indexOf(p) === i);
+}
+
+const LIMIT_BOUNDS = { leases_per_mac: 65_535, addresses_per_duid: 65_535, prefixes_per_duid: 65_535, offers_per_second: 100_000, renew_cache_percent: 50 } as const;
+type LimitKey = keyof typeof LIMIT_BOUNDS;
+
+/** The limits of the Home profile, the profile the mock stands for. */
+const HOME_LIMITS: Record<LimitKey, number> = { leases_per_mac: 16, addresses_per_duid: 16, prefixes_per_duid: 8, offers_per_second: 100, renew_cache_percent: 25 };
+
+/** The limits as the server stores them: every field a whole number inside its bounds; the whole object replaces the stored one. */
+function checkLimits(value: unknown): NonNullable<Settings["limits"]> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return invalid("dhcp.settings.invalid", "limits", "an object");
+  const given = value as Obj;
+  const out: Record<string, number> = {};
+  for (const [name, max] of Object.entries(LIMIT_BOUNDS)) {
+    const v = given[name];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > max) return invalid("dhcp.settings.invalid", `limits.${name}`, `0 to ${max}`);
+    out[name] = v;
+  }
+  return out;
+}
+
 export function getSettings(state: DhcpState): Settings {
   const s = state.settings;
-  return { ...s, effective_conflict_detection: s.conflict_detection ?? true, effective_history_days: s.history_days ?? 90 };
+  // The mock has no profile of its own: the seeded flag stands for the Lab profile, which trusts every sender while no list is set.
+  const effective_limits = { ...HOME_LIMITS };
+  for (const name of Object.keys(HOME_LIMITS) as LimitKey[]) effective_limits[name] = s.limits?.[name] ?? HOME_LIMITS[name];
+  return { ...s, effective_limits, effective_conflict_detection: s.conflict_detection ?? true, effective_history_days: s.history_days ?? 90, effective_trust_any_relay: s.trusted_relays == null && s.effective_trust_any_relay };
 }
 
 export function putSettings(state: DhcpState, ctx: DhcpContext, body: Obj, ifMatch: number | "*" | null): Settings {
@@ -229,6 +264,18 @@ export function putSettings(state: DhcpState, ctx: DhcpContext, body: Obj, ifMat
     const days = body.history_days;
     if (typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > 3650) return invalid("dhcp.settings.invalid", "history_days", "1 to 3650 days");
     next.history_days = days;
+  }
+  // The relay agents the server trusts: the list replaces the stored one, `clear_trusted_relays` unsets it.
+  if (body.clear_trusted_relays === true && body.trusted_relays !== undefined && body.trusted_relays !== null) {
+    return invalid("dhcp.settings.invalid", "clear_trusted_relays", "refused together with trusted_relays");
+  }
+  if (body.clear_trusted_relays === true) delete next.trusted_relays;
+  else if (body.trusted_relays !== undefined && body.trusted_relays !== null) next.trusted_relays = checkTrustedRelays(body.trusted_relays);
+  // The limits: an object replaces the stored ones whole (a field left out follows the profile), `{}` clears them, none keeps them.
+  if (body.limits !== undefined && body.limits !== null) {
+    const limits = checkLimits(body.limits);
+    if (Object.keys(limits).length === 0) delete next.limits;
+    else next.limits = limits;
   }
   next.updated = stamp(ctx);
   next.revision = ctx.nextRevision();
@@ -1691,6 +1738,8 @@ export function seedDhcp(ctx: DhcpContext): DhcpState {
       ddns: {},
       effective_conflict_detection: true,
       effective_history_days: 90,
+      effective_limits: { ...HOME_LIMITS },
+      effective_trust_any_relay: false,
       revision: rev(),
     },
     scopes: [],

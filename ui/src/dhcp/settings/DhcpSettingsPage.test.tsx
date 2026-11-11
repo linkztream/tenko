@@ -1,9 +1,13 @@
 // The DHCP server settings (/settings/dhcp): the lease times in human units, authoritative, conflict
 // detection and the history retention with "follow the security profile" and the value in force,
 // saved with the revision; the local checks; the server's refusal; the page for administrators
-// only; the module-off state; Swedish.
+// only; the module-off state; the trusted relay agents (follow, list, checks, the Trust button and
+// the panel of the senders refused); the limits per client and per scope (follow, the five fields,
+// the checks, the panel of the requests refused); Swedish.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { server } from "../../api/mock/node";
 import { dhcpState } from "../../api/mock/routes-dhcp";
 import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
@@ -129,5 +133,215 @@ describe("the DHCP settings", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("DHCP-inställningar");
     expect(screen.getByTestId("settings-effective-history").textContent).toBe("Gäller nu: 90 dagar.");
     expect(within(screen.getByTestId("dhcp-settings-form")).getByTestId("dhcp-settings-save").textContent).toBe("Spara");
+  });
+});
+
+describe("the trusted relay agents", () => {
+  it("says which state is in force while the list follows the profile", async () => {
+    open();
+    await loaded();
+    expect(field("field-relays-follow").checked).toBe(true);
+    expect(screen.getByTestId("settings-relays-none").textContent).toBe("No relay agent is trusted: only clients on this server's own links are served.");
+    expect(screen.queryByTestId("field-trusted_relays")).toBeNull();
+  });
+
+  it("warns that every sender is trusted under the Lab profile", async () => {
+    dhcpState().settings.effective_trust_any_relay = true;
+    open();
+    await loaded();
+    const notice = screen.getByTestId("settings-relays-trust-any");
+    expect(notice.className).toContain("warn");
+    expect(notice.textContent).toContain("every sender is trusted as a relay agent");
+    expect(screen.queryByTestId("settings-relays-none")).toBeNull();
+  });
+
+  it("saves the list normalized, a bare address as a host prefix", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    fireEvent.click(field("field-relays-follow"));
+    fireEvent.input(await screen.findByTestId("field-trusted_relays"), { target: { value: "192.0.2.9\n\n198.51.100.0/24\n2001:db8::1\n192.0.2.9" } });
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    await waitFor(() => expect(dhcpState().settings.trusted_relays).toBeDefined());
+    expect(writes().find((w) => w.method === "PUT")?.body?.trusted_relays).toEqual(["192.0.2.9/32", "198.51.100.0/24", "2001:db8::1/128"]);
+    expect(dhcpState().settings.trusted_relays).toEqual(["192.0.2.9/32", "198.51.100.0/24", "2001:db8::1/128"]);
+  });
+
+  it("refuses a line that is no address and a prefix with host bits before it sends", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    fireEvent.click(field("field-relays-follow"));
+    const area = await screen.findByTestId("field-trusted_relays");
+    fireEvent.input(area, { target: { value: "192.0.2.1\n192.0.2.1/24" } });
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    const error = await screen.findByTestId("field-error");
+    expect(error.dataset.field).toBe("trusted_relays");
+    expect(error.textContent).toBe("Line 2: 192.0.2.1/24 has host bits set. Write 192.0.2.1/32 for one relay agent, or give the network address of the prefix.");
+    fireEvent.input(area, { target: { value: "relay.example" } });
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    await waitFor(() => expect(screen.getByTestId("field-error").textContent).toBe("Line 1: relay.example is not an IPv4 or IPv6 address or prefix."));
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("clears a stored list when the settings follow the profile again", async () => {
+    dhcpState().settings.trusted_relays = ["192.0.2.1/32"];
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    expect(field("field-relays-follow").checked).toBe(false);
+    expect((screen.getByTestId("field-trusted_relays") as HTMLTextAreaElement).value).toBe("192.0.2.1/32");
+    fireEvent.click(field("field-relays-follow"));
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    await waitFor(() => expect(dhcpState().settings.trusted_relays).toBeUndefined());
+    const body = writes().find((w) => w.method === "PUT")?.body;
+    expect(body?.clear_trusted_relays).toBe(true);
+    expect(body).not.toHaveProperty("trusted_relays");
+  });
+
+  it("sends neither field when nothing was stored and the settings follow the profile", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    await waitFor(() => expect(writes().filter((w) => w.method === "PUT")).toHaveLength(1));
+    const body = writes().find((w) => w.method === "PUT")?.body;
+    expect(body).not.toHaveProperty("trusted_relays");
+    expect(body).not.toHaveProperty("clear_trusted_relays");
+  });
+
+  it("lists the senders refused and the networks relayed, and trusts a sender with one button", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    const panel = await screen.findByTestId("settings-relays-seen");
+    expect(within(panel).getByTestId("settings-relays-relayed").textContent).toContain("198.51.100.0/24 through 198.51.100.1");
+    const row = within(panel).getByTestId("relay-refused");
+    expect(row.dataset.source).toBe("192.0.2.1");
+    expect(within(row).getByTestId("relay-known").textContent).toBe("Known relay");
+    fireEvent.click(within(row).getByTestId("relay-trust"));
+    await waitFor(() => expect(dhcpState().settings.trusted_relays).toEqual(["192.0.2.1/32"]));
+    const sent = writes().find((w) => w.method === "PUT");
+    expect(sent?.body?.trusted_relays).toEqual(["192.0.2.1/32"]);
+    expect(sent?.ifMatch).not.toBeNull();
+    expect(await screen.findByText("192.0.2.1 is now a trusted relay agent")).toBeTruthy();
+    await waitFor(() => expect((screen.getByTestId("field-trusted_relays") as HTMLTextAreaElement).value).toBe("192.0.2.1/32"));
+    await waitFor(() => expect(screen.queryByTestId("settings-relays-seen")).toBeNull());
+  });
+
+  it("hides the panel when the node cannot be read", async () => {
+    server.use(http.get("/api/v1/nodes/:id/dhcp", () => HttpResponse.json({ type: "about:blank", status: 403, code: "sys.forbidden", title: "Forbidden", detail: "no", params: {} }, { status: 403, headers: { "content-type": "application/problem+json" } })));
+    open();
+    await loaded();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId("settings-relays-seen")).toBeNull();
+    expect(screen.getByTestId("field-relays-follow")).toBeTruthy();
+  });
+});
+
+describe("the limits per client and per scope", () => {
+  const put = (writes: ReturnType<typeof recordIfMatch>) => writes().find((w) => w.method === "PUT");
+
+  it("follows the profile and shows the values in force", async () => {
+    open();
+    await loaded();
+    expect(field("field-limits-follow").checked).toBe(true);
+    expect(screen.getByTestId("settings-effective-limits").textContent).toBe(
+      "In force now: bindings per MAC address 16; addresses per DUID 16, prefixes per DUID 8; new clients a second per scope 100; renewal cache 25 %.",
+    );
+    expect(screen.queryByTestId("field-limits_leases_per_mac")).toBeNull();
+  });
+
+  it("reads a limit that is off as off", async () => {
+    dhcpState().settings.limits = { leases_per_mac: 0 };
+    open();
+    await loaded();
+    expect(screen.getByTestId("settings-effective-limits").textContent).toContain("bindings per MAC address off");
+  });
+
+  it("sends all five numbers once the settings stop following the profile", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    fireEvent.click(field("field-limits-follow"));
+    expect(["leases_per_mac", "addresses_per_duid", "prefixes_per_duid", "offers_per_second", "renew_cache_percent"].map((n) => field(`field-limits_${n}`).value)).toEqual(["16", "16", "8", "100", "25"]);
+    fireEvent.input(field("field-limits_leases_per_mac"), { target: { value: "64" } });
+    fireEvent.input(field("field-limits_offers_per_second"), { target: { value: "0" } });
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    await waitFor(() => expect(dhcpState().settings.limits).toBeDefined());
+    const limits = { leases_per_mac: 64, addresses_per_duid: 16, prefixes_per_duid: 8, offers_per_second: 0, renew_cache_percent: 25 };
+    expect(put(writes)?.body?.limits).toEqual(limits);
+    expect(dhcpState().settings.limits).toEqual(limits);
+  });
+
+  it("refuses a value out of range before it sends", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    fireEvent.click(field("field-limits-follow"));
+    fireEvent.input(field("field-limits_renew_cache_percent"), { target: { value: "51" } });
+    fireEvent.input(field("field-limits_prefixes_per_duid"), { target: { value: "x" } });
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    await waitFor(() => expect(screen.getAllByTestId("field-error").map((e) => e.dataset.field)).toEqual(["limits_prefixes_per_duid", "limits_renew_cache_percent"]));
+    expect(screen.getAllByTestId("field-error")[1]?.textContent).toBe("Enter a whole number from 0 to 50.");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("sends an empty object when the settings follow the profile again over stored limits", async () => {
+    dhcpState().settings.limits = { leases_per_mac: 4 };
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    expect(field("field-limits-follow").checked).toBe(false);
+    expect(field("field-limits_leases_per_mac").value).toBe("4");
+    fireEvent.click(field("field-limits-follow"));
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    await waitFor(() => expect(dhcpState().settings.limits).toBeUndefined());
+    expect(put(writes)?.body?.limits).toEqual({});
+  });
+
+  it("sends nothing about limits when nothing was stored and the settings follow the profile", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    await waitFor(() => expect(writes().filter((w) => w.method === "PUT")).toHaveLength(1));
+    expect(put(writes)?.body).not.toHaveProperty("limits");
+  });
+
+  it("shows the refusal of the server beside the field it names", async () => {
+    server.use(
+      http.put("/api/v1/dhcp/settings", () =>
+        HttpResponse.json({ type: "about:blank", status: 400, code: "dhcp.settings.invalid", title: "Invalid", detail: "x", params: { field: "limits.offers_per_second" } }, { status: 400, headers: { "content-type": "application/problem+json" } }),
+      ),
+    );
+    open();
+    await loaded();
+    fireEvent.click(field("field-limits-follow"));
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    const error = await screen.findByTestId("field-error");
+    expect(error.dataset.field).toBe("limits_offers_per_second");
+  });
+
+  it("lists the requests the limits refused with the note on the offer rate", async () => {
+    open();
+    await loaded();
+    const panel = await screen.findByTestId("settings-limits-refused");
+    const rows = within(panel).getAllByTestId("limit-refused");
+    expect(rows.map((r) => r.dataset.limit)).toEqual(["leases_per_mac", "offers_per_second"]);
+    const cells = (row: HTMLElement) => within(row).getAllByRole("cell").map((c) => c.textContent);
+    expect(cells(rows[0] as HTMLElement).slice(0, 5)).toEqual(["Bindings per MAC address", "00:00:5e:00:53:40", "192.0.2.0/24", "holds 16 of 16", "3"]);
+    expect(cells(rows[1] as HTMLElement).slice(0, 5)).toEqual(["New clients per second", "\u2014", "198.51.100.0/24", "holds 100 of 100", "41"]);
+    expect(within(panel).getByTestId("settings-limits-offer-note").textContent).toContain("New clients wait for the scope's offer rate");
+    expect(within(panel).queryByTestId("settings-limits-unlogged")).toBeNull();
+  });
+
+  it("hides the panel when the node cannot be read", async () => {
+    server.use(http.get("/api/v1/nodes/:id/dhcp", () => HttpResponse.json({ type: "about:blank", status: 403, code: "sys.forbidden", title: "Forbidden", detail: "no", params: {} }, { status: 403, headers: { "content-type": "application/problem+json" } })));
+    open();
+    await loaded();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId("settings-limits-refused")).toBeNull();
+    expect(screen.getByTestId("field-limits-follow")).toBeTruthy();
   });
 });

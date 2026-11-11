@@ -81,6 +81,8 @@ pub struct Server6Config {
     pub node: NodeId,
     /// The server's DUID (option 2).
     pub server_duid: Vec<u8>,
+    /// The node's protections, shared with the DHCPv4 server.
+    pub guard: Arc<crate::guard::Guard>,
 }
 
 impl Default for Server6Config {
@@ -98,6 +100,7 @@ impl Default for Server6Config {
             send_buffer: 4 * 1024 * 1024,
             node: NodeId(1),
             server_duid: server_duid(NodeId(1)),
+            guard: Arc::default(),
         }
     }
 }
@@ -206,6 +209,7 @@ struct Shared {
     settings: Engine6Settings,
     node: NodeId,
     server_duid: Vec<u8>,
+    guard: Arc<crate::guard::Guard>,
 }
 
 impl Shared {
@@ -412,6 +416,7 @@ impl Dhcp6Server {
             settings: config.engine,
             node: config.node,
             server_duid: config.server_duid.clone(),
+            guard: Arc::clone(&config.guard),
         });
         let mut threads = Vec::with_capacity(total + 1);
         let committer = {
@@ -568,6 +573,7 @@ fn worker_loop(
                 leases: &*table,
                 offers: &shared.offers,
                 settings: &shared.settings,
+                guard: &shared.guard,
                 server_duid: &shared.server_duid,
                 accepting: shared.store.accepting6(),
                 now: Timestamp::now(),

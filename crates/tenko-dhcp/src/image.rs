@@ -170,6 +170,10 @@ pub struct ConfigImage {
     v6: crate::v6::image::Image6,
     // ADR 0027: the clients of move jobs.
     moving: crate::moving::Moving,
+    /// The trusted relays (`dhcp.settings.trusted_relays`).
+    relays: crate::relay::RelayTrust,
+    /// The limits as stored (`dhcp.settings.limits`); the profile fills the unset ones.
+    limits: tenko_core::dhcp::DhcpLimits,
 }
 
 impl ConfigImage {
@@ -301,6 +305,16 @@ impl ConfigImage {
         &self.moving
     }
 
+    /// The trusted relays.
+    pub fn relay_trust(&self) -> &crate::relay::RelayTrust {
+        &self.relays
+    }
+
+    /// The limits as stored.
+    pub fn limits(&self) -> &tenko_core::dhcp::DhcpLimits {
+        &self.limits
+    }
+
     /// Takes the activity of the moving clients it keeps from `previous`, the image it
     /// replaces; the server calls it before it installs the image.
     pub fn adopt_activity(&mut self, previous: &ConfigImage) {
@@ -415,6 +429,18 @@ impl ImageBuilder {
         values: Vec<OptionValue>,
     ) -> &mut Self {
         self.policy_options.insert(policy, values);
+        self
+    }
+
+    /// Sets the trusted relays.
+    pub fn relays(&mut self, trust: crate::relay::RelayTrust) -> &mut Self {
+        self.image.relays = trust;
+        self
+    }
+
+    /// Sets the stored limits.
+    pub fn limits(&mut self, limits: tenko_core::dhcp::DhcpLimits) -> &mut Self {
+        self.image.limits = limits;
         self
     }
 

@@ -45,6 +45,8 @@ pub struct Candidate {
     pub mac: Option<[u8; 6]>,
     /// Whether the address is the client's reservation (offered even when it answers).
     pub reserved: bool,
+    /// The scope the request selected (the one whose offer rate it counted in).
+    pub selected: PrefixId,
     identity: [u8; MAX_IDENTITY],
     identity_len: usize,
 }
@@ -58,6 +60,7 @@ impl Candidate {
             prefix: PrefixId::from_uuid(uuid::Uuid::nil()),
             mac: None,
             reserved: false,
+            selected: PrefixId::from_uuid(uuid::Uuid::nil()),
             identity: [0; MAX_IDENTITY],
             identity_len: 0,
         }
@@ -88,6 +91,7 @@ pub fn identity_of(request: &[u8], out: &mut [u8; MAX_IDENTITY]) -> Option<usize
 /// documentation. Counts an offer the cache lets through.
 pub fn candidate(
     conflicts: &Conflicts,
+    guard: &crate::guard::Guard,
     image: &ConfigImage,
     leases: &dyn LeaseTable,
     received: &Received<'_>,
@@ -101,11 +105,20 @@ pub fn candidate(
     }
     let chaddr = message.chaddr().ok()?;
     let client_id = message.client_identifier().ok()?.map(|id| id.as_bytes());
-    let relay = message.relay_agent_info().ok()?;
+    // The scope the engine chose: relay data counts only from a trusted relay.
+    let trusted = guard.trusts_relay(image, std::net::IpAddr::V4(*received.source.ip()));
+    let relay = message.relay_agent_info().ok()?.filter(|_| trusted);
     let mut identity = [0u8; MAX_IDENTITY];
     let identity_len = write_identity(message.htype(), chaddr, client_id, &mut identity);
     let who = &identity[..identity_len];
-    let (scope, _) = select::select(image, &message, MessageType::Discover, relay, received)?;
+    let (scope, _) = select::select(
+        image,
+        &message,
+        MessageType::Discover,
+        relay,
+        trusted,
+        received,
+    )?;
     let home = image
         .siblings(scope)
         .find(|sibling| sibling.network.contains(&addr))?;
@@ -138,6 +151,7 @@ pub fn candidate(
         prefix: home.prefix,
         mac: message.mac().ok(),
         reserved,
+        selected: scope.prefix,
         identity,
         identity_len,
     })

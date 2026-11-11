@@ -56,6 +56,83 @@ async fn the_settings_start_from_the_defaults_and_change_with_if_match() {
 }
 
 #[tokio::test]
+async fn the_trusted_relays_and_the_limits_follow_the_profile_until_set() {
+    let app = App::new();
+    // Home before setup: no relay trusted, the limits of Home.
+    let got = app.get("/dhcp/settings").await;
+    got.assert_status(200);
+    assert_eq!(got.body["effective_trust_any_relay"], false);
+    assert_eq!(got.body.get("trusted_relays"), None);
+    assert_eq!(
+        got.body["effective_limits"],
+        json!({
+            "leases_per_mac": 16,
+            "addresses_per_duid": 16,
+            "prefixes_per_duid": 8,
+            "offers_per_second": 100,
+            "renew_cache_percent": 25,
+        })
+    );
+    let changed = app
+        .send(
+            "PUT",
+            "/dhcp/settings",
+            Some(json!({
+                "trusted_relays": ["198.51.100.1/32", "192.0.2.1/32", "192.0.2.1/32"],
+                "limits": {"leases_per_mac": 4, "renew_cache_percent": 0},
+            })),
+        )
+        .await;
+    changed.assert_status(200);
+    assert_eq!(
+        changed.body["trusted_relays"],
+        json!(["192.0.2.1/32", "198.51.100.1/32"])
+    );
+    assert_eq!(
+        changed.body["limits"],
+        json!({"leases_per_mac": 4, "renew_cache_percent": 0})
+    );
+    assert_eq!(changed.body["effective_limits"]["leases_per_mac"], 4);
+    assert_eq!(changed.body["effective_limits"]["renew_cache_percent"], 0);
+    assert_eq!(changed.body["effective_limits"]["offers_per_second"], 100);
+    // A request that names neither keeps both.
+    let kept = app
+        .send(
+            "PUT",
+            "/dhcp/settings",
+            Some(json!({ "authoritative": false })),
+        )
+        .await;
+    kept.assert_status(200);
+    assert_eq!(
+        kept.body["trusted_relays"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(kept.body["limits"]["leases_per_mac"], 4);
+    // Checked, then cleared.
+    for body in [
+        json!({ "trusted_relays": ["192.0.2.1/24"] }),
+        json!({ "trusted_relays": [], "clear_trusted_relays": true }),
+        json!({ "limits": {"renew_cache_percent": 60} }),
+    ] {
+        app.send("PUT", "/dhcp/settings", Some(body))
+            .await
+            .assert_problem(400, "dhcp.settings.invalid");
+    }
+    let cleared = app
+        .send(
+            "PUT",
+            "/dhcp/settings",
+            Some(json!({ "clear_trusted_relays": true, "limits": {} })),
+        )
+        .await;
+    cleared.assert_status(200);
+    assert_eq!(cleared.body.get("trusted_relays"), None);
+    assert_eq!(cleared.body.get("limits"), None);
+    assert_eq!(cleared.body["effective_limits"]["leases_per_mac"], 16);
+}
+
+#[tokio::test]
 async fn a_scope_is_created_read_listed_changed_and_deleted() {
     let app = App::new();
     let prefix = app.prefix("192.0.2.0/24").await;

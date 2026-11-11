@@ -1258,6 +1258,156 @@
       <unit id="dhcp.settings.history_days_help">
         <segment><source>1 to 3650 days.</source><target>1 till 3650 dagar.</target></segment>
       </unit>
+      <unit id="dhcp.settings.relays">
+        <segment><source>Trusted relay agents</source><target>Betrodda reläagenter</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_follow">
+        <segment><source>Trusted relay agents follow the security profile</source><target>Betrodda reläagenter följer säkerhetsprofilen</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_trust_any">
+        <segment><source>Under the Lab profile every sender is trusted as a relay agent, so any host that reaches this server can be served from any scope. List the relay agents to close this.</source><target>Under profilen Lab litar servern på alla avsändare som reläagenter, så vilken värd som helst som når servern kan få adress från vilket scope som helst. Ange reläagenterna för att stänga detta.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_none">
+        <segment><source>No relay agent is trusted: only clients on this server's own links are served.</source><target>Ingen reläagent är betrodd: bara klienter på serverns egna länkar får svar.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_list">
+        <segment><source>Relay agent addresses</source><target>Reläagenternas adresser</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_list_help">
+        <segment><source>One address or prefix per line, such as 192.0.2.1 or 2001:db8::1. Use the addresses the relay agents send their requests from; routers often send from the interface toward this server, not from the giaddr. Relayed requests from any other sender are dropped. An empty list trusts no relay agent.</source><target>En adress eller ett prefix per rad, till exempel 192.0.2.1 eller 2001:db8::1. Ange adresserna som reläagenterna skickar sina förfrågningar från; routrar skickar ofta från gränssnittet mot servern, inte från giaddr. Vidarebefordrade förfrågningar från andra avsändare kastas. En tom lista litar inte på någon reläagent.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_seen">
+        <segment><source>Relay agents this server has seen</source><target>Reläagenter som servern har sett</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_seen_relayed">
+        <segment><source>These networks reached this server through a relay agent, and no relay agent is trusted yet:</source><target>Dessa nät nådde servern via en reläagent, och ingen reläagent är betrodd ännu:</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_seen_relayed_item">
+        <segment><source>{network} through {relays}</source><target>{network} via {relays}</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_refused_label">
+        <segment><source>Senders refused as relay agents</source><target>Avsändare som nekats som reläagenter</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_col_source">
+        <segment><source>Sender</source><target>Avsändare</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_col_relay">
+        <segment><source>Relay address named</source><target>Angiven reläadress</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_col_count">
+        <segment><source>Refusals</source><target>Nekanden</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_col_last">
+        <segment><source>Last seen</source><target>Senast sedd</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_known">
+        <segment><source>Known relay</source><target>Känd reläagent</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_trust">
+        <segment><source>Trust</source><target>Lita på</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_trust_label">
+        <segment><source>Trust {source} as a relay agent</source><target>Lita på {source} som reläagent</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_trusted">
+        <segment><source>{source} is now a trusted relay agent</source><target>{source} är nu en betrodd reläagent</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_unlogged">
+        <segment><source>{count, plural, one {# more refusal was not kept.} other {# more refusals were not kept.}}</source><target>{count, plural, one {# nekande till sparades inte.} other {# nekanden till sparades inte.}}</target></segment>
+      </unit>
+      <unit id="dhcp.check.relays_format">
+        <segment><source>Line {line}: {text} is not an IPv4 or IPv6 address or prefix.</source><target>Rad {line}: {text} är ingen IPv4- eller IPv6-adress eller något prefix.</target></segment>
+      </unit>
+      <unit id="dhcp.check.relays_host_bits">
+        <segment><source>Line {line}: {text} has host bits set. Write {suggest} for one relay agent, or give the network address of the prefix.</source><target>Rad {line}: {text} har värdbitar satta. Skriv {suggest} för en enskild reläagent, eller ange prefixets nätadress.</target></segment>
+      </unit>
+      <unit id="dhcp.check.relays_count">
+        <segment><source>At most {max} prefixes.</source><target>Högst {max} prefix.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits">
+        <segment><source>Limits per client and per scope</source><target>Gränser per klient och per omfång</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_help">
+        <segment><source>A client over a limit gets no new address and keeps the ones it holds. A network boot chain uses up to four DHCPv4 bindings of one MAC address, and a wireless bridge one per client behind it, so raise the limit per MAC address for bridges with many clients. 0 turns a limit off.</source><target>En klient över en gräns får ingen ny adress och behåller de den har. En nätverksstart använder upp till fyra DHCPv4-bindningar för en MAC-adress, och en trådlös brygga en per klient bakom sig, så höj gränsen per MAC-adress för bryggor med många klienter. 0 stänger av en gräns.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_follow">
+        <segment><source>Limits follow the security profile</source><target>Gränserna följer säkerhetsprofilen</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_effective">
+        <segment><source>In force now: bindings per MAC address {mac}; addresses per DUID {addresses}, prefixes per DUID {prefixes}; new clients a second per scope {offers}; renewal cache {cache}.</source><target>Gäller nu: bindningar per MAC-adress {mac}; adresser per DUID {addresses}, prefix per DUID {prefixes}; nya klienter per sekund och omfång {offers}; förnyelsecache {cache}.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_leases_per_mac">
+        <segment><source>Bindings per MAC address</source><target>Bindningar per MAC-adress</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_addresses_per_duid">
+        <segment><source>Addresses per DUID</source><target>Adresser per DUID</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_prefixes_per_duid">
+        <segment><source>Prefixes per DUID</source><target>Prefix per DUID</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_offers_per_second">
+        <segment><source>New clients per second</source><target>Nya klienter per sekund</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_renew_cache">
+        <segment><source>Renewal cache (percent of the lease time)</source><target>Förnyelsecache (procent av lånetiden)</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_conflicts_per_mac">
+        <segment><source>Conflict marks per MAC address</source><target>Konfliktmarkeringar per MAC-adress</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_conflict_share">
+        <segment><source>Conflict marks per scope</source><target>Konfliktmarkeringar per omfång</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_leases_per_mac_help">
+        <segment><source>DHCPv4 bindings one MAC address holds in a scope across its client identifiers. 0 to {max}.</source><target>DHCPv4-bindningar som en MAC-adress har i ett omfång, över alla dess klientidentiteter. 0 till {max}.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_addresses_per_duid_help">
+        <segment><source>DHCPv6 addresses (IA_NA) one DUID holds in a scope. 0 to {max}.</source><target>DHCPv6-adresser (IA_NA) som en DUID har i ett omfång. 0 till {max}.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_prefixes_per_duid_help">
+        <segment><source>DHCPv6 delegated prefixes one DUID holds in a scope. 0 to {max}.</source><target>Delegerade DHCPv6-prefix som en DUID har i ett omfång. 0 till {max}.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_offers_per_second_help">
+        <segment><source>New clients a scope offers an address to each second, with a burst of ten seconds' worth. A client that holds a lease is not counted. 0 to {max}.</source><target>Nya klienter som ett omfång erbjuder en adress varje sekund, med en skur på tio sekunders mängd. En klient som redan har ett lån räknas inte. 0 till {max}.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_renew_cache_help">
+        <segment><source>A renewal within this share of its lease time since the last commit is answered from the stored lease, with no write. 0 to {max}.</source><target>En förnyelse inom denna andel av lånetiden sedan senaste lagring besvaras från det lagrade lånet, utan skrivning. 0 till {max}.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_refused">
+        <segment><source>Requests the limits refused</source><target>Förfrågningar som gränserna nekade</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_refused_label">
+        <segment><source>Requests the limits refused</source><target>Förfrågningar som gränserna nekade</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_limit">
+        <segment><source>Limit</source><target>Gräns</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_client">
+        <segment><source>Client</source><target>Klient</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_network">
+        <segment><source>Network</source><target>Nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_held">
+        <segment><source>Held</source><target>Innehav</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_count">
+        <segment><source>Refusals</source><target>Nekanden</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_last">
+        <segment><source>Last refusal</source><target>Senaste nekande</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_held">
+        <segment><source>holds {held} of {cap}</source><target>har {held} av {cap}</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_offer_note">
+        <segment><source>New clients wait for the scope's offer rate, not for its pool: after a power cut a large scope may need more than the burst.</source><target>Nya klienter väntar på omfångets erbjudandetakt, inte på dess adresspool: efter ett strömavbrott kan ett stort omfång behöva mer än skuren.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_unlogged">
+        <segment><source>{count, plural, one {# more refusal was not kept.} other {# more refusals were not kept.}}</source><target>{count, plural, one {# nekande till sparades inte.} other {# nekanden till sparades inte.}}</target></segment>
+      </unit>
+      <unit id="dhcp.check.limits_range">
+        <segment><source>Enter a whole number from 0 to {max}.</source><target>Ange ett heltal från 0 till {max}.</target></segment>
+      </unit>
       <unit id="dhcp.settings.save">
         <segment><source>Save</source><target>Spara</target></segment>
       </unit>

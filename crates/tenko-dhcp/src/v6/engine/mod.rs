@@ -7,7 +7,11 @@
 //!
 //! - **The relays** ([`RelayChain`]). A RELAY-FORW is walked to the client's message, at
 //!   most eight relays deep; the reply goes back through a RELAY-REPL per relay with its
-//!   Interface-Id echoed, to the address the outermost RELAY-FORW came from.
+//!   Interface-Id echoed, to the address the outermost RELAY-FORW came from. The chain is
+//!   served only from trusted relays ([`relays_trusted`], `dhcp.settings.trusted_relays`):
+//!   the outermost by the datagram's source, each inner relay by the peer address its
+//!   enclosing relay recorded; only the data of trusted relays selects a scope or feeds the
+//!   MAC filters.
 //! - **The client.** Its DUID (option 1); its link-layer address from the Client
 //!   Link-Layer Address option the relay on its link added (RFC 6939), else from a
 //!   DUID-LLT or DUID-LL, for the MAC filters (DHCP-08), the reservations by MAC and the
@@ -44,7 +48,7 @@ pub mod metrics;
 pub mod offers;
 
 use std::{
-    net::{Ipv6Addr, SocketAddrV6},
+    net::{IpAddr, Ipv6Addr, SocketAddrV6},
     time::Duration,
 };
 
@@ -127,6 +131,8 @@ pub struct Context6<'a> {
     pub offers: &'a Offers6,
     /// The settings.
     pub settings: &'a Engine6Settings,
+    /// The node's protections: the profile in force and the relay log.
+    pub guard: &'a crate::guard::Guard,
     /// The server's DUID (option 2).
     pub server_duid: &'a [u8],
     /// Whether the store takes lease writes now (P3-Q14).
@@ -276,7 +282,7 @@ pub fn select<'a>(
     let v6 = image.v6();
     if chain.is_relayed() {
         if let Some(scope) = chain
-            .relays()
+            .trusted_relays()
             .rev()
             .filter_map(|relay| relay.interface_id().ok().flatten())
             .find_map(|id| v6.by_interface_id(id))
@@ -289,6 +295,56 @@ pub fn select<'a>(
             .map(|scope| (scope, Selector6::LinkAddress));
     }
     v6.select(local).map(|scope| (scope, Selector6::Listener))
+}
+
+/// How many relays of `chain`, from the outermost, are trusted (RFC 8415 section 19 leaves
+/// the trust of a relay to the server): the outermost by the datagram's source, each inner
+/// relay by the peer address its enclosing relay recorded, which is where that relay's
+/// message came from. Only the data of these relays counts. An inner relay further in that
+/// names a link (a link address other than `::`) is refused; one that names none (the form
+/// of a lightweight relay of RFC 6221) is passed through with its data ignored, unless its
+/// peer address is trusted too: an operator whose relays have lightweight relays below them
+/// lists the link-local prefix `fe80::/10`, which never makes a link-local sender an
+/// outermost relay. A refused relay goes to the relay log.
+///
+/// # Errors
+///
+/// [`DropReason::UntrustedRelay`].
+pub fn relays_trusted(
+    ctx: &Context6<'_>,
+    chain: &RelayChain<'_>,
+    source: Ipv6Addr,
+) -> Result<usize, DropReason> {
+    let Some(outermost) = chain.outermost() else {
+        return Ok(0);
+    };
+    let trusts = |addr: Ipv6Addr| ctx.guard.trusts_relay(ctx.image, IpAddr::V6(addr));
+    if !ctx.guard.trusts_sender(ctx.image, IpAddr::V6(source)) {
+        ctx.guard.refuse_relay(
+            IpAddr::V6(source),
+            IpAddr::V6(outermost.link_address()),
+            ctx.now,
+        );
+        return Err(DropReason::UntrustedRelay);
+    }
+    let mut trusted = 1;
+    let mut open = true;
+    let mut outer = outermost;
+    for inner in chain.relays().skip(1) {
+        let peer = outer.peer_address();
+        if open && trusts(peer) {
+            trusted += 1;
+        } else {
+            open = false;
+            if !inner.link_address().is_unspecified() {
+                ctx.guard
+                    .refuse_relay(IpAddr::V6(peer), IpAddr::V6(inner.link_address()), ctx.now);
+                return Err(DropReason::UntrustedRelay);
+            }
+        }
+        outer = inner;
+    }
+    Ok(trusted)
 }
 
 /// The client's link-layer address: the RFC 6939 option of the relay on its link, else the
@@ -313,7 +369,7 @@ pub fn handle(ctx: &Context6<'_>, received: &Received6<'_>, scratch: &mut Scratc
     let Ok(message) = Message::parse(received.bytes) else {
         return answer(None, Action6::Drop(DropReason::Malformed));
     };
-    let Ok(chain) = RelayChain::parse(message) else {
+    let Ok(mut chain) = RelayChain::parse(message) else {
         return answer(None, Action6::Drop(DropReason::Malformed));
     };
     let client = chain.client();
@@ -364,6 +420,10 @@ pub fn handle(ctx: &Context6<'_>, received: &Received6<'_>, scratch: &mut Scratc
     }
     if client_id.is_none() && kind != MessageType::InformationRequest {
         return answer(request, Action6::Ignore(Ignore6::Incomplete));
+    }
+    match relays_trusted(ctx, &chain, *received.source.ip()) {
+        Ok(trusted) => chain.limit_trust(trusted),
+        Err(reason) => return answer(request, Action6::Drop(reason)),
     }
     let link_layer = link_layer_of(&chain, client_id);
     let mac = link_layer
@@ -669,6 +729,18 @@ fn claim<'a>(
             &hinted[..count],
             &skip[..skipped],
         )?;
+        if matches!(pick.source, Source::Hint | Source::Pool)
+            && !new_binding_allowed(
+                ctx,
+                inbound,
+                scope,
+                Lease6Kind::Na,
+                (pick.home.prefix, pick.addr, &identity[..len]),
+                taken,
+            )
+        {
+            return None;
+        }
         if !hold {
             return Some(pick);
         }
@@ -688,6 +760,65 @@ fn claim<'a>(
         }
     }
     None
+}
+
+/// Whether a new binding of `kind` (an address or prefix the client does not hold) may be
+/// given: the client's DUID stays within its limit in the scope and its shared network
+/// (`addresses_per_duid`, `prefixes_per_duid`; the bindings it holds plus the new ones of
+/// this message in `taken`), and one without an offer of its own (a SOLICIT, a REQUEST
+/// that skipped it, Rapid Commit) counts in the scope's offer rate. A refusal goes to the
+/// limit log and the IA gets `NoAddrsAvail` or `NoPrefixAvail`.
+fn new_binding_allowed(
+    ctx: &Context6<'_>,
+    inbound: &Inbound<'_>,
+    scope: &Scope6Image,
+    kind: Lease6Kind,
+    (home, addr, identity): (tenko_core::PrefixId, Ipv6Addr, &[u8]),
+    taken: &[Ipv6Addr],
+) -> bool {
+    let limits = ctx.guard.limits(ctx.image);
+    let (cap, limit) = match kind {
+        Lease6Kind::Na => (
+            limits.addresses_per_duid,
+            crate::limits::Limit::AddressesPerDuid,
+        ),
+        Lease6Kind::Pd => (
+            limits.prefixes_per_duid,
+            crate::limits::Limit::PrefixesPerDuid,
+        ),
+    };
+    if cap > 0 && !inbound.duid.is_empty() {
+        let image = ctx.image.v6();
+        let bound = |taken: &Ipv6Addr| {
+            image.siblings(scope).any(|sibling| {
+                ctx.leases.get(sibling.vrf, *taken).is_some_and(|lease| {
+                    lease.kind == kind
+                        && lease.duid.as_bytes() == inbound.duid
+                        && lease.is_bound(ctx.now)
+                })
+            })
+        };
+        let fresh = taken.iter().filter(|taken| !bound(taken)).count();
+        let held = image
+            .siblings(scope)
+            .map(|sibling| ctx.leases.duid_bindings(sibling.prefix, kind, inbound.duid))
+            .sum::<usize>()
+            + fresh;
+        if held >= cap as usize {
+            ctx.guard.refuse_limit(
+                limit,
+                inbound.duid,
+                scope.prefix,
+                (cap, u32::try_from(held).unwrap_or(u32::MAX)),
+                ctx.now,
+            );
+            return false;
+        }
+    }
+    ctx.offers.held_for(home, addr, identity, ctx.now)
+        || ctx
+            .guard
+            .take_offer(scope.prefix, limits.offers_per_second, ctx.now)
 }
 
 /// One `IA_PD`'s prefix, held in the offers as [`claim`] holds an address.
@@ -714,6 +845,18 @@ fn claim_pd<'a>(
             &hinted[..count],
             &skip[..skipped],
         )?;
+        if matches!(pick.source, Source::Hint | Source::Pool)
+            && !new_binding_allowed(
+                ctx,
+                inbound,
+                scope,
+                Lease6Kind::Pd,
+                (pick.home.prefix, pick.prefix, &identity[..len]),
+                taken,
+            )
+        {
+            return None;
+        }
         if !hold {
             return Some(pick);
         }
@@ -1267,9 +1410,15 @@ fn give_back(
     let Some((list, count)) = ias(&inbound.message) else {
         return Action6::Drop(DropReason::Malformed);
     };
+    // As for DHCPv4: a client releases at most a few times an hour, and keeps its bindings
+    // beyond that.
+    if kind == MessageType::Release && !ctx.guard.release_allowed(inbound.duid) {
+        return Action6::Drop(DropReason::RateLimited);
+    }
     let image = ctx.image.v6();
     let mut replies = [IaReply::new(0); MAX_BINDINGS];
     let mut shown = 0;
+    let mut limited = false;
     begin_change(ctx, inbound, &mut scratch.change, None);
     for ia in list[..count].iter().flatten() {
         let mut held_any = false;
@@ -1289,6 +1438,12 @@ fn give_back(
                 continue;
             }
             held_any = true;
+            // The DECLINE limit of DHCPv4, per client and address: a declined address
+            // beyond it stays the client's.
+            if kind == MessageType::Decline && !ctx.guard.decline_allowed(inbound.duid) {
+                limited = true;
+                continue;
+            }
             let (event, state, ends) = if kind == MessageType::Decline {
                 (
                     LeaseEventKind::Declined,
@@ -1325,6 +1480,9 @@ fn give_back(
             return Action6::Drop(DropReason::Malformed);
         };
         shown = after;
+    }
+    if limited && scratch.change.is_empty() {
+        return Action6::Drop(DropReason::RateLimited);
     }
     if !scratch.change.is_empty() && !ctx.accepting {
         return Action6::Drop(DropReason::StoreRefused);

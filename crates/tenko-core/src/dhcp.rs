@@ -630,9 +630,102 @@ pub struct DhcpSettings {
     /// Lease history retention in days (P3-Q13): none follows the security profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_days: Option<u32>,
+    /// The relay agents the server trusts, as prefixes of the addresses their messages come
+    /// from: `giaddr`, option 82, option 118 and a DHCPv6 RELAY-FORW are honored only from
+    /// a sender in the list, and replies go only to a trusted relay or to the client's own
+    /// link. None follows the security profile (every sender under Lab, none otherwise); a
+    /// list, even an empty one, applies under every profile. At most
+    /// [`MAX_TRUSTED_RELAYS`] prefixes, without host bits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Vec<String>>, example = json!(["192.0.2.1/32", "2001:db8::1/128"]))]
+    pub trusted_relays: Option<Vec<IpNet>>,
+    /// The limits per client and per scope that keep one client or one link from taking a
+    /// pool, and the renewal cache; each field left unset follows the security profile.
+    #[serde(default, skip_serializing_if = "DhcpLimits::is_unset")]
+    pub limits: DhcpLimits,
     /// Last change; none before the first write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated: Option<Stamp>,
+}
+
+/// The limits per client and per scope (`docs/dhcp.md` section 14.9). A field left unset
+/// follows the security profile; zero turns a limit off. A client over a limit gets no new
+/// binding, and the bindings it holds keep renewing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DhcpLimits {
+    /// DHCPv4 bindings one MAC address holds in a scope across its client identifiers
+    /// (option 61): active leases that have not ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leases_per_mac: Option<u32>,
+    /// DHCPv6 address bindings (`IA_NA`) one DUID holds in a scope across its IAIDs and
+    /// messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub addresses_per_duid: Option<u32>,
+    /// DHCPv6 delegated prefixes (`IA_PD`) one DUID holds in a scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefixes_per_duid: Option<u32>,
+    /// New clients a scope offers an address to per second, with a burst of ten seconds'
+    /// worth; a client that holds a lease of the scope is not counted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offers_per_second: Option<u32>,
+    /// A renewal that comes within this share of its lease time, counted from its last
+    /// commit, is answered from the stored lease for the time it has left, with no commit
+    /// and no history row: percent, 0 to 50.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renew_cache_percent: Option<u8>,
+}
+
+impl DhcpLimits {
+    /// Whether every field is unset.
+    pub fn is_unset(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Checks the limits.
+    ///
+    /// # Errors
+    ///
+    /// `dhcp.settings.invalid` naming the field.
+    pub fn validate(&self) -> Result<(), DhcpError> {
+        let checks: [(&str, Option<u32>, u32, &str); 5] = [
+            (
+                "limits.leases_per_mac",
+                self.leases_per_mac,
+                65_535,
+                "0 (off) to 65535",
+            ),
+            (
+                "limits.addresses_per_duid",
+                self.addresses_per_duid,
+                65_535,
+                "0 (off) to 65535",
+            ),
+            (
+                "limits.prefixes_per_duid",
+                self.prefixes_per_duid,
+                65_535,
+                "0 (off) to 65535",
+            ),
+            (
+                "limits.offers_per_second",
+                self.offers_per_second,
+                100_000,
+                "0 (off) to 100000",
+            ),
+            (
+                "limits.renew_cache_percent",
+                self.renew_cache_percent.map(u32::from),
+                50,
+                "0 (off) to 50 percent",
+            ),
+        ];
+        for (field, value, max, text) in checks {
+            if value.is_some_and(|value| value > max) {
+                return Err(DhcpError::invalid(codes::SETTINGS_INVALID, field, text));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for DhcpSettings {
@@ -643,10 +736,15 @@ impl Default for DhcpSettings {
             ddns: DdnsPolicy::default(),
             conflict_detection: None,
             history_days: None,
+            trusted_relays: None,
+            limits: DhcpLimits::default(),
             updated: None,
         }
     }
 }
+
+/// The most prefixes [`DhcpSettings::trusted_relays`] holds.
+pub const MAX_TRUSTED_RELAYS: usize = 256;
 
 impl DhcpSettings {
     /// Checks the settings.
@@ -654,7 +752,8 @@ impl DhcpSettings {
     /// # Errors
     ///
     /// The codes of the lease and DDNS checks, or `dhcp.settings.invalid` for a history
-    /// retention of 0 or more than ten years.
+    /// retention of 0 or more than ten years, or a list of trusted relays that is too long
+    /// or holds a prefix with host bits.
     pub fn validate(&self) -> Result<(), DhcpError> {
         self.lease.validate("lease")?;
         self.ddns.validate("ddns")?;
@@ -667,6 +766,23 @@ impl DhcpSettings {
                 "history_days",
                 "1 to 3650 days",
             ));
+        }
+        self.limits.validate()?;
+        if let Some(relays) = &self.trusted_relays {
+            if relays.len() > MAX_TRUSTED_RELAYS {
+                return Err(DhcpError::invalid(
+                    codes::SETTINGS_INVALID,
+                    "trusted_relays",
+                    "at most 256 prefixes",
+                ));
+            }
+            if relays.iter().any(|prefix| prefix.trunc() != *prefix) {
+                return Err(DhcpError::invalid(
+                    codes::SETTINGS_INVALID,
+                    "trusted_relays",
+                    "a prefix without host bits, such as 192.0.2.1/32 or 198.51.100.0/24",
+                ));
+            }
         }
         Ok(())
     }

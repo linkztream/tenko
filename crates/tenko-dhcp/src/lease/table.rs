@@ -83,6 +83,9 @@ pub struct LeaseIndex {
     rows: HashMap<Key, Row>,
     /// The keyed hash of a scope and a client identity, to the rows of that client there.
     clients: HashMap<u64, Keys>,
+    /// The keyed hash of a scope and a MAC address, to the active rows of that MAC there
+    /// (the limit `leases_per_mac`): one entry per device, not per row.
+    macs: HashMap<u64, u32>,
     hasher: RandomState,
     revision: Revision,
     /// The encoder's buffer, so that a row costs one allocation of its own size.
@@ -246,11 +249,20 @@ impl LeaseIndex {
         let scope = lease.scope;
         let mut identity = [0u8; MAX_IDENTITY];
         let len = identity_of(&lease, &mut identity);
+        let counted = (lease.state == BindingState::Active)
+            .then(|| super::client_mac(&lease.client))
+            .flatten();
         let row = Row::new(&lease, revision, &mut self.scratch);
         drop(lease);
         let previous = self.rows.insert(key, row);
         if revision > self.revision {
             self.revision = revision;
+        }
+        if let Some(mac) = counted {
+            self.count_mac(scope, mac, true);
+        }
+        if let Some(previous) = &previous {
+            self.uncount(previous);
         }
         if let Some(previous) = previous {
             let mut held_identity = [0u8; MAX_IDENTITY];
@@ -266,10 +278,33 @@ impl LeaseIndex {
     /// Removes the row of an address; returns it.
     pub fn take(&mut self, vrf: VrfId, addr: Ipv4Addr) -> Option<Lease> {
         let row = self.rows.remove(&(vrf, addr))?;
+        self.uncount(&row);
         let mut identity = [0u8; MAX_IDENTITY];
         let len = row.client().identity(&mut identity);
         self.detach(row.scope, &identity[..len], (vrf, addr));
         Some(row.to_lease(vrf, addr))
+    }
+
+    /// Counts an active row of `mac` in `scope` in or out.
+    fn count_mac(&mut self, scope: PrefixId, mac: [u8; 6], add: bool) {
+        let hash = self.hasher.hash_one((scope, b'm', mac));
+        if add {
+            *self.macs.entry(hash).or_default() += 1;
+        } else if let Some(count) = self.macs.get_mut(&hash) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.macs.remove(&hash);
+            }
+        }
+    }
+
+    /// Counts a row that leaves the table out of the MAC counts.
+    fn uncount(&mut self, row: &Row) {
+        if row.state == BindingState::Active
+            && let Some(mac) = row.client().mac_for_limits()
+        {
+            self.count_mac(row.scope, mac, false);
+        }
     }
 
     fn client_hash(&self, scope: PrefixId, identity: &[u8]) -> u64 {
@@ -416,6 +451,12 @@ impl LeaseTable for LeaseIndex {
 
     fn len(&self) -> usize {
         self.rows.len()
+    }
+
+    fn mac_bindings(&self, scope: PrefixId, mac: [u8; 6]) -> usize {
+        self.macs
+            .get(&self.hasher.hash_one((scope, b'm', mac)))
+            .map_or(0, |count| *count as usize)
     }
 }
 

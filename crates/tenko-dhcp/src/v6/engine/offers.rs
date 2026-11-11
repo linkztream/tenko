@@ -118,6 +118,31 @@ impl Offers6 {
         true
     }
 
+    /// Whether `addr` of `scope` is held at `now` for the client of `identity` itself.
+    pub fn held_for(
+        &self,
+        scope: PrefixId,
+        addr: Ipv6Addr,
+        identity: &[u8],
+        now: Timestamp,
+    ) -> bool {
+        let (scope_hash, addr, stripe, start) = self.place(scope, addr);
+        let who = hash_of_bytes(identity);
+        let now = nanos(now);
+        let slots = self.stripes[stripe]
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let len = slots.len();
+        (0..PROBE.min(len)).any(|step| {
+            let slot = slots[(start + step) % len];
+            slot.used
+                && slot.scope == scope_hash
+                && slot.addr == addr
+                && slot.live(now)
+                && slot.who == who
+        })
+    }
+
     /// Whether `addr` of `scope` is held at `now` for a client other than `identity`.
     pub fn held_for_other(
         &self,

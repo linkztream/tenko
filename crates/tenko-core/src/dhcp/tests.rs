@@ -758,6 +758,62 @@ fn settings_and_ddns_validate() {
     );
     let back: DhcpSettings = from_cbor(&to_cbor(&settings).expect("cbor")).expect("cbor");
     assert_eq!(back, settings);
+    // A row written before the list existed reads as unset: the profile decides.
+    let older: DhcpSettings = serde_json::from_str(r#"{"authoritative":true}"#).expect("json");
+    assert_eq!(older.trusted_relays, None);
+    let relays = |list: &[&str]| DhcpSettings {
+        trusted_relays: Some(
+            list.iter()
+                .map(|text| text.parse().expect("a prefix"))
+                .collect(),
+        ),
+        ..settings.clone()
+    };
+    assert!(relays(&[]).validate().is_ok());
+    assert!(
+        relays(&["192.0.2.1/32", "2001:db8::/64"])
+            .validate()
+            .is_ok()
+    );
+    assert!(relays(&["192.0.2.1/24"]).validate().is_err());
+    let many: Vec<String> = (0..=256)
+        .map(|n| format!("10.0.{}.{}/32", n / 256, n % 256))
+        .collect();
+    let many: Vec<&str> = many.iter().map(String::as_str).collect();
+    assert!(relays(&many[..256]).validate().is_ok());
+    assert!(relays(&many).validate().is_err());
+    // The limits: unset in a row written before them, checked against their bounds.
+    assert_eq!(older.limits, crate::dhcp::DhcpLimits::default());
+    let limits = |limits: crate::dhcp::DhcpLimits| DhcpSettings {
+        limits,
+        ..settings.clone()
+    };
+    assert!(
+        limits(crate::dhcp::DhcpLimits {
+            leases_per_mac: Some(0),
+            renew_cache_percent: Some(50),
+            offers_per_second: Some(100_000),
+            ..crate::dhcp::DhcpLimits::default()
+        })
+        .validate()
+        .is_ok()
+    );
+    for bad in [
+        crate::dhcp::DhcpLimits {
+            renew_cache_percent: Some(51),
+            ..crate::dhcp::DhcpLimits::default()
+        },
+        crate::dhcp::DhcpLimits {
+            offers_per_second: Some(100_001),
+            ..crate::dhcp::DhcpLimits::default()
+        },
+        crate::dhcp::DhcpLimits {
+            prefixes_per_duid: Some(70_000),
+            ..crate::dhcp::DhcpLimits::default()
+        },
+    ] {
+        assert!(limits(bad).validate().is_err());
+    }
     let ddns = DdnsPolicy {
         ttl: Some(700_000),
         ..DdnsPolicy::default()

@@ -172,6 +172,17 @@ impl<'a> ClientView<'a> {
         }
     }
 
+    /// The MAC address the limits count: the six octets of an Ethernet or IEEE 802
+    /// hardware address ([`crate::lease::client_mac`]).
+    pub fn mac_for_limits(&self) -> Option<[u8; 6]> {
+        let (htype, chaddr, _) = self.parts();
+        if matches!(htype, 1 | 6) {
+            <[u8; 6]>::try_from(chaddr).ok()
+        } else {
+            None
+        }
+    }
+
     /// The client key (allocates).
     pub fn to_key(&self) -> ClientKey {
         let (htype, chaddr, client_id) = self.parts();

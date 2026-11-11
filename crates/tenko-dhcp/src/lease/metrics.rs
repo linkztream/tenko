@@ -12,7 +12,7 @@ use tenko_core::metrics::{Counter, CounterVec, Desc, Gauge, Histogram, Registry}
 use crate::metrics as families;
 
 /// The reasons of `tenko_dhcp_dropped_total`, in series order.
-pub const DROP_REASONS: [&str; 7] = [
+pub const DROP_REASONS: [&str; 9] = [
     "malformed",
     "filtered",
     "no_scope",
@@ -20,6 +20,8 @@ pub const DROP_REASONS: [&str; 7] = [
     "queue",
     "store_refused",
     "rate_limited",
+    "untrusted_relay",
+    "limited",
 ];
 
 /// The series of a drop reason in [`DROPPED`].
@@ -40,6 +42,10 @@ pub enum DropReason {
     StoreRefused = 5,
     /// A rate limit dropped it.
     RateLimited = 6,
+    /// Relay data from a sender that is not a trusted relay.
+    UntrustedRelay = 7,
+    /// A limit per client or per scope.
+    Limited = 8,
 }
 
 impl DropReason {
@@ -60,6 +66,8 @@ pub static DROPPED: CounterVec = CounterVec::fixed(
         &["queue"],
         &["store_refused"],
         &["rate_limited"],
+        &["untrusted_relay"],
+        &["limited"],
     ],
 );
 
@@ -119,7 +127,7 @@ mod tests {
             "store_refused"
         );
         assert_eq!(DROP_REASONS[DropReason::Queue as usize], "queue");
-        assert_eq!(DROP_REASONS.len(), DropReason::RateLimited as usize + 1);
+        assert_eq!(DROP_REASONS.len(), DropReason::Limited as usize + 1);
         for desc in [EXPIRED_DESC, HISTORY_ROWS_DESC, HISTORY_PURGED_DESC] {
             assert!(desc.name.starts_with("tenko_dhcp_"));
             assert!(families::ALL.iter().all(|known| known.name != desc.name));

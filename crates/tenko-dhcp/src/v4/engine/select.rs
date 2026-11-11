@@ -12,6 +12,10 @@
 //!    arrives (the client is on another link than the listener);
 //! 5. the address of the listener the request arrived on (a client on the listener's link).
 //!
+//! The first three count only from a trusted relay (RFC 3527 section 4, RFC 3011 section 5:
+//! `dhcp.settings.trusted_relays`, [`crate::relay`]); the engine refuses a request with a
+//! `giaddr` from any other sender before it selects.
+//!
 //! The selection never reads the store and never allocates.
 
 use std::net::Ipv4Addr;
@@ -37,17 +41,19 @@ pub enum Selector {
     Interface,
 }
 
-/// The address the scope is selected by, and why.
+/// The address the scope is selected by, and why. `relay` is option 82 of a trusted relay
+/// and `trusted` whether the sender is one; option 118 counts only then.
 pub fn selector(
     message: &Message<'_>,
     kind: MessageType,
     relay: Option<RelayAgentInfo<'_>>,
+    trusted: bool,
     received: &Received<'_>,
 ) -> (Ipv4Addr, Selector) {
     if let Some(link) = relay.and_then(|info| info.link_selection()) {
         return (link, Selector::LinkSelection);
     }
-    if let Ok(Some(subnet)) = message.subnet_selection() {
+    if trusted && let Ok(Some(subnet)) = message.subnet_selection() {
         return (subnet, Selector::SubnetSelection);
     }
     let giaddr = message.giaddr();
@@ -72,8 +78,9 @@ pub fn select<'a>(
     message: &Message<'_>,
     kind: MessageType,
     relay: Option<RelayAgentInfo<'_>>,
+    trusted: bool,
     received: &Received<'_>,
 ) -> Option<(&'a ScopeImage, Selector)> {
-    let (addr, how) = selector(message, kind, relay, received);
+    let (addr, how) = selector(message, kind, relay, trusted, received);
     image.select(addr).map(|scope| (scope, how))
 }

@@ -409,6 +409,45 @@ pub struct SettingsSetArgs {
     /// Whether the server probes an address before it offers it.
     #[arg(long, value_name = "BOOL")]
     pub conflict_detection: Option<bool>,
+    /// The trusted relay agents, replacing the list: prefixes of the addresses they send
+    /// from, comma-separated (`192.0.2.1/32,2001:db8::1/128`); `none` trusts no relay.
+    /// Relayed requests from any other sender are dropped.
+    #[arg(long, value_name = "PREFIXES", conflicts_with = "clear_trusted_relays")]
+    pub trusted_relays: Option<String>,
+    /// Unsets the trusted relays, so that the security profile decides again (every
+    /// sender under Lab, none otherwise).
+    #[arg(long)]
+    pub clear_trusted_relays: bool,
+    /// The limits per client and per scope, replaced whole: a limit given here is set (0
+    /// turns it off), every other one follows the security profile. DHCPv4 active bindings
+    /// per MAC address and scope.
+    #[arg(long, value_name = "N")]
+    pub leases_per_mac: Option<u32>,
+    /// DHCPv6 address bindings per DUID and scope (see `--leases-per-mac`).
+    #[arg(long, value_name = "N")]
+    pub addresses_per_duid: Option<u32>,
+    /// DHCPv6 delegated prefixes per DUID and scope (see `--leases-per-mac`).
+    #[arg(long, value_name = "N")]
+    pub prefixes_per_duid: Option<u32>,
+    /// New clients a scope offers an address to per second (see `--leases-per-mac`).
+    #[arg(long, value_name = "N")]
+    pub offers_per_second: Option<u32>,
+    /// Renewals within this percent of their lease time are answered from the stored
+    /// lease without a commit, 0 to 50 (see `--leases-per-mac`).
+    #[arg(long, value_name = "PERCENT")]
+    pub renew_cache_percent: Option<u8>,
+    /// Every limit follows the security profile again.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "leases_per_mac",
+            "addresses_per_duid",
+            "prefixes_per_duid",
+            "offers_per_second",
+            "renew_cache_percent",
+        ]
+    )]
+    pub profile_limits: bool,
 }
 
 /// Arguments of `tenko dhcp scope create`.
@@ -1301,6 +1340,29 @@ fn settings(action: &SettingsCommand) -> Result<Request, Failure> {
             insert(&mut body, "authoritative", args.authoritative);
             insert(&mut body, "conflict_detection", args.conflict_detection);
             insert(&mut body, "history_days", args.history_days);
+            insert(
+                &mut body,
+                "trusted_relays",
+                args.trusted_relays.as_deref().map(|list| {
+                    list.split(',')
+                        .map(str::trim)
+                        .filter(|item| !item.is_empty() && *item != "none")
+                        .map(|item| Value::String(item.to_owned()))
+                        .collect::<Vec<_>>()
+                }),
+            );
+            if args.clear_trusted_relays {
+                body.insert("clear_trusted_relays".to_owned(), Value::Bool(true));
+            }
+            let mut limits = Map::new();
+            insert(&mut limits, "leases_per_mac", args.leases_per_mac);
+            insert(&mut limits, "addresses_per_duid", args.addresses_per_duid);
+            insert(&mut limits, "prefixes_per_duid", args.prefixes_per_duid);
+            insert(&mut limits, "offers_per_second", args.offers_per_second);
+            insert(&mut limits, "renew_cache_percent", args.renew_cache_percent);
+            if args.profile_limits || !limits.is_empty() {
+                body.insert("limits".to_owned(), Value::Object(limits));
+            }
             Ok(
                 Request::new(Method::Put, "/dhcp/settings", Present::Item)
                     .with_body(changes(body)?),
@@ -2418,6 +2480,74 @@ mod tests {
         ]);
         assert!(order.message.contains("out of order"), "{}", order.message);
         assert!(parse(&["settings", "set", "--authoritative", "maybe"]).is_err());
+        assert!(
+            parse(&[
+                "settings",
+                "set",
+                "--trusted-relays",
+                "none",
+                "--clear-trusted-relays"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn settings_trusted_relays_and_limits() {
+        // The trusted relays: a list, none, or back to the profile.
+        check(
+            &[
+                "settings",
+                "set",
+                "--trusted-relays",
+                "192.0.2.1/32, 2001:db8::1/128",
+            ],
+            Method::Put,
+            "/dhcp/settings",
+            Some(json!({"trusted_relays": ["192.0.2.1/32", "2001:db8::1/128"]})),
+        );
+        check(
+            &["settings", "set", "--trusted-relays", "none"],
+            Method::Put,
+            "/dhcp/settings",
+            Some(json!({"trusted_relays": []})),
+        );
+        check(
+            &["settings", "set", "--clear-trusted-relays"],
+            Method::Put,
+            "/dhcp/settings",
+            Some(json!({"clear_trusted_relays": true})),
+        );
+        // The limits: the ones given, the others to the profile; or all to the profile.
+        check(
+            &[
+                "settings",
+                "set",
+                "--leases-per-mac",
+                "32",
+                "--renew-cache-percent",
+                "0",
+            ],
+            Method::Put,
+            "/dhcp/settings",
+            Some(json!({"limits": {"leases_per_mac": 32, "renew_cache_percent": 0}})),
+        );
+        check(
+            &["settings", "set", "--profile-limits"],
+            Method::Put,
+            "/dhcp/settings",
+            Some(json!({"limits": {}})),
+        );
+        assert!(
+            parse(&[
+                "settings",
+                "set",
+                "--profile-limits",
+                "--offers-per-second",
+                "5"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

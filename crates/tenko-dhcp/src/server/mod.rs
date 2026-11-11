@@ -74,6 +74,7 @@ use crate::conflict::{
 use crate::v4::engine::OfferBook as _;
 use crate::{
     allocator::SingleNode,
+    guard::Guard,
     image::ConfigImage,
     lease::{LeaseTable, PendingChange, SharedLeases},
     sizing::{self, Limits, Room},
@@ -148,6 +149,9 @@ pub struct ServerConfig {
     /// The proxy DHCP listeners: the unicast address and port (4011 for the boot server
     /// discovery of PXE), each answered by one worker with [`engine::boot::proxy`].
     pub proxy: Vec<SocketAddrV4>,
+    /// The node's protections, shared with the DHCPv6 server: the profile in force and the
+    /// relay log.
+    pub guard: Arc<Guard>,
 }
 
 impl Default for ServerConfig {
@@ -166,6 +170,7 @@ impl Default for ServerConfig {
             node: NodeId(1),
             conflict: ConflictSettings::default(),
             proxy: Vec::new(),
+            guard: Arc::default(),
         }
     }
 }
@@ -358,6 +363,7 @@ struct Shared<H> {
     conflicts: Arc<Conflicts>,
     // E32: the configured sizes, the caps of the tables sized from the image.
     limits: Limits,
+    guard: Arc<Guard>,
 }
 
 impl<H> Shared<H> {
@@ -500,7 +506,10 @@ impl<H: TableHandle> DhcpServer<H> {
             node: config.node,
             conflicts: Arc::new(Conflicts::new(&conflict)),
             limits,
+            guard: Arc::clone(&config.guard),
         });
+        // DHCPv6 counts its DECLINEs in the same limit.
+        shared.guard.share_declines(&shared.conflicts);
         let mut threads = Vec::with_capacity(total + 1);
         let committer = {
             let shared = Arc::clone(&shared);
@@ -552,6 +561,11 @@ impl<H: TableHandle> DhcpServer<H> {
             listeners,
             proxies: proxies.iter().map(|p| p.address).collect(),
         })
+    }
+
+    /// The node's protections.
+    pub fn guard(&self) -> &Arc<Guard> {
+        &self.shared.guard
     }
 
     /// What each listener is.
@@ -787,6 +801,7 @@ fn worker_loop<H: TableHandle>(
                 ownership: &SingleNode,
                 allocator: &HashedAllocator,
                 settings: &shared.settings,
+                guard: &shared.guard,
                 accepting: shared.store.accepting(),
                 now: Timestamp::now(),
             };
@@ -919,6 +934,7 @@ fn proxy_loop<H: TableHandle>(shared: &Shared<H>, socket: &UdpSocket, me: usize,
                 ownership: &SingleNode,
                 allocator: &HashedAllocator,
                 settings: &shared.settings,
+                guard: &shared.guard,
                 accepting: shared.store.accepting(),
                 now: Timestamp::now(),
             };
@@ -1094,7 +1110,15 @@ fn conflict_step<H: TableHandle>(
             let reply = &scratch.reply[..len];
             let candidate = {
                 let table = shared.table.read();
-                rules::candidate(conflicts, image, &*table, request, reply, now)
+                rules::candidate(
+                    conflicts,
+                    &shared.guard,
+                    image,
+                    &*table,
+                    request,
+                    reply,
+                    now,
+                )
             };
             candidate.is_some_and(|candidate| {
                 conflicts.park(&Parking {
@@ -1196,6 +1220,36 @@ impl<H: TableHandle> Hooks for ProbeHooks<H> {
             after(shared.settings.offer_secs),
             now,
         );
+        // The conflict budget: one answering MAC address abandons at most two addresses an
+        // hour, and conflicts at most an eighth of the scope's pool a day; beyond either the
+        // address stays held away for this offer only, and the refusal is logged.
+        let pool = {
+            let image = shared.image.read().unwrap_or_else(PoisonError::into_inner);
+            image.scope(candidate.prefix).map_or(0, |scope| {
+                scope
+                    .pools
+                    .iter()
+                    .map(|pool| {
+                        u64::from(u32::from(pool.last).saturating_sub(u32::from(pool.first))) + 1
+                    })
+                    .sum::<u64>()
+            })
+        };
+        if let Err((limit, cap, held)) =
+            shared
+                .guard
+                .conflicts()
+                .mark(candidate.prefix, pool, mac, now)
+        {
+            shared.guard.refuse_limit(
+                limit,
+                mac.as_ref().map_or(&[][..], |mac| &mac[..]),
+                candidate.prefix,
+                (cap, held),
+                now,
+            );
+            return;
+        }
         let (htype, chaddr): (u8, &[u8]) = match &mac {
             Some(mac) => (1, mac),
             None => (0, &[]),
@@ -1236,6 +1290,12 @@ impl<H: TableHandle> Hooks for ProbeHooks<H> {
         let table = shared.table.read();
         let image = Arc::clone(&shared.image.read().unwrap_or_else(PoisonError::into_inner));
         let now = Timestamp::now();
+        // The DISCOVER counted in its scope's offer rate once; running it again for the
+        // next address gives that token back first.
+        shared.guard.refund_offer(
+            parked.candidate.selected,
+            shared.guard.limits(&image).offers_per_second,
+        );
         let ctx = Context {
             image: &image,
             leases: &*table,
@@ -1243,6 +1303,7 @@ impl<H: TableHandle> Hooks for ProbeHooks<H> {
             ownership: &SingleNode,
             allocator: &HashedAllocator,
             settings: &shared.settings,
+            guard: &shared.guard,
             accepting: shared.store.accepting(),
             now,
         };
@@ -1261,6 +1322,7 @@ impl<H: TableHandle> Hooks for ProbeHooks<H> {
             } => {
                 let candidate = rules::candidate(
                     &shared.conflicts,
+                    &shared.guard,
                     &image,
                     &*table,
                     &received,

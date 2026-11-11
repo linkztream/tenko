@@ -208,8 +208,10 @@ The system component `dhcp` (`SystemComponent::Dhcp`) is the principal of the ro
 | `tenko_dhcp_probe_duration_seconds` | histogram | |
 | `tenko_dhcp_ddns_total` | counter | `outcome` |
 | `tenko_dhcp_ddns_queue` | gauge | |
-| `tenko_dhcp_dropped_total` | counter | `reason` (`malformed`, `filtered`, `no_scope`, `pool_full`, `queue`, `store_refused`, `rate_limited`) |
+| `tenko_dhcp_dropped_total` | counter | `reason` (`malformed`, `filtered`, `no_scope`, `pool_full`, `queue`, `store_refused`, `rate_limited`, `untrusted_relay`, `limited`) |
 | `tenko_dhcp_store_refused_total` | counter | |
+| `tenko_dhcp_limited_total` | counter | `limit` (`leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`, `offers_per_second`, `conflicts_per_mac`, `conflict_share`) |
+| `tenko_dhcp_renewals_cached_total` | counter | |
 
 ## 9. Configuration keys
 

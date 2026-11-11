@@ -523,7 +523,18 @@ pub fn build(data: &DhcpData) -> Built {
                 .collect(),
         )
         // ADR 0027: the clients of move jobs.
-        .moving(data.moving.values());
+        .moving(data.moving.values())
+        .relays(crate::relay::RelayTrust::new(
+            data.settings
+                .as_ref()
+                .and_then(|settings| settings.trusted_relays.as_deref()),
+        ))
+        .limits(
+            data.settings
+                .as_ref()
+                .map(|settings| settings.limits.clone())
+                .unwrap_or_default(),
+        );
     Built {
         image: builder.build(),
         warnings: check_reservations(&candidates),

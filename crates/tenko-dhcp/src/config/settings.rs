@@ -1,7 +1,7 @@
 //! The server settings (`dhcp.settings`, one row): the lease times of scopes that set none,
-//! authority, the DDNS settings new scopes start from, conflict detection (TGL-16) and the
-//! lease history retention (P3-Q13). Before the first write the defaults apply and the row
-//! reads at revision 0.
+//! authority, the DDNS settings new scopes start from, conflict detection (TGL-16), the
+//! lease history retention (P3-Q13) and the trusted relays ([`crate::relay`]). Before the
+//! first write the defaults apply and the row reads at revision 0.
 
 use tenko_core::{
     RequestCtx, Revision,
@@ -29,6 +29,10 @@ pub struct ProfileDefaults {
     /// The lease history retention in days (P3-Q13): 30 under Home, 90 under Standard and
     /// Hardened, 7 under Lab.
     pub history_days: u32,
+    /// Whether an unset list of trusted relays trusts every sender: under Lab only.
+    pub trust_any_relay: bool,
+    /// The limits per client and per scope of the profile ([`crate::limits::Limits`]).
+    pub limits: crate::limits::Limits,
 }
 
 /// The settings to write: each `None` keeps the stored value, except that
@@ -46,6 +50,14 @@ pub struct SettingsChange {
     pub conflict_detection: Option<bool>,
     /// History retention in days; none follows the profile.
     pub history_days: Option<u32>,
+    /// The trusted relays; none keeps the stored list. Stored sorted, without duplicates.
+    pub trusted_relays: Option<Vec<ipnet::IpNet>>,
+    /// Unsets the trusted relays, so that the profile decides again (every sender under
+    /// Lab, none otherwise); refused together with `trusted_relays`.
+    pub clear_trusted_relays: bool,
+    /// The limits per client and per scope, replaced whole; none keeps the stored ones. A
+    /// field left unset in them follows the profile.
+    pub limits: Option<tenko_core::dhcp::DhcpLimits>,
 }
 
 impl ConfigService {
@@ -98,6 +110,27 @@ impl ConfigService {
             }
             after.conflict_detection = change.conflict_detection;
             after.history_days = change.history_days;
+            match (&change.trusted_relays, change.clear_trusted_relays) {
+                (Some(_), true) => {
+                    return Err(tenko_core::dhcp::DhcpError::invalid(
+                        tenko_core::dhcp::codes::SETTINGS_INVALID,
+                        "clear_trusted_relays",
+                        "either a list of trusted relays or clear_trusted_relays",
+                    )
+                    .into());
+                }
+                (Some(list), false) => {
+                    let mut list = list.clone();
+                    list.sort_unstable();
+                    list.dedup();
+                    after.trusted_relays = Some(list);
+                }
+                (None, true) => after.trusted_relays = None,
+                (None, false) => {}
+            }
+            if let Some(limits) = &change.limits {
+                after.limits.clone_from(limits);
+            }
             after.validate()?;
             if after == before && revision > Revision::ZERO {
                 return Ok(Planned::nothing(after));

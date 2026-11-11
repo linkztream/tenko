@@ -143,7 +143,17 @@ fuzz_target!(|data: &[u8]| {
     } else {
         (LISTENER, Selector::Interface)
     };
-    assert_eq!(selector(&message, kind, relay, &received), expected);
+    assert_eq!(selector(&message, kind, relay, true, &received), expected);
+    // From a sender that is not a trusted relay, option 82 and option 118 select nothing
+    // (the engine refuses a `giaddr` from such a sender before it selects).
+    let untrusted = if control & 4 != 0 {
+        (GIADDR, Selector::Giaddr)
+    } else if control & 16 != 0 && kind != MessageType::Discover {
+        (CIADDR, Selector::ClientAddress)
+    } else {
+        (LISTENER, Selector::Interface)
+    };
+    assert_eq!(selector(&message, kind, None, false, &received), untrusted);
 
     // The reply carries the value back unchanged (RFC 3046 section 2.2).
     let Some(info) = relay else {

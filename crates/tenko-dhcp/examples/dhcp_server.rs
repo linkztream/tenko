@@ -4,6 +4,7 @@
 //! ```text
 //! dhcp_server serve [--listen 127.0.0.1:6767] [--relay-port 67] [--workers 4]
 //!                   [--store mem|queue] [--seconds 60] [--lease-secs 3600]
+//!                   [--trusted-relays 0.0.0.0/0] [--renew-cache-percent 25]
 //! dhcp_server load  [--server 127.0.0.1:6767] [--bind 127.0.0.1:6868] [--mode dora|renew]
 //!                   [--clients 10000] [--rate 0] [--window 64] [--seconds 30]
 //!                   [--subnet 198.18.0.0]
@@ -12,7 +13,13 @@
 //! `serve` runs the engine's listener in relay mode over one scope, `198.18.0.0/15` (the
 //! benchmarking range of RFC 2544) with a pool of about 131,000 addresses, selected by
 //! option 118 (RFC 3011) or `giaddr`, so that perfdhcp as a relay and the load client both
-//! reach it; replies go to the relay's port `--relay-port`. The store is the in-memory
+//! reach it; replies go to the relay's port `--relay-port`. `--trusted-relays` is the list
+//! of trusted relays (`dhcp.settings.trusted_relays`, comma-separated prefixes); the
+//! default `0.0.0.0/0` trusts every sender through the list, so that the trust check runs
+//! as it does on a node with a list. The server runs under the Lab profile, whose limits
+//! per client and per scope are off (the load client sends 100,000 clients from 256 MAC
+//! addresses); `--renew-cache-percent` is the renewal cache (`dhcp.settings.limits`, 0
+//! commits every renewal). The store is the in-memory
 //! reference `MemLeaseStore` (`mem`, the oracle of the contracts, whose commit walks every
 //! row of the scope to keep its client index and so slows down as the leases grow), or
 //! `queue`, the same hand-off and completion with no rows kept (the lease table holds them),
@@ -102,8 +109,13 @@ fn network() -> Ipv4Net {
     "198.18.0.0/15".parse().expect("a network")
 }
 
-fn image(lease_secs: u32) -> ConfigImage {
+fn image(lease_secs: u32, relays: &[ipnet::IpNet], renew_cache_percent: u8) -> ConfigImage {
     let mut builder = ImageBuilder::new(Revision(1));
+    builder.relays(tenko_dhcp::relay::RelayTrust::new(Some(relays)));
+    builder.limits(tenko_core::dhcp::DhcpLimits {
+        renew_cache_percent: Some(renew_cache_percent),
+        ..tenko_core::dhcp::DhcpLimits::default()
+    });
     let times = LeaseTimes::fixed(lease_secs);
     builder.scope(ScopeImage {
         prefix: PrefixId::generate(),
@@ -284,7 +296,23 @@ fn serve(args: &Args) -> Result<(), Error> {
     let workers: usize = args.parse("--workers", 4)?;
     let seconds: u64 = args.parse("--seconds", 60)?;
     let lease_secs: u32 = args.parse("--lease-secs", 3_600)?;
+    let relays = args
+        .get("--trusted-relays")
+        .unwrap_or("0.0.0.0/0")
+        .split(',')
+        .filter(|item| !item.is_empty())
+        .map(|item| {
+            item.trim()
+                .parse::<ipnet::IpNet>()
+                .map_err(|error| Error::from(format!("--trusted-relays {item}: {error}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let renew_cache_percent: u8 = args.parse("--renew-cache-percent", 25)?;
     let mut config = ServerConfig {
+        // Lab: no limits per client and per scope for the load client's clients.
+        guard: Arc::new(tenko_dhcp::guard::Guard::new(
+            tenko_dhcp::guard::DhcpProfile::Lab,
+        )),
         listen: vec![Listen {
             address: listen,
             mode: ListenMode::Relay,
@@ -318,7 +346,7 @@ fn serve(args: &Args) -> Result<(), Error> {
     };
     let server = DhcpServer::start(
         &config,
-        image(lease_secs),
+        image(lease_secs, &relays, renew_cache_percent),
         HashTable::default(),
         store,
         Some(drive),

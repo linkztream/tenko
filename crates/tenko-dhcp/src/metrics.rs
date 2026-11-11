@@ -75,7 +75,7 @@ pub const DDNS: Desc =
 pub const DDNS_QUEUE: Desc = Desc::gauge("tenko_dhcp_ddns_queue", "DHCP DDNS requests waiting");
 
 /// Requests dropped, by reason (`malformed`, `filtered`, `no_scope`, `pool_full`, `queue`,
-/// `store_refused`, `rate_limited`).
+/// `store_refused`, `rate_limited`, `untrusted_relay`, `limited`).
 pub const DROPPED: Desc =
     Desc::counter("tenko_dhcp_dropped", "DHCP requests dropped").labels(&["reason"]);
 
@@ -85,8 +85,20 @@ pub const STORE_REFUSED: Desc = Desc::counter(
     "DHCP lease writes the store refused",
 );
 
+/// Requests refused by a limit per client or per scope (`dhcp.settings.limits`), by limit
+/// (`leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`, `offers_per_second`,
+/// `conflicts_per_mac`, `conflict_share`).
+pub const LIMITED: Desc =
+    Desc::counter("tenko_dhcp_limited", "DHCP requests refused by a limit").labels(&["limit"]);
+
+/// Renewals answered from the stored lease without a commit (the renewal cache).
+pub const RENEWALS_CACHED: Desc = Desc::counter(
+    "tenko_dhcp_renewals_cached",
+    "DHCP renewals answered from the stored lease without a commit",
+);
+
 /// Every family of the role, for registration and the contracts document.
-pub const ALL: [&Desc; 13] = [
+pub const ALL: [&Desc; 15] = [
     &PACKETS,
     &EXCHANGE_DURATION,
     &COMMIT_DURATION,
@@ -100,6 +112,8 @@ pub const ALL: [&Desc; 13] = [
     &DDNS_QUEUE,
     &DROPPED,
     &STORE_REFUSED,
+    &LIMITED,
+    &RENEWALS_CACHED,
 ];
 
 #[cfg(test)]

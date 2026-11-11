@@ -148,6 +148,43 @@ describe("settings", () => {
     expect(failure(() => putSettings(state, ctx, { lease: LEASE }, before)).status).toBe(412);
   });
 
+  it("keeps the trusted relay agents sorted and without duplicates, and lets the profile decide again", () => {
+    const set = putSettings(state, ctx, { lease: LEASE, trusted_relays: ["198.51.100.0/24", "192.0.2.9/32", "192.0.2.9/32", "2001:db8::1/128"] }, "*");
+    expect([set.trusted_relays, set.effective_trust_any_relay]).toEqual([["192.0.2.9/32", "198.51.100.0/24", "2001:db8::1/128"], false]);
+    expect(putSettings(state, ctx, { lease: LEASE, authoritative: true, ddns: {}, history_days: 7 }, "*").trusted_relays).toEqual(set.trusted_relays);
+    const cleared = putSettings(state, ctx, { lease: LEASE, clear_trusted_relays: true }, "*");
+    expect(cleared.trusted_relays).toBeUndefined();
+  });
+
+  it("refuses host bits, more than 256 prefixes and both fields together", () => {
+    const bits = failure(() => putSettings(state, ctx, { lease: LEASE, trusted_relays: ["192.0.2.1/24"] }, "*"));
+    expect([bits.code, bits.params.field]).toEqual(["dhcp.settings.invalid", "trusted_relays"]);
+    const many = Array.from({ length: 257 }, (_, i) => `198.51.100.${i % 256}/32`);
+    expect(failure(() => putSettings(state, ctx, { lease: LEASE, trusted_relays: many }, "*")).params.field).toBe("trusted_relays");
+    const both = failure(() => putSettings(state, ctx, { lease: LEASE, trusted_relays: [], clear_trusted_relays: true }, "*"));
+    expect([both.code, both.params.field]).toEqual(["dhcp.settings.invalid", "clear_trusted_relays"]);
+  });
+
+  it("replaces the limits whole, keeps them when left out, and clears them with an empty object", () => {
+    const home = { leases_per_mac: 16, addresses_per_duid: 16, prefixes_per_duid: 8, offers_per_second: 100, renew_cache_percent: 25 };
+    expect(putSettings(state, ctx, { lease: LEASE }, "*").effective_limits).toEqual(home);
+    const set = putSettings(state, ctx, { lease: LEASE, limits: { leases_per_mac: 0, offers_per_second: 500 } }, "*");
+    expect(set.limits).toEqual({ leases_per_mac: 0, offers_per_second: 500 });
+    expect(set.effective_limits).toEqual({ ...home, leases_per_mac: 0, offers_per_second: 500 });
+    expect(putSettings(state, ctx, { lease: LEASE, history_days: 7 }, "*").limits).toEqual(set.limits);
+    const whole = putSettings(state, ctx, { lease: LEASE, limits: { prefixes_per_duid: 2 } }, "*");
+    expect([whole.limits, whole.effective_limits.leases_per_mac]).toEqual([{ prefixes_per_duid: 2 }, 16]);
+    const cleared = putSettings(state, ctx, { lease: LEASE, limits: {} }, "*");
+    expect([cleared.limits, cleared.effective_limits]).toEqual([undefined, home]);
+  });
+
+  it("refuses a limit out of its bounds and names it", () => {
+    for (const [name, value] of [["leases_per_mac", 65_536], ["offers_per_second", 100_001], ["renew_cache_percent", 51], ["prefixes_per_duid", -1], ["addresses_per_duid", 1.5]] as const) {
+      const bad = failure(() => putSettings(state, ctx, { lease: LEASE, limits: { [name]: value } }, "*"));
+      expect([bad.code, bad.params.field]).toEqual(["dhcp.settings.invalid", `limits.${name}`]);
+    }
+  });
+
   it("refuses lease times out of order and a history of 0 days", () => {
     const wrong = failure(() => putSettings(state, ctx, { lease: { default_secs: 100, min_secs: 600, max_secs: 700 } }, "*"));
     expect([wrong.code, wrong.params.field]).toEqual(["dhcp.lease_times.invalid", "lease.default_secs"]);

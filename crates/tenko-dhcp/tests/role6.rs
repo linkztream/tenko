@@ -593,6 +593,10 @@ impl Fixture {
             }],
             workers: 2,
             layout: SocketLayout::Shared,
+            // Lab: the relay on loopback is trusted as every sender was before the relay list.
+            guard: std::sync::Arc::new(tenko_dhcp::guard::Guard::new(
+                tenko_dhcp::guard::DhcpProfile::Lab,
+            )),
             ..ServerConfig::default()
         };
         server4.engine.relay_port = relay4.local_addr().expect("address").port();

@@ -103,6 +103,23 @@ pub trait LeaseTable {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// The active rows of `scope` whose client's hardware address is `mac` (Ethernet or
+    /// IEEE 802), whatever its client identifier: what the limit `leases_per_mac` counts. A
+    /// table without the count answers 0, which turns the limit off.
+    fn mac_bindings(&self, scope: PrefixId, mac: [u8; 6]) -> usize {
+        let _ = (scope, mac);
+        0
+    }
+}
+
+/// The MAC address of a lease's client for the limits: the six octets of an Ethernet or
+/// IEEE 802 hardware address.
+pub fn client_mac(client: &tenko_core::dhcp::ClientKey) -> Option<[u8; 6]> {
+    if !matches!(client.htype, 1 | 6) {
+        return None;
+    }
+    <[u8; 6]>::try_from(client.chaddr.0.as_slice()).ok()
 }
 
 /// The reference lease table.
@@ -194,6 +211,17 @@ impl LeaseTable for MemLeaseTable {
 
     fn len(&self) -> usize {
         self.rows.len()
+    }
+
+    fn mac_bindings(&self, scope: PrefixId, mac: [u8; 6]) -> usize {
+        self.rows
+            .values()
+            .filter(|lease| {
+                lease.scope == scope
+                    && lease.state == BindingState::Active
+                    && client_mac(&lease.client) == Some(mac)
+            })
+            .count()
     }
 }
 

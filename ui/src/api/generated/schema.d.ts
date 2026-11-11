@@ -1814,7 +1814,7 @@ export interface paths {
         get: operations["get_dhcp_settings"];
         /**
          * Change the DHCP server settings
-         * @description Scope: `dhcp.write`. A field left out keeps its value, except `conflict_detection` and `history_days`, which follow the security profile when left out.
+         * @description Scope: `dhcp.write`. A field left out keeps its value, except `conflict_detection` and `history_days`, which follow the security profile when left out. `trusted_relays` replaces the list of trusted relay agents; `clear_trusted_relays` unsets it, so that the profile decides again (every sender under Lab, none otherwise). `limits` replaces the limits per client and per scope whole; a field left out of them follows the profile, zero turns a limit off.
          */
         put: operations["update_dhcp_settings"];
         post?: never;
@@ -3917,7 +3917,7 @@ export interface paths {
         };
         /**
          * Get the DHCP role of a node
-         * @description Scope: `dhcp.read`. The report `dhcp.status` of the node's DHCP role: whether it answers and the store takes its lease writes, its listeners and workers, the scopes it serves, its leases by state, the last commit's time and the revision of its configuration image; the DHCPv6 listeners, scopes and leases in `listeners6`, `scopes6` and `leases6`.
+         * @description Scope: `dhcp.read`. The report `dhcp.status` of the node's DHCP role: whether it answers and the store takes its lease writes, its listeners and workers, the scopes it serves, its leases by state, the last commit's time and the revision of its configuration image; the DHCPv6 listeners, scopes and leases in `listeners6`, `scopes6` and `leases6`; the relay agents it refused (`relays`) and the limits per client and per scope with the requests they refused (`limits`).
          */
         get: operations["get_node_dhcp_status"];
         put?: never;
@@ -8357,6 +8357,34 @@ export interface components {
              */
             command_id: string;
         };
+        /** @description The limits in force (`docs/dhcp.md` section 14.9); zero turns one off. */
+        DhcpEffectiveLimits: {
+            /**
+             * Format: int32
+             * @description DHCPv6 address bindings per DUID and scope.
+             */
+            addresses_per_duid: number;
+            /**
+             * Format: int32
+             * @description DHCPv4 active bindings per MAC address and scope.
+             */
+            leases_per_mac: number;
+            /**
+             * Format: int32
+             * @description New clients a scope offers an address to per second.
+             */
+            offers_per_second: number;
+            /**
+             * Format: int32
+             * @description DHCPv6 delegated prefixes per DUID and scope.
+             */
+            prefixes_per_duid: number;
+            /**
+             * Format: int32
+             * @description The renewal cache, percent of the lease time.
+             */
+            renew_cache_percent: number;
+        };
         /**
          * @description The Kea export (P3-Q17): the configurations of both families, their leases and what
          *     did not map.
@@ -8605,6 +8633,94 @@ export interface components {
             reason?: string | null;
             vrf?: components["schemas"]["VrfId"] | null;
         };
+        /** @description Requests a limit refused. */
+        DhcpLimitRefusal: {
+            /**
+             * Format: int32
+             * @description The limit's value.
+             */
+            cap: number;
+            /**
+             * @description The client: a MAC address, a DUID in hexadecimal; absent for a limit of the scope.
+             * @example 00:00:5e:00:53:01
+             */
+            client?: string | null;
+            /**
+             * Format: int64
+             * @description Refusals.
+             */
+            count: number;
+            /** @description The first refusal. */
+            first: components["schemas"]["Timestamp"];
+            /**
+             * Format: int32
+             * @description What the client (or the scope) held at the last refusal.
+             */
+            held: number;
+            /** @description The last refusal. */
+            last: components["schemas"]["Timestamp"];
+            /**
+             * @description The limit: `leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`,
+             *     `offers_per_second`, `conflicts_per_mac` or `conflict_share`.
+             * @example leases_per_mac
+             */
+            limit: string;
+            /**
+             * @description The scope's network, when the node serves it.
+             * @example 192.0.2.0/24
+             */
+            network?: string | null;
+            /** @description The scope. */
+            scope: components["schemas"]["PrefixId"];
+        };
+        /** @description The limits of a node and the requests they refused since the role started. */
+        DhcpLimitReport: {
+            effective?: components["schemas"]["DhcpEffectiveLimits"] | null;
+            /** @description The refusals, the most frequent first (at most 32). */
+            refused?: components["schemas"]["DhcpLimitRefusal"][];
+            /**
+             * Format: int64
+             * @description Refusals not kept in `refused`.
+             */
+            unlogged?: number;
+        };
+        /**
+         * @description The limits per client and per scope (`docs/dhcp.md` section 14.9). A field left unset
+         *     follows the security profile; zero turns a limit off. A client over a limit gets no new
+         *     binding, and the bindings it holds keep renewing.
+         */
+        DhcpLimits: {
+            /**
+             * Format: int32
+             * @description DHCPv6 address bindings (`IA_NA`) one DUID holds in a scope across its IAIDs and
+             *     messages.
+             */
+            addresses_per_duid?: number | null;
+            /**
+             * Format: int32
+             * @description DHCPv4 bindings one MAC address holds in a scope across its client identifiers
+             *     (option 61): active leases that have not ended.
+             */
+            leases_per_mac?: number | null;
+            /**
+             * Format: int32
+             * @description New clients a scope offers an address to per second, with a burst of ten seconds'
+             *     worth; a client that holds a lease of the scope is not counted.
+             */
+            offers_per_second?: number | null;
+            /**
+             * Format: int32
+             * @description DHCPv6 delegated prefixes (`IA_PD`) one DUID holds in a scope.
+             */
+            prefixes_per_duid?: number | null;
+            /**
+             * Format: int32
+             * @description A renewal that comes within this share of its lease time, counted from its last
+             *     commit, is answered from the stored lease for the time it has left, with no commit
+             *     and no history row: percent, 0 to 50.
+             */
+            renew_cache_percent?: number | null;
+        };
         /**
          * @description How a listener receives traffic (plan section 2.5).
          * @enum {string}
@@ -8645,6 +8761,8 @@ export interface components {
             leases: components["schemas"]["DhcpLeaseCount"][];
             /** @description The DHCPv6 leases by state. */
             leases6?: components["schemas"]["DhcpLeaseCount"][];
+            /** @description The limits per client and per scope as the node applies them, and their refusals. */
+            limits?: components["schemas"]["DhcpLimitReport"];
             /** @description The listeners. */
             listeners: components["schemas"]["DhcpListenerItem"][];
             /** @description The DHCPv6 listeners (port 547). */
@@ -8655,6 +8773,11 @@ export interface components {
             probe: boolean;
             /** @description The router advertisement check of DHCP-10 (`docs/dhcp.md` section 19.12). */
             ra?: components["schemas"]["DhcpRaReport"];
+            /**
+             * @description The trusted relays as the node applies them: the senders it refused and, while no
+             *     list is set, the networks its lease rows say were served through a relay.
+             */
+            relays?: components["schemas"]["DhcpRelayReport"];
             /** @description The revision of the configuration image served. */
             revision: components["schemas"]["Revision"];
             /**
@@ -8861,6 +8984,73 @@ export interface components {
             /** @description Why it is unavailable. */
             reason?: string | null;
         };
+        /** @description A sender the node refused as a relay agent. */
+        DhcpRefusedRelay: {
+            /**
+             * Format: int64
+             * @description Refusals.
+             */
+            count: number;
+            /** @description The first refusal. */
+            first: components["schemas"]["Timestamp"];
+            /** @description The last refusal. */
+            last: components["schemas"]["Timestamp"];
+            /**
+             * @description The relay address the requests named (`giaddr`, or the link address of the
+             *     outermost DHCPv6 relay).
+             * @example 192.0.2.1
+             */
+            relay: string;
+            /**
+             * @description Whether the address is a relay address of the lease rows (the relay the operator
+             *     knows).
+             */
+            seen_before: boolean;
+            /**
+             * @description The address the requests came from: the address to trust.
+             * @example 192.0.2.1
+             */
+            source: string;
+        };
+        /** @description What a node reports about relay agents (`dhcp.settings.trusted_relays`). */
+        DhcpRelayReport: {
+            /** @description Whether a list is set. */
+            listed: boolean;
+            /**
+             * @description The senders refused as relays since the role started, the most refused first (at
+             *     most 32).
+             */
+            refused?: components["schemas"]["DhcpRefusedRelay"][];
+            /**
+             * @description While no list is set: the networks the lease rows say were served through a relay,
+             *     with the relay addresses they name. Information only: nothing is trusted from it.
+             */
+            relayed?: components["schemas"]["DhcpRelayedNetwork"][];
+            /** @description Whether every sender is trusted (no list, under Lab). */
+            trust_any: boolean;
+            /**
+             * Format: int64
+             * @description Refusals not kept in `refused`.
+             */
+            unlogged?: number;
+        };
+        /** @description A network the lease rows say was served through a relay. */
+        DhcpRelayedNetwork: {
+            /**
+             * @description Its network.
+             * @example 192.0.2.0/24
+             */
+            network: string;
+            /**
+             * @description The relay addresses of its rows.
+             * @example [
+             *       "192.0.2.1"
+             *     ]
+             */
+            relays: string[];
+            /** @description The scope. */
+            scope: components["schemas"]["PrefixId"];
+        };
         /**
          * @description A reservation: an IPAM host of mode `reserved` with an interface and an address in a
          *     served prefix (a read view; writes go to the IPAM host routes and the host's option
@@ -9030,6 +9220,24 @@ export interface components {
             history_days?: number | null;
             /** @description Lease times of scopes that set none. */
             lease?: components["schemas"]["LeaseTimes"];
+            /**
+             * @description The limits per client and per scope that keep one client or one link from taking a
+             *     pool, and the renewal cache; each field left unset follows the security profile.
+             */
+            limits?: components["schemas"]["DhcpLimits"];
+            /**
+             * @description The relay agents the server trusts, as prefixes of the addresses their messages come
+             *     from: `giaddr`, option 82, option 118 and a DHCPv6 RELAY-FORW are honored only from
+             *     a sender in the list, and replies go only to a trusted relay or to the client's own
+             *     link. None follows the security profile (every sender under Lab, none otherwise); a
+             *     list, even an empty one, applies under every profile. At most
+             *     [`MAX_TRUSTED_RELAYS`] prefixes, without host bits.
+             * @example [
+             *       "192.0.2.1/32",
+             *       "2001:db8::1/128"
+             *     ]
+             */
+            trusted_relays?: string[] | null;
             updated?: components["schemas"]["Stamp"] | null;
         };
         /** @description The server settings as the API reads them. */
@@ -9041,6 +9249,13 @@ export interface components {
              * @description The same for the lease history retention in days (P3-Q13).
              */
             effective_history_days: number;
+            /** @description The limits in force: the stored ones over the profile's (zero: off). */
+            effective_limits: components["schemas"]["DhcpEffectiveLimits"];
+            /**
+             * @description Whether every sender is trusted as a relay agent: no `trusted_relays` set under the
+             *     Lab profile. Outside Lab an unset list trusts no relay.
+             */
+            effective_trust_any_relay: boolean;
             /** @description The store revision of the row (the `ETag`). */
             revision: components["schemas"]["Revision"];
         };
@@ -9048,6 +9263,11 @@ export interface components {
         DhcpSettingsUpdate: {
             /** @description Whether scopes are authoritative unless they say otherwise. */
             authoritative?: boolean | null;
+            /**
+             * @description Unsets the trusted relays, so that the profile decides again (every sender under
+             *     Lab, none otherwise); refused together with `trusted_relays`.
+             */
+            clear_trusted_relays?: boolean;
             /** @description Conflict detection; none follows the profile. */
             conflict_detection?: boolean | null;
             ddns?: components["schemas"]["DdnsPolicy"] | null;
@@ -9057,6 +9277,15 @@ export interface components {
              */
             history_days?: number | null;
             lease?: components["schemas"]["LeaseTimes"] | null;
+            limits?: components["schemas"]["DhcpLimits"] | null;
+            /**
+             * @description The trusted relay agents, as prefixes of the addresses they send from (at most 256,
+             *     without host bits); left out keeps the stored list.
+             * @example [
+             *       "192.0.2.1/32"
+             *     ]
+             */
+            trusted_relays?: string[] | null;
         };
         /**
          * @description One active health finding of `GET /system/status`, reduced to what a bug report may

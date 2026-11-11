@@ -17,6 +17,7 @@ use tenko_core::{
     NodeId, PrefixId, RangeId, Revision, Timestamp, VrfId,
     dhcp::{BindingState, DdnsPolicy, LeaseEventKind, LeaseTimes, OptionValue},
 };
+use tenko_dhcp::guard::{DhcpProfile, Guard};
 use tenko_dhcp::{
     allocator::SingleNode,
     image::{ConfigImage, ImageBuilder, PoolImage, ScopeImage},
@@ -30,6 +31,9 @@ use tenko_dhcp::{
         },
     },
 };
+
+/// Lab: every sender is a trusted relay, as before the relay list existed.
+static LAB: std::sync::LazyLock<Guard> = std::sync::LazyLock::new(|| Guard::new(DhcpProfile::Lab));
 
 /// What the path reads: the image, the lease table, the store, the clock.
 pub struct Path<'a> {
@@ -60,6 +64,7 @@ pub fn dora(path: &Path<'_>, bytes: &[u8], ticket: u64, scratch: &mut Scratch) -
         ownership: &SingleNode,
         allocator: &HashedAllocator,
         settings: &settings,
+        guard: &LAB,
         accepting: path.store.accepting(),
         now: path.now,
     };
@@ -128,6 +133,16 @@ pub fn image(links: &[Ipv4Addr]) -> ConfigImage {
             ddns: DdnsPolicy::default(),
         });
     }
+    // The relay of these requests is trusted, so that the trust check runs as on a node with
+    // a list.
+    // No renewal cache: these tests commit every renewal; tests/limits.rs covers the cache.
+    builder.limits(tenko_core::dhcp::DhcpLimits {
+        renew_cache_percent: Some(0),
+        ..tenko_core::dhcp::DhcpLimits::default()
+    });
+    builder.relays(tenko_dhcp::relay::RelayTrust::new(Some(&["192.0.2.1/32"
+        .parse()
+        .expect("a prefix")])));
     builder.build()
 }
 

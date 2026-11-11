@@ -418,6 +418,23 @@ pub fn dhcp_role_warnings(role: &tenko_dhcp::role::DhcpStatus) -> Vec<StatusWarn
             params,
         });
     }
+    // The trusted relays: `dhcp.relay.trust_any` under Lab without a list, and
+    // `dhcp.relay.untrusted` for refused senders or relayed networks of the lease rows; the
+    // limits per client and per scope: `dhcp.limit.refused`.
+    for row in role
+        .relays
+        .warnings()
+        .into_iter()
+        .chain(role.limits.warnings())
+    {
+        let mut params = node();
+        params.extend(row.params);
+        warnings.push(StatusWarning {
+            code: row.code.to_owned(),
+            detail: row.detail,
+            params,
+        });
+    }
     warnings
 }
 

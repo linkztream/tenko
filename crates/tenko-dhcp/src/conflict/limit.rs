@@ -56,6 +56,12 @@ impl DeclineLimit {
         }
     }
 
+    /// An empty table with the same limit and window, for about `clients` clients.
+    #[must_use]
+    pub fn like(&self, clients: usize) -> Self {
+        Self::new(clients, self.limit, self.window)
+    }
+
     fn lock(&self, stripe: usize) -> MutexGuard<'_, Box<[Slot]>> {
         self.stripes[stripe]
             .lock()

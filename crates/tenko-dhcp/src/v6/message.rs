@@ -420,6 +420,8 @@ impl fmt::Debug for Message<'_> {
 pub struct RelayChain<'a> {
     relays: [Option<Message<'a>>; MAX_RELAY_DEPTH],
     depth: usize,
+    /// The relays, from the outermost, whose data counts ([`RelayChain::limit_trust`]).
+    trusted: usize,
     client: Message<'a>,
 }
 
@@ -448,8 +450,21 @@ impl<'a> RelayChain<'a> {
         Ok(Self {
             relays,
             depth,
+            trusted: depth,
             client: current,
         })
+    }
+
+    /// Keeps the data of the `trusted` outermost relays only: the link address, the
+    /// Interface-Id, the Remote-Id and the client's link-layer address of a relay further
+    /// in are not read. The reply still goes back through every relay.
+    pub fn limit_trust(&mut self, trusted: usize) {
+        self.trusted = trusted.min(self.depth);
+    }
+
+    /// The relays whose data counts, outermost first.
+    pub fn trusted_relays(&self) -> impl DoubleEndedIterator<Item = Message<'a>> + '_ {
+        self.relays[..self.trusted].iter().flatten().copied()
     }
 
     /// The client's message.
@@ -486,7 +501,7 @@ impl<'a> RelayChain<'a> {
     /// unspecified (a lightweight relay of RFC 6221 sends zero and the relay above it
     /// names the link, RFC 6221 section 5.3).
     pub fn link_address(&self) -> Option<Ipv6Addr> {
-        self.relays()
+        self.trusted_relays()
             .rev()
             .map(|relay| relay.link_address())
             .find(|addr| !addr.is_unspecified())
@@ -494,14 +509,14 @@ impl<'a> RelayChain<'a> {
 
     /// The Interface-Id of the innermost relay that sends one.
     pub fn interface_id(&self) -> Option<&'a [u8]> {
-        self.relays()
+        self.trusted_relays()
             .rev()
             .find_map(|relay| relay.interface_id().ok().flatten())
     }
 
     /// The Remote-Id of the innermost relay that sends one (RFC 4649).
     pub fn remote_id(&self) -> Option<RemoteId<'a>> {
-        self.relays()
+        self.trusted_relays()
             .rev()
             .find_map(|relay| relay.remote_id().ok().flatten())
     }
@@ -509,7 +524,7 @@ impl<'a> RelayChain<'a> {
     /// The client's link-layer address of the innermost relay that adds one (RFC 6939:
     /// the relay on the client's link).
     pub fn client_link_layer(&self) -> Option<LinkLayerAddress<'a>> {
-        self.relays()
+        self.trusted_relays()
             .rev()
             .find_map(|relay| relay.client_link_layer().ok().flatten())
     }

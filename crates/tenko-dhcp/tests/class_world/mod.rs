@@ -39,6 +39,7 @@ use tenko_core::{
     ipam::Stamp,
     principal::{Principal, SystemComponent},
 };
+use tenko_dhcp::guard::{DhcpProfile, Guard};
 use tenko_dhcp::{
     allocator::SingleNode,
     image::{ConfigImage, ImageBuilder, PoolImage, ReservationImage, ScopeImage},
@@ -51,6 +52,9 @@ use tenko_dhcp::{
         },
     },
 };
+
+/// Lab: every sender is a trusted relay, as before the relay list existed.
+static LAB: std::sync::LazyLock<Guard> = std::sync::LazyLock::new(|| Guard::new(DhcpProfile::Lab));
 
 /// The listener's address.
 pub const SERVER: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 10);
@@ -327,6 +331,7 @@ impl World {
             ownership: &SingleNode,
             allocator: &HashedAllocator,
             settings: &self.settings,
+            guard: &LAB,
             accepting: true,
             now: t0(),
         }

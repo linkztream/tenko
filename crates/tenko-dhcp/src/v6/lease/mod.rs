@@ -68,6 +68,14 @@ pub trait Lease6Table {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// The active rows of `scope` and `kind` whose client has the DUID `duid`, whatever
+    /// their IAIDs: what the limits `addresses_per_duid` and `prefixes_per_duid` count. A
+    /// table without the count answers 0, which turns the limits off.
+    fn duid_bindings(&self, scope: PrefixId, kind: Lease6Kind, duid: &[u8]) -> usize {
+        let _ = (scope, kind, duid);
+        0
+    }
 }
 
 /// A held row and the revision that wrote it.
@@ -87,6 +95,10 @@ type ClientIndex = HashMap<Vec<u8>, Vec<(VrfId, Ipv6Addr)>>;
 pub struct Lease6Index {
     rows: HashMap<(VrfId, Ipv6Addr), Held>,
     clients: HashMap<(PrefixId, Lease6Kind), ClientIndex>,
+    /// The keyed hash of a scope, a kind and a DUID, to the active rows of that DUID there
+    /// (the limits per DUID): one entry per client, not per binding.
+    duids: HashMap<u64, u32>,
+    hasher: std::hash::RandomState,
     revision: Revision,
 }
 
@@ -204,11 +216,17 @@ impl Lease6Index {
         }
         let scope = (lease.scope, lease.kind);
         let identity = lease.identity();
+        if lease.state == BindingState::Active {
+            self.count_duid(&lease, true);
+        }
         let previous = self.rows.insert(key, Held { lease, revision });
         if revision > self.revision {
             self.revision = revision;
         }
         if let Some(previous) = previous {
+            if previous.lease.state == BindingState::Active {
+                self.count_duid(&previous.lease, false);
+            }
             let held_identity = previous.lease.identity();
             let held_scope = (previous.lease.scope, previous.lease.kind);
             if held_scope != scope || held_identity != identity {
@@ -230,12 +248,33 @@ impl Lease6Index {
     /// Removes the row of an address; returns it.
     pub fn take(&mut self, vrf: VrfId, addr: Ipv6Addr) -> Option<Lease6> {
         let held = self.rows.remove(&(vrf, addr))?;
+        if held.lease.state == BindingState::Active {
+            self.count_duid(&held.lease, false);
+        }
         self.detach(
             (held.lease.scope, held.lease.kind),
             &held.lease.identity(),
             (vrf, addr),
         );
         Some(held.lease)
+    }
+
+    fn duid_hash(&self, scope: PrefixId, kind: Lease6Kind, duid: &[u8]) -> u64 {
+        use std::hash::BuildHasher as _;
+        self.hasher.hash_one((scope, kind, duid))
+    }
+
+    /// Counts an active row in or out of its DUID's count.
+    fn count_duid(&mut self, lease: &Lease6, add: bool) {
+        let hash = self.duid_hash(lease.scope, lease.kind, lease.duid.as_bytes());
+        if add {
+            *self.duids.entry(hash).or_default() += 1;
+        } else if let Some(count) = self.duids.get_mut(&hash) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.duids.remove(&hash);
+            }
+        }
     }
 
     fn detach(&mut self, scope: (PrefixId, Lease6Kind), identity: &[u8], key: (VrfId, Ipv6Addr)) {
@@ -270,6 +309,12 @@ impl Lease6Table for Lease6Index {
 
     fn len(&self) -> usize {
         self.rows.len()
+    }
+
+    fn duid_bindings(&self, scope: PrefixId, kind: Lease6Kind, duid: &[u8]) -> usize {
+        self.duids
+            .get(&self.duid_hash(scope, kind, duid))
+            .map_or(0, |count| *count as usize)
     }
 }
 

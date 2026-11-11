@@ -409,11 +409,39 @@ export function nodeStatusOf(state: LeaseState, revision: number): NodeStatus {
     node: NODE,
     probe: true,
     revision,
+    limits: limitReport(),
     ra: raReport(),
+    relays: relayReport(),
     scopes: 1,
     scopes6: 1,
     serving: true,
     server_duid: "00040000000000000000000000000000002a",
+  };
+}
+
+/** The limits of the node: a MAC address at its cap of bindings, and a scope that held back new clients at its offer rate. */
+function limitReport(): NonNullable<NodeStatus["limits"]> {
+  const at = new Date().toISOString();
+  const scope = "0190d1c2-0000-7000-8000-0000000a0001";
+  return {
+    effective: { leases_per_mac: 16, addresses_per_duid: 16, prefixes_per_duid: 8, offers_per_second: 100, renew_cache_percent: 25 },
+    refused: [
+      { limit: "leases_per_mac", client: "00:00:5e:00:53:40", scope, network: "192.0.2.0/24", cap: 16, held: 16, count: 3, first: at, last: at },
+      { limit: "offers_per_second", scope, network: "198.51.100.0/24", cap: 100, held: 100, count: 41, first: at, last: at },
+    ],
+    unlogged: 0,
+  };
+}
+
+/** The relay agents of the node: one sender refused that the lease rows know, and one relayed network. */
+function relayReport(): NonNullable<NodeStatus["relays"]> {
+  const at = new Date().toISOString();
+  return {
+    listed: false,
+    trust_any: false,
+    refused: [{ source: "192.0.2.1", relay: "192.0.2.1", count: 12, first: at, last: at, seen_before: true }],
+    unlogged: 0,
+    relayed: [{ scope: "0190d1c2-0000-7000-8000-0000000a0001", network: "198.51.100.0/24", relays: ["198.51.100.1"] }],
   };
 }
 

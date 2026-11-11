@@ -121,7 +121,12 @@ v6_configure() {
     "{\"prefix\": \"${v6_scope6[lan6]}\", \"lease\": {\"default_secs\": $v6_valid_secs, \"min_secs\": $v6_valid_secs, \"max_secs\": $v6_valid_secs}, \"v6\": {\"preferred_secs\": $v6_preferred_secs, \"rapid_commit\": true}}"
   must "the IPv6 scope of iot6" api POST /dhcp/scopes \
     "{\"prefix\": \"${v6_scope6[iot6]}\", \"lease\": {\"default_secs\": 3600, \"min_secs\": 3600, \"max_secs\": 3600}, \"v6\": {\"interface_id\": \"lab-iot6\"}}"
-  ok "configuration6" "two links with an IPv4 and an IPv6 prefix, a pool and a scope each, options 23, 24 and 56"
+  # The trusted relays: the gateway's dhcrelay and the tester's relay agents, both
+  # families, and fe80::/10 for the tester's lightweight relay below its relay, whose
+  # Interface-Id selects the iot6 scope.
+  must "the trusted relays" api PUT /dhcp/settings \
+    "{\"trusted_relays\": [\"192.0.2.2/32\", \"$v6_tester4/32\", \"2001:db8:100::2/128\", \"$v6_tester6/128\", \"fe80::/10\"]}"
+  ok "configuration6" "two links with an IPv4 and an IPv6 prefix, a pool and a scope each, options 23, 24 and 56, the relays trusted"
 }
 
 # ---------------------------------------------------------------------------------------

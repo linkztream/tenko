@@ -8,9 +8,14 @@
 //!   4361, RFC 6842); option 61 is echoed in every reply. Its reservation is found by that
 //!   identity first, then by its hardware address, so that a reservation keyed by MAC holds
 //!   for a client that sends option 61 (WP8.4, [`ConfigImage::client_reservation`]).
+//! - **The relay trust** ([`crate::relay`]). A request with a `giaddr` from a sender that
+//!   is not a trusted relay is dropped (`untrusted_relay`), as is one whose `giaddr` is no
+//!   unicast address; option 82 and option 118 of a sender that is not trusted select no
+//!   scope, class or server identifier (option 82 is still echoed, RFC 3046).
 //! - **The filters.** A MAC address the deny list matches is dropped (DHCP-08); a scope
 //!   marked restricted serves only clients the allow list matches and clients with a
-//!   reservation (TGL-17).
+//!   reservation (TGL-17). A hardware address of type Ethernet or IEEE 802 must be six
+//!   octets long, so that the filters always see it.
 //! - **Classes and policies** (WP8.4, [`crate::class`]): the policies of the scope, then the
 //!   server's, decide the options, the address range, the lease times and the DDNS settings
 //!   of the request; a scope or pool that names classes admits only their clients. A boot
@@ -25,6 +30,12 @@
 //!   REBINDING gets an ACK after the commit or a NAK; DECLINE and RELEASE commit and get no
 //!   reply; INFORM gets an ACK without lease times. The NAK rules are in [`handle`]'s
 //!   request path.
+//! - **The limits** ([`crate::limits`]): a client without a bound lease in the scope is a
+//!   new client; a new client whose MAC address holds `leases_per_mac` active bindings
+//!   there is dropped (`limited`), and a scope offers to at most `offers_per_second` new
+//!   clients a second. A renewal of a bound lease within `renew_cache_percent` of its lease
+//!   time, counted from its last commit, is answered with an ACK for the time it has left
+//!   and nothing is written. A reserved client is never limited.
 //! - **Moves** (ADR 0027, [`crate::moving`]): a client a move job moves gets at most the
 //!   job's short lease for its old address (T1 and T2 derived from it as for any grant),
 //!   and its messages are noted for the job.
@@ -33,8 +44,10 @@
 //!   always sends, option 61, option 81 and last option 82 unchanged (RFC 3046), within the
 //!   size the client accepts; long values are split by the builder (RFC 3396).
 //! - **The destination** ([`Destination`], RFC 2131 section 4.1): the relay at `giaddr`
-//!   port 67; else `ciaddr` port 68; else a broadcast when the client asks for one or for a
-//!   NAK; else the client's hardware address.
+//!   port 67 (a trusted relay); else a NAK by broadcast; else `ciaddr` port 68 when the
+//!   request came from `ciaddr`, else the address it came from; else a broadcast when the
+//!   client asks for one; else the client's hardware address. A reply never goes to an
+//!   address the request only names.
 //!
 //! From the parse to the lease change in [`Scratch::change`] nothing allocates; the
 //! worker hands the change to the [`LeaseStore`](crate::store::LeaseStore) and sends the
@@ -50,7 +63,7 @@ pub mod offers;
 pub mod select;
 
 use std::{
-    net::{Ipv4Addr, SocketAddrV4},
+    net::{IpAddr, Ipv4Addr, SocketAddrV4},
     time::Duration,
 };
 
@@ -142,6 +155,8 @@ pub struct Context<'a> {
     pub allocator: &'a dyn Allocator,
     /// The settings.
     pub settings: &'a EngineSettings,
+    /// The node's protections: the profile in force and the relay log.
+    pub guard: &'a crate::guard::Guard,
     /// Whether the store takes lease writes now (P3-Q14).
     pub accepting: bool,
     /// Now.
@@ -187,6 +202,10 @@ pub enum DropReason {
     StoreRefused = 5,
     /// Rate limited (DECLINE floods, WP8.5).
     RateLimited = 6,
+    /// Relay data from a sender that is not a trusted relay (`dhcp.settings.trusted_relays`).
+    UntrustedRelay = 7,
+    /// A limit per client or per scope (`dhcp.settings.limits`, [`crate::limits`]).
+    Limited = 8,
 }
 
 /// Why a request got no answer although it was well formed.
@@ -299,8 +318,15 @@ struct Inbound<'m, 'i> {
     decision: &'i Decision<'i>,
     chaddr: &'m [u8],
     client_id: Option<&'m [u8]>,
+    /// Option 82 of a trusted relay: the lease row keeps it.
     relay: Option<RelayAgentInfo<'m>>,
+    /// Option 82 as received, which every reply echoes (RFC 3046 section 2.2).
+    echo: Option<RelayAgentInfo<'m>>,
     server_id: Ipv4Addr,
+    /// The datagram's source address.
+    source: Ipv4Addr,
+    /// Whether the client has a reservation in the scope or its shared network.
+    reserved: bool,
 }
 
 fn answer(request: Option<MessageType>, action: Action) -> Answer {
@@ -352,13 +378,15 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
     let mut hardware = [0u8; MAX_IDENTITY];
     let hardware_len = write_identity(message.htype(), chaddr, None, &mut hardware);
     let hardware = &hardware[..hardware_len];
-    let verdict = message
-        .mac()
-        .map_or(FilterVerdict::Unlisted, |mac| ctx.image.verdict(&mac));
-    if verdict == FilterVerdict::Denied {
-        return answer(request, Action::Drop(DropReason::Filtered));
-    }
-    let Some((scope, selector)) = select::select(ctx.image, &message, kind, relay, received) else {
+    let (trusted, verdict) = match admit(ctx, &message, received) {
+        Ok(admitted) => admitted,
+        Err(reason) => return answer(request, Action::Drop(reason)),
+    };
+    let echo = relay;
+    let relay = relay.filter(|_| trusted);
+    let Some((scope, selector)) =
+        select::select(ctx.image, &message, kind, relay, trusted, received)
+    else {
         return answer(request, Action::Drop(DropReason::NoScope));
     };
     // ADR 0027: the activity of a client a move job is moving (two relaxed stores).
@@ -368,25 +396,20 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
         .image
         .client_reservation(scope, identity, hardware)
         .is_some();
-    if scope.restricted && verdict != FilterVerdict::Allowed && !reserved {
-        return Answer {
-            request,
-            action: Action::Drop(DropReason::Filtered),
-            selector: Some(selector),
-        };
-    }
     // WP8.4: the policies of the scope, and its class allow list (a scope that names
     // classes serves only their clients; a sibling of its shared network may admit the
-    // client instead). A reserved client is always served.
+    // client instead). A reserved client is always served; a restricted scope serves only
+    // the allow list besides.
     let decision = ctx
         .image
         .matcher()
-        .decide(scope.prefix, Facts::of(&message));
+        .decide(scope.prefix, facts_of(&message, trusted));
     if !reserved
-        && !ctx
-            .image
-            .siblings(scope)
-            .any(|sibling| decision.admits_scope(sibling))
+        && ((scope.restricted && verdict != FilterVerdict::Allowed)
+            || !ctx
+                .image
+                .siblings(scope)
+                .any(|sibling| decision.admits_scope(sibling)))
     {
         return Answer {
             request,
@@ -406,7 +429,10 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
         chaddr,
         client_id,
         relay,
+        echo,
         server_id,
+        source: *received.source.ip(),
+        reserved,
     };
     let action = match kind {
         MessageType::Discover => discover(ctx, &client, scope, scratch),
@@ -420,6 +446,83 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
         action,
         selector: Some(selector),
     }
+}
+
+/// The relay trust of a request and the MAC filters' verdict on it: whether its sender is
+/// a trusted relay, and the verdict; a request the relay rule or the deny list refuses is
+/// dropped.
+fn admit(
+    ctx: &Context<'_>,
+    message: &Message<'_>,
+    received: &Received<'_>,
+) -> Result<(bool, FilterVerdict), DropReason> {
+    let trusted = relay_gate(ctx, message, received)?;
+    let verdict =
+        filter_mac(message)?.map_or(FilterVerdict::Unlisted, |mac| ctx.image.verdict(&mac));
+    if verdict == FilterVerdict::Denied {
+        return Err(DropReason::Filtered);
+    }
+    Ok((trusted, verdict))
+}
+
+/// Whether the request's sender is a trusted relay (`dhcp.settings.trusted_relays`), so
+/// that its relay data counts. A request with a `giaddr` is refused when its sender is not
+/// trusted (the sender goes to the relay log) or when the `giaddr` is no unicast address.
+pub(super) fn relay_gate(
+    ctx: &Context<'_>,
+    message: &Message<'_>,
+    received: &Received<'_>,
+) -> Result<bool, DropReason> {
+    let sender = IpAddr::V4(*received.source.ip());
+    let trusted = ctx.guard.trusts_sender(ctx.image, sender);
+    let giaddr = message.giaddr();
+    if giaddr.is_unspecified() {
+        return Ok(trusted);
+    }
+    if !trusted {
+        ctx.guard.refuse_relay(sender, IpAddr::V4(giaddr), ctx.now);
+        return Err(DropReason::UntrustedRelay);
+    }
+    if !is_unicast(giaddr) {
+        return Err(DropReason::Malformed);
+    }
+    Ok(true)
+}
+
+/// Whether `addr` can be a relay's or a client's own address: not a broadcast, multicast,
+/// "this network" (0/8) or reserved (240/4) address. A loopback address stays allowed: a
+/// reply to it reaches only this host (a relay or a load generator on the node itself).
+fn is_unicast(addr: Ipv4Addr) -> bool {
+    !(addr.is_broadcast()
+        || addr.is_multicast()
+        || addr.octets()[0] == 0
+        || addr.octets()[0] >= 240)
+}
+
+/// The MAC address the filters and the limits read: any `chaddr` of six octets, whatever
+/// `htype` says, so that a client cannot hide its MAC behind another hardware type; none
+/// for another length. An Ethernet (`htype` 1) or IEEE 802 (`htype` 6) `chaddr` of another
+/// length is refused.
+pub(super) fn filter_mac(message: &Message<'_>) -> Result<Option<[u8; 6]>, DropReason> {
+    let Ok(chaddr) = message.chaddr() else {
+        return Err(DropReason::Malformed);
+    };
+    match <[u8; 6]>::try_from(chaddr) {
+        Ok(mac) => Ok(Some(mac)),
+        Err(_) if matches!(message.htype(), 1 | 6) => Err(DropReason::Malformed),
+        Err(_) => Ok(None),
+    }
+}
+
+/// The facts of a request for the classes: circuit-id and remote-id only from a trusted
+/// relay.
+pub(super) fn facts_of<'a>(message: &Message<'a>, trusted: bool) -> Facts<'a> {
+    let mut facts = Facts::of(message);
+    if !trusted {
+        facts.circuit_id = None;
+        facts.remote_id = None;
+    }
+    facts
 }
 
 /// The scope of the shared network that holds `addr`.
@@ -526,6 +629,17 @@ fn discover(
     scope: &ScopeImage,
     scratch: &mut Scratch,
 ) -> Action {
+    // The limits on new clients: the MAC address's bindings, then the scope's offer rate.
+    if !client.reserved && !holds_lease(ctx, client, scope) {
+        let limits = ctx.guard.limits(ctx.image);
+        if !new_binding_allowed(ctx, client, scope, &limits)
+            || !ctx
+                .guard
+                .take_offer(scope.prefix, limits.offers_per_second, ctx.now)
+        {
+            return Action::Drop(DropReason::Limited);
+        }
+    }
     let requested = client.message.requested_address().ok().flatten();
     let until = later(ctx.now, ctx.settings.offer_secs);
     // A claim fails only when another worker held the address for another client after
@@ -703,6 +817,49 @@ fn request(
             scratch,
         );
     }
+    let granted = grant_time(&times, message.lease_time().ok().flatten(), None);
+    // ADR 0027: a client a move job is moving renews with the short lease, so that it
+    // comes back soon after the move changes its network.
+    let granted = shortened(ctx, home.vrf, target, message, granted);
+    let limits = ctx.guard.limits(ctx.image);
+    match &bound {
+        // The renewal cache: an early renewal of the client's lease is answered from the
+        // stored row for the time it has left; nothing is written.
+        Some(lease) => {
+            if let Some(left) = cached(lease, limits.renew_cache_percent, granted, ctx.now) {
+                crate::limits::RENEWALS_CACHED.inc();
+                let grant = assemble::LeaseGrant {
+                    granted: left,
+                    times: times.renewal_times(left),
+                };
+                return reply(
+                    ctx,
+                    client,
+                    MessageType::Ack,
+                    target,
+                    levels,
+                    Some(grant),
+                    scratch,
+                );
+            }
+        }
+        None if !client.reserved && !new_binding_allowed(ctx, client, scope, &limits) => {
+            return Action::Drop(DropReason::Limited);
+        }
+        // A new binding without an offer of its own (a REQUEST that skipped the DISCOVER)
+        // counts in the scope's offer rate as a DISCOVER would.
+        None if !client.reserved
+            && !ctx
+                .offers
+                .held_for(home.prefix, target, client.identity, ctx.now)
+            && !ctx
+                .guard
+                .take_offer(scope.prefix, limits.offers_per_second, ctx.now) =>
+        {
+            return Action::Drop(DropReason::Limited);
+        }
+        None => {}
+    }
     let until = later(ctx.now, ctx.settings.offer_secs);
     if !ctx
         .offers
@@ -710,10 +867,6 @@ fn request(
     {
         return refuse(scratch, b"the address is not available");
     }
-    let granted = grant_time(&times, message.lease_time().ok().flatten(), None);
-    // ADR 0027: a client a move job is moving renews with the short lease, so that it
-    // comes back soon after the move changes its network.
-    let granted = shortened(ctx, home.vrf, target, message, granted);
     let kind = match (bound.is_some(), state) {
         (true, State::Rebinding) => LeaseEventKind::Rebound,
         (true, _) => LeaseEventKind::Renewed,
@@ -751,6 +904,65 @@ fn request(
         Action::Reply { kind, len, dest } => Action::CommitThenReply { kind, len, dest },
         other => other,
     }
+}
+
+/// Whether the client holds a bound lease in the scope or its shared network.
+fn holds_lease(ctx: &Context<'_>, client: &Inbound<'_, '_>, scope: &ScopeImage) -> bool {
+    ctx.image.siblings(scope).any(|sibling| {
+        ctx.leases
+            .by_client(sibling.prefix, client.identity)
+            .is_some_and(|lease| lease.is_bound(ctx.now))
+    })
+}
+
+/// Whether a new binding of the client keeps its MAC address within `leases_per_mac` in the
+/// scope and its shared network; a refusal goes to the limit log.
+fn new_binding_allowed(
+    ctx: &Context<'_>,
+    client: &Inbound<'_, '_>,
+    scope: &ScopeImage,
+    limits: &crate::limits::Limits,
+) -> bool {
+    let cap = limits.leases_per_mac;
+    if cap == 0 {
+        return true;
+    }
+    let Ok(Some(mac)) = filter_mac(client.message) else {
+        return true;
+    };
+    let held: usize = ctx
+        .image
+        .siblings(scope)
+        .map(|sibling| ctx.leases.mac_bindings(sibling.prefix, mac))
+        .sum();
+    if held < cap as usize {
+        return true;
+    }
+    ctx.guard.refuse_limit(
+        crate::limits::Limit::LeasesPerMac,
+        &mac,
+        scope.prefix,
+        (cap, u32::try_from(held).unwrap_or(u32::MAX)),
+        ctx.now,
+    );
+    false
+}
+
+/// The time a bound lease has left when a renewal of it may be answered from the stored
+/// row: within `percent` of its lease time counted from its last commit (`cltt`), and no
+/// longer than the server would grant now. The answer never runs past the committed end.
+fn cached(lease: &LeaseView<'_>, percent: u8, granted: u32, now: Timestamp) -> Option<u32> {
+    if percent == 0 {
+        return None;
+    }
+    let total = lease.ends.saturating_since(lease.cltt).as_secs();
+    let age = now.saturating_since(lease.cltt).as_secs();
+    let left = lease.ends.saturating_since(now).as_secs();
+    if total == 0 || left == 0 || age.saturating_mul(100) >= u64::from(percent) * total {
+        return None;
+    }
+    let left = u32::try_from(left).ok()?;
+    (left <= granted).then_some(left)
 }
 
 /// Whether option 54 names this server: the effective server identifier, the scope's or
@@ -885,6 +1097,11 @@ fn release(
     if !holds {
         return Action::Ignore(IgnoreReason::NotHolder);
     }
+    // A client releases at most a few times an hour: one RELEASE more is dropped and the
+    // client keeps its lease, so that a loop of RELEASE and REQUEST writes nothing more.
+    if !ctx.guard.release_allowed(client.identity) {
+        return Action::Drop(DropReason::RateLimited);
+    }
     if !ctx.accepting {
         return Action::Drop(DropReason::StoreRefused);
     }
@@ -961,7 +1178,7 @@ fn reply(
             message,
             server_id: client.server_id,
             client_id: client.client_id,
-            relay: client.relay,
+            relay: client.echo,
             lease,
             levels,
         },
@@ -976,7 +1193,7 @@ fn reply(
     Action::Reply {
         kind,
         len,
-        dest: destination(message, kind, yiaddr, ctx.settings),
+        dest: destination(message, kind, yiaddr, client.source, ctx.settings),
     }
 }
 
@@ -1003,7 +1220,7 @@ fn nak(ctx: &Context<'_>, client: &Inbound<'_, '_>, text: &[u8], scratch: &mut S
             .map(|_| ());
     }
     if written.is_ok()
-        && let Some(info) = client.relay
+        && let Some(info) = client.echo
     {
         written = builder.relay_agent_info(info.as_bytes()).map(|_| ());
     }
@@ -1017,16 +1234,22 @@ fn nak(ctx: &Context<'_>, client: &Inbound<'_, '_>, text: &[u8], scratch: &mut S
             message,
             MessageType::Nak,
             Ipv4Addr::UNSPECIFIED,
+            client.source,
             ctx.settings,
         ),
     }
 }
 
-/// The destination of a reply (RFC 2131 section 4.1).
+/// The destination of a reply (RFC 2131 section 4.1) to a request from `source`: the
+/// relay at `giaddr` (the engine serves only trusted relays); a NAK by broadcast; `ciaddr`
+/// when the request came from it, else the address it came from (a broadcast when that is
+/// no unicast address), so that a reply never goes to a third party the request only
+/// names; a broadcast or the client's hardware address for a client without an address.
 pub fn destination(
     message: &Message<'_>,
     kind: MessageType,
     yiaddr: Ipv4Addr,
+    source: Ipv4Addr,
     settings: &EngineSettings,
 ) -> Destination {
     let giaddr = message.giaddr();
@@ -1038,7 +1261,11 @@ pub fn destination(
     }
     let ciaddr = message.ciaddr();
     if !ciaddr.is_unspecified() {
-        return Destination::Client(SocketAddrV4::new(ciaddr, settings.client_port));
+        return if is_unicast(source) {
+            Destination::Client(SocketAddrV4::new(source, settings.client_port))
+        } else {
+            Destination::Broadcast(settings.client_port)
+        };
     }
     match message.mac() {
         Ok(mac) if !message.broadcast() && !yiaddr.is_unspecified() => Destination::Link {

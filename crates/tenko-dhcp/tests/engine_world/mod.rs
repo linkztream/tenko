@@ -28,6 +28,7 @@ use tenko_core::{
 };
 use tenko_dhcp::{
     allocator::SingleNode,
+    guard::{DhcpProfile, Guard},
     image::{ConfigImage, ImageBuilder, PoolImage, ReservationImage, ScopeImage},
     lease::{LeaseTable, MemLeaseTable, PendingChange},
     v4::{
@@ -93,6 +94,9 @@ pub struct World {
     pub accepting: bool,
     /// The VRF of every scope.
     pub vrf: VrfId,
+    /// The node's protections: Lab by default, so that every sender is a trusted relay as
+    /// before the relay list existed; the relay tests change the profile or the image.
+    pub guard: Guard,
 }
 
 fn scope(
@@ -163,6 +167,35 @@ impl World {
     )]
     pub fn moving(
         moving: impl FnOnce(VrfId, PrefixId) -> Vec<tenko_core::dhcp::MovingClient>,
+    ) -> Self {
+        Self::build(moving, None, None)
+    }
+
+    /// The world of the module comment with `dhcp.settings.trusted_relays` set to `relays`
+    /// (none: unset) and the node under `profile`.
+    pub fn trusting(profile: DhcpProfile, relays: Option<&[&str]>) -> Self {
+        let relays: Option<Vec<ipnet::IpNet>> = relays.map(|list| {
+            list.iter()
+                .map(|text| text.parse().expect("a prefix"))
+                .collect()
+        });
+        let world = Self::build(|_, _| Vec::new(), relays.as_deref(), None);
+        world.guard.set_profile(profile);
+        world
+    }
+
+    /// The world under `profile` with the relay trusted and `limits` stored.
+    pub fn limited(profile: DhcpProfile, limits: tenko_core::dhcp::DhcpLimits) -> Self {
+        let relays: Vec<ipnet::IpNet> = vec!["192.0.2.1/32".parse().expect("a prefix")];
+        let world = Self::build(|_, _| Vec::new(), Some(&relays), Some(limits));
+        world.guard.set_profile(profile);
+        world
+    }
+
+    fn build(
+        moving: impl FnOnce(VrfId, PrefixId) -> Vec<tenko_core::dhcp::MovingClient>,
+        relays: Option<&[ipnet::IpNet]>,
+        limits: Option<tenko_core::dhcp::DhcpLimits>,
     ) -> Self {
         let vrf = VrfId::generate();
         let (a, b, c) = (
@@ -244,6 +277,12 @@ impl World {
         }]);
         let moving = moving(vrf, b);
         builder.moving(&moving);
+        // No renewal cache: these tests commit every renewal; tests/limits.rs covers the cache.
+        builder.limits(limits.unwrap_or(tenko_core::dhcp::DhcpLimits {
+            renew_cache_percent: Some(0),
+            ..tenko_core::dhcp::DhcpLimits::default()
+        }));
+        builder.relays(tenko_dhcp::relay::RelayTrust::new(relays));
         let image = builder.build();
         let mut world = Self {
             image,
@@ -252,6 +291,7 @@ impl World {
             settings: EngineSettings::default(),
             accepting: true,
             vrf,
+            guard: Guard::new(DhcpProfile::Lab),
         };
         world.lease(0x10, true, ip("192.0.2.110"), BindingState::Active, 3_600);
         world.lease(0x50, true, ip("203.0.113.120"), BindingState::Active, 3_600);
@@ -302,6 +342,7 @@ impl World {
             ownership: &SingleNode,
             allocator: &HashedAllocator,
             settings: &self.settings,
+            guard: &self.guard,
             accepting: self.accepting,
             now,
         };
@@ -319,7 +360,7 @@ impl World {
 
     /// Runs the engine on `bytes` at `now`, from the relay.
     pub fn run(&self, bytes: &[u8], now: Timestamp, scratch: &mut Scratch) -> Answer {
-        self.run_from(bytes, SocketAddrV4::new(RELAY, 67), now, scratch)
+        self.run_from(bytes, source_of(bytes), now, scratch)
     }
 
     /// Applies a committed change to the table, as the server does after the commit.
@@ -327,6 +368,19 @@ impl World {
         let previous = self.leases.lease(change.vrf, change.addr);
         self.leases
             .apply(change.to_lease(NodeId(1), previous.as_ref()));
+    }
+}
+
+/// Where a request comes from as a client or relay sends it: a relayed one from the relay,
+/// a client with an address from that address, else from `0.0.0.0`.
+pub fn source_of(bytes: &[u8]) -> SocketAddrV4 {
+    let Ok(message) = tenko_dhcp::v4::Message::parse(bytes) else {
+        return SocketAddrV4::new(RELAY, 67);
+    };
+    if message.giaddr().is_unspecified() {
+        SocketAddrV4::new(message.ciaddr(), 68)
+    } else {
+        SocketAddrV4::new(RELAY, 67)
     }
 }
 
@@ -363,6 +417,8 @@ pub struct Ask {
     pub relay: Option<Vec<u8>>,
     /// Option 118.
     pub subnet: Option<Ipv4Addr>,
+    /// Option 61 as given, in place of the one of type 1 with the MAC.
+    pub id: Option<Vec<u8>>,
 }
 
 impl Ask {
@@ -381,6 +437,7 @@ impl Ask {
             prl: vec![code::SUBNET_MASK, code::ROUTERS, code::DOMAIN_NAME_SERVERS],
             relay: None,
             subnet: None,
+            id: None,
         }
     }
 
@@ -399,7 +456,9 @@ impl Ask {
             .giaddr(self.giaddr.unwrap_or(Ipv4Addr::UNSPECIFIED));
         builder.chaddr(&mac(self.client)).expect("chaddr");
         builder.message_type(self.kind).expect("53");
-        if self.with_id {
+        if let Some(id) = &self.id {
+            builder.option(code::CLIENT_IDENTIFIER, id).expect("61");
+        } else if self.with_id {
             let mut id = vec![1];
             id.extend(mac(self.client));
             builder.option(code::CLIENT_IDENTIFIER, &id).expect("61");

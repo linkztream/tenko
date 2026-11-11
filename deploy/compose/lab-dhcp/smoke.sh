@@ -12,10 +12,13 @@
 #   3. with the binary (NODE=tenko, the default): the first-run setup through the API under
 #      the Lab profile; the four networks as IPAM prefixes with a dhcp_pool range each and
 #      a scope each (lease 60 s, so that T1 comes after 30 s), option 3 per scope (the
-#      gateway's address on the network) and options 6, 15 and 42 for the server; then the
-#      rows: a lease on each network through the relay from the right scope with options 3,
-#      6 and 42; option 82 on the lease row (giaddr and the circuit-id dhcrelay adds); the
-#      link selection sub-option choosing another network's scope; perfdhcp and udhcpc;
+#      gateway's address on the network) and options 6, 15 and 42 for the server, the
+#      gateway as the one trusted relay agent; then the rows: a lease on each network
+#      through the relay from the right scope with options 3, 6 and 42; option 82 on the
+#      lease row (giaddr and the circuit-id dhcrelay adds); the tester, not yet trusted, is
+#      refused and named in the health view, then trusted; the link selection sub-option
+#      choosing another network's scope; perfdhcp; an offer rate that holds back a burst
+#      of new clients and is named in the health view; udhcpc;
 #      every client renews at T1 (unicast through the gateway); a reservation wins over the
 #      dynamic lease; a deny filter refuses a client and its removal admits it again; a
 #      release reaches the lease row; a restart of the node keeps the leases and the
@@ -381,7 +384,9 @@ configure() {
     must "option 3 of $net" api PUT "/dhcp/option-sets/scope:$id" \
       "{\"values\": [{\"code\": 3, \"typed\": {\"ipv4\": {\"values\": [\"${gateway[$net]}\"]}}}]}"
   done
-  ok "configuration" "four prefixes with a pool and a scope each, options 3, 6, 15 and 42"
+  # The gateway is the one trusted relay agent; the tester joins it in the rows below.
+  must "the trusted relays" api PUT /dhcp/settings "{\"trusted_relays\": [\"${gateway[servers]}/32\"]}"
+  ok "configuration" "four prefixes with a pool and a scope each, options 3, 6, 15 and 42, the gateway as the trusted relay"
 }
 
 # lease_row <address>: the lease row of an address (GET /dhcp/leases/{addr}).
@@ -448,6 +453,46 @@ relay_test() {
   shift
   compose exec -T tester python3 /lab/relay-test.py --server "$node_ip" --giaddr "$tester_ip" \
     --expect "$expect" "$@"
+}
+
+# untrusted_refused: relay-test.py from the tester, which is not a trusted relay, gets no
+# answer, and GET /system/status names the tester in dhcp.relay.untrusted.
+untrusted_refused() {
+  if relay_test "${prefix[iot]}" --link "${prefix[iot]%/*}" --mac 00:00:5e:00:53:2a \
+    --timeout 2 >/dev/null 2>&1; then
+    return 1
+  fi
+  api GET /system/status >/dev/null || return 1
+  python3 - "$work/api.out" "$tester_ip" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+rows = [w for w in d.get("warnings", []) if w.get("code") == "dhcp.relay.untrusted"]
+print(json.dumps(rows), file=sys.stderr)
+sys.exit(0 if any(sys.argv[2] in w.get("params", {}).get("senders", "") for w in rows) else 1)
+PY
+}
+
+# offers_limited: with an offer rate of 2 new clients a second per scope (a burst of 20),
+# perfdhcp's 40 new clients at once are not all answered, and GET /system/status names the
+# limit in dhcp.limit.refused; the limits go back to the profile (none under Lab) after.
+offers_limited() {
+  local result=0
+  must "an offer rate of 2 a second" api PUT /dhcp/settings '{"limits": {"offers_per_second": 2}}'
+  if perfdhcp_ok 40; then
+    result=1
+  elif api GET /system/status >/dev/null; then
+    python3 - "$work/api.out" <<'PY' || result=1
+import json, sys
+d = json.load(open(sys.argv[1]))
+rows = [w for w in d.get("warnings", []) if w.get("code") == "dhcp.limit.refused"]
+print(json.dumps(rows), file=sys.stderr)
+sys.exit(0 if any("offers_per_second" in w.get("params", {}).get("limits", "") for w in rows) else 1)
+PY
+  else
+    result=1
+  fi
+  must "the limits back to the profile" api PUT /dhcp/settings '{"limits": {}}'
+  return "$result"
 }
 
 # perfdhcp_ok <clients> [<options...>]: perfdhcp as a relay from the tester, every 4-way
@@ -869,9 +914,14 @@ if [[ "$node" == tenko ]]; then
   for net in "${networks[@]}"; do
     row "relay.$net" "the lease row on $net holds giaddr ${gateway[$net]} and circuit-id $net (option 82)" relay_on_lease "$net"
   done
+  row "relay.untrusted" "the tester, not a trusted relay, is refused and named in dhcp.relay.untrusted" \
+    untrusted_refused
+  must "the tester as a trusted relay" api PUT /dhcp/settings \
+    "{\"trusted_relays\": [\"${gateway[servers]}/32\", \"$tester_ip/32\"]}"
   row "link-selection" "option 82 link selection from servers picks the iot scope, echoed" \
     relay_test "${prefix[iot]}" --link "${prefix[iot]%/*}" --mac 00:00:5e:00:53:21 --circuit tester --release
   row "perfdhcp" "perfdhcp as a relay: 10 4-way exchanges, no drops" perfdhcp_ok 10
+  row "limit.offers" "an offer rate of 2 a second holds back a burst of 40 new clients and is named in dhcp.limit.refused"     offers_limited
   row "udhcpc" "BusyBox udhcpc on servers gets an address of the pool" udhcpc_ok servers
   for net in "${networks[@]}"; do
     row "renew.$net" "the client on $net renews its address at T1 through the gateway" within 60 renewed "$net"

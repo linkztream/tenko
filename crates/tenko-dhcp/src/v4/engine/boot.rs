@@ -204,17 +204,26 @@ pub fn proxy(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch) 
         return answer(request, Action::Drop(DropReason::Malformed));
     };
     let image: &ConfigImage = ctx.image;
-    let facts = Facts::of(&message);
+    // The relay trust and the filters as on the server's own listeners.
+    let trusted = match super::relay_gate(ctx, &message, received) {
+        Ok(trusted) => trusted,
+        Err(reason) => return answer(request, Action::Drop(reason)),
+    };
+    let echo = relay;
+    let relay = relay.filter(|_| trusted);
+    let facts = super::facts_of(&message, trusted);
     if BootClient::of(&facts).is_none() {
         return answer(request, Action::Ignore(IgnoreReason::NotBootClient));
     }
-    if message
-        .mac()
-        .is_ok_and(|mac| image.verdict(&mac) == tenko_core::dhcp::FilterVerdict::Denied)
-    {
-        return answer(request, Action::Drop(DropReason::Filtered));
+    match super::filter_mac(&message) {
+        Ok(Some(mac)) if image.verdict(&mac) == tenko_core::dhcp::FilterVerdict::Denied => {
+            return answer(request, Action::Drop(DropReason::Filtered));
+        }
+        Ok(_) => {}
+        Err(reason) => return answer(request, Action::Drop(reason)),
     }
-    let Some((scope, selector)) = select::select(image, &message, kind, relay, received) else {
+    let Some((scope, selector)) = select::select(image, &message, kind, relay, trusted, received)
+    else {
         return answer(request, Action::Drop(DropReason::NoScope));
     };
     let client_id = client_id.map(|id| id.as_bytes());
@@ -256,7 +265,7 @@ pub fn proxy(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch) 
         &levels,
         client,
         server_id,
-        (&message, client_id, relay),
+        (&message, client_id, echo),
     );
     let (Ok(()), Ok(len)) = (written, builder.finish()) else {
         return answer(request, Action::Drop(DropReason::Malformed));

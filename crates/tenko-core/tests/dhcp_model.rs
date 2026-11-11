@@ -1161,16 +1161,59 @@ fn settings() -> impl Strategy<Value = DhcpSettings> {
         ddns_policy(),
         maybe(any::<bool>()),
         maybe(any::<u32>()),
+        maybe(prop::collection::vec(
+            (any::<[u8; 4]>(), 0u8..=32).prop_map(|(octets, len)| {
+                ipnet::IpNet::V4(
+                    ipnet::Ipv4Net::new(std::net::Ipv4Addr::from(octets), len)
+                        .expect("a prefix length")
+                        .trunc(),
+                )
+            }),
+            0..=4,
+        )),
+        (
+            maybe(any::<u32>()),
+            maybe(any::<u32>()),
+            maybe(any::<u32>()),
+            maybe(any::<u32>()),
+            maybe(any::<u8>()),
+        )
+            .prop_map(
+                |(
+                    leases_per_mac,
+                    addresses_per_duid,
+                    prefixes_per_duid,
+                    offers_per_second,
+                    renew_cache_percent,
+                )| tenko_core::dhcp::DhcpLimits {
+                    leases_per_mac,
+                    addresses_per_duid,
+                    prefixes_per_duid,
+                    offers_per_second,
+                    renew_cache_percent,
+                },
+            ),
         maybe(stamp()),
     )
         .prop_map(
-            |(lease, authoritative, ddns, conflict_detection, history_days, updated)| {
+            |(
+                lease,
+                authoritative,
+                ddns,
+                conflict_detection,
+                history_days,
+                trusted_relays,
+                limits,
+                updated,
+            )| {
                 DhcpSettings {
                     lease,
                     authoritative,
                     ddns,
                     conflict_detection,
                     history_days,
+                    trusted_relays,
+                    limits,
                     updated,
                 }
             },

@@ -161,6 +161,11 @@ pub struct DhcpStatus {
     /// The DHCPv6 server's DUID (option 2), while a DHCPv6 server runs; the Kea export
     /// writes it as `server-id`.
     pub server_duid: Option<Vec<u8>>,
+    /// The trusted relays: the senders refused and the networks the lease rows say were
+    /// served through a relay ([`crate::relay`]).
+    pub relays: crate::relay::RelayReport,
+    /// The limits in force and their refusals ([`crate::limits`]).
+    pub limits: crate::limits::LimitReport,
 }
 
 /// A node's DHCP role as the API reaches it: locally in Phase 3.
@@ -280,6 +285,14 @@ impl LocalNode {
     /// Follows a change of the profile's expectation of a probe (TGL-16).
     pub fn set_probe_expected(&self, expected: bool) {
         self.probe_expected.store(expected, Ordering::Relaxed);
+    }
+
+    /// Follows a change of the security profile: what the unset settings mean for the
+    /// engines of both families.
+    pub fn set_profile(&self, profile: crate::guard::DhcpProfile) {
+        if let Some(server) = self.server() {
+            server.guard().set_profile(profile);
+        }
     }
 
     /// The counters of the role (`dhcp.stats`).
@@ -605,6 +618,12 @@ impl DhcpNode for LocalNode {
                 .ra
                 .report(image.as_ref().map(|image| image.v6()), Timestamp::now()),
             server_duid: server6.as_ref().map(|server| server.server_duid().to_vec()),
+            relays: server.as_ref().map_or_else(Default::default, |server| {
+                server.guard().relay_report(image.as_deref())
+            }),
+            limits: server.as_ref().map_or_else(Default::default, |server| {
+                server.guard().limit_report(image.as_deref())
+            }),
         }
     }
 
@@ -728,6 +747,11 @@ impl Follower {
     /// Replaces the image and the table with ones built from `data`, swapped together.
     fn reset(&mut self, mut data: DhcpData) {
         let built = build(&data);
+        self.server.guard().relays().set_relayed(relayed_networks(
+            &built.image,
+            data.leases.values(),
+            data.leases6.values(),
+        ));
         let mut table = index_from_data(&data);
         // WP9.1: the DHCPv6 table from the same image.
         let mut table6 = index_from_data6(&data);
@@ -799,6 +823,37 @@ impl Follower {
     }
 }
 
+/// The networks whose lease rows say that they were served through a relay, with the relay
+/// addresses the rows name (`giaddr`, the DHCPv6 link address of the relay closest to the
+/// client).
+fn relayed_networks<'a>(
+    image: &crate::image::ConfigImage,
+    rows4: impl Iterator<Item = &'a tenko_core::dhcp::Lease>,
+    rows6: impl Iterator<Item = &'a tenko_core::dhcp::Lease6>,
+) -> Vec<crate::relay::RelayedNetwork> {
+    use std::net::IpAddr;
+    let mut collect = crate::relay::RelayedCollector::default();
+    for lease in rows4 {
+        if let (Some(relay), Some(scope)) = (&lease.relay, image.scope(lease.scope)) {
+            collect.note(
+                lease.scope,
+                ipnet::IpNet::V4(scope.network),
+                IpAddr::V4(relay.giaddr),
+            );
+        }
+    }
+    for lease in rows6 {
+        if let (Some(relay), Some(scope)) = (&lease.relay, image.v6().scope(lease.scope)) {
+            collect.note(
+                lease.scope,
+                ipnet::IpNet::V6(scope.network),
+                IpAddr::V6(relay.link_address),
+            );
+        }
+    }
+    collect.finish()
+}
+
 // WP8.5: the stored conflict detection setting (TGL-16).
 /// Follows `dhcp.settings.conflict_detection` of `data` into the server's conflict
 /// detection.
@@ -859,6 +914,13 @@ impl Role {
         // WP9.6: the rows stay until the catch-up of the derived rows read them.
         let rows4 = std::mem::take(&mut data.leases);
         let rows6 = std::mem::take(&mut data.leases6);
+        // The networks the rows say were served through a relay, for the operator while no
+        // relay list is set.
+        settings.server.guard.relays().set_relayed(relayed_networks(
+            &built.image,
+            rows4.values(),
+            rows6.values(),
+        ));
         let held = data.revision;
         // E32: the hand-off queues as large as the first image needs, the setting their cap.
         let queue_cap = settings.commit.queue;
@@ -922,12 +984,26 @@ impl Role {
                 return Err(StartError::Bind(error));
             }
         };
+        // The insecure choice of Lab, said once per start (rule 6 of CONTRIBUTING).
+        let relays = server.guard().relay_report(Some(&server.image()));
+        if relays.trust_any {
+            tracing::warn!(
+                "the dhcp role trusts every sender as a relay agent: no trusted relays are                  set and the security profile is Lab (dhcp.settings.trusted_relays)"
+            );
+        } else if !relays.listed && !relays.relayed.is_empty() {
+            tracing::warn!(
+                networks = relays.relayed.len(),
+                "lease rows show networks served through relay agents, and no relay is                  trusted: list them in dhcp.settings.trusted_relays, or their clients get no                  new address"
+            );
+        }
         // WP9.1: the DHCPv6 listeners, over the same image.
         let server6 = if settings.server6.listen.is_empty() {
             None
         } else {
             let mut config6 = settings.server6.clone();
             config6.node = node;
+            // One guard for both families.
+            config6.guard = Arc::clone(server.guard());
             let image = server.image();
             let table = leases6.clone();
             let store6: Arc<dyn crate::v6::lease::store::Lease6Store> =

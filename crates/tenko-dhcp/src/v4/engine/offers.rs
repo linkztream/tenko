@@ -33,6 +33,10 @@ use crate::allocator::OfferHold;
 
 /// The offers the engine reads and writes.
 pub trait OfferBook: OfferHold + Send + Sync {
+    /// Whether an unexpired offer holds `addr` of `scope` for the client of `identity`
+    /// itself: a REQUEST that follows an OFFER, which the offer rate counted already.
+    fn held_for(&self, scope: PrefixId, addr: Ipv4Addr, identity: &[u8], now: Timestamp) -> bool;
+
     /// Holds `addr` of `scope` for the client of `identity` until `until`. False when an
     /// unexpired offer holds it for another client (nothing changes then).
     fn hold(
@@ -211,6 +215,23 @@ impl OfferHold for OfferTable {
 }
 
 impl OfferBook for OfferTable {
+    fn held_for(&self, scope: PrefixId, addr: Ipv4Addr, identity: &[u8], now: Timestamp) -> bool {
+        let (scope, addr, stripe, high) = Self::place(scope, addr);
+        let now = now.unix_nanos();
+        let slots = self.lock(stripe);
+        let start = start_in(high, slots.len());
+        for step in 0..PROBE.min(slots.len()) {
+            let slot = &slots[(start + step) % slots.len()];
+            if !slot.used {
+                return false;
+            }
+            if slot.is_key(scope, addr) {
+                return slot.live(now) && slot.who == hash::of_bytes(identity);
+            }
+        }
+        false
+    }
+
     fn hold(
         &self,
         scope: PrefixId,

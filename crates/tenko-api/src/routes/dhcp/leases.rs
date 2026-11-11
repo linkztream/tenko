@@ -997,6 +997,61 @@ pub(super) fn status_dto(status: DhcpStatus) -> DhcpNodeStatus {
         server_duid: status
             .server_duid
             .map(|duid| tenko_core::serde_util::to_hex(&duid)),
+        relays: relays_dto(&status.relays),
+        limits: limits_dto(&status.limits),
+    }
+}
+
+/// The limit report of the role as the API answers it.
+fn limits_dto(report: &tenko_dhcp::limits::LimitReport) -> super::model::DhcpLimitReport {
+    super::model::DhcpLimitReport {
+        effective: report.limits.map(Into::into),
+        refused: report
+            .refusals
+            .iter()
+            .map(|(refusal, network)| super::model::DhcpLimitRefusal {
+                limit: refusal.limit.label().to_owned(),
+                client: (!refusal.client.is_empty()).then(|| refusal.client_text()),
+                scope: refusal.scope,
+                network: *network,
+                cap: refusal.cap,
+                held: refusal.held,
+                count: refusal.count,
+                first: refusal.first,
+                last: refusal.last,
+            })
+            .collect(),
+        unlogged: report.unlogged,
+    }
+}
+
+/// The relay report of the role as the API answers it.
+fn relays_dto(report: &tenko_dhcp::relay::RelayReport) -> super::model::DhcpRelayReport {
+    super::model::DhcpRelayReport {
+        listed: report.listed,
+        trust_any: report.trust_any,
+        refused: report
+            .refused
+            .iter()
+            .map(|refused| super::model::DhcpRefusedRelay {
+                source: refused.source,
+                relay: refused.relay,
+                count: refused.count,
+                first: refused.first,
+                last: refused.last,
+                seen_before: report.seen_before(refused),
+            })
+            .collect(),
+        unlogged: report.unlogged,
+        relayed: report
+            .relayed
+            .iter()
+            .map(|network| super::model::DhcpRelayedNetwork {
+                scope: network.scope,
+                network: network.network,
+                relays: network.relays.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -1225,7 +1280,9 @@ pub(super) async fn list_dhcp_history(
                    whether it answers and the store takes its lease writes, its listeners \
                    and workers, the scopes it serves, its leases by state, the last commit's \
                    time and the revision of its configuration image; the DHCPv6 listeners, \
-                   scopes and leases in `listeners6`, `scopes6` and `leases6`.",
+                   scopes and leases in `listeners6`, `scopes6` and `leases6`; the relay \
+                   agents it refused (`relays`) and the limits per client and per scope with \
+                   the requests they refused (`limits`).",
     params(("id" = u64, Path, description = "Node id")),
     responses(
         (status = 200, description = "The report of the DHCP role", body = DhcpNodeStatus),

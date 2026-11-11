@@ -359,6 +359,26 @@ describe("the node", () => {
   });
 });
 
+describe("the limits of the node", () => {
+  it("reports one MAC address at its cap and one scope held back at its offer rate", async () => {
+    const { limits } = await api.get("/api/v1/nodes/{id}/dhcp", { path: { id: 1 } });
+    expect([limits?.effective?.leases_per_mac, limits?.unlogged]).toEqual([16, 0]);
+    expect(limits?.refused?.map((r) => [r.limit, r.client ?? null, r.network, r.held, r.cap, r.count])).toEqual([
+      ["leases_per_mac", "00:00:5e:00:53:40", "192.0.2.0/24", 16, 16, 3],
+      ["offers_per_second", null, "198.51.100.0/24", 100, 100, 41],
+    ]);
+  });
+});
+
+describe("the relay agents of the node", () => {
+  it("reports one refused sender the lease rows know and one relayed network while no list is set", async () => {
+    const { relays } = await api.get("/api/v1/nodes/{id}/dhcp", { path: { id: 1 } });
+    expect([relays?.listed, relays?.trust_any, relays?.unlogged]).toEqual([false, false, 0]);
+    expect(relays?.refused?.map((r) => [r.source, r.relay, r.seen_before])).toEqual([["192.0.2.1", "192.0.2.1", true]]);
+    expect(relays?.relayed?.map((r) => [r.network, r.relays])).toEqual([["198.51.100.0/24", ["198.51.100.1"]]]);
+  });
+});
+
 describe("the router advertisement check of the node", () => {
   it("watches two links, one whose router sets M and O and one whose router sets neither, with the finding for the second", async () => {
     const { ra } = await api.get("/api/v1/nodes/{id}/dhcp", { path: { id: 1 } });

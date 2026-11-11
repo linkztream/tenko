@@ -11,6 +11,7 @@ use tenko_core::{
     dhcp::{DdnsPolicy, LeaseTimes, OptionValue, Scope6Settings},
     serde_util::HexBytes,
 };
+use tenko_dhcp::guard::{DhcpProfile, Guard};
 use tenko_dhcp::{
     image::{ConfigImage, ImageBuilder},
     store::Ticket,
@@ -128,6 +129,9 @@ pub struct World6 {
     pub now: Timestamp,
     pub prefix1: PrefixId,
     pub prefix2: PrefixId,
+    /// The node's protections: Lab by default, so that every sender is a trusted relay as
+    /// before the relay list existed; the relay tests change the profile or the image.
+    pub guard: Guard,
     ticket: u64,
 }
 
@@ -152,12 +156,23 @@ pub fn image(
     let mut reservations = Vec::new();
     tune(&mut first, &mut second, &mut reservations);
     let mut builder = ImageBuilder::new(tenko_core::Revision(1));
+    RELAYS.with(|relays| {
+        builder.relays(tenko_dhcp::relay::RelayTrust::new(
+            relays.borrow().as_deref(),
+        ));
+    });
     builder.v6().add_scope(first);
     builder.v6().add_scope(second);
     for reservation in reservations {
         assert!(builder.v6().add_reservation(reservation).is_none());
     }
     builder.build()
+}
+
+std::thread_local! {
+    /// The relay list the next [`image`] of this thread gets (`World6::trusting`).
+    static RELAYS: std::cell::RefCell<Option<Vec<ipnet::IpNet>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// A reservation of `address` for `key`.
@@ -194,8 +209,49 @@ impl World6 {
             now: Timestamp::now(),
             prefix1,
             prefix2,
+            guard: Guard::new(DhcpProfile::Lab),
             ticket: 0,
         }
+    }
+
+    /// The world with scopes tuned by `tune` and the relay (`RELAY`) as the one trusted
+    /// relay, under Lab until a test changes the profile.
+    pub fn with_trusted_relay(
+        tune: impl FnOnce(&mut Scope6Image, &mut Scope6Image, &mut Vec<Reservation6Image>),
+    ) -> Self {
+        RELAYS.with(|cell| {
+            *cell.borrow_mut() = Some(vec![ipnet::IpNet::V6(
+                ipnet::Ipv6Net::new(RELAY, 128).expect("a prefix"),
+            )]);
+        });
+        let world = Self::with(tune);
+        RELAYS.with(|cell| *cell.borrow_mut() = None);
+        world
+    }
+
+    /// The world with `dhcp.settings.trusted_relays` set to `relays` (none: unset) and the
+    /// node under `profile`.
+    pub fn trusting(profile: DhcpProfile, relays: Option<&[&str]>) -> Self {
+        Self::trusting_with(profile, relays, |_, _, _| {})
+    }
+
+    /// [`World6::trusting`] with scopes tuned by `tune`.
+    pub fn trusting_with(
+        profile: DhcpProfile,
+        relays: Option<&[&str]>,
+        tune: impl FnOnce(&mut Scope6Image, &mut Scope6Image, &mut Vec<Reservation6Image>),
+    ) -> Self {
+        RELAYS.with(|cell| {
+            *cell.borrow_mut() = relays.map(|list| {
+                list.iter()
+                    .map(|text| text.parse().expect("a prefix"))
+                    .collect()
+            });
+        });
+        let world = Self::with(tune);
+        RELAYS.with(|cell| *cell.borrow_mut() = None);
+        world.guard.set_profile(profile);
+        world
     }
 
     /// Runs the engine on `bytes` received from `source`.
@@ -205,6 +261,7 @@ impl World6 {
             leases: &self.table,
             offers: &self.offers,
             settings: &self.settings,
+            guard: &self.guard,
             server_duid: &SERVER_DUID,
             accepting: self.accepting,
             now: self.now,

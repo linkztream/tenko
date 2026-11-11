@@ -141,12 +141,13 @@ use tenko_dhcp::config::ConfigService;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 pub use model::{
-    DhcpClassCreate, DhcpClassItem, DhcpClassPatch, DhcpCommandAccepted, DhcpExportParams,
-    DhcpFamily, DhcpFilterCreate, DhcpFilterItem, DhcpFilterPatch, DhcpHistoryFilters,
-    DhcpHistoryItem, DhcpLeaseCount, DhcpLeaseFilters, DhcpLeaseItem, DhcpLeaseParams,
-    DhcpLeasePeer, DhcpLeaseRelease, DhcpListenMode, DhcpListenerItem, DhcpNodeStatus,
-    DhcpPdUtilization, DhcpPolicyCreate, DhcpPolicyFilter, DhcpPolicyItem, DhcpPolicyPatch,
-    DhcpPoolItem, DhcpPoolSet, DhcpRaCheck, DhcpRaFinding, DhcpRaLink, DhcpRaReport,
+    DhcpClassCreate, DhcpClassItem, DhcpClassPatch, DhcpCommandAccepted, DhcpEffectiveLimits,
+    DhcpExportParams, DhcpFamily, DhcpFilterCreate, DhcpFilterItem, DhcpFilterPatch,
+    DhcpHistoryFilters, DhcpHistoryItem, DhcpLeaseCount, DhcpLeaseFilters, DhcpLeaseItem,
+    DhcpLeaseParams, DhcpLeasePeer, DhcpLeaseRelease, DhcpLimitRefusal, DhcpLimitReport,
+    DhcpListenMode, DhcpListenerItem, DhcpNodeStatus, DhcpPdUtilization, DhcpPolicyCreate,
+    DhcpPolicyFilter, DhcpPolicyItem, DhcpPolicyPatch, DhcpPoolItem, DhcpPoolSet, DhcpRaCheck,
+    DhcpRaFinding, DhcpRaLink, DhcpRaReport, DhcpRefusedRelay, DhcpRelayReport, DhcpRelayedNetwork,
     DhcpReservationItem, DhcpScopeCreate, DhcpScopeFilter, DhcpScopeItem, DhcpScopePatch,
     DhcpScopeUtilization, DhcpSettingsItem, DhcpSettingsUpdate, EffectiveOption, EffectiveOptions,
     EffectiveOptionsParams, ExclusionCreate, ExclusionItem, OptionCatalogItem, OptionCatalogParams,

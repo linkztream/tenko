@@ -406,6 +406,12 @@ impl Conflicts {
 
     /// Whether the client of the DECLINE in `request` may decline now (the per-client
     /// limit); counts it either way.
+    /// The DECLINE limit per client.
+    pub fn decline_limit(&self) -> &DeclineLimit {
+        &self.declines
+    }
+
+    /// Counts a DECLINE of the client of `identity`; false when it is beyond the limit.
     pub fn decline_allowed(&self, identity: &[u8], now: Instant) -> bool {
         if self.declines.allow(identity, now) {
             bump(&self.counters.declines);

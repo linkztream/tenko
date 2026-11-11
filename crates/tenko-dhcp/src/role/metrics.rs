@@ -313,6 +313,8 @@ pub fn register(registry: &Registry) {
     registry.register(&DDNS_QUEUE);
     registry.register(&DROPPED);
     registry.register(&lease::STORE_REFUSED);
+    registry.register(&crate::limits::LIMITED);
+    registry.register(&crate::limits::RENEWALS_CACHED);
     registry.register(&lease::EXPIRED);
     registry.register(&lease::HISTORY_ROWS);
     registry.register(&lease::HISTORY_PURGED);

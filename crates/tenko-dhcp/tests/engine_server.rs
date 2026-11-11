@@ -67,6 +67,10 @@ fn a_relay_listener_runs_dora_renew_and_release_through_the_store() {
         workers: 2,
         layout: SocketLayout::Shared,
         node: NodeId(1),
+        // Lab: the relay on loopback is trusted as every sender was before the relay list.
+        guard: std::sync::Arc::new(tenko_dhcp::guard::Guard::new(
+            tenko_dhcp::guard::DhcpProfile::Lab,
+        )),
         ..ServerConfig::default()
     };
     config.engine.relay_port = relay_port;

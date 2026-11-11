@@ -474,6 +474,8 @@ fn the_node_report_carries_the_ra_check_and_the_server_duid() {
         leases6: none,
         ra,
         server_duid,
+        relays: tenko_dhcp::relay::RelayReport::default(),
+        limits: tenko_dhcp::limits::LimitReport::default(),
     };
     let seen: Timestamp = "2026-10-25T12:00:00Z".parse().expect("time");
     let watching = RaReport {

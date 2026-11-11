@@ -17,8 +17,9 @@
 //!
 //! WP9.1: the `[dhcp] listen` entries with an IPv6 address are the DHCPv6 listeners on
 //! `[dhcp.v6] port` (547), over the same image and the same store.
-//! 6. A follower keeps the profile current: the history retention and whether conflict
-//!    detection is expected (TGL-16, the health row `dhcp.probe.missing`).
+//! 6. A follower keeps the profile current: the history retention, whether conflict
+//!    detection is expected (TGL-16, the health row `dhcp.probe.missing`) and what the
+//!    unset settings of both engines mean (the trusted relays, `tenko_dhcp::guard`).
 //!
 //! The role stops first with the `dns` role when the process stops: the listeners close,
 //! the workers end, the follower and the committer stop, before the store closes. A module
@@ -93,6 +94,17 @@ fn history_profile(profile: Profile) -> HistoryProfile {
         Profile::Standard => HistoryProfile::Standard,
         Profile::Hardened => HistoryProfile::Hardened,
         Profile::Lab => HistoryProfile::Lab,
+    }
+}
+
+/// The profile as the DHCP engines read it.
+fn dhcp_profile(profile: Profile) -> tenko_dhcp::guard::DhcpProfile {
+    use tenko_dhcp::guard::DhcpProfile;
+    match profile {
+        Profile::Lab => DhcpProfile::Lab,
+        Profile::Home => DhcpProfile::Home,
+        Profile::Standard => DhcpProfile::Standard,
+        Profile::Hardened => DhcpProfile::Hardened,
     }
 }
 
@@ -255,6 +267,7 @@ async fn follow_profile(
         let profile = profile_of(store.as_ref(), bootstrap).await;
         retention.set_profile(history_profile(profile));
         node.set_probe_expected(probe_expected(profile));
+        node.set_profile(dhcp_profile(profile));
     }
 }
 
@@ -357,6 +370,8 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DhcpRole, String), StartE
         ..tenko_dhcp::conflict::ConflictSettings::default()
     };
     // End of the WP8.5 block.
+    // The profile both engines start under (the follower below keeps it current).
+    server.guard = Arc::new(tenko_dhcp::guard::Guard::new(dhcp_profile(profile)));
     let settings = RoleSettings {
         server,
         commit: CommitSettings::default(),

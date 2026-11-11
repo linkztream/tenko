@@ -17,7 +17,7 @@ pub const TYPE_LABELS: [&str; 9] = [
 pub const OUTCOME_LABELS: [&str; 4] = ["answered", "nak", "dropped", "ignored"];
 
 /// The drop reasons, in the order of [`DropReason`] and of the `reason` label.
-pub const DROP_LABELS: [&str; 7] = [
+pub const DROP_LABELS: [&str; 9] = [
     "malformed",
     "filtered",
     "no_scope",
@@ -25,6 +25,8 @@ pub const DROP_LABELS: [&str; 7] = [
     "queue",
     "store_refused",
     "rate_limited",
+    "untrusted_relay",
+    "limited",
 ];
 
 /// The steps of `tenko_dhcp_exchange_duration_seconds`.

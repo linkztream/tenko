@@ -154,6 +154,10 @@ fn lab_with(
             cap: CAP,
             ..ConflictSettings::default()
         },
+        // Lab: the relay on loopback is trusted as every sender was before the relay list.
+        guard: std::sync::Arc::new(tenko_dhcp::guard::Guard::new(
+            tenko_dhcp::guard::DhcpProfile::Lab,
+        )),
         ..ServerConfig::default()
     };
     config.engine.relay_port = relay_port;
@@ -392,6 +396,44 @@ fn every_answering_address_is_skipped_until_the_cap() {
     assert!(!calls.contains(&addr), "{calls:?} {addr}");
     assert!(took <= CAP + SLACK, "{took:?}");
     assert_eq!(lab.server.conflicts().stats().conflicts, 4);
+    lab.server.stop();
+}
+
+#[test]
+fn one_answering_mac_abandons_two_addresses_an_hour_and_the_rest_are_skipped_once() {
+    // A host answers every probe with its own MAC address: the first two addresses are
+    // abandoned for the hold time, the next ones only skipped for this offer, and the
+    // limit log names the host.
+    let squatter = mac(0x66);
+    let fake = Fake::new(move |_, _| Answer::InUse(Duration::from_millis(5), Some(squatter)));
+    let lab = lab(Some(fake.clone()));
+    let (addr, _) = lab.offer(0x38);
+    let calls = fake.calls();
+    assert_eq!(calls.len(), 4, "{calls:?}");
+    assert!(!calls.contains(&addr));
+    let abandoned: Vec<_> = calls
+        .iter()
+        .filter(|probed| {
+            lab.row(**probed)
+                .is_some_and(|row| row.state == BindingState::Abandoned)
+        })
+        .collect();
+    wait_for("the two marks", || {
+        calls
+            .iter()
+            .filter(|probed| {
+                lab.row(**probed)
+                    .is_some_and(|row| row.state == BindingState::Abandoned)
+            })
+            .count()
+            == 2
+    });
+    assert!(abandoned.len() <= 2, "{abandoned:?}");
+    let report = lab.server.guard().limit_report(None);
+    let (refusal, _) = &report.refusals[0];
+    assert_eq!(refusal.limit, tenko_dhcp::limits::Limit::ConflictsPerMac);
+    assert_eq!(refusal.client, squatter);
+    assert_eq!(refusal.count, 2);
     lab.server.stop();
 }
 

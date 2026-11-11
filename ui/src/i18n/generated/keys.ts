@@ -1692,6 +1692,7 @@ export type MessageKey =
   | "dhcp.check.lease_number"
   | "dhcp.check.lease_order"
   | "dhcp.check.lease_year"
+  | "dhcp.check.limits_range"
   | "dhcp.check.mac"
   | "dhcp.check.mac_pattern"
   | "dhcp.check.match_empty"
@@ -1705,6 +1706,9 @@ export type MessageKey =
   | "dhcp.check.range_address"
   | "dhcp.check.range_order"
   | "dhcp.check.range_outside"
+  | "dhcp.check.relays_count"
+  | "dhcp.check.relays_format"
+  | "dhcp.check.relays_host_bits"
   | "dhcp.check.server_id"
   | "dhcp.check.server_id_clear"
   | "dhcp.check.space"
@@ -2382,8 +2386,54 @@ export type MessageKey =
   | "dhcp.settings.lease"
   | "dhcp.settings.lease_help"
   | "dhcp.settings.lede"
+  | "dhcp.settings.limit_addresses_per_duid"
+  | "dhcp.settings.limit_addresses_per_duid_help"
+  | "dhcp.settings.limit_conflict_share"
+  | "dhcp.settings.limit_conflicts_per_mac"
+  | "dhcp.settings.limit_leases_per_mac"
+  | "dhcp.settings.limit_leases_per_mac_help"
+  | "dhcp.settings.limit_offers_per_second"
+  | "dhcp.settings.limit_offers_per_second_help"
+  | "dhcp.settings.limit_prefixes_per_duid"
+  | "dhcp.settings.limit_prefixes_per_duid_help"
+  | "dhcp.settings.limit_renew_cache"
+  | "dhcp.settings.limit_renew_cache_help"
+  | "dhcp.settings.limits"
+  | "dhcp.settings.limits_col_client"
+  | "dhcp.settings.limits_col_count"
+  | "dhcp.settings.limits_col_held"
+  | "dhcp.settings.limits_col_last"
+  | "dhcp.settings.limits_col_limit"
+  | "dhcp.settings.limits_col_network"
+  | "dhcp.settings.limits_effective"
+  | "dhcp.settings.limits_follow"
+  | "dhcp.settings.limits_held"
+  | "dhcp.settings.limits_help"
+  | "dhcp.settings.limits_offer_note"
+  | "dhcp.settings.limits_refused"
+  | "dhcp.settings.limits_refused_label"
+  | "dhcp.settings.limits_unlogged"
   | "dhcp.settings.off"
   | "dhcp.settings.on"
+  | "dhcp.settings.relays"
+  | "dhcp.settings.relays_col_count"
+  | "dhcp.settings.relays_col_last"
+  | "dhcp.settings.relays_col_relay"
+  | "dhcp.settings.relays_col_source"
+  | "dhcp.settings.relays_follow"
+  | "dhcp.settings.relays_known"
+  | "dhcp.settings.relays_list"
+  | "dhcp.settings.relays_list_help"
+  | "dhcp.settings.relays_none"
+  | "dhcp.settings.relays_refused_label"
+  | "dhcp.settings.relays_seen"
+  | "dhcp.settings.relays_seen_relayed"
+  | "dhcp.settings.relays_seen_relayed_item"
+  | "dhcp.settings.relays_trust"
+  | "dhcp.settings.relays_trust_any"
+  | "dhcp.settings.relays_trust_label"
+  | "dhcp.settings.relays_trusted"
+  | "dhcp.settings.relays_unlogged"
   | "dhcp.settings.save"
   | "dhcp.settings.saved"
   | "dhcp.settings.server"
@@ -8448,6 +8498,10 @@ export interface MessageArgs {
   "dhcp.check.exclusion_last": { network: string | number };
   "dhcp.check.exclusion_order": { network: string | number };
   "dhcp.check.exclusion_outside": { network: string | number };
+  "dhcp.check.limits_range": { max: string | number };
+  "dhcp.check.relays_count": { max: string | number };
+  "dhcp.check.relays_format": { line: string | number; text: string | number };
+  "dhcp.check.relays_host_bits": { line: string | number; suggest: string | number; text: string | number };
   "dhcp.class.created": { name: string | number };
   "dhcp.class.delete_title": { name: string | number };
   "dhcp.class.deleted": { name: string | number };
@@ -8588,6 +8642,18 @@ export interface MessageArgs {
   "dhcp.scope.saved": { network: string | number };
   "dhcp.settings.effective": { value: string | number };
   "dhcp.settings.effective_days": { days: number };
+  "dhcp.settings.limit_addresses_per_duid_help": { max: string | number };
+  "dhcp.settings.limit_leases_per_mac_help": { max: string | number };
+  "dhcp.settings.limit_offers_per_second_help": { max: string | number };
+  "dhcp.settings.limit_prefixes_per_duid_help": { max: string | number };
+  "dhcp.settings.limit_renew_cache_help": { max: string | number };
+  "dhcp.settings.limits_effective": { addresses: string | number; cache: string | number; mac: string | number; offers: string | number; prefixes: string | number };
+  "dhcp.settings.limits_held": { cap: string | number; held: string | number };
+  "dhcp.settings.limits_unlogged": { count: number };
+  "dhcp.settings.relays_seen_relayed_item": { network: string | number; relays: string | number };
+  "dhcp.settings.relays_trust_label": { source: string | number };
+  "dhcp.settings.relays_trusted": { source: string | number };
+  "dhcp.settings.relays_unlogged": { count: number };
   "dhcp.strip.commit": { ms: string | number };
   "dhcp.strip.listeners": { count: number };
   "dhcp.strip.revision": { revision: string | number };
@@ -11442,6 +11508,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.check.lease_number",
   "dhcp.check.lease_order",
   "dhcp.check.lease_year",
+  "dhcp.check.limits_range",
   "dhcp.check.mac",
   "dhcp.check.mac_pattern",
   "dhcp.check.match_empty",
@@ -11455,6 +11522,9 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.check.range_address",
   "dhcp.check.range_order",
   "dhcp.check.range_outside",
+  "dhcp.check.relays_count",
+  "dhcp.check.relays_format",
+  "dhcp.check.relays_host_bits",
   "dhcp.check.server_id",
   "dhcp.check.server_id_clear",
   "dhcp.check.space",
@@ -12132,8 +12202,54 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.settings.lease",
   "dhcp.settings.lease_help",
   "dhcp.settings.lede",
+  "dhcp.settings.limit_addresses_per_duid",
+  "dhcp.settings.limit_addresses_per_duid_help",
+  "dhcp.settings.limit_conflict_share",
+  "dhcp.settings.limit_conflicts_per_mac",
+  "dhcp.settings.limit_leases_per_mac",
+  "dhcp.settings.limit_leases_per_mac_help",
+  "dhcp.settings.limit_offers_per_second",
+  "dhcp.settings.limit_offers_per_second_help",
+  "dhcp.settings.limit_prefixes_per_duid",
+  "dhcp.settings.limit_prefixes_per_duid_help",
+  "dhcp.settings.limit_renew_cache",
+  "dhcp.settings.limit_renew_cache_help",
+  "dhcp.settings.limits",
+  "dhcp.settings.limits_col_client",
+  "dhcp.settings.limits_col_count",
+  "dhcp.settings.limits_col_held",
+  "dhcp.settings.limits_col_last",
+  "dhcp.settings.limits_col_limit",
+  "dhcp.settings.limits_col_network",
+  "dhcp.settings.limits_effective",
+  "dhcp.settings.limits_follow",
+  "dhcp.settings.limits_held",
+  "dhcp.settings.limits_help",
+  "dhcp.settings.limits_offer_note",
+  "dhcp.settings.limits_refused",
+  "dhcp.settings.limits_refused_label",
+  "dhcp.settings.limits_unlogged",
   "dhcp.settings.off",
   "dhcp.settings.on",
+  "dhcp.settings.relays",
+  "dhcp.settings.relays_col_count",
+  "dhcp.settings.relays_col_last",
+  "dhcp.settings.relays_col_relay",
+  "dhcp.settings.relays_col_source",
+  "dhcp.settings.relays_follow",
+  "dhcp.settings.relays_known",
+  "dhcp.settings.relays_list",
+  "dhcp.settings.relays_list_help",
+  "dhcp.settings.relays_none",
+  "dhcp.settings.relays_refused_label",
+  "dhcp.settings.relays_seen",
+  "dhcp.settings.relays_seen_relayed",
+  "dhcp.settings.relays_seen_relayed_item",
+  "dhcp.settings.relays_trust",
+  "dhcp.settings.relays_trust_any",
+  "dhcp.settings.relays_trust_label",
+  "dhcp.settings.relays_trusted",
+  "dhcp.settings.relays_unlogged",
   "dhcp.settings.save",
   "dhcp.settings.saved",
   "dhcp.settings.server",

@@ -55,6 +55,8 @@ fn status(ra: RaReport) -> DhcpStatus {
         leases6: none,
         ra,
         server_duid: None,
+        relays: tenko_dhcp::relay::RelayReport::default(),
+        limits: tenko_dhcp::limits::LimitReport::default(),
     }
 }
 
@@ -256,4 +258,35 @@ fn the_diagnostics_give_the_rows_their_severity() {
     assert_eq!(severity_of(MANAGED_WITHOUT_SCOPE), FindingSeverity::Warning);
     // The role's own failures stay errors.
     assert_eq!(severity_of(DHCP_ROLE_NOT_SERVING), FindingSeverity::Error);
+}
+
+#[test]
+fn the_relay_report_becomes_the_relay_warnings_with_the_node() {
+    use tenko_dhcp::relay::{RelayLog, RelayedCollector, TRUST_ANY, UNTRUSTED};
+    let log = RelayLog::new();
+    let mut collect = RelayedCollector::default();
+    let giaddr: std::net::IpAddr = std::net::Ipv4Addr::new(192, 0, 2, 1).into();
+    collect.note(
+        tenko_core::PrefixId::generate(),
+        "192.0.2.0/24".parse().expect("net"),
+        giaddr,
+    );
+    log.set_relayed(collect.finish());
+    log.refuse(giaddr, giaddr, Timestamp::UNIX_EPOCH);
+    let mut role = status(RaReport::default());
+    role.relays = log.report(false, false);
+    let warnings = dhcp_role_warnings(&role);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].code, UNTRUSTED);
+    assert_eq!(warnings[0].params["node"], "7");
+    assert_eq!(warnings[0].params["senders"], "192.0.2.1");
+    assert!(warnings[0].detail.contains("a relay of the lease rows"));
+    assert_eq!(severity_of(UNTRUSTED), FindingSeverity::Warning);
+    role.relays = RelayLog::new().report(false, true);
+    let warnings = dhcp_role_warnings(&role);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].code, TRUST_ANY);
+    assert_eq!(severity_of(TRUST_ANY), FindingSeverity::Warning);
+    role.relays = RelayLog::new().report(true, false);
+    assert_eq!(dhcp_role_warnings(&role), Vec::new());
 }

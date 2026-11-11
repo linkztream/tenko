@@ -25,9 +25,16 @@ use std::{alloc::System, hint::black_box, net::Ipv4Addr};
 
 use stats_alloc::{INSTRUMENTED_SYSTEM, Region, StatsAlloc};
 use support::{WELL_FORMED, fixture};
+use tenko_dhcp::guard::{DhcpProfile, Guard};
 use tenko_dhcp::v4::{
     ClientFqdn, DomainSearch, Message, MessageBuilder, MessageType, Route, Routes, WireName, code,
 };
+
+/// Lab: every sender is a trusted relay, as before the relay list existed.
+/// Standard: the relay list of the image applies, and the limits per client and per scope
+/// run, so that the measured path holds them too.
+static GUARD: std::sync::LazyLock<Guard> =
+    std::sync::LazyLock::new(|| Guard::new(DhcpProfile::Standard));
 
 #[global_allocator]
 static GLOBAL: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
@@ -389,6 +396,7 @@ fn conflict_section(requests: &[Vec<u8>]) {
                 ownership: &SingleNode,
                 allocator: &HashedAllocator,
                 settings: &settings,
+                guard: &GUARD,
                 accepting: true,
                 now,
             };
@@ -402,6 +410,7 @@ fn conflict_section(requests: &[Vec<u8>]) {
             if let Action::Reply { len, dest, .. } = answer.action
                 && let Some(found) = candidate(
                     &conflicts,
+                    &GUARD,
                     &image,
                     &leases,
                     &received,

@@ -60,15 +60,18 @@ KEEP=1 bash deploy/compose/lab-dhcp/smoke.sh             # leaves the lab runnin
 With the binary, the smoke sets the node up through the API under the Lab profile and
 configures it: the four networks as IPAM prefixes, a `dhcp_pool` range in each (`.30` to
 `.59` of each /26), a scope on each with a 60-second lease (T1 after 30 seconds), option 3
-per scope (the gateway's address on the network) and options 6, 15 and 42 for the server.
+per scope (the gateway's address on the network) and options 6, 15 and 42 for the server,
+and the gateway (`192.0.2.2`) as the one trusted relay agent (`dhcp.settings.trusted_relays`).
 Then the rows, one `PASS`, `FAIL` or `SKIP` line each:
 
 | Row | Checks |
 |---|---|
 | `lease.<network>` | `dhclient` on each network gets an address of that network's pool through the relay, with option 3 the gateway, option 6 `192.0.2.53` and option 42 `192.0.2.123` (the options of E23) |
 | `relay.<network>` | the lease row (`GET /dhcp/leases/{addr}`) holds `giaddr`, the gateway's address on the network, and the circuit-id `dhcrelay` added (the network's name): option 82 reaches the scope and the lease |
+| `relay.untrusted` | `relay-test.py` on servers, not yet a trusted relay, gets no answer, and `GET /system/status` names the tester in `dhcp.relay.untrusted`; the smoke then adds the tester to the trusted relays for the rows below |
 | `link-selection` | `relay-test.py` on servers sends option 82 with the link selection sub-option (RFC 3527) of iot: the offer and the ack come from the iot scope, option 82 back unchanged |
 | `perfdhcp` | perfdhcp as a relay: 10 4-way exchanges, no drops |
+| `limit.offers` | with `limits.offers_per_second` 2 (a burst of 20), perfdhcp's 40 new clients at once are not all answered and `GET /system/status` names `offers_per_second` in `dhcp.limit.refused`; the limits go back to the profile after |
 | `udhcpc` | BusyBox's `udhcpc` on servers gets an address of the pool |
 | `renew.<network>` | every `dhclient` renews its address at T1, a unicast through the gateway |
 | `reservation` | an IPAM host of mode `reserved` with client-lan's MAC at `192.0.2.80`: after a release client-lan gets `192.0.2.80`, not its dynamic address |
@@ -136,7 +139,9 @@ set holds the DHCPv4 options 6, 15 and 42 and the DHCPv6 options 23 (`2001:db8:1
 to `.123` on lan6, `.158` to `.187` on iot6, option 3 the relay) and an IPv6 prefix with a
 `dhcp_pool` range `::1000` to `::1fff`, and a scope on each. The IPv6 scope of lan6 has a
 valid lifetime of 120 seconds and a preferred lifetime of 60 (T1 after 30); that of iot6
-names the Interface-Id `lab-iot6`. Servers6 has no scope until the RA rows. WP9.2: the IA_PD
+names the Interface-Id `lab-iot6`. The trusted relays are the gateway's and the tester's
+addresses of both families (`192.0.2.2`, `192.0.2.20`, `2001:db8:100::2`, `2001:db8:100::20`),
+and `fe80::/10`, so that the Interface-Id of the tester's inner lightweight relay selects a scope. Servers6 has no scope until the RA rows. WP9.2: the IA_PD
 rows add the delegation network `2001:db8:180::/48` with a `dhcp_pd_pool` range
 `2001:db8:180:100::` to `2001:db8:180:1ff:ffff:ffff:ffff:ffff` (`delegated_len` 60) and a
 scope, and a shared network `lab-lan6` that holds lan6's IPv6 scope and that scope; the RA

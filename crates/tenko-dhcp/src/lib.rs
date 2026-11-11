@@ -36,8 +36,12 @@ pub mod ddns;
 pub mod export;
 pub mod feed;
 pub mod fingerprint;
+// The protections both engines read: the profile in force and the relay log.
+pub mod guard;
 pub mod image;
 pub mod lease;
+// The limits per client and per scope, and the renewal cache.
+pub mod limits;
 pub mod metrics;
 // The clients of move jobs: the short lease before a move and the client's activity
 // (ADR 0027).
@@ -45,6 +49,8 @@ pub mod moving;
 pub mod probe;
 // WP9.2: the router advertisement check of DHCP-10.
 pub mod ra;
+// The trusted relay agents (`dhcp.settings.trusted_relays`).
+pub mod relay;
 // WP7.3: the listeners, the workers and the committer around the engine.
 pub mod server;
 // E32: the room of the role's fixed tables, from the configuration image.

@@ -366,6 +366,10 @@ async fn the_role_serves_from_the_store_follows_it_and_survives_a_snapshot_insta
         }],
         workers: 2,
         layout: SocketLayout::Shared,
+        // Lab: the relay on loopback is trusted as every sender was before the relay list.
+        guard: Arc::new(tenko_dhcp::guard::Guard::new(
+            tenko_dhcp::guard::DhcpProfile::Lab,
+        )),
         ..ServerConfig::default()
     };
     server.engine.relay_port = relay_port;
@@ -683,5 +687,140 @@ async fn e32_ops_15_the_roles_tables_start_at_the_floor_and_grow_with_the_scopes
         floor,
         "the DHCPv6 queue follows the DHCPv6 scopes"
     );
+    role.stop().await;
+}
+
+/// Sends `ask` once and waits `wait` for an answer.
+async fn once(
+    relay: &Arc<UdpSocket>,
+    server: SocketAddrV4,
+    ask: &Ask,
+    wait: Duration,
+) -> Option<Vec<u8>> {
+    let relay = Arc::clone(relay);
+    let bytes = ask.bytes();
+    tokio::task::spawn_blocking(move || {
+        let start = Instant::now();
+        let mut buf = [0u8; 1500];
+        relay.send_to(&bytes, server).expect("send");
+        while start.elapsed() < wait {
+            if let Ok((len, _)) = relay.recv_from(&mut buf) {
+                return Some(buf[..len].to_vec());
+            }
+        }
+        None
+    })
+    .await
+    .expect("join")
+}
+
+/// The upgrade of an installation that relied on relays before the relay list existed:
+/// the node names the networks its lease rows say came through a relay before any client
+/// is refused, then the relay it refuses (marked as one the rows know), and serves it once
+/// the operator lists it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_upgraded_node_names_its_relays_before_it_refuses_and_serves_them_once_listed() {
+    let store: Arc<dyn Store> = Arc::new(MemStore::default());
+    let config = ConfigService::with_direct_jobs(Arc::clone(&store));
+    let vrf = VrfId::generate();
+    let scope = network(
+        &store,
+        &config,
+        vrf,
+        "192.0.2.0/24",
+        ("192.0.2.100", "192.0.2.199"),
+    )
+    .await;
+    // A lease row written by the version before: the client came through the relay at
+    // 127.0.0.1 (the loopback relay of this test).
+    let mut lease = foreign_lease(vrf, scope, Ipv4Addr::new(192, 0, 2, 150));
+    lease.relay = Some(tenko_core::dhcp::RelayInfo {
+        giaddr: LOOPBACK,
+        circuit_id: None,
+        remote_id: None,
+        link_selection: None,
+        server_id_override: None,
+        raw: HexBytes(Vec::new()),
+    });
+    let mut batch = WriteBatch::new(
+        Principal::system(SystemComponent::Api),
+        tenko_core::Timestamp::now(),
+    );
+    batch
+        .put_typed(&LEASES, &(vrf, lease.addr), &lease)
+        .expect("lease");
+    store.propose(batch).await.expect("the old row");
+
+    let relay = UdpSocket::bind(SocketAddrV4::new(LOOPBACK, 0)).expect("bind");
+    relay
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .expect("timeout");
+    let relay_port = relay.local_addr().expect("address").port();
+    let relay = Arc::new(relay);
+    // The default guard: Home, the profile of an installation before setup.
+    let mut server = ServerConfig {
+        listen: vec![Listen {
+            address: SocketAddrV4::new(LOOPBACK, 0),
+            mode: ListenMode::Relay,
+            interface: None,
+        }],
+        workers: 1,
+        layout: SocketLayout::Shared,
+        ..ServerConfig::default()
+    };
+    server.engine.relay_port = relay_port;
+    let role = Role::start(
+        Arc::clone(&store),
+        NodeId(1),
+        RoleSettings {
+            server,
+            commit: CommitSettings::default(),
+            probe: false,
+            probe_expected: false,
+            server6: tenko_dhcp::v6::server::Server6Config::default(),
+        },
+    )
+    .await
+    .expect("start");
+    let node = role.node();
+    let address = node.status().listeners[0].address;
+
+    // At the first start, before any refusal: the relayed network and its relay.
+    let report = node.status().relays;
+    assert!(!report.listed && !report.trust_any && report.untrusted());
+    assert_eq!(report.refused, Vec::new());
+    assert_eq!(report.relayed.len(), 1);
+    assert_eq!(report.relayed[0].scope, scope);
+    assert_eq!(report.relayed[0].network.to_string(), "192.0.2.0/24");
+    assert_eq!(report.relayed[0].relays, [std::net::IpAddr::V4(LOOPBACK)]);
+
+    // The relay is refused, and the node says it is the relay the rows know.
+    let ask = relayed(MessageType::Discover, 0x61, "192.0.2.0");
+    assert_eq!(
+        once(&relay, address, &ask, Duration::from_millis(500)).await,
+        None
+    );
+    let report = node.status().relays;
+    assert_eq!(report.refused.len(), 1);
+    assert_eq!(report.refused[0].source, std::net::IpAddr::V4(LOOPBACK));
+    assert!(report.seen_before(&report.refused[0]));
+
+    // The operator trusts it: served, and the relayed networks are no longer shown.
+    config
+        .update_settings(
+            &cx(),
+            tenko_dhcp::config::settings::SettingsChange {
+                trusted_relays: Some(vec!["127.0.0.1/32".parse().expect("prefix")]),
+                ..tenko_dhcp::config::settings::SettingsChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("the list");
+    let offer = exchange(&relay, address, &ask).await.expect("an offer");
+    let offer = Message::parse(&offer).expect("parse");
+    assert_eq!(offer.message_type().expect("53"), Some(MessageType::Offer));
+    let report = node.status().relays;
+    assert!(report.listed && report.relayed.is_empty());
     role.stop().await;
 }
