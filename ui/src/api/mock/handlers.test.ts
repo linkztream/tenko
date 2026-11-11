@@ -6,6 +6,7 @@ import { apiOperations } from "../generated/operations";
 import type {
   CreatedToken,
   CredentialInfo,
+  KnownDeviceInfo,
   LoginResponse,
   Page,
   PasswordCheckResult,
@@ -746,6 +747,8 @@ describe("factors", () => {
       ["POST", "/api/v1/auth/recovery-codes"],
       ["GET", "/api/v1/auth/webauthn/credentials"],
       ["GET", "/api/v1/auth/sessions"],
+      ["GET", "/api/v1/auth/known-devices"],
+      ["DELETE", "/api/v1/auth/known-devices"],
       ["GET", "/api/v1/auth/tokens"],
       ["POST", "/api/v1/auth/tokens"],
       ["POST", "/api/v1/auth/password"],
@@ -1402,6 +1405,89 @@ describe("settings", () => {
 });
 
 // ---------------------------------------------------------------------------------
+describe("known devices", () => {
+  const OWN = "/api/v1/auth/known-devices";
+
+  it("lists this browser first, then the others, newest sign-in first", async () => {
+    resetMockDb("signed-in");
+    const list = await get<Page<KnownDeviceInfo>>(OWN);
+    expect(list.status).toBe(200);
+    expect(list.body.items).toHaveLength(2);
+    expect(list.body.items.filter((d) => d.current)).toHaveLength(1);
+    expect(list.body.items[0]?.current).toBe(true);
+    expect(list.body.next_cursor).toBeNull();
+    const [first, second] = list.body.items as [KnownDeviceInfo, KnownDeviceInfo];
+    expect(first.last_sign_in > second.last_sign_in).toBe(true);
+    // A device ends 30 days after its last sign-in.
+    const days = (Date.parse(second.expires_at) - Date.parse(second.last_sign_in)) / 86_400_000;
+    expect(days).toBe(30);
+    expect(second.id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("makes the browser a known device at a sign-in and renews it at the next one", async () => {
+    resetMockDb("signed-out");
+    const before = db.knownDevices.length;
+    await loginAs("sam");
+    const first = await get<Page<KnownDeviceInfo>>(OWN);
+    expect(db.knownDevices).toHaveLength(before + 1);
+    expect(first.body.items.filter((d) => d.current)).toHaveLength(1);
+    // The same browser signs in again: no second device.
+    await post("/api/v1/auth/logout");
+    await loginAs("sam");
+    expect(db.knownDevices).toHaveLength(before + 1);
+  });
+
+  it("forgets one device and answers 404 for a device it does not know", async () => {
+    resetMockDb("signed-in");
+    const list = await get<Page<KnownDeviceInfo>>(OWN);
+    const other = list.body.items.find((d) => !d.current) as KnownDeviceInfo;
+    expect((await del(`${OWN}/${other.id}`)).status).toBe(204);
+    expectProblem(await del(`${OWN}/${other.id}`), 404, "auth.known_device.not_found");
+    expect((await get<Page<KnownDeviceInfo>>(OWN)).body.items).toHaveLength(1);
+    // A device of another account is not found either.
+    const sam = db.knownDevices.find((d) => d.user_id === MOCK_USER_IDS.sam) as { id: string };
+    expectProblem(await del(`${OWN}/${sam.id}`), 404, "auth.known_device.not_found");
+  });
+
+  it("forgets all devices of the account and leaves the others alone", async () => {
+    resetMockDb("signed-in");
+    expect((await del(OWN)).status).toBe(204);
+    expect((await get<Page<KnownDeviceInfo>>(OWN)).body.items).toEqual([]);
+    expect(db.knownDevices.some((d) => d.user_id === MOCK_USER_IDS.sam)).toBe(true);
+  });
+
+  it("lets an administrator read and forget the devices of another account", async () => {
+    resetMockDb("signed-in");
+    const sam = `/api/v1/users/${MOCK_USER_IDS.sam}/known-devices`;
+    const list = await get<Page<KnownDeviceInfo>>(sam);
+    expect(list.status).toBe(200);
+    expect(list.body.items).toHaveLength(1);
+    expect(list.body.items[0]?.current).toBe(false);
+    const id = list.body.items[0]?.id;
+    expectProblem(await del(`${sam}/00000000-0000-4000-8000-000000000000`), 404, "auth.known_device.not_found");
+    expect((await del(`${sam}/${id}`)).status).toBe(204);
+    expect((await get<Page<KnownDeviceInfo>>(sam)).body.items).toEqual([]);
+    expectProblem(await get("/api/v1/users/00000000-0000-4000-8000-000000000000/known-devices"), 404, "users.not_found");
+    // All at once.
+    db.knownDevices.push({ id: "a", user_id: MOCK_USER_IDS.sam, known_since: 1, last_sign_in: 2 });
+    expect((await del(sam)).status).toBe(204);
+    expect(db.knownDevices.some((d) => d.user_id === MOCK_USER_IDS.sam)).toBe(false);
+  });
+
+  it("forgets the devices when the account is signed out everywhere or changes its password", async () => {
+    resetMockDb("signed-in");
+    expect((await del(`/api/v1/users/${MOCK_USER_IDS.sam}/sessions`)).status).toBe(204);
+    expect(db.knownDevices.some((d) => d.user_id === MOCK_USER_IDS.sam)).toBe(false);
+    expect(db.knownDevices.some((d) => d.user_id === MOCK_USER_IDS.alex)).toBe(true);
+    const changed = await post("/api/v1/auth/password", {
+      current_password: MOCK_PASSWORDS.alex,
+      new_password: "a-long-new-pass-phrase-7431",
+    });
+    expect(changed.status).toBe(200);
+    expect(db.knownDevices.some((d) => d.user_id === MOCK_USER_IDS.alex)).toBe(false);
+  });
+});
+
 // Users
 
 describe("users", () => {
@@ -1417,6 +1503,8 @@ describe("users", () => {
       ["PUT", `/api/v1/users/${MOCK_USER_IDS.alex}/roles`],
       ["POST", `/api/v1/users/${MOCK_USER_IDS.alex}/unlock`],
       ["DELETE", `/api/v1/users/${MOCK_USER_IDS.alex}/sessions`],
+      ["GET", `/api/v1/users/${MOCK_USER_IDS.alex}/known-devices`],
+      ["DELETE", `/api/v1/users/${MOCK_USER_IDS.alex}/known-devices`],
       ["GET", "/api/v1/roles"],
     ] as const) {
       expectProblem(await call(method, path, { json: method === "GET" || method === "DELETE" ? undefined : {} }), 403, "auth.forbidden");

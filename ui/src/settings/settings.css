@@ -61,6 +61,7 @@ table.users tr.clickable { cursor: pointer; }
 .facts { padding: var(--sp-5) var(--sp-6); }
 .facts .kv { grid-template-columns: 160px minmax(0, 1fr); }
 .plain-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.ud-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); flex-wrap: wrap; }
 .page-section > h2 .tag { margin-inline-start: var(--sp-3); font-weight: var(--fw-medium); }
 .action-list { margin: 0; padding: 0; list-style: none; }
 .action-row { display: flex; align-items: center; gap: var(--sp-6); padding: var(--sp-4) var(--sp-6); border-bottom: 1px solid var(--line); }

@@ -152,6 +152,25 @@ export type MessageKey =
   | "account.codes.lede"
   | "account.codes.title"
   | "account.copy_failed"
+  | "account.devices.col.actions"
+  | "account.devices.col.known_since"
+  | "account.devices.col.last_sign_in"
+  | "account.devices.col.until"
+  | "account.devices.confirm_all_body"
+  | "account.devices.confirm_all_button"
+  | "account.devices.confirm_all_title"
+  | "account.devices.confirm_body"
+  | "account.devices.confirm_button"
+  | "account.devices.confirm_title"
+  | "account.devices.forget"
+  | "account.devices.forget_all"
+  | "account.devices.forget_named"
+  | "account.devices.forgotten"
+  | "account.devices.forgotten_all"
+  | "account.devices.lede"
+  | "account.devices.none"
+  | "account.devices.this"
+  | "account.devices.title"
   | "account.methods.flag_mfa"
   | "account.methods.flag_password"
   | "account.methods.reauthenticate"
@@ -302,6 +321,7 @@ export type MessageKey =
   | "audit.action.auth.grant.create"
   | "audit.action.auth.grant.revoke"
   | "audit.action.auth.installation.language"
+  | "audit.action.auth.known_device.remove"
   | "audit.action.auth.login.break_glass"
   | "audit.action.auth.login.password"
   | "audit.action.auth.login.recovery"
@@ -7199,6 +7219,19 @@ export type MessageKey =
   | "settings.users.delete.note"
   | "settings.users.delete.title"
   | "settings.users.deleted"
+  | "settings.users.devices.count"
+  | "settings.users.devices.forget_all"
+  | "settings.users.devices.forget_all_body"
+  | "settings.users.devices.forget_all_confirm"
+  | "settings.users.devices.forget_all_title"
+  | "settings.users.devices.forget_body"
+  | "settings.users.devices.forget_confirm"
+  | "settings.users.devices.forget_title"
+  | "settings.users.devices.forgot"
+  | "settings.users.devices.forgot_all"
+  | "settings.users.devices.help"
+  | "settings.users.devices.none"
+  | "settings.users.devices.title"
   | "settings.users.disable.body"
   | "settings.users.disable.confirm"
   | "settings.users.disable.title"
@@ -8278,6 +8311,10 @@ export interface MessageArgs {
   "access.token.revoke_named": { name: string | number };
   "access.token.revoke_title": { name: string | number };
   "access.token_scope.mirror": { id: string | number };
+  "account.devices.confirm_all_body": { count: number };
+  "account.devices.confirm_all_button": { count: number };
+  "account.devices.forget_named": { when: string | number };
+  "account.devices.forgotten_all": { count: number };
   "account.methods.requires": { method: string | number; profile: string | number };
   "account.methods.signed_in_with": { method: string | number };
   "account.passkey.created": { date: string | number };
@@ -9659,6 +9696,17 @@ export interface MessageArgs {
   "settings.users.delete.confirm": { name: string | number };
   "settings.users.delete.title": { name: string | number };
   "settings.users.deleted": { name: string | number };
+  "settings.users.devices.count": { count: number };
+  "settings.users.devices.forget_all_body": { count: number; name: string | number };
+  "settings.users.devices.forget_all_confirm": { name: string | number };
+  "settings.users.devices.forget_all_title": { name: string | number };
+  "settings.users.devices.forget_body": { name: string | number };
+  "settings.users.devices.forget_confirm": { name: string | number };
+  "settings.users.devices.forget_title": { name: string | number };
+  "settings.users.devices.forgot": { name: string | number };
+  "settings.users.devices.forgot_all": { name: string | number };
+  "settings.users.devices.help": { name: string | number };
+  "settings.users.devices.none": { name: string | number };
   "settings.users.disable.body": { name: string | number };
   "settings.users.disable.confirm": { name: string | number };
   "settings.users.disable.title": { name: string | number };
@@ -9986,6 +10034,25 @@ export const messageKeys: readonly MessageKey[] = [
   "account.codes.lede",
   "account.codes.title",
   "account.copy_failed",
+  "account.devices.col.actions",
+  "account.devices.col.known_since",
+  "account.devices.col.last_sign_in",
+  "account.devices.col.until",
+  "account.devices.confirm_all_body",
+  "account.devices.confirm_all_button",
+  "account.devices.confirm_all_title",
+  "account.devices.confirm_body",
+  "account.devices.confirm_button",
+  "account.devices.confirm_title",
+  "account.devices.forget",
+  "account.devices.forget_all",
+  "account.devices.forget_named",
+  "account.devices.forgotten",
+  "account.devices.forgotten_all",
+  "account.devices.lede",
+  "account.devices.none",
+  "account.devices.this",
+  "account.devices.title",
   "account.methods.flag_mfa",
   "account.methods.flag_password",
   "account.methods.reauthenticate",
@@ -10136,6 +10203,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.auth.grant.create",
   "audit.action.auth.grant.revoke",
   "audit.action.auth.installation.language",
+  "audit.action.auth.known_device.remove",
   "audit.action.auth.login.break_glass",
   "audit.action.auth.login.password",
   "audit.action.auth.login.recovery",
@@ -17033,6 +17101,19 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.users.delete.note",
   "settings.users.delete.title",
   "settings.users.deleted",
+  "settings.users.devices.count",
+  "settings.users.devices.forget_all",
+  "settings.users.devices.forget_all_body",
+  "settings.users.devices.forget_all_confirm",
+  "settings.users.devices.forget_all_title",
+  "settings.users.devices.forget_body",
+  "settings.users.devices.forget_confirm",
+  "settings.users.devices.forget_title",
+  "settings.users.devices.forgot",
+  "settings.users.devices.forgot_all",
+  "settings.users.devices.help",
+  "settings.users.devices.none",
+  "settings.users.devices.title",
   "settings.users.disable.body",
   "settings.users.disable.confirm",
   "settings.users.disable.title",

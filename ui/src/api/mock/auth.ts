@@ -6,6 +6,7 @@ import {
   db,
   ensureOtherSessions,
   isAdmin,
+  newDeviceRecord,
   newSessionRecord,
   type MockSession,
   type MockUser,
@@ -146,9 +147,34 @@ export function startSession(user: MockUser, strength: AuthStrength): MockSessio
   db.sessions.push(session);
   db.currentSessionId = session.id;
   ensureOtherSessions(user);
+  rememberDevice(user.id);
   user.last_login_at = iso(session.created_at);
   commit("admin", { objects: [{ kind: "session", id: session.id }], tables: ["auth.sessions"] }, [user]);
   return session;
+}
+
+/** A completed sign-in makes the browser a known device of the account, or renews it. */
+function rememberDevice(userId: string): void {
+  const now = Date.now();
+  const held = db.knownDevices.find((d) => d.id === db.currentDeviceId && d.user_id === userId);
+  if (held) {
+    held.last_sign_in = now;
+    commit("admin", { objects: [{ kind: "known_device", id: held.id }], tables: ["auth.known_devices"] });
+    return;
+  }
+  const device = newDeviceRecord({ id: userId }, now, now);
+  db.knownDevices.push(device);
+  db.currentDeviceId = device.id;
+  commit("admin", { objects: [{ kind: "known_device", id: device.id }], tables: ["auth.known_devices"] });
+}
+
+/** Forgets the known devices of a user (all, or the one `only`); returns how many went. */
+export function forgetKnownDevices(userId: string, only?: string): number {
+  const gone = db.knownDevices.filter((d) => d.user_id === userId && (only === undefined || d.id === only));
+  if (gone.length === 0) return 0;
+  db.knownDevices = db.knownDevices.filter((d) => !gone.includes(d));
+  commit("admin", { deleted: gone.map((d) => ({ kind: "known_device", id: d.id })), tables: ["auth.known_devices"] });
+  return gone.length;
 }
 
 /** Ends one session; the current session signs the mock out. */
@@ -157,8 +183,9 @@ export function endSession(id: string): void {
   commit("admin", { deleted: [{ kind: "session", id }], tables: ["auth.sessions"] });
 }
 
-/** Ends every session of a user and returns how many there were. */
+/** Ends every session of a user, forgets its known devices, and returns how many sessions there were. */
 export function revokeUserSessions(userId: string): number {
+  forgetKnownDevices(userId);
   const ended = db.sessions.filter((s) => s.user_id === userId);
   for (const s of ended) dropSession(s.id);
   // The sessions are gone for good: do not seed the user's other sessions again.

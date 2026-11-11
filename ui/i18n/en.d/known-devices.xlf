@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="known-devices">
+      <unit id="account.devices.title">
+        <segment><source>Known devices</source></segment>
+      </unit>
+      <unit id="account.devices.lede">
+        <notes><note category="description">Account page, under the heading of the known devices.</note></notes>
+        <segment><source>A browser you have signed in with becomes a known device. Its next sign-ins pass the delay that slows down someone guessing your password from many networks. It does not sign you in by itself. A device is forgotten after 30 days without a sign-in, and when your password changes.</source></segment>
+      </unit>
+      <unit id="account.devices.col.last_sign_in">
+        <segment><source>Last sign-in</source></segment>
+      </unit>
+      <unit id="account.devices.col.known_since">
+        <segment><source>Known since</source></segment>
+      </unit>
+      <unit id="account.devices.col.until">
+        <notes><note category="description">Column: when the device stops being known unless it signs in again.</note></notes>
+        <segment><source>Known until</source></segment>
+      </unit>
+      <unit id="account.devices.col.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="account.devices.this">
+        <segment><source>This browser</source></segment>
+      </unit>
+      <unit id="account.devices.forget">
+        <segment><source>Forget</source></segment>
+      </unit>
+      <unit id="account.devices.forget_named">
+        <notes><note category="description">when is a date and time; the accessible name of the button of a row.</note></notes>
+        <segment><source>Forget the device that last signed in {when}</source></segment>
+      </unit>
+      <unit id="account.devices.forget_all">
+        <segment><source>Forget all</source></segment>
+      </unit>
+      <unit id="account.devices.none">
+        <segment><source>No browser is known for your account yet. A browser becomes known when you sign in with it.</source></segment>
+      </unit>
+      <unit id="account.devices.forgotten">
+        <segment><source>Device forgotten</source></segment>
+      </unit>
+      <unit id="account.devices.forgotten_all">
+        <segment><source>{count, plural, one {# device forgotten} other {# devices forgotten}}</source></segment>
+      </unit>
+      <unit id="account.devices.confirm_title">
+        <segment><source>Forget this device?</source></segment>
+      </unit>
+      <unit id="account.devices.confirm_body">
+        <segment><source>The next sign-ins from this browser are slowed down like those from any other browser. Sessions that are open stay open.</source></segment>
+      </unit>
+      <unit id="account.devices.confirm_button">
+        <segment><source>Forget device</source></segment>
+      </unit>
+      <unit id="account.devices.confirm_all_title">
+        <segment><source>Forget all known devices?</source></segment>
+      </unit>
+      <unit id="account.devices.confirm_all_body">
+        <segment><source>{count, plural, one {The # known device of this account is forgotten.} other {The # known devices of this account are forgotten.}} Their next sign-ins are slowed down like those from any other browser. Sessions that are open stay open.</source></segment>
+      </unit>
+      <unit id="account.devices.confirm_all_button">
+        <segment><source>{count, plural, one {Forget # device} other {Forget # devices}}</source></segment>
+      </unit>
+      <unit id="settings.users.devices.title">
+        <segment><source>Known devices</source></segment>
+      </unit>
+      <unit id="settings.users.devices.help">
+        <segment><source>Browsers {name} has signed in with. Their next sign-ins pass the delay of the sign-in lock until they are forgotten: after 30 days without a sign-in, at a password change, or when {name} is signed out everywhere.</source></segment>
+      </unit>
+      <unit id="settings.users.devices.count">
+        <segment><source>{count, plural, =0 {No known devices} one {# known device} other {# known devices}}</source></segment>
+      </unit>
+      <unit id="settings.users.devices.none">
+        <segment><source>No browser is known for {name}.</source></segment>
+      </unit>
+      <unit id="settings.users.devices.forget_all">
+        <segment><source>Forget all</source></segment>
+      </unit>
+      <unit id="settings.users.devices.forget_all_title">
+        <segment><source>Forget the known devices of {name}?</source></segment>
+      </unit>
+      <unit id="settings.users.devices.forget_all_body">
+        <segment><source>{count, plural, one {The # known device of {name} is forgotten.} other {The # known devices of {name} are forgotten.}} The next sign-ins of {name} are slowed down like those from any other browser.</source></segment>
+      </unit>
+      <unit id="settings.users.devices.forget_all_confirm">
+        <segment><source>Forget the known devices of {name}</source></segment>
+      </unit>
+      <unit id="settings.users.devices.forgot_all">
+        <segment><source>Forgot the known devices of {name}</source></segment>
+      </unit>
+      <unit id="settings.users.devices.forget_title">
+        <segment><source>Forget this device of {name}?</source></segment>
+      </unit>
+      <unit id="settings.users.devices.forget_body">
+        <segment><source>The next sign-ins of {name} from this browser are slowed down like those from any other browser.</source></segment>
+      </unit>
+      <unit id="settings.users.devices.forget_confirm">
+        <segment><source>Forget the device of {name}</source></segment>
+      </unit>
+      <unit id="settings.users.devices.forgot">
+        <segment><source>Forgot a known device of {name}</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

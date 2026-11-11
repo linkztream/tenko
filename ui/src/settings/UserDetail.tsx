@@ -7,8 +7,9 @@ import { api } from "../api/client";
 import { createLiveQuery, latest } from "../api/live";
 import { fetchAll } from "../api/paginate";
 import { isApiError } from "../api/problem";
-import type { RoleInfo, UserInfo } from "../api/types";
+import type { KnownDeviceInfo, RoleInfo, UserInfo } from "../api/types";
 import { paths } from "../app/paths";
+import { KnownDeviceList } from "../auth/account/KnownDeviceList";
 import { session } from "../auth/session";
 import { Icon } from "../components/Icon";
 import { ErrorNotice, Notice } from "../components/Notice";
@@ -23,7 +24,7 @@ import { EditUserDialog, PasswordDialog, RolesDialog, RunDialog } from "./UserDi
 import { languageName, methodParts, rolesText, UserStatus } from "./userModel";
 import "./settings.css";
 
-type Dialog = "edit" | "roles" | "password" | "disable" | "sign-out" | "break-glass" | "delete";
+type Dialog = "edit" | "roles" | "password" | "disable" | "sign-out" | "devices" | "device" | "break-glass" | "delete";
 
 interface UserData {
   user: UserInfo;
@@ -55,6 +56,18 @@ export default function UserDetail(props: { id: string }) {
       return { value: { user, roles: roles.items }, revision: undefined };
     },
   });
+
+  // The browsers the account has signed in with (a service account has none and is not asked).
+  const devicesQuery = createLiveQuery<KnownDeviceInfo[]>({
+    topics: ["admin"],
+    fetch: async (signal) => {
+      const all = await fetchAll<KnownDeviceInfo>("/api/v1/users/{id}/known-devices", { path: { id: props.id }, signal });
+      return { value: all.items, revision: all.revision };
+    },
+  });
+  const devices = () => latest(devicesQuery) ?? [];
+  // The device a "Forget" confirmation is open for.
+  const [device, setDevice] = createSignal<KnownDeviceInfo>();
 
   // The user on screen: the last answer of the server, from a read or from our own change.
   const [current, setCurrent] = createSignal<UserData>();
@@ -159,6 +172,21 @@ export default function UserDetail(props: { id: string }) {
           const runSignOut = async () => {
             await api.delete("/api/v1/users/{id}/sessions", { path: { id: user().id } });
             toast({ kind: "ok", title: t("settings.users.signed_out", { name: name() }) });
+            devicesQuery.refetch();
+          };
+
+          const runForgetAll = async () => {
+            await api.delete("/api/v1/users/{id}/known-devices", { path: { id: user().id } });
+            toast({ kind: "ok", title: t("settings.users.devices.forgot_all", { name: name() }) });
+            devicesQuery.refetch();
+          };
+
+          const runForgetOne = async () => {
+            const target = device();
+            if (!target) return;
+            await api.delete("/api/v1/users/{id}/known-devices/{device}", { path: { id: user().id, device: target.id } });
+            toast({ kind: "ok", title: t("settings.users.devices.forgot", { name: name() }) });
+            devicesQuery.refetch();
           };
 
           const runBreakGlass = async () => {
@@ -365,6 +393,34 @@ export default function UserDetail(props: { id: string }) {
                 </ul>
               </section>
 
+              <Show when={!isServiceAccount(user())}>
+                <section class="page-section" aria-labelledby="ud-devices" data-testid="user-known-devices">
+                  <div class="ud-head">
+                    <h2 id="ud-devices">{t("settings.users.devices.title")}</h2>
+                    <button
+                      type="button"
+                      class="btn danger"
+                      disabled={devices().length === 0}
+                      onClick={() => setDialog("devices")}
+                    >
+                      {t("settings.users.devices.forget_all")}
+                    </button>
+                  </div>
+                  <p class="muted">{t("settings.users.devices.help", { name: name() })}</p>
+                  <p data-testid="user-devices-count">{t("settings.users.devices.count", { count: devices().length })}</p>
+                  <Show when={devices().length > 0}>
+                    <KnownDeviceList
+                      devices={devices()}
+                      caption={t("settings.users.devices.title")}
+                      onForget={(d) => {
+                        setDevice(d);
+                        setDialog("device");
+                      }}
+                    />
+                  </Show>
+                </section>
+              </Show>
+
               <Show when={!user().break_glass}>
                 <GrantsSection
                   subject={{ id: user().id, name: user().name, display_name: user().display_name, kind: user().kind ?? "person" }}
@@ -414,6 +470,30 @@ export default function UserDetail(props: { id: string }) {
                   danger
                   onStale={stale}
                   run={runSignOut}
+                  onClose={() => setDialog(undefined)}
+                />
+              </Show>
+
+              <Show when={dialog() === "devices"}>
+                <RunDialog
+                  title={t("settings.users.devices.forget_all_title", { name: name() })}
+                  body={<p>{t("settings.users.devices.forget_all_body", { name: name(), count: devices().length })}</p>}
+                  confirmLabel={t("settings.users.devices.forget_all_confirm", { name: name() })}
+                  danger
+                  onStale={stale}
+                  run={runForgetAll}
+                  onClose={() => setDialog(undefined)}
+                />
+              </Show>
+
+              <Show when={dialog() === "device"}>
+                <RunDialog
+                  title={t("settings.users.devices.forget_title", { name: name() })}
+                  body={<p>{t("settings.users.devices.forget_body", { name: name() })}</p>}
+                  confirmLabel={t("settings.users.devices.forget_confirm", { name: name() })}
+                  danger
+                  onStale={stale}
+                  run={runForgetOne}
                   onClose={() => setDialog(undefined)}
                 />
               </Show>

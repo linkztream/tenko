@@ -16,7 +16,7 @@ import type {
 import { parseCidr } from "../../ipam/ip";
 import { PROFILES } from "../types";
 import { forgetUser, isServiceAccount, problem, userInfoOf } from "./access-store";
-import { clearThrottle, requireAdmin, requireSession, revokeUserSessions } from "./auth";
+import { clearThrottle, forgetKnownDevices, requireAdmin, requireSession, revokeUserSessions } from "./auth";
 import {
   commit,
   db,
@@ -25,6 +25,7 @@ import {
   isAdmin,
   otherActiveAdmins,
   settingsView,
+  toKnownDeviceInfo,
   userChange,
   type MockUser,
 } from "./db";
@@ -246,6 +247,30 @@ const revokeSessionsOfUser = route("delete", "/api/v1/users/{id}/sessions", (ctx
   return noContent();
 });
 
+const listKnownDevicesOfUser = route("get", "/api/v1/users/{id}/known-devices", (ctx) => {
+  requireAdmin();
+  const user = userOr404(ctx.params.id);
+  const devices = db.knownDevices
+    .filter((d) => d.user_id === user.id)
+    .sort((a, b) => b.last_sign_in - a.last_sign_in)
+    .map((d) => toKnownDeviceInfo(d, false));
+  return ok(wholePage(devices, db.revision));
+});
+
+const forgetKnownDevicesOfUser = route("delete", "/api/v1/users/{id}/known-devices", (ctx) => {
+  requireAdmin();
+  const user = userOr404(ctx.params.id);
+  forgetKnownDevices(user.id);
+  return noContent();
+});
+
+const forgetKnownDeviceOfUser = route("delete", "/api/v1/users/{id}/known-devices/{device}", (ctx) => {
+  requireAdmin();
+  const user = userOr404(ctx.params.id);
+  if (forgetKnownDevices(user.id, ctx.params.device) === 0) return fail("auth.known_device.not_found");
+  return noContent();
+});
+
 const listRoles = route("get", "/api/v1/roles", () => {
   requireAdmin();
   const roles: RoleInfo[] = ROLE_NAMES.map((name) => ({
@@ -448,6 +473,9 @@ export const adminRoutes: HttpHandler[] = [
   setUserRoles,
   unlockUser,
   revokeSessionsOfUser,
+  listKnownDevicesOfUser,
+  forgetKnownDevicesOfUser,
+  forgetKnownDeviceOfUser,
   listRoles,
   getSecuritySettings,
   updateSecuritySettings,

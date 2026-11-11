@@ -90,6 +90,10 @@
         <notes><note category="description">What the audit action auth.installation.language is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Change the default language</source></segment>
       </unit>
+      <unit id="audit.action.auth.known_device.remove">
+        <notes><note category="description">What the audit action auth.known_device.remove is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Forget known devices</source></segment>
+      </unit>
       <unit id="audit.action.auth.login.break_glass">
         <notes><note category="description">What the audit action auth.login.break_glass is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Sign in with break-glass access</source></segment>

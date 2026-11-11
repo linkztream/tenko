@@ -57,6 +57,7 @@ export type AuthenticationResponseJSON = S["AuthenticationResponse"];
 /** `RegistrationResponseJSON`. */
 export type RegistrationResponseJSON = S["RegistrationResponse"];
 export type SessionSummary = S["SessionSummary"];
+export type KnownDeviceInfo = S["KnownDeviceInfo"];
 
 // ---------------------------------------------------------------------------------
 // Factors and tokens

@@ -15,6 +15,11 @@ function show() {
   return renderRoute(Account, { url: "/account/sessions", path: "/account/:section?" });
 }
 
+/** The rows of the table of sessions; the table of known devices below it is left out. */
+function sessionRows(): HTMLElement[] {
+  return within(screen.getByRole("table", { name: "Where you are signed in" })).getAllByRole("row");
+}
+
 /** The row of the table whose first cell reads `client`. */
 function rowOf(client: string): HTMLTableRowElement {
   const row = screen
@@ -30,7 +35,7 @@ describe("sessions", () => {
     show();
     await screen.findByText("Firefox on Android");
     // A header row and three sessions.
-    expect(screen.getAllByRole("row")).toHaveLength(4);
+    expect(sessionRows()).toHaveLength(4);
     expect(screen.getAllByText("This session")).toHaveLength(1);
     const columns = screen.getAllByRole("columnheader").map((c) => c.textContent);
     expect(columns).toEqual(expect.arrayContaining(["Client", "Address", "Signed in", "Last activity", "Expires", "Sign-in method"]));
@@ -88,7 +93,7 @@ describe("sessions", () => {
     await waitFor(() => expect(screen.queryByText("Firefox on Android")).toBeNull());
     expect(db.sessions).toHaveLength(2);
     expect(screen.getByText("Session revoked")).toBeTruthy();
-    expect(screen.getAllByRole("row")).toHaveLength(3);
+    expect(sessionRows()).toHaveLength(3);
   });
 
   it("signs out of this session from its own row", async () => {
@@ -113,7 +118,7 @@ describe("sessions", () => {
     expect(db.sessions).toHaveLength(3);
     fireEvent.click(within(dialog).getByRole("button", { name: "Sign out 2 other sessions" }));
     await waitFor(() => expect(db.sessions).toHaveLength(1));
-    await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2));
+    await waitFor(() => expect(sessionRows()).toHaveLength(2));
     expect(screen.getByText("2 sessions signed out")).toBeTruthy();
     expect(screen.getByText("You have no other open sessions.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign out everywhere else" }).hasAttribute("disabled")).toBe(true);

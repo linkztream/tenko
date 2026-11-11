@@ -18,6 +18,7 @@ import {
   currentPrincipal,
   endSession,
   failAttempt,
+  forgetKnownDevices,
   needsSecondFactor,
   passwordStrength,
   requireSession,
@@ -30,6 +31,7 @@ import {
   db,
   findUser,
   findUserByName,
+  toKnownDeviceInfo,
   toSessionSummary,
   toTokenInfo,
   userChange,
@@ -432,6 +434,8 @@ const changePassword = route("post", "/api/v1/auth/password", async (ctx) => {
   user.password = next;
   user.password_change_required = false;
   user.pin_expires_at = null;
+  // A new password ends what the old one let through: the known devices go too.
+  forgetKnownDevices(user.id);
   // The other sessions of the account end, and so do its personal and scoped tokens.
   const others = db.sessions.filter((s) => s.user_id === user.id && s.id !== session.id);
   db.sessions = db.sessions.filter((s) => !others.includes(s));
@@ -547,6 +551,30 @@ const revokeSession = route("delete", "/api/v1/auth/sessions/{id}", (ctx) => {
 });
 
 // ---------------------------------------------------------------------------------
+// Known devices of the account
+
+const listKnownDevices = route("get", "/api/v1/auth/known-devices", () => {
+  const { user } = requireSession();
+  const mine = db.knownDevices
+    .filter((d) => d.user_id === user.id)
+    .sort((a, b) => b.last_sign_in - a.last_sign_in)
+    .map((d) => toKnownDeviceInfo(d, d.id === db.currentDeviceId));
+  return ok(wholePage(mine, db.revision));
+});
+
+const forgetOwnKnownDevices = route("delete", "/api/v1/auth/known-devices", () => {
+  const { user } = requireSession();
+  forgetKnownDevices(user.id);
+  return noContent();
+});
+
+const forgetOwnKnownDevice = route("delete", "/api/v1/auth/known-devices/{id}", (ctx) => {
+  const { user } = requireSession();
+  if (forgetKnownDevices(user.id, ctx.params.id) === 0) return fail("auth.known_device.not_found");
+  return noContent();
+});
+
+// ---------------------------------------------------------------------------------
 // Personal tokens
 
 const listTokens = route("get", "/api/v1/auth/tokens", () => {
@@ -610,6 +638,9 @@ export const authRoutes: HttpHandler[] = [
   getSession,
   listSessions,
   revokeSession,
+  listKnownDevices,
+  forgetOwnKnownDevices,
+  forgetOwnKnownDevice,
   changePassword,
   checkPasswordRoute,
   totpEnrollStart,

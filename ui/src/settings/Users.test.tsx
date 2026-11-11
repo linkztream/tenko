@@ -165,6 +165,67 @@ describe("user administration", () => {
     expect(await screen.findByText("Signed sam out everywhere")).toBeTruthy();
   });
 
+  it("says that signing out everywhere also forgets the known devices", async () => {
+    await signInAs();
+    await openDetail("sam");
+    const button = await screen.findByRole("button", { name: "Sign out everywhere" });
+    expect(screen.getByText(/forgets the known devices of sam/)).toBeTruthy();
+    fireEvent.click(button);
+    const dialog = await screen.findByRole("dialog", { name: "Sign sam out everywhere?" });
+    expect(dialog.textContent).toContain("the known devices of sam are forgotten");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Sign sam out everywhere" }));
+    await waitFor(() => expect(db.knownDevices.some((d) => d.user_id === MOCK_USER_IDS.sam)).toBe(false));
+    expect(await screen.findByText("No known devices")).toBeTruthy();
+  });
+
+  it("shows the known devices of the account, counted and without the badge", async () => {
+    await signInAs();
+    await openDetail("sam");
+    const section = await screen.findByTestId("user-known-devices");
+    expect(await within(section).findByText("1 known device")).toBeTruthy();
+    const table = within(section).getByTestId("known-devices");
+    expect(within(table).getAllByRole("row")).toHaveLength(2);
+    expect(within(section).queryByText("This browser")).toBeNull();
+    expect(within(section).getByText(/pass the delay of the sign-in lock/)).toBeTruthy();
+  });
+
+  it("shows no list and a disabled button for an account without known devices", async () => {
+    await signInAs();
+    db.knownDevices = db.knownDevices.filter((d) => d.user_id !== MOCK_USER_IDS.sam);
+    await openDetail("sam");
+    const section = await screen.findByTestId("user-known-devices");
+    expect(await within(section).findByText("No known devices")).toBeTruthy();
+    expect(within(section).queryByTestId("known-devices")).toBeNull();
+    expect((within(section).getByRole("button", { name: "Forget all" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("forgets one known device after a confirmation that names the user", async () => {
+    await signInAs();
+    await openDetail("sam");
+    const section = await screen.findByTestId("user-known-devices");
+    fireEvent.click(await within(section).findByRole("button", { name: /^Forget the device that last signed in / }));
+    const dialog = await screen.findByRole("dialog", { name: "Forget this device of sam?" });
+    expect(db.knownDevices.some((d) => d.user_id === MOCK_USER_IDS.sam)).toBe(true);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Forget the device of sam" }));
+    expect(await screen.findByText("Forgot a known device of sam")).toBeTruthy();
+    expect(db.knownDevices.some((d) => d.user_id === MOCK_USER_IDS.sam)).toBe(false);
+    expect(await within(section).findByText("No known devices")).toBeTruthy();
+  });
+
+  it("forgets all known devices of the account after a confirmation, and leaves other accounts alone", async () => {
+    await signInAs();
+    await openDetail("sam");
+    const section = await screen.findByTestId("user-known-devices");
+    await within(section).findByText("1 known device");
+    fireEvent.click(within(section).getByRole("button", { name: "Forget all" }));
+    const dialog = await screen.findByRole("dialog", { name: "Forget the known devices of sam?" });
+    expect(dialog.textContent).toContain("The 1 known device of sam is forgotten.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Forget the known devices of sam" }));
+    expect(await screen.findByText("Forgot the known devices of sam")).toBeTruthy();
+    expect(db.knownDevices.some((d) => d.user_id === MOCK_USER_IDS.sam)).toBe(false);
+    expect(db.knownDevices.some((d) => d.user_id === MOCK_USER_IDS.alex)).toBe(true);
+  });
+
   it("has no accessibility violations on the list, the detail and a dialog", async () => {
     await signInAs();
     const list = await openUsers();
@@ -174,6 +235,7 @@ describe("user administration", () => {
     expect(await axeViolations(dialog)).toEqual([]);
     list.unmount();
     const detail = await openDetail("sam");
+    await screen.findByTestId("known-devices");
     expect(await axeViolations(detail.container)).toEqual([]);
   });
 });

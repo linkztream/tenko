@@ -7,6 +7,7 @@ import { t, type MessageKey } from "../../i18n";
 import { session } from "../session";
 import "../auth.css";
 import "./account.css";
+import KnownDevices from "./KnownDevices";
 import Methods from "./Methods";
 import Sessions from "./Sessions";
 import Tokens from "./Tokens";
@@ -47,6 +48,7 @@ export default function Account() {
         <Switch>
           <Match when={section() === "sessions"}>
             <Sessions />
+            <KnownDevices />
           </Match>
           <Match when={section() === "tokens"}>
             <Tokens />

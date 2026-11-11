@@ -88,6 +88,7 @@ const CATALOG = {
   ],
   "auth.token.not_found": [404, "Not Found", "token not found"],
   "auth.session.not_found": [404, "Not Found", "session not found"],
+  "auth.known_device.not_found": [404, "Not Found", "known device not found"],
   "auth.preference.not_found": [404, "Not Found", "preference not found"],
   "auth.preference.too_large": [413, "Content Too Large", "the preference exceeds 16384 bytes"],
   "auth.preference.limit": [409, "Conflict", "a person stores at most 64 preferences"],

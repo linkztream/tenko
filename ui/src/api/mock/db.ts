@@ -12,6 +12,7 @@ import type {
   RoleName,
   SecuritySettings,
   SecuritySettingsView,
+  KnownDeviceInfo,
   SessionSummary,
   TlsMode,
   TokenInfo,
@@ -98,6 +99,14 @@ export interface MockSession {
   user_agent: string;
 }
 
+/** A browser that completed a sign-in of its account (the server keeps a hash of its cookie). */
+export interface MockKnownDevice {
+  id: string;
+  user_id: string;
+  known_since: number;
+  last_sign_in: number;
+}
+
 export interface MockToken {
   user_id: string;
   info: TokenInfo;
@@ -179,6 +188,10 @@ export interface MockDb {
   users: MockUser[];
   sessions: MockSession[];
   currentSessionId: string | null;
+  /** The known devices of all accounts. */
+  knownDevices: MockKnownDevice[];
+  /** The device cookie this browser holds, if any; it survives a sign-out. */
+  currentDeviceId: string | null;
   /** Users whose other sessions were created already. */
   seededSessionUsers: Set<string>;
   tokens: MockToken[];
@@ -307,6 +320,24 @@ export function newSessionRecord(
     absolute_expires_at: absolute,
     source_ip: options.source_ip ?? CURRENT_CLIENT.source_ip,
     user_agent: options.user_agent ?? CURRENT_CLIENT.user_agent,
+  };
+}
+
+/** A known device of `user` first seen at `since` and last signed in at `last`. */
+export function newDeviceRecord(user: { id: string }, since: number, last: number): MockKnownDevice {
+  return { id: randomId(), user_id: user.id, known_since: since, last_sign_in: last };
+}
+
+/** A device stops being known after this long without a sign-in. */
+export const KNOWN_DEVICE_TTL_MS = 30 * DAY_MS;
+
+export function toKnownDeviceInfo(device: MockKnownDevice, current: boolean): KnownDeviceInfo {
+  return {
+    id: device.id,
+    known_since: iso(device.known_since),
+    last_sign_in: iso(device.last_sign_in),
+    expires_at: iso(device.last_sign_in + KNOWN_DEVICE_TTL_MS),
+    current,
   };
 }
 
@@ -473,6 +504,8 @@ function createDb(scenario: MockScenario): MockDb {
     users,
     sessions: [],
     currentSessionId: null,
+    knownDevices: [],
+    currentDeviceId: null,
     seededSessionUsers: new Set(),
     tokens: [],
     challenges: new Map(),
@@ -501,6 +534,17 @@ function createDb(scenario: MockScenario): MockDb {
     const session = newSessionRecord(settings, alex, "passkey", { now });
     state.sessions.push(session);
     state.currentSessionId = session.id;
+    const device = newDeviceRecord(alex, now - 12 * DAY_MS, now);
+    state.knownDevices.push(device);
+    state.currentDeviceId = device.id;
+  }
+  // Devices of other browsers: alex has signed in from a second one, sam from one.
+  for (const [name, daysKnown, daysAgo] of [
+    ["alex", 20, 3],
+    ["sam", 8, 2],
+  ] as const) {
+    const user = users.find((u) => u.name === name);
+    if (user) state.knownDevices.push(newDeviceRecord(user, now - daysKnown * DAY_MS, now - daysAgo * DAY_MS));
   }
   return state;
 }
