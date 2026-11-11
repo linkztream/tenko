@@ -497,10 +497,13 @@ mod host {
                     std::thread::sleep(Duration::from_millis(20));
                 }
                 Ok(None) => {
+                    // The check refuses rather than run unchecked; the line says what to try.
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(format!(
-                        "{} did not end within {} s",
+                        "{} did not end within {} s and was stopped; run the command again, \
+                         and if this repeats, find what holds up that program on this machine \
+                         (it should take well under a second)",
                         path.display(),
                         limit.as_secs()
                     ));
@@ -1558,7 +1561,8 @@ mod tests {
         );
         assert!(
             slow.as_ref()
-                .is_err_and(|error| error.contains("did not end within 1 s")),
+                .is_err_and(|error| error.contains("did not end within 1 s")
+                    && error.contains("run the command again")),
             "{slow:?}"
         );
         assert!(started.elapsed() < Duration::from_secs(20));
