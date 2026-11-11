@@ -909,6 +909,24 @@ impl AuthService {
                     "register an attested hardware security key for the account first",
                 ));
             }
+            // Under Hardened the break-glass key must be one that a configured attestation
+            // root confirms, also when the account becomes break-glass after its keys were
+            // registered (IAM-09, ADR 0010).
+            if self.settings().profile == crate::settings::Profile::Hardened
+                && !credentials.iter().any(|credential| {
+                    credential.hardware_key
+                        && matches!(
+                            credential.attestation,
+                            crate::webauthn::AttestationKind::Certificate { anchored: true, .. }
+                        )
+                })
+            {
+                return Err(AuthError::invalid(
+                    "user_id",
+                    "under the Hardened profile the break-glass account needs a security key that \
+                     an attestation root of [auth] attestation_roots confirms",
+                ));
+            }
             if !user.break_glass && user.is_admin() && Self::other_admins(view.as_ref(), id)? == 0 {
                 return Err(AuthError::LastAdministrator);
             }

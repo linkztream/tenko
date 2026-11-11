@@ -65,12 +65,27 @@ pub struct RpConfig {
 }
 
 impl RpConfig {
-    /// A configuration for `rp_id` served from `https://<rp_id>` on any port.
+    /// A configuration for `rp_id` served from `https://<rp_id>` (port 443) only.
     pub fn for_host(rp_id: &str) -> Self {
+        Self::for_host_ports(rp_id, &[])
+    }
+
+    /// A configuration for `rp_id` served from `https://<rp_id>` and from
+    /// `https://<rp_id>:<port>` for each of `ports`: the server's own listen ports, so a
+    /// direct installation and one behind a proxy on 443 work, and a page of another
+    /// service on another port of the same host cannot run a ceremony.
+    pub fn for_host_ports(rp_id: &str, ports: &[u16]) -> Self {
+        let mut origins = vec![format!("https://{rp_id}")];
+        for port in ports {
+            let origin = format!("https://{rp_id}:{port}");
+            if *port != 443 && !origins.contains(&origin) {
+                origins.push(origin);
+            }
+        }
         Self {
             rp_id: rp_id.to_owned(),
             rp_name: "Tenko DDI".to_owned(),
-            origins: vec![format!("https://{rp_id}:*")],
+            origins,
             trust_anchors: Vec::new(),
             timeout_ms: DEFAULT_TIMEOUT_MS,
         }
@@ -86,6 +101,10 @@ pub struct RegistrationPolicy {
     /// IAM-09). The options then ask for `direct` attestation and a cross-platform
     /// authenticator.
     pub hardware_key_required: bool,
+    /// The attestation must chain to a configured root (`[auth] attestation_roots`): the
+    /// break-glass key under the Hardened profile. Without roots no key can meet it, so
+    /// the registration is refused with [`WebAuthnError::AttestationUntrusted`].
+    pub anchored_attestation_required: bool,
 }
 
 impl Default for RegistrationPolicy {
@@ -93,6 +112,7 @@ impl Default for RegistrationPolicy {
         Self {
             user_verification: UserVerification::Required,
             hardware_key_required: false,
+            anchored_attestation_required: false,
         }
     }
 }
@@ -344,7 +364,7 @@ impl RelyingParty {
             match &attestation {
                 AttestationKind::Certificate {
                     anchored: false, ..
-                } if !self.anchors.is_empty() => {
+                } if !self.anchors.is_empty() || policy.anchored_attestation_required => {
                     return Err(WebAuthnError::AttestationUntrusted);
                 }
                 AttestationKind::Certificate { .. } => {}
@@ -367,7 +387,7 @@ impl RelyingParty {
             backup_eligible,
             backup_state: auth_data.flags.backup_state(),
             attestation,
-            transports: response.response.transports.clone(),
+            transports: types::bounded_transports(&response.response.transports),
             hardware_key,
         })
     }
@@ -564,7 +584,8 @@ fn parse_attestation_object(bytes: &[u8]) -> Result<(String, Value, Vec<u8>), We
     }
 }
 
-/// Entry points for the fuzz target `webauthn_attestation` (not part of the API).
+/// Entry points for the fuzz targets `webauthn_attestation` and `webauthn_certificate`
+/// (not part of the API).
 #[doc(hidden)]
 pub mod fuzzing {
     use super::{
@@ -603,6 +624,31 @@ pub mod fuzzing {
             &[],
             NOW_UNIX,
         )
+    }
+
+    /// Reads a DER certificate chain as `packed` attestation does before any signature:
+    /// each certificate parsed, then the constraints of the chain (critical extensions,
+    /// key usage and path length of the issuers). The input is split into certificates by
+    /// their own DER lengths; at most eight are read.
+    ///
+    /// # Errors
+    ///
+    /// As the registration ceremony.
+    pub fn certificate_chain(mut input: &[u8]) -> Result<usize, WebAuthnError> {
+        let mut ders = Vec::new();
+        while !input.is_empty() && ders.len() < 8 {
+            let len = super::der::element_len(input)
+                .ok_or(WebAuthnError::AttestationInvalid("malformed certificate"))?;
+            let (der, rest) = input.split_at(len);
+            ders.push(der);
+            input = rest;
+        }
+        let certificates = ders
+            .iter()
+            .map(|der| super::der::Certificate::parse(der))
+            .collect::<Result<Vec<_>, _>>()?;
+        attestation::check_chain_constraints(&certificates)?;
+        Ok(certificates.len())
     }
 }
 

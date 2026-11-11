@@ -110,7 +110,7 @@ export function lockoutPatch(value: unknown): SettingsPatch {
   return { lockout: mode, lockout_policy: policy };
 }
 
-export type LockField = "attempts" | "waits" | "lock" | "account";
+export type LockField = "attempts" | "waits" | "lock" | "account" | "alarm";
 
 export interface LockDraft {
   attempts: string;
@@ -119,6 +119,7 @@ export interface LockDraft {
   lock: string;
   lockUnit: DurationUnit;
   account: string;
+  alarm: string;
 }
 
 function whole(text: string): number | undefined {
@@ -161,7 +162,18 @@ export function lockPolicyOf(
   ) {
     errors.account = true;
   }
-  if (Object.keys(errors).length > 0 || attempts === undefined || waits === undefined || lock === undefined || account === undefined) {
+  const alarm = whole(draft.alarm);
+  if (alarm === undefined || alarm < LOCK_LIMITS.alarm_after_failures.min || alarm > LOCK_LIMITS.alarm_after_failures.max) {
+    errors.alarm = true;
+  }
+  if (
+    Object.keys(errors).length > 0 ||
+    attempts === undefined ||
+    waits === undefined ||
+    lock === undefined ||
+    account === undefined ||
+    alarm === undefined
+  ) {
     return { errors };
   }
   return {
@@ -171,6 +183,7 @@ export function lockPolicyOf(
       lock_secs: lock,
       account_max_delay_secs: account,
       passkey_holds_lock: passkeyHoldsLock,
+      alarm_after_failures: alarm,
     },
     errors,
   };

@@ -523,10 +523,10 @@ async fn start_oidc_login(
     tag = "auth",
     operation_id = "finish_oidc_login",
     summary = "Finish an OpenID Connect sign-in",
-    description = "Public; the provider's redirect target. Matches the state and the flow cookie, exchanges the code with the client secret and the PKCE verifier, verifies the ID token (issuer, audience and `azp`, times, nonce, an algorithm of the allow-list, the key from the provider's JWKS), maps the claims onto roles and scopes, creates the session with the `tenko_session` cookie and answers a small page that moves the browser to the return path. No access or refresh token is kept.",
+    description = "Public; the provider's redirect target. Matches the state and the flow cookie, exchanges the code with the client secret and the PKCE verifier, verifies the ID token (issuer, audience and `azp`, times, nonce, an algorithm of the allow-list, the key from the provider's JWKS), maps the claims onto roles and scopes, creates the session with its cookie (`__Host-tenko_session` over HTTPS) and answers a small page that moves the browser to the return path. No access or refresh token is kept.",
     params(("id" = String, Path, description = "Provider identifier (UUID)"), OidcCallbackParams),
     responses(
-        (status = 200, description = "A page that moves the browser to the return path, with the session cookie", content_type = "text/html", headers(("Set-Cookie" = String, description = "The session cookie `tenko_session`"))),
+        (status = 200, description = "A page that moves the browser to the return path, with the session cookie", content_type = "text/html", headers(("Set-Cookie" = String, description = "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"))),
         (status = 400, description = "No flow matches the callback (`auth.oidc.flow_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "The ID token was refused (`auth.oidc.token_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "No mapping matches the user (`auth.directory.no_mapping`), or the groups came as an overage marker (`auth.directory.overage`)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -554,7 +554,7 @@ async fn finish_oidc_login(
     summary = "Sign in with Kerberos through the browser",
     description = "Public. Without a token answers `401` with `WWW-Authenticate: Negotiate`; with a SPNEGO token for `HTTP/<fqdn>` accepts it with the account's keys, answers the AP-REP in the header, maps the PAC's groups through the negotiate provider's mappings and creates the session (RFC 4559; identity plan section 3.14). Offered only while a negotiate provider is verified.",
     responses(
-        (status = 200, description = "The session is created; the browser is moved to the UI", content_type = "text/html", headers(("Set-Cookie" = String, description = "The session cookie `tenko_session`"), ("WWW-Authenticate" = String, description = "`Negotiate <AP-REP>`, the mutual authentication"))),
+        (status = 200, description = "The session is created; the browser is moved to the UI", content_type = "text/html", headers(("Set-Cookie" = String, description = "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"), ("WWW-Authenticate" = String, description = "`Negotiate <AP-REP>`, the mutual authentication"))),
         (status = 401, description = "No token yet (`WWW-Authenticate: Negotiate`), or the token was refused (`auth.invalid_credentials`)", body = ProblemDetails, content_type = "application/problem+json", headers(("WWW-Authenticate" = String, description = "`Negotiate`"))),
         (status = 403, description = "No mapping matches the principal (`auth.directory.no_mapping`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No verified negotiate provider (`auth.provider.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),

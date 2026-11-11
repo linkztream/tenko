@@ -94,8 +94,22 @@ pub(super) fn verify(
             _ => Err(WebAuthnError::AttestationInvalid("`none` with a statement")),
         },
         "packed" => verify_packed(input, anchors, now_unix),
-        other => Err(WebAuthnError::UnsupportedAttestation(other.to_owned())),
+        other => Err(WebAuthnError::UnsupportedAttestation(format_name(other))),
     }
+}
+
+/// The longest attestation format name an error repeats: the registered formats are at
+/// most 17 characters long.
+pub(super) const MAX_FORMAT_NAME: usize = 32;
+
+/// A format name as an error may repeat it: at most [`MAX_FORMAT_NAME`] characters, each
+/// a visible ASCII character or `?`, so the answer never grows with what the client sent.
+pub(super) fn format_name(format: &str) -> String {
+    format
+        .chars()
+        .take(MAX_FORMAT_NAME)
+        .map(|c| if c.is_ascii_graphic() { c } else { '?' })
+        .collect()
 }
 
 fn verify_packed(
@@ -167,6 +181,7 @@ fn verify_packed(
         .iter()
         .map(|der| Certificate::parse(der))
         .collect::<Result<_, _>>()?;
+    check_chain_constraints(&certificates)?;
     let leaf = &certificates[0];
     check_leaf_requirements(leaf, input.aaguid)?;
     verify_with_certificate_key(leaf, alg, &signed, sig)?;
@@ -198,6 +213,35 @@ fn verify_packed(
             .unwrap_or_default()
             .to_owned(),
     })
+}
+
+/// The constraints of the chain that need no signature: no certificate marks an
+/// extension critical that the reader does not understand, and every issuer may sign
+/// certificates (key usage `keyCertSign` when it states a key usage) and allows the
+/// authorities below it (`pathLenConstraint`). Self-issued certificates are not part of
+/// an attestation chain, so every issuer below an authority counts.
+pub(super) fn check_chain_constraints(
+    certificates: &[Certificate<'_>],
+) -> Result<(), WebAuthnError> {
+    for (index, certificate) in certificates.iter().enumerate() {
+        certificate.check_critical_extensions()?;
+        if index == 0 {
+            continue;
+        }
+        if !certificate.may_sign_certificates()? {
+            return Err(WebAuthnError::AttestationInvalid(
+                "an issuer's key usage does not allow signing certificates",
+            ));
+        }
+        // The authorities between this one and the leaf.
+        let below = u32::try_from(index - 1).unwrap_or(u32::MAX);
+        if certificate.path_len()?.is_some_and(|limit| below > limit) {
+            return Err(WebAuthnError::AttestationInvalid(
+                "the chain is longer than an issuer allows",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The requirements of section 8.2.1 on a `packed` attestation certificate.
@@ -250,4 +294,175 @@ fn verify_with_certificate_key(
     UnparsedPublicKey::new(algorithm, key)
         .verify(message, sig)
         .map_err(|_| refused)
+}
+
+#[cfg(test)]
+mod tests {
+    use rcgen::{
+        BasicConstraints, CertificateParams, CustomExtension, IsCa, KeyPair, KeyUsagePurpose,
+    };
+
+    use super::*;
+
+    /// A self-signed certificate made with `params`; the constraints read no signature.
+    fn der(params: &CertificateParams) -> Vec<u8> {
+        let key = KeyPair::generate().expect("key");
+        params
+            .self_signed(&key)
+            .expect("certificate")
+            .der()
+            .to_vec()
+    }
+
+    fn params(ca: Option<BasicConstraints>, usages: Vec<KeyUsagePurpose>) -> CertificateParams {
+        let mut params = CertificateParams::new(Vec::<String>::new()).expect("params");
+        params.is_ca = ca.map_or(IsCa::NoCa, IsCa::Ca);
+        params.key_usages = usages;
+        params
+    }
+
+    fn check(ders: &[Vec<u8>]) -> Result<(), WebAuthnError> {
+        let certificates: Vec<Certificate<'_>> = ders
+            .iter()
+            .map(|der| Certificate::parse(der).expect("parses"))
+            .collect();
+        check_chain_constraints(&certificates)
+    }
+
+    #[test]
+    fn an_unknown_critical_extension_is_refused() {
+        let mut leaf = params(None, Vec::new());
+        let mut extension =
+            CustomExtension::from_oid_content(&[1, 3, 6, 1, 4, 1, 99_999, 1], vec![0x05, 0x00]);
+        extension.set_criticality(true);
+        leaf.custom_extensions = vec![extension];
+        assert_eq!(
+            check(&[der(&leaf)]),
+            Err(WebAuthnError::AttestationInvalid(
+                "unknown critical extension"
+            ))
+        );
+        // The same extension, not critical, is ignored.
+        let mut plain = params(None, Vec::new());
+        plain.custom_extensions = vec![CustomExtension::from_oid_content(
+            &[1, 3, 6, 1, 4, 1, 99_999, 1],
+            vec![0x05, 0x00],
+        )];
+        assert_eq!(check(&[der(&plain)]), Ok(()));
+        // Critical basic constraints and key usage are understood.
+        let ca = params(
+            Some(BasicConstraints::Unconstrained),
+            vec![KeyUsagePurpose::KeyCertSign],
+        );
+        assert_eq!(check(&[der(&params(None, Vec::new())), der(&ca)]), Ok(()));
+    }
+
+    #[test]
+    fn an_issuer_must_be_allowed_to_sign_certificates() {
+        let leaf = der(&params(None, Vec::new()));
+        let signs_only = params(
+            Some(BasicConstraints::Unconstrained),
+            vec![KeyUsagePurpose::DigitalSignature],
+        );
+        assert_eq!(
+            check(&[leaf.clone(), der(&signs_only)]),
+            Err(WebAuthnError::AttestationInvalid(
+                "an issuer's key usage does not allow signing certificates"
+            ))
+        );
+        // Without a key usage nothing is restricted.
+        let no_usage = params(Some(BasicConstraints::Unconstrained), Vec::new());
+        assert_eq!(check(&[leaf, der(&no_usage)]), Ok(()));
+    }
+
+    #[test]
+    fn an_issuer_limits_the_authorities_below_it() {
+        let leaf = der(&params(None, Vec::new()));
+        let usage = vec![KeyUsagePurpose::KeyCertSign];
+        let intermediate = der(&params(
+            Some(BasicConstraints::Constrained(0)),
+            usage.clone(),
+        ));
+        let root_zero = der(&params(
+            Some(BasicConstraints::Constrained(0)),
+            usage.clone(),
+        ));
+        let root_one = der(&params(Some(BasicConstraints::Constrained(1)), usage));
+        // An issuer with path length 0 may issue the leaf directly.
+        assert_eq!(check(&[leaf.clone(), intermediate.clone()]), Ok(()));
+        // One authority below a root that allows none is refused.
+        assert_eq!(
+            check(&[leaf.clone(), intermediate.clone(), root_zero]),
+            Err(WebAuthnError::AttestationInvalid(
+                "the chain is longer than an issuer allows"
+            ))
+        );
+        assert_eq!(check(&[leaf, intermediate, root_one]), Ok(()));
+    }
+
+    #[test]
+    fn the_path_length_and_the_key_usage_are_read() {
+        let usage = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+        let constrained = der(&params(Some(BasicConstraints::Constrained(3)), usage));
+        let certificate = Certificate::parse(&constrained).expect("parses");
+        assert_eq!(certificate.path_len(), Ok(Some(3)));
+        assert_eq!(certificate.may_sign_certificates(), Ok(true));
+        let unconstrained = der(&params(
+            Some(BasicConstraints::Unconstrained),
+            vec![KeyUsagePurpose::DigitalSignature],
+        ));
+        let certificate = Certificate::parse(&unconstrained).expect("parses");
+        assert_eq!(certificate.path_len(), Ok(None));
+        assert_eq!(certificate.may_sign_certificates(), Ok(false));
+        let leaf = der(&params(None, Vec::new()));
+        assert_eq!(
+            Certificate::parse(&leaf).expect("parses").path_len(),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn a_format_name_in_an_error_is_bounded() {
+        let long = "x".repeat(10_000);
+        assert_eq!(format_name(&long).len(), MAX_FORMAT_NAME);
+        assert_eq!(format_name("tpm\n\u{1b}[31m"), "tpm??[31m");
+        assert_eq!(format_name("android-safetynet"), "android-safetynet");
+        let Err(WebAuthnError::UnsupportedAttestation(echoed)) = verify(
+            &Statement {
+                format: &long,
+                body: &Value::Map(Vec::new()),
+                auth_data: &[],
+                client_data_hash: &[0; 32],
+                credential_key: &crate::webauthn::cose::CoseKey::parse(&es256_key()).expect("key"),
+                aaguid: &[0; 16],
+            },
+            &[],
+            0,
+        ) else {
+            panic!("refused");
+        };
+        assert_eq!(echoed.len(), MAX_FORMAT_NAME);
+    }
+
+    /// A COSE ES256 key with the generator point of P-256.
+    fn es256_key() -> Vec<u8> {
+        let x = crate::encoding::hex_decode(
+            "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296",
+        )
+        .expect("hex");
+        let y = crate::encoding::hex_decode(
+            "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5",
+        )
+        .expect("hex");
+        let map = Value::Map(vec![
+            (Value::Integer(1.into()), Value::Integer(2.into())),
+            (Value::Integer(3.into()), Value::Integer((-7).into())),
+            (Value::Integer((-1).into()), Value::Integer(1.into())),
+            (Value::Integer((-2).into()), Value::Bytes(x)),
+            (Value::Integer((-3).into()), Value::Bytes(y)),
+        ]);
+        let mut out = Vec::new();
+        ciborium::ser::into_writer(&map, &mut out).expect("cbor");
+        out
+    }
 }

@@ -368,7 +368,7 @@ describe("the security page", () => {
     fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
     fireEvent.click(await within(dialog).findByRole("button", { name: "Switch to Hardened" }));
     expect((await within(dialog).findByTestId("error-notice")).textContent).toBe(
-      "The profile requires an audit export. Enable an export sink first, then switch the profile.",
+      "The profile requires an audit export. Enable a TCP, TLS or file sink first, then switch the profile. A UDP sink confirms nothing and does not count.",
     );
     expect(db.settings.profile).toBe("standard");
   });
@@ -1180,6 +1180,7 @@ describe("the lock policy (TGL-07)", () => {
     fireEvent.input(attempts, { target: { value: "5" } });
     fireEvent.input(within(dialog).getByTestId("field-lock_waits"), { target: { value: "20, 60" } });
     fireEvent.input(within(dialog).getByTestId("field-lock_account"), { target: { value: "0" } });
+    fireEvent.input(within(dialog).getByTestId("field-lock_alarm"), { target: { value: "7" } });
     fireEvent.click(passkey);
     fireEvent.click(within(dialog).getByRole("button", { name: "Save setting" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -1190,6 +1191,7 @@ describe("the lock policy (TGL-07)", () => {
       lock_secs: 1800,
       account_max_delay_secs: 0,
       passkey_holds_lock: true,
+      alarm_after_failures: 7,
     });
     expect(within(row("TGL-07")).getByText("Differs from the profile")).toBeTruthy();
     expect(

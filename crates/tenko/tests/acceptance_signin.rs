@@ -140,7 +140,7 @@ impl Browser {
         for value in reply.headers.get_all("set-cookie") {
             let Ok(text) = value.to_str() else { continue };
             let pair = text.split(';').next().unwrap_or_default().trim();
-            if let Some(secret) = pair.strip_prefix("tenko_session=") {
+            if let Some(secret) = serve_support::api::session_secret(pair) {
                 self.api
                     .set_cookie((!secret.is_empty()).then(|| pair.to_owned()));
             }
@@ -227,7 +227,9 @@ fn assert_session_cookie_flags(reply: &Reply) {
         .get_all("set-cookie")
         .iter()
         .filter_map(|value| value.to_str().ok())
-        .filter(|text| text.starts_with("tenko_session="))
+        .filter(|text| {
+            serve_support::api::session_secret(text.split(';').next().unwrap_or_default()).is_some()
+        })
         .map(str::to_owned)
         .collect();
     assert_eq!(

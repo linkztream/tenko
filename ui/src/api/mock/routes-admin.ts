@@ -310,6 +310,7 @@ function parseLockPolicy(value: unknown): LockPolicy {
   }
   const lock = int("lock_secs", 60, 86_400);
   const account = int("account_max_delay_secs", 0, 600);
+  const alarm = value.alarm_after_failures === undefined ? 5 : int("alarm_after_failures", 1, 100);
   if (typeof value.passkey_holds_lock !== "boolean") return invalid("lockout_policy", "passkey_holds_lock is required");
   return {
     attempts,
@@ -317,6 +318,7 @@ function parseLockPolicy(value: unknown): LockPolicy {
     lock_secs: lock,
     account_max_delay_secs: account,
     passkey_holds_lock: value.passkey_holds_lock,
+    alarm_after_failures: alarm,
   };
 }
 

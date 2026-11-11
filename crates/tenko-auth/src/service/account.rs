@@ -147,6 +147,7 @@ impl AuthService {
         settings: &SecuritySettings,
         password: &str,
         owner: &PasswordOwner<'_>,
+        purpose: crate::hibp::CheckPurpose,
     ) -> (Vec<PolicyViolation>, BreachStatus) {
         let policy = settings.password_policy.for_account(owner.administers);
         let mut violations = settings.password_policy.check_for(
@@ -165,7 +166,11 @@ impl AuthService {
             if is_pin_like(&normalized) && admits_pin(&policy) {
                 return (violations, BreachStatus::NotApplicable);
             }
-            match self.breach_checker(settings).check(&normalized).await {
+            match self
+                .breach_checker(settings)
+                .check_for(&normalized, purpose)
+                .await
+            {
                 BreachOutcome::Clean => BreachStatus::Clean,
                 BreachOutcome::Breached { count } => {
                     violations.push(PolicyViolation::Breached { count });
@@ -189,7 +194,12 @@ impl AuthService {
         now: tenko_core::Timestamp,
     ) -> Result<(StoredPassword, BreachStatus), AuthError> {
         let (violations, status) = self
-            .evaluate_password(settings, password.expose(), owner)
+            .evaluate_password(
+                settings,
+                password.expose(),
+                owner,
+                crate::hibp::CheckPurpose::Set,
+            )
             .await;
         if !violations.is_empty() {
             return Err(AuthError::PasswordPolicy(violations));
@@ -424,6 +434,7 @@ impl AuthService {
                     host_name: host_name.as_deref(),
                     administers,
                 },
+                crate::hibp::CheckPurpose::Preview,
             )
             .await;
         Ok(PasswordCheckResult {
@@ -445,28 +456,23 @@ impl AuthService {
         request: &PasswordChange,
         settings: &SecuritySettings,
     ) -> Result<(), AuthError> {
-        let attempt = self.attempt(&user.name, Some(user), ctx, settings);
-        self.check_attempt(
-            self.view().await?.as_ref(),
-            &attempt,
-            super::guard::Step::Password,
-            ctx.now,
-        )?;
         let current = request
             .current_password
             .as_ref()
             .ok_or(AuthError::PasswordIncorrect)?;
+        let attempt = self.attempt(&user.name, Some(user), ctx, settings);
+        let turn = self.check_attempt(self.view().await?.as_ref(), &attempt, ctx.now)?;
         let candidate = normalize(current.expose());
         let hash = stored.hash.clone();
         let cost = crate::password::hash::HashCost::of_hash(&hash).unwrap_or_else(|| {
             crate::password::hash::HashCost::of_strength(hash_strength(settings))
         });
-        if !self
+        let hashed = self
             .hashing(cost, super::guard::Slot::trusted(), move || {
                 verify_password(&candidate, &hash)
             })
-            .await??
-        {
+            .await;
+        if !self.turn_back_if_refused(&attempt, turn, hashed)?? {
             self.login_failed(
                 ctx,
                 &attempt,
@@ -791,6 +797,7 @@ impl AuthService {
         let policy = RegistrationPolicy {
             user_verification: UserVerification::Required,
             hardware_key_required: hardware_key,
+            anchored_attestation_required: self.anchored_attestation_required(&user),
         };
         let public_key = rp.creation_options(
             &user.user_handle(),
@@ -814,6 +821,13 @@ impl AuthService {
             ceremony_id,
             public_key,
         })
+    }
+
+    /// Whether a registration of `user` needs an attestation that chains to a configured
+    /// root: the break-glass account under the Hardened profile (IAM-09, ADR 0010), whose
+    /// key must be a hardware key the installation can confirm.
+    fn anchored_attestation_required(&self, user: &UserRecord) -> bool {
+        user.break_glass && self.settings().profile == crate::settings::Profile::Hardened
     }
 
     /// `POST /auth/webauthn/register/finish`.
@@ -853,9 +867,24 @@ impl AuthService {
             &RegistrationPolicy {
                 user_verification: UserVerification::Required,
                 hardware_key_required: hardware_key || user.break_glass,
+                anchored_attestation_required: self.anchored_attestation_required(&user),
             },
             ctx.now,
         )?;
+        let anchored = matches!(
+            registered.attestation,
+            crate::webauthn::AttestationKind::Certificate { anchored: true, .. }
+        );
+        if registered.hardware_key && !anchored {
+            // ADR 0010: without attestation roots a security key counts as one on its
+            // attestation alone, which a software key can also produce.
+            tracing::warn!(
+                user = %user.name,
+                break_glass = user.break_glass,
+                "a security key was registered whose attestation no configured root confirms; \
+                 configure [auth] attestation_roots to check the make of security keys"
+            );
+        }
         if view
             .get_typed(&CREDENTIAL_IDS, &registered.credential_id)?
             .is_some()
@@ -901,6 +930,7 @@ impl AuthService {
             )
             .with_context("label", record.label.clone())
             .with_context("hardware_key", record.hardware_key.to_string())
+            .with_context("attestation_anchored", anchored.to_string())
             .with_context("backup_eligible", record.backup_eligible.to_string()),
         );
         self.commit(batch).await?;

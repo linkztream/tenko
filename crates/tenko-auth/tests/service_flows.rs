@@ -131,10 +131,15 @@ async fn setup_runs_once_and_logs_the_administrator_in() {
     assert_eq!(session.info.strength, AuthStrength::Password);
     assert_eq!(session.info.required_strength, AuthStrength::PasswordTotp);
     assert!(session.info.flags.mfa_enrollment_required);
-    assert!(session.set_cookie.contains("HttpOnly"));
-    assert!(session.set_cookie.contains("SameSite=Strict"));
-    assert!(session.set_cookie.contains("Secure"));
-    assert!(session.set_cookie.starts_with("tenko_session="));
+    // Over HTTPS the cookie is `__Host-` and Secure; over plain HTTP (Lab) it has the plain
+    // name and no Secure, which a browser would refuse there.
+    let https = session.set_cookie(true);
+    assert!(https.contains("HttpOnly") && https.contains("SameSite=Strict"));
+    assert!(https.contains("Secure") && https.contains("Path=/"));
+    assert!(!https.contains("Domain"));
+    assert!(https.starts_with("__Host-tenko_session="));
+    let plain = session.set_cookie(false);
+    assert!(plain.starts_with("tenko_session=") && !plain.contains("Secure"));
 
     assert!(!env.service.setup_state().await.expect("state").open);
     assert!(
@@ -237,8 +242,9 @@ async fn sessions_expire_idle_and_absolute_and_end_at_logout() {
             .expect("login"),
     );
     let ctx = env.session_ctx(&other).await.expect("ctx");
-    let cleared = env.service.logout(&ctx).await.expect("logout");
-    assert!(cleared.contains("Max-Age=0"));
+    env.service.logout(&ctx).await.expect("logout");
+    let cleared = tenko_auth::service::clear_session_cookie(true);
+    assert!(cleared.starts_with("__Host-tenko_session=;") && cleared.contains("Max-Age=0"));
     assert!(matches!(
         env.service
             .authenticate_credentials(&session_credentials(&other), env.now())
@@ -609,6 +615,44 @@ async fn passkeys_register_and_log_in_without_a_user_name() {
     ));
 }
 
+/// Stores the profile's settings as the security settings and waits until the service
+/// reads them.
+async fn switch_profile(env: &TestEnv, profile: Profile) {
+    let mut batch = tenko_store::WriteBatch::new(
+        Principal::system(tenko_core::SystemComponent::Api),
+        env.now(),
+    );
+    batch
+        .put_typed(&tenko_auth::model::SETTINGS, &(), &profile.defaults())
+        .expect("encodes");
+    env.store.propose(batch).await.expect("commits");
+    for _ in 0..400 {
+        if env.service.settings().profile == profile {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the service never read the profile {profile:?}");
+}
+
+/// Under Hardened the break-glass key must be one a configured attestation root confirms:
+/// an installation without roots cannot designate the account with the key it has.
+async fn hardened_refuses_an_unconfirmed_key(
+    env: &TestEnv,
+    strong: &RequestCtx,
+    designate: &BreakGlassChange,
+) {
+    switch_profile(env, Profile::Hardened).await;
+    assert!(
+        matches!(
+            env.service.set_break_glass(strong, designate).await,
+            Err(AuthError::Invalid { .. })
+        ),
+        "an unconfirmed key is no break-glass key under Hardened"
+    );
+    switch_profile(env, Profile::Home).await;
+}
+
 #[tokio::test]
 async fn break_glass_needs_an_attested_hardware_key_and_raises_alarms() {
     let (env, session) = TestEnv::installed(Profile::Home).await;
@@ -676,6 +720,7 @@ async fn break_glass_needs_an_attested_hardware_key_and_raises_alarms() {
     )
     .await
     .expect("hardware key");
+    hardened_refuses_an_unconfirmed_key(&env, &strong_ctx, &designate).await;
     let info = env
         .service
         .set_break_glass(&strong_ctx, &designate)

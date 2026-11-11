@@ -100,7 +100,9 @@ pub async fn list_all(
         }
         let request = Request::builder()
             .uri(&uri)
-            .header(header::COOKIE, format!("tenko_session={secret}"))
+            .header(header::COOKIE, format!(
+                    "__Host-tenko_session={secret}; tenko_session={secret}"
+                ))
             .body(Body::empty())?;
         let response = router.clone().oneshot(request).await?;
         let status = response.status();

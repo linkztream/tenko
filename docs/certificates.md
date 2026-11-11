@@ -15,6 +15,8 @@ Related: [SECURITY-PROFILES.md](SECURITY-PROFILES.md) (TGL-08), [QUICKSTART.md](
 | `reverse_proxy` | A proxy in front of Tenko (HAProxy, nginx, Caddy) | In the proxy | every profile | `trusted_proxies`, `proxy_protocol`, `public_host` |
 | `plain` | Nobody: plain HTTP from every source | none | Lab only | none |
 
+A proxy that serves the UI on a port other than 443 needs that origin in `[auth] origins` (for example `["https://ddi.example.test:9443"]`): passkeys are accepted from `https://<rp id>` and from the ports Tenko listens on only ([SECURITY-PROFILES.md](SECURITY-PROFILES.md), passkey origins).
+
 `tls13_only` (always on under Hardened) and `hsts` apply to the first two modes. DNS over TLS and DNS over HTTPS use the certificate of the listener unless `[dns.tls] certificate` and `key` name files of their own, which are watched the same way.
 
 ## 2. What the node serves

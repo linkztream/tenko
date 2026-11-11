@@ -204,7 +204,7 @@ while [ "$tries" -gt 0 ] && ! curl -sS -o /dev/null "$URL/api/v1/health" 2>/dev/
 PASSWORD=$(printf 'Run-%s-Aa1' "$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')")
 SETUP="{\"setup_token\": \"$(head -n 1 "$WORK/data/setup-token" | tr -d '\r\n')\", \"profile\": \"home\", \"admin\": {\"name\": \"bench\", \"display_name\": \"Bench\", \"password\": \"$PASSWORD\"}, \"host_name\": \"localhost\", \"language\": \"en\"}"
 COOKIE="$(curl -sS -D - -o "$WORK/api.out" -H "Origin: $URL" -H "Content-Type: application/json" \
-  --data "$SETUP" "$URL/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1)"
+  --data "$SETUP" "$URL/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(\(__Host-\)\{0,1\}tenko_session=[^;]*\).*/\1/p' | head -n 1)"
 [ -n "$COOKIE" ] || die "the setup did not sign in: $(cat "$WORK/api.out")"
 SECRET="$(head -c 32 /dev/urandom | base64 | tr -d '\r\n')"
 printf '%s\n' "$SECRET" > "$WORK/key.b64"

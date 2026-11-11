@@ -20,7 +20,7 @@
         <segment><source>Sinks that fail or fall behind: {sinks}. Records wait on this installation until they deliver again.</source><target>Sinks som misslyckas eller ligger efter: {sinks}. Posterna väntar på den här installationen tills de levereras igen.</target></segment>
       </unit>
       <unit id="audit_export.warning.required">
-        <segment><source>The profile requires an audit export (TGL-21) and no sink is enabled. Add a sink or switch one on.</source><target>Profilen kräver granskningsexport (TGL-21) och ingen sink är aktiverad. Lägg till en sink eller aktivera en.</target></segment>
+        <segment><source>The profile requires an audit export (TGL-21) and no sink delivers: switch on a TCP, TLS or file sink, or repair the one that fails. A UDP sink confirms nothing and does not count.</source><target>Profilen kräver granskningsexport (TGL-21) och ingen sink levererar: aktivera en TCP-, TLS- eller filsink, eller åtgärda den som misslyckas. En UDP-sink bekräftar ingenting och räknas inte.</target></segment>
       </unit>
       <unit id="audit_export.sinks.heading">
         <segment><source>Sinks</source><target>Sinks</target></segment>
@@ -223,13 +223,13 @@
         <segment><source>Secret with the client key</source><target>Hemlighet med klientnyckeln</target></segment>
       </unit>
       <unit id="audit_export.field.client_key_help">
-        <segment><source>The id of the operator secret that holds the private key in PEM. It is read from the vault each time the sink connects.</source><target>Id för den operatörshemlighet som innehåller den privata nyckeln i PEM. Den läses från valvet varje gång sink ansluter.</target></segment>
+        <segment><source>The id of an operator secret (not a system secret) that holds the private key in PEM. It is read from the vault once for each export run, and the read is audited.</source><target>Id för en operatörshemlighet (inte en systemhemlighet) som innehåller den privata nyckeln i PEM. Den läses från valvet en gång per exportkörning, och läsningen granskningsloggas.</target></segment>
       </unit>
       <unit id="audit_export.field.file">
         <segment><source>File name</source><target>Filnamn</target></segment>
       </unit>
       <unit id="audit_export.field.file_help">
-        <segment><source>A plain file name in the export directory of the controller; letters, digits, hyphen, underscore and dot.</source><target>Ett vanligt filnamn i controllerns exportkatalog; bokstäver, siffror, bindestreck, understreck och punkt.</target></segment>
+        <segment><source>A plain file name in the export directory of the controller; letters, digits, hyphen, underscore and dot. No trailing dot and no device names such as CON, NUL, COM1 or LPT1.</source><target>Ett vanligt filnamn i controllerns exportkatalog; bokstäver, siffror, bindestreck, understreck och punkt. Ingen avslutande punkt och inga enhetsnamn som CON, NUL, COM1 eller LPT1.</target></segment>
       </unit>
       <unit id="audit_export.field.max_mib">
         <segment><source>Rotate at (MiB)</source><target>Rotera vid (MiB)</target></segment>
@@ -247,10 +247,10 @@
         <segment><source>Enter a port from 1 to 65535.</source><target>Ange en port från 1 till 65535.</target></segment>
       </unit>
       <unit id="audit_export.error.client_key">
-        <segment><source>Give the client certificate and the id of the secret with its key together, or neither.</source><target>Ange klientcertifikatet och id för hemligheten med dess nyckel tillsammans, eller inget av dem.</target></segment>
+        <segment><source>Give the client certificate and the id of an operator secret with its key together, or neither.</source><target>Ange klientcertifikatet och id för en operatörshemlighet med dess nyckel tillsammans, eller inget av dem.</target></segment>
       </unit>
       <unit id="audit_export.error.file">
-        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot.</source><target>Ange ett vanligt filnamn: bokstäver, siffror, bindestreck, understreck och punkt, utan inledande punkt.</target></segment>
+        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot, not ending with a dot and not a device name such as CON or NUL.</source><target>Ange ett vanligt filnamn: bokstäver, siffror, bindestreck, understreck och punkt, utan inledande eller avslutande punkt och inte ett enhetsnamn som CON eller NUL.</target></segment>
       </unit>
       <unit id="audit_export.error.max_mib">
         <segment><source>Enter a size from 0.0625 MiB (64 KiB) to 1,048,576 MiB (1 TiB).</source><target>Ange en storlek från 0,0625 MiB (64 KiB) till 1 048 576 MiB (1 TiB).</target></segment>
@@ -278,7 +278,7 @@
       </unit>
       <unit id="errors.audit.export.required">
         <notes><note category="description">Also shown when a change would leave no enabled sink while the profile requires one.</note></notes>
-        <segment><source>The profile requires an audit export. Enable an export sink first, then switch the profile.</source><target>Profilen kräver granskningsexport. Aktivera först en sink för export och byt sedan profil.</target></segment>
+        <segment><source>The profile requires an audit export. Enable a TCP, TLS or file sink first, then switch the profile. A UDP sink confirms nothing and does not count.</source><target>Profilen kräver granskningsexport. Aktivera först en TCP-, TLS- eller filsink och byt sedan profil. En UDP-sink bekräftar ingenting och räknas inte.</target></segment>
       </unit>
       <unit id="errors.audit.export.conflict">
         <segment><source>The audit export settings changed in the meantime. The page shows the current ones; check them and try again.</source><target>Inställningarna för granskningsexport ändrades under tiden. Sidan visar de aktuella; kontrollera dem och försök igen.</target></segment>
@@ -311,13 +311,13 @@
         <segment><source>Enter one or more certificates in PEM, each starting with -----BEGIN CERTIFICATE-----.</source><target>Ange ett eller flera certifikat i PEM, var och ett med inledningen -----BEGIN CERTIFICATE-----.</target></segment>
       </unit>
       <unit id="errors.audit.export.client_key">
-        <segment><source>Give the client certificate and the secret with its key together, or neither.</source><target>Ange klientcertifikatet och hemligheten med dess nyckel tillsammans, eller inget av dem.</target></segment>
+        <segment><source>Give the client certificate and an operator secret with its key together, or neither.</source><target>Ange klientcertifikatet och en operatörshemlighet med dess nyckel tillsammans, eller inget av dem.</target></segment>
       </unit>
       <unit id="errors.audit.export.tls_unused">
         <segment><source>TLS options only apply to the TLS transport. Clear them or choose TLS.</source><target>TLS-alternativ gäller bara för transporten TLS. Rensa dem eller välj TLS.</target></segment>
       </unit>
       <unit id="errors.audit.export.file">
-        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot.</source><target>Ange ett vanligt filnamn: bokstäver, siffror, bindestreck, understreck och punkt, utan inledande punkt.</target></segment>
+        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot, not ending with a dot and not a device name such as CON or NUL.</source><target>Ange ett vanligt filnamn: bokstäver, siffror, bindestreck, understreck och punkt, utan inledande eller avslutande punkt och inte ett enhetsnamn som CON eller NUL.</target></segment>
       </unit>
       <unit id="errors.audit.export.range">
         <segment><source>The value is out of range.</source><target>Värdet är utanför tillåtet intervall.</target></segment>

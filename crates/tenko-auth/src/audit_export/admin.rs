@@ -28,10 +28,10 @@ use super::{
     exporter::framing,
     format::{self, Event, Origin, TestMessage},
     model::{
-        AuditExportSettings, AuditExportUpdate, CURSORS, ExportCursor, SETTINGS, Sink, SinkFailure,
-        SinkSpec, SinkTarget, SyslogTransport,
+        AuditExportSettings, AuditExportUpdate, CURSORS, ExportCursor, SETTINGS, START, Sink,
+        SinkFailure, SinkSpec, SinkTarget, SyslogTransport, certificate_digests,
     },
-    sink::Opener,
+    sink::{Opener, client_key_of},
     status::{AuditExportView, ExportPolicy, read_view, toggle},
 };
 
@@ -138,6 +138,8 @@ impl AuditExportAdmin {
         }
         let known: BTreeSet<Uuid> = before.sinks.iter().map(|sink| sink.id).collect();
         let after = update.validate(&known)?;
+        self.check_client_keys(&after, |index| format!("sinks[{index}]"))
+            .await?;
         let policy = ExportPolicy::of(toggle(view.as_ref())?, &after);
         if !policy.satisfied {
             self.audit_refusal(ctx, &ExportError::Required).await;
@@ -146,8 +148,20 @@ impl AuditExportAdmin {
         let mut batch = WriteBatch::for_request(ctx);
         batch.expect_typed(&SETTINGS, &(), revision);
         batch.put_typed(&SETTINGS, &(), &after)?;
+        let mut restarted = Vec::new();
         for sink in &after.sinks {
-            if !known.contains(&sink.id) {
+            let moved = before
+                .sink(sink.id)
+                .is_some_and(|was| was.destination_differs(sink));
+            if moved {
+                // Another place gets the whole log, as a new sink does: the records sent to
+                // the place before are not taken as delivered to this one.
+                let from = view
+                    .get_typed(&CURSORS, &sink.id)?
+                    .map_or(START.seq, |(cursor, _)| cursor.delivered.seq);
+                restarted.push((sink.id, from));
+            }
+            if moved || !known.contains(&sink.id) {
                 batch.put_typed(&CURSORS, &sink.id, &ExportCursor::start(ctx.now))?;
             }
         }
@@ -158,6 +172,14 @@ impl AuditExportAdmin {
             AuditDraft::success(UPDATE_ACTION, Vec::new()).with_source_ip(ctx.source_ip);
         for change in changes(&before, &after) {
             draft = draft.with_change(change);
+        }
+        for (id, from) in restarted {
+            draft = draft.with_change(FieldChange {
+                object: None,
+                field: format!("cursor:{id}"),
+                old: Some(from.0.to_string()),
+                new: Some(START.seq.0.to_string()),
+            });
         }
         batch.audit(draft);
         match self.store.propose(batch).await {
@@ -175,6 +197,42 @@ impl AuditExportAdmin {
             Err(error) => return Err(error.into()),
         }
         self.view(ctx.now).await
+    }
+
+    /// Refuses a TLS client key that is not an operator secret of the vault: a system
+    /// secret (a CA key, a TOTP seed) is never a sink's key, and a missing secret answers
+    /// the same, so the refusal tells nothing about what a secret is. `at` names the sink
+    /// of an index in the field of the error.
+    async fn check_client_keys(
+        &self,
+        settings: &AuditExportSettings,
+        at: impl Fn(usize) -> String,
+    ) -> Result<(), ExportError> {
+        let mut problems = Vec::new();
+        for (index, sink) in settings.sinks.iter().enumerate() {
+            let Some(secret) = client_key_of(sink) else {
+                continue;
+            };
+            let operator = self
+                .opener
+                .is_operator_secret(secret)
+                .await
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "the class of an audit export client key cannot be read");
+                    false
+                });
+            if !operator {
+                problems.push(FieldError::new(
+                    format!("{}.target.tls.client_key", at(index)),
+                    "audit.export.client_key",
+                ));
+            }
+        }
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(ExportError::Invalid(problems))
+        }
     }
 
     async fn audit_refusal(&self, ctx: &RequestCtx, error: &ExportError) {
@@ -229,6 +287,8 @@ impl AuditExportAdmin {
                     ),
                     other => other,
                 })?;
+                self.check_client_keys(&validated, |_| "spec".to_owned())
+                    .await?;
                 validated.sinks.remove(0)
             }
             _ => {
@@ -287,8 +347,56 @@ impl AuditExportAdmin {
         };
         let message = format::render(sink.format, framing(sink), &origin, &Event::Test(&test))
             .map_err(|error| SinkError::new(super::FailureKind::Config, error.to_string()))?;
-        let mut transport = self.opener.open(sink).await?;
+        let key = match client_key_of(sink) {
+            Some(secret) => Some(self.read_client_key(ctx, sink, secret).await?),
+            None => None,
+        };
+        let mut transport = self
+            .opener
+            .open_with_key(sink, key.as_ref().map(|key| key.as_slice()))
+            .await?;
         transport.send(&[message]).await
+    }
+
+    /// Records the use of a sink's client key for a test, then reads it: as the exporter
+    /// does, a key of another class is refused before anything is recorded, and a key whose
+    /// use cannot be recorded is not read.
+    async fn read_client_key(
+        &self,
+        ctx: &RequestCtx,
+        sink: &Sink,
+        secret: tenko_core::SecretId,
+    ) -> Result<zeroize::Zeroizing<Vec<u8>>, SinkError> {
+        let unusable = |detail: String| SinkError::new(super::FailureKind::ClientKey, detail);
+        match self.opener.is_operator_secret(secret).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(unusable(format!(
+                    "the client key {secret} is not an operator secret of the vault"
+                )));
+            }
+            Err(error) => {
+                return Err(unusable(format!(
+                    "the client key {secret} cannot be read from the vault: {error}"
+                )));
+            }
+        }
+        let mut batch = WriteBatch::for_request(ctx);
+        batch.audit(
+            AuditDraft::success(
+                super::exporter::CLIENT_KEY_ACTION,
+                vec![tenko_core::ObjectRef::from(secret)],
+            )
+            .with_source_ip(ctx.source_ip)
+            .with_context("sink_name", sink.name.clone())
+            .with_context("test", "true"),
+        );
+        self.store.propose(batch).await.map_err(|error| {
+            unusable(format!(
+                "the use of the client key could not be audited, so it was not read: {error}"
+            ))
+        })?;
+        self.opener.client_key(secret).await
     }
 }
 
@@ -308,8 +416,16 @@ pub fn summary(sink: &Sink) -> String {
                 } else {
                     " ca=system"
                 });
+                // The fingerprints of the pinned authorities and of the client chain, so that
+                // a swapped certificate shows in the record of the change.
+                if let Some(pem) = &target.tls.ca_pem {
+                    let _ = write!(text, " ca_sha256={}", fingerprints(pem));
+                }
                 if let Some(name) = &target.tls.server_name {
                     let _ = write!(text, " server_name={name}");
+                }
+                if let Some(pem) = &target.tls.client_cert_pem {
+                    let _ = write!(text, " client_cert_sha256={}", fingerprints(pem));
                 }
                 if let Some(key) = target.tls.client_key {
                     let _ = write!(text, " client_key={key}");
@@ -328,6 +444,12 @@ pub fn summary(sink: &Sink) -> String {
         sink.format.as_str(),
         if sink.enabled { "enabled" } else { "disabled" }
     )
+}
+
+/// The SHA-256 fingerprints of the certificates of a PEM text, comma-separated, or
+/// `unreadable` for a text that does not parse (a row stored before the check).
+fn fingerprints(pem: &str) -> String {
+    certificate_digests(pem).map_or_else(|| "unreadable".to_owned(), |digests| digests.join(","))
 }
 
 /// The field changes between two settings: one per added, removed or changed sink

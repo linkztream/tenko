@@ -103,7 +103,9 @@ export default function AuditExportPage() {
     }
   };
 
-  const isLast = (sink: SinkView) => !!current()?.policy.required && !(current()?.sinks ?? []).some((s) => s.id !== sink.id && s.enabled);
+  // TGL-21 counts only sinks that confirm delivery: TCP, TLS or a file, never UDP.
+  const confirms = (s: SinkView) => s.target.kind === "file" || s.target.transport !== "udp";
+  const isLast = (sink: SinkView) => !!current()?.policy.required && !(current()?.sinks ?? []).some((s) => s.id !== sink.id && s.enabled && confirms(s));
 
   return (
     <div class="page" data-testid="page-audit-export">

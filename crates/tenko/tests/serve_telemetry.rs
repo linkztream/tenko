@@ -45,8 +45,7 @@ fn exercise(node: &mut Node) -> (String, String, serve_support::Outcome) {
     api.get("/prefixes").expect(200);
     // The secret of the session, without the cookie's name.
     let cookie = api.cookie().expect("a session cookie");
-    let cookie = cookie
-        .strip_prefix("tenko_session=")
+    let cookie = serve_support::api::session_secret(cookie)
         .unwrap_or(cookie)
         .to_owned();
     let outcome = server.stop();

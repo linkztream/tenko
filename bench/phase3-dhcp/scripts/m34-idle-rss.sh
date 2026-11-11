@@ -236,7 +236,7 @@ note "ready after $READY_AFTER s; RSS $LAST_RSS MiB, HWM $LAST_HWM MiB, anon $LA
 # ---- setup --------------------------------------------------------------------------------
 COOKIE=$(curl -sk -D - -o "$WORKDIR/api.out" -H "Origin: $BASE" -H "Content-Type: application/json" \
     --data "{\"setup_token\": \"$TOKEN\", \"profile\": \"home\", \"host_name\": \"localhost\", \"language\": \"en\", \"admin\": {\"name\": \"admin\", \"display_name\": \"Bench\", \"password\": \"$PASSWORD\"}}" \
-    "$API/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1)
+    "$API/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(\(__Host-\)\{0,1\}tenko_session=[^;]*\).*/\1/p' | head -n 1)
 [ -n "$COOKIE" ] || die "setup failed: $(sed "s/$TOKEN/<token>/g" "$WORKDIR/api.out")"
 note "setup complete (Home profile), session open"
 sample setup

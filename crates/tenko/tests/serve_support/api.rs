@@ -297,7 +297,7 @@ impl Api {
         for value in reply.headers.get_all("set-cookie") {
             let Ok(text) = value.to_str() else { continue };
             let pair = text.split(';').next().unwrap_or_default().trim();
-            if let Some(secret) = pair.strip_prefix("tenko_session=") {
+            if let Some(secret) = session_secret(pair) {
                 self.cookie = (!secret.is_empty()).then(|| pair.to_owned());
             }
         }
@@ -584,4 +584,14 @@ impl Events {
             }
         }
     }
+}
+
+/// The secret of a `name=value` pair when it is the session cookie under either name: the
+/// server names it by the scheme it is reached over (`__Host-tenko_session` over HTTPS,
+/// `tenko_session` over plain HTTP).
+pub fn session_secret(pair: &str) -> Option<&str> {
+    [true, false].into_iter().find_map(|https| {
+        pair.strip_prefix(tenko_auth::service::session_cookie_name(https))
+            .and_then(|rest| rest.strip_prefix('='))
+    })
 }

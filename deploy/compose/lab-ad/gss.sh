@@ -236,7 +236,7 @@ token="$(compose exec -T tenko /usr/local/bin/tenko setup token --data-dir /var/
 admin_password="$(random_password)"
 setup="{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"labadmin\", \"display_name\": \"Lab Admin\", \"password\": \"$admin_password\"}, \"host_name\": \"ns1.lab.example.test\", \"language\": \"en\"}"
 cookie="$(in_client curl -sS -D - -o /dev/null -H "Origin: $api_base" -H "Content-Type: application/json" \
-  --data "$setup" "$api_base/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1)"
+  --data "$setup" "$api_base/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(\(__Host-\)\{0,1\}tenko_session=[^;]*\).*/\1/p' | head -n 1)"
 [[ -n "$cookie" ]] || fail "the setup did not sign in"
 printf 'the node is set up under the Lab profile\n'
 

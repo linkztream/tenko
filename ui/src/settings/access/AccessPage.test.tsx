@@ -34,7 +34,7 @@ describe("the roles", () => {
     const rows = screen.getAllByTestId("access-role");
     expect(rows.map((r) => r.dataset.key)).toEqual(["admin", "operator", "viewer", "auditor"]);
     const auditor = rows[3]!;
-    expect(auditor.textContent).toContain("Reads the audit log, the audit export status and the system status, nothing else.");
+    expect(auditor.textContent).toContain("Reads the audit log and the system status with its audit export warnings, nothing else.");
     expect(auditor.textContent).toContain("Globally only");
     expect(rows[1]!.textContent).toContain("Globally or through a grant");
     // The Standard profile asks administrators for MFA.

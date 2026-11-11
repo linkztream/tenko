@@ -43,7 +43,7 @@ Global roles stay in the user record. Grants, scoped tokens and role policies ar
 | `admin` | Everything, including users, security settings, secrets and the system. | Globally only |
 | `operator` | Reads the inventory (tenants, VRFs, sites, VLANs, prefixes, ranges, addresses, hosts, interfaces, custom fields, jobs, observations, proposals, imports, connectors, nodes, the system) and, in addition, users, settings and operator-secret metadata. Creates, changes and deletes tenants, VRFs, sites, VLANs, prefixes, ranges, addresses, hosts, interfaces, imports and connectors. Runs jobs, imports and actions on prefixes, hosts, addresses and connectors. Approves proposals. Reveals operator secrets under the reveal policy. Cannot administer, and cannot create custom fields. | Globally, or through a grant |
 | `viewer` | Reads the inventory kinds listed for the operator, jobs and imports. Reads nothing else. | Globally, or through a grant |
-| `auditor` | Reads the audit log, the audit export status and the system status. Nothing else (section 9). | Globally only |
+| `auditor` | Reads the audit log and the system status, which carries the audit export warnings. Nothing else (section 9). | Globally only |
 
 A grant carries `operator` or `viewer`. A grant reaches only the kinds that scopes apply to: tenants, VRFs, sites, VLANs, prefixes, ranges, addresses, hosts, interfaces, custom fields, jobs, observations and proposals. The other kinds are global-only in Phase 1: imports, connectors, nodes, secrets, settings, users, sessions, tokens and the system. A person who holds only grants therefore cannot run an import, change a connector, read a secret or manage users, whatever the grant says.
 
@@ -244,7 +244,7 @@ The policies are read with `GET /access/role-policies`, which lists the four rol
 
 ## 9. The auditor
 
-The `auditor` role is global-only and cannot be granted. It reads the audit log, the audit export status and the system status. It cannot read the inventory, users, settings, secrets, nodes or imports, and it cannot change anything. A viewer, by contrast, also reads the audit log through the system kind, so an installation that wants the trail read by somebody who does not see the inventory gives them the auditor role and no other.
+The `auditor` role is global-only and cannot be granted. It reads the audit log and the system status, which carries the audit export warnings. It does not read the audit export settings (`GET /settings/audit-export` needs the administer permission on the system). It cannot read the inventory, users, settings, secrets, nodes or imports, and it cannot change anything. A viewer, by contrast, also reads the audit log through the system kind, so an installation that wants the trail read by somebody who does not see the inventory gives them the auditor role and no other.
 
 The auditor reads `GET /audit`, `GET /audit/{seq}` and `GET /audit/verify`. A token with the scope `audit:read` reads the same audit routes.
 

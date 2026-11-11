@@ -77,7 +77,7 @@ TOML
     password=$(printf 'Run-%s-Aa1' "$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')")
     cookie="$(curl -sS -D - -o "$dir/api.out" -H "Origin: $base" -H "Content-Type: application/json" \
       --data "{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"benchadmin\", \"display_name\": \"Bench\", \"password\": \"$password\"}, \"host_name\": \"node.example.test\", \"language\": \"en\"}" \
-      "$base/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1)"
+      "$base/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(\(__Host-\)\{0,1\}tenko_session=[^;]*\).*/\1/p' | head -n 1)"
     [ -n "$cookie" ] || { echo "node-setup: setup failed: $(cat "$dir/api.out")" >&2; exit 1; }
     printf '%s\n' "$cookie" >"$dir/cookie"
     api POST /prefixes '{"cidr": "198.18.0.0/15", "description": "bench"}'

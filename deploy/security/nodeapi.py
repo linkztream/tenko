@@ -169,9 +169,11 @@ class Client:
             headers["Content-Type"] = "application/json"
         reply, raw = self.send(method, API + path, headers, data)
         for name, value in reply.getheaders():
-            if name.lower() == "set-cookie" and value.startswith("tenko_session="):
+            if name.lower() == "set-cookie" and value.startswith(
+                ("tenko_session=", "__Host-tenko_session=")
+            ):
                 pair = value.split(";", 1)[0]
-                self.state["cookie"] = pair if pair != "tenko_session=" else None
+                self.state["cookie"] = pair if not pair.endswith("=") else None
         try:
             doc = json.loads(raw) if raw else None
         except ValueError:

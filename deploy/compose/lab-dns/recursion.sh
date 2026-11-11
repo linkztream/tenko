@@ -62,7 +62,7 @@ setup_node() {
   body="{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"labadmin\", \"display_name\": \"Lab Admin\", \"password\": \"$password\"}, \"host_name\": \"$3\", \"language\": \"en\"}"
   curl -sS -D - -o "$work/api.out" -H "Origin: http://$2:8443" -H "Content-Type: application/json" \
     --data "$body" "http://$2:8443/api/v1/setup" | tr -d '\r' |
-    sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1
+    sed -n 's/^[Ss]et-[Cc]ookie: \(\(__Host-\)\{0,1\}tenko_session=[^;]*\).*/\1/p' | head -n 1
 }
 
 # The configuration of the authority node: the Lab profile, DNS on 53, no recursion of its

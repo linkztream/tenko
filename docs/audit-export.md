@@ -45,18 +45,18 @@ Fields of a sink:
 | `target.transport` | `udp`, `tcp` or `tls` (default) |
 | `target.host`, `target.port` | The receiver; a host name or an IPv4 or IPv6 address. The port defaults as in the table. |
 | `target.facility` | `user`, `daemon`, `auth`, `authpriv` (default, 10), `log_audit` (13), `local0` to `local7` |
-| `target.tls.ca_pem` | The certificate authorities that sign the receiver's certificate; empty: the operating system's roots |
+| `target.tls.ca_pem` | The certificate authorities that sign the receiver's certificate, in PEM; empty: the operating system's roots. A given value holds at least one `CERTIFICATE` block that decodes (`audit.export.pem`). |
 | `target.tls.server_name` | The name the receiver's certificate must carry; empty: `host` |
-| `target.tls.client_cert_pem`, `target.tls.client_key` | A client certificate chain and the id of the operator secret (see [secrets.md](secrets.md)) that holds its private key in PEM, for receivers that require client authentication. Both or neither. |
-| `target.file` | A plain file name (letters, digits, `-`, `_`, `.`, not starting with a dot) inside the export directory of the controller (`[audit_export] file_dir`, by default `<data_dir>/audit-export`) |
+| `target.tls.client_cert_pem`, `target.tls.client_key` | A client certificate chain and the id of the operator secret (see [secrets.md](secrets.md)) that holds its private key in PEM, for receivers that require client authentication. Both or neither. The chain holds at least one `CERTIFICATE` block that decodes (`audit.export.pem`). The key names an operator secret: a system secret and a missing secret are refused with the same answer (`audit.export.client_key`). |
+| `target.file` | A plain file name (letters, digits, `-`, `_`, `.`, not starting with a dot and not ending with one, and not a Windows device name: `CON`, `PRN`, `AUX`, `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`, in any case and also with an extension such as `nul.jsonl`; the rule holds on every platform) inside the export directory of the controller (`[audit_export] file_dir`, by default `<data_dir>/audit-export`) |
 | `target.max_bytes` | Rotation size, 64 KiB to 1 TiB, default 64 MiB |
 | `target.keep` | Rotated files kept, 0 to 1000, default 10 |
 
-A **new sink exports the whole log from record 1**. Editing a sink keeps its id and its position: pointing an existing sink at a new receiver does not resend the past. To give a new receiver the whole log, add a new sink (and remove the old one).
+A **new sink exports the whole log from record 1**. Editing a sink keeps its id and its position, with one exception: a sink sent to another place starts again from record 1, as a new sink does. Another place is another transport, host, port, receiver name (`target.tls.server_name`), other pinned authorities (`target.tls.ca_pem`, which decide which receiver the records reach) or another file name. The audit record of that update carries the change `cursor:<sink id>` with the delivered sequence number as the old value and `0` as the new one. Any other edit keeps the position.
 
 File sinks: the directory and the file are created with modes 0700 and 0600 on Unix. On rotation `<file>.<n>` becomes `<file>.<n+1>`, the oldest beyond `keep` is removed, `<file>` becomes `<file>.1` and a new `<file>` starts with a checkpoint, so every file verifies on its own ([4](#4-checkpoints-and-verification)). A file sink writes on the controller that leads; after a leader change the next part of the export is in the directory of the new leader. Collect the files with a log shipper on every controller, or prefer a network sink in a cluster.
 
-The TLS client key is read from the vault each time the sink connects and is never logged or audited; the audit trail names only the secret's id.
+The TLS client key is read from the vault once for each worker of the exporting controller; a settings change, a new leader term or a restart starts a new worker. The key itself is never logged or audited. The read is audited as `sys.audit_export.client_key`, which names the secret and the sink, and the record is written before the read: a key whose use cannot be audited is not read. A worker writes the record once, also when the read after it fails and is tried again. A test message (`POST /settings/audit-export/test`) reads the key the same way, with a record of its own that carries the context `test: true`. A key that does not parse or does not fit the client certificate fails with one text: "the client key is not a private key in PEM that fits the client certificate".
 
 ## 3. Formats
 
@@ -99,7 +99,7 @@ What a receiver can see:
 - **Truncation** by checkpoint: a checkpoint that names record `n` while the receiver holds less, or one that names a `store_head` far ahead of what arrives later, shows that records are missing. Truncation after the last checkpoint is visible at the next checkpoint, at the latest 5 minutes later.
 - **Duplicates** by sequence number: delivery is at least once ([5](#5-delivery)). A record that arrives again has the same sequence number and hash and is dropped.
 
-`tenko audit verify --file export.jsonl [--from <seq>:<hash>]` verifies a JSON export offline. The chain starts at the head given with `--from` (which the file must continue), else at the first checkpoint of the file, else at record 1, else at the first record's own `prev` (the report then says the start is not anchored). Every record line must carry canonical bytes that hash to `hash` and encode its fields, and the records must form the chain. Records at or below the verified head are duplicates and must equal the record verified under that number (within the last 100,000 records); a checkpoint must name a position of the verified chain. The first problem ends the check with exit status 9 and names the line and a code: `sys.audit.gap`, `sys.audit.broken_link`, `sys.audit.bad_hash`, `audit.export.verify.cbor`, `audit.export.verify.checkpoint`, `audit.export.verify.duplicate` or `audit.export.verify.malformed`.
+`tenko audit verify --file export.jsonl [--from <seq>:<hash>]` verifies a JSON export offline. The chain starts at the head given with `--from` (which the file must continue), else at the first checkpoint of the file, else at record 1, else at the first record's own `prev` (the report then says the start is not anchored). Record 1 must link to the zero hash to count as "anchored at the start of the log"; otherwise the chain is broken at that line (`sys.audit.broken_link`). A checkpoint that names sequence 0 with a hash other than the zero hash is refused (`audit.export.verify.checkpoint`). Every record line must carry canonical bytes that hash to `hash` and encode its fields, and the records must form the chain. Records at or below the verified head are duplicates and must equal the record verified under that number (within the last 100,000 records); a checkpoint must name a position of the verified chain. The first problem ends the check with exit status 9 and names the line and a code: `sys.audit.gap`, `sys.audit.broken_link`, `sys.audit.bad_hash`, `audit.export.verify.cbor`, `audit.export.verify.checkpoint`, `audit.export.verify.duplicate` or `audit.export.verify.malformed`.
 
 To verify a rotated set, verify each file alone (each starts with a checkpoint), or concatenate them oldest first and verify the result. To tie an export to the live log, compare its last head with `GET /audit/{seq}` or run `tenko audit verify` against the server.
 
@@ -134,24 +134,30 @@ Every controller computes the status of every sink from the cursors, so the stat
 | `failing` | The last attempt failed |
 | `alarm` | Failing for at least `alert_after_secs` |
 
-`/system/status` on every controller shows the warning `audit.export.failing` while a sink is in `alarm` or `behind` (params `sinks`, `count`, `since`, and `required`, true when TGL-21 requires an export and no enabled sink works), and the warning `audit.export.required` while TGL-21 requires an export and no sink is enabled. A warning that appears or goes is also a `system` event of kind `audit.export.warning` (params `code`, `active`). Every change of a cursor is a `system` event too, because the tables `sys.audit_export*` map to that topic.
+`/system/status` on every controller shows the warning `audit.export.failing` while a sink is in `alarm` or `behind` (params `sinks`, `count`, `since`, and `required`, true when TGL-21 requires an export and no enabled sink works), and the warning `audit.export.required` while TGL-21 requires an export and no sink that confirms delivery is enabled (`params.reason` is `no_sink`) or none delivers within the alarm delay (`not_delivering`; see [7](#7-tgl-21)). The auditor role reads these warnings in `/system/status`. A warning that appears or goes is also a `system` event of kind `audit.export.warning` (params `code`, `active`). Every change of a cursor is a `system` event too, because the tables `sys.audit_export*` map to that topic.
 
 ## 7. TGL-21
 
 TGL-21 decides what the installation requires of the export ([SECURITY-PROFILES.md](SECURITY-PROFILES.md)): `local` (Home, Lab), `optional` (Standard) and `required` (Hardened). The audit log itself is never off.
 
-While TGL-21 is `required`, `PUT /settings/audit-export` refuses settings without an enabled sink (409 `audit.export.required`, audited as a failed `sys.audit_export.update`), and the status shows the warning `audit.export.required` when no sink is enabled, for example right after switching to Hardened. `GET /settings/audit-export` reports the policy as `policy.audit_export`, `policy.required` and `policy.satisfied`, which the setup wizard and the banner of the UI use. `PATCH /settings/security` consults the export the same way: a change that starts to require it, by setting TGL-21 to `required` or by switching the profile to Hardened, is refused with 409 `audit.export.required` while no sink is enabled, and the refusal is audited like the PIN coupling rule. A sink that fails or is disabled afterwards is the status warning's business.
+TGL-21 counts only **sinks that confirm delivery**: an enabled TCP, TLS or file sink. A UDP sink confirms nothing and does not count. For TCP and TLS the confirmation is the receiving host's acknowledgment of the bytes, not a statement that the receiver stored the records: a receiver that reads and discards still counts, so check the receiver itself.
+
+While TGL-21 is `required`, `PUT /settings/audit-export` refuses settings where no such sink is enabled (409 `audit.export.required`, audited as a failed `sys.audit_export.update`). `GET /settings/audit-export` reports the policy as `policy.audit_export`, `policy.required`, `policy.satisfied` (a confirming sink is enabled) and `policy.delivering` (when required, at least one confirming sink delivers now: its state is `ok`, `pending` or `failing`, not `alarm` or `behind`). The setup wizard and the banner of the UI use them.
+
+The status shows the warning `audit.export.required` in two cases, told apart by `params.reason`: `no_sink` when no confirming sink is enabled, for example right after switching to Hardened, and `not_delivering` when confirming sinks are enabled but none delivers within the alarm delay.
+
+`PATCH /settings/security` consults the export the same way: a change that starts to require it, by setting TGL-21 to `required` or by switching the profile to Hardened, is refused with 409 `audit.export.required` while no confirming sink is enabled, and the refusal is audited like the PIN coupling rule.
 
 ## 8. API
 
 | Endpoint | Permission | Success | Errors |
 |---|---|---|---|
-| `GET /settings/audit-export` (`get_audit_export`) | The global read permission on the audit log, as `GET /audit/verify` (see [access.md](access.md)): an administrator, the auditor role, a token with `audit:read` | 200 `AuditExportView` with `ETag: "<revision>"` | 401, 403, 501 |
+| `GET /settings/audit-export` (`get_audit_export`) | Administer on the system (administrators only; see [access.md](access.md)). The auditor role and a token with `audit:read` get 403; they see the export warnings in `/system/status` | 200 `AuditExportView` with `ETag: "<revision>"` | 401, 403, 501 |
 | `PUT /settings/audit-export` (`put_audit_export`) | Update on the system (administrators) | 200 `AuditExportView` with the new `ETag` | 400 `audit.export.invalid`, 401, 403, 409 `audit.export.required` or `audit.export.conflict`, 501 |
 | `POST /settings/audit-export/test` (`test_audit_export`) | Update on the system | 200 `AuditExportTestResult` | 400, 401, 403, 404 `audit.export.not_found`, 501 |
 | `GET /audit/export?from=&limit=` (`export_audit`) | Read on the audit log, globally | 200 `AuditExportPage` | 400 `sys.invalid_query`, 401, 403 |
 
-- `AuditExportView`: `revision`, `alert_after_secs`, `sinks` (each sink's fields with `status`: `state`, `delivered` {`seq`, `hash`}, `lag`, `updated_at`, `last_success_at`, `failing_since`, `last_error` {`code`, `detail`, `at`}, `checkpoint` {`head`, `at`}), `policy` {`audit_export`, `required`, `satisfied`}, `store_head`, `warnings` [{`code`, `detail`, `params`}].
+- `AuditExportView`: `revision`, `alert_after_secs`, `sinks` (each sink's fields with `status`: `state`, `delivered` {`seq`, `hash`}, `lag`, `updated_at`, `last_success_at`, `failing_since`, `last_error` {`code`, `detail`, `at`}, `checkpoint` {`head`, `at`}), `policy` {`audit_export`, `required`, `satisfied`, `delivering`}, `store_head`, `warnings` [{`code`, `detail`, `params`}].
 - `AuditExportUpdate` (the `PUT` body): `sinks` (the complete list; a sink without `id` is new, a stored sink left out is removed with its cursor) and `alert_after_secs`. `If-Match: "<revision>"` makes the change conditional. Invalid fields come back in `errors` with codes such as `audit.export.name`, `audit.export.host`, `audit.export.file`.
 - `AuditExportTest` (the test body): `sink` (a stored sink's id) or `spec` (a sink as the form holds it), exactly one. The test message is sent from the controller that serves the request (a file sink writes into that controller's directory) and is not part of the chain. `AuditExportTestResult`: `delivered`, `error`, `elapsed_ms`; a failed delivery is a 200 with `delivered: false`. Audited as `sys.audit_export.test`.
 - `AuditExportPage`: `anchor` (the record before `from`), `records` in sequence order (up to `limit`, 1 to 5,000, default 1,000), `next` and `store_head`. A principal with scoped grants only is refused, because an export is only verifiable whole.
@@ -178,14 +184,18 @@ Store tables (both on the `system` event topic):
 | `sys.audit_export_settings` | `()` | The sinks and `alert_after_secs` |
 | `sys.audit_export_cursors` | sink id | `delivered` (seq and hash), `updated_at`, the last checkpoint, `last_success_at`, `failing_since`, `last_error`, `alarmed` |
 
-Audit actions: `sys.audit_export.update` (a settings change, one field change per added, removed or changed sink and for the alarm delay; never a secret), `sys.audit_export.test`, `sys.audit_export.failing`, `sys.audit_export.recovered`.
+Audit actions: `sys.audit_export.update` (a settings change, one field change per added, removed or changed sink and for the alarm delay; never a secret), `sys.audit_export.test`, `sys.audit_export.client_key`, `sys.audit_export.failing`, `sys.audit_export.recovered`.
+
+- The text of a sink change (`sys.audit_export.update`, and the `target` context of `sys.audit_export.test`) names a pinned CA as `ca=pinned`, followed by `ca_sha256=<fp>[,<fp>...]`, and a client chain by `client_cert_sha256=<fp>[,<fp>...]`. Each `<fp>` is the SHA-256 fingerprint of one certificate's DER in lowercase hex, as `openssl x509 -fingerprint -sha256` shows it without the colons; a stored PEM that does not parse reads `unreadable`.
+- A sink sent to another place adds the change `cursor:<sink id>` (old: the delivered sequence number, new: `0`).
+- `sys.audit_export.client_key` has the secret as its object and the context `sink` (the id) and `sink_name`; for a test message `sink_name` and `test: true`.
 
 Error codes:
 
 | Code | Status | When |
 |---|---|---|
 | `audit.export.invalid` | 400 | The settings or the test spec are invalid; `errors` names each field with one of `audit.export.name`, `audit.export.duplicate`, `audit.export.unknown_sink`, `audit.export.too_many`, `audit.export.host`, `audit.export.port`, `audit.export.pem`, `audit.export.client_key`, `audit.export.tls_unused`, `audit.export.file`, `audit.export.range`, `audit.export.test_target` |
-| `audit.export.required` | 409 | TGL-21 requires an export and no sink would be enabled; also the status warning |
+| `audit.export.required` | 409 | TGL-21 requires an export and no sink that confirms delivery (TCP, TLS or file) would be enabled; also the status warning (`params.reason` `no_sink` or `not_delivering`) |
 | `audit.export.conflict` | 409 | `If-Match` is stale, or the settings changed during the request (params `expected`, `current`) |
 | `audit.export.not_found` | 404 | No sink has the id of a test (param `sink`) |
 | `audit.export.failing` | | The alarm and status warning of a sink in `alarm` or `behind` |

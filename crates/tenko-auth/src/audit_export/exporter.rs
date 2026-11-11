@@ -43,13 +43,13 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{
-    error::SinkError,
+    error::{FailureKind, SinkError},
     format::{self, Checkpoint, Event, Framing, Origin},
     model::{
         AuditExportSettings, CURSORS, CheckpointMark, ExportCursor, SETTINGS, Sink, SinkFailure,
         SinkTarget,
     },
-    sink::{Opener, Transport},
+    sink::{Opener, Transport, client_key_of},
 };
 
 /// The name of the leader service.
@@ -59,6 +59,9 @@ pub const SERVICE: &str = "audit.export";
 pub const ALARM_ACTION: AuditAction = AuditAction::from_static("sys.audit_export.failing");
 /// The audit action of a recovery after an alarm.
 pub const RECOVERED_ACTION: AuditAction = AuditAction::from_static("sys.audit_export.recovered");
+/// The audit action of reading a sink's TLS client key from the vault: once per worker,
+/// before the key is read, so a key is never in use without a record that says so.
+pub const CLIENT_KEY_ACTION: AuditAction = AuditAction::from_static("sys.audit_export.client_key");
 
 /// The rhythm of the exporter. The defaults are those of the plan; tests shorten them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +219,8 @@ impl AuditExporter {
                     epoch,
                     tuning: self.tuning,
                     wake: wake.clone(),
+                    client_key: None,
+                    client_key_recorded: false,
                 };
                 tasks.spawn(worker.run(workers.clone()));
             }
@@ -297,6 +302,11 @@ struct Worker {
     epoch: u64,
     tuning: Tuning,
     wake: watch::Receiver<u64>,
+    /// The TLS client key, read from the vault once in the worker's life (a settings
+    /// change, a new term or a restart starts a new worker) and kept for its reconnects.
+    client_key: Option<zeroize::Zeroizing<Vec<u8>>>,
+    /// Whether the record of the key's use was written.
+    client_key_recorded: bool,
 }
 
 /// The worker's view of its cursor: the stored row and what has happened since.
@@ -349,7 +359,7 @@ impl Worker {
         loop {
             let opened = tokio::select! {
                 () = stop.cancelled() => return self.finish(&mut progress).await,
-                opened = self.opener.open(&self.sink) => opened,
+                opened = self.open() => opened,
             };
             let failure = match opened {
                 Ok(mut transport) => {
@@ -614,6 +624,69 @@ impl Worker {
         } else {
             Ok(())
         }
+    }
+
+    /// Opens the sink's transport with the client key, which the first call reads.
+    async fn open(&mut self) -> Result<Box<dyn Transport>, SinkError> {
+        if self.client_key.is_none()
+            && let Some(secret) = client_key_of(&self.sink)
+        {
+            self.client_key = Some(self.read_client_key(secret).await?);
+        }
+        self.opener
+            .open_with_key(
+                &self.sink,
+                self.client_key.as_ref().map(|key| key.as_slice()),
+            )
+            .await
+    }
+
+    /// Records the use of the client key, then reads it. The record is written first and
+    /// fenced like the cursor, so a key whose use cannot be audited is not read.
+    async fn read_client_key(
+        &mut self,
+        secret: tenko_core::SecretId,
+    ) -> Result<zeroize::Zeroizing<Vec<u8>>, SinkError> {
+        // A key of the wrong class is refused before anything is recorded or read.
+        match self.opener.is_operator_secret(secret).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(SinkError::new(
+                    FailureKind::ClientKey,
+                    format!("the client key {secret} is not an operator secret of the vault"),
+                ));
+            }
+            Err(error) => {
+                return Err(SinkError::new(
+                    FailureKind::ClientKey,
+                    format!("the client key {secret} cannot be read from the vault: {error}"),
+                ));
+            }
+        }
+        // One record per worker, also when a read after it failed and is tried again.
+        if self.client_key_recorded {
+            return self.opener.client_key(secret).await;
+        }
+        let mut batch = WriteBatch::new(
+            Principal::system(SystemComponent::AuditExport),
+            Timestamp::now(),
+        );
+        batch.preconditions.push(fence(self.epoch));
+        batch.audit(
+            AuditDraft::success(CLIENT_KEY_ACTION, vec![tenko_core::ObjectRef::from(secret)])
+                .with_context("sink", self.sink.id.to_string())
+                .with_context("sink_name", self.sink.name.clone()),
+        );
+        self.store.propose(batch).await.map_err(|error| {
+            SinkError::new(
+                FailureKind::ClientKey,
+                format!(
+                    "the use of the client key could not be audited, so it was not read: {error}"
+                ),
+            )
+        })?;
+        self.client_key_recorded = true;
+        self.opener.client_key(secret).await
     }
 
     fn draft(&self, action: AuditAction) -> AuditDraft {

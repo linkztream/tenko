@@ -11,7 +11,7 @@ use tenko_store::{ReadViewExt, WriteBatch};
 
 use super::{
     AuthService, LoginOutcome, NewSession, actions,
-    guard::{Attempt, Slot, Step, throttled},
+    guard::{Attempt, Slot, throttled},
     types::{
         CodeLogin, PasswordLogin, SecondFactorMethod, WebAuthnLoginFinish, WebAuthnLoginOptions,
         WebAuthnLoginStart,
@@ -105,6 +105,17 @@ fn second_factor_methods(
         methods.push(SecondFactorMethod::Recovery);
     }
     methods
+}
+
+/// Whether an account signs in with a password: enabled, not break-glass, not a service
+/// account, local, with a password. An account of an external directory has no local
+/// password, whatever its record holds: it is refused as an unknown account is.
+fn signs_in_with_password(user: &UserRecord) -> bool {
+    !user.disabled
+        && !user.break_glass
+        && !user.is_service()
+        && user.source.is_local()
+        && user.password.is_some()
 }
 
 impl AuthService {
@@ -254,23 +265,16 @@ impl AuthService {
             ctx,
             &settings,
         );
-        self.check_attempt(view.as_ref(), &attempt, Step::Password, ctx.now)?;
+        let turn = self.check_attempt(view.as_ref(), &attempt, ctx.now)?;
         let slot = Slot::sign_in(ctx.source_ip, attempt.known);
 
         let normalized = normalize(request.password.expose());
         let strength = hash_strength(&settings);
-        // An account of an external directory has no local password, whatever its record
-        // holds: it is refused as an unknown account is.
-        let usable = found.filter(|(user, _)| {
-            !user.disabled
-                && !user.break_glass
-                && !user.is_service()
-                && user.source.is_local()
-                && user.password.is_some()
-        });
-        let Some((user, revision)) = usable else {
-            self.dummy_verification(normalized.clone(), strength, slot)
-                .await?;
+        let Some((user, revision)) = found.filter(|(user, _)| signs_in_with_password(user)) else {
+            let dummy = self
+                .dummy_verification(normalized.clone(), strength, slot)
+                .await;
+            self.turn_back_if_refused(&attempt, turn, dummy)?;
             return Err(self
                 .login_failed(ctx, &attempt, None, actions::LOGIN_PASSWORD)
                 .await);
@@ -284,11 +288,12 @@ impl AuthService {
         let started = Instant::now();
         // The gate charges what an unknown name would cost, whatever this hash costs, so
         // whether an attempt fits the budget does not tell a known name from an unknown one.
-        let verified = self
+        let hashed = self
             .hashing(self.dummy_cost(strength), slot, move || {
                 verify_password(&candidate, &hash)
             })
-            .await?;
+            .await;
+        let verified = self.turn_back_if_refused(&attempt, turn, hashed)?;
         // A stored hash weaker than the dummy's answers no sooner than an unknown name.
         self.pad_to_dummy(started, cost, strength).await;
         // A PIN from before the six-digit minimum whose period ended without a sign-in that
@@ -336,6 +341,9 @@ impl AuthService {
             batch.put_typed(&USERS, &user.id, &updated)?;
         }
         if !methods.is_empty() {
+            // The password was right and a second factor follows: its turn goes back, and
+            // every code of the challenge takes a turn of its own.
+            self.give_back_turn(&attempt, turn);
             return self
                 .open_second_factor(ctx, batch, &updated, first, methods)
                 .await;
@@ -410,7 +418,17 @@ impl AuthService {
             return Err(AuthError::InvalidCredentials);
         }
         let attempt = self.attempt(&user.name, Some(&user), ctx, &self.settings());
-        self.check_attempt(view.as_ref(), &attempt, Step::SecondFactor, ctx.now)?;
+        // Every code takes a turn of the account-wide delay. A code held back keeps its
+        // challenge until the challenge's own end, which this does not prolong.
+        if let Err(error) = self.check_attempt(view.as_ref(), &attempt, ctx.now) {
+            self.ceremonies.put_back_until(
+                challenge_id.to_owned(),
+                pending,
+                staged.expires_at(),
+                ctx.now,
+            );
+            return Err(error);
+        }
         Ok((pending, staged, user, revision, attempt))
     }
 
@@ -632,7 +650,11 @@ impl AuthService {
             })?;
             (Some(user), true)
         } else if let Some(name) = &request.user_name {
-            // An unknown name gets the same answer as a discoverable login.
+            // A named start answers for the account it names: an existing account with
+            // passkeys gets their ids and transports in `allowCredentials`, and the
+            // break-glass account the security-key hint, while an unknown or disabled name
+            // gets the empty list of a discoverable login. So the answer tells whether the
+            // name has passkeys; the discoverable login (no name) tells nothing.
             let found = Self::find_user(view.as_ref(), name)?.filter(|user| !user.disabled);
             (found.map(|user| user.id), false)
         } else {
@@ -896,7 +918,7 @@ impl AuthService {
     /// # Errors
     ///
     /// [`AuthError::Unauthenticated`] without a session, or a store error.
-    pub async fn logout(&self, ctx: &RequestCtx) -> Result<String, AuthError> {
+    pub async fn logout(&self, ctx: &RequestCtx) -> Result<(), AuthError> {
         let (user, session, _) = Self::session_principal(ctx)?;
         let view = self.view().await?;
         if let Some(found) = Self::load_session(view.as_ref(), user, session)? {
@@ -909,7 +931,7 @@ impl AuthService {
             ));
             self.commit(batch).await?;
         }
-        Ok(self.clear_cookie())
+        Ok(())
     }
 }
 

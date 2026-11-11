@@ -31,8 +31,9 @@ pub enum RoleName {
     Operator,
     /// Read-only access to the inventory.
     Viewer,
-    /// Reads the audit trail, the audit export status and the system status, and nothing
-    /// else: no inventory, users or settings (owner decision S3-Q18, IAM-18). Global only.
+    /// Reads the audit trail and the system status with its audit export warnings, and
+    /// nothing else: no inventory, users or settings, and not the export's sinks (owner
+    /// decision S3-Q18, IAM-18). Global only.
     Auditor,
 }
 
@@ -59,7 +60,7 @@ impl RoleName {
             }
             Self::Viewer => "Reads the IPAM inventory, jobs and imports",
             Self::Auditor => {
-                "Reads the audit log, the audit export status and the system status; nothing else"
+                "Reads the audit log and the system status with its audit export warnings; nothing else"
             }
         }
     }

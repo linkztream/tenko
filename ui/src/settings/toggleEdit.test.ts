@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { lockPolicyOf, lockoutPatch, parseWaits, toPinDays, type LockDraft } from "./toggleEdit";
 
-const draft: LockDraft = { attempts: "3", waits: "10, 30, 180, 300, 600", lock: "30", lockUnit: "minutes", account: "60" };
+const draft: LockDraft = { attempts: "3", waits: "10, 30, 180, 300, 600", lock: "30", lockUnit: "minutes", account: "60", alarm: "5" };
 
 describe("the lock policy of the form", () => {
   it("turns the fields into the numbers of the API", () => {
@@ -11,6 +11,7 @@ describe("the lock policy of the form", () => {
       lock_secs: 1800,
       account_max_delay_secs: 60,
       passkey_holds_lock: true,
+      alarm_after_failures: 5,
     });
     expect(lockPolicyOf({ ...draft, lock: "1", lockUnit: "days" }, false).policy?.lock_secs).toBe(86_400);
   });
@@ -30,6 +31,9 @@ describe("the lock policy of the form", () => {
     expect(errors({ lock: "2", lockUnit: "days" })).toEqual(["lock"]);
     expect(errors({ account: "601" })).toEqual(["account"]);
     expect(errors({ account: "0" })).toEqual([]);
+    expect(errors({ alarm: "0" })).toEqual(["alarm"]);
+    expect(errors({ alarm: "101" })).toEqual(["alarm"]);
+    expect(errors({ alarm: "1" })).toEqual([]);
     expect(errors({ attempts: "x", waits: "a", lock: "", account: "-1" })).toEqual(["attempts", "waits", "lock", "account"]);
   });
 

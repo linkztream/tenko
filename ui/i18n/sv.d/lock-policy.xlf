@@ -28,7 +28,7 @@
       </unit>
       <unit id="settings.security.lockout.explain">
         <notes><note category="description">Explains the numbers below in the lockout editor.</note></notes>
-        <segment><source>An account gets the attempts below from one network (an IPv4 address or an IPv6 /64), then the waits in order and, in the modes that lock, a lock that ends by itself. Across all networks the account gets a delay of at most the ceiling below once it fails as often as one network may, and administrators get an alarm. The last administrator is never locked by the network. A passkey passes the lock unless the setting below holds it.</source><target>Ett konto får försöken nedan från ett nätverk (en IPv4-adress eller ett IPv6 /64), därefter väntetiderna i ordning och, i de lägen som spärrar, en spärr som upphör av sig själv. Över alla nätverk får kontot en fördröjning på högst taket nedan när det misslyckas lika många gånger som ett nätverk får, och administratörerna får ett larm. Den sista administratören spärras aldrig av nätverket. En passkey går igenom spärren om inte inställningen nedan låter spärren gälla.</target></segment>
+        <segment><source>An account gets the attempts below from one network (an IPv4 address or an IPv6 /64), then the waits in order and, in the modes that lock, a lock that ends by itself. Across all networks the account gets a delay of at most the ceiling below once it fails as often as one network may, and administrators get an alarm after the number of failures below. The delay never locks, also for the last administrator. The last administrator is never locked by the network. A passkey passes the lock unless the setting below holds it.</source><target>Ett konto får försöken nedan från ett nätverk (en IPv4-adress eller ett IPv6 /64), därefter väntetiderna i ordning och, i de lägen som spärrar, en spärr som upphör av sig själv. Över alla nätverk får kontot en fördröjning på högst taket nedan när det misslyckas lika många gånger som ett nätverk får, och administratörerna får ett larm efter antalet misslyckanden nedan. Fördröjningen spärrar aldrig, inte heller för den sista administratören. Den sista administratören spärras aldrig av nätverket. En passkey går igenom spärren om inte inställningen nedan låter spärren gälla.</target></segment>
       </unit>
       <unit id="settings.security.lockout.attempts">
         <segment><source>Attempts from one network</source><target>Försök från ett nätverk</target></segment>
@@ -65,6 +65,16 @@
       </unit>
       <unit id="settings.security.lockout.account_error">
         <segment><source>Enter a whole number from 0 to 600.</source><target>Ange ett heltal från 0 till 600.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.alarm">
+        <segment><source>Failures before the alarm</source><target>Misslyckanden före larm</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.alarm_help">
+        <notes><note category="description">Help under the number of failed sign-ins, counted across all networks, that raise the sign-in alarm.</note></notes>
+        <segment><source>1 to 100. Failed sign-ins to one account, counted across all networks, that raise the alarm; it is raised again each time the count doubles.</source><target>1 till 100. Misslyckade inloggningar till ett konto, räknade över alla nätverk, som utlöser larmet; det utlöses igen varje gång antalet fördubblas.</target></segment>
+      </unit>
+      <unit id="settings.security.lockout.alarm_error">
+        <segment><source>Enter a whole number from 1 to 100.</source><target>Ange ett heltal från 1 till 100.</target></segment>
       </unit>
       <unit id="settings.security.lockout.passkey">
         <segment><source>The lock also holds for a passkey</source><target>Spärren gäller också för en passkey</target></segment>

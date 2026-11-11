@@ -72,9 +72,9 @@ pub enum ExportError {
     #[error("the audit export settings are invalid")]
     Invalid(Vec<FieldError>),
     /// TGL-21 requires an export (the Hardened profile) and the settings leave no sink
-    /// enabled.
+    /// enabled that confirms its deliveries (TCP, TLS or a file).
     #[error(
-        "the security settings require an audit export (TGL-21): keep at least one sink enabled"
+        "the security settings require an audit export (TGL-21): keep at least one TCP, TLS or file sink enabled"
     )]
     Required,
     /// `If-Match` names another revision than the stored settings.

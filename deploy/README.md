@@ -419,7 +419,8 @@ change. `reverse_proxy` ends TLS in HAProxy, nginx or Caddy in front of Tenko: T
 accepts plain HTTP, or the PROXY protocol, only from `trusted_proxies`, takes the client
 address, scheme and host from the proxy, and needs `public_host`, the name clients use,
 which is also the passkey relying-party ID; every other peer gets 403, health probes
-included. `plain` is plain HTTP from everyone and exists for the Lab profile only.
+included. Passkeys work from `https://<public_host>` and from the ports Tenko listens on;
+a proxy that serves the UI on another port needs that origin in `[auth] origins`. `plain` is plain HTTP from everyone and exists for the Lab profile only.
 
 ### First-run setup
 

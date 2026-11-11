@@ -57,6 +57,7 @@ fn relying_party(anchored: bool) -> RelyingParty {
 const LENIENT: RegistrationPolicy = RegistrationPolicy {
     user_verification: UserVerification::Discouraged,
     hardware_key_required: false,
+    anchored_attestation_required: false,
 };
 const LENIENT_ASSERTION: AssertionPolicy = AssertionPolicy {
     user_verification: UserVerification::Discouraged,
@@ -244,6 +245,7 @@ fn hardware_key_policy_needs_certificate_attestation() {
     let strict = RegistrationPolicy {
         user_verification: UserVerification::Discouraged,
         hardware_key_required: true,
+        anchored_attestation_required: false,
     };
     assert_eq!(
         register(&rp, "16.2", strict),
@@ -269,6 +271,7 @@ fn required_user_verification_follows_the_uv_flag() {
     let required = RegistrationPolicy {
         user_verification: UserVerification::Required,
         hardware_key_required: false,
+        anchored_attestation_required: false,
     };
     for section in ["16.2", "16.3", "16.7", "16.10", "16.11"] {
         let lenient = register(&rp, section, LENIENT).expect("registration");

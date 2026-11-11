@@ -9,6 +9,7 @@ import { FieldHelp, SelectField } from "./fields";
 import {
   AUDIT_EXPORT,
   AUDIT_EXPORT_DEFAULT,
+  ALARM_AFTER_FAILURES_DEFAULT,
   LOCKOUT_MODES,
   lockoutValue,
   REVEAL_DEFAULT,
@@ -176,10 +177,11 @@ export function LockoutEditor(props: EditorProps<LockoutValue> & { profileDefaul
   const [lock, setLock] = createSignal(String(lock0.amount));
   const [lockUnit, setLockUnit] = createSignal<DurationUnit>(lock0.unit);
   const [account, setAccount] = createSignal(String(init.account_max_delay_secs));
+  const [alarm, setAlarm] = createSignal(String(init.alarm_after_failures ?? ALARM_AFTER_FAILURES_DEFAULT));
   const [passkey, setPasskey] = createSignal(init.passkey_holds_lock);
 
   const result = createMemo(() =>
-    lockPolicyOf({ attempts: attempts(), waits: waits(), lock: lock(), lockUnit: lockUnit(), account: account() }, passkey()),
+    lockPolicyOf({ attempts: attempts(), waits: waits(), lock: lock(), lockUnit: lockUnit(), account: account(), alarm: alarm() }, passkey()),
   );
   createEffect(() => {
     const policy = result().policy;
@@ -195,6 +197,7 @@ export function LockoutEditor(props: EditorProps<LockoutValue> & { profileDefaul
     setLock(String(lock1.amount));
     setLockUnit(lock1.unit);
     setAccount(String(reference.account_max_delay_secs));
+    setAlarm(String(reference.alarm_after_failures ?? ALARM_AFTER_FAILURES_DEFAULT));
     setPasskey(reference.passkey_holds_lock);
   };
 
@@ -280,6 +283,28 @@ export function LockoutEditor(props: EditorProps<LockoutValue> & { profileDefaul
             id="tg-lock-account-help"
             help={withProfile(t("settings.security.lockout.account_help"), String(reference.account_max_delay_secs))}
             error={result().errors.account ? t("settings.security.lockout.account_error") : undefined}
+          />
+        </div>
+        <div class="field">
+          <label for="tg-lock-alarm">{t("settings.security.lockout.alarm")}</label>
+          <input
+            id="tg-lock-alarm"
+            data-testid="field-lock_alarm"
+            class="input num"
+            inputmode="numeric"
+            autocomplete="off"
+            value={alarm()}
+            aria-invalid={result().errors.alarm ? "true" : undefined}
+            aria-describedby="tg-lock-alarm-help"
+            onInput={(e) => setAlarm(e.currentTarget.value)}
+          />
+          <FieldHelp
+            id="tg-lock-alarm-help"
+            help={withProfile(
+              t("settings.security.lockout.alarm_help"),
+              String(reference.alarm_after_failures ?? ALARM_AFTER_FAILURES_DEFAULT),
+            )}
+            error={result().errors.alarm ? t("settings.security.lockout.alarm_error") : undefined}
           />
         </div>
         <Show when={locks()}>

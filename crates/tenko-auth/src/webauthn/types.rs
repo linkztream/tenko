@@ -59,14 +59,43 @@ pub struct CredentialDescriptor {
 }
 
 impl CredentialDescriptor {
-    /// A descriptor for a credential id.
+    /// A descriptor for a credential id, with the transports bounded as
+    /// [`bounded_transports`] keeps them, also for a record stored before the bound.
     pub fn new(id: &[u8], transports: Vec<String>) -> Self {
         Self {
             type_: "public-key".to_owned(),
             id: crate::encoding::base64url_encode(id),
-            transports,
+            transports: bounded_transports(transports),
         }
     }
+}
+
+/// The most transport hints kept for a credential: the registry of WebAuthn names seven.
+pub const MAX_TRANSPORTS: usize = 8;
+/// The longest transport hint kept, in bytes.
+pub const MAX_TRANSPORT_LEN: usize = 32;
+
+/// The transport hints a client reported, as they are stored and served: at most
+/// [`MAX_TRANSPORTS`] distinct values in the order given, each 1 to [`MAX_TRANSPORT_LEN`]
+/// lowercase ASCII letters, digits and `-` (the form of every registered hint). Other values
+/// are dropped, not refused: a hint only helps the browser pick an authenticator.
+pub fn bounded_transports<S: AsRef<str>>(reported: impl IntoIterator<Item = S>) -> Vec<String> {
+    let mut kept: Vec<String> = Vec::new();
+    for hint in reported {
+        let hint = hint.as_ref();
+        if kept.len() == MAX_TRANSPORTS {
+            break;
+        }
+        let valid = !hint.is_empty()
+            && hint.len() <= MAX_TRANSPORT_LEN
+            && hint
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if valid && !kept.iter().any(|known| known == hint) {
+            kept.push(hint.to_owned());
+        }
+    }
+    kept
 }
 
 /// How strongly the relying party asks for user verification.

@@ -488,7 +488,7 @@ export interface paths {
         };
         /**
          * Finish an OpenID Connect sign-in
-         * @description Public; the provider's redirect target. Matches the state and the flow cookie, exchanges the code with the client secret and the PKCE verifier, verifies the ID token (issuer, audience and `azp`, times, nonce, an algorithm of the allow-list, the key from the provider's JWKS), maps the claims onto roles and scopes, creates the session with the `tenko_session` cookie and answers a small page that moves the browser to the return path. No access or refresh token is kept.
+         * @description Public; the provider's redirect target. Matches the state and the flow cookie, exchanges the code with the client secret and the PKCE verifier, verifies the ID token (issuer, audience and `azp`, times, nonce, an algorithm of the allow-list, the key from the provider's JWKS), maps the claims onto roles and scopes, creates the session with its cookie (`__Host-tenko_session` over HTTPS) and answers a small page that moves the browser to the return path. No access or refresh token is kept.
          */
         get: operations["finish_oidc_login"];
         put?: never;
@@ -5069,12 +5069,12 @@ export interface paths {
         };
         /**
          * Get the audit export sinks with their status
-         * @description The sinks in their order, each with its state (`disabled`, `pending`, `ok`, `behind`, `failing`, `alarm`), the last record delivered and the lag behind the log; `policy` says whether TGL-21 requires an export and whether the settings satisfy it; `warnings` are those `/system/status` shows (`audit.export.failing`, `audit.export.required`).
+         * @description The sinks in their order, each with its state (`disabled`, `pending`, `ok`, `behind`, `failing`, `alarm`), the last record delivered and the lag behind the log; `policy` says whether TGL-21 requires an export, whether the settings satisfy it and whether a sink delivers; `warnings` are those `/system/status` shows (`audit.export.failing`, `audit.export.required`). Needs the administer permission on the system: the receivers and their certificates are for administrators only.
          */
         get: operations["get_audit_export"];
         /**
          * Replace the audit export sinks
-         * @description The body is the complete list of sinks: a sink with the `id` of a stored sink keeps its position, a sink without `id` is new and exports the log from record 1, and a stored sink left out is removed. While TGL-21 requires an export (the Hardened profile), at least one sink must stay enabled (409 `audit.export.required`). The change is audited as `sys.audit_export.update`.
+         * @description The body is the complete list of sinks: a sink with the `id` of a stored sink keeps its position, a sink without `id` is new and exports the log from record 1, and a stored sink left out is removed. A stored sink sent to another place (another transport, host, port, receiver name, pinned authorities or file) also exports the log from record 1 again. While TGL-21 requires an export (the Hardened profile), at least one TCP, TLS or file sink must stay enabled (409 `audit.export.required`); a UDP sink confirms no delivery and does not count. A TLS client key must name an operator secret. The change is audited as `sys.audit_export.update`.
          */
         put: operations["put_audit_export"];
         post?: never;
@@ -9978,9 +9978,18 @@ export interface components {
         ExportPolicy: {
             /** @description The effective value of TGL-21. */
             audit_export: components["schemas"]["AuditExport"];
+            /**
+             * @description Whether the export meets the toggle now: not required, or at least one such sink
+             *     delivers: it is current or catching up, new and within the alarm delay, or failing
+             *     for less than the alarm delay. A sink in `alarm` or `behind` does not count.
+             */
+            delivering?: boolean;
             /** @description Whether an export is required (`required`, the Hardened profile). */
             required: boolean;
-            /** @description Whether the settings satisfy the toggle: not required, or at least one sink enabled. */
+            /**
+             * @description Whether the settings satisfy the toggle: not required, or at least one enabled sink
+             *     that confirms its deliveries (TCP, TLS or a file; a UDP datagram confirms nothing).
+             */
             satisfied: boolean;
         };
         /** @description A warning for `/system/status`. */
@@ -12962,9 +12971,16 @@ export interface components {
              * Format: int32
              * @description The ceiling of the account-wide delay, in seconds (0 to 600; 0 switches the delay
              *     off). The delay starts once the account fails, across every network, as often as
-             *     one network may before its lock; that is also when the alarm is raised.
+             *     one network may before its lock.
              */
             account_max_delay_secs: number;
+            /**
+             * Format: int32
+             * @description The failed attempts of an account, counted across every network, that raise the
+             *     alarm `auth.alarm.sign_in_failures` (1 to 100; default 5); it is raised again each
+             *     time the count doubles. A policy stored without the field gets 5.
+             */
+            alarm_after_failures?: number;
             /**
              * Format: int32
              * @description Attempts an account has from one network before the first wait (1 to 20).
@@ -27413,7 +27429,7 @@ export interface operations {
             /** @description The login is complete (`status: authenticated`) or a second factor is required (`status: second_factor`) */
             200: {
                 headers: {
-                    /** @description The session cookie `tenko_session` (HttpOnly, SameSite=Strict, Secure); only when the login is complete */
+                    /** @description The session cookie (HttpOnly, SameSite=Strict, Path=/): `__Host-tenko_session` with Secure over HTTPS, `tenko_session` over plain HTTP (Lab); only when the login is complete */
                     "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };
@@ -27475,7 +27491,7 @@ export interface operations {
             /** @description The login is complete; the session cookie is set */
             200: {
                 headers: {
-                    /** @description The session cookie `tenko_session` */
+                    /** @description The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab) */
                     "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };
@@ -27537,7 +27553,7 @@ export interface operations {
             /** @description The login is complete; the session cookie is set */
             200: {
                 headers: {
-                    /** @description The session cookie `tenko_session` */
+                    /** @description The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab) */
                     "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };
@@ -27633,7 +27649,7 @@ export interface operations {
             /** @description The session is created; the browser is moved to the UI */
             200: {
                 headers: {
-                    /** @description The session cookie `tenko_session` */
+                    /** @description The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab) */
                     "Set-Cookie"?: string;
                     /** @description `Negotiate <AP-REP>`, the mutual authentication */
                     "WWW-Authenticate"?: string;
@@ -27714,7 +27730,7 @@ export interface operations {
             /** @description A page that moves the browser to the return path, with the session cookie */
             200: {
                 headers: {
-                    /** @description The session cookie `tenko_session` */
+                    /** @description The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab) */
                     "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };
@@ -29407,7 +29423,7 @@ export interface operations {
             /** @description The login is complete (`status: authenticated`); the session cookie is set */
             200: {
                 headers: {
-                    /** @description The session cookie `tenko_session` */
+                    /** @description The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab) */
                     "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };
@@ -49795,7 +49811,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description TGL-21 requires an enabled sink (`audit.export.required`), or `If-Match` is stale (`audit.export.conflict`) */
+            /** @description TGL-21 requires an enabled TCP, TLS or file sink (`audit.export.required`), or `If-Match` is stale (`audit.export.conflict`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -50795,7 +50811,7 @@ export interface operations {
             /** @description Setup is complete; the administrator is logged in */
             200: {
                 headers: {
-                    /** @description The session cookie `tenko_session` */
+                    /** @description The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab) */
                     "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };

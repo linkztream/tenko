@@ -56,7 +56,8 @@ impl FileTransport {
             return Err(SinkError::new(
                 FailureKind::Config,
                 "the file name of the sink is not a plain file name (letters, digits, `-`, \
-                 `_` and `.`, not starting with a dot, at most 128 bytes)",
+                 `_` and `.`, not starting or ending with a dot, not a Windows device name \
+                 such as `NUL`, at most 128 bytes)",
             ));
         }
         let existed = fs::try_exists(dir).await.unwrap_or(false);
@@ -275,6 +276,10 @@ mod tests {
             "sub/audit.log",
             "sub\\audit.log",
             ".audit.log",
+            // A settings row stored before device names were refused still fails here.
+            "NUL",
+            "con.jsonl",
+            "COM1",
             long.as_str(),
         ] {
             let target = FileTarget {

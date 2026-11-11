@@ -44,7 +44,9 @@
 //! restart, on another controller, or after the memory evicted the ceremony is refused by
 //! the row.
 //!
-//! A wrong second-factor code is the one case that keeps a ceremony open:
+//! A wrong second-factor code, and a code that the sign-in lock holds back before it is
+//! checked ([`Ceremonies::put_back_until`], within the ceremony's own lifetime), are the
+//! cases that keep a ceremony open. After a wrong code
 //! [`Ceremonies::put_back`] stores the pending state with its attempt counter on this
 //! controller only, under the id as given, so the same id works once more here. Another
 //! controller opens the id with the counter it was sealed with.
@@ -744,6 +746,30 @@ impl Ceremonies {
         }
         let pending = self.consume(sealed, now)?;
         Ok((pending, staged))
+    }
+
+    /// Puts a ceremony back under its id, open until `expires_at` and no longer: a code
+    /// that the sign-in lock held back before it was checked leaves its challenge as it
+    /// was, without prolonging it. Nothing is kept when `expires_at` has passed.
+    pub fn put_back_until(
+        &self,
+        id: String,
+        pending: Pending,
+        expires_at: Timestamp,
+        now: Timestamp,
+    ) {
+        if expires_at <= now {
+            return;
+        }
+        let mut local = self.lock();
+        insert_bounded(
+            &mut local.overrides,
+            self.capacity,
+            now,
+            id,
+            (pending, expires_at),
+            |(_, expires_at)| *expires_at,
+        );
     }
 
     /// Puts a ceremony back under its id after a wrong code, open for another

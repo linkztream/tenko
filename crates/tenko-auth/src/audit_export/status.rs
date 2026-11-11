@@ -115,19 +115,48 @@ pub struct ExportPolicy {
     pub audit_export: AuditExport,
     /// Whether an export is required (`required`, the Hardened profile).
     pub required: bool,
-    /// Whether the settings satisfy the toggle: not required, or at least one sink enabled.
+    /// Whether the settings satisfy the toggle: not required, or at least one enabled sink
+    /// that confirms its deliveries (TCP, TLS or a file; a UDP datagram confirms nothing).
     pub satisfied: bool,
+    /// Whether the export meets the toggle now: not required, or at least one such sink
+    /// delivers: it is current or catching up, new and within the alarm delay, or failing
+    /// for less than the alarm delay. A sink in `alarm` or `behind` does not count.
+    #[serde(default = "default_true")]
+    pub delivering: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl ExportPolicy {
-    /// The policy of `toggle` over `settings`.
+    /// The policy of `toggle` over `settings`, as the settings alone decide it: `delivering`
+    /// is taken to equal `satisfied` until [`with_status`](Self::with_status) has seen the
+    /// sinks' status.
     pub fn of(toggle: AuditExport, settings: &AuditExportSettings) -> Self {
         let required = toggle == AuditExport::Required;
+        let satisfied = !required || settings.has_confirming_sink();
         Self {
             audit_export: toggle,
             required,
-            satisfied: !required || settings.has_enabled_sink(),
+            satisfied,
+            delivering: satisfied,
         }
+    }
+
+    /// The policy with `delivering` from the status of the sinks.
+    #[must_use]
+    pub fn with_status(mut self, sinks: &[SinkView]) -> Self {
+        self.delivering = !self.required
+            || sinks.iter().any(|view| {
+                view.sink.enabled
+                    && view.sink.confirms_delivery()
+                    && matches!(
+                        view.status.state,
+                        SinkState::Ok | SinkState::Pending | SinkState::Failing
+                    )
+            });
+        self
     }
 }
 
@@ -209,9 +238,18 @@ pub fn warnings(policy: &ExportPolicy, sinks: &[SinkView]) -> Vec<ExportWarning>
     if !policy.satisfied {
         out.push(ExportWarning {
             code: REQUIRED.to_owned(),
-            detail: "the security settings require an audit export (TGL-21) and no sink is enabled"
+            detail: "the security settings require an audit export (TGL-21) and no sink that \
+                     confirms its deliveries (TCP, TLS or a file) is enabled"
                 .to_owned(),
-            params: BTreeMap::new(),
+            params: BTreeMap::from([("reason".to_owned(), "no_sink".to_owned())]),
+        });
+    } else if !policy.delivering {
+        out.push(ExportWarning {
+            code: REQUIRED.to_owned(),
+            detail: "the security settings require an audit export (TGL-21) and no sink has \
+                     delivered within the alarm delay"
+                .to_owned(),
+            params: BTreeMap::from([("reason".to_owned(), "not_delivering".to_owned())]),
         });
     }
     out
@@ -264,6 +302,7 @@ pub fn read_view(view: &dyn ReadView, now: Timestamp) -> Result<AuditExportView,
             status,
         });
     }
+    let policy = policy.with_status(&sinks);
     let warnings = warnings(&policy, &sinks);
     Ok(AuditExportView {
         revision,

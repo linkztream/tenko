@@ -2862,7 +2862,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "The session cookie `tenko_session` (HttpOnly, SameSite=Strict, Secure); only when the login is complete"
+                "description": "The session cookie (HttpOnly, SameSite=Strict, Path=/): `__Host-tenko_session` with Secure over HTTPS, `tenko_session` over plain HTTP (Lab); only when the login is complete"
               }
             },
             "content": {
@@ -2942,7 +2942,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "The session cookie `tenko_session`"
+                "description": "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"
               }
             },
             "content": {
@@ -3022,7 +3022,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "The session cookie `tenko_session`"
+                "description": "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"
               }
             },
             "content": {
@@ -3140,7 +3140,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "The session cookie `tenko_session`"
+                "description": "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"
               },
               "WWW-Authenticate": {
                 "schema": {
@@ -3221,7 +3221,7 @@
           "auth"
         ],
         "summary": "Finish an OpenID Connect sign-in",
-        "description": "Public; the provider's redirect target. Matches the state and the flow cookie, exchanges the code with the client secret and the PKCE verifier, verifies the ID token (issuer, audience and `azp`, times, nonce, an algorithm of the allow-list, the key from the provider's JWKS), maps the claims onto roles and scopes, creates the session with the `tenko_session` cookie and answers a small page that moves the browser to the return path. No access or refresh token is kept.",
+        "description": "Public; the provider's redirect target. Matches the state and the flow cookie, exchanges the code with the client secret and the PKCE verifier, verifies the ID token (issuer, audience and `azp`, times, nonce, an algorithm of the allow-list, the key from the provider's JWKS), maps the claims onto roles and scopes, creates the session with its cookie (`__Host-tenko_session` over HTTPS) and answers a small page that moves the browser to the return path. No access or refresh token is kept.",
         "operationId": "finish_oidc_login",
         "parameters": [
           {
@@ -3269,7 +3269,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "The session cookie `tenko_session`"
+                "description": "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"
               }
             },
             "content": {
@@ -5332,7 +5332,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "The session cookie `tenko_session`"
+                "description": "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"
               }
             },
             "content": {
@@ -32845,7 +32845,7 @@
           "audit_export"
         ],
         "summary": "Get the audit export sinks with their status",
-        "description": "The sinks in their order, each with its state (`disabled`, `pending`, `ok`, `behind`, `failing`, `alarm`), the last record delivered and the lag behind the log; `policy` says whether TGL-21 requires an export and whether the settings satisfy it; `warnings` are those `/system/status` shows (`audit.export.failing`, `audit.export.required`).",
+        "description": "The sinks in their order, each with its state (`disabled`, `pending`, `ok`, `behind`, `failing`, `alarm`), the last record delivered and the lag behind the log; `policy` says whether TGL-21 requires an export, whether the settings satisfy it and whether a sink delivers; `warnings` are those `/system/status` shows (`audit.export.failing`, `audit.export.required`). Needs the administer permission on the system: the receivers and their certificates are for administrators only.",
         "operationId": "get_audit_export",
         "responses": {
           "200": {
@@ -32896,14 +32896,19 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       },
       "put": {
         "tags": [
           "audit_export"
         ],
         "summary": "Replace the audit export sinks",
-        "description": "The body is the complete list of sinks: a sink with the `id` of a stored sink keeps its position, a sink without `id` is new and exports the log from record 1, and a stored sink left out is removed. While TGL-21 requires an export (the Hardened profile), at least one sink must stay enabled (409 `audit.export.required`). The change is audited as `sys.audit_export.update`.",
+        "description": "The body is the complete list of sinks: a sink with the `id` of a stored sink keeps its position, a sink without `id` is new and exports the log from record 1, and a stored sink left out is removed. A stored sink sent to another place (another transport, host, port, receiver name, pinned authorities or file) also exports the log from record 1 again. While TGL-21 requires an export (the Hardened profile), at least one TCP, TLS or file sink must stay enabled (409 `audit.export.required`); a UDP sink confirms no delivery and does not count. A TLS client key must name an operator secret. The change is audited as `sys.audit_export.update`.",
         "operationId": "put_audit_export",
         "parameters": [
           {
@@ -32979,7 +32984,7 @@
             }
           },
           "409": {
-            "description": "TGL-21 requires an enabled sink (`audit.export.required`), or `If-Match` is stale (`audit.export.conflict`)",
+            "description": "TGL-21 requires an enabled TCP, TLS or file sink (`audit.export.required`), or `If-Match` is stale (`audit.export.conflict`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -34255,7 +34260,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "The session cookie `tenko_session`"
+                "description": "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"
               }
             },
             "content": {
@@ -50748,13 +50753,17 @@
             "$ref": "#/components/schemas/AuditExport",
             "description": "The effective value of TGL-21."
           },
+          "delivering": {
+            "type": "boolean",
+            "description": "Whether the export meets the toggle now: not required, or at least one such sink\ndelivers: it is current or catching up, new and within the alarm delay, or failing\nfor less than the alarm delay. A sink in `alarm` or `behind` does not count."
+          },
           "required": {
             "type": "boolean",
             "description": "Whether an export is required (`required`, the Hardened profile)."
           },
           "satisfied": {
             "type": "boolean",
-            "description": "Whether the settings satisfy the toggle: not required, or at least one sink enabled."
+            "description": "Whether the settings satisfy the toggle: not required, or at least one enabled sink\nthat confirms its deliveries (TCP, TLS or a file; a UDP datagram confirms nothing)."
           }
         }
       },
@@ -58770,7 +58779,13 @@
           "account_max_delay_secs": {
             "type": "integer",
             "format": "int32",
-            "description": "The ceiling of the account-wide delay, in seconds (0 to 600; 0 switches the delay\noff). The delay starts once the account fails, across every network, as often as\none network may before its lock; that is also when the alarm is raised.",
+            "description": "The ceiling of the account-wide delay, in seconds (0 to 600; 0 switches the delay\noff). The delay starts once the account fails, across every network, as often as\none network may before its lock.",
+            "minimum": 0
+          },
+          "alarm_after_failures": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The failed attempts of an account, counted across every network, that raise the\nalarm `auth.alarm.sign_in_failures` (1 to 100; default 5); it is raised again each\ntime the count doubles. A policy stored without the field gets 5.",
             "minimum": 0
           },
           "attempts": {
@@ -89305,8 +89320,8 @@
       "session": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "tenko_session",
-        "description": "Session cookie of the web UI. Mutating requests must carry a same-origin `Origin` header."
+        "name": "__Host-tenko_session",
+        "description": "Session cookie of the web UI: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab); a request is read with the name of its own scheme only. Mutating requests must carry a same-origin `Origin` header."
       },
       "token": {
         "type": "http",

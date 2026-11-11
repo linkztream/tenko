@@ -28,4 +28,6 @@ pub mod verify;
 
 pub use error::{ExportError, FailureKind, SinkError};
 #[cfg(test)]
+mod admin_tests;
+#[cfg(test)]
 mod tests;

@@ -250,9 +250,15 @@ fn the_account_wide_delay_starts_at_the_lock_threshold_and_has_a_ceiling() {
         default.account_wide(LockoutMode::Off).delay_after(u32::MAX),
         Duration::ZERO
     );
-    // The alarm: at the threshold and each doubling.
-    let alarms: Vec<u32> = (1..=70).filter(|n| default.alarms_at(*n)).collect();
-    assert_eq!(alarms, [8, 16, 32, 64]);
+    // The alarm: at five failures and each doubling, independent of the delay.
+    let alarms: Vec<u32> = (1..=90).filter(|n| default.alarms_at(*n)).collect();
+    assert_eq!(alarms, [5, 10, 20, 40, 80]);
+    let three = LockPolicy {
+        alarm_after_failures: 3,
+        ..LockPolicy::default()
+    };
+    let alarms: Vec<u32> = (1..=30).filter(|n| three.alarms_at(*n)).collect();
+    assert_eq!(alarms, [3, 6, 12, 24]);
 }
 
 #[test]
@@ -295,6 +301,14 @@ fn lock_policies_out_of_bounds_are_refused() {
             account_max_delay_secs: 601,
             ..base()
         },
+        LockPolicy {
+            alarm_after_failures: 0,
+            ..base()
+        },
+        LockPolicy {
+            alarm_after_failures: 101,
+            ..base()
+        },
     ] {
         assert!(bad.validate().is_err(), "{bad:?}");
     }
@@ -305,6 +319,25 @@ fn lock_policies_out_of_bounds_are_refused() {
         )
         .is_err()
     );
+}
+
+/// A policy stored before the alarm threshold was a field reads with the default of five,
+/// and a higher threshold is a weaker policy.
+#[test]
+fn a_stored_policy_without_the_alarm_threshold_gets_five() {
+    let stored: LockPolicy = serde_json::from_str(
+        r#"{"attempts":3,"waits_secs":[10,30,180,300,600],"lock_secs":1800,"account_max_delay_secs":60,"passkey_holds_lock":false}"#,
+    )
+    .expect("a policy from before the field");
+    assert_eq!(stored.alarm_after_failures, 5);
+    assert_eq!(stored, LockPolicy::default());
+    assert!(stored.validate().is_ok());
+    let later = LockPolicy {
+        alarm_after_failures: 6,
+        ..LockPolicy::default()
+    };
+    assert!(later.weaker_than(&LockPolicy::default()));
+    assert!(!LockPolicy::default().weaker_than(&later));
 }
 
 #[test]

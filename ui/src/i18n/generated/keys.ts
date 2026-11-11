@@ -182,6 +182,7 @@ export type MessageKey =
   | "account.passkey.remove_title"
   | "account.passkey.removed"
   | "account.passkey.title"
+  | "account.passkey.unconfirmed"
   | "account.passkey.waiting_key"
   | "account.passkey.waiting_passkey"
   | "account.password.changed"
@@ -570,6 +571,7 @@ export type MessageKey =
   | "audit.action.scan.resume"
   | "audit.action.scan.run"
   | "audit.action.scan.stop"
+  | "audit.action.sys.audit_export.client_key"
   | "audit.action.sys.audit_export.failing"
   | "audit.action.sys.audit_export.recovered"
   | "audit.action.sys.audit_export.test"
@@ -7018,6 +7020,9 @@ export type MessageKey =
   | "settings.security.lockout.account"
   | "settings.security.lockout.account_error"
   | "settings.security.lockout.account_help"
+  | "settings.security.lockout.alarm"
+  | "settings.security.lockout.alarm_error"
+  | "settings.security.lockout.alarm_help"
   | "settings.security.lockout.attempts"
   | "settings.security.lockout.attempts_error"
   | "settings.security.lockout.attempts_help"
@@ -8994,6 +8999,7 @@ export interface MessageArgs {
   "errors.auth.setup.invalid_host_name": { host_name: string | number };
   "errors.auth.throttled": { retry_after: string | number };
   "errors.auth.token.lifetime_exceeded": { max_days: string | number };
+  "errors.auth.webauthn.origin_mismatch": { origin: string | number };
   "errors.client.bad_response": { status: string | number };
   "errors.connect.port_stuck": { cause: string | number; connector: string | number; device: string | number; port: string | number };
   "errors.connect.secret.missing": { purpose: string | number };
@@ -10009,6 +10015,7 @@ export const messageKeys: readonly MessageKey[] = [
   "account.passkey.remove_title",
   "account.passkey.removed",
   "account.passkey.title",
+  "account.passkey.unconfirmed",
   "account.passkey.waiting_key",
   "account.passkey.waiting_passkey",
   "account.password.changed",
@@ -10397,6 +10404,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.scan.resume",
   "audit.action.scan.run",
   "audit.action.scan.stop",
+  "audit.action.sys.audit_export.client_key",
   "audit.action.sys.audit_export.failing",
   "audit.action.sys.audit_export.recovered",
   "audit.action.sys.audit_export.test",
@@ -16845,6 +16853,9 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.security.lockout.account",
   "settings.security.lockout.account_error",
   "settings.security.lockout.account_help",
+  "settings.security.lockout.alarm",
+  "settings.security.lockout.alarm_error",
+  "settings.security.lockout.alarm_help",
   "settings.security.lockout.attempts",
   "settings.security.lockout.attempts_error",
   "settings.security.lockout.attempts_help",

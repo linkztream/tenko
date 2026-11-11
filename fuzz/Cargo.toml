@@ -208,6 +208,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "webauthn_certificate"
+path = "fuzz_targets/webauthn_certificate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "dns_codec"
 path = "fuzz_targets/dns_codec.rs"
 test = false

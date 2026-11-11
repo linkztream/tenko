@@ -43,6 +43,8 @@ pub mod oid {
     pub const ECDSA_SHA384: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x03];
     /// sha256WithRSAEncryption (1.2.840.113549.1.1.11).
     pub const RSA_SHA256: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b];
+    /// keyUsage (2.5.29.15).
+    pub const KEY_USAGE: &[u8] = &[0x55, 0x1d, 0x0f];
     /// basicConstraints (2.5.29.19).
     pub const BASIC_CONSTRAINTS: &[u8] = &[0x55, 0x1d, 0x13];
     /// id-fido-gen-ce-aaguid (1.3.6.1.4.1.45724.1.1.4).
@@ -60,6 +62,15 @@ pub mod oid {
 }
 
 const MALFORMED: WebAuthnError = WebAuthnError::AttestationInvalid("malformed certificate");
+
+/// The length, header included, of the DER element at the start of `input`; `None` when
+/// it is not a well-formed definite-length element that fits.
+pub(super) fn element_len(input: &[u8]) -> Option<usize> {
+    Reader::new(input)
+        .read()
+        .ok()
+        .map(|element| element.raw.len())
+}
 
 /// One DER element.
 #[derive(Debug, Clone, Copy)]
@@ -323,6 +334,88 @@ impl<'a> Certificate<'a> {
             };
         }
         Ok(Some(false))
+    }
+
+    /// Refuses a certificate that marks an extension critical which this reader does not
+    /// understand (RFC 5280, section 4.2): only basic constraints, key usage and the FIDO
+    /// AAGUID are read, so any other critical extension could restrict the certificate in
+    /// a way the verifier would not honor.
+    ///
+    /// # Errors
+    ///
+    /// [`WebAuthnError::AttestationInvalid`] naming the refusal.
+    pub fn check_critical_extensions(&self) -> Result<(), WebAuthnError> {
+        const UNDERSTOOD: [&[u8]; 3] = [oid::BASIC_CONSTRAINTS, oid::KEY_USAGE, oid::FIDO_AAGUID];
+        if self
+            .extensions
+            .iter()
+            .any(|extension| extension.critical && !UNDERSTOOD.contains(&extension.oid))
+        {
+            return Err(WebAuthnError::AttestationInvalid(
+                "unknown critical extension",
+            ));
+        }
+        Ok(())
+    }
+
+    /// The `pathLenConstraint` of basic constraints: how many certificate authorities
+    /// may follow below this one. `None` without the extension or without the field.
+    ///
+    /// # Errors
+    ///
+    /// [`WebAuthnError::AttestationInvalid`] if the extension is malformed.
+    pub fn path_len(&self) -> Result<Option<u32>, WebAuthnError> {
+        let Some(extension) = self.extension(oid::BASIC_CONSTRAINTS) else {
+            return Ok(None);
+        };
+        let mut outer = Reader::new(extension.value);
+        let constraints = outer.expect(tag::SEQUENCE)?;
+        outer.finish()?;
+        let mut inner = Reader::new(constraints.content);
+        if inner.peek_tag() == Some(tag::BOOLEAN) {
+            inner.read()?;
+        }
+        if inner.is_empty() {
+            return Ok(None);
+        }
+        let integer = inner.expect(tag::INTEGER)?;
+        inner.finish()?;
+        // A non-negative INTEGER in its shortest form; more than three bytes is out of any
+        // sensible range for a chain of at most eight certificates.
+        let content = integer.content;
+        let minimal = match content {
+            [] => false,
+            [first, ..] if first & 0x80 != 0 => false,
+            [0, second, ..] => second & 0x80 != 0,
+            _ => true,
+        };
+        if !minimal || content.len() > 3 {
+            return Err(MALFORMED);
+        }
+        Ok(Some(content.iter().fold(0_u32, |value, byte| {
+            (value << 8) | u32::from(*byte)
+        })))
+    }
+
+    /// Whether the key usage allows signing certificates (`keyCertSign`); true without
+    /// the extension, which then restricts nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`WebAuthnError::AttestationInvalid`] if the extension is malformed.
+    pub fn may_sign_certificates(&self) -> Result<bool, WebAuthnError> {
+        let Some(extension) = self.extension(oid::KEY_USAGE) else {
+            return Ok(true);
+        };
+        let mut reader = Reader::new(extension.value);
+        let bits = reader.expect(tag::BIT_STRING)?;
+        reader.finish()?;
+        let (unused, bits) = bits.content.split_first().ok_or(MALFORMED)?;
+        if *unused > 7 || (bits.is_empty() && *unused != 0) {
+            return Err(MALFORMED);
+        }
+        // keyCertSign is bit 5, counted from the most significant bit of the first byte.
+        Ok(bits.first().is_some_and(|first| first & 0x04 != 0))
     }
 
     /// The 16 bytes of the FIDO AAGUID extension, if present.

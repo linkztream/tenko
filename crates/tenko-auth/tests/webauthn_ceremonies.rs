@@ -1775,3 +1775,61 @@ fn an_assertion_with_attested_credential_data_is_refused() {
         "{refused:?}"
     );
 }
+
+#[test]
+fn an_anchored_attestation_requirement_refuses_a_key_no_root_confirms() {
+    let anchored = RegistrationPolicy {
+        anchored_attestation_required: true,
+        ..hardware_registration()
+    };
+    // Without roots no attestation can be confirmed, so the key is refused.
+    let refused = register(
+        &relying_party(Vec::new()),
+        &mut certificate_authenticator(),
+        anchored,
+    )
+    .expect_err("no root confirms the key");
+    assert_eq!(refused, WebAuthnError::AttestationUntrusted);
+    // A root that confirms the chain lets the same make of key in.
+    let credential = register(
+        &relying_party(vec![soft_root()]),
+        &mut certificate_authenticator(),
+        anchored,
+    )
+    .expect("an anchored key");
+    assert!(credential.hardware_key);
+    assert!(matches!(
+        credential.attestation,
+        AttestationKind::Certificate { anchored: true, .. }
+    ));
+}
+
+#[test]
+fn reported_transports_are_bounded() {
+    let rp = relying_party(Vec::new());
+    let policy = RegistrationPolicy::default();
+    let mut response = registration_response(
+        &rp,
+        &mut SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::None),
+        USER_ID,
+        ORIGIN,
+        &Tweaks::default(),
+        policy,
+    );
+    let mut reported: Vec<String> = vec![
+        "usb".to_owned(),
+        "usb".to_owned(),
+        "NFC".to_owned(),
+        "x".repeat(33),
+        String::new(),
+        "hybrid".to_owned(),
+    ];
+    reported.extend((0..100_000).map(|i| format!("t{i}")));
+    response.response.transports = reported;
+    let credential = finish_registration(&rp, &response, policy).expect("registration");
+    assert_eq!(credential.transports.len(), 8);
+    assert_eq!(credential.transports[..3], ["usb", "hybrid", "t0"]);
+    // A record stored before the bound is served bounded as well.
+    let served = CredentialDescriptor::new(b"id", (0..1000).map(|i| format!("t{i}")).collect());
+    assert_eq!(served.transports.len(), 8);
+}

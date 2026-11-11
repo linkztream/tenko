@@ -214,7 +214,7 @@ test("TGL-21: the export cannot be required without a sink, and the last sink ca
   // Pausing or removing the last enabled sink is refused by the server; the dialog says why.
   await page.getByTestId("audit-export-toggle").click();
   await expect(page.getByTestId("error-notice")).toHaveAttribute("data-code", "audit.export.required");
-  await expect(page.getByTestId("error-notice")).toContainText("Enable an export sink first");
+  await expect(page.getByTestId("error-notice")).toContainText("Enable a TCP, TLS or file sink first");
   await page.getByTestId("audit-export-remove").click();
   const confirm = page.getByTestId("dialog-confirm");
   await expect(confirm).toContainText("the profile requires one");

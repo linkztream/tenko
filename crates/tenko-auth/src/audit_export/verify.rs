@@ -8,7 +8,7 @@
 //! - the head given with `--from <seq>:<hash>`, which the file must continue;
 //! - the first checkpoint line, which a sink writes when it connects and at the top of
 //!   every rotated file;
-//! - record 1;
+//! - record 1, which must link to the zero hash (the genesis);
 //! - otherwise the first record's own `prev`; the report then says the start is not
 //!   anchored.
 //!
@@ -33,13 +33,19 @@ use super::format::json::{Line, LineError, MAX_LINE, parse_line};
 /// How many recent records a duplicate may repeat.
 pub const DUPLICATE_WINDOW: usize = 100_000;
 
+/// The position before record 1: sequence 0 and the zero hash, which record 1 links to.
+const GENESIS: ChainHead = ChainHead {
+    seq: AuditSeq::NONE,
+    hash: Digest::ZERO,
+};
+
 /// Where the verified chain starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Anchor {
     /// The file holds no record and no checkpoint.
     None,
-    /// At record 1.
+    /// At record 1, which links to the zero hash of the genesis.
     Start,
     /// At the head given on the command line.
     Given,
@@ -248,14 +254,17 @@ impl State {
                     hash: record.hash,
                 };
                 if self.verifier.is_none() {
-                    let start = ChainHead {
-                        seq: AuditSeq(record.seq.0.saturating_sub(1)),
-                        hash: record.prev,
-                    };
-                    let anchor = if record.seq == AuditSeq(1) {
-                        Anchor::Start
+                    // Record 1 is anchored at the genesis of the chain, whose hash is zero:
+                    // a record 1 that links to anything else breaks the chain at once. Any
+                    // other first record starts from its own `prev`, which nothing confirms.
+                    let (start, anchor) = if record.seq == AuditSeq(1) {
+                        (GENESIS, Anchor::Start)
                     } else {
-                        Anchor::Unanchored
+                        let start = ChainHead {
+                            seq: AuditSeq(record.seq.0.saturating_sub(1)),
+                            hash: record.prev,
+                        };
+                        (start, Anchor::Unanchored)
                     };
                     self.anchor(start, anchor);
                 }
@@ -278,6 +287,17 @@ impl State {
     }
 
     fn checkpoint(&mut self, number: u64, head: ChainHead) -> Result<(), VerifyProblem> {
+        if head.seq == AuditSeq::NONE && head.hash != Digest::ZERO {
+            return Err(problem(
+                number,
+                "audit.export.verify.checkpoint",
+                format!(
+                    "the checkpoint names the start of the chain with the hash {}, which is not \
+                     the zero hash of the genesis",
+                    head.hash
+                ),
+            ));
+        }
         if self.verifier.is_none() {
             self.anchor(head, Anchor::Checkpoint);
             return Ok(());
@@ -493,6 +513,59 @@ mod tests {
         };
         let report = verify(&lines[2..], Some(wrong));
         assert_eq!(report.problem.expect("link").code, "sys.audit.broken_link");
+    }
+
+    #[test]
+    fn record_one_must_link_to_the_genesis() {
+        // A record 1 whose `prev` is not the zero hash, with consistent hashes after it:
+        // a chain made up from somewhere else, which must not verify as anchored at the
+        // start.
+        let made_up = chain(2);
+        // Sealed as a forger would: every hash fits its record, the first link is not the
+        // genesis.
+        let mut first = made_up[0].clone();
+        first.prev = Digest([7; 32]);
+        first.hash = first.compute_hash().expect("hash");
+        let mut second = made_up[1].clone();
+        second.prev = first.hash;
+        second.hash = second.compute_hash().expect("hash");
+        let report = verify(&[record_line(&first), record_line(&second)], None);
+        assert!(!report.intact, "{report:?}");
+        let problem = report.problem.expect("link");
+        assert_eq!(problem.code, "sys.audit.broken_link");
+        assert_eq!(problem.line, 1);
+        assert_eq!(report.records, 0);
+
+        // The genuine record 1 is anchored at the start.
+        let records = chain(2);
+        let lines: Vec<String> = records.iter().map(record_line).collect();
+        let report = verify(&lines, None);
+        assert!(report.intact, "{report:?}");
+        assert_eq!(report.anchor, Anchor::Start);
+    }
+
+    #[test]
+    fn a_checkpoint_at_the_start_has_the_zero_hash() {
+        let records = chain(2);
+        let fake = ChainHead {
+            seq: AuditSeq::NONE,
+            hash: Digest([9; 32]),
+        };
+        let mut lines = vec![checkpoint_line(fake, 2)];
+        lines.extend(records.iter().map(record_line));
+        let report = verify(&lines, None);
+        assert_eq!(
+            report.problem.expect("checkpoint").code,
+            "audit.export.verify.checkpoint"
+        );
+        // Later in a file too.
+        let mut lines: Vec<String> = records.iter().map(record_line).collect();
+        lines.push(checkpoint_line(fake, 2));
+        let report = verify(&lines, None);
+        assert_eq!(
+            report.problem.expect("checkpoint").code,
+            "audit.export.verify.checkpoint"
+        );
     }
 
     #[test]

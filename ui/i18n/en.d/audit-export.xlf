@@ -20,7 +20,7 @@
         <segment><source>Sinks that fail or fall behind: {sinks}. Records wait on this installation until they deliver again.</source></segment>
       </unit>
       <unit id="audit_export.warning.required">
-        <segment><source>The profile requires an audit export (TGL-21) and no sink is enabled. Add a sink or switch one on.</source></segment>
+        <segment><source>The profile requires an audit export (TGL-21) and no sink delivers: switch on a TCP, TLS or file sink, or repair the one that fails. A UDP sink confirms nothing and does not count.</source></segment>
       </unit>
       <unit id="audit_export.sinks.heading">
         <segment><source>Sinks</source></segment>
@@ -223,13 +223,13 @@
         <segment><source>Secret with the client key</source></segment>
       </unit>
       <unit id="audit_export.field.client_key_help">
-        <segment><source>The id of the operator secret that holds the private key in PEM. It is read from the vault each time the sink connects.</source></segment>
+        <segment><source>The id of an operator secret (not a system secret) that holds the private key in PEM. It is read from the vault once for each export run, and the read is audited.</source></segment>
       </unit>
       <unit id="audit_export.field.file">
         <segment><source>File name</source></segment>
       </unit>
       <unit id="audit_export.field.file_help">
-        <segment><source>A plain file name in the export directory of the controller; letters, digits, hyphen, underscore and dot.</source></segment>
+        <segment><source>A plain file name in the export directory of the controller; letters, digits, hyphen, underscore and dot. No trailing dot and no device names such as CON, NUL, COM1 or LPT1.</source></segment>
       </unit>
       <unit id="audit_export.field.max_mib">
         <segment><source>Rotate at (MiB)</source></segment>
@@ -247,10 +247,10 @@
         <segment><source>Enter a port from 1 to 65535.</source></segment>
       </unit>
       <unit id="audit_export.error.client_key">
-        <segment><source>Give the client certificate and the id of the secret with its key together, or neither.</source></segment>
+        <segment><source>Give the client certificate and the id of an operator secret with its key together, or neither.</source></segment>
       </unit>
       <unit id="audit_export.error.file">
-        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot.</source></segment>
+        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot, not ending with a dot and not a device name such as CON or NUL.</source></segment>
       </unit>
       <unit id="audit_export.error.max_mib">
         <segment><source>Enter a size from 0.0625 MiB (64 KiB) to 1,048,576 MiB (1 TiB).</source></segment>
@@ -278,7 +278,7 @@
       </unit>
       <unit id="errors.audit.export.required">
         <notes><note category="description">Also shown when a change would leave no enabled sink while the profile requires one.</note></notes>
-        <segment><source>The profile requires an audit export. Enable an export sink first, then switch the profile.</source></segment>
+        <segment><source>The profile requires an audit export. Enable a TCP, TLS or file sink first, then switch the profile. A UDP sink confirms nothing and does not count.</source></segment>
       </unit>
       <unit id="errors.audit.export.conflict">
         <segment><source>The audit export settings changed in the meantime. The page shows the current ones; check them and try again.</source></segment>
@@ -311,13 +311,13 @@
         <segment><source>Enter one or more certificates in PEM, each starting with -----BEGIN CERTIFICATE-----.</source></segment>
       </unit>
       <unit id="errors.audit.export.client_key">
-        <segment><source>Give the client certificate and the secret with its key together, or neither.</source></segment>
+        <segment><source>Give the client certificate and an operator secret with its key together, or neither.</source></segment>
       </unit>
       <unit id="errors.audit.export.tls_unused">
         <segment><source>TLS options only apply to the TLS transport. Clear them or choose TLS.</source></segment>
       </unit>
       <unit id="errors.audit.export.file">
-        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot.</source></segment>
+        <segment><source>Enter a plain file name: letters, digits, hyphen, underscore and dot, not starting with a dot, not ending with a dot and not a device name such as CON or NUL.</source></segment>
       </unit>
       <unit id="errors.audit.export.range">
         <segment><source>The value is out of range.</source></segment>

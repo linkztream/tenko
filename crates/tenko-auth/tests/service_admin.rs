@@ -1407,6 +1407,7 @@ fn lockout_value(mode: &str, passkey_holds_lock: bool) -> Value {
         "lock_secs": 1800,
         "account_max_delay_secs": 60,
         "passkey_holds_lock": passkey_holds_lock,
+        "alarm_after_failures": 5,
     })
 }
 

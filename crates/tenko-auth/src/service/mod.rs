@@ -158,9 +158,9 @@ pub struct AuthConfig {
     pub rp_name: String,
     /// DER attestation roots for hardware keys (ADR 0010).
     pub attestation_roots: Vec<Vec<u8>>,
-    /// The `Secure` cookie attribute; off only for plain HTTP under TGL-08 (Lab) and
-    /// `localhost` development.
-    pub cookie_secure: bool,
+    /// The ports the server listens on for the API and the UI: the default WebAuthn origins
+    /// are `https://<rp id>` and `https://<rp id>:<port>` for each of them (no other port).
+    pub listen_ports: Vec<u16>,
     /// The online HIBP range source (feature `online` provides one).
     pub hibp_online: Option<Arc<dyn HibpRangeSource>>,
     /// The offline breach filter built by `tenko hibp build`.
@@ -182,7 +182,7 @@ impl Default for AuthConfig {
             origins: Vec::new(),
             rp_name: "Tenko DDI".to_owned(),
             attestation_roots: Vec::new(),
-            cookie_secure: true,
+            listen_ports: Vec::new(),
             hibp_online: None,
             hibp_offline: None,
             throttle_capacity: 100_000,
@@ -197,7 +197,7 @@ impl std::fmt::Debug for AuthConfig {
         f.debug_struct("AuthConfig")
             .field("rp_id", &self.rp_id)
             .field("origins", &self.origins)
-            .field("cookie_secure", &self.cookie_secure)
+            .field("listen_ports", &self.listen_ports)
             .field("attestation_roots", &self.attestation_roots.len())
             .field("hibp_online", &self.hibp_online.is_some())
             .field("hibp_offline", &self.hibp_offline.is_some())
@@ -238,8 +238,53 @@ pub struct NewSession {
     pub secret: BearerSecret,
     /// The session as `GET /auth/session` describes it.
     pub info: SessionInfo,
-    /// The `Set-Cookie` header value.
-    pub set_cookie: String,
+    /// How long the cookie lives: the session's lifetime.
+    pub max_age: Duration,
+}
+
+impl NewSession {
+    /// The `Set-Cookie` header value for a request over HTTPS or plain HTTP
+    /// ([`session_cookie_name`]).
+    pub fn set_cookie(&self, https: bool) -> String {
+        session_cookie(self.secret.expose(), self.max_age, https)
+    }
+}
+
+/// The name of the session cookie over HTTPS. A browser keeps a `__Host-` cookie only when
+/// it was set `Secure`, with `Path=/` and without `Domain`, by this host itself, so no other
+/// host (a sibling subdomain included) and no plain-HTTP answer can set or replace it.
+pub const HOST_SESSION_COOKIE: &str = "__Host-tenko_session";
+
+/// The name of the session cookie for a request over HTTPS or over plain HTTP: the one
+/// place that decides it, for the server, the CLI and the tests. Over plain HTTP (the Lab
+/// profile under TGL-08, and `localhost` in development) a browser refuses a `__Host-`
+/// cookie, so the plain name serves there, and only there.
+pub fn session_cookie_name(https: bool) -> &'static str {
+    if https {
+        HOST_SESSION_COOKIE
+    } else {
+        SESSION_COOKIE
+    }
+}
+
+/// The `Set-Cookie` value of a session secret: `HttpOnly`, `SameSite=Strict`, `Path=/`,
+/// and `Secure` with the `__Host-` name over HTTPS.
+pub fn session_cookie(secret: &str, max_age: Duration, https: bool) -> String {
+    let secure = if https { "; Secure" } else { "" };
+    format!(
+        "{}={secret}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{secure}",
+        session_cookie_name(https),
+        max_age.as_secs()
+    )
+}
+
+/// The `Set-Cookie` value that removes the session cookie of the scheme.
+pub fn clear_session_cookie(https: bool) -> String {
+    let secure = if https { "; Secure" } else { "" };
+    format!(
+        "{}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure}",
+        session_cookie_name(https)
+    )
 }
 
 /// What a login step produced.
@@ -258,15 +303,19 @@ pub enum LoginOutcome {
 }
 
 impl LoginOutcome {
-    /// The JSON answer and, for a session, the `Set-Cookie` value.
-    pub fn into_response(self) -> (LoginResponse, Option<String>) {
+    /// The JSON answer and, for a session, the `Set-Cookie` value for a request over HTTPS
+    /// or plain HTTP.
+    pub fn into_response(self, https: bool) -> (LoginResponse, Option<String>) {
         match self {
-            Self::Session(session) => (
-                LoginResponse::Authenticated {
-                    session: session.info,
-                },
-                Some(session.set_cookie),
-            ),
+            Self::Session(session) => {
+                let cookie = session.set_cookie(https);
+                (
+                    LoginResponse::Authenticated {
+                        session: session.info,
+                    },
+                    Some(cookie),
+                )
+            }
             Self::SecondFactor {
                 challenge_id,
                 methods,
@@ -389,13 +438,22 @@ impl AuthService {
         let Some(rp_id) = rp_id else {
             return Ok(());
         };
-        let mut config = RpConfig::for_host(&rp_id);
+        let mut config = RpConfig::for_host_ports(&rp_id, &self.config.listen_ports);
         config.rp_name.clone_from(&self.config.rp_name);
         if !self.config.origins.is_empty() {
             config.origins.clone_from(&self.config.origins);
         } else if rp_id == "localhost" {
-            // Browsers treat plain-HTTP localhost as a secure context (development).
-            config.origins.push("http://localhost:*".to_owned());
+            // Development: any port of localhost, and plain HTTP, which browsers treat as a
+            // secure context there.
+            config.origins = vec![
+                "https://localhost:*".to_owned(),
+                "http://localhost:*".to_owned(),
+            ];
+        } else {
+            tracing::info!(
+                origins = %config.origins.join(", "),
+                "passkeys work from these origins; list others in [auth] origins"
+            );
         }
         config
             .trust_anchors
@@ -403,30 +461,6 @@ impl AuthService {
         self.relying_party
             .store(Some(Arc::new(RelyingParty::new(config)?)));
         Ok(())
-    }
-
-    /// The `Set-Cookie` value for a session secret.
-    pub fn session_cookie(&self, secret: &BearerSecret, max_age: Duration) -> String {
-        let secure = if self.config.cookie_secure {
-            "; Secure"
-        } else {
-            ""
-        };
-        format!(
-            "{SESSION_COOKIE}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{secure}",
-            secret.expose(),
-            max_age.as_secs()
-        )
-    }
-
-    /// The `Set-Cookie` value that removes the session cookie.
-    pub fn clear_cookie(&self) -> String {
-        let secure = if self.config.cookie_secure {
-            "; Secure"
-        } else {
-            ""
-        };
-        format!("{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure}")
     }
 
     async fn view(&self) -> Result<Arc<dyn ReadView>, AuthError> {
@@ -615,11 +649,10 @@ impl AuthService {
         self.commit(batch).await?;
         let info = self.session_info(user, &record).await?;
         let max_age = record.expires_at.saturating_since(record.created_at);
-        let set_cookie = self.session_cookie(&secret, max_age);
         Ok(NewSession {
             secret,
             info,
-            set_cookie,
+            max_age,
         })
     }
 

@@ -252,6 +252,37 @@ pub struct Sink {
     pub target: SinkTarget,
 }
 
+impl Sink {
+    /// Whether a delivery to the sink is confirmed: TCP and TLS acknowledge what they
+    /// carry and a file is synced to its disk, while a UDP datagram is only sent. TGL-21
+    /// `required` counts only sinks that confirm.
+    pub fn confirms_delivery(&self) -> bool {
+        match &self.target {
+            SinkTarget::Syslog(target) => target.transport != SyslogTransport::Udp,
+            SinkTarget::File(_) => true,
+        }
+    }
+
+    /// Whether `other` sends to another place than this sink: another transport, host,
+    /// port, receiver name or pinned authorities for syslog (the authorities decide which
+    /// receiver the records reach), another file, or another kind of target. Such a sink
+    /// starts from record 1 again, as a new sink does, so that no receiver misses the
+    /// records sent to the place before.
+    pub fn destination_differs(&self, other: &Sink) -> bool {
+        match (&self.target, &other.target) {
+            (SinkTarget::Syslog(a), SinkTarget::Syslog(b)) => {
+                a.transport != b.transport
+                    || !a.host.eq_ignore_ascii_case(&b.host)
+                    || a.port() != b.port()
+                    || a.tls.server_name != b.tls.server_name
+                    || a.tls.ca_pem != b.tls.ca_pem
+            }
+            (SinkTarget::File(a), SinkTarget::File(b)) => a.file != b.file,
+            _ => true,
+        }
+    }
+}
+
 /// A sink as a client writes it: the id is optional for a new sink.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SinkSpec {
@@ -299,9 +330,17 @@ fn default_alert_after() -> u32 {
 }
 
 impl AuditExportSettings {
-    /// Whether at least one sink is enabled (what TGL-21 `required` asks for).
+    /// Whether at least one sink is enabled.
     pub fn has_enabled_sink(&self) -> bool {
         self.sinks.iter().any(|sink| sink.enabled)
+    }
+
+    /// Whether at least one enabled sink confirms its deliveries (what TGL-21 `required`
+    /// asks of the settings; [`Sink::confirms_delivery`]).
+    pub fn has_confirming_sink(&self) -> bool {
+        self.sinks
+            .iter()
+            .any(|sink| sink.enabled && sink.confirms_delivery())
     }
 
     /// The sink with this id.
@@ -429,7 +468,7 @@ fn validate_syslog(
             ("target.tls.client_cert_pem", &tls.client_cert_pem),
         ] {
             if let Some(pem) = pem
-                && (pem.len() > MAX_PEM || !pem.contains("-----BEGIN CERTIFICATE-----"))
+                && (pem.len() > MAX_PEM || certificate_digests(pem).is_none())
             {
                 problems.push(invalid(at(field), "audit.export.pem"));
             }
@@ -490,14 +529,58 @@ pub fn valid_host(host: &str) -> bool {
 }
 
 /// A plain file name: 1 to 128 characters of letters, digits, `-`, `_` and `.`, not
-/// starting with a dot, so it cannot leave the export directory or hide.
+/// starting or ending with a dot, so it cannot leave the export directory or hide, and not
+/// a Windows device name (`NUL`, `CON`, `COM1`, also with an extension such as
+/// `nul.jsonl`), which a Windows controller would open as the device. The settings are
+/// shared by every controller, so the rule holds on every platform.
 pub fn valid_file_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
         && !name.starts_with('.')
+        && !name.ends_with('.')
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        && !is_windows_device(name)
+}
+
+/// Whether Windows opens `name` as a device: its part before the first dot is one of the
+/// reserved device names, in any case.
+fn is_windows_device(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    match stem.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" => true,
+        _ => {
+            let bytes = stem.as_bytes();
+            bytes.len() == 4
+                && (stem.starts_with("COM") || stem.starts_with("LPT"))
+                && bytes[3].is_ascii_digit()
+        }
+    }
+}
+
+/// The SHA-256 fingerprint of every certificate of a PEM text, in lowercase hex and in
+/// order: what `openssl x509 -fingerprint -sha256` shows for each, without the colons.
+/// `None` when the text holds no certificate or a block that does not parse.
+pub fn certificate_digests(pem: &str) -> Option<Vec<String>> {
+    use rustls_pki_types::{CertificateDer, pem::PemObject};
+    use sha2::Digest as _;
+
+    let mut out = Vec::new();
+    for cert in CertificateDer::pem_slice_iter(pem.as_bytes()) {
+        let cert = cert.ok()?;
+        let digest = sha2::Sha256::digest(cert.as_ref());
+        out.push(
+            digest
+                .iter()
+                .fold(String::with_capacity(64), |mut text, byte| {
+                    use std::fmt::Write as _;
+                    let _ = write!(text, "{byte:02x}");
+                    text
+                }),
+        );
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 /// A failure of a sink, as the status shows it.
@@ -730,6 +813,7 @@ mod tests {
                 "sinks[0].target.host=audit.export.host",
                 "sinks[0].target.port=audit.export.port",
                 "sinks[0].target.tls.ca_pem=audit.export.pem",
+                "sinks[0].target.tls.client_cert_pem=audit.export.pem",
                 "sinks[0].target.tls.server_name=audit.export.host",
                 "sinks[0].target.tls.client_key=audit.export.client_key",
                 "sinks[1].target.file=audit.export.file",
@@ -772,6 +856,132 @@ mod tests {
         for name in ["", ".hidden", "a/b", "..", "a\\b", "c:x", &"x".repeat(129)] {
             assert!(!valid_file_name(name), "{name}");
         }
+    }
+
+    #[test]
+    fn windows_device_names_are_no_file_names() {
+        // On a Windows controller these open the device: `NUL` discards what is written
+        // and reports success.
+        for name in [
+            "NUL",
+            "nul",
+            "Nul.jsonl",
+            "CON",
+            "con.log",
+            "PRN",
+            "AUX",
+            "COM1",
+            "com9.txt",
+            "LPT1",
+            "lpt0",
+            "audit.",
+        ] {
+            assert!(!valid_file_name(name), "{name}");
+        }
+        for name in [
+            "null",
+            "console.log",
+            "com10",
+            "lpt",
+            "comx",
+            "nul_audit.jsonl",
+            "audit.nul",
+            "my-con.log",
+        ] {
+            assert!(valid_file_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn certificates_have_their_fingerprints() {
+        // Two blocks with known DER bytes: the fingerprint is the SHA-256 of the DER.
+        let pem = "-----BEGIN CERTIFICATE-----\nAAEC\n-----END CERTIFICATE-----\n\
+                   -----BEGIN CERTIFICATE-----\nAwQF\n-----END CERTIFICATE-----\n";
+        let digests = certificate_digests(pem).expect("two blocks");
+        assert_eq!(
+            digests,
+            [
+                "ae4b3280e56e2faf83f414a6e3dabe9d5fbe18976544c05fed121accb85b53fc",
+                "2848698aa4b3431e3db06c343ca2cb0455f8aaf16c85cdd828c92ddf7dc134f8",
+            ]
+        );
+        assert!(certificate_digests("no pem").is_none());
+        assert!(
+            certificate_digests("-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n")
+                .is_none()
+        );
+        assert!(certificate_digests("-----BEGIN CERTIFICATE-----x").is_none());
+    }
+
+    #[test]
+    fn udp_confirms_nothing_and_a_new_place_is_a_new_destination() {
+        let sink = |target: SinkTarget| Sink {
+            id: Uuid::now_v7(),
+            name: "s".to_owned(),
+            enabled: true,
+            format: ExportFormat::default(),
+            target,
+        };
+        let udp = sink(syslog(SyslogTransport::Udp));
+        let tls = sink(syslog(SyslogTransport::Tls));
+        let file = sink(SinkTarget::File(FileTarget {
+            file: "audit.jsonl".to_owned(),
+            max_bytes: DEFAULT_MAX_BYTES,
+            keep: 1,
+        }));
+        assert!(!udp.confirms_delivery());
+        assert!(tls.confirms_delivery() && file.confirms_delivery());
+        let only_udp = AuditExportSettings {
+            sinks: vec![udp.clone()],
+            ..AuditExportSettings::default()
+        };
+        assert!(only_udp.has_enabled_sink() && !only_udp.has_confirming_sink());
+
+        assert!(udp.destination_differs(&tls));
+        assert!(tls.destination_differs(&file));
+        let mut moved = tls.clone();
+        moved.name = "renamed".to_owned();
+        moved.format = ExportFormat::Json;
+        moved.enabled = false;
+        assert!(
+            !tls.destination_differs(&moved),
+            "name, format and state are no place"
+        );
+        let change = |sink: &mut Sink, f: &dyn Fn(&mut SyslogTarget)| {
+            if let SinkTarget::Syslog(target) = &mut sink.target {
+                f(target);
+            }
+        };
+        change(&mut moved, &|target| {
+            target.host = "SIEM.example.test".to_owned();
+            target.port = Some(6514);
+        });
+        assert!(
+            !tls.destination_differs(&moved),
+            "same host and default port"
+        );
+        change(&mut moved, &|target| {
+            target.tls.ca_pem = Some("other trust".to_owned());
+        });
+        assert!(
+            tls.destination_differs(&moved),
+            "other pinned authorities reach another receiver"
+        );
+        change(&mut moved, &|target| target.tls.ca_pem = None);
+        assert!(!tls.destination_differs(&moved));
+        change(&mut moved, &|target| target.port = Some(6515));
+        assert!(tls.destination_differs(&moved));
+        change(&mut moved, &|target| {
+            target.port = None;
+            target.tls.server_name = Some("other.example.test".to_owned());
+        });
+        assert!(tls.destination_differs(&moved));
+        let mut renamed = file.clone();
+        let SinkTarget::File(target) = &mut renamed.target else {
+            unreachable!()
+        };
+        target.file = "other.jsonl".to_owned();
+        assert!(file.destination_differs(&renamed));
     }
 
     #[test]

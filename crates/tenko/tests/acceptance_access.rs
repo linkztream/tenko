@@ -232,7 +232,7 @@ fn sign_in(api: &mut Api, name: &str, pin: &str) {
         .iter()
         .filter_map(|value| value.to_str().ok())
         .filter_map(|text| text.split(';').next())
-        .find(|pair| pair.starts_with("tenko_session="))
+        .find(|pair| serve_support::api::session_secret(pair).is_some())
         .expect("the login set a session cookie")
         .to_owned();
     api.set_cookie(Some(cookie));

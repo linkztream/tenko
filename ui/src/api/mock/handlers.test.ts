@@ -1210,6 +1210,7 @@ describe("settings", () => {
       lock_secs: 1800,
       account_max_delay_secs: 60,
       passkey_holds_lock: false,
+      alarm_after_failures: 5,
     };
     expect(view.body.settings.lockout_policy).toEqual(defaults);
     expect(view.body.settings.unconfirmed_pin_days).toBe(30);

@@ -10,7 +10,10 @@ pub(crate) mod net;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use tenko_core::{RequestCtx, SystemComponent};
+use tenko_core::{
+    RequestCtx, SystemComponent,
+    secret::{SecretClass, SecretRef},
+};
 use tenko_vault::Vault;
 
 pub use self::file::FileTransport;
@@ -96,12 +99,32 @@ impl std::fmt::Debug for Opener {
 }
 
 impl Opener {
-    /// Connects the sink (or opens its file for appending).
+    /// Connects the sink (or opens its file for appending), reading a TLS client key from
+    /// the vault when the sink names one.
     ///
     /// # Errors
     ///
     /// [`SinkError`]: resolution, connection, TLS, client key, file or configuration.
     pub async fn open(&self, sink: &Sink) -> Result<Box<dyn Transport>, SinkError> {
+        let key = match client_key_of(sink) {
+            Some(secret) => Some(self.client_key(secret).await?),
+            None => None,
+        };
+        self.open_with_key(sink, key.as_ref().map(|key| key.as_slice()))
+            .await
+    }
+
+    /// Connects the sink with the TLS client key `key` already read (see
+    /// [`client_key`](Self::client_key)); `None` for a sink without one.
+    ///
+    /// # Errors
+    ///
+    /// As [`open`](Self::open).
+    pub async fn open_with_key(
+        &self,
+        sink: &Sink,
+        key: Option<&[u8]>,
+    ) -> Result<Box<dyn Transport>, SinkError> {
         match &sink.target {
             SinkTarget::File(target) => {
                 let dir = self.file_dir.as_ref().ok_or_else(|| {
@@ -120,11 +143,7 @@ impl Opener {
                     TcpTransport::connect(target, None, self.timeouts).await?,
                 )),
                 SyslogTransport::Tls => {
-                    let key = match target.tls.client_key {
-                        Some(secret) => Some(self.client_key(secret).await?),
-                        None => None,
-                    };
-                    let config = client_config(&target.tls, key.as_deref().map(Vec::as_slice))?;
+                    let config = client_config(&target.tls, key)?;
                     Ok(Box::new(
                         TcpTransport::connect(target, Some(config), self.timeouts).await?,
                     ))
@@ -133,8 +152,35 @@ impl Opener {
         }
     }
 
-    /// The PEM text of a TLS client key from the vault.
-    async fn client_key(
+    /// Whether `secret` is an operator secret of the vault: the only class a sink's client
+    /// key may name. A missing secret, a system secret and a missing vault all answer
+    /// false, alike.
+    ///
+    /// # Errors
+    ///
+    /// The vault's error when its metadata cannot be read.
+    pub async fn is_operator_secret(
+        &self,
+        secret: tenko_core::SecretId,
+    ) -> Result<bool, tenko_vault::VaultError> {
+        let Some(vault) = self.vault.as_ref() else {
+            return Ok(false);
+        };
+        Ok(vault
+            .meta(SecretRef { secret })
+            .await?
+            .is_some_and(|meta| meta.class == SecretClass::Operator))
+    }
+
+    /// The PEM text of a TLS client key from the vault. Only an operator secret is read:
+    /// a system secret (a CA key, a TOTP seed) is never handed to a sink, whatever the
+    /// stored settings name. The caller audits the read.
+    ///
+    /// # Errors
+    ///
+    /// [`SinkError`] with [`FailureKind::ClientKey`]; a missing secret and a secret of
+    /// another class fail with the same text.
+    pub async fn client_key(
         &self,
         secret: tenko_core::SecretId,
     ) -> Result<zeroize::Zeroizing<Vec<u8>>, SinkError> {
@@ -144,16 +190,35 @@ impl Opener {
                 "no vault is available for the client key",
             )
         })?;
+        let unreadable = |detail: String| SinkError::new(FailureKind::ClientKey, detail);
+        if !self.is_operator_secret(secret).await.map_err(|error| {
+            unreadable(format!(
+                "the client key {secret} cannot be read from the vault: {error}"
+            ))
+        })? {
+            return Err(unreadable(format!(
+                "the client key {secret} is not an operator secret of the vault"
+            )));
+        }
         let ctx = RequestCtx::system(SystemComponent::AuditExport);
         let value = vault
-            .get_system(&ctx, tenko_core::secret::SecretRef { secret })
+            .get_system(&ctx, SecretRef { secret })
             .await
             .map_err(|error| {
-                SinkError::new(
-                    FailureKind::ClientKey,
-                    format!("the client key {secret} cannot be read from the vault: {error}"),
-                )
+                unreadable(format!(
+                    "the client key {secret} cannot be read from the vault: {error}"
+                ))
             })?;
         Ok(zeroize::Zeroizing::new(value.expose().to_vec()))
+    }
+}
+
+/// The client key a sink names: a TLS syslog sink's `client_key`.
+pub fn client_key_of(sink: &Sink) -> Option<tenko_core::SecretId> {
+    match &sink.target {
+        SinkTarget::Syslog(target) if target.transport == SyslogTransport::Tls => {
+            target.tls.client_key
+        }
+        _ => None,
     }
 }

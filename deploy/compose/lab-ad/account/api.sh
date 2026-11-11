@@ -23,7 +23,7 @@ if [[ "$1" == setup ]]; then
   status="$(printf '%s' "$body" | curl -sS -D "$headers" -o "$out" -w '%{http_code}' \
     -H "Origin: $base" -H 'Content-Type: application/json' --data-binary @- "$base/api/v1/setup")"
   umask 077
-  tr -d '\r' <"$headers" | sed -n 's/^[Ss]et-[Cc]ookie: \(tenko_session=[^;]*\).*/\1/p' | head -n 1 >/lab/out/cookie
+  tr -d '\r' <"$headers" | sed -n 's/^[Ss]et-[Cc]ookie: \(\(__Host-\)\{0,1\}tenko_session=[^;]*\).*/\1/p' | head -n 1 >/lab/out/cookie
   rm -f "$headers"
   cat "$out"
   printf '\n%s\n' "$status"

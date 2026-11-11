@@ -35,7 +35,7 @@
         <segment><source>Reads the inventory, jobs and imports.</source><target>Läser inventariet, jobb och importer.</target></segment>
       </unit>
       <unit id="access.role.auditor_description">
-        <segment><source>Reads the audit log, the audit export status and the system status, nothing else.</source><target>Läser granskningsloggen, statusen för granskningsexporten och systemstatusen, men inget annat.</target></segment>
+        <segment><source>Reads the audit log and the system status with its audit export warnings, nothing else.</source><target>Läser granskningsloggen och systemstatusen med dess varningar om granskningsexporten, men inget annat.</target></segment>
       </unit>
       <unit id="access.role.operator_grant">
         <notes><note category="description">Help under the role choice of a grant.</note></notes>

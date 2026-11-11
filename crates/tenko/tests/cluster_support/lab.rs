@@ -383,7 +383,10 @@ impl ClusterLab {
             .filter_map(|value| value.to_str().ok())
             .filter_map(|text| text.split(';').next())
             .map(str::trim)
-            .find(|pair| pair.starts_with("tenko_session=") && pair.len() > "tenko_session=".len())
+            .find(|pair| {
+                crate::serve_support::api::session_secret(pair)
+                    .is_some_and(|secret| !secret.is_empty())
+            })
             .expect("a session cookie")
             .to_owned();
         self.cookie = cookie;

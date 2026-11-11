@@ -4,7 +4,7 @@
 //! IAM-10.
 //!
 //! Password login returns a session or a challenge with the remaining methods; `WebAuthn`
-//! also covers break-glass. Sessions travel in the `tenko_session` cookie, personal tokens
+//! also covers break-glass. Sessions travel in the `__Host-tenko_session` cookie (`tenko_session` over plain HTTP), personal tokens
 //! as bearer tokens (shown once, expiry capped by TGL-05).
 //!
 //! The handlers are thin: [`tenko_auth::AuthService`] owns the rules and its errors carry
@@ -100,7 +100,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
     dto::Page,
-    extract::{ClientInfo, Ctx},
+    extract::{ClientInfo, Ctx, Https},
     problem::{ApiError, ProblemDetails, codes as api_codes},
     state::AppState,
 };
@@ -489,8 +489,8 @@ pub(crate) fn if_match(headers: &HeaderMap) -> Result<Option<Revision>, ApiError
 
 /// The answer of a complete or pending login step: the JSON of the [`LoginResponse`] and,
 /// for a session, its cookie.
-fn login_answer(outcome: LoginOutcome) -> Result<Response, RouteError> {
-    let (body, cookie) = outcome.into_response();
+fn login_answer(outcome: LoginOutcome, https: bool) -> Result<Response, RouteError> {
+    let (body, cookie) = outcome.into_response(https);
     secret_json(StatusCode::OK, cookie.as_deref(), &body)
 }
 
@@ -509,7 +509,7 @@ fn login_answer(outcome: LoginOutcome) -> Result<Response, RouteError> {
     request_body = PasswordLogin,
     responses(
         (status = 200, description = "The login is complete (`status: authenticated`) or a second factor is required (`status: second_factor`)", body = LoginResponse,
-            headers(("Set-Cookie" = String, description = "The session cookie `tenko_session` (HttpOnly, SameSite=Strict, Secure); only when the login is complete"))),
+            headers(("Set-Cookie" = String, description = "The session cookie (HttpOnly, SameSite=Strict, Path=/): `__Host-tenko_session` with Secure over HTTPS, `tenko_session` over plain HTTP (Lab); only when the login is complete"))),
         (status = 400, description = "The body is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "The user name or password was not accepted (`auth.invalid_credentials`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Too many failed attempts, or the account is locked (`auth.throttled`); `Retry-After` gives the seconds", body = ProblemDetails, content_type = "application/problem+json"),
@@ -520,12 +520,14 @@ fn login_answer(outcome: LoginOutcome) -> Result<Response, RouteError> {
 async fn login_password(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
+    Https(https): Https,
     ApiJson(request): ApiJson<PasswordLogin>,
 ) -> Result<Response, RouteError> {
     login_answer(
         service
             .login_password(&ctx, user_agent.as_deref(), &request)
             .await?,
+        https,
     )
 }
 
@@ -539,7 +541,7 @@ async fn login_password(
     request_body = CodeLogin,
     responses(
         (status = 200, description = "The login is complete; the session cookie is set", body = LoginResponse,
-            headers(("Set-Cookie" = String, description = "The session cookie `tenko_session`"))),
+            headers(("Set-Cookie" = String, description = "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"))),
         (status = 400, description = "The body is malformed (`sys.invalid_request`) or the challenge is unknown or expired (`auth.challenge_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "The code was not accepted (`auth.invalid_credentials`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Too many failed attempts (`auth.throttled`); `Retry-After` gives the seconds", body = ProblemDetails, content_type = "application/problem+json"),
@@ -550,12 +552,14 @@ async fn login_password(
 async fn login_totp(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
+    Https(https): Https,
     ApiJson(request): ApiJson<CodeLogin>,
 ) -> Result<Response, RouteError> {
     login_answer(
         service
             .login_totp(&ctx, user_agent.as_deref(), &request)
             .await?,
+        https,
     )
 }
 
@@ -569,7 +573,7 @@ async fn login_totp(
     request_body = CodeLogin,
     responses(
         (status = 200, description = "The login is complete; the session cookie is set", body = LoginResponse,
-            headers(("Set-Cookie" = String, description = "The session cookie `tenko_session`"))),
+            headers(("Set-Cookie" = String, description = "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"))),
         (status = 400, description = "The body is malformed (`sys.invalid_request`) or the challenge is unknown or expired (`auth.challenge_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "The code was not accepted (`auth.invalid_credentials`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Too many failed attempts (`auth.throttled`); `Retry-After` gives the seconds", body = ProblemDetails, content_type = "application/problem+json"),
@@ -580,12 +584,14 @@ async fn login_totp(
 async fn login_recovery(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
+    Https(https): Https,
     ApiJson(request): ApiJson<CodeLogin>,
 ) -> Result<Response, RouteError> {
     login_answer(
         service
             .login_recovery(&ctx, user_agent.as_deref(), &request)
             .await?,
+        https,
     )
 }
 
@@ -623,7 +629,7 @@ async fn webauthn_login_start(
     request_body = WebAuthnLoginFinish,
     responses(
         (status = 200, description = "The login is complete (`status: authenticated`); the session cookie is set", body = LoginResponse,
-            headers(("Set-Cookie" = String, description = "The session cookie `tenko_session`"))),
+            headers(("Set-Cookie" = String, description = "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"))),
         (status = 400, description = "The body or the assertion is malformed or fails verification (`sys.invalid_request`, `auth.challenge_invalid`, `auth.webauthn.*`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "The credential is unknown (`auth.invalid_credentials`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The break-glass account needs a hardware key (`auth.break_glass.hardware_key_only`)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -635,17 +641,18 @@ async fn webauthn_login_start(
 async fn webauthn_login_finish(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
+    Https(https): Https,
     ApiJson(request): ApiJson<WebAuthnLoginFinish>,
 ) -> Result<Response, RouteError> {
-    let NewSession {
-        info, set_cookie, ..
-    } = service
+    let session: NewSession = service
         .webauthn_login_finish(&ctx, user_agent.as_deref(), &request)
         .await?;
     secret_json(
         StatusCode::OK,
-        Some(&set_cookie),
-        &LoginResponse::Authenticated { session: info },
+        Some(&session.set_cookie(https)),
+        &LoginResponse::Authenticated {
+            session: session.info,
+        },
     )
 }
 
@@ -665,12 +672,17 @@ async fn webauthn_login_finish(
     ),
     security(("session" = []))
 )]
-async fn logout(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<Response, RouteError> {
-    let cookie = service.logout(&ctx).await?;
+async fn logout(
+    Svc(service): Svc,
+    Ctx(ctx): Ctx,
+    Https(https): Https,
+) -> Result<Response, RouteError> {
+    service.logout(&ctx).await?;
     let mut response = StatusCode::NO_CONTENT.into_response();
-    response
-        .headers_mut()
-        .append(header::SET_COOKIE, cookie_value(&cookie)?);
+    response.headers_mut().append(
+        header::SET_COOKIE,
+        cookie_value(&tenko_auth::service::clear_session_cookie(https))?,
+    );
     Ok(response)
 }
 
@@ -1174,6 +1186,31 @@ pub(crate) mod testkit {
     }
 
     /// A request to the API. `path` is relative to the API base.
+    /// The request as one that came over HTTPS, as the middleware's [`ClientInfo`] would
+    /// say; a session cookie it carries is renamed to the HTTPS name.
+    pub(crate) fn over_https(mut request: Request<Body>) -> Request<Body> {
+        let plain = format!("{}=", tenko_auth::service::session_cookie_name(false));
+        let host = format!("{}=", tenko_auth::service::session_cookie_name(true));
+        if let Some(cookie) = request
+            .headers()
+            .get(header::COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.replace(&plain, &host))
+        {
+            request
+                .headers_mut()
+                .insert(header::COOKIE, cookie.parse().expect("a cookie header"));
+        }
+        request.extensions_mut().insert(crate::extract::ClientInfo {
+            source_ip: None,
+            peer: None,
+            https: true,
+            host: Some("tenko.example.test".to_owned()),
+            via_proxy: false,
+        });
+        request
+    }
+
     pub(crate) fn request(
         method: &str,
         path: &str,
@@ -1186,9 +1223,15 @@ pub(crate) mod testkit {
             .uri(format!("{API_BASE}{path}"));
         builder = match credential {
             Credential::Anonymous => builder,
-            Credential::Cookie(secret) => {
-                builder.header(header::COOKIE, format!("tenko_session={secret}"))
-            }
+            // The harness speaks plain HTTP (no middleware, a path-only URI), so the
+            // session cookie has the plain name; `over_https` makes a request an HTTPS one.
+            Credential::Cookie(secret) => builder.header(
+                header::COOKIE,
+                format!(
+                    "{}={secret}",
+                    tenko_auth::service::session_cookie_name(false)
+                ),
+            ),
             Credential::Bearer(token) => {
                 builder.header(header::AUTHORIZATION, format!("Bearer {token}"))
             }
@@ -1250,7 +1293,13 @@ pub(crate) mod testkit {
             let cookies = self.set_cookies();
             let cookie = cookies
                 .iter()
-                .find_map(|cookie| cookie.strip_prefix("tenko_session="))
+                .find_map(|cookie| {
+                    [true, false].into_iter().find_map(|https| {
+                        cookie
+                            .strip_prefix(tenko_auth::service::session_cookie_name(https))
+                            .and_then(|rest| rest.strip_prefix('='))
+                    })
+                })
                 .expect("a session cookie is set");
             cookie.split(';').next().expect("a cookie value").to_owned()
         }
@@ -1788,14 +1837,28 @@ mod tests {
     #[tokio::test]
     async fn password_login_sets_a_secure_session_cookie() {
         let (harness, _) = Harness::installed().await;
+        // Over plain HTTP (Lab) the plain name, without Secure.
+        let plain = harness
+            .call(
+                "POST",
+                "/auth/login/password",
+                Anonymous,
+                Some(&json!({ "user_name": ADMIN, "password": ADMIN_PASSWORD })),
+            )
+            .await;
+        plain.assert_status(200);
+        let cookie = plain.set_cookies()[0];
+        assert!(cookie.starts_with("tenko_session="), "{cookie}");
+        assert!(!cookie.contains("Secure"), "{cookie}");
+        // Over HTTPS the `__Host-` cookie: Secure, Path=/, no Domain.
         let reply = harness
-            .call_with(
+            .send(testkit::over_https(testkit::request(
                 "POST",
                 "/auth/login/password",
                 Anonymous,
                 Some(&json!({ "user_name": ADMIN, "password": ADMIN_PASSWORD })),
                 &[("User-Agent", "route-test/1.0")],
-            )
+            )))
             .await;
         reply.assert_status(200);
         assert_eq!(reply.body["status"], "authenticated");
@@ -1806,7 +1869,8 @@ mod tests {
         let cookies = reply.set_cookies();
         assert_eq!(cookies.len(), 1);
         let cookie = cookies[0];
-        assert!(cookie.starts_with("tenko_session="), "{cookie}");
+        assert!(cookie.starts_with("__Host-tenko_session="), "{cookie}");
+        assert!(!cookie.contains("Domain"), "{cookie}");
         for attribute in [
             "HttpOnly",
             "SameSite=Strict",

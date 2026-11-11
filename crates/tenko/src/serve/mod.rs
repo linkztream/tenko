@@ -2255,8 +2255,7 @@ async fn auth_config(resolved: &Resolved) -> Result<AuthConfig, StartError> {
         origins: config.auth.origins.clone(),
         rp_name: config.auth.rp_name.clone(),
         attestation_roots,
-        // Off only for plain HTTP (Lab, TGL-08): browsers drop `Secure` cookies there.
-        cookie_secure: !matches!(resolved.tls, TlsSpec::Plain),
+        listen_ports: resolved.listen.iter().map(SocketAddr::port).collect(),
         hibp_online,
         hibp_offline,
         password_hash_memory_mib: config

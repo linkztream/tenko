@@ -155,6 +155,34 @@ pub fn parse_range(body: &str, suffix: &str) -> Result<Option<u64>, HibpError> {
     Ok(found)
 }
 
+/// The most offline filter lookups for a password being set that run at once on the
+/// blocking pool.
+pub const MAX_OFFLINE_LOOKUPS: usize = 4;
+/// The most offline filter lookups for the live strength check that run at once; they
+/// have turns of their own, so a flood of checks cannot keep a password being set from
+/// its lookup.
+pub const MAX_OFFLINE_PREVIEWS: usize = 2;
+/// How long a lookup for a password being set waits for its turn before the check counts
+/// as unavailable. A preview never waits.
+pub const OFFLINE_LOOKUP_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The turns of the lookups for passwords being set, shared by every checker of the
+/// process.
+static OFFLINE_LOOKUPS: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(MAX_OFFLINE_LOOKUPS);
+/// The turns of the lookups of the live strength check.
+static OFFLINE_PREVIEWS: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(MAX_OFFLINE_PREVIEWS);
+
+/// What a breach check is for, which decides the turns of its offline lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckPurpose {
+    /// A password being set: waits up to [`OFFLINE_LOOKUP_WAIT`] for its turn.
+    Set,
+    /// The live strength check: takes a free preview turn or answers unavailable at once.
+    Preview,
+}
+
 /// The result of a breached-password check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BreachOutcome {
@@ -218,18 +246,29 @@ impl BreachChecker {
         self.mode
     }
 
-    /// Checks a normalized password. See the type documentation for the order of sources.
+    /// Checks a normalized password being set. See the type documentation for the order
+    /// of sources.
     pub async fn check(&self, normalized_password: &str) -> BreachOutcome {
+        self.check_for(normalized_password, CheckPurpose::Set).await
+    }
+
+    /// Checks a normalized password for `purpose`, which decides how the offline lookup
+    /// waits for its turn.
+    pub async fn check_for(
+        &self,
+        normalized_password: &str,
+        purpose: CheckPurpose,
+    ) -> BreachOutcome {
         match self.mode {
             BreachMode::Off => BreachOutcome::Clean,
-            BreachMode::Offline => self.check_offline(normalized_password).await,
+            BreachMode::Offline => self.check_offline(normalized_password, purpose).await,
             BreachMode::Online => match self.try_online(normalized_password).await {
                 Some(outcome) => outcome,
-                None => self.check_offline(normalized_password).await,
+                None => self.check_offline(normalized_password, purpose).await,
             },
             BreachMode::OfflinePreferred => {
                 if self.offline.is_some() {
-                    self.check_offline(normalized_password).await
+                    self.check_offline(normalized_password, purpose).await
                 } else {
                     self.try_online(normalized_password)
                         .await
@@ -255,22 +294,48 @@ impl BreachChecker {
         }
     }
 
-    async fn check_offline(&self, normalized_password: &str) -> BreachOutcome {
+    async fn check_offline(
+        &self,
+        normalized_password: &str,
+        purpose: CheckPurpose,
+    ) -> BreachOutcome {
         let Some(filter) = &self.offline else {
             tracing::warn!("no offline breach filter configured");
             return BreachOutcome::Unavailable;
         };
         let digest = Zeroizing::new(sha1(normalized_password));
         let filter = Arc::clone(filter);
-        let lookup = move || filter.contains_sha1(&digest);
         // A file-backed filter does blocking reads; keep them off the async workers when a
-        // runtime is there to take them.
+        // runtime is there to take them, and never more than OFFLINE_LOOKUPS of them at once,
+        // so that password changes cannot fill the blocking pool that other work shares.
         let result = match tokio::runtime::Handle::try_current() {
-            Ok(handle) => handle
-                .spawn_blocking(lookup)
-                .await
-                .unwrap_or_else(|_| Err(FilterError::Io("lookup task did not finish".to_owned()))),
-            Err(_) => lookup(),
+            Ok(handle) => {
+                let permit = match purpose {
+                    CheckPurpose::Set => {
+                        tokio::time::timeout(OFFLINE_LOOKUP_WAIT, OFFLINE_LOOKUPS.acquire())
+                            .await
+                            .ok()
+                            .and_then(Result::ok)
+                    }
+                    CheckPurpose::Preview => OFFLINE_PREVIEWS.try_acquire().ok(),
+                };
+                match permit {
+                    Some(permit) => handle
+                        .spawn_blocking(move || {
+                            // Held until the read ends, also when the caller stops waiting.
+                            let _permit = permit;
+                            filter.contains_sha1(&digest)
+                        })
+                        .await
+                        .unwrap_or_else(|_| {
+                            Err(FilterError::Io("lookup task did not finish".to_owned()))
+                        }),
+                    None => Err(FilterError::Io(
+                        "too many offline breach lookups at once".to_owned(),
+                    )),
+                }
+            }
+            Err(_) => filter.contains_sha1(&digest),
         };
         match result {
             Ok(true) => BreachOutcome::Breached { count: None },
@@ -307,6 +372,46 @@ mod tests {
     const PASSWORD_SHA1: &str = "5BAA61E4C9B93F3F0682250B6CF8331B7EE68FD8";
     const EMPTY_SHA1: &str = "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709";
     const SUFFIX: &str = "1E4C9B93F3F0682250B6CF8331B7EE68FD8";
+
+    #[tokio::test]
+    async fn offline_lookups_wait_their_turn_and_give_up_after_the_wait() {
+        // A filter that holds the SHA-1 of "password".
+        let digest = sha1("password");
+        let line = format!(
+            "{}:5\n",
+            crate::encoding::hex_encode(&digest).to_ascii_uppercase()
+        );
+        let mut bytes = Vec::new();
+        filter::build_filter(
+            line.as_bytes(),
+            &mut bytes,
+            &filter::BuildOptions { min_count: 1 },
+        )
+        .expect("builds");
+        let checker = BreachChecker::new(
+            BreachMode::Offline,
+            None,
+            Some(Arc::new(HibpFilter::from_bytes(bytes).expect("filter"))),
+        );
+        assert_eq!(
+            checker.check("password").await,
+            BreachOutcome::Breached { count: None }
+        );
+        // Every turn taken: the check waits, then counts as unavailable instead of adding
+        // work to the blocking pool.
+        let taken = OFFLINE_LOOKUPS
+            .acquire_many(u32::try_from(MAX_OFFLINE_LOOKUPS).expect("small"))
+            .await
+            .expect("open");
+        let started = std::time::Instant::now();
+        assert_eq!(checker.check("password").await, BreachOutcome::Unavailable);
+        assert!(started.elapsed() >= OFFLINE_LOOKUP_WAIT);
+        drop(taken);
+        assert_eq!(
+            checker.check("password").await,
+            BreachOutcome::Breached { count: None }
+        );
+    }
 
     #[test]
     fn sha1_matches_known_digests() {

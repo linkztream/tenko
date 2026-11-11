@@ -19,6 +19,7 @@ use axum::{
     extract::{ConnectInfo, FromRef, FromRequestParts},
     http::{HeaderMap, Uri, header, request::Parts},
 };
+use tenko_auth::service::{HOST_SESSION_COOKIE, session_cookie_name};
 use tenko_core::{
     AuthFailure, Authenticated, Credentials, IdempotencyKey, InvalidValue, Principal, RequestCtx,
     RequestId, SystemComponent, Timestamp, auth::SESSION_COOKIE,
@@ -74,13 +75,22 @@ where
         let principal = match &app.auth {
             None => placeholder_principal(),
             Some(authenticator) => {
-                let outcome = if let Some(AuthOutcome(outcome)) = parts.extensions.get() {
-                    outcome.clone()
-                } else {
-                    let credentials = credentials(&parts.headers);
-                    authenticator
-                        .authenticate(&credentials, source_ip, now)
-                        .await
+                // Only the session cookie of the request's scheme counts. The middleware
+                // authenticated whichever name it found first; its outcome stands only when
+                // that was the same credential.
+                let https = ClientInfo::from_parts(parts).https;
+                let credentials = credentials_for(&parts.headers, https);
+                let outcome = match parts.extensions.get() {
+                    Some(AuthOutcome(outcome))
+                        if credentials == self::credentials(&parts.headers) =>
+                    {
+                        outcome.clone()
+                    }
+                    _ => {
+                        authenticator
+                            .authenticate(&credentials, source_ip, now)
+                            .await
+                    }
                 };
                 let authenticated = outcome?;
                 if authenticated.flags.password_change_required
@@ -143,7 +153,9 @@ pub(crate) fn placeholder_principal() -> Principal {
     }
 }
 
-/// Reads the session cookie and the `Authorization` header.
+/// Reads a session cookie of either name and the `Authorization` header: what the
+/// middleware's rate limits key on before the scheme is weighed. [`Ctx`] authenticates only
+/// with [`credentials_for`].
 pub(crate) fn credentials(headers: &HeaderMap) -> Credentials {
     let authorization = headers
         .get(header::AUTHORIZATION)
@@ -152,18 +164,52 @@ pub(crate) fn credentials(headers: &HeaderMap) -> Credentials {
     Credentials::from_headers(session, authorization)
 }
 
-/// The value of the session cookie, if the request carries one.
+/// Reads the session cookie of the request's scheme and the `Authorization` header: over
+/// HTTPS only `__Host-tenko_session`, over plain HTTP only `tenko_session`
+/// ([`session_cookie_name`]), so that a cookie set from a sibling host or over plain HTTP
+/// never stands in for the session of an HTTPS client.
+pub(crate) fn credentials_for(headers: &HeaderMap, https: bool) -> Credentials {
+    let authorization = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+    let session = cookie(headers, session_cookie_name(https));
+    Credentials::from_headers(session, authorization)
+}
+
+/// The value of a session cookie of either name, the `__Host-` one first: whether the
+/// request carries one at all (the CSRF guard asks this).
 pub(crate) fn session_cookie(headers: &HeaderMap) -> Option<&str> {
+    cookie(headers, HOST_SESSION_COOKIE).or_else(|| cookie(headers, SESSION_COOKIE))
+}
+
+/// The value of the cookie `name`, the first one the request carries.
+fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|value| value.to_str().ok())
         .find_map(|header| {
             header.split(';').map(str::trim).find_map(|pair| {
-                pair.strip_prefix(SESSION_COOKIE)
+                pair.strip_prefix(name)
                     .and_then(|rest| rest.strip_prefix('='))
             })
         })
+}
+
+/// Whether the request came over HTTPS, as [`ClientInfo`] reads it: the extractor of the
+/// routes that set or remove the session cookie, whose name follows the scheme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Https(pub bool);
+
+impl<S: Send + Sync> FromRequestParts<S> for Https {
+    type Rejection = std::convert::Infallible;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        std::future::ready(Ok(Self(ClientInfo::from_parts(parts).https)))
+    }
 }
 
 /// Reads and validates the `Idempotency-Key` header.
@@ -657,6 +703,85 @@ mod tests {
             .await
             .expect_err("expired");
         assert_eq!(error.coded_error().code, "auth.session_expired");
+    }
+
+    /// A request over HTTPS or plain HTTP with `cookie`, with or without the outcome the
+    /// middleware would store (it authenticates a cookie of either name).
+    async fn signed_in(cookie: &str, https: bool, with_middleware: bool) -> bool {
+        let user = UserId::generate();
+        let state = state_with_auth(user);
+        let mut parts = parts(None);
+        parts.extensions.insert(ClientInfo {
+            source_ip: None,
+            peer: None,
+            https,
+            host: Some("ddi.example.org".to_owned()),
+            via_proxy: false,
+        });
+        parts.headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(cookie).expect("cookie"),
+        );
+        if with_middleware {
+            let authenticator = state.auth.clone().expect("an authenticator");
+            let outcome = authenticator
+                .authenticate(&credentials(&parts.headers), None, Timestamp::now())
+                .await;
+            parts.extensions.insert(AuthOutcome(outcome));
+        }
+        Ctx::from_request_parts(&mut parts, &state).await.is_ok()
+    }
+
+    #[tokio::test]
+    async fn only_the_session_cookie_of_the_scheme_counts() {
+        for middleware in [false, true] {
+            // Over HTTPS only the `__Host-` cookie: a plain-named one, which a sibling host
+            // or a plain-HTTP answer can set, never stands in for it.
+            assert!(signed_in("__Host-tenko_session=s3ss10n", true, middleware).await);
+            assert!(!signed_in("tenko_session=s3ss10n", true, middleware).await);
+            assert!(
+                !signed_in(
+                    "tenko_session=s3ss10n; __Host-tenko_session=wrong",
+                    true,
+                    middleware
+                )
+                .await
+            );
+            assert!(
+                signed_in(
+                    "tenko_session=wrong; __Host-tenko_session=s3ss10n",
+                    true,
+                    middleware
+                )
+                .await
+            );
+            // Over plain HTTP (Lab) only the plain name.
+            assert!(signed_in("tenko_session=s3ss10n", false, middleware).await);
+            assert!(!signed_in("__Host-tenko_session=s3ss10n", false, middleware).await);
+            assert!(
+                signed_in(
+                    "__Host-tenko_session=wrong; tenko_session=s3ss10n",
+                    false,
+                    middleware
+                )
+                .await
+            );
+        }
+    }
+
+    #[test]
+    fn the_csrf_guard_sees_a_session_cookie_of_either_name() {
+        for cookie in ["__Host-tenko_session=s", "tenko_session=s"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::COOKIE, HeaderValue::from_static(cookie));
+            assert_eq!(session_cookie(&headers), Some("s"));
+        }
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_static("x__Host-tenko_session=s; tenko_sessionx=t"),
+        );
+        assert_eq!(session_cookie(&headers), None);
     }
 
     #[test]

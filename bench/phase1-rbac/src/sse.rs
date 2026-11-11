@@ -165,7 +165,10 @@ async fn streams(
             .uri("/api/v1/events?topics=ipam")
             .header(
                 header::COOKIE,
-                format!("tenko_session={}", secrets[i % secrets.len()]),
+                format!(
+                    "__Host-tenko_session={0}; tenko_session={0}",
+                    secrets[i % secrets.len()]
+                ),
             )
             .body(Body::empty())?;
         let response = api.router.clone().oneshot(request).await?;

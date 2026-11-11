@@ -139,6 +139,9 @@ export const LOCKOUT_MODES: readonly LockoutMode[] = [
   "lock_until_unlock",
 ];
 
+/** The failures across networks that raise the sign-in alarm when the policy does not say (a policy stored before the field). */
+export const ALARM_AFTER_FAILURES_DEFAULT = 5;
+
 /** The bounds the server checks the numbers of the lock policy against. */
 export const LOCK_LIMITS = {
   attempts: { min: 1, max: 20 },
@@ -146,6 +149,7 @@ export const LOCK_LIMITS = {
   wait_secs: { min: 1, max: 86_400 },
   lock_secs: { min: 60, max: 86_400 },
   account_max_delay_secs: { min: 0, max: 600 },
+  alarm_after_failures: { min: 1, max: 100 },
 } as const;
 
 function lockPolicy(passkeyHoldsLock: boolean): LockPolicy {
@@ -155,6 +159,7 @@ function lockPolicy(passkeyHoldsLock: boolean): LockPolicy {
     lock_secs: 1_800,
     account_max_delay_secs: 60,
     passkey_holds_lock: passkeyHoldsLock,
+    alarm_after_failures: ALARM_AFTER_FAILURES_DEFAULT,
   };
 }
 

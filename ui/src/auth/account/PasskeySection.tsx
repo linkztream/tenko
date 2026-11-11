@@ -19,6 +19,11 @@ function kindOf(c: CredentialInfo): Kind {
 
 const KIND_ICON: Record<Kind, IconName> = { synced: "refresh", hardware: "key", device: "lock" };
 
+/** A security key whose attestation no configured attestation root confirms (ADR 0010). */
+function unconfirmed(c: CredentialInfo): boolean {
+  return c.hardware_key && c.attestation.kind === "certificate" && !c.attestation.anchored;
+}
+
 /** Passkeys and security keys: the list, removal and enrollment (IAM-06). */
 export function PasskeySection(props: {
   data: MethodsData;
@@ -115,6 +120,9 @@ export function PasskeySection(props: {
                             ? t("account.passkey.last_used", { when: formatRelative(c.last_used_at) })
                             : t("account.passkey.never_used")}
                         </span>
+                        <Show when={unconfirmed(c)}>
+                          <span data-testid="passkey-unconfirmed">{t("account.passkey.unconfirmed")}</span>
+                        </Show>
                       </p>
                     </div>
                     <div class="act">

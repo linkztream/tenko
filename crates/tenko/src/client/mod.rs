@@ -524,7 +524,13 @@ impl RawResponse {
             .filter_map(|value| value.to_str().ok())
             .filter_map(|value| value.split(';').next())
             .filter_map(|pair| pair.trim().split_once('='))
-            .find(|(name, value)| *name == tenko_core::auth::SESSION_COOKIE && !value.is_empty())
+            .find(|(name, value)| {
+                // The server names the cookie by the scheme it was reached over.
+                [true, false]
+                    .into_iter()
+                    .any(|https| *name == tenko_auth::service::session_cookie_name(https))
+                    && !value.is_empty()
+            })
             .map(|(_, value)| value.to_owned())
     }
 }
@@ -700,9 +706,12 @@ fn with_session(
 ) -> reqwest::RequestBuilder {
     match session {
         Some(secret) => {
+            // Under both names: the server reads the one of the scheme it is reached over
+            // (HTTPS or plain HTTP under Lab), and a stored session works with either.
             let mut value = reqwest::header::HeaderValue::from_str(&format!(
-                "{}={secret}",
-                tenko_core::auth::SESSION_COOKIE
+                "{}={secret}; {}={secret}",
+                tenko_auth::service::session_cookie_name(true),
+                tenko_auth::service::session_cookie_name(false)
             ))
             .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static(""));
             value.set_sensitive(true);
@@ -1126,6 +1135,20 @@ mod tests {
             body: Vec::new(),
         };
         assert_eq!(response.session_cookie().as_deref(), Some("abc"));
+        // Over HTTPS the server names it `__Host-tenko_session`.
+        let mut headers = HeaderMap::new();
+        headers.append(
+            SET_COOKIE,
+            "__Host-tenko_session=def; Path=/; HttpOnly; Secure"
+                .parse()
+                .expect("header"),
+        );
+        let response = RawResponse {
+            status: StatusCode::OK,
+            headers,
+            body: Vec::new(),
+        };
+        assert_eq!(response.session_cookie().as_deref(), Some("def"));
     }
 
     #[test]

@@ -25,7 +25,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::auth::{ApiJson, PublicCtx, RouteError, Svc, Unavailable, secret_json};
 use super::system::CaRootSource;
-use crate::{problem::ProblemDetails, state::AppState};
+use crate::{extract::Https, problem::ProblemDetails, state::AppState};
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new().routes(routes!(get_setup, complete_setup))
@@ -73,7 +73,7 @@ pub struct SetupResponse {
     request_body = SetupRequest,
     responses(
         (status = 200, description = "Setup is complete; the administrator is logged in", body = SetupResponse,
-            headers(("Set-Cookie" = String, description = "The session cookie `tenko_session`"))),
+            headers(("Set-Cookie" = String, description = "The session cookie: `__Host-tenko_session` over HTTPS, `tenko_session` over plain HTTP (Lab)"))),
         (status = 400, description = "The body is malformed (`sys.invalid_request`), or the host name, user name or language is invalid (`auth.setup.invalid_host_name`, `auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "The setup token is wrong (`auth.setup.token_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "Setup has already been completed (`auth.setup.closed`)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -86,6 +86,7 @@ pub struct SetupResponse {
 async fn complete_setup(
     Svc(service): Svc,
     PublicCtx { ctx, user_agent }: PublicCtx,
+    Https(https): Https,
     ca_root: Option<Extension<Arc<CaRootSource>>>,
     ipam: Option<Extension<Arc<IpamService>>>,
     ApiJson(request): ApiJson<SetupRequest>,
@@ -111,7 +112,7 @@ async fn complete_setup(
         session: session.info.clone(),
         ca_fingerprint,
     };
-    secret_json(StatusCode::OK, Some(&session.set_cookie), &answer)
+    secret_json(StatusCode::OK, Some(&session.set_cookie(https)), &answer)
 }
 
 #[cfg(test)]
@@ -175,13 +176,15 @@ mod tests {
         let harness = Harness::fresh().await;
         let token = token(&harness).await;
         let reply = harness
-            .call_with(
-                "POST",
-                "/setup",
-                Anonymous,
-                Some(&body(&token)),
-                &[("User-Agent", "setup-test/1.0")],
-            )
+            .send(super::super::auth::testkit::over_https(
+                super::super::auth::testkit::request(
+                    "POST",
+                    "/setup",
+                    Anonymous,
+                    Some(&body(&token)),
+                    &[("User-Agent", "setup-test/1.0")],
+                ),
+            ))
             .await;
         reply.assert_status(200);
         assert_eq!(reply.header("cache-control"), Some("no-store"));
@@ -193,13 +196,12 @@ mod tests {
         assert_eq!(reply.body["default_language"], "sv");
         let cookies = reply.set_cookies();
         assert_eq!(cookies.len(), 1);
-        for attribute in [
-            "tenko_session=",
-            "HttpOnly",
-            "SameSite=Strict",
-            "Secure",
-            "Path=/",
-        ] {
+        assert!(
+            cookies[0].starts_with("__Host-tenko_session="),
+            "{}",
+            cookies[0]
+        );
+        for attribute in ["HttpOnly", "SameSite=Strict", "Secure", "Path=/"] {
             assert!(
                 cookies[0].contains(attribute),
                 "{attribute} in {}",

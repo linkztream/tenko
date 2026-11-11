@@ -146,7 +146,9 @@ allow_plain = false
 # The passkey relying-party ID. Default: tls.public_host in mode c, otherwise the host name
 # from first-run setup. Use "localhost" for development.
 # rp_id = "ddi.example.org"
-# Origins the UI is served from (default https://<rp id> on any port).
+# Origins the UI is served from. Default: https://<rp id> and https://<rp id>:<port> for each
+# port in [server] listen. List the origin here when the UI is reached through a proxy or a
+# port forward on another port, for example ["https://ddi.example.org:9443"].
 origins = []
 # The name browsers show for the relying party.
 rp_name = "Tenko DDI"

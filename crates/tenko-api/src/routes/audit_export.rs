@@ -12,11 +12,12 @@
 //!
 //! The sinks live in the store (`sys.audit_export_settings`) and the cursors in
 //! `sys.audit_export_cursors`; both reach the `system` event topic. Reading the settings
-//! and their status needs the global read permission on the audit log, the same check as
-//! `GET /audit/verify` (`AUDIT_OBJECT`: for example an administrator, the auditor role or a
-//! token with `audit:read`); changing them and sending a test needs
-//! the update permission on the system. `GET /audit/export` reads records in sequence
-//! order for `tenko audit export`, with the same permission as `GET /audit/verify`.
+//! and their status needs the administer permission on the system (administrators): the
+//! receivers and their certificates map where the log goes, which a reader of the log
+//! does not need. The auditor role and a token with `audit:read` see the export's
+//! warnings in `/system/status`. Changing the settings and sending a test needs the update
+//! permission on the system. `GET /audit/export` reads records in sequence order for
+//! `tenko audit export`, with the same permission as `GET /audit/verify` (`AUDIT_OBJECT`).
 //!
 //! The server binary provides the service as the request extension
 //! `Arc<AuditExportAdmin>`; without it the settings routes answer 501.
@@ -96,23 +97,25 @@ fn view_response(view: AuditExportView) -> Response {
     summary = "Get the audit export sinks with their status",
     description = "The sinks in their order, each with its state (`disabled`, `pending`, `ok`, \
         `behind`, `failing`, `alarm`), the last record delivered and the lag behind the log; \
-        `policy` says whether TGL-21 requires an export and whether the settings satisfy it; \
-        `warnings` are those `/system/status` shows (`audit.export.failing`, \
-        `audit.export.required`).",
+        `policy` says whether TGL-21 requires an export, whether the settings satisfy it and \
+        whether a sink delivers; `warnings` are those `/system/status` shows \
+        (`audit.export.failing`, `audit.export.required`). Needs the administer permission \
+        on the system: the receivers and their certificates are for administrators only.",
     responses(
         (status = 200, description = "The settings and their status", body = AuditExportView,
             headers(("ETag" = String, description = "The revision of the settings, for `If-Match`"))),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "The server runs without the audit export", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn get_audit_export(
     State(state): State<AppState>,
     admin: Admin,
     Ctx(ctx): Ctx,
 ) -> Result<Response, ApiError> {
-    state.authorize(&ctx.principal, Action::Read, &AUDIT_OBJECT)?;
+    state.authorize(&ctx.principal, Action::Administer, &system_object())?;
     let admin = admin_or_stub(admin, "GET", PATH)?;
     Ok(view_response(admin.view(ctx.now).await?))
 }
@@ -127,8 +130,11 @@ async fn get_audit_export(
     summary = "Replace the audit export sinks",
     description = "The body is the complete list of sinks: a sink with the `id` of a stored \
         sink keeps its position, a sink without `id` is new and exports the log from record 1, \
-        and a stored sink left out is removed. While TGL-21 requires an export (the Hardened \
-        profile), at least one sink must stay enabled (409 `audit.export.required`). The \
+        and a stored sink left out is removed. A stored sink sent to another place (another \
+        transport, host, port, receiver name, pinned authorities or file) also exports the \
+        log from record 1 again. While TGL-21 requires an export (the Hardened profile), at least one TCP, TLS \
+        or file sink must stay enabled (409 `audit.export.required`); a UDP sink confirms no \
+        delivery and does not count. A TLS client key must name an operator secret. The \
         change is audited as `sys.audit_export.update`.",
     params(("If-Match" = Option<String>, Header, description = "The revision the client read, as in the `ETag`; a stale revision is refused with 409")),
     request_body = AuditExportUpdate,
@@ -138,7 +144,7 @@ async fn get_audit_export(
         (status = 400, description = "A value is invalid (`audit.export.invalid` with one entry per field in `errors`), the body is malformed, or `If-Match` is malformed", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "TGL-21 requires an enabled sink (`audit.export.required`), or `If-Match` is stale (`audit.export.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "TGL-21 requires an enabled TCP, TLS or file sink (`audit.export.required`), or `If-Match` is stale (`audit.export.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "The server runs without the audit export", body = ProblemDetails, content_type = "application/problem+json")
     ),
     security(("session" = []))
@@ -899,9 +905,13 @@ mod tests {
                 .assert_problem(401, "auth.unauthenticated");
         }
 
-        let read = lab.h.call("GET", SETTINGS, Cookie(&auditor), None).await;
-        read.assert_status(200);
-        assert_eq!(read.body["revision"], 0);
+        // Only administrators read the sinks: the auditor reads the log, not where it goes.
+        for who in [&viewer, &auditor] {
+            lab.h
+                .call("GET", SETTINGS, Cookie(who), None)
+                .await
+                .assert_problem(403, "auth.forbidden");
+        }
         lab.h
             .call("GET", "/audit/export", Cookie(&auditor), None)
             .await
@@ -920,7 +930,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_token_with_the_audit_read_scope_reads_but_cannot_change() {
+    async fn a_token_with_the_audit_read_scope_reads_the_log_but_not_the_sinks() {
         let lab = Lab::new(true).await;
         let created = lab
             .h
@@ -936,7 +946,7 @@ mod tests {
         lab.h
             .call("GET", SETTINGS, Bearer(&token), None)
             .await
-            .assert_status(200);
+            .assert_problem(403, "auth.forbidden");
         lab.h
             .call("GET", "/audit/export", Bearer(&token), None)
             .await

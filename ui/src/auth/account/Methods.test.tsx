@@ -64,6 +64,27 @@ describe("sign-in methods: passkeys and security keys", () => {
     expect(await screen.findByText("Office key")).toBeTruthy();
     expect(screen.getByText("Hardware security key")).toBeTruthy();
     expect(screen.getByText("Never used")).toBeTruthy();
+    expect(screen.queryByTestId("passkey-unconfirmed")).toBeNull();
+  });
+
+  it("says when no attestation root confirms a security key", async () => {
+    await signInAlex({
+      prepare: (u) => {
+        const [first] = u.credentials;
+        if (first)
+          u.credentials.push({
+            ...first,
+            id: "hw-2",
+            label: "Spare key",
+            hardware_key: true,
+            backup_eligible: false,
+            attestation: { kind: "certificate", anchored: false, certificate_sha256: "00", subject: "Example key" },
+          });
+      },
+    });
+    show();
+    expect(await screen.findByText("Spare key")).toBeTruthy();
+    expect(screen.getByTestId("passkey-unconfirmed").textContent).toContain("No configured attestation root confirms");
   });
 
   it("asks before removing a passkey, and keeps it when you cancel", async () => {

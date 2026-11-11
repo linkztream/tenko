@@ -17,7 +17,9 @@ pub enum WebAuthnError {
     #[error("the challenge does not match")]
     ChallengeMismatch,
     /// The origin is not one of the configured origins.
-    #[error("origin `{0}` is not allowed")]
+    #[error(
+        "the ceremony ran on `{0}`, which is not an allowed origin; an administrator lists it in `[auth] origins` of the server's configuration"
+    )]
     OriginMismatch(String),
     /// The ceremony ran in a cross-origin iframe (`crossOrigin` or `topOrigin`).
     #[error("cross-origin ceremonies are not allowed")]

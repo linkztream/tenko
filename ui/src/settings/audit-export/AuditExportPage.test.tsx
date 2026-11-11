@@ -179,7 +179,7 @@ describe("the audit export page", () => {
     // A client certificate without the secret that holds its key is refused before any request.
     fireEvent.input(within(dialog).getByTestId("field-client_cert_pem"), { target: { value: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----" } });
     fireEvent.click(within(dialog).getByTestId("audit-export-test"));
-    expect(await within(dialog).findByText(/certificate and the id of the secret/)).toBeTruthy();
+    expect(await within(dialog).findByText(/certificate and the id of an operator secret/)).toBeTruthy();
     expect(within(dialog).queryByTestId("audit-export-test-result")).toBeNull();
     fireEvent.input(within(dialog).getByTestId("field-client_cert_pem"), { target: { value: "" } });
     fireEvent.click(within(dialog).getByTestId("audit-export-test"));
@@ -260,7 +260,7 @@ describe("the audit export page", () => {
     expect(confirm.textContent).toContain("the server refuses to remove it");
     fireEvent.click(within(confirm).getByTestId("confirm-ok"));
     // The server refuses (audit.export.required) with the administrator's remedy in words.
-    expect(await within(confirm).findByText(/Enable an export sink first/)).toBeTruthy();
+    expect(await within(confirm).findByText(/Enable a TCP, TLS or file sink first/)).toBeTruthy();
     expect(auditExportState.sinks).toHaveLength(1);
   });
 

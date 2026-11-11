@@ -24,7 +24,10 @@
 //!   network cannot lock an account for the others.
 //! - [`ThrottleKey::Account`], the account across every network: a delay with a short
 //!   ceiling once the account fails more often than one network may ([`LockPolicy::account_wide`]),
-//!   which keeps a distributed guess slow without locking anyone out.
+//!   which keeps a distributed guess slow without locking anyone out. It holds for every
+//!   account, the last administrator included, never locks, and is taken with
+//!   [`Throttle::admit`], which gives one attempt per delay however many arrive at once.
+//!   The lock belongs to the account and one network only.
 //! - [`ThrottleKey::Source`], a client network across every account, with
 //!   [`LockoutPolicy::source_policy`], which slows password spraying.
 //!
@@ -238,11 +241,22 @@ pub struct LockPolicy {
     pub lock_secs: u32,
     /// The ceiling of the account-wide delay, in seconds (0 to 600; 0 switches the delay
     /// off). The delay starts once the account fails, across every network, as often as
-    /// one network may before its lock; that is also when the alarm is raised.
+    /// one network may before its lock.
     pub account_max_delay_secs: u32,
     /// Whether the lock also holds for a passkey sign-in (Hardened). Otherwise a passkey,
     /// which cannot be guessed, signs in through the lock.
     pub passkey_holds_lock: bool,
+    /// The failed attempts of an account, counted across every network, that raise the
+    /// alarm `auth.alarm.sign_in_failures` (1 to 100; default 5); it is raised again each
+    /// time the count doubles. A policy stored without the field gets 5.
+    #[serde(default = "default_alarm_after_failures")]
+    pub alarm_after_failures: u32,
+}
+
+/// The default of [`LockPolicy::alarm_after_failures`], also for a stored policy from before
+/// the field.
+const fn default_alarm_after_failures() -> u32 {
+    LockPolicy::DEFAULT_ALARM_AFTER_FAILURES
 }
 
 impl Default for LockPolicy {
@@ -256,6 +270,7 @@ impl Default for LockPolicy {
             lock_secs: 1_800,
             account_max_delay_secs: 60,
             passkey_holds_lock: false,
+            alarm_after_failures: Self::DEFAULT_ALARM_AFTER_FAILURES,
         }
     }
 }
@@ -269,6 +284,10 @@ impl LockPolicy {
     pub const MIN_LOCK_SECS: u32 = 60;
     /// The highest account-wide ceiling: ten minutes.
     pub const MAX_ACCOUNT_DELAY_SECS: u32 = 600;
+    /// The default of the failures that raise the alarm.
+    pub const DEFAULT_ALARM_AFTER_FAILURES: u32 = 5;
+    /// The most failures before the alarm.
+    pub const MAX_ALARM_AFTER_FAILURES: u32 = 100;
 
     /// The default of the Hardened profile: the numbers of [`LockPolicy::default`], and the
     /// lock holds for a passkey as well.
@@ -279,8 +298,9 @@ impl LockPolicy {
         }
     }
 
-    /// Whether this policy is weaker than `baseline` in any respect: more attempts before
-    /// the first wait or before the lock, less waiting in total, a shorter lock, a lower
+    /// Whether this policy is weaker than `baseline` in any respect: a later alarm, more
+    /// attempts before the first wait or before the lock, less waiting in total, a shorter
+    /// lock, a lower
     /// account-wide ceiling, or a passkey that passes a lock the baseline holds.
     pub fn weaker_than(&self, baseline: &Self) -> bool {
         let total = |policy: &Self| -> u64 {
@@ -296,6 +316,7 @@ impl LockPolicy {
             || total(self) < total(baseline)
             || self.lock_secs < baseline.lock_secs
             || self.account_max_delay_secs < baseline.account_max_delay_secs
+            || self.alarm_after_failures > baseline.alarm_after_failures
             || (baseline.passkey_holds_lock && !self.passkey_holds_lock)
     }
 
@@ -345,9 +366,11 @@ impl LockPolicy {
     }
 
     /// The policy of [`ThrottleKey::Account`]: no delay up to the lock threshold, then 1 s
-    /// doubling up to `account_max_delay_secs`, never a lock, forgotten after the lock's
-    /// duration (at least an hour) without a failure. Under `Off`, or with a ceiling of 0,
-    /// the failures are still counted (for the alarm) but never delay.
+    /// doubling up to `account_max_delay_secs`, never a lock (the owner's decision: an
+    /// account-wide measure delays, for every account, and only the account from one
+    /// network is locked), forgotten after the lock's
+    /// duration (at least an hour) without a failure. With a ceiling of 0 the failures are
+    /// still counted (for the alarm) but never delay; under `Off` nothing is counted.
     pub fn account_wide(&self, mode: LockoutMode) -> LockoutPolicy {
         let ceiling = Duration::from_secs(u64::from(self.account_max_delay_secs));
         let delays = mode != LockoutMode::Off && !ceiling.is_zero();
@@ -367,11 +390,11 @@ impl LockPolicy {
         }
     }
 
-    /// Whether account-wide failure number `failures` raises the alarm: at the lock
-    /// threshold, and again each time the count doubles, so a long attack is reported
-    /// without one alarm per attempt.
+    /// Whether account-wide failure number `failures` raises the alarm: at
+    /// [`alarm_after_failures`](Self::alarm_after_failures), and again each time the count
+    /// doubles, so a long attack is reported without one alarm per attempt.
     pub fn alarms_at(&self, failures: u32) -> bool {
-        let threshold = self.lock_threshold().max(1);
+        let threshold = self.alarm_after_failures.max(1);
         failures >= threshold
             && failures.is_multiple_of(threshold)
             && (failures / threshold).is_power_of_two()
@@ -402,6 +425,11 @@ impl LockPolicy {
         }
         if self.account_max_delay_secs > Self::MAX_ACCOUNT_DELAY_SECS {
             return Err(invalid("account_max_delay_secs must be 0 to 600"));
+        }
+        if self.alarm_after_failures == 0
+            || self.alarm_after_failures > Self::MAX_ALARM_AFTER_FAILURES
+        {
+            return Err(invalid("alarm_after_failures must be 1 to 100"));
         }
         Ok(())
     }
@@ -485,6 +513,14 @@ pub struct Retry {
     /// lock. `None` when there is no known end: the lock lasts until an administrator unlocks
     /// it (its timeout is beyond the representable time range).
     pub after: Option<Duration>,
+}
+
+/// A turn of a delay taken by [`Throttle::admit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Turn {
+    at: Timestamp,
+    previous: Timestamp,
+    failures: u32,
 }
 
 /// The result of [`Throttle::record_failure`].
@@ -646,6 +682,66 @@ impl Throttle {
         self.check_as(key, policy, now, true)
     }
 
+    /// [`Throttle::check`] that also takes the attempt's turn: once the key's delay is in
+    /// force, an attempt it allows moves the start of the next delay to `now`, under the
+    /// same lock as the check, so attempts that arrive together get one turn per delay
+    /// instead of all passing before the first of them fails. A failure then counts as
+    /// usual ([`Throttle::record_failure`]); a success leaves the count as it is.
+    ///
+    /// Before the delay starts (the free attempts) nothing is taken, so attempts that
+    /// arrive together during the free attempts can each pass; the count catches up as
+    /// they fail. A turn does not prolong how long the count is kept beyond the delay it
+    /// starts: only failures do.
+    ///
+    /// Returns the turn taken, if any, for [`give_back`](Self::give_back).
+    ///
+    /// # Errors
+    ///
+    /// [`Retry`] when the attempt is not allowed yet.
+    pub fn admit(
+        &self,
+        key: &ThrottleKey,
+        policy: &LockoutPolicy,
+        now: Timestamp,
+    ) -> Result<Option<Turn>, Retry> {
+        if policy.mode == LockoutMode::Off {
+            return Ok(None);
+        }
+        let mut table = self.table();
+        let Some(tracked) = table.get_mut(key) else {
+            return Ok(None);
+        };
+        if !tracked.is_live(now) {
+            table.remove(key);
+            return Ok(None);
+        }
+        tracked.verdict(policy, now, false)?;
+        let delay = policy.delay_after(tracked.failures);
+        if delay.is_zero() {
+            return Ok(None);
+        }
+        let turn = Turn {
+            at: now,
+            previous: tracked.last_failure,
+            failures: tracked.failures,
+        };
+        tracked.last_failure = now;
+        tracked.forget_at = tracked.forget_at.max(add_saturating(now, delay));
+        Ok(Some(turn))
+    }
+
+    /// Gives a turn back when the attempt that took it was refused before any credential
+    /// was checked (the bound on password hashing was reached): the delay runs from the
+    /// failure before it again, unless another failure has been counted since.
+    pub fn give_back(&self, key: &ThrottleKey, turn: Turn) {
+        if let Some(tracked) = self.table().get_mut(key)
+            && tracked.last_failure == turn.at
+            && tracked.failures == turn.failures
+        {
+            tracked.last_failure = turn.previous;
+        }
+    }
+
     /// The lock `key` holds at `now`, if any, ignoring its delay.
     pub fn lock_of(&self, key: &ThrottleKey, now: Timestamp) -> Option<Retry> {
         let table = self.table();
@@ -744,7 +840,8 @@ impl Throttle {
             };
         }
 
-        tracked.last_failure = now;
+        // Never backwards: a turn admitted after this attempt started stays the later one.
+        tracked.last_failure = tracked.last_failure.max(now);
         let delay = policy.delay_after(failures);
         if !guarded && policy.mode.locks() && failures >= policy.lock_after.max(1) {
             let until = add_saturating(now, policy.lock_duration);
@@ -1028,6 +1125,66 @@ mod tests {
         let shown = format!("{throttle:?}");
         assert!(!shown.contains("secret-name"));
         assert!(shown.contains("tracked: 1"));
+    }
+
+    #[test]
+    fn an_admitted_attempt_takes_the_turn_of_the_delay() {
+        let throttle = Throttle::new(16);
+        let policy = LockPolicy::default().account_wide(LockoutMode::DelayThenTemporaryLock);
+        let key = ThrottleKey::account("alice");
+        let start = at(1_000);
+        // The free attempts: every one is admitted and nothing is taken.
+        for _ in 0..policy.free_attempts {
+            throttle.admit(&key, &policy, start).expect("free");
+            throttle.record_failure(&key, &policy, start);
+        }
+        // One failure more: the delay is in force (1 s after the last failure).
+        throttle.record_failure(&key, &policy, start);
+        let later = at(1_001);
+        // Of ten attempts that arrive together, one gets the turn.
+        let admitted = (0..10)
+            .filter(|_| throttle.admit(&key, &policy, later).is_ok())
+            .count();
+        assert_eq!(admitted, 1);
+        // The turn holds until the delay after it has passed.
+        assert!(throttle.admit(&key, &policy, at(1_001)).is_err());
+        let turn = throttle
+            .admit(&key, &policy, at(1_002))
+            .expect("the next turn")
+            .expect("a turn is taken");
+        // Given back, the turn is free again at once.
+        throttle.give_back(&key, turn);
+        assert!(throttle.admit(&key, &policy, at(1_002)).is_ok());
+        // A failure counted after a turn is not undone by giving the turn back, and a
+        // failure that started before the turn does not move it backwards.
+        let turn = throttle
+            .admit(&key, &policy, at(1_010))
+            .expect("allowed")
+            .expect("a turn");
+        throttle.record_failure(&key, &policy, at(1_009));
+        throttle.give_back(&key, turn);
+        assert!(throttle.admit(&key, &policy, at(1_010)).is_err());
+    }
+
+    #[test]
+    fn the_account_wide_measure_delays_and_never_locks() {
+        let lock = LockPolicy::default();
+        for mode in [
+            LockoutMode::ProgressiveDelay,
+            LockoutMode::DelayThenTemporaryLock,
+            LockoutMode::LockUntilUnlock,
+        ] {
+            let policy = lock.account_wide(mode);
+            assert_eq!(policy.free_attempts, lock.lock_threshold());
+            assert_eq!(policy.max_delay, secs(60));
+            let throttle = Throttle::new(4);
+            let key = ThrottleKey::account("alice");
+            for n in 0..10_000 {
+                let outcome = throttle.record_failure(&key, &policy, at(1_000 + n));
+                assert_eq!(outcome.locked_until, None, "{mode:?} {n}");
+                assert!(outcome.delay <= secs(60));
+            }
+        }
     }
 
     #[test]

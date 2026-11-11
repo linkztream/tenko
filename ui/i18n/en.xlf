@@ -937,7 +937,7 @@
         <segment><source>This passkey is already registered.</source></segment>
       </unit>
       <unit id="errors.auth.webauthn.origin_mismatch">
-        <segment><source>The passkey was created for another address. Open Tenko DDI by its host name.</source></segment>
+        <segment><source>The passkey sign-in ran on {origin}, which is not an allowed address. Open Tenko DDI at its own address, or ask an administrator to add the address to [auth] origins in the server configuration.</source></segment>
       </unit>
       <unit id="errors.auth.webauthn.rp_id_mismatch">
         <segment><source>The passkey belongs to another host name.</source></segment>
@@ -1336,6 +1336,10 @@
       </unit>
       <unit id="account.passkey.kind.synced">
         <segment><source>Synced passkey</source></segment>
+      </unit>
+      <unit id="account.passkey.unconfirmed">
+        <notes><note category="description">Shown under a security key whose attestation no attestation root of the server configuration confirms.</note></notes>
+        <segment><source>No configured attestation root confirms the make of this key.</source></segment>
       </unit>
       <unit id="account.passkey.kind.hardware">
         <segment><source>Hardware security key</source></segment>

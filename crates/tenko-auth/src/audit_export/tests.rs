@@ -656,3 +656,182 @@ async fn a_settings_change_restarts_the_sinks_and_a_disabled_sink_rests() {
     stop.cancel();
     assert_eq!(task.await.expect("joins"), Ok(()));
 }
+
+#[tokio::test]
+async fn a_client_key_is_read_once_per_worker_and_its_use_is_audited() {
+    use super::exporter::CLIENT_KEY_ACTION;
+    use super::sink::net::tests::{make_ca, make_leaf};
+    use tenko_vault::{MemVault, SecretBytes, SecretPurpose, SecretSpec, Vault};
+
+    let store = Arc::new(MemStore::default());
+    let vault = Arc::new(MemVault::with_store(Arc::clone(&store)));
+    write_records(&store, 3).await;
+    let (port, ca_pem, mut rx) = tls_receiver().await;
+    let client_pki = make_ca("Tenko client CA");
+    let (client_cert, client_key) = make_leaf(&client_pki, &["ctl1.example.test"]);
+    let ctx = tenko_core::RequestCtx::system(SystemComponent::Api);
+    let key = vault
+        .put_operator(
+            &ctx,
+            SecretSpec::new(SecretPurpose::from_static("sys.audit_export_key")),
+            SecretBytes::from(client_key.into_bytes()),
+        )
+        .await
+        .expect("stored")
+        .secret;
+    let sink = Sink {
+        id: Uuid::now_v7(),
+        name: "siem-mtls".to_owned(),
+        enabled: true,
+        format: ExportFormat::Json,
+        target: SinkTarget::Syslog(SyslogTarget {
+            transport: SyslogTransport::Tls,
+            host: "127.0.0.1".to_owned(),
+            port: Some(port),
+            facility: Facility::default(),
+            tls: TlsOptions {
+                ca_pem: Some(ca_pem),
+                server_name: Some("siem.example.test".to_owned()),
+                client_cert_pem: Some(client_cert),
+                client_key: Some(key),
+            },
+        }),
+    };
+    store_settings(
+        &store,
+        &AuditExportSettings {
+            sinks: vec![sink.clone()],
+            alert_after_secs: 300,
+        },
+    )
+    .await;
+    let epoch = bump_epoch(&store).await;
+    let exporter = AuditExporter::new(
+        Arc::clone(&store) as Arc<dyn Store>,
+        Opener {
+            file_dir: None,
+            vault: Some(Arc::clone(&vault) as Arc<dyn Vault>),
+            timeouts: Timeouts {
+                connect: Duration::from_secs(2),
+                write: Duration::from_secs(2),
+            },
+        },
+        "ctl1.example.test",
+        "0.0.1",
+    )
+    .with_tuning(tuning());
+    let stop = CancellationToken::new();
+    let token = stop.clone();
+    let task = tokio::spawn(async move { exporter.run(epoch, token).await });
+    let lines = receive_until(&mut rx, 3).await;
+    assert!(
+        lines.iter().any(|line| line.contains("\"seq\":3,")),
+        "{lines:?}"
+    );
+    stop.cancel();
+    assert_eq!(task.await.expect("joins"), Ok(()));
+    let uses: Vec<AuditRecord> = audit_records(&store)
+        .await
+        .into_iter()
+        .filter(|record| record.draft.action == CLIENT_KEY_ACTION)
+        .collect();
+    assert_eq!(uses.len(), 1, "one record for the worker's one read");
+    assert_eq!(
+        uses[0].draft.objects,
+        vec![tenko_core::ObjectRef::from(key)]
+    );
+    assert_eq!(
+        uses[0]
+            .draft
+            .details
+            .context
+            .get("sink")
+            .map(String::as_str),
+        Some(sink.id.to_string().as_str())
+    );
+}
+
+#[tokio::test]
+async fn a_system_secret_as_client_key_fails_the_sink_without_a_read() {
+    use super::exporter::CLIENT_KEY_ACTION;
+    use tenko_vault::{MemVault, SecretBytes, SecretPurpose, SecretSpec, Vault};
+
+    let store = Arc::new(MemStore::default());
+    let vault = Arc::new(MemVault::with_store(Arc::clone(&store)));
+    write_records(&store, 2).await;
+    let ctx = tenko_core::RequestCtx::system(SystemComponent::Api);
+    let system = vault
+        .put_system(
+            &ctx,
+            SecretSpec::new(SecretPurpose::from_static("auth.totp")),
+            SecretBytes::from(b"seed".to_vec()),
+        )
+        .await
+        .expect("stored")
+        .secret;
+    // A row stored before the class was checked names a system secret.
+    let sink = Sink {
+        id: Uuid::now_v7(),
+        name: "old".to_owned(),
+        enabled: true,
+        format: ExportFormat::Json,
+        target: SinkTarget::Syslog(SyslogTarget {
+            transport: SyslogTransport::Tls,
+            host: "127.0.0.1".to_owned(),
+            port: Some(9),
+            facility: Facility::default(),
+            tls: TlsOptions {
+                ca_pem: None,
+                server_name: None,
+                client_cert_pem: Some(
+                    "-----BEGIN CERTIFICATE-----\nAAEC\n-----END CERTIFICATE-----\n".to_owned(),
+                ),
+                client_key: Some(system),
+            },
+        }),
+    };
+    store_settings(
+        &store,
+        &AuditExportSettings {
+            sinks: vec![sink.clone()],
+            alert_after_secs: 300,
+        },
+    )
+    .await;
+    let epoch = bump_epoch(&store).await;
+    let exporter = AuditExporter::new(
+        Arc::clone(&store) as Arc<dyn Store>,
+        Opener {
+            file_dir: None,
+            vault: Some(Arc::clone(&vault) as Arc<dyn Vault>),
+            timeouts: Timeouts::default(),
+        },
+        "ctl1.example.test",
+        "0.0.1",
+    )
+    .with_tuning(tuning());
+    let stop = CancellationToken::new();
+    let token = stop.clone();
+    let task = tokio::spawn(async move { exporter.run(epoch, token).await });
+    let id = sink.id;
+    let watched = Arc::clone(&store);
+    eventually("the sink fails on its key", move || {
+        let store = Arc::clone(&watched);
+        async move {
+            cursor(&store, id)
+                .await
+                .and_then(|cursor| cursor.last_error)
+                .is_some_and(|error| error.code == "audit.export.client_key")
+        }
+    })
+    .await;
+    stop.cancel();
+    assert_eq!(task.await.expect("joins"), Ok(()));
+    assert!(
+        audit_records(&store)
+            .await
+            .iter()
+            .all(|record| record.draft.action != CLIENT_KEY_ACTION),
+        "a refused key is not recorded as used"
+    );
+}

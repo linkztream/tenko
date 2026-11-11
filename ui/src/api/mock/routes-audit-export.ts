@@ -121,7 +121,10 @@ export function auditExportView(): View {
   const sinks = auditExportState.sinks.map(viewOfSink);
   const value = auditExportOf(db.settings);
   const required = value === "required";
-  const satisfied = !required || auditExportState.sinks.some((s) => s.enabled);
+  const satisfied = !required || auditExportState.sinks.some(confirms);
+  const delivering = !required || sinks.some((s) => confirms(s) && ["ok", "pending", "failing"].includes(s.status.state));
+  // `delivering` is not in the generated schema until it is regenerated; a variable skips the excess-property check.
+  const policy = { audit_export: value, required, satisfied, delivering };
   const warnings: Warning[] = [];
   const bad = sinks.filter((s) => s.status.state === "alarm" || s.status.state === "behind");
   if (bad.length > 0) {
@@ -132,16 +135,26 @@ export function auditExportView(): View {
         sinks: bad.map((s) => s.name).join(", "),
         count: String(bad.length),
         since: bad[0]?.status.failing_since ?? bad[0]?.status.updated_at ?? iso(Date.now()),
-        required: String(required && !sinks.some((s) => s.enabled && (s.status.state === "ok" || s.status.state === "pending"))),
+        required: String(required && !delivering),
       },
     });
   }
   if (required && !satisfied) {
-    warnings.push({ code: "audit.export.required", detail: "the profile requires an audit export and no sink is enabled" });
+    warnings.push({
+      code: "audit.export.required",
+      detail: "the profile requires an audit export and no sink that confirms delivery is enabled",
+      params: { reason: "no_sink" },
+    });
+  } else if (required && !delivering) {
+    warnings.push({
+      code: "audit.export.required",
+      detail: "the profile requires an audit export and no sink delivers",
+      params: { reason: "not_delivering" },
+    });
   }
   return {
     alert_after_secs: auditExportState.alert_after_secs,
-    policy: { audit_export: value, required, satisfied },
+    policy,
     revision: auditExportState.revision,
     sinks,
     store_head: storeHead(),
@@ -165,8 +178,17 @@ function validHost(host: string): boolean {
   return host.length > 0 && host.length <= 253 && host.split(".").every((label) => /^[A-Za-z0-9_-]{1,63}$/.test(label));
 }
 
+const DEVICE_NAME = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i;
+
+/** A plain file name: no trailing dot and no Windows device name (also with an extension), on any platform. */
 function validFileName(name: string): boolean {
-  return /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,127}$/.test(name);
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,127}$/.test(name) || name.endsWith(".")) return false;
+  return !DEVICE_NAME.test(name.split(".")[0] ?? "");
+}
+
+/** A sink that confirms delivery: TCP, TLS or a file. UDP confirms nothing. */
+function confirms(sink: Sink): boolean {
+  return sink.enabled && (sink.target.kind === "file" || sink.target.transport !== "udp");
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -243,7 +265,7 @@ function validate(raw: unknown[], alert: unknown, prefix: (index: number) => str
       if (transport === "tls") {
         for (const field of ["ca_pem", "client_cert_pem"] as const) {
           const pem = tls[field];
-          if (pem !== null && !pem.includes("-----BEGIN CERTIFICATE-----")) errors.push(fieldError(at(`target.tls.${field}`), "audit.export.pem"));
+          if (pem !== null && !(pem.includes("-----BEGIN CERTIFICATE-----") && pem.includes("-----END CERTIFICATE-----"))) errors.push(fieldError(at(`target.tls.${field}`), "audit.export.pem"));
         }
         if (tls.server_name !== null && !validHost(tls.server_name)) errors.push(fieldError(at("target.tls.server_name"), "audit.export.host"));
         if ((tls.client_cert_pem === null) !== (tls.client_key === null) || (tls.client_key !== null && !UUID.test(tls.client_key))) {
@@ -301,8 +323,8 @@ export const auditExportRoutes = [
     const body = await ctx.body();
     if (body.sinks !== undefined && !Array.isArray(body.sinks)) throw new Problem("sys.invalid_request", { detail: "sinks must be a list" });
     const { sinks, alert } = validate((body.sinks as unknown[] | undefined) ?? [], body.alert_after_secs, (i) => `sinks[${i}]`);
-    if (auditExportOf(db.settings) === "required" && !sinks.some((s) => s.enabled)) {
-      throw new Problem("audit.export.required", { status: 409, detail: "the profile requires an audit export and no sink would be enabled" });
+    if (auditExportOf(db.settings) === "required" && !sinks.some(confirms)) {
+      throw new Problem("audit.export.required", { status: 409, detail: "the profile requires an audit export and no sink that confirms delivery would be enabled" });
     }
     auditExportState.sinks = sinks;
     auditExportState.alert_after_secs = alert;

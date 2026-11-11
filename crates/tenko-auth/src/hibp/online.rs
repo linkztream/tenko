@@ -22,7 +22,7 @@ const MAX_BODY: usize = 1 << 20;
 
 /// A [`HibpRangeSource`] that asks the Pwned Passwords range API (or a compatible mirror) over
 /// HTTP(S). It sends `GET {base_url}{prefix}` with the headers `Add-Padding: true` and
-/// `User-Agent: tenko-ddi`, and gives up after 5 seconds.
+/// `User-Agent: tenko-ddi`, follows no redirect, and gives up after 5 seconds.
 #[derive(Debug, Clone)]
 pub struct HttpRangeSource {
     client: reqwest::Client,
@@ -52,9 +52,12 @@ impl HttpRangeSource {
             "Add-Padding",
             reqwest::header::HeaderValue::from_static("true"),
         );
+        // No redirects: a redirect could send the hash prefix to another host or over
+        // plain HTTP. A mirror answers at its own address; a 3xx counts as a failure.
         let client = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .timeout(TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
             .default_headers(headers)
             .build()
             .map_err(|error| HibpError::Unavailable(describe(&error)))?;
@@ -129,6 +132,51 @@ mod tests {
         let mirror =
             HttpRangeSource::with_base_url("https://mirror.example.test/range").expect("client");
         assert_eq!(mirror.base_url, "https://mirror.example.test/range/");
+    }
+
+    #[tokio::test]
+    async fn a_redirect_is_not_followed() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // A source that answers every request with a redirect to a second listener, which
+        // counts the requests it gets.
+        let target = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("binds");
+        let target_port = target.local_addr().expect("address").port();
+        let reached = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = std::sync::Arc::clone(&reached);
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = target.accept().await {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buffer = [0u8; 1024];
+                let _ = socket.read(&mut buffer).await;
+                let _ = socket
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+                    .await;
+            }
+        });
+        let source = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("binds");
+        let port = source.local_addr().expect("address").port();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = source.accept().await {
+                let mut buffer = [0u8; 1024];
+                let _ = socket.read(&mut buffer).await;
+                let answer = format!(
+                    "HTTP/1.1 302 Found\r\nlocation: http://127.0.0.1:{target_port}/range/5BAA6\r\ncontent-length: 0\r\n\r\n"
+                );
+                let _ = socket.write_all(answer.as_bytes()).await;
+            }
+        });
+        let client = HttpRangeSource::with_base_url(format!("http://127.0.0.1:{port}/range/"))
+            .expect("client");
+        let answer = client.range("5BAA6").await;
+        assert!(
+            matches!(&answer, Err(HibpError::Unavailable(detail)) if detail.contains("302")),
+            "{answer:?}"
+        );
+        assert_eq!(reached.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

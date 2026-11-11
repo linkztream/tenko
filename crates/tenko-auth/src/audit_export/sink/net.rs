@@ -238,6 +238,11 @@ impl Transport for TcpTransport {
     }
 }
 
+/// The failure text of a client key that does not parse or does not fit the client
+/// certificate.
+pub const UNUSABLE_CLIENT_KEY: &str =
+    "the client key is not a private key in PEM that fits the client certificate";
+
 /// The TLS client configuration of a sink.
 ///
 /// # Errors
@@ -285,18 +290,13 @@ pub fn client_config(
         }
         let pem = client_key_pem
             .ok_or_else(|| SinkError::new(FailureKind::ClientKey, "the client key is missing"))?;
-        let key = PrivateKeyDer::from_pem_slice(pem).map_err(|_| {
-            SinkError::new(
-                FailureKind::ClientKey,
-                "the client key is not a PEM private key",
-            )
-        })?;
-        builder.with_client_auth_cert(chain, key).map_err(|error| {
-            SinkError::new(
-                FailureKind::ClientKey,
-                format!("the client key does not fit the client certificate: {error}"),
-            )
-        })?
+        // One text for every way the key is unusable: what the secret holds is not for the
+        // person who configures the sink to learn from the error.
+        let unusable = || SinkError::new(FailureKind::ClientKey, UNUSABLE_CLIENT_KEY);
+        let key = PrivateKeyDer::from_pem_slice(pem).map_err(|_| unusable())?;
+        builder
+            .with_client_auth_cert(chain, key)
+            .map_err(|_| unusable())?
     } else {
         builder.with_no_client_auth()
     };
@@ -571,8 +571,12 @@ pub(crate) mod tests {
         // A key of another certificate does not fit.
         let (_, other_key) = make_leaf(&pki, &["other.example.test"]);
         let mismatch = client_config(&tls, Some(other_key.as_bytes()));
-        assert_eq!(mismatch.expect_err("mismatch").kind, FailureKind::ClientKey);
+        let mismatch = mismatch.expect_err("mismatch");
+        assert_eq!(mismatch.kind, FailureKind::ClientKey);
         assert!(!garbage.detail.contains("not a key"));
+        // A key that does not parse and a key that does not fit read alike.
+        assert_eq!(garbage.detail, UNUSABLE_CLIENT_KEY);
+        assert_eq!(mismatch.detail, UNUSABLE_CLIENT_KEY);
         // A broken certificate PEM is a TLS problem.
         tls.client_cert_pem =
             Some("-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n".to_owned());

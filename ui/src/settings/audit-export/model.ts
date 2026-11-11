@@ -237,13 +237,19 @@ export type FormProblems = Partial<Record<FormField, string>>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILE_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,127}$/;
+const DEVICE_NAME = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i;
+
+/** A plain file name: no trailing dot and no Windows device name (also with an extension). */
+function validFileName(name: string): boolean {
+  return FILE_NAME.test(name) && !name.endsWith(".") && !DEVICE_NAME.test(name.split(".")[0] ?? "");
+}
 
 /** Why a sink cannot be saved, by field; empty when it can. The server checks again. */
 export function formProblems(form: SinkForm): FormProblems {
   const out: FormProblems = {};
   if (!form.name.trim()) out.name = t("audit_export.error.name");
   if (form.choice === "file") {
-    if (!FILE_NAME.test(form.file.trim())) out.file = t("audit_export.error.file");
+    if (!validFileName(form.file.trim())) out.file = t("audit_export.error.file");
     const bytes = maxBytesOf(form);
     if (!Number.isFinite(bytes) || bytes < MIN_MAX_BYTES || bytes > MAX_MAX_BYTES) out.max_mib = t("audit_export.error.max_mib");
     const keep = form.keep.trim() === "" ? DEFAULT_KEEP : Number(form.keep);

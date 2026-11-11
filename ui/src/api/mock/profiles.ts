@@ -25,6 +25,7 @@ function lockPolicy(passkeyHoldsLock: boolean): LockPolicy {
     lock_secs: 1_800,
     account_max_delay_secs: 60,
     passkey_holds_lock: passkeyHoldsLock,
+    alarm_after_failures: 5,
   };
 }
 

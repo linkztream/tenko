@@ -191,9 +191,11 @@ impl Modify for SecurityAddon {
         components.add_security_scheme(
             "session",
             SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
-                "tenko_session",
-                "Session cookie of the web UI. Mutating requests must carry a same-origin \
-                 `Origin` header.",
+                tenko_auth::service::HOST_SESSION_COOKIE,
+                "Session cookie of the web UI: `__Host-tenko_session` over HTTPS, \
+                 `tenko_session` over plain HTTP (Lab); a request is read with the name of \
+                 its own scheme only. Mutating requests must carry a same-origin `Origin` \
+                 header.",
             ))),
         );
         components.add_security_scheme(

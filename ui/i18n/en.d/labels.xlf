@@ -1038,6 +1038,10 @@
         <notes><note category="description">What the audit action scan.stop is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Stop scanning</source></segment>
       </unit>
+      <unit id="audit.action.sys.audit_export.client_key">
+        <notes><note category="description">What the audit action sys.audit_export.client_key is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Read an audit export client key</source></segment>
+      </unit>
       <unit id="audit.action.sys.audit_export.failing">
         <notes><note category="description">What the audit action sys.audit_export.failing is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Raise an audit export alarm</source></segment>

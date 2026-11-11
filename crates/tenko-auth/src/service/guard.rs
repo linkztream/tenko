@@ -13,8 +13,8 @@
 //!
 //! The last administrator (the one person left who administers) is never locked by the
 //! network: its failures still wait out the schedule, whose last wait then repeats, but no
-//! lock is reached, stored or enforced, and the account-wide delay does not apply. The
-//! alarm still does. `tenko user unlock` lifts the locks of any account on a stopped
+//! lock is reached, stored or enforced. The account-wide delay applies to it as to every
+//! account, and never locks. The alarm applies too. `tenko user unlock` lifts the locks of any account on a stopped
 //! controller.
 //!
 //! A network from which the account completed a sign-in in the last 30 days is a known
@@ -71,10 +71,13 @@ pub(super) fn truncated(name: &str) -> String {
     name.trim().chars().take(MAX_NAME_CHARS).collect()
 }
 
-/// The answer to an attempt that must wait.
+/// The answer to an attempt that must wait: whole seconds, rounded up, so a client that
+/// waits as told does not arrive before the turn.
 pub(super) fn throttled(retry: Retry) -> AuthError {
     AuthError::Throttled {
-        retry_after: retry.after.map(|after| after.as_secs().max(1)),
+        retry_after: retry
+            .after
+            .map(|after| (after.as_secs() + u64::from(after.subsec_nanos() > 0)).max(1)),
     }
 }
 
@@ -352,15 +355,6 @@ impl KnownNetworks {
     }
 }
 
-/// The step of a sign-in an attempt is checked at.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Step {
-    /// The password or PIN.
-    Password,
-    /// A TOTP or recovery code after a correct password.
-    SecondFactor,
-}
-
 /// One sign-in attempt as the lock sees it.
 #[derive(Debug, Clone)]
 pub(super) struct Attempt {
@@ -462,9 +456,10 @@ impl AuthService {
     }
 
     /// Checks an attempt before any credential is verified: the waits and the lock of the
-    /// account from this network, the account-wide delay, the spraying delay of the network
-    /// and the stored lock. The last administrator is held by the waits and the spraying
-    /// delay only.
+    /// account from this network, the spraying delay of the network, the stored lock, and
+    /// last the account-wide delay, whose turn an allowed attempt takes. The last
+    /// administrator is held by the waits, the spraying delay and the account-wide delay,
+    /// never by a lock.
     ///
     /// # Errors
     ///
@@ -473,11 +468,10 @@ impl AuthService {
         &self,
         view: &dyn ReadView,
         attempt: &Attempt,
-        step: Step,
         now: tenko_core::Timestamp,
-    ) -> Result<(), AuthError> {
+    ) -> Result<Option<crate::lockout::Turn>, AuthError> {
         if attempt.mode == LockoutMode::Off {
-            return Ok(());
+            return Ok(None);
         }
         let per_source = attempt.per_source();
         let key = attempt.per_source_key();
@@ -487,19 +481,6 @@ impl AuthService {
             self.throttle.check(&key, &per_source, now)
         }
         .map_err(throttled)?;
-        // The account-wide delay holds back networks the account has not signed in from
-        // lately. For the last administrator it holds at the second factor only: a password
-        // already known must not be followed by codes guessed from many networks, and the
-        // delay never locks.
-        if !attempt.known && (!attempt.guarded || step == Step::SecondFactor) {
-            self.throttle
-                .check(
-                    &attempt.account_key(),
-                    &attempt.policy.account_wide(attempt.mode),
-                    now,
-                )
-                .map_err(throttled)?;
-        }
         if let Some(ip) = attempt.source {
             self.throttle
                 .check(
@@ -512,11 +493,47 @@ impl AuthService {
         if !attempt.guarded
             && let Some(lock) = Self::stored_lock(view, &attempt.name, attempt.source, now)?
         {
-            return Err(AuthError::Throttled {
-                retry_after: Some(lock.until.saturating_since(now).as_secs().max(1)),
-            });
+            return Err(throttled(Retry {
+                after: Some(lock.until.saturating_since(now)),
+            }));
         }
-        Ok(())
+        // The account-wide delay holds back every network the account has not completed a
+        // sign-in from lately, at the password and at the second factor, for every account:
+        // limits per network do not stop guesses from endlessly many networks. It never
+        // locks. It comes last, because an allowed attempt takes its turn.
+        if attempt.known {
+            return Ok(None);
+        }
+        self.throttle
+            .admit(
+                &attempt.account_key(),
+                &attempt.policy.account_wide(attempt.mode),
+                now,
+            )
+            .map_err(throttled)
+    }
+
+    /// Gives back the account-wide turn of an attempt that was refused before its
+    /// credential was checked, or whose correct password opened a second factor (each code
+    /// then takes a turn of its own).
+    pub(super) fn give_back_turn(&self, attempt: &Attempt, turn: Option<crate::lockout::Turn>) {
+        if let Some(turn) = turn {
+            self.throttle.give_back(&attempt.account_key(), turn);
+        }
+    }
+
+    /// Passes `result` on, giving the attempt's turn back first when the bound on password
+    /// hashing refused the computation: nothing was checked.
+    pub(super) fn turn_back_if_refused<T>(
+        &self,
+        attempt: &Attempt,
+        turn: Option<crate::lockout::Turn>,
+        result: Result<T, AuthError>,
+    ) -> Result<T, AuthError> {
+        if matches!(result, Err(AuthError::Throttled { .. })) {
+            self.give_back_turn(attempt, turn);
+        }
+        result
     }
 
     /// Whether a passkey sign-in must respect the lock (the policy says so, as under
@@ -539,9 +556,9 @@ impl AuthService {
             return Err(throttled(retry));
         }
         if let Some(lock) = Self::stored_lock(view, &attempt.name, attempt.source, now)? {
-            return Err(AuthError::Throttled {
-                retry_after: Some(lock.until.saturating_since(now).as_secs().max(1)),
-            });
+            return Err(throttled(Retry {
+                after: Some(lock.until.saturating_since(now)),
+            }));
         }
         Ok(())
     }

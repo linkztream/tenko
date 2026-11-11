@@ -107,7 +107,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(with(Requirement::PublicUntilSetup), until_setup);
     assert_eq!(
         with(Requirement::Session).len(),
-        95,
+        96,
         "the session-only operations"
     );
 }

@@ -257,12 +257,14 @@ async fn one_network_cannot_lock_the_account_for_another() {
 }
 
 /// Across networks an account gets a delay of at most one minute once it fails as often as
-/// one network may, and the alarm is raised then.
+/// one network may. The alarm is raised at the fifth failure across networks, once however
+/// many networks the failures come from, and again at the tenth and the twentieth.
 #[tokio::test]
 async fn the_account_wide_delay_has_a_ceiling_and_raises_the_alarm() {
     let (env, admin) = TestEnv::installed(Profile::Standard).await;
     second_admin(&env, &admin).await;
     let mut longest = 0;
+    let mut raised = Vec::new();
     for n in 1..=24u8 {
         let source = format!("203.0.113.{n}");
         longest = longest.max(
@@ -272,19 +274,70 @@ async fn the_account_wide_delay_has_a_ceiling_and_raises_the_alarm() {
                 .max()
                 .unwrap_or(0),
         );
-        if n == 7 {
-            assert_eq!(alarms(&env, AlarmKind::SignInFailures).await, 0);
-        }
-        if n == 8 {
-            assert_eq!(alarms(&env, AlarmKind::SignInFailures).await, 1);
-        }
+        raised.push(alarms(&env, AlarmKind::SignInFailures).await);
     }
     assert_eq!(longest, 60, "the account-wide ceiling");
-    assert_eq!(
-        alarms(&env, AlarmKind::SignInFailures).await,
-        2,
-        "again at 16"
+    // After failure n (one per network): none before the fifth, one from the fifth to the
+    // ninth, two from the tenth, three from the twentieth.
+    let expected: Vec<usize> = (1..=24)
+        .map(|n| match n {
+            ..=4 => 0,
+            5..=9 => 1,
+            10..=19 => 2,
+            _ => 3,
+        })
+        .collect();
+    assert_eq!(raised, expected);
+}
+
+/// Failed attempts on a name that is no account are counted and slowed like any other, but
+/// raise no alarm: an alarm names an account, and the answers do not differ.
+#[tokio::test]
+async fn a_name_that_is_no_account_raises_no_alarm() {
+    let (env, _) = TestEnv::installed(Profile::Standard).await;
+    let mut answers = Vec::new();
+    for n in 1..=12u8 {
+        answers.push(login(&env, &format!("203.0.113.{n}"), "nobody", WRONG).await);
+    }
+    assert!(
+        answers[..9]
+            .iter()
+            .all(|a| matches!(a, Err(AuthError::InvalidCredentials))),
+        "{answers:?}"
     );
+    assert!(
+        answers[9..]
+            .iter()
+            .all(|a| matches!(a, Err(AuthError::Throttled { .. }))),
+        "{answers:?}"
+    );
+    assert_eq!(alarms(&env, AlarmKind::SignInFailures).await, 0);
+}
+
+/// The alarm threshold is part of the lock policy: three raises it at the third failure.
+#[tokio::test]
+async fn the_alarm_threshold_follows_the_policy() {
+    let (env, admin) = TestEnv::installed(Profile::Standard).await;
+    second_admin(&env, &admin).await;
+    with_settings(&env, |settings| {
+        settings.lockout_policy = Some(tenko_auth::lockout::LockPolicy {
+            alarm_after_failures: 3,
+            ..tenko_auth::lockout::LockPolicy::default()
+        });
+    })
+    .await;
+    for _ in 0..400 {
+        if env.service.settings().lockout_policy().alarm_after_failures == 3 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    for n in 1..=2u8 {
+        fail_waiting(&env, &format!("203.0.113.{n}"), ADMIN).await;
+    }
+    assert_eq!(alarms(&env, AlarmKind::SignInFailures).await, 0);
+    fail_waiting(&env, "203.0.113.3", ADMIN).await;
+    assert_eq!(alarms(&env, AlarmKind::SignInFailures).await, 1);
 }
 
 /// The last administrator is never locked by the network: its waits repeat the last one,
@@ -932,8 +985,8 @@ async fn a_known_network_is_not_held_back_by_the_account_wide_delay() {
         .expect("the known network is not held back");
 }
 
-/// The last administrator meets no account-wide delay at the password, but its second
-/// factor does: codes guessed from many networks are slowed down without a lock.
+/// The last administrator's second factor has the account-wide delay: codes guessed from
+/// many networks are slowed down without a lock, and so is the password step.
 #[tokio::test]
 async fn the_last_administrators_second_factor_has_the_account_wide_delay() {
     let (env, admin) = TestEnv::installed(Profile::Standard).await;
@@ -997,11 +1050,109 @@ async fn the_last_administrators_second_factor_has_the_account_wide_delay() {
         "{answers:?}"
     );
     assert!(answers[9].contains("Throttled"), "{answers:?}");
-    // The password step of the last administrator stays free from a new network.
+    // The password step of the last administrator meets the same delay from a new
+    // network, and so does the network that reached the second factor with the right
+    // password: only a completed sign-in makes a network known.
     assert!(matches!(
         login(&env, "198.51.100.200", ADMIN, ADMIN_PASSWORD).await,
-        Ok(LoginOutcome::SecondFactor { .. })
+        Err(AuthError::Throttled { .. })
     ));
+    assert!(matches!(
+        login(&env, ATTACKER, ADMIN, ADMIN_PASSWORD).await,
+        Err(AuthError::Throttled { .. })
+    ));
+}
+
+/// Guesses at the last administrator's password from many networks meet the account-wide
+/// delay, as for any account: one network each gets its own attempts, the account does
+/// not. Nothing locks, the alarm is raised as for other accounts, and the administrator on
+/// a network it signed in from lately is not held back.
+#[tokio::test]
+async fn guesses_against_the_last_administrator_from_many_networks_meet_the_account_wide_delay() {
+    let (env, _) = TestEnv::installed(Profile::Standard).await;
+    // The administrator signed in from OTHER before the attack.
+    assert!(login(&env, OTHER, ADMIN, ADMIN_PASSWORD).await.is_ok());
+    // Each network fails once, as an attacker with many networks would.
+    let mut answers = Vec::new();
+    for n in 1..=12u8 {
+        answers.push(login(&env, &format!("203.0.113.{n}"), ADMIN, WRONG).await);
+    }
+    // Eight failures pass, the ninth sets the delay, the next networks meet it.
+    assert!(
+        answers[..9]
+            .iter()
+            .all(|a| matches!(a, Err(AuthError::InvalidCredentials))),
+        "{answers:?}"
+    );
+    assert!(
+        answers[9..].iter().all(|a| matches!(
+            a,
+            Err(AuthError::Throttled {
+                retry_after: Some(1..=60)
+            })
+        )),
+        "{answers:?}"
+    );
+    // The delay never grows beyond the ceiling, however long the attack.
+    let mut longest = 0;
+    for n in 13..=40u8 {
+        let source = format!("203.0.113.{n}");
+        longest = longest.max(
+            fail_waiting(&env, &source, ADMIN)
+                .await
+                .into_iter()
+                .max()
+                .unwrap_or(0),
+        );
+    }
+    assert_eq!(longest, 60, "the account-wide ceiling");
+    // Nothing locks, and the alarm is raised as for any account.
+    assert_eq!(locks_of(&env, ADMIN).await, 0);
+    assert_eq!(alarms(&env, AlarmKind::AccountLocked).await, 0);
+    assert!(alarms(&env, AlarmKind::SignInFailures).await >= 1);
+    // The administrator on the known network signs in at once, during the attack.
+    assert!(matches!(
+        login(&env, "203.0.113.250", ADMIN, WRONG).await,
+        Err(AuthError::Throttled { .. })
+    ));
+    assert!(
+        login(&env, OTHER, ADMIN, ADMIN_PASSWORD).await.is_ok(),
+        "the known network is not held back"
+    );
+}
+
+/// Attempts that arrive together while the account-wide delay holds get one turn per
+/// delay: they do not all pass the check before the first of them fails.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn attempts_that_arrive_together_get_one_turn_of_the_account_wide_delay() {
+    let (env, admin) = TestEnv::installed(Profile::Standard).await;
+    second_admin(&env, &admin).await;
+    for n in 1..=9u8 {
+        assert!(matches!(
+            login(&env, &format!("203.0.113.{n}"), SECOND, WRONG).await,
+            Err(AuthError::InvalidCredentials)
+        ));
+    }
+    // The delay after the ninth failure is one second; then twenty networks try at once.
+    env.clock.advance(Duration::from_secs(1));
+    let service = Arc::clone(&env.service);
+    let tasks: Vec<_> = (1..=20u8)
+        .map(|n| {
+            let service = Arc::clone(&service);
+            let ctx = ctx_from(&env, &format!("198.51.100.{n}"));
+            tokio::spawn(async move { login_on(&service, &ctx, SECOND, WRONG).await })
+        })
+        .collect();
+    let mut verified = 0;
+    for task in tasks {
+        if matches!(
+            task.await.expect("joins"),
+            Err(AuthError::InvalidCredentials)
+        ) {
+            verified += 1;
+        }
+    }
+    assert_eq!(verified, 1, "one turn per delay");
 }
 
 /// Under Hardened the lock of a second network raises no second alarm while the first
@@ -1077,4 +1228,202 @@ async fn short_numeric_secrets_and_weak_passwords_do_not_slip_through() {
         .set_user_roles(&ctx, finn.id, &[RoleName::Admin], None)
         .await
         .expect("a password that meets the rule");
+}
+
+/// Enrolls TOTP for the session's account and returns its seed.
+async fn enroll_totp(env: &TestEnv, session: &tenko_auth::NewSession) -> Vec<u8> {
+    let ctx = env.session_ctx(session).await.expect("ctx");
+    let enrollment = env.service.totp_enroll_start(&ctx).await.expect("start");
+    let seed = tenko_auth::encoding::base32_decode(enrollment.secret.expose()).expect("seed");
+    let now = u64::try_from(env.now().0.unix_timestamp()).expect("time");
+    env.service
+        .totp_enroll_finish(
+            &ctx,
+            &TotpEnrollFinish {
+                enrollment_id: enrollment.enrollment_id,
+                code: SecretString::new(totp::code_at(&seed, &TotpParams::default(), now).as_str()),
+            },
+        )
+        .await
+        .expect("enrolled");
+    seed
+}
+
+/// The current TOTP code of a seed.
+fn current_code(env: &TestEnv, seed: &[u8]) -> String {
+    let now = u64::try_from(env.now().0.unix_timestamp()).expect("time");
+    totp::code_at(seed, &TotpParams::default(), now)
+        .as_str()
+        .to_owned()
+}
+
+/// Fails once from each of `networks` fresh networks, waiting out every wait: the
+/// account-wide delay grows to its ceiling of a minute after 15 failures.
+async fn raise_the_delay(env: &TestEnv, name: &str, networks: u8) {
+    for n in 1..=networks {
+        fail_waiting(env, &format!("203.0.113.{n}"), name).await;
+    }
+}
+
+/// Signs in with the password from `source`, waiting out the account-wide delay, and
+/// returns the challenge of the second factor.
+async fn password_step(env: &TestEnv, source: &str) -> String {
+    loop {
+        match login(env, source, ADMIN, ADMIN_PASSWORD).await {
+            Ok(LoginOutcome::SecondFactor { challenge_id, .. }) => return challenge_id,
+            Err(AuthError::Throttled {
+                retry_after: Some(secs),
+            }) => env.clock.advance(Duration::from_secs(secs)),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+}
+
+/// During a one-minute account-wide delay the real user on a new network signs in with
+/// password and code: the correct password gives its turn back, so the code typed five
+/// seconds later is not held back by it.
+#[tokio::test]
+async fn a_second_factor_sign_in_completes_during_the_account_wide_delay() {
+    let (env, admin) = TestEnv::installed(Profile::Standard).await;
+    let seed = enroll_totp(&env, &admin).await;
+    env.clock.advance(Duration::from_secs(90));
+    raise_the_delay(&env, ADMIN, 15).await;
+    let user = "198.51.100.77";
+    let challenge = password_step(&env, user).await;
+    env.clock.advance(Duration::from_secs(5));
+    let code = current_code(&env, &seed);
+    let answer = env
+        .service
+        .login_totp(
+            &ctx_from(&env, user),
+            None,
+            &CodeLogin {
+                challenge_id: challenge,
+                code: SecretString::new(code.as_str()),
+            },
+        )
+        .await;
+    assert!(
+        matches!(answer, Ok(LoginOutcome::Session(_))),
+        "the code completes the sign-in: {answer:?}"
+    );
+}
+
+/// A challenge opened while the count was low gets no free code later: once the delay is
+/// in force, its first code waits its turn like any other, and keeps the challenge.
+#[tokio::test]
+async fn a_challenge_opened_before_the_delay_gets_no_free_code() {
+    let (env, admin) = TestEnv::installed(Profile::Standard).await;
+    let seed = enroll_totp(&env, &admin).await;
+    env.clock.advance(Duration::from_secs(90));
+    // Someone who knows the password opens a challenge while nothing has failed yet.
+    let challenge = password_step(&env, ATTACKER).await;
+    // Failures from other networks put the account-wide delay in force.
+    for n in 1..=15u8 {
+        let _ = login(&env, &format!("203.0.113.{n}"), ADMIN, WRONG).await;
+    }
+    let code = current_code(&env, &seed);
+    let answer = env
+        .service
+        .login_totp(
+            &ctx_from(&env, ATTACKER),
+            None,
+            &CodeLogin {
+                challenge_id: challenge.clone(),
+                code: SecretString::new(code.as_str()),
+            },
+        )
+        .await;
+    let Err(AuthError::Throttled {
+        retry_after: Some(secs),
+    }) = answer
+    else {
+        panic!("the first code waits its turn: {answer:?}");
+    };
+    // The challenge was not spent by the refusal.
+    env.clock.advance(Duration::from_secs(secs));
+    let answer = env
+        .service
+        .login_totp(
+            &ctx_from(&env, ATTACKER),
+            None,
+            &CodeLogin {
+                challenge_id: challenge,
+                code: SecretString::new(current_code(&env, &seed).as_str()),
+            },
+        )
+        .await;
+    assert!(
+        matches!(answer, Ok(LoginOutcome::Session(_))),
+        "still open: {answer:?}"
+    );
+}
+
+/// A second code of a challenge takes a turn of its own; refused by the delay, it leaves
+/// the challenge open for the next turn.
+#[tokio::test]
+async fn a_code_held_back_by_the_delay_keeps_its_challenge() {
+    let (env, admin) = TestEnv::installed(Profile::Standard).await;
+    let seed = enroll_totp(&env, &admin).await;
+    env.clock.advance(Duration::from_secs(90));
+    for n in 1..=5u8 {
+        for _ in 0..3 {
+            let _ = login(&env, &format!("203.0.113.{n}"), ADMIN, WRONG).await;
+        }
+    }
+    let user = "198.51.100.78";
+    let challenge = loop {
+        match login(&env, user, ADMIN, ADMIN_PASSWORD).await {
+            Ok(LoginOutcome::SecondFactor { challenge_id, .. }) => break challenge_id,
+            Err(AuthError::Throttled {
+                retry_after: Some(secs),
+            }) => env.clock.advance(Duration::from_secs(secs)),
+            other => panic!("unexpected {other:?}"),
+        }
+    };
+    let code_login = |code: String| CodeLogin {
+        challenge_id: challenge.clone(),
+        code: SecretString::new(code.as_str()),
+    };
+    // A mistyped first code takes the turn the correct password gave back, fails and sets
+    // a new delay.
+    let wrong = if current_code(&env, &seed) == "000000" {
+        "111111"
+    } else {
+        "000000"
+    };
+    assert!(matches!(
+        env.service
+            .login_totp(&ctx_from(&env, user), None, &code_login(wrong.to_owned()))
+            .await,
+        Err(AuthError::InvalidCredentials)
+    ));
+    // The second code meets the delay, and the challenge survives it.
+    let held = env
+        .service
+        .login_totp(
+            &ctx_from(&env, user),
+            None,
+            &code_login(current_code(&env, &seed)),
+        )
+        .await;
+    let Err(AuthError::Throttled {
+        retry_after: Some(secs),
+    }) = held
+    else {
+        panic!("held back: {held:?}");
+    };
+    env.clock.advance(Duration::from_secs(secs));
+    let answer = env
+        .service
+        .login_totp(
+            &ctx_from(&env, user),
+            None,
+            &code_login(current_code(&env, &seed)),
+        )
+        .await;
+    assert!(
+        matches!(answer, Ok(LoginOutcome::Session(_))),
+        "the challenge is still open: {answer:?}"
+    );
 }
