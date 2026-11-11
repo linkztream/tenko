@@ -43,17 +43,27 @@ $ErrorActionPreference = 'Stop'
 
 # The extensions must match the toolset in .config/dotnet-tools.json. They are fetched by
 # name and version through `wix extension add` (as the toolset is through `dotnet tool
-# restore`), and neither command takes a hash: the WiX CLI resolves the version with NuGet's
-# client, which checks the repository signature of nuget.org and nothing more specific.
-# Pinning them by hash would take: a step before this script that downloads each package by
-# exact version from the NuGet flat container
-# (https://api.nuget.org/v3-flatcontainer/<id>/<version>/<id>.<version>.nupkg), compares it
-# with a SHA-256 recorded here, and offers the verified files to both commands as the only
-# package source (a nuget.config in the repository root with that folder and nuget.org
-# cleared); the digests are recorded once from a machine that downloads the four packages.
-# Until then the version is the pin, and the job that runs this script holds no secret.
+# restore`), and neither command takes a hash: NuGet's client checks the repository
+# signature of nuget.org and nothing more specific. So the files those commands leave on
+# disk, the ones `wix build` loads and runs, are checked here against the digests below
+# before anything is built, and a mismatch stops the build: a package that changes under
+# the same version (a compromised feed or account) never builds the MSI. The digest of a
+# directory is the SHA-256 of its listing, one line "<SHA-256>  <path>" per file, the path
+# relative to the directory with forward slashes, sorted by ordinal order; on a POSIX shell:
+#   (cd <dir> && find . -type f | sed 's#^\./##' | LC_ALL=C sort |
+#     while IFS= read -r f; do printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$f"; done) |
+#     sha256sum
+# A version bump records the new digests from a machine that ran the old ones' check (the
+# tool's directory is <NuGet global packages>/wix/<version>/tools, an extension's is
+# %USERPROFILE%\.wix\extensions\<id>\<version>) after reading the release notes.
 $WixVersion = '5.0.2'
 $Extensions = @('WixToolset.UI.wixext', 'WixToolset.Util.wixext', 'WixToolset.Firewall.wixext')
+$WixToolDigest = 'c4429030dde7abb7317a1c406346ff0fccf2afb9c448274788edd892728f7d49'
+$ExtensionDigests = @{
+    'WixToolset.UI.wixext'       = 'cc94cba303b7df35d2bc1d86f19ff1771d5b5f0ac522169c384e8d3afc48470a'
+    'WixToolset.Util.wixext'     = '1aa2bedd9daf5602fb0f576f839cc23baedc7bfd56dd58c66c05abe7389f2571'
+    'WixToolset.Firewall.wixext' = 'cce18f2ea48d5e6219fd62f5e484b9d3444e924114693180dd6a5bafb00958c8'
+}
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $wixDir = Join-Path $PSScriptRoot 'wix'
@@ -62,6 +72,32 @@ function Invoke-Checked {
     param([string] $What, [scriptblock] $Command)
     & $Command
     if ($LASTEXITCODE -ne 0) { throw "$What failed with exit status $LASTEXITCODE" }
+}
+
+# The digest of a directory tree, as described at $WixToolDigest.
+function Get-TreeDigest {
+    param([string] $Dir)
+    if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { throw "$Dir does not exist" }
+    $root = (Resolve-Path -LiteralPath $Dir).Path.TrimEnd('\', '/')
+    $lines = foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File -Force) {
+        $relative = $file.FullName.Substring($root.Length + 1).Replace('\', '/')
+        [pscustomobject]@{ Path = $relative; Hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+    }
+    $sorted = [System.Collections.Generic.List[object]]::new()
+    foreach ($line in $lines) { $sorted.Add($line) }
+    $sorted.Sort([System.Comparison[object]] { param($a, $b) [string]::CompareOrdinal($a.Path, $b.Path) })
+    $text = -join ($sorted | ForEach-Object { "$($_.Hash)  $($_.Path)`n" })
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
+    return ([System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::HashData($bytes))).Replace('-', '').ToLowerInvariant()
+}
+
+function Assert-TreeDigest {
+    param([string] $What, [string] $Dir, [string] $Expected)
+    $actual = Get-TreeDigest -Dir $Dir
+    if ($actual -ne $Expected) {
+        throw "$What in $Dir has the digest $actual, not the $Expected this script pins; the package changed under its version, so nothing is built"
+    }
+    Write-Host "verified $What ($actual)"
 }
 
 # --- Inputs ------------------------------------------------------------------------------
@@ -108,6 +144,19 @@ try {
         if ($have -notmatch [regex]::Escape("$ext $WixVersion")) {
             Invoke-Checked "wix extension add $ext" { dotnet tool run wix extension add -g "$ext/$WixVersion" }
         }
+    }
+
+    # --- The files that run, against their pinned digests -----------------------------
+    # The tool, where dotnet tool restore put it (the NuGet global packages folder).
+    $packages = (dotnet nuget locals global-packages --list) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or $packages -notmatch 'global-packages:\s*(\S.*\S)') { throw "the NuGet global packages folder is unknown: $packages" }
+    Assert-TreeDigest -What "WiX $WixVersion" -Dir (Join-Path -Path $Matches[1] -ChildPath "wix\$WixVersion\tools") -Expected $WixToolDigest
+    # wix build looks for an extension in the working directory's .wix\extensions before the
+    # global cache; only the global cache, whose files are checked here, may provide one.
+    if (Test-Path -LiteralPath (Join-Path $repo '.wix')) { throw "$repo\.wix exists; remove it so that wix build loads only the checked extensions" }
+    $cache = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.wix\extensions'
+    foreach ($ext in $Extensions) {
+        Assert-TreeDigest -What "$ext $WixVersion" -Dir (Join-Path -Path $cache -ChildPath "$ext\$WixVersion") -Expected $ExtensionDigests[$ext]
     }
 
     # --- Build ---------------------------------------------------------------------------

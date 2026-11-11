@@ -19,8 +19,10 @@
 #      sign-binary (WP6.7) signs the Windows binary with Authenticode when a certificate is
 #                  configured, in a job of its own that holds the signing secrets and runs
 #                  nothing else (below);
-#      msi         builds the Windows MSI from the signed binary (deploy/windows/build-msi.ps1)
-#                  and the package of the upgrade test; sign-msi signs the MSI, and msi-smoke
+#      msi         builds the Windows MSI from the signed binary (deploy/windows/build-msi.ps1,
+#                  which checks the WiX toolset and extensions it runs against pinned
+#                  SHA-256 digests) and the package of the upgrade test; sign-msi signs the
+#                  MSI, and msi-smoke
 #                  installs, upgrades and removes the signed package on the runner
 #                  (deploy/windows/msi-smoke.ps1);
 #   5. image-build builds the container image from the Linux binary of `build`, the file the
@@ -34,9 +36,11 @@
 #                  scripts/sbom-tools) and the image from the archive (syft);
 #   7. manifest    builds releases.json and SHA256SUMS (scripts/release-manifest.mjs), which lists
 #                  releases.json, after checking every earlier release of the previous manifest
-#                  against the SHA256SUMS its own release published; adds the installers and the
-#                  SBOMs to SHA256SUMS, and hands the release files on as one artifact, so that
-#                  the files attested are the files published;
+#                  against the SHA256SUMS its own release published (its texts are taken from
+#                  the changelog, never from the previous manifest); adds the installers, the
+#                  Proxmox files pinned by tenko-proxmox.sh and the SBOMs to SHA256SUMS, and
+#                  hands the release files on as one artifact, so that the files attested are
+#                  the files published;
 #   8. attest      holds id-token: write and attestations: write (L1.10): a SLSA build provenance
 #                  attestation for every release file and an SBOM attestation binding each SBOM
 #                  to its binary, with GitHub's own actions/attest and nothing else;
@@ -836,7 +840,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.verify.outputs.version }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -883,7 +886,10 @@ jobs:
         # own release published (release-manifest.mjs, --verify-previous): the asset is
         # mutable, the check is not. There is none for the very first release. (GitHub does
         # not count a pre-release as the latest release, so a pre-release is merged into the
-        # manifest of the last stable release.)
+        # manifest of the last stable release.) The job's read token is handed to this step
+        # only: the step before runs the released binary, which needs none.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p prev
@@ -1130,7 +1136,9 @@ jobs:
       VERSION: ${{ needs.verify.outputs.version }}
       PRERELEASE: ${{ needs.verify.outputs.prerelease }}
       DIGEST: ${{ needs.image.outputs.digest }}
-      GH_TOKEN: ${{ github.token }}
+    # The token that can write the release and the packages is handed to the two steps that
+    # use it (gh and skopeo), not to the job: the release notes are written by the
+    # repository's own script before, without it.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1148,6 +1156,8 @@ jobs:
       - name: Release notes
         run: node scripts/changelog.mjs notes "$VERSION" > notes.md
       - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # The tag still names the commit verify resolved: a tag moved during the run is

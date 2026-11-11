@@ -930,7 +930,9 @@ Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
 3. **Smoke.** The job `smoke-linux` runs the Linux binary on two distributions (below).
 4. **Windows.** The Windows binary is signed (when a certificate is configured) in a job of
    its own that holds the signing secrets and runs nothing else; the MSI is built from the
-   signed binary, signed the same way, and installed, upgraded and removed on the runner
+   signed binary, with the WiX toolset and extensions checked against the SHA-256 digests
+   that `deploy/windows/build-msi.ps1` pins (a package that changed under its version stops
+   the build), signed the same way, and installed, upgraded and removed on the runner
    (`deploy/windows/README.md`).
 5. **Image.** The container image is built from the Linux binary of step 2, the same file,
    on a `distroless/static` base pinned by digest (`deploy/Dockerfile`); nothing is compiled
@@ -938,9 +940,9 @@ Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
 6. **SBOMs.** A CycloneDX SBOM for each binary, the web UI and the image (below).
 7. **Release files.** `SHA256SUMS` and the manifest `releases.json`
    (`scripts/release-manifest.mjs`): every earlier release of the previous manifest is
-   checked against the `SHA256SUMS` its own release published before it is kept,
-   `SHA256SUMS` lists `releases.json` itself, and the installers and the SBOMs are added to
-   `SHA256SUMS`.
+   checked against the `SHA256SUMS` its own release published before it is kept, and its
+   texts are taken from the changelog; `SHA256SUMS` lists `releases.json` itself, and the
+   installers, the Proxmox files and the SBOMs are added to `SHA256SUMS`.
 8. **Attest.** A build provenance attestation for every release file and an SBOM
    attestation for each SBOM of a binary.
 9. **Security round, then the image.** The lab round of `docs/plans/security-audit-plan.md`
@@ -992,7 +994,13 @@ The manifest names each binary by `<base-url>/<file name>`, where the base URL i
 download URL of the release, `https://github.com/linkztream/tenko/releases/download/v<version>`.
 The manifest of a release lists that release and, from the previous manifest, every earlier
 release whose files and digests still match the `SHA256SUMS` that release published (an
-entry that does not match is dropped, with a warning in the release log). The address
+entry that does not match is dropped, with a warning in the release log). Nothing else of an
+earlier entry is taken from the previous manifest, which is a file that whoever can write
+the releases can replace: its date, notes, security flag and action come from that version's
+section of the changelog being released, its image must be the repository's image with its
+own version, its data-directory format no greater than the new release's, and fields the
+manifest's schema does not know are left out; an entry whose version has no section in the
+changelog is dropped. The address
 `https://github.com/linkztream/tenko/releases/latest/download/releases.json`
 therefore serves the manifest of the release that GitHub marks as the latest, with the
 notes of all earlier releases.

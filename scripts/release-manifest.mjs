@@ -18,7 +18,11 @@
 // digests are checked against the SHA256SUMS of that release, fetched from
 // `<--verify-previous>/v<version>/SHA256SUMS` (the release's own asset, by tag; never from a
 // URL the entry names). An entry that does not match, or whose release has no SHA256SUMS, is
-// dropped with a warning; a fetch that fails otherwise stops the run. SHA256SUMS lists the
+// dropped with a warning; a fetch that fails otherwise stops the run. What an entry says
+// besides its files is not taken from it either: its texts come from the same version's
+// section of the changelog being released, its image must be this release's repository with
+// its own version, its format no greater than this one's, and fields schema 1 does not know
+// are left out. SHA256SUMS lists the
 // manifest itself, computed from the final text, so that what is attested and signed covers
 // the manifest too (formatReleaseFiles).
 //
@@ -275,11 +279,7 @@ export async function buildRelease({ version, changelogText, assetsDir, baseUrl,
   /** @type {Release} */
   const release = {
     version,
-    date: /** @type {string} */ (section.date),
-    notes: boundText(section.body, MAX_NOTES_BYTES),
-    security: section.security,
-    requires_action: section.requiresAction,
-    ...(section.requiresAction ? { action: boundText(section.action, MAX_ACTION_BYTES) } : {}),
+    ...releaseTexts(section),
     ...(format === undefined ? {} : { format }),
     ...(image === undefined ? {} : { image }),
     assets,
@@ -287,6 +287,23 @@ export async function buildRelease({ version, changelogText, assetsDir, baseUrl,
     ...(installers.length === 0 ? {} : { installers }),
   };
   return { release, ignored };
+}
+
+/**
+ * The texts of a release's manifest entry, from its changelog section: the date, the notes
+ * and the action (each cut to the bound an installation enforces), and the two flags.
+ *
+ * @param {{ date: string | null, body: string, security: boolean, requiresAction: boolean, action: string }} section
+ * @returns {{ date: string, notes: string, security: boolean, requires_action: boolean, action?: string }}
+ */
+function releaseTexts(section) {
+  return {
+    date: /** @type {string} */ (section.date),
+    notes: boundText(section.body, MAX_NOTES_BYTES),
+    security: section.security,
+    requires_action: section.requiresAction,
+    ...(section.requiresAction ? { action: boundText(section.action, MAX_ACTION_BYTES) } : {}),
+  };
 }
 
 /**
@@ -389,27 +406,37 @@ export function parseChecksums(text) {
 /**
  * The check of a previous manifest's releases against the SHA256SUMS each of them published.
  * The input is validated as mergeManifest validates it and is not modified; the result holds
- * copies of the entries that passed, unchanged, and the version and reason of each entry that
- * was dropped. An entry passes when every asset and installer names a file under the
- * release's own download directory, `<downloadUrl>/v<version>/`, and that release's
- * SHA256SUMS, fetched from the same directory, lists the file with the same digest.
+ * the entries that passed, rebuilt (rebuildEntry: the fields of schema 1 only, the texts from
+ * the changelog), and the version and reason of each entry that was dropped. An entry passes
+ * when the changelog has its section, its image and format fit this release's, and every
+ * asset and installer names a file under the release's own download directory,
+ * `<downloadUrl>/v<version>/`, whose SHA256SUMS, fetched from the same directory, lists the
+ * file with the same digest.
  *
- * Dropped: a digest or a name the release's SHA256SUMS does not have, a URL elsewhere, an
- * entry without a file to check, a release without SHA256SUMS (404). Thrown, so that the run
- * stops: any other failure to fetch, which says nothing about the entry.
+ * Dropped: no changelog section, another image or a larger format, a malformed file entry, a
+ * digest or a name the release's SHA256SUMS does not have, a URL elsewhere, an entry without
+ * a file to check, a release without SHA256SUMS (404). Thrown, so that the run stops: any
+ * other failure to fetch, which says nothing about the entry.
  *
  * @param {{ schema?: unknown, project?: unknown, releases?: unknown } | null | undefined} previous
  * @param {object} options
  * @param {string} options.downloadUrl the download directory of the releases, without the tag
  * @param {(url: string) => Promise<{ status: number, text: string }>} options.fetchText
  * @param {string} [options.skipVersion] the version being released, whose entry is replaced
+ * @param {string} options.changelogText the changelog being released, the source of every text
+ * @param {string} [options.image] the image of this release (`<repository>:<version>`)
+ * @param {number} [options.format] the data-directory format of this release
  * @returns {Promise<{ previous: { schema: number, project: string, releases: Release[] }, dropped: { version: string, reason: string }[] }>}
  * @throws {ManifestError}
  */
-export async function verifyPreviousReleases(previous, { downloadUrl, fetchText, skipVersion }) {
+export async function verifyPreviousReleases(previous, { downloadUrl, fetchText, skipVersion, changelogText, image, format }) {
   if (previous === null || previous === undefined || typeof previous !== "object" || previous.schema !== SCHEMA || previous.project !== PROJECT || !Array.isArray(previous.releases)) {
     throw new ManifestError(`the previous manifest is not a schema ${SCHEMA} manifest of project ${PROJECT}`);
   }
+  const sections = new Map(parseChangelog(changelogText).sections.filter((s) => s.version !== null).map((s) => [s.version, s]));
+  // The image repository of the release being made, without its tag: an earlier entry may
+  // name only the same repository with its own version as the tag.
+  const repository = image === undefined ? undefined : image.slice(0, image.lastIndexOf(":") > image.lastIndexOf("/") ? image.lastIndexOf(":") : image.length);
   const base = downloadUrl.replace(/\/+$/, "");
   /** @type {Release[]} */
   const kept = [];
@@ -423,11 +450,87 @@ export async function verifyPreviousReleases(previous, { downloadUrl, fetchText,
       kept.push(structuredClone(r));
       continue;
     }
-    const reason = await checkRelease(r, `${base}/v${r.version}/`, fetchText);
-    if (reason === null) kept.push(structuredClone(r));
+    const rebuilt = rebuildEntry(r, { section: sections.get(r.version), repository, format });
+    if (typeof rebuilt === "string") {
+      dropped.push({ version: r.version, reason: rebuilt });
+      continue;
+    }
+    const reason = await checkRelease(rebuilt, `${base}/v${r.version}/`, fetchText);
+    if (reason === null) kept.push(rebuilt);
     else dropped.push({ version: r.version, reason });
   }
   return { previous: { schema: SCHEMA, project: PROJECT, releases: kept }, dropped };
+}
+
+/**
+ * An earlier release's entry as this release writes it, or the reason it is dropped: only
+ * the fields of schema 1, never one the entry adds; the texts (date, notes, the security and
+ * action flags, the action) from that version's section of the changelog being released,
+ * which is reviewed source, and never from the previous manifest, which is a mutable asset;
+ * the image, when there is one, the release's repository with the entry's own version; the
+ * format a positive integer no greater than the one being released; every file with the
+ * platform (and kind) its name gives, a digest of 64 hexadecimal digits and a positive size.
+ * The files and digests are then checked against the release's SHA256SUMS (checkRelease).
+ *
+ * @param {Release} r an entry of the previous manifest, with a valid version
+ * @param {object} context
+ * @param {ReturnType<typeof parseChangelog>["sections"][number] | undefined} context.section
+ * @param {string | undefined} context.repository the image repository of this release
+ * @param {number | undefined} context.format the format of this release
+ * @returns {Release | string}
+ */
+function rebuildEntry(r, { section, repository, format }) {
+  const version = r.version;
+  if (section === undefined || section.date === null) return `the changelog has no section "## [${version}] - <date>" to take its texts from`;
+  if (r.image !== undefined && (repository === undefined || r.image !== `${repository}:${version}`)) {
+    return `it names the image ${JSON.stringify(r.image)}, not ${repository === undefined ? "none (this release has no image)" : `${repository}:${version}`}`;
+  }
+  if (r.format !== undefined && (!Number.isSafeInteger(r.format) || r.format < 1 || (format !== undefined && r.format > format))) {
+    return `its data-directory format ${JSON.stringify(r.format)} is not a positive integer${format === undefined ? "" : ` of at most ${format}`}`;
+  }
+  /** @type {Asset[]} */
+  const assets = [];
+  for (const a of Array.isArray(r.assets) ? r.assets : []) {
+    const f = fileOf(a, version);
+    if (typeof f === "string") return f;
+    if (a.platform !== assetPlatform(f.name, version)) return `${f.name} is listed with the platform ${JSON.stringify(a.platform)}`;
+    assets.push({ platform: /** @type {string} */ (a.platform), ...f });
+  }
+  /** @type {Installer[]} */
+  const installers = [];
+  for (const i of Array.isArray(r.installers) ? r.installers : []) {
+    const f = fileOf(i, version);
+    if (typeof f === "string") return f;
+    const known = installerOf(f.name, version);
+    if (known === null || i.kind !== known.kind || i.platform !== known.platform) return `${f.name} is listed as ${JSON.stringify(i.kind)} for ${JSON.stringify(i.platform)}`;
+    installers.push({ kind: known.kind, platform: known.platform, ...f });
+  }
+  return {
+    version,
+    ...releaseTexts(section),
+    ...(r.format === undefined ? {} : { format: r.format }),
+    ...(r.image === undefined ? {} : { image: r.image }),
+    assets,
+    ...(installers.length === 0 ? {} : { installers }),
+  };
+}
+
+/**
+ * The name, URL, digest and size of a file entry, or why it is refused.
+ * @param {unknown} f
+ * @param {string} version
+ * @returns {{ name: string, url: string, sha256: string, size: number } | string}
+ */
+function fileOf(f, version) {
+  if (f === null || typeof f !== "object") return `it has a file entry that is not an object: ${JSON.stringify(f)}`;
+  const { name, url, sha256, size } = /** @type {Record<string, unknown>} */ (f);
+  if (typeof name !== "string" || typeof url !== "string" || typeof sha256 !== "string") {
+    return `it has a file entry without a name, url and sha256: ${JSON.stringify(f)}`;
+  }
+  if (!name.startsWith(`tenko-${version}-`)) return `${name} is not a file of version ${version}`;
+  if (!/^[0-9a-f]{64}$/.test(sha256)) return `${name} has the digest ${JSON.stringify(sha256)}, not 64 lowercase hexadecimal digits`;
+  if (!Number.isSafeInteger(size) || /** @type {number} */ (size) < 1) return `${name} has the size ${JSON.stringify(size)}`;
+  return { name, url, sha256, size: /** @type {number} */ (size) };
 }
 
 /**
@@ -592,6 +695,9 @@ export async function main(argv) {
         downloadUrl: /** @type {string} */ (v["verify-previous"]),
         fetchText: fetchChecksums,
         skipVersion: release.version,
+        changelogText,
+        image: release.image,
+        format: release.format,
       });
       previous = checked.previous;
       dropped = checked.dropped;
