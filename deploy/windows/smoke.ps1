@@ -151,16 +151,26 @@ function Find-SmokeEvent([string]$Text, [Nullable[datetime]]$Since = $null) {
 
 # The lines of a job detail (the body of GET /jobs/<id>): the job's state and error, then
 # every step with its state, start, finish and error.
+# ", started <time>, finished <time>" for the times the object has; nothing for a time it lacks.
+function Format-Times($Object) {
+    $text = ''
+    foreach ($field in 'started', 'finished') {
+        $value = Get-Prop $Object $field
+        if ($null -ne $value -and [string]$value -ne '') { $text += ", $field $value" }
+    }
+    return $text
+}
+
 function Format-JobDetail($Json) {
     $job = Get-Prop $Json 'job'
     if ($null -eq $job) { return @('(no job in the reply)') }
-    $lines = @("job $(Get-Prop $job 'id'): $(Get-Prop $job 'state'), started $(Get-Prop $job 'started'), finished $(Get-Prop $job 'finished')")
+    $lines = @("job $(Get-Prop $job 'id'): $(Get-Prop $job 'state')$(Format-Times $job)")
     $jobError = Get-Prop $job 'error'
     if ($null -ne $jobError) { $lines += "  error $(Get-Prop $jobError 'code'): $(Get-Prop $jobError 'detail')" }
     foreach ($step in @(Get-Prop $job 'steps')) {
         $state = Get-Prop $step 'state'
-        $lines += ('  step {0} {1}: {2}, started {3}, finished {4}' -f (Get-Prop $step 'index'), (Get-Prop $step 'kind'),
-            (Get-Prop $state 'state'), (Get-Prop $step 'started'), (Get-Prop $step 'finished'))
+        $lines += ('  step {0} {1}: {2}{3}' -f (Get-Prop $step 'index'), (Get-Prop $step 'kind'),
+            (Get-Prop $state 'state'), (Format-Times $step))
         $stepError = Get-Prop (Get-Prop $state 'data') 'error'
         if ($null -ne $stepError) { $lines += "    error $(Get-Prop $stepError 'code'): $(Get-Prop $stepError 'detail')" }
     }
@@ -205,42 +215,163 @@ function Show-TenkoProcesses {
     }
 }
 
-# The tokens the Service Control Manager gives a service: three throwaway services whose image
-# is cmd.exe running `whoami /user /groups /priv /fo csv /nh` into a file. One like the smoke
-# service (a virtual account narrowed to SeChangeNotifyPrivilege, as `tenko service install`
-# and the MSI set it), one virtual account without the narrowing (a service created by hand),
-# one LocalSystem; and the token of this elevated script. cmd.exe does not answer the Service
-# Control Manager, so each start ends in an error after the file is written; it is ignored.
+# The token of a running process in the shape of `whoami /user /groups /priv /fo csv /nh`:
+# the user, the groups with their integrity label, the privileges by constant name. The
+# offline commands' guard (crates/tenko/src/exec.rs) reads exactly that output; this reads the
+# token of another process, which the elevated script may open (Process Explorer does the
+# same). The attributes are printed as numbers, not as whoami's translated words.
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Text;
+
+public static class TenkoSmokeToken
+{
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool CloseHandle(IntPtr handle);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr buffer, int length, out int needed);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool LookupPrivilegeNameW(string system, IntPtr luid, StringBuilder name, ref int length);
+
+    const uint ProcessQueryLimitedInformation = 0x1000;
+    const uint TokenQuery = 0x0008;
+    const int TokenUser = 1, TokenGroups = 2, TokenPrivileges = 3, TokenIntegrityLevel = 25;
+
+    static IntPtr Info(IntPtr token, int cls)
+    {
+        int needed;
+        GetTokenInformation(token, cls, IntPtr.Zero, 0, out needed);
+        IntPtr buffer = Marshal.AllocHGlobal(needed);
+        if (!GetTokenInformation(token, cls, buffer, needed, out needed))
+        {
+            int error = Marshal.GetLastWin32Error();
+            Marshal.FreeHGlobal(buffer);
+            throw new Win32Exception(error);
+        }
+        return buffer;
+    }
+
+    static string Name(SecurityIdentifier sid)
+    {
+        try { return sid.Translate(typeof(NTAccount)).Value; } catch { return sid.Value; }
+    }
+
+    static string Quote(params string[] fields)
+    {
+        return "\"" + string.Join("\",\"", fields) + "\"";
+    }
+
+    public static string[] Describe(int pid)
+    {
+        IntPtr process = OpenProcess(ProcessQueryLimitedInformation, false, pid);
+        if (process == IntPtr.Zero) { throw new Win32Exception(Marshal.GetLastWin32Error()); }
+        IntPtr token;
+        bool opened = OpenProcessToken(process, TokenQuery, out token);
+        int openError = Marshal.GetLastWin32Error();
+        CloseHandle(process);
+        if (!opened) { throw new Win32Exception(openError); }
+        List<string> lines = new List<string>();
+        try
+        {
+            IntPtr user = Info(token, TokenUser);
+            SecurityIdentifier userSid = new SecurityIdentifier(Marshal.ReadIntPtr(user));
+            Marshal.FreeHGlobal(user);
+            lines.Add(Quote(Name(userSid).ToLowerInvariant(), userSid.Value));
+            lines.Add("");
+
+            IntPtr groups = Info(token, TokenGroups);
+            int count = Marshal.ReadInt32(groups);
+            int entry = 2 * IntPtr.Size;
+            for (int i = 0; i < count; i++)
+            {
+                IntPtr at = groups + IntPtr.Size + i * entry;
+                SecurityIdentifier sid = new SecurityIdentifier(Marshal.ReadIntPtr(at));
+                uint attributes = (uint)Marshal.ReadInt32(at + IntPtr.Size);
+                // SE_GROUP_INTEGRITY: the label, printed once below as whoami does.
+                if ((attributes & 0x20) != 0) { continue; }
+                lines.Add(Quote(Name(sid), "Group", sid.Value, "0x" + attributes.ToString("x")));
+            }
+            Marshal.FreeHGlobal(groups);
+
+            IntPtr label = Info(token, TokenIntegrityLevel);
+            SecurityIdentifier labelSid = new SecurityIdentifier(Marshal.ReadIntPtr(label));
+            Marshal.FreeHGlobal(label);
+            lines.Add(Quote(Name(labelSid), "Label", labelSid.Value, ""));
+            lines.Add("");
+
+            IntPtr privileges = Info(token, TokenPrivileges);
+            int held = Marshal.ReadInt32(privileges);
+            for (int i = 0; i < held; i++)
+            {
+                IntPtr at = privileges + 4 + i * 12;
+                StringBuilder name = new StringBuilder(64);
+                int length = name.Capacity;
+                string text = LookupPrivilegeNameW(null, at, name, ref length) ? name.ToString() : "?";
+                uint attributes = (uint)Marshal.ReadInt32(at + 8);
+                lines.Add(Quote(text, "", (attributes & 2) != 0 ? "Enabled" : "Disabled"));
+            }
+            Marshal.FreeHGlobal(privileges);
+        }
+        finally
+        {
+            CloseHandle(token);
+        }
+        return lines.ToArray();
+    }
+}
+'@
+
+# The tokens the Service Control Manager builds: the running smoke service (installed by
+# `tenko service install`), and two throwaway services that run ping.exe for a minute: one
+# under a virtual account without the narrowing of the required privileges (a service
+# created by hand with `sc create`), one as LocalSystem. ping.exe never answers the Service
+# Control Manager, which reports a failed start after 30 s; the process runs on until it is
+# stopped here. Prints each token and returns the smoke service's.
 function Show-ServiceTokens {
-    Write-Host '---- service tokens: whoami /user /groups /priv /fo csv /nh ----'
+    Write-Host '---- service tokens (user, groups, label, privileges) ----'
     $system32 = Join-Path $env:SystemRoot 'System32'
+    $smoke = $null
+    $record = Get-ServiceRecord
+    if ($null -ne $record -and [int]$record.ProcessId -gt 0) {
+        Write-Host "-- $($script:Name), process $($record.ProcessId) (installed by tenko service install)"
+        try {
+            $smoke = [TenkoSmokeToken]::Describe([int]$record.ProcessId)
+            $smoke | Out-Host
+        } catch {
+            Write-Host "cannot read the token: $($_.Exception.Message)"
+        }
+    }
     $probes = @(
-        @{ Suffix = 'narrowed'; Account = 'virtual'; Privileges = 'SeChangeNotifyPrivilege' },
-        @{ Suffix = 'default'; Account = 'virtual'; Privileges = $null },
-        @{ Suffix = 'system'; Account = 'LocalSystem'; Privileges = $null }
+        @{ Service = "$($script:Name)-token-default"; Account = 'virtual' },
+        @{ Service = "$($script:Name)-token-system"; Account = 'LocalSystem' }
     )
     try {
         foreach ($probe in $probes) {
-            $service = "$($script:Name)-token-$($probe.Suffix)"
-            $dir = Join-Path $script:Root "token-$($probe.Suffix)"
-            $probe.Service = $service
-            $probe.File = Join-Path $dir 'whoami.csv'
-            [void](New-Item -ItemType Directory -Force -Path $dir)
-            $account = if ($probe.Account -eq 'virtual') { "NT SERVICE\$service" } else { 'LocalSystem' }
-            $image = "$system32\cmd.exe /c $system32\whoami.exe /user /groups /priv /fo csv /nh > $($probe.File) 2>&1"
-            [void](sc.exe create $service binPath= $image obj= $account type= own start= demand)
-            if ($probe.Privileges) { [void](sc.exe privs $service $probe.Privileges) }
-            if ($probe.Account -eq 'virtual') { [void](icacls.exe $dir /grant "NT SERVICE\${service}:(OI)(CI)M") }
-            Start-Process -FilePath (Join-Path $system32 'sc.exe') -ArgumentList 'start', $service -WindowStyle Hidden
+            $account = if ($probe.Account -eq 'virtual') { "NT SERVICE\$($probe.Service)" } else { 'LocalSystem' }
+            $created = sc.exe create $probe.Service binPath= "$system32\PING.EXE -n 60 127.0.0.1" obj= $account type= own start= demand 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) { Write-Host "sc.exe create $($probe.Service): $created"; continue }
+            Start-Process -FilePath (Join-Path $system32 'sc.exe') -ArgumentList 'start', $probe.Service -WindowStyle Hidden
         }
-        $deadline = [DateTime]::UtcNow.AddSeconds(30)
         foreach ($probe in $probes) {
-            while (-not ((Test-Path -LiteralPath $probe.File) -and (Get-Item -LiteralPath $probe.File).Length -gt 0) -and [DateTime]::UtcNow -lt $deadline) {
-                Start-Sleep -Milliseconds 500
+            Write-Host "-- $($probe.Service) ($($probe.Account), required privileges not set)"
+            $processId = 0
+            $deadline = [DateTime]::UtcNow.AddSeconds(20)
+            while ($processId -le 0 -and [DateTime]::UtcNow -lt $deadline) {
+                $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$($probe.Service)'" -ErrorAction SilentlyContinue
+                if ($null -ne $service) { $processId = [int]$service.ProcessId }
+                if ($processId -le 0) { Start-Sleep -Milliseconds 250 }
             }
-            Start-Sleep -Milliseconds 500
-            Write-Host "-- $($probe.Service) ($($probe.Account), required privileges: $(if ($probe.Privileges) { $probe.Privileges } else { 'not set' }))"
-            if (Test-Path -LiteralPath $probe.File) { Get-Content -LiteralPath $probe.File | Out-Host } else { Write-Host '(no output)' }
+            $probe.ProcessId = $processId
+            if ($processId -le 0) { Write-Host '(the process did not start)'; continue }
+            try { [TenkoSmokeToken]::Describe($processId) | Out-Host } catch { Write-Host "cannot read the token: $($_.Exception.Message)" }
         }
         Write-Host '-- this script (elevated administrator)'
         & (Join-Path $system32 'whoami.exe') /user /groups /priv /fo csv /nh | Out-Host
@@ -248,9 +379,11 @@ function Show-ServiceTokens {
         Write-Host "cannot read the service tokens: $($_.Exception.Message)"
     } finally {
         foreach ($probe in $probes) {
-            if ($probe.Service) { [void](sc.exe stop $probe.Service 2>&1); [void](sc.exe delete $probe.Service 2>&1) }
+            if ($probe.ProcessId -gt 0) { Stop-Process -Id $probe.ProcessId -Force -ErrorAction SilentlyContinue }
+            [void](sc.exe delete $probe.Service 2>&1)
         }
     }
+    return $smoke
 }
 
 function Show-Diagnostics {
@@ -279,7 +412,6 @@ function Show-Diagnostics {
     } catch {
         Write-Host "cannot read the Event Log: $($_.Exception.Message)"
     }
-    Show-ServiceTokens
     Write-Host '----'
 }
 
@@ -345,7 +477,11 @@ function Invoke-Api([string]$Method, [string]$Path, $Body = $null, [switch]$Keye
     $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
     $parsed = $null
     if ($text) {
-        try { $parsed = $text | ConvertFrom-Json -Depth 20 } catch { $parsed = $null }
+        # Times stay the API's RFC 3339 text where ConvertFrom-Json can keep them (-DateKind,
+        # PowerShell 7.5 and later); older versions turn them into local DateTime values.
+        $options = @{ Depth = 20 }
+        if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')) { $options.DateKind = 'String' }
+        try { $parsed = $text | ConvertFrom-Json @options } catch { $parsed = $null }
     }
     return [pscustomobject]@{ Status = [int]$response.StatusCode; Text = $text; Json = $parsed }
 }
@@ -537,6 +673,16 @@ ready_timeout_secs = 60
     Write-Host $healthOut
     $firstPid = [int](Get-ServiceRecord).ProcessId
     Assert-That ($firstPid -gt 0) 'the service has no process id'
+    # The token the Service Control Manager built for the service: SeChangeNotifyPrivilege
+    # alone and not a member of Administrators, whatever its integrity label. The guard of
+    # the offline commands (crates/tenko/src/exec.rs) reads the same facts; the tokens of a
+    # service created by hand and of LocalSystem are printed beside it.
+    $token = @(Show-ServiceTokens)
+    Assert-That ($token.Count -gt 0) 'the token of the service could not be read'
+    $held = @($token | Where-Object { $_ -match '^"(Se\w+Privilege)",' } | ForEach-Object { ($_ -split '","')[0].Trim('"') })
+    Assert-That (($held -join ',') -eq 'SeChangeNotifyPrivilege') "the service token holds '$($held -join ',')'; expected SeChangeNotifyPrivilege alone"
+    Assert-That (-not ($token -match '"S-1-5-32-544"')) 'the service token is a member of Administrators'
+    Write-Host "the service token holds $($held -join ','), and is not a member of Administrators"
 
     # 5 ----------------------------------------------------------------------------------
     Write-Step '5/9 Event Log: "tenko service starting"'
