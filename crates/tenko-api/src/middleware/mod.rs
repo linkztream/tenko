@@ -8,8 +8,9 @@
 //! - **API routes** (`api`, a route layer, so it sees the matched route template), in
 //!   this order: the `Origin` CSRF guard (`csrf`), the per-address rate limit (before
 //!   authentication, so it shields the login path), authentication through the
-//!   [`Authenticator`](tenko_core::Authenticator) of the state (once per request; the
-//!   outcome goes to [`AuthOutcome`] for `Ctx`), the per-principal rate limit, the quorum
+//!   [`Authenticator`](tenko_core::Authenticator) of the state (once per request, with the
+//!   session cookie of the request's scheme only, as `Ctx` reads it; the outcome goes to
+//!   [`AuthOutcome`] for `Ctx`), the per-principal rate limit, the quorum
 //!   gate of an isolated controller ([`quorum`]), the `Idempotency-Key` replay
 //!   ([`idempotency`]), `Cache-Control: no-store` on API responses that set no caching
 //!   themselves, and `Tenko-Staleness` on every answer of a controller without quorum.
@@ -27,6 +28,9 @@ pub mod quorum;
 pub mod rate_limit;
 pub(crate) mod trace;
 
+#[cfg(test)]
+mod tests;
+
 use std::{sync::Arc, time::Instant};
 
 use axum::{
@@ -41,7 +45,7 @@ pub use idempotency::IdempotencyConfig;
 pub use rate_limit::{LimitScope, Quota, RateLimitConfig, RateLimiter, RetryAfter};
 
 use crate::{
-    extract::{AuthOutcome, ClientInfo, credentials, placeholder_principal},
+    extract::{AuthOutcome, ClientInfo, credentials_for, placeholder_principal},
     problem::{ApiError, codes},
     server::forwarded::{ConnInfo, UnstatedScheme, resolve},
     state::AppState,
@@ -252,7 +256,9 @@ async fn guard(layers: &Layers, request: &mut Request) -> Option<Response> {
     let Some(authenticator) = &layers.state.auth else {
         return None;
     };
-    let credentials = credentials(request.headers());
+    // Only the session cookie of the request's scheme, as the extractor reads it: over HTTPS
+    // a plain-named cookie selects no principal for the limits or the idempotency records.
+    let credentials = credentials_for(request.headers(), client.https);
     let outcome = if credentials.is_present() {
         authenticator
             .authenticate(&credentials, client.source_ip, Timestamp::now())

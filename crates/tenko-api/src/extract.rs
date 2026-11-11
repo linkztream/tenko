@@ -76,21 +76,16 @@ where
             None => placeholder_principal(),
             Some(authenticator) => {
                 // Only the session cookie of the request's scheme counts. The middleware
-                // authenticated whichever name it found first; its outcome stands only when
-                // that was the same credential.
-                let https = ClientInfo::from_parts(parts).https;
-                let credentials = credentials_for(&parts.headers, https);
-                let outcome = match parts.extensions.get() {
-                    Some(AuthOutcome(outcome))
-                        if credentials == self::credentials(&parts.headers) =>
-                    {
-                        outcome.clone()
-                    }
-                    _ => {
-                        authenticator
-                            .authenticate(&credentials, source_ip, now)
-                            .await
-                    }
+                // read the credentials the same way, with the same client information, so
+                // its outcome stands when it ran.
+                let outcome = if let Some(AuthOutcome(outcome)) = parts.extensions.get() {
+                    outcome.clone()
+                } else {
+                    let https = ClientInfo::from_parts(parts).https;
+                    let credentials = credentials_for(&parts.headers, https);
+                    authenticator
+                        .authenticate(&credentials, source_ip, now)
+                        .await
                 };
                 let authenticated = outcome?;
                 if authenticated.flags.password_change_required
@@ -151,17 +146,6 @@ pub(crate) fn placeholder_principal() -> Principal {
         component: SystemComponent::Api,
         on_behalf_of: None,
     }
-}
-
-/// Reads a session cookie of either name and the `Authorization` header: what the
-/// middleware's rate limits key on before the scheme is weighed. [`Ctx`] authenticates only
-/// with [`credentials_for`].
-pub(crate) fn credentials(headers: &HeaderMap) -> Credentials {
-    let authorization = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok());
-    let session = session_cookie(headers);
-    Credentials::from_headers(session, authorization)
 }
 
 /// Reads the session cookie of the request's scheme and the `Authorization` header: over
@@ -706,7 +690,7 @@ mod tests {
     }
 
     /// A request over HTTPS or plain HTTP with `cookie`, with or without the outcome the
-    /// middleware would store (it authenticates a cookie of either name).
+    /// middleware would store (it authenticates the cookie of the request's scheme).
     async fn signed_in(cookie: &str, https: bool, with_middleware: bool) -> bool {
         let user = UserId::generate();
         let state = state_with_auth(user);
@@ -725,7 +709,11 @@ mod tests {
         if with_middleware {
             let authenticator = state.auth.clone().expect("an authenticator");
             let outcome = authenticator
-                .authenticate(&credentials(&parts.headers), None, Timestamp::now())
+                .authenticate(
+                    &credentials_for(&parts.headers, https),
+                    None,
+                    Timestamp::now(),
+                )
                 .await;
             parts.extensions.insert(AuthOutcome(outcome));
         }

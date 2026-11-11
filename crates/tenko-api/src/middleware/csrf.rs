@@ -1,17 +1,19 @@
 //! The `Origin`-based CSRF guard of state-changing requests (plan section 4: "same-origin
 //! `Origin` on mutations").
 //!
-//! The UI authenticates with the `tenko_session` cookie (`SameSite=Strict`), which already
-//! keeps cross-site requests from carrying it; this guard is the second line. Rules, for
-//! every method other than `GET`, `HEAD` and `OPTIONS`:
+//! The UI authenticates with the session cookie, `__Host-tenko_session` over HTTPS and
+//! `tenko_session` over plain HTTP (`SameSite=Strict`), which already keeps cross-site
+//! requests from carrying it; this guard is the second line. Rules, for every method other
+//! than `GET`, `HEAD` and `OPTIONS`:
 //!
 //! - An `Origin` header must equal the request's own origin (scheme and host as the trusted
 //!   proxy rules see them), the configured public origin, or one of the allowed extra
 //!   origins (development). `Origin: null` never matches.
-//! - Without `Origin`, a request that carries the session cookie is refused, and so is one
-//!   whose `Sec-Fetch-Site` is neither `same-origin` nor `none`: browsers send `Origin` on
-//!   every state-changing request, so its absence next to a cookie is not a browser
-//!   talking to its own origin.
+//! - Without `Origin`, a request that carries a session cookie of either name is refused
+//!   (the name of the other scheme too: the guard asks only whether a browser sent one),
+//!   and so is one whose `Sec-Fetch-Site` is neither `same-origin` nor `none`: browsers
+//!   send `Origin` on every state-changing request, so its absence next to a cookie is not
+//!   a browser talking to its own origin.
 //! - Requests without `Origin` and without the cookie pass: they come from non-browser
 //!   clients such as the CLI, which authenticate with bearer tokens.
 
