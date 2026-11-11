@@ -1,11 +1,12 @@
 import { createMemoryHistory, MemoryRouter } from "@solidjs/router";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { resetMockDb, type MockScenario } from "./api/mock/db";
 import { DHCP_IDS } from "./api/mock/dhcp-model";
 import { DNS_IDS } from "./api/mock/dns-model";
 import { setTheme } from "./app/prefs";
 import { axeViolations } from "./app/testing/axe";
+import { preloadPages } from "./app/testing/preload";
 import { buildRoutes, Root } from "./App";
 import { loadSession, setSessionForTest } from "./auth/session";
 
@@ -18,6 +19,11 @@ async function renderApp(url: string, scenario: MockScenario) {
   await loadSession();
   return { ...result, location: () => history.get() };
 }
+
+// The pages these tests open are lazy chunks; load them once, outside the limits of the waits.
+beforeAll(async () => {
+  await preloadPages(["/", "/signin", "/setup", "/jobs", `/dhcp/scopes/${DHCP_IDS.lan}`, `/dns/zones/${DNS_IDS.zone.example}`, "/ipam/prefixes/192.0.2.0/24"]);
+}, 60_000);
 
 afterEach(() => {
   setSessionForTest(null, "loading");
@@ -57,8 +63,6 @@ describe("shell", () => {
   });
 
   it("shows the DNS page on a deep link into the DNS area", async () => {
-    // The zone page is a lazy chunk, and the DNS message pack loads with it: under a loaded full
-    // run the one-second default of findBy ran out before either arrived, so wait as the DHCP test does.
     const app = await renderApp(`/dns/zones/${DNS_IDS.zone.example}`, "signed-in");
     const rail = await screen.findByRole("navigation", { name: "Main" }, { timeout: 5000 });
     expect(within(rail).getByRole("link", { name: /DNS/ }).classList.contains("active")).toBe(true);
@@ -155,7 +159,6 @@ describe("shell", () => {
   it("has no accessibility violations on the dashboard and in the palette", async () => {
     const app = await renderApp("/", "signed-in");
     await screen.findByRole("navigation", { name: "Main" });
-    // The start page is a lazy chunk with its packs; under a full parallel run it can take a while.
     await screen.findByRole("heading", { name: /Dashboard/ }, { timeout: 5000 });
     expect(await axeViolations(app.container)).toEqual([]);
     fireEvent.keyDown(document, { key: "k", ctrlKey: true });

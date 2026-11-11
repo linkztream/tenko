@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { mockUpdates } from "../api/mock/routes-updates";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
@@ -7,6 +7,12 @@ import { setSessionForTest } from "../auth/session";
 import Dashboard from "../dashboard/Dashboard";
 import { resetModules, setModulesForTest } from "./modules";
 import { signInAdmin, viewerOnly } from "./testkit";
+
+// The dashboard loads its update card and its restart notice as lazy chunks, which the first test
+// that shows one used to wait for inside the one second of `findBy`; load them once, outside it.
+beforeAll(async () => {
+  await Promise.all([import("./UpdateCard"), import("./ModulesNotice")]);
+}, 60_000);
 
 afterEach(() => {
   setSessionForTest(null);

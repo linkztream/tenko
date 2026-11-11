@@ -4,9 +4,10 @@
 // serving security and users.
 import { createMemoryHistory, MemoryRouter } from "@solidjs/router";
 import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { resetMockDb } from "../api/mock/db";
 import { axeViolations } from "../app/testing/axe";
+import { preloadPages } from "../app/testing/preload";
 import { buildRoutes, Root } from "../App";
 import { alex } from "../auth/account/testkit";
 import { loadSession, setSessionForTest } from "../auth/session";
@@ -41,6 +42,11 @@ const PAGES = [
   { key: "certificates", url: "/settings/certificates", title: "Certificates", marker: "certificates-mode" },
   { key: "backup", url: "/settings/backup", title: "Backup", marker: "backup-status" },
 ] as const;
+
+// The settings pages are lazy chunks; load them once, outside the limits of the waits.
+beforeAll(async () => {
+  await preloadPages(["/settings/security", "/settings/users", ...PAGES.map((page) => page.url)]);
+}, 60_000);
 
 describe("the route table", () => {
   it("lists the static settings pages before the generic section route, for administrators", () => {
