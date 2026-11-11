@@ -16,14 +16,22 @@ use tenko_dns::{
 /// The zones a server can be asked as: lowercase wire names, the root and two levels down.
 const ZONES: [&[u8]; 3] = [b"\x00", b"\x04test\x00", b"\x07example\x04test\x00"];
 
-/// The denial cache fed the server's answer as the resolver keeps it, then asked for a name
-/// below the one it denies, with and without the carry of the delegation (the RPZ triggers
-/// NSDNAME and NSIP): a synthesized answer parses, and under the carry it holds no more
-/// name servers and addresses than the caps keep.
-fn check_denials(message: &[u8], qname: &[u8]) {
+/// The denial cache fed the server's answer as the resolver keeps it (`carried`: as composed
+/// under the carry of the delegation), then asked for a name below the one it denies, with
+/// and without the carry (the RPZ triggers NSDNAME and NSIP): a synthesized answer parses,
+/// under the carry it holds no more name servers and addresses than the caps keep, and a
+/// negative one holds no NS record of another zone than its SOA's (RFC 2308 section 2.2).
+fn check_denials(message: &[u8], qname: &[u8], carried: bool) {
     let cache = Denials::new(DenialSettings::default());
     let now = Instant::now();
-    if !cache.insert(None, message, &Verdict::UNVALIDATED, Origin::Recursion, now) {
+    if !cache.insert_carried(
+        None,
+        message,
+        &Verdict::UNVALIDATED,
+        Origin::Recursion,
+        now,
+        carried,
+    ) {
         return;
     }
     let mut below = b"x".to_vec();
@@ -76,6 +84,15 @@ fn check_denials(message: &[u8], qname: &[u8]) {
         if !carry {
             assert_eq!(ns, 0, "a delegation written without the carry");
         }
+        if let Some(soa) = synthesized.authority.iter().find(|rr| rr.rtype == 6) {
+            assert!(
+                synthesized
+                    .authority
+                    .iter()
+                    .all(|rr| rr.rtype != 2 || rr.owner == soa.owner),
+                "an NS record of another zone beside the SOA"
+            );
+        }
     }
 }
 
@@ -91,7 +108,8 @@ fn check_within(records: &[Rr], zone: &[u8], what: &str) {
 }
 
 // The first octet picks the zone the server was asked as, the rest is the server's answer.
-// The answer goes into a denial cache as well (`check_denials`).
+// The answer goes into a denial cache as well (`check_denials`), carried when the first
+// octet's high bit is set.
 // A message that parses is classified for the question it carries; the step must keep to
 // the bailiwick rules (RFC 9471, RFC 2181 section 5.4.1): a referral goes strictly below
 // the zone, its glue is within the zone and in-domain glue within the delegated zone, and
@@ -105,7 +123,8 @@ fuzz_target!(|data: &[u8]| {
     let Some(parsed) = parse(message) else {
         return;
     };
-    check_denials(message, &parsed.qname);
+    // The high bit of the first octet: the answer was composed under the carry.
+    check_denials(message, &parsed.qname, *pick >= 0x80);
     let step = classify(&parsed, zone, &parsed.qname, parsed.qtype);
     let (rcode, answer, authority): (u8, &[Rr], &[Rr]) = match &step {
         Step::Referral(referral) => {

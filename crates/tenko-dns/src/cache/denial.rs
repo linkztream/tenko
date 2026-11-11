@@ -18,11 +18,14 @@
 //!   replaces a zone held from secure ones.
 //! - **The delegation** of a zone, when the answer that taught its records carried one (the
 //!   resolver's answers do while an RPZ zone has NSDNAME or NSIP triggers): the NS records
-//!   at the apex and the addresses of those name servers, at most
+//!   at the apex, or at the parent's cut when the zone's servers answer for the parent as
+//!   well, and the addresses of those name servers, at most
 //!   [`store::MAX_DELEGATION_SERVERS`] and [`store::MAX_DELEGATION_ADDRESSES`] (more keeps
-//!   none), living as long as the shortest of them. [`Denials::answer_carrying`] writes it
-//!   into the synthesized answer for those triggers to judge, and under the carry answers
-//!   nothing from a zone that does not hold a fresh one.
+//!   none), living as long as the shortest of them. [`Denials::answer_carrying`] writes into
+//!   the synthesized answer what the resolver's own answer would carry, for those triggers
+//!   to judge: the zone's delegation; for a zone without a cut of its own on the resolver's
+//!   path, none in a negative answer and the parent's in a wildcard answer. Under the carry
+//!   it answers nothing from a zone whose answers it does not know.
 //! - **The bound** (`denial_entries`: 2,000 under Home, 20,000 otherwise) counts records and
 //!   names; past it the least recently used sixteenth goes.
 //! - **The lookup** ([`Denials::answer`], the worker): for a name the answer cache has
@@ -54,7 +57,7 @@ use std::{
 
 use tenko_core::dns::{SecurityState, ViewId};
 
-use self::store::{Chain3, Cut, Nsec, Nsec3, Set, Shown, Zone, nsec3_params, wildcard_key};
+use self::store::{Chain3, Cut, Nsec, Nsec3, Set, Zone, nsec3_params, wildcard_key};
 use crate::{
     cache::{Client, Verdict},
     dnssec::chain::base32hex_decode,
@@ -533,10 +536,12 @@ impl Denials {
 
 impl Denials {
     /// Synthesizes as [`DenialCache::answer`] does; with `carry` (the resolver's answers
-    /// carry their delegation for the RPZ triggers NSDNAME and NSIP) only from a zone whose
-    /// delegation is held and fresh, and with that delegation in the answer, so that the
-    /// triggers judge it as they judge an answer from the answer cache. A zone without one
-    /// is left to the resolver, whose answer carries it.
+    /// carry their delegation for the RPZ triggers NSDNAME and NSIP) with what the
+    /// resolver's own answer would carry, so that the triggers judge it as they judge an
+    /// answer from the answer cache: the zone's delegation, held and fresh; for a zone whose
+    /// servers are its parent's, the parent's cut in a wildcard answer and nothing in a
+    /// negative one ([`Zone::above_until`]). A zone whose answers under the carry are not
+    /// known is left to the resolver, whose answer carries it and teaches the zone.
     #[allow(
         clippy::too_many_arguments,
         reason = "the trait's arguments and the carry"
@@ -568,17 +573,26 @@ impl Denials {
         })?;
         let mut synth = zone.lookup(qname, qtype, now)?;
         if carry {
+            let negative = synth.answer.is_none();
             match zone
                 .delegation
                 .as_ref()
                 .filter(|delegation| delegation.fresh(now))
             {
-                Some(delegation) => synth.delegation = Some(delegation),
-                // The resolver's answers for the zone carry its delegation, so a synthesized
-                // one may not go without it. A zone only forwarders taught, whose answers never
-                // carried one, is synthesized as before.
-                None if zone.from_recursion || zone.delegated => return None,
-                None => {}
+                // The zone's own cut: every answer of the resolver in the zone carries it.
+                Some(delegation) if *delegation.ns.owner == *zone.apex => {
+                    synth.delegation = Some(delegation);
+                }
+                // A cut above the zone: the resolver's positive answers carry it.
+                Some(delegation) if !negative => synth.delegation = Some(delegation),
+                // Its negative answers carry nothing beside the zone's SOA.
+                _ if negative && zone.above_until > now => {}
+                // The resolver's answers for the zone carry a delegation the cache does not
+                // hold (or it is not known what they carry), so a synthesized one may not go
+                // without it. A zone only forwarders taught, whose answers never carried one,
+                // is synthesized as before.
+                _ if zone.from_recursion || zone.delegated => return None,
+                _ => {}
             }
         }
         let rcode = synth::write(&synth, client, now, out)?;
@@ -592,28 +606,19 @@ impl Denials {
             rcode,
         })
     }
-}
 
-impl DenialCache for Denials {
-    fn answer(
-        &self,
-        view: Option<ViewId>,
-        qname: &[u8],
-        qtype: u16,
-        client: &Client<'_>,
-        now: Instant,
-        out: &mut Vec<u8>,
-    ) -> Option<DenialHit> {
-        self.answer_carrying(view, qname, qtype, client, now, out, false)
-    }
-
-    fn insert(
+    /// Keeps what `answer` proves, as [`DenialCache::insert`] does. `carried` says that the
+    /// resolver composed it while answers carry their delegation: the NS records it holds are
+    /// then the cut the resolver followed, and an answer without the zone's own says that the
+    /// resolver's answers in the zone carry none of it (see [`Zone::above_until`]).
+    pub fn insert_carried(
         &self,
         view: Option<ViewId>,
         answer: &[u8],
         verdict: &Verdict,
         origin: Origin,
         now: Instant,
+        carried: bool,
     ) -> bool {
         if verdict.state == SecurityState::Bogus {
             return false;
@@ -633,7 +638,20 @@ impl DenialCache for Denials {
         };
         let apex = learned.apex;
         // The delegation the answer carried, built before the lock is taken.
-        let shown = store::delegation_of(&apex, &parsed.authority, &parsed.additional, now);
+        let shown =
+            store::delegation_of(&apex, &parsed.authority, &parsed.additional, now, carried);
+        // Negative as the resolver judges it when it composes the delegation: an RCODE or
+        // an SOA (a NODATA at the end of a CNAME chain as well).
+        let negative =
+            parsed.rcode != 0 || parsed.authority.iter().any(|rr| rr.rtype == types::SOA);
+        // The answer's records live until the first of them expires.
+        let lives = parsed
+            .answer
+            .iter()
+            .chain(&parsed.authority)
+            .map(|rr| rr.ttl)
+            .min()
+            .map_or(now, |ttl| now.saturating_add(ttl));
         let mut buf = [0u8; ZONE_KEY_MAX];
         let key: Box<[u8]> = zone_key(view, &apex, &mut buf).into();
         let mut guard = self.store.write().unwrap_or_else(PoisonError::into_inner);
@@ -698,21 +716,36 @@ impl DenialCache for Denials {
         if origin == Origin::Recursion {
             entry.from_recursion = true;
         }
-        match shown {
-            Shown::Nothing => {}
-            Shown::TooLarge => {
-                entry.delegation = None;
-                entry.delegated = true;
-            }
-            Shown::Delegation(delegation) => {
-                entry.delegation = Some(delegation);
-                entry.delegated = true;
-            }
-        }
+        entry.learn_delegation(shown, carried, negative, lives);
         let after = entry.count();
         store.records = (store.records + after).saturating_sub(before);
         self.trim(store);
         true
+    }
+}
+
+impl DenialCache for Denials {
+    fn answer(
+        &self,
+        view: Option<ViewId>,
+        qname: &[u8],
+        qtype: u16,
+        client: &Client<'_>,
+        now: Instant,
+        out: &mut Vec<u8>,
+    ) -> Option<DenialHit> {
+        self.answer_carrying(view, qname, qtype, client, now, out, false)
+    }
+
+    fn insert(
+        &self,
+        view: Option<ViewId>,
+        answer: &[u8],
+        verdict: &Verdict,
+        origin: Origin,
+        now: Instant,
+    ) -> bool {
+        self.insert_carried(view, answer, verdict, origin, now, false)
     }
 
     fn flush(&self, suffix: Option<&[u8]>) -> usize {

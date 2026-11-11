@@ -912,7 +912,13 @@ impl Shared {
                     }
                     if keep {
                         cache.insert_with(key, &resolved.message, Instant::now(), None, &verdict);
-                        self.keep_denials(view, &resolved.message, &verdict, Origin::Recursion);
+                        self.keep_denials(
+                            view,
+                            &resolved.message,
+                            &verdict,
+                            Origin::Recursion,
+                            resolved.carried,
+                        );
                     }
                 }
                 _ if !question.cd && keep => {
@@ -922,6 +928,7 @@ impl Shared {
                         &resolved.message,
                         &Verdict::UNVALIDATED,
                         Origin::Recursion,
+                        resolved.carried,
                     );
                 }
                 _ => {}
@@ -938,16 +945,18 @@ impl Shared {
 
     // WP10.3: the denial cache's records come from what the answer cache keeps.
     /// Keeps the denial records (or, unsigned, the NXDOMAIN of RFC 8020) of `message`,
-    /// which came from `origin`.
+    /// which came from `origin`; `carried` when the resolver composed it while answers
+    /// carry their delegation.
     fn keep_denials(
         &self,
         view: Option<ViewId>,
         message: &[u8],
         verdict: &Verdict,
         origin: Origin,
+        carried: bool,
     ) {
         if let Some(denials) = &self.denials {
-            denials.insert(view, message, verdict, origin, Instant::now());
+            denials.insert_carried(view, message, verdict, origin, Instant::now(), carried);
         }
     }
     // WP10.3: end.
@@ -1338,7 +1347,7 @@ impl Shared {
                     let verdict = validation.verdict(self.failure_ttl());
                     cache.insert_with(key, &answer, Instant::now(), rule, &verdict);
                     // WP10.3: forwarded answers feed the denial cache too.
-                    self.keep_denials(key.view(), &answer, &verdict, Origin::Forwarder);
+                    self.keep_denials(key.view(), &answer, &verdict, Origin::Forwarder, false);
                 }
                 _ if !question.cd => {
                     cache.insert(key, &answer, Instant::now(), rule);
@@ -1347,6 +1356,7 @@ impl Shared {
                         &answer,
                         &Verdict::UNVALIDATED,
                         Origin::Forwarder,
+                        false,
                     );
                 }
                 _ => {}

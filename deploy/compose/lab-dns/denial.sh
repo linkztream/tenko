@@ -190,7 +190,11 @@ delv_secure() {
   [[ "$verdict" == secure && "$after" == "$before" ]]
 }
 
-# denial_rows: the rows with the node's default settings.
+# denial_rows: the rows with the node's default settings. They run after the E41 rows,
+# whose NSDNAME and NSIP triggers stay, so the resolver's answers carry their delegation
+# and the synthesis is checked under that carry. The lab's authority answers for every zone
+# from the root's cut, so the zones here have no cut of their own on the resolver's path
+# (docs/dns-resolver.md section 10.11).
 denial_rows() {
   printf '\n==> E35: QNAME minimization and the denial cache\n'
   row den.qmin "www.nsec3.example.test: example.test and nsec3.example.test asked first, the full name once" \

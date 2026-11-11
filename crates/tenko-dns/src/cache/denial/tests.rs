@@ -461,6 +461,12 @@ fn names_below_a_cached_nxdomain_of_an_unsigned_zone_are_nxdomain() {
 /// The NSEC3 zone `n3.test` (no salt, no iterations) with the apex and `www` (A): two
 /// records, the whole chain.
 fn nsec3_zone(cache: &Denials, opt_out: bool) {
+    let answer = nsec3_answer(opt_out);
+    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+}
+
+/// The NXDOMAIN of `nothing.n3.test` with the NSEC3 records of the apex and `www`.
+fn nsec3_answer(opt_out: bool) -> Vec<u8> {
     let mut hashes: Vec<([u8; 20], Vec<u16>)> = vec![
         (
             nsec3_hash(&wire_name("n3.test"), &[], 0),
@@ -483,8 +489,7 @@ fn nsec3_zone(cache: &Denials, opt_out: bool) {
         authority.push(rr(&owner, types::NSEC3, 300, data));
         authority.push(rrsig(&owner, types::NSEC3, 3, "n3.test", 300));
     }
-    let answer = message("nothing.n3.test", A, 3, &[], &authority);
-    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    message("nothing.n3.test", A, 3, &[], &authority)
 }
 
 #[test]
@@ -946,12 +951,24 @@ fn synthesize_carrying(
     carry: bool,
     max_len: usize,
 ) -> Option<(wire::RawHeader, Vec<Record>)> {
-    let asked = ask(qname, A);
+    synthesize_type(cache, qname, A, now, carry, max_len)
+}
+
+/// As [`synthesize_carrying`], for `qtype`.
+fn synthesize_type(
+    cache: &Denials,
+    qname: &str,
+    qtype: u16,
+    now: Instant,
+    carry: bool,
+    max_len: usize,
+) -> Option<(wire::RawHeader, Vec<Record>)> {
+    let asked = ask(qname, qtype);
     let mut out = Vec::with_capacity(65_535);
     cache.answer_carrying(
         None,
         &wire_name(qname),
-        A,
+        qtype,
         &client(&asked, false, max_len),
         now,
         &mut out,
@@ -1142,4 +1159,213 @@ fn a_full_delegation_with_names_at_the_length_limit_is_kept_counted_and_written(
         1 + store::MAX_DELEGATION_SERVERS + store::MAX_DELEGATION_ADDRESSES
     );
     assert!(cache.is_empty());
+}
+
+// One server answers for the parent and for the zone below it (the DNS lab's authority
+// serves the root, the TLD and the zones under them), so the resolver follows the parent's
+// cut. Under the carry its negative answers then carry no NS record (the cut is not the
+// zone of the SOA, RFC 2308 section 2.2) and its positive answers the parent's.
+
+/// The signed NXDOMAIN of `nothing.example.test` as the resolver composes it under the
+/// carry from the root's cut: the SOA and two NSEC records, no NS record.
+fn nxdomain_from_the_parents_cut() -> Vec<u8> {
+    let mut authority: Vec<Rr> = signed_soa("example.test", 300).into();
+    authority.extend(nsec(
+        "example.test",
+        "example.test",
+        "a.example.test",
+        &[2, 6, 46, 47, 48],
+        300,
+    ));
+    authority.extend(nsec(
+        "example.test",
+        "m.example.test",
+        "sub.example.test",
+        &[A, MX, 46, 47],
+        300,
+    ));
+    message("nothing.example.test", A, 3, &[], &authority)
+}
+
+fn no_ns(records: &[Record]) -> bool {
+    records.iter().all(|record| record.2 != types::NS)
+}
+
+#[test]
+fn under_the_carry_the_denials_of_a_zone_its_parents_servers_answer_are_synthesized() {
+    let now = Instant::now();
+    // NXDOMAIN from the NSEC: after nothing.example.test, nope.example.test.
+    let cache = denials();
+    let answer = nxdomain_from_the_parents_cut();
+    assert!(cache.insert_carried(None, &answer, &SECURE, Origin::Recursion, now, true));
+    let (header, records) = synthesize_type(&cache, "nope.example.test", A, now, true, 1232)
+        .expect("synthesized under the carry");
+    assert_eq!(header.rcode, 3);
+    assert!(
+        no_ns(&records),
+        "as the resolver's own answer, no NS: {records:?}"
+    );
+    // NODATA from the NSEC: after m.example.test AAAA, TXT.
+    let cache = denials();
+    let mut authority: Vec<Rr> = signed_soa("example.test", 300).into();
+    authority.extend(nsec(
+        "example.test",
+        "m.example.test",
+        "sub.example.test",
+        &[A, MX, 46, 47],
+        300,
+    ));
+    let answer = message("m.example.test", AAAA, 0, &[], &authority);
+    assert!(cache.insert_carried(None, &answer, &SECURE, Origin::Recursion, now, true));
+    let (header, records) = synthesize_type(&cache, "m.example.test", 16, now, true, 1232)
+        .expect("NODATA under the carry");
+    assert_eq!((header.rcode, header.ancount), (0, 0));
+    assert!(no_ns(&records), "{records:?}");
+    // NXDOMAIN and NODATA from the NSEC3 chain.
+    let cache = denials();
+    let answer = nsec3_answer(false);
+    assert!(cache.insert_carried(None, &answer, &SECURE, Origin::Recursion, now, true));
+    let (header, _) = synthesize_type(&cache, "other.n3.test", A, now, true, 1232)
+        .expect("NSEC3 NXDOMAIN under the carry");
+    assert_eq!(header.rcode, 3);
+    let (header, _) = synthesize_type(&cache, "www.n3.test", AAAA, now, true, 1232)
+        .expect("NSEC3 NODATA under the carry");
+    assert_eq!(header.rcode, 0);
+    // RFC 8020 in an unsigned zone.
+    let cache = denials();
+    let answer = message("gone.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
+    assert!(cache.insert_carried(None, &answer, &INSECURE, Origin::Recursion, now, true));
+    let (header, records) = synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232)
+        .expect("RFC 8020 under the carry");
+    assert_eq!(header.rcode, 3);
+    assert!(no_ns(&records), "{records:?}");
+    // The same answers taught before the carry (not carried) leave the zone to the
+    // resolver: whether its answers carry a delegation is not known.
+    let cache = denials();
+    let answer = nxdomain_from_the_parents_cut();
+    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, now));
+    assert!(synthesize_type(&cache, "nope.example.test", A, now, true, 1232).is_none());
+    assert!(synthesize_type(&cache, "nope.example.test", A, now, false, 1232).is_some());
+    // The next answer of the zone under the carry brings the synthesis back.
+    let answer = nxdomain_from_the_parents_cut();
+    assert!(cache.insert_carried(None, &answer, &SECURE, Origin::Recursion, now, true));
+    assert!(synthesize_type(&cache, "nope.example.test", A, now, true, 1232).is_some());
+}
+
+#[test]
+fn under_the_carry_a_wildcard_answer_carries_the_parents_delegation_it_came_through() {
+    let now = Instant::now();
+    let cache = denials();
+    let answer = [
+        rr("one.wild.example.test", A, 300, vec![192, 0, 2, 20]),
+        rrsig("one.wild.example.test", A, 3, "wild.example.test", 300),
+    ];
+    let mut authority: Vec<Rr> = nsec(
+        "wild.example.test",
+        "*.wild.example.test",
+        "host.wild.example.test",
+        &[A, 46, 47],
+        300,
+    )
+    .into();
+    // The root's cut, as the resolver adds it to a positive answer under the carry.
+    authority.push(rr(".", types::NS, 3600, wire_name("a.root.test")));
+    let additional = [rr("a.root.test", A, 3600, vec![192, 0, 2, 1])];
+    let wildcard = compose(&Composed {
+        qname: &wire_name("one.wild.example.test"),
+        qtype: A,
+        qclass: 1,
+        rcode: 0,
+        answer: &answer,
+        authority: &authority,
+        additional: &additional,
+    });
+    assert!(cache.insert_carried(None, &wildcard, &SECURE, Origin::Recursion, now, true));
+    let (header, records) = synthesize_type(&cache, "foo.wild.example.test", A, now, true, 1232)
+        .expect("synthesized under the carry");
+    assert_eq!((header.rcode, header.ancount), (0, 1));
+    let sections: Vec<(usize, u16)> = records.iter().map(|record| (record.0, record.2)).collect();
+    assert_eq!(
+        sections,
+        vec![(0, A), (1, types::NS), (2, A)],
+        "the root's NS and its address, as the resolver's answer carries them"
+    );
+    // A delegation of the zone's own replaces it: the resolver follows that cut now.
+    let cache = denials();
+    let answer = message("gone.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
+    assert!(cache.insert_carried(None, &answer, &INSECURE, Origin::Recursion, now, true));
+    let answer = carried(
+        "other.plain.test",
+        "plain.test",
+        &servers(&["ns1.plain.test"]),
+        1,
+        600,
+    );
+    assert!(cache.insert_carried(None, &answer, &INSECURE, Origin::Recursion, now, true));
+    let (_, records) =
+        synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232).expect("synthesized");
+    assert_eq!(
+        kinds(&records),
+        vec![
+            (1, "plain.test", types::SOA),
+            (1, "plain.test", types::NS),
+            (2, "ns1.plain.test", A),
+        ]
+    );
+}
+
+#[test]
+fn the_mark_of_a_cut_above_follows_the_answers_that_taught_it() {
+    let now = Instant::now();
+    let bare = message("gone.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
+    // Set by a negative answer composed under the carry without an NS record...
+    let cache = denials();
+    assert!(cache.insert_carried(None, &bare, &INSECURE, Origin::Recursion, now, true));
+    assert!(synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232).is_some());
+    // ...and cleared by one taught without the carry: what the resolver's answers in the
+    // zone carry is not known again.
+    assert!(cache.insert(None, &bare, &INSECURE, Origin::Recursion, now));
+    assert!(synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232).is_none());
+    // Cleared by an answer with more name servers at the apex than kept.
+    let cache = denials();
+    assert!(cache.insert_carried(None, &bare, &INSECURE, Origin::Recursion, now, true));
+    let names: Vec<String> = (0..=store::MAX_DELEGATION_SERVERS)
+        .map(|index| format!("ns{index}.plain.test"))
+        .collect();
+    let large = carried("other.plain.test", "plain.test", &names, 1, 600);
+    assert!(cache.insert_carried(None, &large, &INSECURE, Origin::Recursion, now, true));
+    assert!(synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232).is_none());
+    // The zone's own delegation wins over a later answer without it: a fresh one is
+    // written.
+    let cache = denials();
+    let own = carried(
+        "other.plain.test",
+        "plain.test",
+        &servers(&["ns1.plain.test"]),
+        1,
+        600,
+    );
+    assert!(cache.insert_carried(None, &own, &INSECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(None, &bare, &INSECURE, Origin::Recursion, now, true));
+    let (_, records) =
+        synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232).expect("synthesized");
+    assert!(!no_ns(&records), "{records:?}");
+}
+
+#[test]
+fn a_positive_answer_through_a_cut_above_does_not_mark_the_zone() {
+    let mut zone = store::Zone::new(&wire_name("wild.example.test"), true);
+    let authority = [rr(".", types::NS, 3600, wire_name("a.root.test"))];
+    let additional = [rr("a.root.test", A, 3600, vec![192, 0, 2, 1])];
+    let shown = store::delegation_of(&zone.apex, &authority, &additional, 100, true);
+    assert!(matches!(shown, store::Shown::Delegation(_)));
+    zone.learn_delegation(shown, true, false, 400);
+    assert_eq!(
+        zone.above_until, 0,
+        "only a negative answer says its cut is above"
+    );
+    assert!(zone.delegated);
+    // Without the carry no cut above the apex is taken.
+    let shown = store::delegation_of(&zone.apex, &authority, &additional, 100, false);
+    assert!(matches!(shown, store::Shown::Nothing));
 }

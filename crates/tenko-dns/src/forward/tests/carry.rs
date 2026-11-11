@@ -2,7 +2,8 @@
 //! forwarder and the policy sink, against a root server of the test's own on a loopback
 //! address: an answer kept before the first trigger came, an answer resolved after a new
 //! trigger reached the catalog but before the housekeeping noticed it, a trigger added while
-//! the answers carry their delegation, and a denial synthesized from the denial cache.
+//! the answers carry their delegation, and a denial synthesized from the denial cache, of a
+//! zone with a cut of its own and of one its parent's server answers for.
 
 use std::{
     net::{SocketAddr, UdpSocket},
@@ -40,8 +41,13 @@ use crate::{
 /// The name server of the test's root: what the NSDNAME trigger names.
 const ROOT_SERVER: &str = "a.root.test";
 
+/// A zone the root's server answers for as well, with no cut of its own (one server for the
+/// parent and the zone, as the DNS lab's authority): its NXDOMAIN carries the zone's SOA.
+const ZONE: &str = "zone.test";
+
 /// A root server on a loopback address: `./NS` with its glue, NXDOMAIN with the root's
-/// SOA for every other name; it counts what it is asked.
+/// SOA for every other name (the SOA of [`ZONE`] for a name in it); it counts what it is
+/// asked.
 struct Root {
     address: SocketAddr,
     asked: Arc<AtomicUsize>,
@@ -101,7 +107,13 @@ fn root_answer(query: &[u8]) -> Option<Vec<u8>> {
         for value in [1u32, 3600, 900, 1_209_600, 300] {
             soa.extend_from_slice(&value.to_be_bytes());
         }
-        push_record(&mut out, &[0], 6, 300, &soa);
+        let zone = wire_name(ZONE);
+        let owner = if qname.as_wire().to_ascii_lowercase().ends_with(&zone) {
+            zone
+        } else {
+            vec![0]
+        };
+        push_record(&mut out, &owner, 6, 300, &soa);
     }
     Some(out)
 }
@@ -443,6 +455,38 @@ async fn a_synthesized_denial_is_judged_with_the_delegation_of_its_zone() {
         "synthesized and rewritten by the policy: {intake:?}"
     );
     assert!(blocked(&answer));
+    assert_eq!(
+        root.asked.load(Ordering::Relaxed),
+        asked,
+        "no query was sent"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn under_the_carry_a_zone_its_parents_server_answers_is_synthesized_from_the_denial_cache() {
+    // The DNS lab's sequence: the trigger rows leave their NSDNAME trigger, and the denial
+    // rows follow under the carry. The trigger names the server that answers for the zone,
+    // so the policy judges the resolver's answer and the synthesized one alike.
+    let root = root();
+    let node = node(&root, &[ROOT_SERVER]);
+    ticks().await;
+    // The resolver's answer comes through the root's cut, not the zone's: it carries no
+    // NS record beside the zone's SOA (RFC 2308 section 2.2), so the trigger does not match.
+    let answer = node.ask(&format!("gone.{ZONE}")).await;
+    assert!(natural_nxdomain(&answer));
+    let header = wire::parse_header(&answer).expect("header");
+    assert_eq!(
+        (header.nscount, header.arcount),
+        (1, 1),
+        "the SOA and the OPT"
+    );
+    let asked = root.asked.load(Ordering::Relaxed);
+    let (intake, answer) = node.intake(&format!("below.gone.{ZONE}"));
+    assert!(
+        matches!(intake, Intake::Synthesized { .. }),
+        "synthesized from the denial cache, as the resolver would answer it: {intake:?}"
+    );
+    assert!(natural_nxdomain(&answer));
     assert_eq!(
         root.asked.load(Ordering::Relaxed),
         asked,

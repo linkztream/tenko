@@ -255,14 +255,15 @@ pub const MAX_DELEGATION_SERVERS: usize = crate::recurse::message::MAX_REFERRAL_
 pub const MAX_DELEGATION_ADDRESSES: usize =
     MAX_DELEGATION_SERVERS * crate::recurse::message::MAX_ADDRESSES_PER_SERVER;
 
-/// The delegation a zone's denials came through: the NS RRset at the apex and the
-/// addresses of its name servers, as the resolver's answers carry them while an RPZ zone
-/// has NSDNAME or NSIP triggers. A synthesized answer writes it, so that those triggers
+/// The delegation a zone's denials came through: the NS RRset at the apex (or, when the
+/// resolver followed a cut above the zone because its servers answer for the zone as well,
+/// at that cut) and the addresses of its name servers, as the resolver's answers carry them
+/// while an RPZ zone has NSDNAME or NSIP triggers. A synthesized answer writes it, so that those triggers
 /// judge the synthesized answer as they judge one from the answer cache; it lives as long
 /// as its shortest record.
 #[derive(Debug)]
 pub struct Delegation {
-    /// The NS records at the apex.
+    /// The NS records at the apex, or at the cut above it.
     pub ns: Set,
     /// The A and AAAA RRsets of the name servers.
     pub addresses: Vec<Set>,
@@ -297,7 +298,7 @@ impl Delegation {
 /// What an answer shows of the delegation of the zone at `apex`.
 #[derive(Debug)]
 pub enum Shown {
-    /// No NS record at the apex: what the zone holds stays.
+    /// No NS record at the apex (or above it): what the zone holds stays.
     Nothing,
     /// More name servers or addresses than kept: the zone keeps none.
     TooLarge,
@@ -306,22 +307,46 @@ pub enum Shown {
 }
 
 /// The delegation of the zone at `apex` in `authority` (the NS records at the apex) and
-/// `additional` (the addresses of those name servers), stored at `now`.
-pub fn delegation_of(apex: &[u8], authority: &[Rr], additional: &[Rr], now: u32) -> Shown {
+/// `additional` (the addresses of those name servers), stored at `now`. With `above` (an
+/// answer the resolver composed while answers carry their delegation) an answer without NS
+/// records at the apex shows the cut it came through when that is above the apex: the
+/// deepest owner of NS records the apex is within.
+pub fn delegation_of(
+    apex: &[u8],
+    authority: &[Rr],
+    additional: &[Rr],
+    now: u32,
+    above: bool,
+) -> Shown {
     const NS: u16 = 2;
     const A: u16 = 1;
     const AAAA: u16 = 28;
+    let owner: &[u8] = if authority
+        .iter()
+        .any(|rr| rr.rtype == NS && *rr.owner == *apex)
+    {
+        apex
+    } else if above {
+        match authority
+            .iter()
+            .filter(|rr| rr.rtype == NS && name::is_within(apex, &rr.owner))
+            .map(|rr| rr.owner.as_slice())
+            .max_by_key(|owner| name::label_count(owner))
+        {
+            Some(owner) => owner,
+            None => return Shown::Nothing,
+        }
+    } else {
+        return Shown::Nothing;
+    };
     let ns: Vec<&Rr> = authority
         .iter()
-        .filter(|rr| rr.rtype == NS && *rr.owner == *apex)
+        .filter(|rr| rr.rtype == NS && *rr.owner == *owner)
         .collect();
-    if ns.is_empty() {
-        return Shown::Nothing;
-    }
     if ns.len() > MAX_DELEGATION_SERVERS {
         return Shown::TooLarge;
     }
-    let Some(ns_set) = Set::build(apex, &ns, &[], now, 0) else {
+    let Some(ns_set) = Set::build(owner, &ns, &[], now, 0) else {
         return Shown::Nothing;
     };
     let mut addresses = Vec::new();
@@ -394,6 +419,15 @@ pub struct Zone {
     pub from_recursion: bool,
     /// Whether an answer ever carried its delegation.
     pub delegated: bool,
+    /// Until when, in the cache's seconds, the resolver's answers in the zone are known to
+    /// come through a cut above it: its servers answer for the zone as well, so the zone has
+    /// no cut of its own on the resolver's path. The resolver's negative answers then carry
+    /// no delegation (the cut is not the zone of the SOA, RFC 2308 section 2.2), and under
+    /// the carry the zone's synthesized ones carry none either. Set by a negative answer
+    /// composed under the carry that showed no NS record, for as long as that answer's
+    /// records and the SOA live; cleared by an answer that showed the zone's own cut, one
+    /// with more name servers than kept, or one taught without the carry.
+    pub above_until: u32,
 }
 
 /// The key of a wildcard RRset: the type, then the owner.
@@ -466,6 +500,37 @@ impl Zone {
             apex: apex.into(),
             secure,
             ..Self::default()
+        }
+    }
+
+    /// Takes what an answer `shown` of the delegation; `carried` when the resolver composed
+    /// it under the carry, `negative` for NXDOMAIN or NODATA, whose records live until
+    /// `lives`. Only a negative answer composed under the carry without an NS record sets
+    /// [`Zone::above_until`], for no longer than the SOA it keeps; any other answer that
+    /// does not show the zone's cut above it clears it.
+    pub fn learn_delegation(&mut self, shown: Shown, carried: bool, negative: bool, lives: u32) {
+        match shown {
+            // No NS record of the zone or above it: the resolver followed a cut above the
+            // zone, and its negative answers carry none.
+            Shown::Nothing if carried && negative => {
+                let soa = self.soa.as_ref().map_or(lives, |soa| soa.expires);
+                self.above_until = lives.min(soa);
+            }
+            Shown::Nothing if carried => {}
+            // Taught without the carry: what the resolver's answers carry is not known.
+            Shown::Nothing => self.above_until = 0,
+            Shown::TooLarge => {
+                self.delegation = None;
+                self.delegated = true;
+                self.above_until = 0;
+            }
+            Shown::Delegation(delegation) => {
+                if *delegation.ns.owner == *self.apex {
+                    self.above_until = 0;
+                }
+                self.delegation = Some(delegation);
+                self.delegated = true;
+            }
         }
     }
 
