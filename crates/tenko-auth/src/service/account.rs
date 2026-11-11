@@ -267,6 +267,7 @@ impl AuthService {
         if now.saturating_since(session.authenticated_at) > FRESH_AUTHENTICATION {
             return Err(AuthError::StepUpRequired { required: "fresh" });
         }
+        crate::journal::note_fresh_session();
         Ok(())
     }
 

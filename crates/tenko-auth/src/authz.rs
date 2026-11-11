@@ -990,23 +990,30 @@ impl Authorizer for RbacAuthorizer {
         action: Action,
         object: &ObjectRef,
     ) -> Result<(), Denied> {
-        self.decide(principal, action, object)
-            .map_err(|reason| Denied {
-                action,
-                object: *object,
-                reason,
-            })
+        let decided = self.decide(principal, action, object);
+        // The check journal of a keyed request (`crate::journal`): a passed check is noted,
+        // and for a scoped kind the principal's scope too, which computing it notes.
+        if decided.is_ok() && crate::journal::note_check(principal, action, object) {
+            let _ = self.scope(principal, action, object.kind);
+        }
+        decided.map_err(|reason| Denied {
+            action,
+            object: *object,
+            reason,
+        })
     }
 
     fn scope(&self, principal: &Principal, action: Action, kind: ObjectKind) -> ScopeFilter {
-        match self.reach(principal, action, &anywhere(kind)) {
+        let filter = match self.reach(principal, action, &anywhere(kind)) {
             Ok(Reach::Global) => ScopeFilter::All,
             Ok(Reach::Scoped(mut layers)) if layers.len() == 1 => {
                 layers.pop().unwrap_or(ScopeFilter::Nothing)
             }
             Ok(Reach::Scoped(layers)) => self.narrow(layers),
             Ok(Reach::Denied) | Err(_) => ScopeFilter::Nothing,
-        }
+        };
+        crate::journal::note_scope(principal, action, kind, &filter);
+        filter
     }
 }
 

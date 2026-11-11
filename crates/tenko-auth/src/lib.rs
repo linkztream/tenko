@@ -39,6 +39,7 @@ pub mod encoding;
 pub mod error;
 pub mod grants;
 pub mod hibp;
+pub mod journal;
 pub mod lockout;
 pub mod model;
 pub mod password;

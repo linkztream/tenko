@@ -8,10 +8,10 @@
 //! | `GET /nodes` | 200 page of [`NodeView`] by id, each with its live connection | 400 `sys.invalid_query`, `sys.invalid_cursor` |
 //! | `GET /nodes/{id}` | 200 [`NodeView`] with `ETag` | 400, 403, 404 `cluster.node.not_found` |
 //! | `DELETE /nodes/{id}` | 204: the node is revoked, its connections close | 403, 404, 409 `cluster.node.conflict` |
-//! | `POST /nodes/enrollments` | 201 [`CreatedEnrollment`] with the token, `Cache-Control: no-store` | 400, 403 (`auth.step_up_required` for a controller token), 409 `cluster.node.name_taken`, 422 `cluster.enrollment.*`, `cluster.node.name` |
+//! | `POST /nodes/enrollments` | 201 [`CreatedEnrollment`] with the token, `Cache-Control: no-store` | 400, 403 (`auth.step_up_required` for a controller token), 501 `sys.not_implemented` (a controller token without the authentication service), 409 `cluster.node.name_taken`, 422 `cluster.enrollment.*`, `cluster.node.name` |
 //! | `GET /nodes/enrollments` | 200 [`EnrollmentList`], newest first, never a secret | 403 |
 //! | `DELETE /nodes/enrollments/{id}` | 204 | 403, 404 `cluster.enrollment.not_found` |
-//! | `POST /nodes/enroll` | 201 [`EnrollResponse`] (public: the token authenticates) | 400, 401 `cluster.enrollment.invalid_token`, `.used`, `.expired`; 403 `cluster.enrollment.roles`, `cluster.enrollment.plain_http`; 409 `cluster.protocol.unsupported`, `cluster.node.name_taken`; 422 `cluster.ca.invalid_csr`, `cluster.node.name`, `cluster.node.address` |
+//! | `POST /nodes/enroll` | 201 [`EnrollResponse`] (public: the token authenticates) | 400, 401 `cluster.enrollment.invalid_token`, `.used`, `.expired`; 403 `cluster.enrollment.roles`, `cluster.enrollment.plain_http`, `cluster.enrollment.scheme_unknown`; 409 `cluster.protocol.unsupported`, `cluster.node.name_taken`; 422 `cluster.ca.invalid_csr`, `cluster.node.name`, `cluster.node.address` |
 //!
 //! # The service
 //!
@@ -29,7 +29,11 @@
 //! credential, and every refusal is audited. A token that arrives over plain HTTP is
 //! accepted only under the Lab profile, and recorded with `transport: http`; under every
 //! other profile it is refused with 403 `cluster.enrollment.plain_http` and withdrawn, since
-//! it crossed the network in clear text.
+//! it crossed the network in clear text. A token that arrives through a trusted reverse
+//! proxy that did not state the scheme (no `X-Forwarded-Proto`, no PROXY protocol SSL
+//! record) is accepted only under Lab as well, recorded with `transport: unknown`; under
+//! every other profile it is refused with 403 `cluster.enrollment.scheme_unknown` and kept,
+//! since nothing shows that it was exposed.
 
 use std::sync::Arc;
 
@@ -66,6 +70,7 @@ use crate::{
     extract::{ClientInfo, Ctx},
     list::{Filters, encode_cursor},
     problem::{ApiError, ProblemDetails},
+    server::forwarded::UnstatedScheme,
     state::AppState,
 };
 
@@ -325,9 +330,13 @@ async fn create_enrollment(
         &ObjectRef::singleton(ObjectKind::Node),
     )?;
     let controller = request.roles.contains(&tenko_core::Role::Controller);
-    if controller && let Some(Extension(auth)) = &auth {
+    if controller {
         // A controller receives the installation's key encryption keys (R22): only an
-        // interactive sign-in within the last five minutes creates its token.
+        // interactive sign-in within the last five minutes creates its token. Without the
+        // authentication service nothing can check that, so nothing creates one.
+        let Some(Extension(auth)) = &auth else {
+            return Err(not_implemented("POST", "/nodes/enrollments"));
+        };
         if !matches!(cx.principal, Principal::User { .. }) {
             return Err(ApiError::from_coded_error(
                 CodedError::new(
@@ -409,10 +418,12 @@ async fn delete_enrollment(
 
 /// How the request reached this server: over plain HTTP when it came through a listener
 /// (a peer address is known) and neither the connection nor a trusted reverse proxy said
-/// HTTPS. A router used without a listener (tests) counts as HTTPS.
-fn transport(client: Option<&ClientInfo>) -> EnrollTransport {
+/// HTTPS; unstated when a trusted reverse proxy said nothing about the scheme
+/// ([`UnstatedScheme`]). A router used without a listener (tests) counts as HTTPS.
+fn transport(client: Option<&ClientInfo>, unstated: bool) -> EnrollTransport {
     match client {
         Some(client) if client.peer.is_some() && !client.https => EnrollTransport::PlainHttp,
+        Some(client) if client.peer.is_some() && unstated => EnrollTransport::Unstated,
         _ => EnrollTransport::Https,
     }
 }
@@ -440,7 +451,7 @@ async fn plain_http_profile(app: &AppState) -> Result<Profile, ApiError> {
         (status = 201, description = "The node, its certificate and the CA root (`Cache-Control: no-store`)", body = EnrollResponse),
         (status = 400, description = "The body is not valid JSON (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "The token is not valid (`cluster.enrollment.invalid_token`), was created by another controller (`cluster.enrollment.wrong_controller`), was used (`cluster.enrollment.used`) or expired (`cluster.enrollment.expired`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The token does not allow a requested role (`cluster.enrollment.roles`), or it arrived over plain HTTP and the profile is not Lab (`cluster.enrollment.plain_http`; the token is withdrawn)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The token does not allow a requested role (`cluster.enrollment.roles`), or it arrived over plain HTTP and the profile is not Lab (`cluster.enrollment.plain_http`; the token is withdrawn), or through a trusted reverse proxy that did not state the scheme and the profile is not Lab (`cluster.enrollment.scheme_unknown`; the token is kept)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "No common protocol major (`cluster.protocol.unsupported`) or the name is taken (`cluster.node.name_taken`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The certificate request (`cluster.ca.invalid_csr`), the name (`cluster.node.name`) or the address (`cluster.node.address`) is not usable", body = ProblemDetails, content_type = "application/problem+json")
     ),
@@ -450,15 +461,23 @@ async fn enroll_node(
     State(app): State<AppState>,
     PublicCtx { ctx, .. }: PublicCtx,
     client: Option<Extension<ClientInfo>>,
+    unstated: Option<Extension<UnstatedScheme>>,
     registry: Registry,
     ApiJson(request): ApiJson<EnrollRequest>,
 ) -> Result<Response, ApiError> {
     let registry = registry_or_stub(registry, "POST", "/nodes/enroll")?;
     let mut cx = ctx;
     cx.principal = Principal::system(tenko_core::SystemComponent::Cluster);
-    let transport = transport(client.as_ref().map(|Extension(client)| client));
-    if transport == EnrollTransport::PlainHttp && plain_http_profile(&app).await? != Profile::Lab {
-        return Err(failed(registry.refuse_plain_http(&cx, &request).await));
+    let transport = transport(
+        client.as_ref().map(|Extension(client)| client),
+        unstated.is_some(),
+    );
+    if transport != EnrollTransport::Https && plain_http_profile(&app).await? != Profile::Lab {
+        let refusal = match transport {
+            EnrollTransport::PlainHttp => registry.refuse_plain_http(&cx, &request).await,
+            _ => registry.refuse_unstated_scheme(&cx).await,
+        };
+        return Err(failed(refusal));
     }
     let enrolled = registry
         .enroll_over(&cx, request, transport)
@@ -687,45 +706,18 @@ mod tests {
         send(&router, "DELETE", "/nodes/enrollments/not-a-uuid", None)
             .await
             .assert_problem(400, "sys.invalid_request");
-        send(
-            &router,
-            "POST",
-            "/nodes/enrollments",
-            Some(json!({ "roles": ["controller", "probe"] })),
-        )
-        .await
-        .assert_problem(422, "cluster.enrollment.roles");
-        send(
-            &router,
-            "POST",
-            "/nodes/enrollments",
-            Some(json!({ "roles": ["controller"], "expires_in_secs": 7200 })),
-        )
-        .await
-        .assert_problem(422, "cluster.enrollment.lifetime");
-        let controller = send(
-            &router,
-            "POST",
-            "/nodes/enrollments",
-            Some(json!({ "roles": ["controller"] })),
-        )
-        .await;
-        assert_eq!(
-            controller.status,
-            StatusCode::CREATED,
-            "{}",
-            controller.body
-        );
-        assert!(
-            controller.body["command"]
-                .as_str()
-                .is_some_and(
-                    |command| command.starts_with("tenko cluster join --controller")
-                        && command.ends_with("--address HOST:PORT --data-dir D")
-                ),
-            "{}",
-            controller.body
-        );
+        // A controller token needs a fresh interactive sign-in, which only the
+        // authentication service can check; this router has none, so nothing creates one
+        // (the server always has it: `tenko`'s cluster tests create controller tokens).
+        for body in [
+            json!({ "roles": ["controller", "probe"] }),
+            json!({ "roles": ["controller"], "expires_in_secs": 7200 }),
+            json!({ "roles": ["controller"] }),
+        ] {
+            send(&router, "POST", "/nodes/enrollments", Some(body))
+                .await
+                .assert_problem(501, "sys.not_implemented");
+        }
         send(
             &router,
             "POST",
@@ -875,6 +867,15 @@ mod tests {
 
     /// `POST /nodes/enroll` as a listener hands it on: from a peer, over plain HTTP.
     async fn enroll_over_plain_http(router: &Router, body: &Value) -> Reply {
+        enroll_as(router, body, false, false).await
+    }
+
+    /// Enrolls through a trusted reverse proxy that did not state the scheme.
+    async fn enroll_through_a_silent_proxy(router: &Router, body: &Value) -> Reply {
+        enroll_as(router, body, true, true).await
+    }
+
+    async fn enroll_as(router: &Router, body: &Value, https: bool, unstated: bool) -> Reply {
         let mut request = Request::builder()
             .method("POST")
             .uri(format!("{API_BASE}/nodes/enroll"))
@@ -884,10 +885,13 @@ mod tests {
         request.extensions_mut().insert(ClientInfo {
             source_ip: Some("192.0.2.21".parse().expect("address")),
             peer: Some("192.0.2.21:40000".parse().expect("peer")),
-            https: false,
+            https,
             host: None,
-            via_proxy: false,
+            via_proxy: unstated,
         });
+        if unstated {
+            request.extensions_mut().insert(UnstatedScheme);
+        }
         let response = router.clone().oneshot(request).await.expect("response");
         let status = response.status();
         let headers = response.headers().clone();
@@ -980,6 +984,57 @@ mod tests {
         let records = audit_contexts(&store, "cluster.node.enroll").await;
         assert_eq!(records.len(), 2, "{records:?}");
         assert!(!records[1].contains_key("transport"), "{records:?}");
+    }
+
+    #[tokio::test]
+    async fn an_unstated_scheme_is_refused_outside_lab_and_the_token_kept() {
+        for profile in [Profile::Home, Profile::Standard, Profile::Hardened] {
+            let store = store_with_profile(profile).await;
+            let router = router_on(Arc::clone(&store), None, true).await;
+            let token_text = token(&router).await;
+            let refused =
+                enroll_through_a_silent_proxy(&router, &enroll_request(&token_text)).await;
+            refused.assert_problem(403, "cluster.enrollment.scheme_unknown");
+            let detail = refused.body["detail"].as_str().unwrap_or_default();
+            assert!(
+                detail.contains("X-Forwarded-Proto") && detail.contains("send-proxy-v2-ssl"),
+                "the refusal says what to set: {detail}"
+            );
+            assert!(
+                audit_contexts(&store, "cluster.enrollment.delete")
+                    .await
+                    .is_empty(),
+                "{profile:?}: nothing withdrawn"
+            );
+            assert_eq!(
+                audit_contexts(&store, "cluster.node.enroll").await.len(),
+                1,
+                "{profile:?}: the refusal is audited"
+            );
+            // The token is kept: the same token enrolls once the scheme is stated.
+            let enrolled = send(
+                &router,
+                "POST",
+                "/nodes/enroll",
+                Some(enroll_request(&token_text)),
+            )
+            .await;
+            assert_eq!(enrolled.status, StatusCode::CREATED, "{}", enrolled.body);
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unstated_scheme_under_lab_is_recorded_as_unknown() {
+        let store = store_with_profile(Profile::Lab).await;
+        let router = router_on(Arc::clone(&store), None, true).await;
+        let token_text = token(&router).await;
+        let enrolled = enroll_through_a_silent_proxy(&router, &enroll_request(&token_text)).await;
+        assert_eq!(enrolled.status, StatusCode::CREATED, "{}", enrolled.body);
+        let records = audit_contexts(&store, "cluster.node.enroll").await;
+        assert_eq!(
+            records[0].get("transport").map(String::as_str),
+            Some("unknown")
+        );
     }
 
     /// The enrollment request for `token` with a fresh certificate request.

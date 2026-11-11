@@ -108,10 +108,15 @@ plain HTTP, directly or through a trusted reverse proxy that says so
 stored profile is Lab, and its token is withdrawn if it is not used yet, since it crossed the
 network in clear text (`cluster.enrollment.delete` with the reason `plain_http`). The
 withdrawal does not stop a listener that uses the token first; only the node's refusal,
-before anything is sent, does. A trusted reverse proxy that sends no `X-Forwarded-Proto`
-counts as HTTPS (TLS mode c), so a proxy that also accepts plain HTTP must set the header.
+before anything is sent, does. Through a trusted reverse proxy (TLS mode c) the scheme must
+be stated: a proxy that sends no `X-Forwarded-Proto` and no PROXY protocol version 2 SSL
+record leaves it unknown, and the enrollment is refused with 403
+`cluster.enrollment.scheme_unknown` under every profile but Lab. The token is kept, since
+nothing shows that it crossed the network in clear text; set the header in the proxy
+([certificates.md](certificates.md) section 7 says how) and enroll again with the same token.
 Under Lab the enrollment is
-recorded with `transport: http` in `cluster.node.enroll`. A Lab controller that enrolls
+recorded with `transport: http` in `cluster.node.enroll`, or `transport: unknown` when the
+proxy did not state the scheme. A Lab controller that enrolls
 nodes over a network someone else can read should turn its built-in TLS on instead: the
 token's fingerprint then makes the internal CA safe without public certificates.
 
@@ -603,7 +608,7 @@ Work that must happen once for the whole installation runs on the leader only, u
 | `connect.poll` | The poll schedule of every connector instance. The plugin processes, the health checks and the runs a person asks for stay on every controller ([connectors.md](connectors.md)) |
 | `vault.kek_rotation` | The online rotation of the key-encryption key |
 | `cluster.prune` | The hourly prune of expired revocations and old enrollment tokens |
-| `api.idempotency_purge` | The hourly purge of expired idempotency records |
+| `api.idempotency_purge` | The hourly purge of expired idempotency records, oldest first through their expiry rows (`sys.api_idempotency_expiry`), in batches of 500 that yield between them; when it takes office and once a day it also sweeps the records that have no expiry row (written by an earlier version, or by an older controller during a rolling upgrade) |
 | `auth.used_challenges_purge` | The hourly purge of the records of used sign-in challenges |
 | `import.purge` | The hourly purge of expired import uploads and of staged uploads without an import |
 | `cluster.clock` | Every minute, writes the leader's clock so every controller can compare its own with it |

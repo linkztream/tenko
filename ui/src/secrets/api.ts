@@ -3,9 +3,10 @@
 // access hand-off. Values travel only in `createSecret`, `updateSecret` (requests) and
 // `revealSecret` (the one answer that carries a value); every other call is metadata.
 //
-// Creating or replacing a value sends no `Idempotency-Key`: the server keeps a fingerprint
-// of keyed requests for its replay check, and a request body that holds a value should not
-// leave even a hash behind. A retried create is refused by nothing but shows up as a second
+// Creating or replacing a value sends no `Idempotency-Key`. The server would never
+// fingerprint such a body (it holds a value, and even a hash of a short password can be
+// tested offline): a keyed create leaves only a marker, and a retry with its key is 409
+// `sys.idempotency_not_replayable`. Without a key a retried create shows up as a second
 // secret, which the person sees and deletes.
 import { ANY_REVISION, api } from "../api/client";
 import type { components } from "../api/generated/schema";

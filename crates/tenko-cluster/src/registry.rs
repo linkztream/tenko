@@ -266,6 +266,10 @@ pub enum EnrollTransport {
     Https,
     /// Over plain HTTP. Only the Lab profile accepts it ([`NodeRegistry::refuse_plain_http`]).
     PlainHttp,
+    /// Through a trusted reverse proxy that did not say whether the client used HTTPS (no
+    /// `X-Forwarded-Proto`, no PROXY protocol SSL record). Only the Lab profile accepts it
+    /// ([`NodeRegistry::refuse_unstated_scheme`]).
+    Unstated,
 }
 
 fn plain_http_refused() -> ClusterError {
@@ -275,6 +279,19 @@ fn plain_http_refused() -> ClusterError {
         "this controller accepts enrollment tokens only over HTTPS: the token crossed the \
          network in clear text and is withdrawn; create a new token and enroll with the \
          https:// URL of the controller (plain HTTP is accepted only under the Lab profile)",
+    )
+}
+
+fn scheme_unknown() -> ClusterError {
+    ClusterError::new(
+        "cluster.enrollment.scheme_unknown",
+        403,
+        "this controller accepts enrollment tokens only over HTTPS, and the reverse proxy in \
+         front of it did not say whether the client used HTTPS; let the proxy set the header \
+         X-Forwarded-Proto (HAProxy: `http-request set-header X-Forwarded-Proto https` on the \
+         TLS frontend; nginx: `proxy_set_header X-Forwarded-Proto $scheme;`) or send the \
+         PROXY protocol version 2 with its SSL record (HAProxy: `send-proxy-v2-ssl`), then \
+         enroll again with the same token, which is kept",
     )
 }
 
@@ -1052,8 +1069,9 @@ impl NodeRegistry {
     }
 
     /// [`Self::enroll`] for a request that arrived over `transport`. An enrollment over
-    /// plain HTTP is recorded with the context `transport: http`; the caller has checked
-    /// that the profile allows it.
+    /// plain HTTP is recorded with the context `transport: http`, one whose scheme the
+    /// trusted proxy did not state with `transport: unknown`; the caller has checked that
+    /// the profile allows it.
     ///
     /// # Errors
     ///
@@ -1064,8 +1082,14 @@ impl NodeRegistry {
         request: EnrollRequest,
         transport: EnrollTransport,
     ) -> Result<Enrolled, ClusterError> {
-        if transport == EnrollTransport::PlainHttp {
-            tracing::warn!(source = ?cx.source_ip, "an enrollment token arrived over plain HTTP (Lab profile)");
+        match transport {
+            EnrollTransport::PlainHttp => {
+                tracing::warn!(source = ?cx.source_ip, "an enrollment token arrived over plain HTTP (Lab profile)");
+            }
+            EnrollTransport::Unstated => {
+                tracing::warn!(source = ?cx.source_ip, "an enrollment token arrived through a reverse proxy that did not state the scheme (Lab profile)");
+            }
+            EnrollTransport::Https => {}
         }
         match self.try_enroll(cx, request, transport).await {
             Ok(enrolled) => Ok(enrolled),
@@ -1096,6 +1120,18 @@ impl NodeRegistry {
             proven = Some(token.id());
         }
         self.audit_refusal(cx, &error, proven).await;
+        error
+    }
+
+    /// Refuses an enrollment whose scheme the trusted reverse proxy did not state, where the
+    /// profile does not allow it (every profile but Lab): 403
+    /// `cluster.enrollment.scheme_unknown`, audited with that code among the refusals anyone
+    /// can send (one summary per window past the burst, as the other refusals). The token
+    /// is kept: nothing shows that it crossed the network in clear text. Returns the error
+    /// to answer with.
+    pub async fn refuse_unstated_scheme(&self, cx: &RequestCtx) -> ClusterError {
+        let error = scheme_unknown();
+        self.audit_refusal(cx, &error, None).await;
         error
     }
 
@@ -1161,6 +1197,7 @@ impl NodeRegistry {
             "cluster.node.name_taken" => "cluster.node.name_taken",
             "cluster.ca.invalid_csr" => "cluster.ca.invalid_csr",
             "cluster.enrollment.plain_http" => "cluster.enrollment.plain_http",
+            "cluster.enrollment.scheme_unknown" => "cluster.enrollment.scheme_unknown",
             _ => "cluster.enrollment.refused",
         };
         let window = self.timings().refusal_window;
@@ -1178,10 +1215,12 @@ impl NodeRegistry {
             };
             // Before the secret matched: the token is malformed, unknown, wrong or from
             // another controller, which anyone can send; so is a refusal over plain HTTP that
-            // names no token.
+            // names no token, and one through a proxy that did not state the scheme.
             let unproven = matches!(
                 error.code(),
-                "cluster.enrollment.invalid_token" | "cluster.enrollment.wrong_controller"
+                "cluster.enrollment.invalid_token"
+                    | "cluster.enrollment.wrong_controller"
+                    | "cluster.enrollment.scheme_unknown"
             ) || (error.code() == "cluster.enrollment.plain_http"
                 && token.is_none());
             let recorded = if unproven {
@@ -1429,8 +1468,10 @@ impl NodeRegistry {
                 .with_context("enrollment", token_id.to_string())
                 .with_context("serial", issued.info.serial.clone())
                 .with_context("not_after", issued.info.not_after.to_rfc3339());
-            if transport == EnrollTransport::PlainHttp {
-                draft = draft.with_context("transport", "http");
+            match transport {
+                EnrollTransport::PlainHttp => draft = draft.with_context("transport", "http"),
+                EnrollTransport::Unstated => draft = draft.with_context("transport", "unknown"),
+                EnrollTransport::Https => {}
             }
             batch.audit(draft);
             Ok(batch)

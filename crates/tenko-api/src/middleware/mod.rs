@@ -43,7 +43,7 @@ pub use rate_limit::{LimitScope, Quota, RateLimitConfig, RateLimiter, RetryAfter
 use crate::{
     extract::{AuthOutcome, ClientInfo, credentials, placeholder_principal},
     problem::{ApiError, codes},
-    server::forwarded::{ConnInfo, client_info},
+    server::forwarded::{ConnInfo, UnstatedScheme, resolve},
     state::AppState,
 };
 pub(crate) use metrics::RouteTable;
@@ -117,11 +117,14 @@ pub(crate) async fn outer(
     next: Next,
 ) -> Response {
     let id = RequestId::generate();
-    let client = client_info(
+    let (client, scheme_stated) = resolve(
         request.extensions().get::<ConnInfo>(),
         request.headers(),
         request.uri(),
     );
+    if !scheme_stated {
+        request.extensions_mut().insert(UnstatedScheme);
+    }
     let started = Instant::now();
     let method = request.method().clone();
     let api_path = is_api_path(request.uri().path());
@@ -181,11 +184,16 @@ pub(crate) async fn api(
                 .cloned(),
         };
         let state = &layers.state;
+        let env = idempotency::Env {
+            principal: principal.as_ref(),
+            authorizer: state.authorizer.as_deref(),
+            secrets: layers.routes.secrets(route),
+        };
         idempotency::handle(
             state.store.as_ref(),
             &state.platform.in_flight,
             layers.idempotency,
-            principal.as_ref(),
+            env,
             request,
             |request| next.run(request),
         )

@@ -650,20 +650,61 @@ where
     }
 }
 
+/// How many purges of the idempotency records run between two sweeps for records without
+/// an expiry row (once a day at the hourly interval).
+const IDEMPOTENCY_SWEEP_EVERY: u64 = 24;
+
 /// The hourly purge of expired idempotency records (`api.idempotency_purge`), fenced with
-/// the leader epoch.
+/// the leader epoch: through the expiry rows, oldest first, in bounded batches. The first
+/// run of a term and every [`IDEMPOTENCY_SWEEP_EVERY`]th run also sweep the table for
+/// records without an expiry row (from an earlier version, or from an older controller
+/// during a rolling upgrade).
 pub(crate) fn idempotency_purge(store: Arc<dyn Store>, ttl: Duration) -> Arc<dyn LeaderService> {
+    // The epoch of the last completed run and the runs since the last sweep; updated only
+    // when a run completes, so a run that fails is followed by one that sweeps as it would.
+    let runs = Arc::new(Mutex::new((None::<u64>, 0_u64)));
     periodic("api.idempotency_purge", PURGE_INTERVAL, move |epoch| {
         let store = Arc::clone(&store);
+        let runs = Arc::clone(&runs);
+        let (sweep, next) = {
+            let runs = runs.lock().unwrap_or_else(PoisonError::into_inner);
+            let since = if runs.0 == Some(epoch) { runs.1 } else { 0 };
+            (
+                runs.0 != Some(epoch) || since.is_multiple_of(IDEMPOTENCY_SWEEP_EVERY),
+                since + 1,
+            )
+        };
         async move {
-            tenko_api::middleware::idempotency::purge_expired(
+            let now = Timestamp::now();
+            let removed = tenko_api::middleware::idempotency::purge_expired(
                 store.as_ref(),
                 ttl,
-                Timestamp::now(),
+                now,
                 Some(epoch),
             )
             .await
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+            if sweep {
+                let changed = tenko_api::middleware::idempotency::sweep_unindexed(
+                    store.as_ref(),
+                    ttl,
+                    now,
+                    Some(epoch),
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+                if changed > 0 {
+                    tracing::info!(
+                        changed,
+                        "idempotency records without an expiry row removed or indexed"
+                    );
+                }
+            }
+            {
+                let mut runs = runs.lock().unwrap_or_else(PoisonError::into_inner);
+                *runs = (Some(epoch), if sweep { 1 } else { next });
+            }
+            Ok(removed)
         }
     })
 }

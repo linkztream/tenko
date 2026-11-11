@@ -270,8 +270,8 @@ impl Api {
     }
 
     /// A `multipart/form-data` upload of files in the field `file`, without an
-    /// `Idempotency-Key` (the idempotency middleware buffers keyed bodies under a small
-    /// limit).
+    /// `Idempotency-Key`, as the clients send uploads (the idempotency middleware reads at
+    /// most 32 MiB of a retried body into its fingerprint).
     pub fn upload(&self, path: &str, files: &[(&str, &[u8])]) -> Reply {
         let boundary = format!("tenko-test-{}", uuid::Uuid::now_v7().simple());
         let mut body = Vec::new();

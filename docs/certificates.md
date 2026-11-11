@@ -213,6 +213,23 @@ Install the root only on computers you administer from: a computer that trusts i
 
 With `reverse_proxy` the certificate is the proxy's, issued and renewed there (for HAProxy with an ACME client, see the notes in [deploy/README.md](../deploy/README.md)). Tenko shows the proxies it trusts and the public host name on the Certificates page and nothing else about the certificate, because it never holds it. `tls.trusted_proxies` are the only sources that may connect and the only ones whose forwarded headers are believed.
 
+**What the proxy must send.** Tenko takes the client's address, scheme and host from the proxy:
+
+| What | Header | Rule |
+|---|---|---|
+| Address | `X-Forwarded-For`, or the PROXY protocol (`proxy_protocol = true`) | Walked from the right: the nearest entry that is not a trusted proxy is the client |
+| Scheme | `X-Forwarded-Proto: https`, or a PROXY protocol version 2 header with its SSL record | The last value counts. Set the header, do not append to it |
+| Host | `X-Forwarded-Host`, else `Host` | The last value counts |
+
+Without a stated scheme Tenko assumes HTTPS for its security headers and the CSRF origin check, since the proxy ends TLS. The enrollment of a node hands over a secret, so it needs the scheme stated: through a proxy that says nothing, `tenko node enroll` and `tenko cluster join` are refused with 403 `cluster.enrollment.scheme_unknown` under every profile but Lab, and the token stays valid for the next attempt. A proxy that also accepts plain HTTP must send `X-Forwarded-Proto: http` there, or the refusal of enrollments over plain HTTP cannot see them.
+
+| Proxy | What to add |
+|---|---|
+| HAProxy, HTTP mode | `http-request set-header X-Forwarded-Proto https` on the TLS frontend (and `http` on a plain one), `option forwardfor` in the backend |
+| HAProxy with the PROXY protocol | `send-proxy-v2-ssl` on the `server` line (plain `send-proxy-v2` carries no SSL record) |
+| nginx | `proxy_set_header X-Forwarded-Proto $scheme;`, `proxy_set_header X-Forwarded-Host $host;`, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` |
+| Caddy, Traefik | Nothing: both set `X-Forwarded-Proto` and `X-Forwarded-For` |
+
 ## 8. Reference
 
 | What | Where |

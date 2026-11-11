@@ -121,7 +121,8 @@ component is loaded with `lazy()`, so every area is its own chunk. Build every l
   (an ESLint rule enforces it). Area-specific request modules (`src/api/moves.ts`,
   `src/import/api.ts`) wrap the client and keep the rest of an area free of wire details.
 - POST sends an `Idempotency-Key`; pass the same key when retrying one logical operation,
-  `idempotencyKey: null` to send none (uploads). Every write sends `If-Match` when `ifMatch` is
+  `idempotencyKey: null` to send none (uploads: the server compares a retry by reading at
+  most 32 MiB of its body). Every write sends `If-Match` when `ifMatch` is
   given (POST too, for an action on an existing object): the revision of the object being
   edited, or `ANY_REVISION` where none applies.
 - A body is JSON, except a `FormData` (multipart) and a `Blob` or `File`, which are sent as they

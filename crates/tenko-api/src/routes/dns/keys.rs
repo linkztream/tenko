@@ -1,11 +1,13 @@
 //! `GET|POST /dns/keys`, `GET|DELETE /dns/keys/{key}`: TSIG keys. The secret is in the
-//! vault and appears once, in the answer of the create; every action needs `dns.keys`,
-//! and a change needs an interactive session (the authorizer refuses a token).
+//! vault and appears once, in the answer of the create (`Cache-Control: no-store`, so an
+//! `Idempotency-Key` retry gets 409 `sys.idempotency_not_replayable`, never the secret
+//! again); every action needs `dns.keys`, and a change needs an interactive session (the
+//! authorizer refuses a token).
 
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use tenko_auth::authz::anywhere;
@@ -91,7 +93,7 @@ pub(super) async fn list_dns_keys(
     description = "Scope: `dns.keys`, in an interactive session. Without `secret` a secret of the algorithm's hash length is generated; with it, the base64 secret (16 to 1,024 octets) is imported. The secret is stored in the vault and shown in this answer only.",
     request_body(content = KeyCreate, content_type = "application/json"),
     responses(
-        (status = 201, description = "The key and its secret, shown this once", body = KeyCreated),
+        (status = 201, description = "The key and its secret, shown this once (`Cache-Control: no-store`)", body = KeyCreated),
         (status = 400, description = "The request is malformed, or the name or the secret is invalid (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to change keys", body = ProblemDetails, content_type = "application/problem+json"),
@@ -122,7 +124,11 @@ pub(super) async fn create_dns_key(
         key: item(created.key.clone()),
         secret: created.secret.as_str().to_owned(),
     };
-    Ok((StatusCode::CREATED, Json(answer)).into_response())
+    let mut response = (StatusCode::CREATED, Json(answer)).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
 }
 
 #[utoipa::path(

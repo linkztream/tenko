@@ -77,7 +77,7 @@ Tenko uses system secrets itself and no person needs their value; a reveal route
 | Events | The `secrets` topic of `GET /events` carries references to the changed objects (from `vault.operator_meta`, `vault.reveals` and `vault.host_bindings`), not bodies. The envelope tables map to no topic. |
 | Errors | The messages and parameters of the model's errors name fields, ids and counts. |
 | Job records | Edits are not jobs (section 7). |
-| Idempotency records | A keyed request leaves a fingerprint, and a response that holds a value leaves a marker only (section 4). |
+| Idempotency records | A keyed request whose body holds a value leaves no fingerprint, and a response that holds a value leaves a marker only (section 4). |
 
 ### Limits
 
@@ -217,7 +217,7 @@ The log can err in one direction only. A reveal cannot happen unrecorded, but a 
 
 ### Retries and the Idempotency-Key
 
-A reveal is never replayed. The middleware that implements `Idempotency-Key` keeps the response of a keyed `POST` for 24 hours by default, except that a response with `Cache-Control: no-store` leaves only a bodiless marker. A retry with the same key and the same request therefore gets 409 `sys.idempotency_not_replayable`; the handler does not run a second time, so there is no second value and no second record. The same key with another request is 422 `sys.idempotency_mismatch`. A client that lost a reveal answer asks again with a new key and gets a new record in the log.
+A reveal is never replayed. The middleware that implements `Idempotency-Key` keeps the response of a keyed `POST` for 24 hours by default, except that a response that carries a secret (the document types the value as `SecretString`) or `Cache-Control: no-store` leaves only a bodiless marker ([api/README.md](api/README.md)). A retry with the same key and the same request therefore gets 409 `sys.idempotency_not_replayable`; the handler does not run a second time, so there is no second value and no second record. The same key with another request is 422 `sys.idempotency_mismatch`. A client that lost a reveal answer asks again with a new key and gets a new record in the log.
 
 ### The reveal dialog
 
@@ -314,7 +314,7 @@ At every start the server adopts operator secrets that have no record, such as c
 
 **Concurrency.** `PATCH` and `DELETE` on a secret take `If-Match` with the revision of the metadata, as `GET /secrets/{id}` returns it in `ETag`. `PUT /hosts/{id}/credentials` takes the `version` of the host's set of bindings, as `GET /hosts/{id}/credentials` returns it. A stale value is 409 `vault.secret.conflict` or `vault.host_credentials.conflict`. An absent header or `*` means no precondition. A delete also fails with `vault.secret.conflict` when a binding appeared between the check and the write. A `PATCH` that changes nothing returns the current secret without a write or a record. A `PUT` of the same set does the same.
 
-**The Idempotency-Key.** The UI sends no `Idempotency-Key` with `POST /secrets`, although its client adds one to every other `POST`. For a keyed request the middleware stores a SHA-256 fingerprint of the method, path, content type and body, to recognize a retry, and the store table that holds it is replicated, snapshotted and backed up like any other. A body that holds a value should not leave even a hash behind, because the hash of a short password can be tested offline. The cost is that a create whose answer was lost, when retried, shows up as a second secret with the same name; the person sees it and deletes one. Clients of the API should do the same. The middleware handles `POST` only, so `PATCH` with a new value is not affected. The store's own deduplication is off for these writes: a new envelope holds random keys and nonces and never repeats.
+**The Idempotency-Key.** A keyed `POST /secrets` leaves no fingerprint of its body: the body holds a value, and even a hash of a short password can be tested offline, so the middleware records only that the request was performed, and a retry with the same key is 409 `sys.idempotency_not_replayable` instead of a second secret ([api/README.md](api/README.md)). The UI sends no `Idempotency-Key` with `POST /secrets`, as it did when keyed requests were fingerprinted, although its client adds one to every other `POST`; a create whose answer was lost and that is sent again shows up as a second secret with the same name, which the person sees and deletes. The middleware handles `POST` only, so `PATCH` with a new value is not affected. The store's own deduplication is off for these writes: a new envelope holds random keys and nonces and never repeats.
 
 ## 8. The key-encryption key
 

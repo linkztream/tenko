@@ -579,6 +579,7 @@ export type MessageKey =
   | "audit.action.sys.backup.restore"
   | "audit.action.sys.backup.settings"
   | "audit.action.sys.diagnostics"
+  | "audit.action.sys.idempotency.replay"
   | "audit.action.sys.modules.update"
   | "audit.action.sys.update.confirm"
   | "audit.action.sys.update.download"
@@ -10328,6 +10329,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.sys.backup.restore",
   "audit.action.sys.backup.settings",
   "audit.action.sys.diagnostics",
+  "audit.action.sys.idempotency.replay",
   "audit.action.sys.modules.update",
   "audit.action.sys.update.confirm",
   "audit.action.sys.update.download",

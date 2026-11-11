@@ -13,8 +13,9 @@
 //! `Cluster` service then needs the caller's record in the node registry, holding the
 //! presented certificate. The `Raft` service accepts a controller without a record as
 //! long as this member has not replicated it yet (a learner catching up from an empty
-//! store knows nobody); a record that exists must hold the certificate. A Raft message
-//! must name its sender as the leader or candidate it speaks for.
+//! store knows nobody), unless a row of the store's revocation table names the node or
+//! its certificate; a record that exists must hold the certificate. A Raft message must
+//! name its sender as the leader or candidate it speaks for.
 //!
 //! # Membership
 //!
@@ -433,20 +434,27 @@ impl Peers {
             }
             // The first controller of a cluster never enrolled and has no record; a revoked
             // controller has none either. Its certificates are on the revocation list, but
-            // one its record no longer held is not, so the node id decides.
-            None if access == Access::Raft => match self.registry() {
-                Ok(registry)
-                    if registry.is_revoked_node(node)
-                        || registry.revocations().is_revoked(&peer.identity.serial) =>
+            // one its record no longer held is not, so the node id decides. The store's
+            // revocation table decides, not the registry's sets: those are empty until the
+            // registry is attached at start, and lag a revocation until its watcher
+            // catches up. Only a caller without a record pays the scan.
+            None if access == Access::Raft => {
+                let view = self
+                    .store()
+                    .read(ReadConsistency::Local)
+                    .await
+                    .map_err(|error| status_of(&ClusterError::from(error)))?;
+                if revoked_in(view.as_ref(), node, &peer.identity.serial)
+                    .map_err(|error| status_of(&error))?
                 {
-                    Err(status_of(&ClusterError::new(
+                    return Err(status_of(&ClusterError::new(
                         "cluster.node.unknown",
                         403,
                         format!("controller {node} was revoked"),
-                    )))
+                    )));
                 }
-                _ => Ok(None),
-            },
+                Ok(None)
+            }
             None => Err(status_of(&ClusterError::new(
                 "cluster.node.unknown",
                 403,
@@ -1778,9 +1786,54 @@ impl StepHandler for MemberStep {
     }
 }
 
+/// Whether the store revokes the certificate `serial` or the node `node`: a row of
+/// `cluster.revocations` names either.
+fn revoked_in(view: &dyn ReadView, node: NodeId, serial: &str) -> Result<bool, ClusterError> {
+    if view
+        .get_typed(&tables::REVOCATIONS, &serial.to_owned())?
+        .is_some()
+    {
+        return Ok(true);
+    }
+    Ok(view
+        .scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
+        .iter()
+        .any(|(_, revocation, _)| revocation.node == node))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_revoked_controller_is_known_from_the_store_alone() {
+        use tenko_store::MemStore;
+        let store = MemStore::default();
+        let revoked = NodeId(7);
+        let other = NodeId(8);
+        let now = Timestamp::now();
+        let ctx = tenko_core::RequestCtx::system(tenko_core::SystemComponent::Cluster);
+        let mut batch = WriteBatch::for_request(&ctx);
+        batch
+            .put_typed(
+                &tables::REVOCATIONS,
+                &"0a1b".to_owned(),
+                &crate::model::Revocation {
+                    node: revoked,
+                    revoked_at: now,
+                    not_after: now,
+                },
+            )
+            .expect("row");
+        store.propose(batch).await.expect("revoke");
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        // By node id: a certificate its record no longer held is not on the list.
+        assert!(revoked_in(view.as_ref(), revoked, "ffff").expect("read"));
+        // By serial: whatever node the certificate names.
+        assert!(revoked_in(view.as_ref(), other, "0a1b").expect("read"));
+        assert!(!revoked_in(view.as_ref(), other, "ffff").expect("read"));
+        // No registry exists in this test at all: the store alone decides.
+    }
 
     #[test]
     fn promotions_keep_the_voters_odd() {

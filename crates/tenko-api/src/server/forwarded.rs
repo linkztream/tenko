@@ -11,6 +11,16 @@
 //!   client cannot spoof its address by sending its own header through the proxy); the
 //!   scheme from `X-Forwarded-Proto`, else the PROXY v2 SSL record, else HTTPS (the proxy
 //!   terminates TLS in mode c); the host from `X-Forwarded-Host`, else `Host`.
+//!
+//! `X-Forwarded-Proto` and `X-Forwarded-Host` are read from their **last** value: the one
+//! the trusted proxy itself appended or set. A proxy that appends to what the client sent
+//! leaves the client's own claims to the left, where they are never read.
+//!
+//! **A stated scheme.** In mode c the HTTPS of a request whose proxy said nothing about
+//! the scheme (no `X-Forwarded-Proto` of `https` or `http`, no PROXY v2 SSL record with the
+//! client bit, no TLS of the connection itself) is assumed, not stated. The security
+//! headers and the CSRF own-origin use the assumption; the enrollment of a node, which
+//! hands over a secret, refuses it outside Lab ([`UnstatedScheme`]).
 
 use std::{net::IpAddr, sync::Arc};
 
@@ -45,27 +55,46 @@ impl ConnInfo {
     }
 }
 
+/// A request extension that marks a request whose HTTPS a trusted proxy did not state: the
+/// proxy sent no `X-Forwarded-Proto` of `https` or `http` and no PROXY v2 SSL record with
+/// the client bit, and the connection to Tenko was not TLS. [`ClientInfo::https`] is then
+/// true by the assumption of mode c (the proxy terminates TLS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct UnstatedScheme;
+
 /// The client of a request under the trusted proxy rules.
 pub(crate) fn client_info(conn: Option<&ConnInfo>, headers: &HeaderMap, uri: &Uri) -> ClientInfo {
+    resolve(conn, headers, uri).0
+}
+
+/// [`client_info`] and whether the scheme was stated (`false`: assumed, see
+/// [`UnstatedScheme`]).
+pub(crate) fn resolve(
+    conn: Option<&ConnInfo>,
+    headers: &HeaderMap,
+    uri: &Uri,
+) -> (ClientInfo, bool) {
     let Some(conn) = conn else {
         // No listener (router used directly): nothing is trusted.
-        return ClientInfo {
+        let info = ClientInfo {
             source_ip: None,
             peer: None,
             https: uri.scheme_str() == Some("https"),
             host: request_host(headers, uri),
             via_proxy: false,
         };
+        return (info, true);
     };
     let host = request_host(headers, uri);
     if !conn.trusted {
-        return ClientInfo {
+        let info = ClientInfo {
             source_ip: Some(canonical(conn.peer.ip())),
             peer: Some(conn.peer),
             https: conn.tls,
             host,
             via_proxy: false,
         };
+        return (info, true);
     }
 
     let proxied_source = conn
@@ -78,23 +107,23 @@ pub(crate) fn client_info(conn: Option<&ConnInfo>, headers: &HeaderMap, uri: &Ur
         source = walk_forwarded_for(canonical(source), headers, trusted);
     }
 
-    let https = match first_value(headers, &X_FORWARDED_PROTO) {
-        Some(proto) if proto.eq_ignore_ascii_case("https") => true,
-        Some(proto) if proto.eq_ignore_ascii_case("http") => false,
-        _ => {
-            conn.tls
-                || conn.proxy.as_ref().is_some_and(|header| header.tls)
-                || !conn.mode.terminates_tls()
-        }
+    let (https, stated) = match last_value(headers, &X_FORWARDED_PROTO) {
+        Some(proto) if proto.eq_ignore_ascii_case("https") => (true, true),
+        Some(proto) if proto.eq_ignore_ascii_case("http") => (false, true),
+        _ if conn.tls || conn.proxy.as_ref().is_some_and(|header| header.tls) => (true, true),
+        // Mode c: the proxy terminates TLS, so HTTPS is assumed; nobody said so.
+        _ if !conn.mode.terminates_tls() => (true, false),
+        _ => (false, true),
     };
-    let forwarded_host = first_value(headers, &X_FORWARDED_HOST).and_then(valid_host);
-    ClientInfo {
+    let forwarded_host = last_value(headers, &X_FORWARDED_HOST).and_then(valid_host);
+    let info = ClientInfo {
         source_ip: Some(canonical(source)),
         peer: Some(conn.peer),
         https,
         host: forwarded_host.or(host),
         via_proxy: true,
-    }
+    };
+    (info, stated)
 }
 
 /// Walks `X-Forwarded-For` from the right while the current hop is a trusted proxy.
@@ -136,13 +165,16 @@ fn parse_forwarded_address(entry: &str) -> Option<IpAddr> {
     address.parse::<std::net::Ipv4Addr>().ok().map(IpAddr::V4)
 }
 
-/// The first comma-separated value of a header (the client-facing hop).
-fn first_value<'a>(headers: &'a HeaderMap, name: &HeaderName) -> Option<&'a str> {
+/// The last comma-separated value of the last line of a header: the value the trusted
+/// proxy appended or set. Values to its left may come from the client.
+fn last_value<'a>(headers: &'a HeaderMap, name: &HeaderName) -> Option<&'a str> {
     headers
-        .get(name)?
+        .get_all(name)
+        .iter()
+        .next_back()?
         .to_str()
         .ok()?
-        .split(',')
+        .rsplit(',')
         .map(str::trim)
         .find(|value| !value.is_empty())
 }
@@ -271,6 +303,89 @@ mod tests {
             &uri(),
         );
         assert!(!http.https);
+    }
+
+    #[test]
+    fn the_value_the_proxy_appended_wins_over_what_the_client_sent() {
+        let mode = proxy_mode("192.0.2.1", false);
+        // A proxy that appends: the client's own claims stay to the left.
+        let appended = client_info(
+            Some(&conn("192.0.2.1:40000", Arc::clone(&mode), false)),
+            &headers(&[
+                ("host", "ddi.example.org"),
+                ("x-forwarded-proto", "https, http"),
+                ("x-forwarded-host", "evil.example.com, ddi.example.org"),
+            ]),
+            &uri(),
+        );
+        assert!(!appended.https, "the proxy said http");
+        assert_eq!(appended.host.as_deref(), Some("ddi.example.org"));
+        // Two header lines: the last line is the proxy's.
+        let lines = client_info(
+            Some(&conn("192.0.2.1:40000", Arc::clone(&mode), false)),
+            &headers(&[
+                ("x-forwarded-proto", "http"),
+                ("x-forwarded-proto", "https"),
+                ("x-forwarded-host", "evil.example.com"),
+                ("x-forwarded-host", "ddi.example.org"),
+            ]),
+            &uri(),
+        );
+        assert!(lines.https);
+        assert_eq!(lines.host.as_deref(), Some("ddi.example.org"));
+        // Empty trailing entries are skipped, not read as the value.
+        let trailing = client_info(
+            Some(&conn("192.0.2.1:40000", mode, false)),
+            &headers(&[("x-forwarded-proto", "http, ")]),
+            &uri(),
+        );
+        assert!(!trailing.https);
+    }
+
+    #[test]
+    fn a_scheme_nobody_stated_is_marked_as_assumed() {
+        let mode = proxy_mode("192.0.2.1", true);
+        let stated = |pairs: &[(&'static str, &'static str)], proxy: Option<ProxyHeader>| {
+            let mut info = conn("192.0.2.1:40000", Arc::clone(&mode), false);
+            info.proxy = proxy;
+            let (client, stated) = resolve(Some(&info), &headers(pairs), &uri());
+            (client.https, stated)
+        };
+        let v2 = |tls| ProxyHeader {
+            version: 2,
+            command: ProxyCommand::Proxy,
+            source: Some("198.51.100.20:51000".parse().expect("addr")),
+            destination: Some("192.0.2.5:443".parse().expect("addr")),
+            tls,
+        };
+        assert_eq!(stated(&[], None), (true, false), "assumed by mode c");
+        assert_eq!(
+            stated(&[("x-forwarded-proto", "https")], None),
+            (true, true)
+        );
+        assert_eq!(
+            stated(&[("x-forwarded-proto", "http")], None),
+            (false, true)
+        );
+        assert_eq!(
+            stated(&[("x-forwarded-proto", "wss")], None),
+            (true, false),
+            "an unknown value states nothing"
+        );
+        assert_eq!(stated(&[], Some(v2(true))), (true, true), "the SSL record");
+        assert_eq!(
+            stated(&[], Some(v2(false))),
+            (true, false),
+            "a PROXY header without the SSL record states nothing"
+        );
+        // An untrusted peer and a router without a listener always state their scheme.
+        let (_, untrusted) = resolve(
+            Some(&conn("203.0.113.9:40000", Arc::clone(&mode), false)),
+            &HeaderMap::new(),
+            &uri(),
+        );
+        assert!(untrusted);
+        assert!(resolve(None, &HeaderMap::new(), &uri()).1);
     }
 
     #[test]

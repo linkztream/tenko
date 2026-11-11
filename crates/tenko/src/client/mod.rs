@@ -561,8 +561,8 @@ impl Raw {
     }
 
     /// `POST /api/v1{path}` with a `multipart/form-data` body of one file field, with the
-    /// token. No `Idempotency-Key`: the idempotency middleware buffers keyed requests under
-    /// a smaller limit than an upload may have.
+    /// token. No `Idempotency-Key`: the idempotency middleware reads at most 32 MiB of a
+    /// retried body into its fingerprint, less than an upload may have.
     ///
     /// # Errors
     ///

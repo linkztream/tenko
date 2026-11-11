@@ -2298,9 +2298,9 @@ async fn import(target: &Target, args: &ImportArgs) -> Result<Output, Failure> {
     if args.dry_run {
         path.push_str("?dry_run=true");
     }
-    // No `Idempotency-Key`: the idempotency middleware keeps keyed requests under a smaller
-    // limit (32 MiB) than a zone file may have, and an import is checked again before it
-    // starts.
+    // No `Idempotency-Key`: the idempotency middleware compares a retry by reading its body
+    // into a fingerprint, at most 32 MiB, less than a zone file may have, and an import is
+    // checked again before it starts.
     let answer: Value = client.post(&path, &body, None).await?;
     if args.dry_run {
         if target.json {
@@ -3299,8 +3299,8 @@ async fn block_list_upload(target: &Target, args: &BlockListUploadArgs) -> Resul
     let client = target.connect().await?;
     let list = resolve_block_list(&client, &args.list).await?;
     // The typed client sends JSON only: the file goes as `text/plain` through the raw helper,
-    // without an `Idempotency-Key` (keyed requests are buffered under a smaller limit than an
-    // upload may have).
+    // without an `Idempotency-Key` (the idempotency middleware reads at most 32 MiB of a
+    // retried body into its fingerprint, less than an upload may have).
     let raw = target.raw()?;
     let mut request = raw
         .http

@@ -35759,7 +35759,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The key and its secret, shown this once */
+            /** @description The key and its secret, shown this once (`Cache-Control: no-store`) */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -43621,7 +43621,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The token does not allow a requested role (`cluster.enrollment.roles`), or it arrived over plain HTTP and the profile is not Lab (`cluster.enrollment.plain_http`; the token is withdrawn) */
+            /** @description The token does not allow a requested role (`cluster.enrollment.roles`), or it arrived over plain HTTP and the profile is not Lab (`cluster.enrollment.plain_http`; the token is withdrawn), or through a trusted reverse proxy that did not state the scheme and the profile is not Lab (`cluster.enrollment.scheme_unknown`; the token is kept) */
             403: {
                 headers: {
                     [name: string]: unknown;

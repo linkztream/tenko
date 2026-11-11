@@ -1074,6 +1074,10 @@
         <notes><note category="description">What the audit action sys.diagnostics is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Read the diagnostics</source><target>Läs diagnostiken</target></segment>
       </unit>
+      <unit id="audit.action.sys.idempotency.replay">
+        <notes><note category="description">What the audit action sys.idempotency.replay is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Replay an earlier answer</source><target>Upprepa ett tidigare svar</target></segment>
+      </unit>
       <unit id="audit.action.sys.modules.update">
         <notes><note category="description">What the audit action sys.modules.update is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Change the enabled modules</source><target>Ändra de aktiverade modulerna</target></segment>

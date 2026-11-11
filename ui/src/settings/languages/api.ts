@@ -19,8 +19,8 @@ export function listPacks(signal?: AbortSignal): Promise<PackList> {
 
 /**
  * Uploads an XLIFF 2.0 document; the server validates it and keeps it as the candidate of its
- * language. No `Idempotency-Key`: the server buffers keyed requests under a smaller size limit
- * than a pack.
+ * language. No `Idempotency-Key`, as for every upload: the server compares a retry by reading
+ * at most 32 MiB of its body into a fingerprint.
  */
 export function uploadPack(file: File): Promise<PackUpload> {
   const form = new FormData();

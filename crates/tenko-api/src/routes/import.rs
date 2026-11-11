@@ -71,8 +71,8 @@
 //! CRLF line ends and a closing delimiter, and answers 400 `import.upload.malformed`
 //! otherwise.
 //!
-//! A request with an `Idempotency-Key` is buffered by the idempotency middleware first,
-//! which has its own, much smaller limit; send uploads without a key.
+//! Send uploads without an `Idempotency-Key`: the idempotency middleware compares a retry
+//! by reading its body into a fingerprint, at most 32 MiB, less than an upload may have.
 //!
 //! # Apply
 //!

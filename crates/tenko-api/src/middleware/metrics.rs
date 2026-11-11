@@ -167,6 +167,9 @@ pub(crate) struct RouteTable {
     ui: u16,
     /// The first row of `other`; one row per method label.
     other: u16,
+    /// What the bodies of each row carry, for the idempotency middleware (only `POST` rows
+    /// can carry anything).
+    secrets: Vec<super::idempotency::SecretBodies>,
 }
 
 impl RouteTable {
@@ -242,6 +245,22 @@ impl RouteTable {
         };
         let ui = fixed_rows(UI_ROUTE);
         let other = fixed_rows(OTHER_ROUTE);
+        let secret_bodies = serde_json::to_value(document)
+            .map(|document| super::idempotency::secret_bodies(&document))
+            .unwrap_or_default();
+        // A `POST` the document does not list (`other`) is taken as carrying secrets both
+        // ways: nothing tells otherwise.
+        let secrets = rows
+            .iter()
+            .map(|(route, method)| match (*route, *method) {
+                (OTHER_ROUTE, "POST") => super::idempotency::SecretBodies {
+                    request: true,
+                    response: true,
+                },
+                (route, "POST") => secret_bodies.get(route).copied().unwrap_or_default(),
+                _ => super::idempotency::SecretBodies::default(),
+            })
+            .collect();
         let routes = rows
             .iter()
             .map(|(route, _)| Box::<str>::from(*route))
@@ -269,7 +288,16 @@ impl RouteTable {
                 .collect(),
             ui,
             other,
+            secrets,
         }
+    }
+
+    /// What the bodies of a row's operation carry.
+    pub(crate) fn secrets(&self, row: RouteRow) -> super::idempotency::SecretBodies {
+        self.secrets
+            .get(usize::from(row.0))
+            .copied()
+            .unwrap_or_default()
     }
 
     /// The route label of a row: its path template, `ui` or `other`.

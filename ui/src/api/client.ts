@@ -4,7 +4,8 @@
 //
 // - POST carries an `Idempotency-Key` (API-04). Pass the same `idempotencyKey` when
 //   retrying one logical operation; otherwise every call gets a fresh one. `null` sends
-//   none: the server buffers keyed requests under a smaller size limit than an upload.
+//   none, for uploads: the server compares a retry by reading at most 32 MiB of its body
+//   into a fingerprint, less than an upload may have.
 // - Every write (POST, PUT, PATCH, DELETE) carries `If-Match: "<revision>"` when `ifMatch` is
 //   given; use the revision from the object you edit, or ANY_REVISION where no revision
 //   applies. A POST that acts on an existing object (an activation, say) passes it too.
