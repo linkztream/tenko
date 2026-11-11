@@ -22,7 +22,7 @@
 <style>
   /* The history of a metric tile on a time axis that compresses toward the past (OPS-20).
      Tokens only, never raw hex. The data is the series hue (--series-1), the band is the same hue
-     as a wash; focus and the bucket under the pointer are the accent; no-data is hatched in --line-strong. */
+     as a wash; focus and the bucket under the pointer are the accent; no-data is hatched in --chart-ink. */
 
   .page-head { flex-wrap: wrap; }
   .page-head .titles { display: grid; gap: 1px; min-width: min(100%, 260px); }
@@ -84,6 +84,8 @@
   .hplot { position: relative; flex: 1 1 auto; min-block-size: calc(64px + 14px); border-radius: var(--r-1); outline: none; cursor: crosshair; }
   .hplot:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
   .hplot > svg { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; overflow: visible; display: block; }
+  .hplot > canvas { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; display: block; }
+  .mock-controls .perf { font-variant-numeric: tabular-nums; color: var(--ink-2); }
   .hplot .paused { position: absolute; inset-block-start: 0; inset-inline-end: 0; font-size: var(--fs-11); color: var(--ink-3); background: var(--surface); padding: 0 var(--sp-2); border-radius: var(--r-1); display: none; }
   .hplot.is-held .paused { display: block; }
   .h-zone { fill: var(--surface-2); }
@@ -240,12 +242,15 @@
               <button type="button" data-k="series" data-v="zero" aria-pressed="false">At zero</button>
             </span>
           </span>
-          <span class="ctl">Axis
-            <span class="seg" role="group" aria-label="Axis">
-              <button type="button" data-k="axis" data-v="zones" aria-pressed="true">A: three zones</button>
-              <button type="button" data-k="axis" data-v="log" aria-pressed="false">B: logarithmic</button>
+          <span class="ctl">Motion
+            <span class="seg" role="group" aria-label="Motion">
+              <button type="button" data-k="motion" data-v="glide" aria-pressed="true">Glide, 10 frames/s</button>
+              <button type="button" data-k="motion" data-v="glide30" aria-pressed="false">Glide, 30 frames/s</button>
+              <button type="button" data-k="motion" data-v="step" aria-pressed="false">Step each second</button>
             </span>
           </span>
+          <label class="ctl"><input type="checkbox" id="reduced">Reduced motion</label>
+          <button type="button" class="btn sm" id="mark" aria-pressed="false">Mark the last minute</button>
           <span class="ctl">Reach
             <span class="seg" role="group" aria-label="How far back">
               <button type="button" data-k="reach" data-v="1h" aria-pressed="false">1 h</button>
@@ -279,6 +284,7 @@
             </span>
           </span>
           <label class="ctl"><input type="checkbox" id="show-alt">Show the text alternative</label>
+          <span class="ctl perf" id="perf">Drawing: measuring</span>
         </div>
 
         <!-- Embedded copy (?embed=tile): one proposed tile, for the light and dark previews. -->
@@ -289,24 +295,31 @@
         <!-- View 1: one tile. -->
         <section class="hist-section only-tile" aria-labelledby="h-compare">
           <h2 id="h-compare">Today and proposed, at the real tile size</h2>
-          <p class="lead">Both tiles are 283 px wide, a controller tile in a 1280 px window. Today's sparkline forgets after 60 s. The proposed tile keeps the last minute second by second, the hour minute by minute and the days hour by hour, and keeps each bucket's lowest and highest value, so a burst of five seconds hours ago is still a needle. Point at the chart, or tab to it and use the arrow keys.</p>
+          <p class="lead">Both tiles are 283 px wide, a controller tile in a 1280 px window. Today's sparkline forgets after 60 s. The proposed tile draws the last two days on one continuous axis: the newest seconds at an even pace on the right, the past compressed more and more toward the left, with no border anywhere. The grid lines are moments in time; they glide left as time passes and close up as they go, and they fade in and out as their spacing changes. Each bucket keeps its lowest and highest value, so a burst of five seconds hours ago is still a needle. Point at the chart, or tab to it and use the arrow keys.</p>
           <div class="hist-row">
             <figure class="hist-fig"><div style="inline-size:283px" data-slot="today"></div><figcaption><strong>Today.</strong> The last 60 s, one value per second; the scale is the minute's highest.</figcaption></figure>
-            <figure class="hist-fig"><div style="inline-size:283px" data-slot="proposed"></div><figcaption><strong>Proposed.</strong> The same tile, 50 px taller, so that a tile with a list keeps a 64 px chart and its row of labels. The newest second is at the right end.</figcaption></figure>
+            <figure class="hist-fig"><div style="inline-size:283px" data-slot="proposed"></div><figcaption><strong>Proposed.</strong> The same tile, 50 px taller, so that a tile with a list keeps a 64 px chart and its row of labels. The newest second is at the right end; the chart glides left between samples.</figcaption></figure>
           </div>
         </section>
 
         <section class="hist-section only-tile" aria-labelledby="h-axes">
-          <h2 id="h-axes">Two designs of the axis, the same data</h2>
-          <p class="lead">Both put the newest second at the right and compress toward the left; they differ in how the compression is drawn. The labels name the age of the data at each grid line.</p>
+          <h2 id="h-axes">The chosen axis beside the two earlier designs</h2>
+          <p class="lead">The owner chose the continuous axis on 2026-11-11. The two earlier designs stay here for comparison; they step once a second, A with its tiers as zones and B with its logarithmic axis over the first draft's three tiers. "Mark the last minute" highlights one minute and lets it travel: watch it narrow as it moves left.</p>
           <div class="hist-row">
             <figure class="hist-fig wide-chart">
-              <span class="wide-title">A. Three zones, each linear</span>
+              <span class="wide-title">Chosen: one continuous axis</span>
+              <div data-slot="wide-cont"></div>
+              <figcaption>The age is drawn through an inverse hyperbolic sine with a knee at 20 s: linear for the newest seconds, logarithmic for the past, with no border between. Grid lines are anchored to moments (every 5 s, 15 s, minute, 5 min, 15 min, hour, 6 h, day) and fade in and out with their spacing. Behind the line, the tiers grow about tenfold from one to the next, so on the 249 px plot of a 283 px tile every bucket is between about 0.4 and 4 px wide (twice that on this wider chart), and during the last step before finer buckets are folded into a coarser one they slide into it, so the change of resolution cannot be seen.</figcaption>
+            </figure>
+          </div>
+          <div class="hist-row">
+            <figure class="hist-fig wide-chart">
+              <span class="wide-title">Earlier A. Three zones, each linear</span>
               <div data-slot="wide-zones"></div>
               <figcaption>Each tier gets its own zone, set off by a stronger line and a quiet fill, and time runs evenly inside a zone. A slope can be compared inside a zone; across a boundary the scale jumps by 60, and the label says so. The width of a zone is fixed, so the eye learns where "an hour ago" is.</figcaption>
             </figure>
             <figure class="hist-fig wide-chart">
-              <span class="wide-title">B. Continuous logarithmic</span>
+              <span class="wide-title">Earlier B. Logarithmic, with the tiers as they were</span>
               <div data-slot="wide-log"></div>
               <figcaption>The age is drawn on a logarithmic scale with a knee at 10 s, so the compression grows smoothly to the left and no boundary interrupts the line. The grid lines bunch up toward the past, as in the memory graph that prompted this; inside one bucket the time is not even, so slopes are harder to compare.</figcaption>
             </figure>
@@ -333,7 +346,7 @@
 
         <!-- View 2: the whole dashboard in the new form. -->
         <section class="dash-metrics only-dashboard" aria-labelledby="dash-metrics-h">
-          <h2 id="dash-metrics-h">Live metrics <span class="aside" id="dash-aside">Updated every second · history kept in memory on each controller</span></h2>
+          <h2 id="dash-metrics-h">Live metrics <button type="button" class="btn sm" id="pause-motion" aria-pressed="false">Pause motion</button><span class="aside" id="dash-aside">Updated every second · history kept in memory on each controller</span></h2>
           <div class="metrics-grid" id="dash-grid"></div>
         </section>
 
@@ -352,14 +365,16 @@
 
 <aside class="notes" id="notes" aria-label="Mockup notes">
   <h2>Mockup notes: metric history <button class="icon-btn" data-action="notes" aria-label="Close notes"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></h2>
-  <p class="sub">Try it: pick "5 s burst" and both axis designs, then set Reach to 7 d and see the needle stay; pick Restart and switch between Memory only and Small file; set Scope to Cluster of 3; tab to a chart and press the arrow keys, Home and End; switch to Dashboard in the header; switch the theme in the top bar. Every name is a placeholder; the data is generated in the page and is not a measurement.</p>
+  <p class="sub">Try it: pick "5 s burst", set Reach to 7 d and see the needle stay; compare the chosen axis with the earlier designs below; pick Restart and switch between Memory only and Small file; set Scope to Cluster of 3; switch Motion and watch the meter; press "Mark the last minute"; tab to a chart and press the arrow keys, Home and End; switch to Dashboard in the header, where "Pause motion" stops every chart; switch the theme in the top bar. Every name is a placeholder; the data is generated in the page and is not a measurement.</p>
   <ol>
-    <li><strong>Open (DH-Q1): the axis.</strong> A, three zones each linear, or B, one logarithmic axis. Recommended: A; the zones make the scale readable and slopes comparable inside a zone.</li>
-    <li><strong>Open (DH-Q2): how far back.</strong> 1 h, 2 d or 7 d. Recommended: 2 d (60 × 1 s, 60 × 1 min, 48 × 1 h), so today's rhythm can be held against yesterday's.</li>
+    <li><strong>Decided (DH-Q1), the owner on 2026-11-11: one continuous axis</strong>, no zones; the grid scrolls left and compresses as it goes. The earlier designs A and B stay in the comparison for reference.</li>
+    <li><strong>Motion:</strong> the bar at the top measures what the drawing costs in this browser ("Drawing: ..."); switch between 10 and 30 frames a second and stepping once a second, and hide the tab to see the drawing stop. Add <code>?bench=1</code> to the address to measure 300 frames in a row, and use <code>window.tenkoHistory.pause(true)</code> and <code>frameAt(t)</code> in the browser console to draw any moment and read what was drawn.</li>
+    <li><strong>Open (DH-Q2): how far back.</strong> 1 h, 2 d or 7 d. Recommended: 2 d (70 × 1 s, 60 × 10 s, 60 × 1 min, 36 × 10 min, 43 × 1 h), so today's rhythm can be held against yesterday's.</li>
     <li><strong>Open (DH-Q3): across a restart.</strong> Memory only (history starts again, drawn hatched with the restart marked; in a cluster that controller is missing from the past, a burst included) or a small file per controller (after a clean stop only the downtime is missing). Recommended: memory only for the first release.</li>
     <li><strong>Open (DH-Q4): which tiles first.</strong> All 25 at once, or DNS and host first. Recommended: all at once (the Dashboard view).</li>
     <li><strong>Open (DH-Q5): the cluster's band.</strong> An envelope from each controller's own history (sums of the lowests and of the highests, which contain the true range) or exact cluster history kept every second. Recommended: the envelope; the readout says what each number is.</li>
     <li><strong>Open (DH-Q6): the scale.</strong> The highest in view, or with lone needles cut and marked with a caret. Recommended: cut lone needles (switch Scale to compare).</li>
+    <li><strong>Open (DH-Q7): motion on the dashboard.</strong> Every tile on screen glides at 10 frames a second, only the tile under the pointer, or every tile steps once a second. Recommended: every tile glides, with the fallback to a step a second on a slow device and "Pause motion" on the header.</li>
     <li><strong>Built in the mockup only:</strong> the chart holds still while the pointer or the keyboard is on it ("Held"), the number keeps updating; the readout is the same for the pointer and the keyboard and is announced to screen readers.</li>
     <li><strong>Colors:</strong> the data is <code>--series-1</code> (as the DNS panel's chart), the band the same hue as a wash with its upper edge drawn, so a needle one pixel wide still shows; the accent marks only the bucket under the pointer and the focus. Today's sparkline is drawn in the accent; the plan proposes moving it to <code>--series-1</code>.</li>
   </ol>
@@ -375,7 +390,7 @@
   var EMBED = Q.get('embed');
   var REDUCED = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   var state = {
-    view: 'tile',
+    view: Q.get('view') || 'tile',
     series: Q.get('series') || 'burst',
     axis: Q.get('axis') || 'zones',
     reach: Q.get('reach') || '2d',
@@ -383,6 +398,10 @@
     scope: Q.get('scope') || 'node',
     scale: Q.get('scale') || 'cut',
     band: Q.get('band') || 'on',
+    motion: Q.get('motion') || 'glide',
+    reduced: Q.get('reduced') === '1',
+    mark: null,
+    pause: false,
     alt: Q.get('alt') === '1'
   };
 
@@ -529,7 +548,9 @@
     if (step === 5) r = sampled(s, k, a, 5, 5);
     else if (step === 1) {
       if (nodeDown(a, k)) r = { n: 0 }; else { var v = value(s, a, k); r = { lo: v, hi: v, sum: v, n: 1 }; }
-    } else if (step === 60) r = sampled(s, k, a, 60, 12);
+    } else if (step === 10) r = sampled(s, k, a, 10, 5);
+    else if (step === 60) r = sampled(s, k, a, 60, 12);
+    else if (step === 600) r = sampled(s, k, a, 600, 30);
     else if (step === 3600) r = sampled(s, k, a, 3600, 60);
     else {
       // A 6 h bucket is folded from its six hours, as the server folds them.
@@ -739,10 +760,208 @@
     chart.svg.innerHTML = runs.map(function (r) { return '<polyline points="' + r.join(' ') + '"/>'; }).join('');
   }
 
+  /* ---------------- The continuous axis (the owner's choice, DH-Q1) ---------------- */
+  // x(age) = W · (1 − asinh(age / TAU) / asinh(A / TAU)). The inverse hyperbolic sine is linear near
+  // zero (asinh u ≈ u − u³/6, no curvature at "now") and logarithmic far out (asinh u ≈ ln 2u), so the
+  // newest seconds move at an even pace and the past compresses without a border. A plain logarithm
+  // of (1 + age / TAU) bends already at "now"; the earlier design B used it.
+  var TAU = 20;
+  var REACH = { '1h': 3600, '2d': 172800, '7d': 604800 };
+  // The tiers behind the line: each step about a tenth of the age it covers, so a bucket is 0.4 to 4 px
+  // wide everywhere on a tile and the change of resolution cannot be found by eye.
+  var TIERS_C = {
+    '1h': [{ step: 1, a0: 0, a1: 60 }, { step: 10, a0: 60, a1: 600 }, { step: 60, a0: 600, a1: 3600 }],
+    '2d': [{ step: 1, a0: 0, a1: 60 }, { step: 10, a0: 60, a1: 600 }, { step: 60, a0: 600, a1: 3600 }, { step: 600, a0: 3600, a1: 21600 }, { step: 3600, a0: 21600, a1: 172800 }],
+    '7d': [{ step: 1, a0: 0, a1: 60 }, { step: 10, a0: 60, a1: 600 }, { step: 60, a0: 600, a1: 3600 }, { step: 600, a0: 3600, a1: 21600 }, { step: 3600, a0: 21600, a1: 172800 }, { step: 21600, a0: 172800, a1: 604800 }]
+  };
+  // Grid lines: moments in local time, from the day down to 5 s; a line shows once its neighbors are
+  // 3 px away and is fully drawn at 7 px, so lines fade in and out instead of appearing at a border.
+  var GRID = [86400, 21600, 3600, 900, 300, 60, 15, 5];
+  var GRID_MIN = 3;
+  var AGE_LABELS = [[10, '10 s'], [60, '1 min'], [600, '10 min'], [3600, '1 h'], [21600, '6 h'], [86400, '1 d'], [172800, '2 d']];
+  function nowF() { return Date.now() / 1000; }
+  // Every drawn bucket is whole: a finer tier covers the time until the next coarser bucket starts, so
+  // no bucket is cut at a tier's edge (a cut bucket would carry a maximum from time drawn beside it).
+  // Only the oldest bucket, at the edge of the reach, is drawn in part.
+  function bucketsCont(id, atInt) {
+    var tiers = TIERS_C[state.reach], A = REACH[state.reach], edge = atInt, parts = [];
+    tiers.forEach(function (z, zi) {
+      var st = z.step === 1 && SERIES[id].merge === 'ratio' ? 5 : z.step, next = tiers[zi + 1];
+      var low = next ? Math.floor((atInt - z.a1) / next.step) * next.step : atInt - A;
+      var list = [];
+      for (var b = Math.floor((edge - st) / st) * st; b + st > low; b -= st) {
+        if (b + st > edge) continue;
+        var r = stat(id, b, st), c0 = Math.max(b, atInt - A);
+        r.start = b; r.step = st; r.t0 = c0; r.t1 = b + st; r.tier = zi; r.clipped = c0 > b;
+        // The coarser bucket this one will be folded into, and the moment that happens: during the last
+        // step before it, the drawn values slide toward the coarser bucket's, so the switch is invisible.
+        // (The rings overlap by one coarser step, so the client holds both.)
+        if (next) { var S = next.step, B = Math.floor(b / S) * S; r.parent = stat(id, B, S); r.tsw = B + S + z.a1; r.fade = S; r.pmid = B + S / 2; }
+        list.push(r);
+      }
+      parts.push(list.reverse());
+      edge = low;
+    });
+    return [].concat.apply([], parts.reverse());
+  }
+  function scaleOf(s, bs) {
+    if (s.fixed) return s.fixed;
+    var hi = 0, held = 0;
+    bs.forEach(function (b, i) {
+      if (!b.n) return;
+      var topOf = function (x) { return state.band === 'off' ? x.mean : x.hi; };
+      hi = Math.max(hi, topOf(b));
+      var nb = 0; [bs[i - 2], bs[i - 1], bs[i + 1], bs[i + 2]].forEach(function (x) { if (x && x.n) nb = Math.max(nb, topOf(x)); });
+      held = Math.max(held, nb > 0 ? Math.min(topOf(b), 1.5 * nb) : topOf(b));
+    });
+    var y = niceCeil((state.scale === 'cut' ? held : hi) * 1.04);
+    return y > 0 ? y : 1;
+  }
+  // The token colors, read once per theme.
+  var COLORS = null;
+  function colors() {
+    if (COLORS) return COLORS;
+    var cs = getComputedStyle(document.documentElement), g = function (n) { return cs.getPropertyValue(n).trim(); };
+    COLORS = { fs11: g('--fs-11') || '11px', series: g('--series-1'), grid: g('--chart-grid'), axis: g('--chart-axis'), ink: g('--chart-ink'), ink3: g('--ink-3'), surface: g('--surface'), accent: g('--accent'), font: g('--font-ui') };
+    if (window.matchMedia && matchMedia('(forced-colors: active)').matches) {
+      COLORS.series = COLORS.axis = COLORS.ink = COLORS.ink3 = 'CanvasText'; COLORS.grid = 'GrayText'; COLORS.surface = 'Canvas'; COLORS.accent = 'Highlight'; COLORS.forced = true;
+    }
+    var pc = document.createElement('canvas'); pc.width = pc.height = 7;
+    var px = pc.getContext('2d'); px.fillStyle = COLORS.surface; px.fillRect(0, 0, 7, 7);
+    px.strokeStyle = COLORS.ink; px.lineWidth = 1; px.beginPath(); px.moveTo(-1, 8); px.lineTo(8, -1); px.moveTo(-1, 1); px.lineTo(1, -1); px.moveTo(6, 8); px.lineTo(8, 6); px.stroke();
+    COLORS.hatch = pc;
+    return COLORS;
+  }
+  var perf = { ms: 0, draws: 0, frames: 0, since: performance.now() };
+  var probing = false, paused = false;
+  function drawCont(chart, tF) {
+    var cv = chart.canvas, host = chart.plot, W = host.clientWidth, H = host.clientHeight;
+    if (H < 30 || W < 40) return;
+    var started = performance.now();
+    var dpr = window.devicePixelRatio || 1, cw = Math.round(W * dpr), chh = Math.round(H * dpr);
+    if (cv.width !== cw || cv.height !== chh) { cv.width = cw; cv.height = chh; }
+    var ctx = cv.getContext('2d'), C = colors();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+    var AH = 14, PH = H - AH, top = 3, s = SERIES[chart.id];
+    var at = chart.held != null ? chart.held : tF, atInt = Math.floor(at);
+    var key = atInt + '|' + state.reach + '|' + state.restart + '|' + state.scope + '|' + state.scale + '|' + state.band;
+    if (chart.key !== key) { chart.key = key; chart.bs = bucketsCont(chart.id, atInt); chart.ymax = scaleOf(s, chart.bs); }
+    var bs = chart.bs, A = REACH[state.reach], L = Math.asinh(A / TAU), ymax = chart.ymax;
+    var x = function (age) { return W * (1 - Math.asinh(Math.max(0, age) / TAU) / L); };
+    var y = function (v) { return Math.min(PH - 1, top + (PH - top) * (1 - Math.min(v, ymax) / ymax)); };
+    chart.ax = { A: A }; chart.at = at;
+    bs.forEach(function (b) {
+      b.x0 = x(at - Math.max(b.start, at - A)); b.x1 = x(at - b.t1); b.cx = (b.x0 + b.x1) / 2;
+      var w = b.n && b.parent && b.parent.n ? Math.min(1, Math.max(0, (b.tsw - at) / b.fade)) : 1;
+      if (w < 1) b.cx = w * b.cx + (1 - w) * x(at - b.pmid);   // the points also gather at the coarser bucket's center
+      b.m = w * b.mean + (1 - w) * (w < 1 ? b.parent.mean : 0); b.h = w * b.hi + (1 - w) * (w < 1 ? b.parent.hi : 0); b.l = w * b.lo + (1 - w) * (w < 1 ? b.parent.lo : 0);
+    });
+    if (probing) chart.probe = { at: at, W: W, A: A, grid: [], pts: [] };
+    ctx.lineWidth = 1;
+    // The baseline, under the series, so a series at zero stays visible on it.
+    ctx.strokeStyle = C.axis; ctx.beginPath(); ctx.moveTo(0, PH - 0.5); ctx.lineTo(W, PH - 0.5); ctx.stroke();
+    // Rows: quarters of the scale.
+    ctx.strokeStyle = C.grid;
+    [0, 0.25, 0.5, 0.75].forEach(function (q) { var yy = Math.round(top + (PH - top) * q) + 0.5; ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(W, yy); ctx.stroke(); });
+    // Columns: moments, drawn where they are (not rounded to a pixel), so they glide.
+    GRID.forEach(function (S, si) {
+      var far = S * W / (L * GRID_MIN); far = Math.min(A, Math.sqrt(Math.max(0, far * far - TAU * TAU)));
+      for (var m = Math.floor((at + TZ) / S) * S - TZ; at - m <= far; m -= S) {
+        if (si > 0) { var P = GRID[si - 1]; if ((((m + TZ) % P) + P) % P === 0) continue; }
+        var age = at - m, sp = S * W / (L * Math.sqrt(age * age + TAU * TAU)), a = Math.min(1, (sp - GRID_MIN) / 4);
+        if (a <= 0) continue;
+        var gx = x(age);
+        if (probing) chart.probe.grid.push({ m: m, step: S, x: gx, alpha: a });
+        ctx.globalAlpha = a; ctx.beginPath(); ctx.moveTo(gx, top); ctx.lineTo(gx, PH); ctx.stroke();
+      }
+    });
+    ctx.globalAlpha = 1;
+    // No data, hatched.
+    var gap = null;
+    bs.forEach(function (b, i) {
+      if (!b.n) { if (!gap) gap = { x0: b.x0 }; gap.x1 = b.x1; }
+      if ((b.n || i === bs.length - 1) && gap) { ctx.fillStyle = ctx.createPattern(C.hatch, 'repeat'); ctx.fillRect(gap.x0, top, Math.max(1, gap.x1 - gap.x0), PH - top); gap = null; }
+    });
+    // The marked minute: a span that keeps its time and narrows as it moves left.
+    if (state.mark) {
+      var mx0 = x(at - state.mark.t0), mx1 = x(at - state.mark.t1);
+      ctx.globalAlpha = 0.12; ctx.fillStyle = C.ink3; ctx.fillRect(mx0, top, Math.max(1, mx1 - mx0), PH - top); ctx.globalAlpha = 1;
+      ctx.strokeStyle = C.ink3; [mx0, mx1].forEach(function (mx) { ctx.beginPath(); ctx.moveTo(mx, top); ctx.lineTo(mx, PH); ctx.stroke(); });
+    }
+    // Band, upper edge, halo and mean, in runs of present buckets.
+    var runs = [], run = null, prev = null;
+    bs.forEach(function (b) {
+      if (!b.n) { run = null; prev = null; return; }
+      var part = b.cov < b.of;
+      if (!run || run.part !== part) { run = { part: part, b: [], bridge: prev }; runs.push(run); }
+      run.b.push(b); prev = b;
+    });
+    function line(list, val) {
+      ctx.beginPath();
+      if (list.length === 1) { ctx.moveTo(list[0].x0, y(val(list[0]))); ctx.lineTo(list[0].x1, y(val(list[0]))); return; }
+      list.forEach(function (b, i) { if (i) ctx.lineTo(b.cx, y(val(b))); else ctx.moveTo(b.cx, y(val(b))); });
+    }
+    if (probing) bs.forEach(function (b) { if (b.n) chart.probe.pts.push({ start: b.start, step: b.step, cx: b.cx, y: y(b.m) }); });
+    runs.forEach(function (r) {
+      if (state.band !== 'off' && !C.forced) {
+        ctx.fillStyle = C.series; ctx.globalAlpha = r.part ? 0.08 : 0.18;
+        ctx.beginPath();
+        if (r.b.length === 1) { var b1 = r.b[0]; ctx.rect(b1.x0, y(b1.h), Math.max(1, b1.x1 - b1.x0), Math.max(0.5, y(b1.l) - y(b1.h))); }
+        else { r.b.forEach(function (b, i) { if (i) ctx.lineTo(b.cx, y(b.h)); else ctx.moveTo(b.cx, y(b.h)); }); for (var i = r.b.length - 1; i >= 0; i--) ctx.lineTo(r.b[i].cx, y(r.b[i].l)); ctx.closePath(); }
+        ctx.fill(); ctx.globalAlpha = 1;
+      }
+      // The upper edge shows a short burst in a wide bucket, so it is drawn in forced colors too.
+      if (state.band !== 'off') { ctx.strokeStyle = C.series; ctx.lineWidth = 1; line(r.b, function (b) { return b.h; }); ctx.stroke(); }
+      var list = r.bridge ? [r.bridge].concat(r.b) : r.b;
+      ctx.strokeStyle = C.series; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      if (!C.forced) { ctx.globalAlpha = 0.16; ctx.lineWidth = 5; line(list, function (b) { return b.m; }); ctx.stroke(); }
+      ctx.globalAlpha = 1; ctx.lineWidth = 1.5; line(list, function (b) { return b.m; }); ctx.stroke();
+      if (r.part) { ctx.fillStyle = C.ink; ctx.fillRect(r.b[0].x0, PH + 1, Math.max(1, r.b[r.b.length - 1].x1 - r.b[0].x0), 2); }
+    });
+    ctx.lineWidth = 1;
+    // Above the scale: a caret at the top.
+    ctx.fillStyle = C.series;
+    bs.forEach(function (b) { if (b.n && (state.band === 'off' ? b.mean : b.hi) > ymax) { ctx.beginPath(); ctx.moveTo(b.cx - 3.5, top + 5); ctx.lineTo(b.cx, top - 1); ctx.lineTo(b.cx + 3.5, top + 5); ctx.closePath(); ctx.fill(); } });
+    // The restart.
+    if (state.restart !== 'none' && at - RESTART < A) {
+      var rx = x(at - RESTART);
+      ctx.strokeStyle = C.ink3; ctx.beginPath(); ctx.moveTo(rx, top); ctx.lineTo(rx, PH); ctx.stroke();
+      ctx.fillStyle = C.ink3; ctx.beginPath(); ctx.moveTo(rx - 3.5, top); ctx.lineTo(rx + 3.5, top); ctx.lineTo(rx, top + 4); ctx.closePath(); ctx.fill();
+    }
+    // The newest value: the line runs on to the right edge at the newest value, and the end marker sits there, so the end glides instead of hopping back each second.
+    var last = null; for (var j = bs.length - 1; j >= 0; j--) if (bs[j].n) { last = bs[j]; break; }
+    if (last && last.step < 60) { ctx.strokeStyle = C.series; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(last.cx, y(last.m)); ctx.lineTo(W - 3, y(last.m)); ctx.stroke(); ctx.lineWidth = 1; }
+    if (last && last.step < 60) { ctx.beginPath(); ctx.arc(W - 3, y(last.m), 3, 0, Math.PI * 2); ctx.fillStyle = C.series; ctx.strokeStyle = C.surface; ctx.lineWidth = 2; ctx.stroke(); ctx.fill(); ctx.lineWidth = 1; }
+    // The bucket under the pointer or the focus.
+    if (chart.sel != null && bs[chart.sel]) {
+      var sb = bs[chart.sel];
+      ctx.globalAlpha = 0.14; ctx.fillStyle = C.accent; ctx.fillRect(Math.min(sb.x0, sb.cx - 2), top, Math.max(4, sb.x1 - sb.x0), PH - top); ctx.globalAlpha = 1;
+      ctx.strokeStyle = C.accent; ctx.beginPath(); ctx.moveTo(sb.cx, top); ctx.lineTo(sb.cx, PH); ctx.stroke();
+      if (sb.n) { ctx.beginPath(); ctx.arc(sb.cx, y(sb.m), 3.5, 0, Math.PI * 2); ctx.fillStyle = C.series; ctx.strokeStyle = C.surface; ctx.lineWidth = 2; ctx.stroke(); ctx.fill(); ctx.lineWidth = 1; }
+    }
+    // Labels: ages at the positions the axis gives them, with a short tick under the baseline.
+    ctx.font = C.fs11 + ' ' + C.font; ctx.textBaseline = 'alphabetic';
+    var labs = AGE_LABELS.filter(function (l) { return l[0] < A * 0.9; }).map(function (l) { return { x: x(l[0]), t: l[1], r: 1 }; });
+    labs.push({ x: 0, t: END_LABEL[state.reach], r: 2, edge: true }, { x: W, t: 'now', r: 2, now: true });
+    labs.sort(function (p, q) { return q.r - p.r; });
+    var placed = [];
+    labs.forEach(function (l) {
+      var w = ctx.measureText(l.t).width, a0 = l.now ? l.x - w : l.edge ? 0 : l.x - w / 2;
+      if (placed.some(function (q) { return a0 < q[1] + 6 && a0 + w > q[0] - 6; })) return;
+      placed.push([a0, a0 + w]);
+      ctx.fillStyle = C.ink; ctx.fillText(l.t, a0, H - 2);
+      if (!l.now && !l.edge) { ctx.strokeStyle = C.axis; ctx.beginPath(); ctx.moveTo(l.x, PH); ctx.lineTo(l.x, PH + 3); ctx.stroke(); }
+    });
+    // The scale, inside the plot.
+    var sl = fmt(s, ymax);
+    ctx.lineWidth = 4; ctx.strokeStyle = C.surface; ctx.lineJoin = 'round'; ctx.strokeText(sl, 2, top + 11); ctx.fillStyle = C.ink; ctx.fillText(sl, 2, top + 11); ctx.lineWidth = 1;
+    perf.ms += performance.now() - started; perf.draws++;
+  }
+
   /* ---------------- Words: the readout and the text alternative ---------------- */
   function unitWord(s) { return s.unit === '/s' ? ' per second' : s.unit === ' ms' ? ' ms' : s.unit === ' %' ? ' %' : s.unit === ' GiB' ? ' GiB' : s.unit === 'B' ? ' bytes' : ''; }
   function fmt(s, v) { return si(v) + (s.unit === ' %' ? ' %' : s.unit === ' ms' ? ' ms' : s.unit === '/s' ? '/s' : s.unit === ' GiB' ? ' GiB' : s.unit === 'B' ? ' B' : ''); }
-  function stepWord(st) { return st === 1 ? '1 s' : st === 5 ? '5 s' : st === 60 ? '1 min' : st === 3600 ? '1 h' : '6 h'; }
+  function stepWord(st) { return st < 60 ? st + ' s' : st < 3600 ? st / 60 + ' min' : st / 3600 + ' h'; }
   function downNote() {
     if (state.restart === 'memory') return state.scope === 'node' ? 'No data: this controller restarted at ' + clock(RESTART) + ' and its history was kept in memory.' : 'Controller 1 restarted at ' + clock(RESTART) + '; its history before that was in memory.';
     return state.scope === 'node' ? 'No data: this controller was stopped for ' + DOWNTIME + ' s and restarted at ' + clock(RESTART) + '.' : 'Controller 1 was stopped for ' + DOWNTIME + ' s.';
@@ -755,7 +974,7 @@
     tip.val = fmt(s, b.mean) + (b.step === 1 ? '' : ' mean');
     if (b.step > 1) tip.rows.push(['band', 'Lowest ' + fmt(s, b.lo) + ', highest ' + fmt(s, b.hi) + (b.hi > chart.ymax ? ' (above the scale)' : '')]);
     else if (b.mean > chart.ymax) tip.rows.push(['band', 'Above the scale of ' + fmt(s, chart.ymax)]);
-    if (b.clipped) tip.notes.push('Part of this bucket lies in the next zone to the right, where it is drawn at the finer step.');
+    if (b.clipped) tip.notes.push('This bucket starts before the chart\u2019s reach; only its newer part is drawn.');
     if (b.step > 1 && b.n < b.step) tip.notes.push(span(b.n) + ' of ' + stepWord(b.step) + ' with data. ' + downNote());
     if (state.scope === 'cluster') {
       if (b.cov < b.of) tip.notes.push(b.cov + ' of ' + b.of + ' controllers reported: Controller 2 and Controller 3. ' + downNote());
@@ -766,7 +985,7 @@
   function readoutText(chart, b) { var r = readout(chart, b); return SERIES[chart.id].title + ', ' + r.when + ': ' + r.val + (r.rows.length ? '. ' + r.rows.map(function (x) { return x[1]; }).join('. ') : '') + (r.notes.length ? '. ' + r.notes.join(' ') : ''); }
 
   function altText(id, ax) {
-    var s = SERIES[id], at = now, A = ax ? ax.A : TIERS[state.reach][TIERS[state.reach].length - 1].a1;
+    var s = SERIES[id], at = now, A = REACH[state.reach];
     var cur = stat(id, at - 1, 1), u = unitWord(s);
     var parts = [s.title + ': ' + (cur.n ? si(cur.mean) + u : 'no figure') + ' now' + (state.scope === 'cluster' ? ', the cluster of 3 controllers' : '') + '.'];
     function scan(t0, t1, st) { var lo = null, hi = null, sum = 0, n = 0, none = 0; for (var b = Math.floor(t0 / st) * st; b < t1; b += st) { var x = stat(id, b, st); if (!x.n) { none++; continue; } if (!lo || x.lo < lo.v) lo = { v: x.lo, t: b }; if (!hi || x.hi > hi.v) hi = { v: x.hi, t: b }; sum += x.mean; n++; } return { lo: lo, hi: hi, mean: n ? sum / n : null, none: none }; }
@@ -778,8 +997,8 @@
     else if (h.hi) parts.push('Last hour: mean ' + si(h.mean) + ', highest ' + si(h.hi.v) + ' at ' + clock(h.hi.t) + '.');
     // The days: each coarse tier at its own step, so a peak is named with the span its bucket really has.
     var d = { hi: null, lo: null };
-    TIERS[state.reach].forEach(function (z) {
-      if (z.step < 3600) return;
+    TIERS_C[state.reach].forEach(function (z) {
+      if (z.a0 < 3600) return;
       var x = scan(Math.floor((at - z.a1) / z.step) * z.step, at - z.a0, z.step);
       if (x.hi && (!d.hi || x.hi.v > d.hi.v)) d.hi = { v: x.hi.v, t: x.hi.t, st: z.step };
       if (x.lo && (!d.lo || x.lo.v < d.lo.v)) d.lo = x.lo;
@@ -811,10 +1030,10 @@
     var did = 'alt-' + (++uid);
     t.innerHTML = '<h4>' + s.title + '</h4><div class="tile-value"><span class="v"></span>' + unitHtml(s) + '</div>' +
       '<div class="metrics-chart">' + (today ? '<div class="metrics-plot"><svg class="sparkline" viewBox="0 -1 59 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>' :
-        '<div class="hplot" tabindex="0" role="slider" aria-valuemin="0"><svg aria-hidden="true"></svg><span class="paused">Held</span></div>') +
+        '<div class="hplot" tabindex="0" role="slider" aria-valuemin="0"><canvas aria-hidden="true"></canvas><span class="paused">Held</span></div>') +
       (s.list ? LISTS[s.list]() : '') + '</div>' +
       '<div class="metrics-foot"><p class="muted">' + s.hint + '</p></div>' + (today ? '' : '<p class="alt sr-only" id="' + did + '"></p>');
-    var chart = { id: id, tile: t, today: today, svg: t.querySelector('svg'), value: t.querySelector('.v'), alt: t.querySelector('.alt') };
+    var chart = { id: id, tile: t, today: today, kind: today ? 'today' : 'cont', svg: t.querySelector('svg'), canvas: t.querySelector('canvas'), value: t.querySelector('.v'), alt: t.querySelector('.alt') };
     if (!today) {
       chart.plot = t.querySelector('.hplot');
       chart.plot.setAttribute('aria-label', s.title + ' history. ' + KEYS);
@@ -825,10 +1044,10 @@
     return t;
   }
   function wideChart(id, axis) {
-    var box = el('div', 'card'), s = SERIES[id];
+    var box = el('div', 'card'), s = SERIES[id], cont = axis === 'cont';
     box.style.padding = 'var(--sp-5) var(--sp-6)';
-    box.innerHTML = '<div class="hplot" tabindex="0" role="slider" aria-valuemin="0" aria-label="' + s.title + ' history, design ' + (axis === 'log' ? 'B' : 'A') + '. ' + KEYS + '"><svg aria-hidden="true"></svg><span class="paused">Held</span></div>';
-    var chart = { id: id, tile: box, wide: true, axis: axis, svg: box.querySelector('svg'), plot: box.querySelector('.hplot') };
+    box.innerHTML = '<div class="hplot" tabindex="0" role="slider" aria-valuemin="0" aria-label="' + s.title + ' history, ' + (cont ? 'the chosen design' : 'earlier design ' + (axis === 'log' ? 'B' : 'A')) + '. ' + KEYS + '">' + (cont ? '<canvas aria-hidden="true"></canvas>' : '<svg aria-hidden="true"></svg>') + '<span class="paused">Held</span></div>';
+    var chart = { id: id, tile: box, wide: true, kind: cont ? 'cont' : 'old', axis: cont ? null : axis, svg: box.querySelector('svg'), canvas: box.querySelector('canvas'), plot: box.querySelector('.hplot') };
     wire(chart); charts.push(chart);
     return box;
   }
@@ -857,11 +1076,16 @@
     tipEl.style.left = left + 'px'; tipEl.style.top = top + 'px';
   }
   function hold(chart, on) {
-    if (on && chart.held == null) chart.held = now;
+    if (on && chart.held == null) chart.held = chart.kind === 'cont' ? (chart.at != null ? chart.at : motionTime()) : now;
     if (!on) { chart.held = null; chart.sel = null; }
     chart.plot.classList.toggle('is-held', !!on);
   }
-  function redraw(chart) { withAxis(chart, function () { drawHistory(chart); }); }
+  function redraw(chart) { if (chart.kind === 'cont') drawCont(chart, motionTime()); else withAxis(chart, function () { drawHistory(chart); }); }
+  // The time the continuous charts are drawn at: the moment itself while they glide, the whole second while they step.
+  function reducedNow() { return state.reduced || REDUCED; }
+  var slow = 0, fellBack = false, lastClear = 0;
+  function gliding() { return (state.motion === 'glide' || state.motion === 'glide30') && !reducedNow() && !fellBack && !state.pause; }
+  function motionTime() { return gliding() ? nowF() : now; }
   function wire(chart) {
     var p = chart.plot;
     var point = function (e) {
@@ -875,9 +1099,10 @@
     p.addEventListener('pointermove', point);
     p.addEventListener('pointerdown', point);
     p.addEventListener('pointerleave', function (e) { if (e.pointerType && e.pointerType !== 'mouse') return; if (document.activeElement === p) return; hold(chart, false); redraw(chart); tipEl.classList.remove('open'); });
-    p.addEventListener('focus', function () { hold(chart, true); redraw(chart); if (chart.sel == null) chart.sel = chart.bs.length - 1; redraw(chart); showTip(chart); announce(chart); });
+    p.addEventListener('focus', function () { hold(chart, true); redraw(chart); if (!chart.bs) return; if (chart.sel == null) chart.sel = chart.bs.length - 1; redraw(chart); showTip(chart); announce(chart); });
     p.addEventListener('blur', function () { hold(chart, false); redraw(chart); tipEl.classList.remove('open'); });
     p.addEventListener('keydown', function (e) {
+      if (!chart.bs) return;
       var n = chart.bs.length, i = chart.sel == null ? n - 1 : chart.sel, b = chart.bs[i];
       if (e.key === 'ArrowLeft') i = Math.max(0, i - (e.shiftKey ? 10 : 1));
       else if (e.key === 'ArrowRight') i = Math.min(n - 1, i + (e.shiftKey ? 10 : 1));
@@ -919,8 +1144,17 @@
     } else {
       $('[data-slot="today"]').appendChild(tileShell(id, true));
       $('[data-slot="proposed"]').appendChild(tileShell(id, false));
+      $('[data-slot="wide-cont"]').appendChild(wideChart(id, 'cont'));
       $('[data-slot="wide-zones"]').appendChild(wideChart(id, 'zones'));
       $('[data-slot="wide-log"]').appendChild(wideChart(id, 'log'));
+    }
+    // A chart off screen is not drawn (the product uses the same observer).
+    if (window.IntersectionObserver) {
+      if (build.io) build.io.disconnect();
+      build.io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) { var c = charts.find(function (x) { return x.plot === en.target; }); if (c) { c.visible = en.isIntersecting; if (en.isIntersecting) redraw(c); } });
+      });
+      charts.forEach(function (c) { if (c.kind === 'cont') build.io.observe(c.plot); });
     }
     tick(true);
   }
@@ -929,10 +1163,19 @@
       var cur = stat(c.id, now - 1, 1);
       if (c.value) { c.value.textContent = cur.n ? si(cur.mean) : ''; c.value.title = cur.n ? String(Math.round(cur.mean * 100) / 100) : ''; }
       if (c.today) { drawToday(c); return; }
+      if (document.hidden) return;
+      if (c.alt && (full || now - (c.altAt || 0) >= 5)) { c.alt.textContent = altText(c.id); c.altAt = now; }
       if (c.held != null && !full) return;
-      if (!full && REDUCED && now % 5 !== 0) return;   // reduced motion: redrawn every 5 s
+      if (c.kind === 'cont') {
+        if (paused || state.pause) return;
+        // Gliding charts are drawn by the frame loop; stepping ones once a second; under reduced motion once every 10 s.
+        if (c.visible === false) return;
+        if (full) { redraw(c); return; }
+        if (reducedNow() ? now - (c.drawnAt || 0) >= 10 : !gliding()) { drawCont(c, now); c.drawnAt = now; }
+        return;
+      }
+      if (!full && reducedNow() && now % 5 !== 0) return;
       redraw(c);
-      if (c.alt && (full || now % 5 === 0)) c.alt.textContent = withAxis(c, function () { return altText(c.id, c.ax); });
     });
     var aside = $('#dash-aside');
     if (aside) aside.textContent = 'Updated every second · ' + (state.scope === 'cluster' ? 'the cluster of 3 controllers, ' : 'Controller 1, ') + 'history of the last ' + (state.reach === '1h' ? 'hour' : state.reach === '2d' ? '2 days' : '7 days') + (state.restart === 'memory' ? ' since Controller 1 restarted at ' + clock(RESTART) : '') + ', kept in ' + (state.restart === 'file' ? 'memory and a small file' : 'memory') + ' on each controller';
@@ -940,7 +1183,7 @@
   }
   function frames() {
     if (EMBED) return;
-    var base = 'metric-tile-history.html?series=' + state.series + '&axis=' + state.axis + '&reach=' + state.reach + '&restart=' + state.restart + '&scope=' + state.scope + '&scale=' + state.scale + '&band=' + state.band + (state.alt ? '&alt=1' : '');
+    var base = 'metric-tile-history.html?series=' + state.series + '&axis=' + state.axis + '&reach=' + state.reach + '&restart=' + state.restart + '&scope=' + state.scope + '&scale=' + state.scale + '&band=' + state.band + '&motion=' + state.motion + (state.reduced ? '&reduced=1' : '') + (state.alt ? '&alt=1' : '');
     var theme = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     var map = { phone: base + '&embed=dashboard&theme=' + theme, light: base + '&embed=tile&theme=light', dark: base + '&embed=tile&theme=dark' };
     $$('iframe[data-frame]').forEach(function (f) { var src = map[f.dataset.frame]; if (f.getAttribute('src') !== src) f.setAttribute('src', src); });
@@ -951,11 +1194,14 @@
     document.body.dataset.view = EMBED === 'dashboard' ? 'dashboard' : state.view;
     document.body.classList.toggle('show-alt', state.alt);
     var ch = $('#show-alt'); if (ch) ch.checked = state.alt;
+    var rd = $('#reduced'); if (rd) rd.checked = state.reduced;
+    var mk = $('#mark'); if (mk) { mk.setAttribute('aria-pressed', String(!!state.mark)); mk.textContent = state.mark ? 'Clear the marked minute' : 'Mark the last minute'; }
   }
   document.addEventListener('click', function (e) {
     var b = e.target.closest('[data-k]');
     if (b) {
       state[b.dataset.k] = b.dataset.v;
+      if (b.dataset.k === 'motion') { fellBack = false; slow = 0; }
       if (b.dataset.k === 'series' && b.dataset.v === 'restart' && state.restart === 'none') state.restart = 'memory';
       paintControls(); build(); frames(); return;
     }
@@ -970,7 +1216,71 @@
   paintControls();
   build();
   frames();
-  setInterval(function () { now = Math.floor(Date.now() / 1000); if (now % 120 === 0) cacheS = {}; tick(false); }, 1000);
+  setInterval(function () { now = Math.floor(Date.now() / 1000); if (now - lastClear >= 120) { cacheS = {}; lastClear = now; } tick(false); meter(); }, 1000);
+
+  // The glide: one frame loop for every continuous chart on the page, at 10 or 30 frames a second. A
+  // browser stops animation frames while the tab is hidden, so nothing is drawn then.
+  var lastFrame = 0;
+  function frame(ts) {
+    requestAnimationFrame(frame);
+    if (!gliding() || document.hidden || paused) return;
+    var fps = state.motion === 'glide30' ? 30 : 10;
+    if (ts - lastFrame < 1000 / fps - 4) return;
+    lastFrame = ts; perf.frames++;
+    var t = nowF(), s0 = performance.now();
+    charts.forEach(function (c) { if (c.kind === 'cont' && c.held == null && c.visible !== false) drawCont(c, t); });
+    slow = performance.now() - s0 > 8 ? slow + 1 : 0;
+    if (slow >= 5) fellBack = true;
+  }
+  requestAnimationFrame(frame);
+  // The meter in the Mockup bar: what drawing the charts costs in this browser.
+  function meter() {
+    var el2 = $('#perf'); if (!el2 || document.body.dataset.bench) return;
+    var span = performance.now() - perf.since;
+    if (span < 2000) return;
+    var n = charts.filter(function (c) { return c.kind === 'cont' && c.visible !== false; }).length;
+    var mode = reducedNow() ? 'once every 10 s' : gliding() ? (state.motion === 'glide30' ? 30 : 10) + ' frames/s' : fellBack ? 'once a second (fell back: frames over 8 ms)' : 'once a second';
+    el2.textContent = document.hidden ? 'Drawing: paused while the tab is hidden' : 'Drawing ' + n + ' chart' + (n === 1 ? '' : 's') + ', ' + mode + ': ' + (perf.draws ? (perf.ms / perf.draws).toFixed(2) : '0') + ' ms a chart, ' + (100 * perf.ms / span).toFixed(1) + ' % of one core';
+    perf.ms = 0; perf.draws = 0; perf.frames = 0; perf.since = performance.now();
+  }
+  // ?bench=1: draw every continuous chart on the page for 300 frames in a row, a tenth of a second
+  // apart, and report the time per frame and per chart; the same work the glide does, without waiting.
+  function bench() {
+    var list = charts.filter(function (c) { return c.kind === 'cont'; }), t = nowF(), times = [];
+    for (var i = 0; i < 300; i++) {
+      var s0 = performance.now();
+      list.forEach(function (c) { drawCont(c, t + i / 10); });
+      times.push(performance.now() - s0);
+    }
+    times.sort(function (a, b) { return a - b; });
+    var mean = times.reduce(function (a, b) { return a + b; }, 0) / times.length;
+    var out = 'Bench: ' + list.length + ' charts, a frame ' + mean.toFixed(2) + ' ms mean, ' + times[Math.floor(times.length * 0.99)].toFixed(2) + ' ms p99 (' + (mean / Math.max(1, list.length)).toFixed(3) + ' ms a chart); at 10 frames/s ' + (mean).toFixed(1) + ' % of one core, at 30 frames/s ' + (3 * mean).toFixed(1) + ' %';
+    var el3 = $('#perf'); if (el3) el3.textContent = out;
+    document.body.dataset.bench = out;
+  }
+  if (Q.get('bench')) setTimeout(bench, 500);
+  // Frame by frame, from outside: window.tenkoHistory.pause(true), then frameAt(t) draws every continuous
+  // chart on the page at the time t (seconds since 1970, fractions allowed) and returns what it drew: the
+  // grid lines (moment, step, x, opacity) and the bucket centers of the line, per chart. Any frame can be
+  // reproduced this way; pause(false) lets the glide go on.
+  window.tenkoHistory = {
+    pause: function (on) { paused = !!on; return paused; },
+    now: nowF,
+    frameAt: function (t) {
+      probing = true;
+      var out = charts.filter(function (c) { return c.kind === 'cont'; }).map(function (c) { c.probe = null; drawCont(c, t); return { id: c.id, wide: !!c.wide, probe: c.probe }; });
+      probing = false;
+      return out;
+    }
+  };
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { now = Math.floor(Date.now() / 1000); perf.ms = 0; perf.draws = 0; perf.since = performance.now(); tick(true); } });
+  // A theme change repaints the canvases with the other theme's tokens.
+  function retheme() { COLORS = null; charts.forEach(function (c) { if (c.kind === 'cont') redraw(c); }); }
+  new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  if (window.matchMedia) { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', retheme); matchMedia('(forced-colors: active)').addEventListener('change', retheme); }
+  $('#pause-motion').addEventListener('click', function (e) { state.pause = !state.pause; e.currentTarget.setAttribute('aria-pressed', String(state.pause)); e.currentTarget.textContent = state.pause ? 'Resume motion' : 'Pause motion'; charts.forEach(function (c) { if (c.kind === 'cont') redraw(c); }); });
+  $('#reduced').addEventListener('change', function (e) { state.reduced = e.target.checked; paintControls(); build(); frames(); });
+  $('#mark').addEventListener('click', function () { var t = nowF(); state.mark = state.mark ? null : { t0: t - 60, t1: t }; paintControls(); charts.forEach(function (c) { if (c.kind === 'cont') redraw(c); }); });
 })();
 </script>
 </body>

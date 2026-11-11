@@ -309,7 +309,7 @@ The Tenko mark is a nine-tailed fox, the form a tenko takes. A geometric fox hea
 | `mockups/move-job.html` | Move job: preview, running job panel, jobs list |
 | `mockups/topology.html` | Topology map with hover card, port panel, filters and legend |
 | `mockups/dashboard.html` | Dashboard per node and for the cluster |
-| `mockups/metric-tile-history.html` | Proposal: the metric tiles with a history on a compressed time axis, two axis designs, the whole dashboard in that form ([dashboard-history-plan.md](../docs/plans/dashboard-history-plan.md)) |
+| `mockups/metric-tile-history.html` | Proposal: the metric tiles with a history on one continuous, gliding time axis (the owner's choice of 2026-11-11), the two earlier designs for comparison, the whole dashboard in that form ([dashboard-history-plan.md](../docs/plans/dashboard-history-plan.md)) |
 | `mockups/ipam-networks.html` | The IPAM networks view (U6): the short tree, one network with its header, meter, panels and address map above the grid, a supernet's table, a /16 block map |
 | `mockups/reconciliation.html` | Discovery's findings list grouped by severity with the side panel of a conflict, and the per-network reconciliation view (U4) |
 | `mockups/jobs.html` | The jobs list as built (U5): the default chip Active and needs you, the calm line, the jobs that wait for you and run leading, the finished jobs by day with Show the rest, Started by said once |
