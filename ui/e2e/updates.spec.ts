@@ -422,6 +422,11 @@ test.describe("from the version layout", () => {
     source,
     signedIn,
   }) => {
+    // The named waits of this test (the install's steps, the exit, the restart, the job) add up
+    // to about six minutes, and under load the test took up to 1.6 of the two minutes the
+    // configuration gives a test. Its own limit covers its waits, so a stalled step fails with
+    // the wait that names it and not with the test's time-out.
+    test.setTimeout(6 * 60_000);
     expect(signedIn.session.user.name).toBe("admin");
     const status = await updateStatus(api);
     const running = status.running;
@@ -569,6 +574,10 @@ test.describe("from the version layout, with a copy that reports the old version
     source,
     signedIn,
   }) => {
+    // As the install test: the named waits (the dry run's failure, the rollback, the job) add up
+    // to more than the two minutes the configuration gives a test, which took up to 1.2 minutes
+    // under load; the test's own limit covers them.
+    test.setTimeout(6 * 60_000);
     expect(signedIn.session.user.name).toBe("admin");
     const running = (await updateStatus(api)).running;
     const next = nextPatch(running);

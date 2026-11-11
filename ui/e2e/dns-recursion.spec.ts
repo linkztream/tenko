@@ -145,15 +145,23 @@ test("creates a negative trust anchor that expires", async ({ page, signedIn }) 
   await form.getByTestId("field-nta-reason").fill("The zone's operator let its signatures expire.");
   await form.getByTestId("form-submit").click();
   await expect(form.locator('[data-testid="field-error"][data-field="nta-expires"]')).toBeVisible();
-  await form.getByTestId("field-nta-lifetime").fill("6s");
+  await form.getByTestId("field-nta-lifetime").fill("30s");
+  // The page's clock stands still from here (its timers keep running): the page reckons the
+  // expiry from this time and shows the anchor active until the test moves the clock past it.
+  // The server lists only living anchors by its own clock, so the save and the first reading
+  // must fit the 30 seconds of the lifetime, and the anchor is gone from the server's list
+  // within the limit of the last step below.
+  const created = Date.now();
+  await page.clock.setFixedTime(created);
   await form.getByTestId("form-submit").click();
   await expect(form).toHaveCount(0);
 
   const nta = section.locator('[data-testid="dns-nta"][data-key="broken.example.test"]');
   await expect(nta).toHaveAttribute("data-state", "active");
   await expect(nta).toContainText("signatures expire");
-  // Past its expiry the row says so at once ...
-  await expect(nta).toHaveAttribute("data-state", "expired", { timeout: 20_000 });
+  // Past its expiry the row says so at once (the page reads its clock every second) ...
+  await page.clock.setFixedTime(created + 31_000);
+  await expect(nta).toHaveAttribute("data-state", "expired");
   await expect(nta.getByTestId("dns-nta-expired")).toBeVisible();
   // ... and the server lists only the living ones, so it is gone once read again (the leader
   // service deletes the row at its next pass).

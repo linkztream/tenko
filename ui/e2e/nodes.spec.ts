@@ -76,12 +76,23 @@ function nodeView(api: Api, id = NODE): Promise<NodeView> {
   return api.get<NodeView>(`/nodes/${id}`);
 }
 
-/** Waits until the controller counts the node as connected and returns its view. */
+/**
+ * Waits until the controller counts the node as connected and has its first heartbeat, and
+ * returns its view. The controller opens the connection when the heartbeat stream opens; the
+ * protocol major and the version of the node come with the first beat, a moment later.
+ */
 async function waitForConnected(api: Api, id = NODE): Promise<NodeView> {
+  let view: NodeView | undefined;
   await expect
-    .poll(async () => (await nodeView(api, id)).connected, { message: `node ${id} to be connected`, timeout: 30_000 })
+    .poll(
+      async () => {
+        view = await nodeView(api, id);
+        return view.connected && !!view.connection?.last_beat;
+      },
+      { message: `node ${id} to be connected with a first heartbeat`, timeout: 30_000 },
+    )
     .toBe(true);
-  return nodeView(api, id);
+  return view!;
 }
 
 /** The state of the node process, from `tenko node status --json`. */

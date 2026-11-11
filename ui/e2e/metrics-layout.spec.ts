@@ -92,9 +92,12 @@ async function checkLayout(page: Page, testInfo: TestInfo, width: number): Promi
   await expect(root).toHaveAttribute("data-controllers", "1");
   await expect(page.getByTestId("metrics-tile-dns-queries")).toHaveAttribute("data-value", /.+/);
   await expect(page.getByTestId("metrics-tile-dns-answers").getByTestId("metrics-dns-rcode")).toHaveCount(5);
+  // Measure once everything the tiles draw is in: the last group's lists and the web font, whose
+  // arrival changes the size of every line of text.
+  await expect(page.getByTestId("metrics-tile-dhcp-pools").getByTestId("metrics-dhcp-pool")).toHaveCount(3);
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
 
   const { tiles, grid } = await tileBoxes(page);
-  await expect(page.getByTestId("metrics-tile-dhcp-pools").getByTestId("metrics-dhcp-pool")).toHaveCount(3);
   expect(tiles.map((t) => t.name)).toEqual([...CONTROLLER, ...HOST, ...DNS, ...DHCP]);
 
   // One height for every tile, and nothing in a tile cut off at its bottom or out of its chart area.

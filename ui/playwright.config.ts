@@ -14,7 +14,9 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: true,
   forbidOnly: ci,
-  retries: ci ? 1 : 0,
+  // No retries, here or anywhere: a test that fails has a cause, in the product or in the test,
+  // and a pass on a second try would hide it (docs/testing/health-2026-11.md, section 1.3).
+  retries: 0,
   workers: ci ? 2 : 4,
   timeout: 120_000,
   // The whole run must fit this budget, well inside the CI job's thirty minutes; past it the run
