@@ -139,6 +139,12 @@ $rtfText = "{\rtf1\ansi\deff0{\fonttbl{\f0 Tahoma;}}\fs16`r`n" + ($rtfLines -joi
 Push-Location $repo
 try {
     Invoke-Checked 'dotnet tool restore' { dotnet tool restore }
+    # The tool, where dotnet tool restore put it (the NuGet global packages folder), checked
+    # against its pinned digest before it runs for the first time.
+    $packages = (dotnet nuget locals global-packages --list) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or $packages -notmatch 'global-packages:\s*(\S.*\S)') { throw "the NuGet global packages folder is unknown: $packages" }
+    Assert-TreeDigest -What "WiX $WixVersion" -Dir (Join-Path -Path $Matches[1] -ChildPath "wix\$WixVersion\tools") -Expected $WixToolDigest
+
     $have = (dotnet tool run wix extension list -g) -join "`n"
     foreach ($ext in $Extensions) {
         if ($have -notmatch [regex]::Escape("$ext $WixVersion")) {
@@ -146,11 +152,7 @@ try {
         }
     }
 
-    # --- The files that run, against their pinned digests -----------------------------
-    # The tool, where dotnet tool restore put it (the NuGet global packages folder).
-    $packages = (dotnet nuget locals global-packages --list) -join "`n"
-    if ($LASTEXITCODE -ne 0 -or $packages -notmatch 'global-packages:\s*(\S.*\S)') { throw "the NuGet global packages folder is unknown: $packages" }
-    Assert-TreeDigest -What "WiX $WixVersion" -Dir (Join-Path -Path $Matches[1] -ChildPath "wix\$WixVersion\tools") -Expected $WixToolDigest
+    # --- The extensions, against their pinned digests, before wix build loads them -----
     # wix build looks for an extension in the working directory's .wix\extensions before the
     # global cache; only the global cache, whose files are checked here, may provide one.
     if (Test-Path -LiteralPath (Join-Path $repo '.wix')) { throw "$repo\.wix exists; remove it so that wix build loads only the checked extensions" }

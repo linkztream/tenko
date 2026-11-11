@@ -944,7 +944,10 @@ Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
    texts are taken from the changelog; `SHA256SUMS` lists `releases.json` itself, and the
    installers, the Proxmox files and the SBOMs are added to `SHA256SUMS`.
 8. **Attest.** A build provenance attestation for every release file and an SBOM
-   attestation for each SBOM of a binary.
+   attestation for each SBOM of a binary. Every job checks the files it takes from an
+   earlier job against the SHA-256 that job stated, and the image's binary against the
+   Linux binary's, so a file replaced between jobs is neither signed, tested, attested nor
+   published.
 9. **Security round, then the image.** The lab round of `docs/plans/security-audit-plan.md`
    runs on the Linux binary, from the tag's commit. Only after it and the attestations
    passed is the image pushed to the registry, by digest and without a tag, and attested

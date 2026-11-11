@@ -54,6 +54,15 @@
 #                  takes the release text from the changelog (scripts/changelog.mjs notes) and
 #                  creates the GitHub release with the files of `manifest`.
 #
+# Files pass from job to job as artifacts of the run, which any process of the run that holds
+# the run's artifact token can replace (a dependency's build code, a scanner, a test tool, in
+# a job running at the same time). So each producing job states the SHA-256 of what it hands
+# on as a job output (ui, build, sign-binary, msi, sign-msi, image-build, sbom, manifest),
+# which that token cannot write, and every job checks the files it downloads against it
+# before it runs, signs, attests or publishes them; `attest` and `publish` check every
+# release file against the SHA256SUMS whose own digest `manifest` stated. The image's
+# /usr/local/bin/tenko is checked against the Linux binary's digest after the image build.
+#
 # Running installations read releases.json from the latest release to learn about updates;
 # the file names tenko-<version>-<platform>[.exe] are the contract with scripts/README.md
 # (the platform of the musl binary stays linux-x86_64). SECURITY.md, "Verifying a release",
@@ -81,7 +90,7 @@
 # Every `uses:` is pinned to a full commit SHA with its tag in a comment (L1.6); the version
 # updates for github-actions in .github/dependabot.yml move the pins. dtolnay/rust-toolchain
 # has no release tags: its pin is a commit of its default branch, the same one ci.yml uses.
-# The toolchain is the exact version rust-toolchain.toml names (OD-10 of the release review),
+# The toolchain is the exact version rust-toolchain.toml names (the owner's decision),
 # read by the step before each use of the action, which at this commit installs nothing
 # without the input; the file is bumped in its own commit.
 
@@ -202,6 +211,9 @@ jobs:
     name: UI
     needs: verify
     runs-on: ubuntu-latest
+    outputs:
+      # The digest of the bundle's listing, which `build` checks before it embeds the bundle.
+      dist-sha256: ${{ steps.digest.outputs.sha256 }}
     defaults:
       run:
         working-directory: ui
@@ -249,6 +261,13 @@ jobs:
         run: npm run test
       - name: Build
         run: npm run build
+      # Every file handed from one job to the next is checked against a digest the producing
+      # job states as a job output. An artifact of this run can be replaced by any process of
+      # the run that holds the run's artifact token (a dependency's build code in one job, a
+      # scanner in another, running at the same time); a job output cannot.
+      - name: The digest of the bundle
+        id: digest
+        run: echo "sha256=$(find dist -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-dist
@@ -276,6 +295,10 @@ jobs:
             # Unsigned: `sign-binary` signs it and uploads binary-windows-x86_64.
             artifact: binary-windows-x86_64-unsigned
     runs-on: ${{ matrix.os }}
+    outputs:
+      # The SHA-256 of each binary, one output per leg (each leg sets only its own).
+      linux-x86_64: ${{ steps.name.outputs.linux-x86_64 }}
+      windows-x86_64: ${{ steps.name.outputs.windows-x86_64 }}
     env:
       VERSION: ${{ needs.verify.outputs.version }}
       TARGET: ${{ matrix.target }}
@@ -312,6 +335,14 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist
+      - name: The bundle is the one `ui` built
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.ui.outputs.dist-sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+          test "$(cd ui && find dist -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)" = "$EXPECTED"
       - name: Build
         shell: bash
         run: cargo build --release --locked -p tenko --target "$TARGET"
@@ -343,11 +374,13 @@ jobs:
           esac
           "$bin" upgrade format
       - name: Name the binary
+        id: name
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
           cp "target/${TARGET}/release/tenko${EXE}" "dist/tenko-${VERSION}-${PLATFORM}${EXE}"
+          echo "${PLATFORM}=$(sha256sum "dist/tenko-${VERSION}-${PLATFORM}${EXE}" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           # SIGNING (later, API-19): no signature is made here. Section 7.2 of
           # docs/plans/security-audit-plan.md: a key in this workflow would prove no more than
           # the provenance of the `attest` job; the owner's hardware key signs SHA256SUMS, which
@@ -387,6 +420,13 @@ jobs:
         with:
           name: binary-linux-x86_64
           path: dist
+      - name: The binary is the one `build` made
+        env:
+          EXPECTED: ${{ needs.build.outputs.linux-x86_64 }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+          echo "${EXPECTED}  dist/tenko-${VERSION}-linux-x86_64" | sha256sum --check --strict -
       - name: Run the binary in ${{ matrix.name }}
         run: |
           set -euo pipefail
@@ -505,6 +545,8 @@ jobs:
     name: Sign the Windows binary
     needs: [verify, build]
     runs-on: windows-latest
+    outputs:
+      sha256: ${{ steps.digest.outputs.sha256 }}
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
@@ -519,6 +561,15 @@ jobs:
         with:
           name: binary-windows-x86_64-unsigned
           path: bin
+      # The certificate signs only the file `build` made, never one that replaced it.
+      - name: The binary is the one `build` made
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.build.outputs.windows-x86_64 }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+          echo "${EXPECTED}  bin/tenko-${VERSION}-windows-x86_64.exe" | sha256sum --check --strict -
       - name: Sign
         shell: pwsh
         env:
@@ -526,6 +577,10 @@ jobs:
           SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
           SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
         run: ./deploy/windows/sign.ps1 -File "bin/tenko-$env:VERSION-windows-x86_64.exe"
+      - name: The digest of the signed binary
+        id: digest
+        shell: bash
+        run: echo "sha256=$(sha256sum "bin/tenko-${VERSION}-windows-x86_64.exe" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: binary-windows-x86_64
@@ -541,6 +596,9 @@ jobs:
     name: MSI (windows-x86_64)
     needs: [verify, sign-binary]
     runs-on: windows-latest
+    outputs:
+      sha256: ${{ steps.digest.outputs.sha256 }}
+      upgrade-sha256: ${{ steps.digest.outputs.upgrade }}
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     defaults:
@@ -556,6 +614,14 @@ jobs:
         with:
           name: binary-windows-x86_64
           path: bin
+      - name: The binary is the one `sign-binary` signed
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.sign-binary.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+          echo "${EXPECTED}  bin/tenko-${VERSION}-windows-x86_64.exe" | sha256sum --check --strict -
       - name: Build the MSI
         run: ./deploy/windows/build-msi.ps1 -Binary "bin/tenko-$env:VERSION-windows-x86_64.exe" -Version $env:VERSION -Out dist
       - name: Build the upgrade test package
@@ -565,6 +631,13 @@ jobs:
           if ($env:VERSION -notmatch '^(\d+)\.(\d+)\.(\d+)') { throw "unexpected version $env:VERSION" }
           $next = "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
           ./deploy/windows/build-msi.ps1 -Binary "bin/tenko-$env:VERSION-windows-x86_64.exe" -Version $env:VERSION -MsiVersion $next -Out upgrade-test
+      - name: The digests of the packages
+        id: digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sha256=$(sha256sum "dist/tenko-${VERSION}-windows-x86_64.msi" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "upgrade=$(sha256sum "upgrade-test/tenko-${VERSION}-windows-x86_64.msi" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-windows-x86_64-unsigned
@@ -584,6 +657,8 @@ jobs:
     name: Sign the MSI
     needs: [verify, msi]
     runs-on: windows-latest
+    outputs:
+      sha256: ${{ steps.digest.outputs.sha256 }}
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
@@ -597,6 +672,14 @@ jobs:
         with:
           name: installer-windows-x86_64-unsigned
           path: dist
+      - name: The package is the one `msi` built
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.msi.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+          echo "${EXPECTED}  dist/tenko-${VERSION}-windows-x86_64.msi" | sha256sum --check --strict -
       - name: Sign
         shell: pwsh
         env:
@@ -604,6 +687,10 @@ jobs:
           SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
           SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
         run: ./deploy/windows/sign.ps1 -File "dist/tenko-$env:VERSION-windows-x86_64.msi"
+      - name: The digest of the signed package
+        id: digest
+        shell: bash
+        run: echo "sha256=$(sha256sum "dist/tenko-${VERSION}-windows-x86_64.msi" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-windows-x86_64
@@ -616,7 +703,7 @@ jobs:
   # package under test is the signed one that is published.
   msi-smoke:
     name: MSI smoke (windows-x86_64)
-    needs: [verify, sign-msi]
+    needs: [verify, msi, sign-msi]
     runs-on: windows-latest
     env:
       VERSION: ${{ needs.verify.outputs.version }}
@@ -636,6 +723,16 @@ jobs:
         with:
           name: msi-upgrade-test
           path: upgrade-test
+      - name: The packages are the ones `msi` built and `sign-msi` signed
+        shell: bash
+        env:
+          SIGNED: ${{ needs.sign-msi.outputs.sha256 }}
+          UPGRADE: ${{ needs.msi.outputs.upgrade-sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SIGNED" =~ ^[0-9a-f]{64}$ && "$UPGRADE" =~ ^[0-9a-f]{64}$ ]]
+          echo "${SIGNED}  dist/tenko-${VERSION}-windows-x86_64.msi" | sha256sum --check --strict -
+          echo "${UPGRADE}  upgrade-test/tenko-${VERSION}-windows-x86_64.msi" | sha256sum --check --strict -
       - name: Smoke test the MSI
         run: ./deploy/windows/msi-smoke.ps1 -Msi "dist/tenko-$env:VERSION-windows-x86_64.msi" -UpgradeMsi "upgrade-test/tenko-$env:VERSION-windows-x86_64.msi" -LogDir $env:RUNNER_TEMP
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -646,8 +743,8 @@ jobs:
           retention-days: 7
 
   # -------------------------------------------------------------------------------------
-  # The container image, built from the Linux binary of `build` (OD-04 of the release
-  # review): deploy/Dockerfile copies that file onto distroless/static, pinned by digest, and
+  # The container image, built from the Linux binary of `build` (the owner's decision of
+  # 2026-11-05): deploy/Dockerfile copies that file onto distroless/static, pinned by digest, and
   # compiles nothing, so the binary in the image is the file the smoke runs started, the
   # round tests and the provenance attestation names. The image is written to an OCI archive
   # (one manifest: no index, no attestation of the builder, as the real provenance comes from
@@ -671,6 +768,13 @@ jobs:
         with:
           name: binary-linux-x86_64
           path: dist
+      - name: The binary is the one `build` made
+        env:
+          EXPECTED: ${{ needs.build.outputs.linux-x86_64 }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+          echo "${EXPECTED}  dist/tenko-${VERSION}-linux-x86_64" | sha256sum --check --strict -
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -695,6 +799,35 @@ jobs:
           test "$(tar -xOf "$RUNNER_TEMP/image.tar" "blobs/sha256/${digest#sha256:}" | sha256sum | cut -d' ' -f1)" = "${digest#sha256:}"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "Image ${IMAGE}@${digest} (not pushed yet)"
+      # The builder (BuildKit, whose image the buildx action starts) writes the archive; the
+      # binary in it must be the tested one, whatever the builder did. Exactly one layer holds
+      # /usr/local/bin/tenko, and its SHA-256 is that of `build`'s Linux binary.
+      - name: The image holds the binary `build` made
+        env:
+          EXPECTED: ${{ needs.build.outputs.linux-x86_64 }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/image.tar"
+          blob() { tar -xOf "$archive" "blobs/sha256/${1#sha256:}"; }
+          layer_tar() {
+            case "$2" in
+              *gzip) blob "$1" | gzip -dc ;;
+              *zstd) blob "$1" | zstd -dc ;;
+              *) blob "$1" ;;
+            esac
+          }
+          found=0 got=""
+          while IFS=$'\t' read -r layer media; do
+            name="$(layer_tar "$layer" "$media" | tar -tf - | grep -xE '(\./)?usr/local/bin/tenko' || true)"
+            [ -n "$name" ] || continue
+            found=$((found + 1))
+            got="$(layer_tar "$layer" "$media" | tar -xOf - "$name" | sha256sum | cut -d' ' -f1)"
+          done < <(blob "$DIGEST" | jq -r '.layers[] | [.digest, .mediaType] | @tsv')
+          test "$found" = 1
+          [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+          test "$got" = "$EXPECTED"
+          echo "The image's /usr/local/bin/tenko is the tested binary (${got})"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-oci
@@ -711,6 +844,9 @@ jobs:
     name: SBOMs
     needs: [verify, image-build]
     runs-on: ubuntu-latest
+    outputs:
+      # The digest of the listing of the four SBOMs, which `manifest` and `attest-image` check.
+      sha256: ${{ steps.sboms.outputs.sha256 }}
     env:
       VERSION: ${{ needs.verify.outputs.version }}
       CARGO_CYCLONEDX_VERSION: 0.5.9
@@ -806,9 +942,18 @@ jobs:
           name: image-oci
           path: ${{ runner.temp }}/image
       - name: SBOM of the container image
-        # syft reads the archive `image-build` made, the image `image` pushes later.
+        # syft reads the archive `image-build` made, the image `image` pushes later, after
+        # checking that it is that archive (the manifest its index names, by digest).
+        env:
+          DIGEST: ${{ needs.image-build.outputs.digest }}
         run: |
           set -euo pipefail
+          archive="$RUNNER_TEMP/image/image.tar"
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          index="$(tar -xOf "$archive" index.json)"
+          test "$(jq -r '.manifests | length' <<< "$index")" = 1
+          test "$(jq -r '.manifests[0].digest' <<< "$index")" = "$DIGEST"
+          test "$(tar -xOf "$archive" "blobs/sha256/${DIGEST#sha256:}" | sha256sum | cut -d' ' -f1)" = "${DIGEST#sha256:}"
           syft scan "oci-archive:$RUNNER_TEMP/image/image.tar" --platform linux/amd64 \
             --output "cyclonedx-json=sbom/tenko-${VERSION}-image.cdx.json"
       - name: Count the components
@@ -823,6 +968,9 @@ jobs:
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
           test "$(find sbom -name '*.cdx.json' | wc -l)" -eq 4
+      - name: The digest of the SBOMs
+        id: sboms
+        run: echo "sha256=$(cd sbom && sha256sum -- *.cdx.json | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom
@@ -836,8 +984,12 @@ jobs:
   # these files and `publish` attaches exactly these files.
   manifest:
     name: Release files
-    needs: [verify, build, smoke-linux, sign-binary, msi-smoke, sbom]
+    needs: [verify, build, smoke-linux, sign-binary, sign-msi, msi-smoke, sbom]
     runs-on: ubuntu-latest
+    outputs:
+      # The SHA-256 of SHA256SUMS, which lists every other file of the release: `attest` and
+      # `publish` check the files they take against it.
+      sums-sha256: ${{ steps.sums.outputs.sha256 }}
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
@@ -868,6 +1020,23 @@ jobs:
         with:
           name: sbom
           path: sbom
+      - name: The files are the ones their jobs made
+        env:
+          LINUX: ${{ needs.build.outputs.linux-x86_64 }}
+          WINDOWS: ${{ needs.sign-binary.outputs.sha256 }}
+          MSI: ${{ needs.sign-msi.outputs.sha256 }}
+          SBOMS: ${{ needs.sbom.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          for d in "$LINUX" "$WINDOWS" "$MSI" "$SBOMS"; do [[ "$d" =~ ^[0-9a-f]{64}$ ]]; done
+          {
+            echo "${LINUX}  dist/tenko-${VERSION}-linux-x86_64"
+            echo "${WINDOWS}  dist/tenko-${VERSION}-windows-x86_64.exe"
+            echo "${MSI}  dist/tenko-${VERSION}-windows-x86_64.msi"
+          } | sha256sum --check --strict -
+          test "$(find dist -type f | wc -l)" -eq 3
+          test "$(find sbom -type f | wc -l)" -eq 4
+          test "$(cd sbom && sha256sum -- *.cdx.json | sha256sum | cut -d' ' -f1)" = "$SBOMS"
       - name: Data-directory format
         # The format number of this version, from the Linux binary that is being released
         # (a matrix job cannot hand one leg's output on reliably).
@@ -944,6 +1113,7 @@ jobs:
       # L1.9: the SBOMs as release assets, listed in SHA256SUMS like the installers and not in
       # releases.json (release-manifest.mjs ignores them: they are no asset of a platform).
       - name: The SBOMs
+        id: sums
         run: |
           set -euo pipefail
           cp sbom/*.cdx.json dist/
@@ -954,6 +1124,7 @@ jobs:
           test "$(grep -c . dist/SHA256SUMS)" -eq "$(find dist -type f ! -name SHA256SUMS | wc -l)"
           cat dist/SHA256SUMS
           ls -l dist
+          echo "sha256=$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release
@@ -963,8 +1134,8 @@ jobs:
 
   # -------------------------------------------------------------------------------------
   # L1.10: the attestations of the release files. The job checks out nothing and runs no code
-  # of this repository and no third-party action: it downloads the release files and calls
-  # GitHub's own actions/attest (the action that actions/attest-build-provenance and
+  # of this repository and no third-party action: it downloads the release files, checks them
+  # against the SHA256SUMS whose digest `manifest` stated, and calls GitHub's own actions/attest (the action that actions/attest-build-provenance and
   # actions/attest-sbom wrap since their version 4). The attestations are signed through
   # Sigstore's public instance, recorded in its transparency log and stored on the
   # repository. The image is attested by `attest-image`, after it is pushed.
@@ -983,6 +1154,15 @@ jobs:
         with:
           name: release
           path: dist
+      - name: The files are the ones `manifest` listed
+        env:
+          SUMS: ${{ needs.manifest.outputs.sums-sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SUMS" =~ ^[0-9a-f]{64}$ ]]
+          echo "${SUMS}  dist/SHA256SUMS" | sha256sum --check --strict -
+          (cd dist && sha256sum --check --strict SHA256SUMS)
+          test "$(grep -c . dist/SHA256SUMS)" -eq "$(find dist -type f ! -name SHA256SUMS | wc -l)"
       - name: Provenance of the release files
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -1023,6 +1203,7 @@ jobs:
       version: ${{ needs.verify.outputs.version }}
       commit: ${{ needs.verify.outputs.sha }}
       binary-artifact: binary-linux-x86_64
+      binary-sha256: ${{ needs.build.outputs.linux-x86_64 }}
     permissions:
       contents: read
 
@@ -1096,6 +1277,14 @@ jobs:
         with:
           name: sbom
           path: sbom
+      - name: The SBOMs are the ones `sbom` wrote
+        env:
+          SBOMS: ${{ needs.sbom.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SBOMS" =~ ^[0-9a-f]{64}$ ]]
+          test "$(find sbom -type f | wc -l)" -eq 4
+          test "$(cd sbom && sha256sum -- *.cdx.json | sha256sum | cut -d' ' -f1)" = "$SBOMS"
       - name: Log in to the registry
         env:
           REGISTRY_TOKEN: ${{ github.token }}
@@ -1136,9 +1325,10 @@ jobs:
       VERSION: ${{ needs.verify.outputs.version }}
       PRERELEASE: ${{ needs.verify.outputs.prerelease }}
       DIGEST: ${{ needs.image.outputs.digest }}
-    # The token that can write the release and the packages is handed to the two steps that
-    # use it (gh and skopeo), not to the job: the release notes are written by the
-    # repository's own script before, without it.
+    # The token that can write the release and the packages is in the environment of only the
+    # two steps that use it (gh and skopeo): the release notes are written by the
+    # repository's own script before, without it. (GitHub's own actions of the job can read
+    # the job's token as their default input; none of the others does here.)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1153,16 +1343,41 @@ jobs:
         with:
           name: release
           path: dist
+      - name: The files are the ones `manifest` listed
+        env:
+          SUMS: ${{ needs.manifest.outputs.sums-sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SUMS" =~ ^[0-9a-f]{64}$ ]]
+          echo "${SUMS}  dist/SHA256SUMS" | sha256sum --check --strict -
+          (cd dist && sha256sum --check --strict SHA256SUMS)
+          test "$(grep -c . dist/SHA256SUMS)" -eq "$(find dist -type f ! -name SHA256SUMS | wc -l)"
       - name: Release notes
         run: node scripts/changelog.mjs notes "$VERSION" > notes.md
+      # skopeo is on the runner image; installed here only if it is not, in a step without the
+      # token, so that no package script runs where the token is.
+      - name: skopeo
+        run: |
+          set -euo pipefail
+          if ! command -v skopeo > /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends skopeo
+          fi
+          skopeo --version
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # The tag still names the commit verify resolved: a tag moved during the run is
-          # not published under its new commit.
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)" = "$SHA"
+          # not published under its new commit. Read as a tag (refs/tags/), never a branch of
+          # the same name; an annotated tag is followed to its commit.
+          ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}")"
+          object="$(jq -r '.object.sha' <<< "$ref")"
+          if [ "$(jq -r '.object.type' <<< "$ref")" = tag ]; then
+            object="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${object}" --jq .object.sha)"
+          fi
+          test "$object" = "$SHA"
           ls -l dist
           flags=()
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
@@ -1180,10 +1395,6 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          if ! command -v skopeo > /dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends skopeo
-          fi
           tags=("$VERSION")
           if [ "$PRERELEASE" != "true" ]; then tags+=(latest); fi
           printf '%s' "$REGISTRY_TOKEN" | skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
