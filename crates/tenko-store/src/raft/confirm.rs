@@ -28,6 +28,12 @@
 //! isolation_after_ms` after its last quorum acknowledgment, 3 s by default) or until the
 //! read wait ends, whichever comes first. The read then fails with `NoQuorum`, or with
 //! `Timeout` when the read wait ends while a round is still running.
+//!
+//! The readers of a missed round share the next one. A round that follows a missed one
+//! starts only after a pause (the heartbeat interval), and its readers join it at once,
+//! while the round task waits out the pause: none of them comes back alone, finds no round
+//! running and starts a round of its own, which would add heartbeats on the follower whose
+//! slowness made the round miss, and split the readers again at every miss.
 
 use std::{
     sync::{
@@ -66,9 +72,13 @@ type Round = Arc<dyn Fn() -> BoxFuture<'static, Confirmation> + Send + Sync>;
 /// The rounds of one store.
 pub(super) struct Confirmer {
     round: Round,
+    /// The time between a round that a quorum missed and the next one.
+    pause: Duration,
     state: Mutex<State>,
     /// Rounds started.
     rounds: AtomicU64,
+    /// Rounds that ended in a quorum's acknowledgment (`Leader`).
+    confirmed: AtomicU64,
 }
 
 impl std::fmt::Debug for Confirmer {
@@ -79,19 +89,21 @@ impl std::fmt::Debug for Confirmer {
 
 #[derive(Debug, Default)]
 struct State {
-    /// A round is running.
+    /// A round is running, or the pause after a missed one.
     running: bool,
     /// The round that starts when the running one ends, with its readers.
     next: Option<Outcome>,
 }
 
 impl Confirmer {
-    /// Rounds of `round`.
-    fn new(round: Round) -> Self {
+    /// Rounds of `round`, the one after a missed round `pause` after it.
+    fn new(round: Round, pause: Duration) -> Self {
         Self {
             round,
+            pause,
             state: Mutex::default(),
             rounds: AtomicU64::new(0),
+            confirmed: AtomicU64::new(0),
         }
     }
 
@@ -100,12 +112,23 @@ impl Confirmer {
         self.rounds.load(Ordering::Relaxed)
     }
 
-    /// Rounds of openraft's leadership check on `raft`, each ended after `limit`.
-    pub(super) fn of_raft(raft: Raft, limit: Duration) -> Self {
-        Self::new(Arc::new(move || {
-            let raft = raft.clone();
-            Box::pin(async move { confirm(&raft, limit).await })
-        }))
+    /// The rounds so far that ended in a quorum's acknowledgment. Every read that a round
+    /// answers is answered by exactly one of them, so reads that share rounds outnumber
+    /// these, however many rounds a quorum missed in between.
+    pub(super) fn confirmed_rounds(&self) -> u64 {
+        self.confirmed.load(Ordering::Relaxed)
+    }
+
+    /// Rounds of openraft's leadership check on `raft`, each ended after `limit`, the one
+    /// after a missed round `pause` after it.
+    pub(super) fn of_raft(raft: Raft, limit: Duration, pause: Duration) -> Self {
+        Self::new(
+            Arc::new(move || {
+                let raft = raft.clone();
+                Box::pin(async move { confirm(&raft, limit).await })
+            }),
+            pause,
+        )
     }
 
     /// The outcome of a round that starts no earlier than this call: a new round when none
@@ -132,16 +155,15 @@ impl Confirmer {
     }
 
     /// The confirmation of one read, by `deadline` at most, through the rounds of this
-    /// confirmer. A round that a quorum missed is followed by the next one `pause` later
-    /// while `in_contact` says that the leader's replication is still acknowledged by a
-    /// quorum; once it says otherwise, or when the deadline would pass first, the read fails
-    /// with that round's `NoQuorum`. A round that went without an outcome (its task was
-    /// dropped with its runtime) is followed by a new one while `running` says the store
-    /// runs.
+    /// confirmer. A read whose round a quorum missed joins the next one at once, which
+    /// starts after the pause, while `in_contact` says that the leader's replication is
+    /// still acknowledged by a quorum; once it says otherwise, or when the deadline would
+    /// pass during the pause, the read fails with that round's `NoQuorum`. A round that went
+    /// without an outcome (its task was dropped with its runtime) is followed by a new one
+    /// while `running` says the store runs.
     pub(super) async fn confirm_read(
         self: &Arc<Self>,
         deadline: Instant,
-        pause: Duration,
         running: impl Fn() -> bool,
         in_contact: impl Fn() -> bool,
     ) -> Confirmation {
@@ -168,11 +190,10 @@ impl Confirmer {
             if outcome != Confirmation::NoQuorum || !in_contact() {
                 return outcome;
             }
-            if Instant::now() + pause >= deadline {
+            if Instant::now() + self.pause >= deadline {
                 return outcome;
             }
             tracing::debug!("a leadership round missed its quorum; the next one decides");
-            tokio::time::sleep(pause).await;
         }
     }
 }
@@ -183,7 +204,16 @@ async fn run(mut running: Running, mut outcome: Outcome) {
     loop {
         confirmer.rounds.fetch_add(1, Ordering::Relaxed);
         let confirmation = (confirmer.round)().await;
+        if matches!(confirmation, Confirmation::Leader { .. }) {
+            confirmer.confirmed.fetch_add(1, Ordering::Relaxed);
+        }
         outcome.send_replace(Some(confirmation));
+        if confirmation == Confirmation::NoQuorum {
+            // The round stays marked as running through the pause: the readers that try
+            // again join the next round meanwhile, all of them, instead of the first one
+            // back starting a round of its own.
+            tokio::time::sleep(confirmer.pause).await;
+        }
         let mut state = confirmer
             .state
             .lock()
@@ -247,15 +277,21 @@ mod tests {
 
     type Gates = mpsc::UnboundedReceiver<oneshot::Sender<Confirmation>>;
 
-    /// A confirmer whose rounds report their start, and end with what the test sends.
+    /// A confirmer whose rounds report their start, and end with what the test sends; the
+    /// round after a missed one starts 10 ms after it.
     fn gated() -> (Arc<Confirmer>, Gates) {
+        gated_with_pause(Duration::from_millis(10))
+    }
+
+    /// [`gated`], with the round after a missed one `pause` after it.
+    fn gated_with_pause(pause: Duration) -> (Arc<Confirmer>, Gates) {
         let (started, gates) = mpsc::unbounded_channel();
         let round: Round = Arc::new(move || {
             let (gate, ended) = oneshot::channel();
             let _ = started.send(gate);
             Box::pin(async move { ended.await.unwrap_or(Confirmation::ShuttingDown) })
         });
-        (Arc::new(Confirmer::new(round)), gates)
+        (Arc::new(Confirmer::new(round, pause)), gates)
     }
 
     async fn outcome(mut receiver: watch::Receiver<Option<Confirmation>>) -> Confirmation {
@@ -303,6 +339,11 @@ mod tests {
         let fourth = confirmer.join();
         let round_three = gates.recv().await.expect("a round for the next read");
         assert_eq!(confirmer.rounds(), 3, "four reads, three rounds");
+        assert_eq!(
+            confirmer.confirmed_rounds(),
+            1,
+            "a deposed leader confirms nothing"
+        );
         let _ = round_three.send(Confirmation::Leader { index: Some(4) });
         assert_eq!(
             outcome(fourth).await,
@@ -391,12 +432,7 @@ mod tests {
         let reader = Arc::clone(&confirmer);
         let read = tokio::spawn(async move {
             reader
-                .confirm_read(
-                    Instant::now() + Duration::from_secs(10),
-                    Duration::from_millis(10),
-                    || true,
-                    || true,
-                )
+                .confirm_read(Instant::now() + Duration::from_secs(10), || true, || true)
                 .await
         });
         let first = gates.recv().await.expect("the first round");
@@ -407,6 +443,54 @@ mod tests {
             read.await.expect("the read"),
             Confirmation::Leader { index: Some(7) }
         );
+        assert_eq!(confirmer.rounds(), 2);
+        assert_eq!(
+            confirmer.confirmed_rounds(),
+            1,
+            "the missed round is not one"
+        );
+    }
+
+    /// The readers of a round that a quorum missed come back together: the reader of the
+    /// missed round shares the next round with the reads that were already waiting for it,
+    /// instead of starting a round of its own after them.
+    #[tokio::test]
+    async fn the_readers_of_a_missed_round_share_the_next_one() {
+        let (confirmer, mut gates) = gated_with_pause(Duration::from_millis(50));
+        let read = |confirmer: &Arc<Confirmer>| {
+            let reader = Arc::clone(confirmer);
+            tokio::spawn(async move {
+                reader
+                    .confirm_read(Instant::now() + Duration::from_secs(10), || true, || true)
+                    .await
+            })
+        };
+        let first = read(&confirmer);
+        let round_one = gates.recv().await.expect("the first round");
+        // Two reads arrive while it runs: they wait for the next round.
+        let waiting = [read(&confirmer), read(&confirmer)];
+        tokio::task::yield_now().await;
+        let _ = round_one.send(Confirmation::NoQuorum);
+        let round_two = gates.recv().await.expect("the next round");
+        let _ = round_two.send(Confirmation::Leader { index: Some(8) });
+        let answered = tokio::time::timeout(Duration::from_secs(5), first)
+            .await
+            .expect("the reader of the missed round is answered by the next round")
+            .expect("the read");
+        assert_eq!(answered, Confirmation::Leader { index: Some(8) });
+        for read in waiting {
+            assert_eq!(
+                read.await.expect("a read"),
+                Confirmation::Leader { index: Some(8) }
+            );
+        }
+        assert_eq!(
+            confirmer.rounds(),
+            2,
+            "three reads, one missed round, one more"
+        );
+        assert_eq!(confirmer.confirmed_rounds(), 1);
+        assert!(gates.try_recv().is_err(), "no round of its own");
     }
 
     /// After a missed round the read fails when the leader is out of contact with a
@@ -414,7 +498,6 @@ mod tests {
     /// round.
     #[tokio::test]
     async fn a_missed_round_fails_the_read_out_of_contact_or_at_the_deadline() {
-        let (confirmer, mut gates) = gated();
         let cases = [
             // Out of contact, with time to spare.
             (Duration::from_secs(10), Duration::from_millis(10), false),
@@ -422,10 +505,11 @@ mod tests {
             (Duration::from_millis(500), Duration::from_secs(10), true),
         ];
         for (wait, pause, in_contact) in cases {
+            let (confirmer, mut gates) = gated_with_pause(pause);
             let reader = Arc::clone(&confirmer);
             let read = tokio::spawn(async move {
                 reader
-                    .confirm_read(Instant::now() + wait, pause, || true, move || in_contact)
+                    .confirm_read(Instant::now() + wait, || true, move || in_contact)
                     .await
             });
             let round = gates.recv().await.expect("a round");

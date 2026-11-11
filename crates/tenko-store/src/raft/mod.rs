@@ -442,6 +442,9 @@ pub struct EngineStats {
     /// Leadership confirmation rounds run for linearizable reads; the reads that wait at
     /// the same time share one.
     pub leadership_rounds: u64,
+    /// The leadership rounds that a quorum confirmed, apart from the rounds it missed. Every
+    /// linearizable read the leader answers is answered by exactly one of them.
+    pub leadership_rounds_confirmed: u64,
 }
 
 /// Bytes on disk of a store, from the size cache (refreshed every
@@ -826,7 +829,11 @@ impl RaftStore {
             Arc::clone(&hold),
         );
         let isolation_after = config.isolation_after;
-        let confirmer = Arc::new(Confirmer::of_raft(raft.clone(), config.read_wait));
+        let confirmer = Arc::new(Confirmer::of_raft(
+            raft.clone(),
+            config.read_wait,
+            Duration::from_millis(config.timings.heartbeat_ms),
+        ));
         let inner = Arc::new(Inner {
             config,
             raft,
@@ -947,6 +954,7 @@ impl RaftStore {
             reseeds_in_place: load(&sm.rewrites),
             checkpoints: load(&sm.checkpoints),
             leadership_rounds: self.inner.confirmer.rounds(),
+            leadership_rounds_confirmed: self.inner.confirmer.confirmed_rounds(),
         }
     }
 
@@ -1897,7 +1905,8 @@ impl Inner {
     /// a quorum did not answer within the heartbeat interval is not the end while this
     /// leader's replication is acknowledged by a quorum (its quorum state accepts writes):
     /// one late heartbeat answer of a loaded follower is not a lost quorum, so the next
-    /// round decides. A leader that has lost its quorum keeps the read waiting until it
+    /// round, one heartbeat interval later and shared by every reader of the missed one,
+    /// decides. A leader that has lost its quorum keeps the read waiting until it
     /// counts as isolated (`isolation_after` after its last quorum acknowledgment) or until
     /// the deadline, whichever comes first. The read then fails with `NoQuorum`, or with
     /// `Timeout` when the deadline passes while a round is still running.
@@ -1905,7 +1914,6 @@ impl Inner {
         self.confirmer
             .confirm_read(
                 deadline,
-                Duration::from_millis(self.config.timings.heartbeat_ms),
                 || self.check_running().is_ok(),
                 || self.leadership.subscribe_quorum().borrow().accepts_writes(),
             )

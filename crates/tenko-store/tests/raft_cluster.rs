@@ -113,12 +113,23 @@ async fn a_forwarded_write_follows_a_leader_change() {
 
 /// With one voter of three down, a burst of linearizable reads on the leader goes through
 /// the one follower left, a loaded one that answers one message at a time: the reads share
-/// their leadership rounds instead of sending one heartbeat each (far fewer rounds than
-/// reads), so the follower's queue stays short and no read fails with `NoQuorum` while a
-/// quorum is up.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// their leadership rounds instead of sending one heartbeat each, so the follower's queue
+/// stays short and no read fails while a quorum is up.
+///
+/// The sharing is counted by the rounds a quorum confirmed: each read is answered by
+/// exactly one of them, so reads that each ran a round of their own would need `READS`.
+/// The bound follows from how the reads arrive. All of them are polled to their first wait
+/// in one poll of this task, on a runtime with one thread, so no round can end before every
+/// read has joined one: the first read starts a round, the others wait for the next.
+/// The readers of a round that a quorum missed join the next one during the pause after
+/// it: they are woken before the round task starts the pause, and on one thread they run
+/// before its timer can wake the task again, so they never split. Two groups,
+/// at most two confirmed rounds, however many rounds the follower made miss; how many it
+/// made miss depends on the host and is not counted.
+#[tokio::test(flavor = "current_thread")]
 async fn linearizable_reads_share_leadership_rounds_with_one_voter_down() {
     const READS: usize = 40;
+    const CONFIRMED_AT_MOST: u64 = 2;
     let cluster = InProcessCluster::start_with(3, &ConformanceConfig::default(), quick).await;
     let leader = cluster.wait_for_leader().await;
     let revision = put(&leader, 1, "before").await.expect("write");
@@ -132,22 +143,17 @@ async fn linearizable_reads_share_leadership_rounds_with_one_voter_down() {
     cluster
         .network()
         .set_service_time(followers[1], Some(Duration::from_millis(20)));
-    let rounds_before = leader.engine_stats().leadership_rounds;
-    let reads: Vec<_> = (0..READS)
-        .map(|_| {
-            let leader = leader.clone();
-            tokio::spawn(async move {
-                leader
-                    .read(ReadConsistency::Linearizable)
-                    .await
-                    .map(|view| view.revision())
-            })
-        })
-        .collect();
+    let before = leader.engine_stats();
+    let reads =
+        futures::future::join_all((0..READS).map(|_| leader.read(ReadConsistency::Linearizable)))
+            .await;
+    let after = leader.engine_stats();
+    let confirmed = after.leadership_rounds_confirmed - before.leadership_rounds_confirmed;
+    let started = after.leadership_rounds - before.leadership_rounds;
     let mut failed = Vec::new();
     for read in reads {
-        match read.await.expect("a read task") {
-            Ok(seen) => assert!(seen >= revision),
+        match read {
+            Ok(view) => assert!(view.revision() >= revision),
             Err(error) => failed.push(error),
         }
     }
@@ -156,10 +162,10 @@ async fn linearizable_reads_share_leadership_rounds_with_one_voter_down() {
         "{} of {READS} linearizable reads failed: {failed:?}",
         failed.len()
     );
-    let rounds = leader.engine_stats().leadership_rounds - rounds_before;
     assert!(
-        (1..=READS as u64 / 4).contains(&rounds),
-        "{READS} reads took {rounds} leadership rounds"
+        (1..=CONFIRMED_AT_MOST).contains(&confirmed),
+        "{READS} reads were answered by {confirmed} confirmed leadership rounds \
+         ({started} started)"
     );
     cluster.network().set_service_time(followers[1], None);
     cluster.network().set_isolated(followers[0], false);
