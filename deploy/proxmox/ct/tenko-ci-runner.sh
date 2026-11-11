@@ -5,19 +5,20 @@
 # runner container, it updates that container instead. Everything it runs is in
 # deploy/proxmox; deploy/proxmox/README.md has the details.
 #
-# Usage, as root on the Proxmox VE host:
-#   bash deploy/proxmox/ct/tenko-ci-runner.sh                      # from a checkout
-#   bash -c "$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-#     https://raw.githubusercontent.com/linkztream/tenko/main/deploy/proxmox/ct/tenko-ci-runner.sh)"
-# Settings: the var_* of lib/host.sh and below, RUNNER_TOKEN, TENKO_SCRIPTS_URL,
-# GITHUB_TOKEN, TENKO_DRY_RUN=1 (print the Proxmox commands instead of running them).
+# Usage, as root on the Proxmox VE host, from a checkout of the repository at a commit you
+# have reviewed (the runner it registers runs jobs as an account with passwordless sudo):
+#   bash deploy/proxmox/ct/tenko-ci-runner.sh
+# There is no one-command form: nothing pins a script fetched from a branch, and this one is
+# not a release file.
+# Settings: the var_* of lib/host.sh and below, RUNNER_TOKEN, GITHUB_TOKEN, TENKO_DRY_RUN=1
+# (print the Proxmox commands instead of running them).
 #
 # License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 # Secrets stay variables of this shell: exported, they would reach every child process.
 export -n RUNNER_TOKEN GITHUB_TOKEN 2>/dev/null || true
 
-# >>> bootstrap: the scripts root. Copy unchanged into another ct/ script; set the two names.
+# >>> bootstrap: the scripts root, from a checkout only.
 TENKO_CT_SCRIPT="tenko-ci-runner"
 TENKO_INSTALL="tenko-ci-runner-install"
 TENKO_BOOTSTRAP_TMP=""
@@ -25,33 +26,12 @@ if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" && -r "${BASH_SOURCE[0]
   # A checkout: ct/ and lib/ sit side by side in deploy/proxmox.
   TENKO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 else
-  # One command (bash -c "$(curl ...)"): the libraries and the install script are fetched
-  # into a temporary root, removed on exit. The repository is private, so GITHUB_TOKEN goes
-  # in the Authorization header, which curl reads from standard input (-H @-): it is in no
-  # argument list and no file.
-  TENKO_SCRIPTS_URL="${TENKO_SCRIPTS_URL:-https://raw.githubusercontent.com/linkztream/tenko/main/deploy/proxmox}"
-  TENKO_BOOTSTRAP_TMP="$(mktemp -d)" || exit 2
-  trap 'rm -rf "$TENKO_BOOTSTRAP_TMP"' EXIT
-  mkdir -p "${TENKO_BOOTSTRAP_TMP}/lib" "${TENKO_BOOTSTRAP_TMP}/install"
-  tenko_auth=()
-  [[ -n "${GITHUB_TOKEN:-}" ]] && tenko_auth=(-H @-)
-  for tenko_file in lib/common.sh lib/host.sh lib/container.sh "install/${TENKO_INSTALL}.sh"; do
-    if ! printf 'Authorization: Bearer %s\n' "${GITHUB_TOKEN:-}" |
-      curl -fsSL --retry 2 --connect-timeout 10 "${tenko_auth[@]}" \
-        -o "${TENKO_BOOTSTRAP_TMP}/${tenko_file}" "${TENKO_SCRIPTS_URL}/${tenko_file}" ||
-      [[ ! -s "${TENKO_BOOTSTRAP_TMP}/${tenko_file}" ]]; then
-      printf '\nCould not fetch %s from %s\n' "$tenko_file" "$TENKO_SCRIPTS_URL" >&2
-      printf 'The repository is private; run this script in one of two ways (deploy/proxmox/README.md):\n' >&2
-      printf '  1. From a checkout on this host:\n       bash deploy/proxmox/ct/%s.sh\n' "$TENKO_CT_SCRIPT" >&2
-      printf '  2. In one command, with GITHUB_TOKEN set to a fine-grained token that can read the contents:\n' >&2
-      # shellcheck disable=SC2016 # The command is printed for the owner, not run.
-      printf '       bash -c "$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" %s/ct/%s.sh)"\n' \
-        "$TENKO_SCRIPTS_URL" "$TENKO_CT_SCRIPT" >&2
-      exit 2
-    fi
-  done
-  unset tenko_auth tenko_file
-  TENKO_ROOT="$TENKO_BOOTSTRAP_TMP"
+  # Started as bash -c "$(curl ...)": the libraries it would source as root are not pinned
+  # by any release, so it stops before fetching anything.
+  printf '\nct/%s.sh runs from a checkout only (deploy/proxmox/README.md):\n' "$TENKO_CT_SCRIPT" >&2
+  printf '  git clone https://github.com/linkztream/tenko && cd tenko && git checkout <a reviewed commit or tag>\n' >&2
+  printf '  bash deploy/proxmox/ct/%s.sh\n' "$TENKO_CT_SCRIPT" >&2
+  exit 2
 fi
 # <<< bootstrap
 

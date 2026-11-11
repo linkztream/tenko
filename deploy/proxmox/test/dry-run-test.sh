@@ -4,8 +4,11 @@
 # and pvesh command and answers the queries; this checks the printed commands, that the
 # registration token and the root password appear nowhere in the output (only the size of
 # what went to standard input), the by-hand registration lines without a token, the
-# refusal of an invalid setting, and the one-command bootstrap against a loopback HTTP
-# server (the Authorization header arrives, the token is in no curl argument).
+# refusal of an invalid setting, and that the runner script refuses the one-command form.
+# Then the flows of ct/tenko.sh, and its one-command form from the files release-files.sh
+# writes, served by a loopback HTTP server: every file fetched https-only and without a
+# token, a file that differs from its pin refused before anything runs, and the
+# repository's copy (no pins) refusing to fetch.
 #
 # Usage:  bash deploy/proxmox/test/dry-run-test.sh     (bash, python3 and curl)
 #
@@ -102,56 +105,19 @@ out="$(dry var_ip=192.0.2.300/24)" || rc=$?
 has "$out" "var_ip: dhcp or a.b.c.d/nn" "names the setting"
 lacks "$out" "pct create" "nothing created"
 
-echo "== 5. one command: bootstrap from a loopback server"
+echo "== 5. one command: the runner script refuses to run outside a checkout"
 mkdir -p "${work}/bin"
 real_curl="$(command -v curl)"
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s/curl-args.log"\nexec "%s" "$@"\n' "$work" "$real_curl" >"${work}/bin/curl"
 chmod 0755 "${work}/bin/curl"
-cat >"${work}/server.py" <<'EOF'
-import functools, http.server, sys
-directory, port_file, auth_log, expected = sys.argv[1:5]
-class Handler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        got = self.headers.get("Authorization")
-        state = "absent" if got is None else ("matching" if got == "Bearer " + expected else "wrong")
-        with open(auth_log, "a") as f:
-            f.write(f"{self.path} authorization={state}\n")
-        super().do_GET()
-    def log_message(self, *args):
-        pass
-server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=directory))
-with open(port_file, "w") as f:
-    f.write(str(server.server_address[1]))
-server.serve_forever()
-EOF
-github_token="github-token-for-the-test-91b2"
-python3 "${work}/server.py" "$root" "${work}/port" "${work}/auth.log" "$github_token" &
-server_pid=$!
-for _ in $(seq 50); do [[ -s "${work}/port" ]] && break; sleep 0.1; done
-url="http://127.0.0.1:$(cat "${work}/port")"
 rc=0
-out="$(env -u RUNNER_TOKEN PATH="${work}/bin:${PATH}" TMPDIR="$work" TENKO_SCRIPTS_URL="$url" \
-  GITHUB_TOKEN="$github_token" TENKO_DRY_RUN=1 var_unattended=yes NO_COLOR=1 \
-  var_runner_version=2.338.0 var_runner_sha256="$sha" bash -c "$(cat "$ct")" </dev/null 2>&1)" || rc=$?
-((rc == 0)) && pass "exit 0" || fail "exit ${rc}: $(tail -n 5 <<<"$out")"
-for f in lib/common.sh lib/host.sh lib/container.sh install/tenko-ci-runner-install.sh; do
-  grep -qx "/${f} authorization=matching" "${work}/auth.log" && pass "fetched ${f} with the Authorization header" ||
-    fail "fetch of ${f}: $(grep -F "/${f}" "${work}/auth.log")"
-done
-has "$out" "/root/tenko-ci-runner-install.sh" "the fetched install script was pushed"
-if grep -qF "$github_token" "${work}/curl-args.log" || grep -qF "$github_token" <<<"$out"; then
-  fail "the GitHub token appeared in a curl argument or in the output"
-else
-  pass "the GitHub token is in none of the $(wc -l <"${work}/curl-args.log") curl argument lists and not in the output"
-fi
-[[ -z "$(find "$work" -mindepth 1 -maxdepth 1 -name 'tmp.*' -type d)" ]] && pass "the temporary root was removed" ||
-  fail "temporary root left behind: $(find "$work" -mindepth 1 -maxdepth 1 -name "tmp.*")"
-rc=0
-out="$(env -u RUNNER_TOKEN -u GITHUB_TOKEN TMPDIR="$work" TENKO_SCRIPTS_URL="${url}/missing" \
-  bash -c "$(cat "$ct")" </dev/null 2>&1)" || rc=$?
-((rc == 2)) && pass "a failed fetch stops with exit 2" || fail "failed fetch: exit ${rc}"
-has "$out" "From a checkout on this host" "the message names the checkout way"
-has "$out" "In one command, with GITHUB_TOKEN" "the message names the one-command way"
+out="$(env -u RUNNER_TOKEN -u GITHUB_TOKEN PATH="${work}/bin:${PATH}" TMPDIR="$work" TENKO_DRY_RUN=1 \
+  var_unattended=yes NO_COLOR=1 bash -c "$(cat "$ct")" </dev/null 2>&1)" || rc=$?
+((rc == 2)) && pass "exit 2" || fail "exit ${rc}: $(tail -n 5 <<<"$out")"
+has "$out" "runs from a checkout only" "the message says it runs from a checkout only"
+has "$out" "bash deploy/proxmox/ct/tenko-ci-runner.sh" "the message names the checkout command"
+[[ ! -s "${work}/curl-args.log" ]] && pass "nothing was fetched" || fail "curl ran: $(cat "${work}/curl-args.log")"
+lacks "$out" "pct create" "nothing created"
 
 # ── ct/tenko.sh: the Tenko container ──────────────────────────────────────────────────────
 tenko_ct="${root}/ct/tenko.sh"
@@ -264,6 +230,98 @@ has "$out" "[dry-run] pct exec 120 -- env TENKO_VERBOSE=no TENKO_INSTALL_VERSION
 rc=0
 out="$(tdry -- --update abc)" || rc=$?
 ((rc == 2)) && pass "--update needs a container ID" || fail "--update abc: exit ${rc}"
+
+echo "== 10. ct/tenko.sh in one command: the release files, each checked against its pin"
+release="${work}/release"
+files_out="$(bash "${root}/release-files.sh" v0.0.1 "$release" 2>&1)" && pass "release-files.sh wrote the files" ||
+  fail "release-files.sh: ${files_out}"
+published="${release}/tenko-proxmox.sh"
+has "$(cat "$published")" "TENKO_RELEASE_TAG=v0.0.1" "the published script names its tag"
+for pair in lib/common.sh:tenko-proxmox-common.sh lib/host.sh:tenko-proxmox-host.sh \
+  lib/container.sh:tenko-proxmox-container.sh install/tenko-install.sh:tenko-proxmox-install.sh ../install.sh:install.sh; do
+  has "$(cat "$published")" "  [${pair%%:*}]=$(sha256sum "${root}/${pair%%:*}" | cut -d' ' -f1)" "the pin of ${pair%%:*} is its SHA-256"
+  cmp -s "${root}/${pair%%:*}" "${release}/${pair#*:}" && pass "${pair#*:} is ${pair%%:*}" || fail "${pair#*:} differs from ${pair%%:*}"
+done
+diff <(sed '/^# >>> release pins/,/^# <<< release pins/d' "${root}/ct/tenko.sh") \
+  <(sed '/^# >>> release pins/,/^# <<< release pins/d' "$published") >/dev/null &&
+  pass "outside the pins, tenko-proxmox.sh is ct/tenko.sh" || fail "tenko-proxmox.sh differs from ct/tenko.sh outside the pins"
+# The loopback server is plain HTTP: this curl drops the two https-only options (after
+# checking that the bootstrap passed them) and logs every request.
+cat >"${work}/bin/curl" <<CURL
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${work}/curl-https.log"
+args=()
+while ((\$#)); do
+  case "\$1" in
+  --proto | --proto-redir) [[ "\$2" == "=https" ]] || exit 99; shift 2 ;;
+  *) args+=("\$1"); shift ;;
+  esac
+done
+exec "${real_curl}" "\${args[@]}"
+CURL
+chmod 0755 "${work}/bin/curl"
+cat >"${work}/serve.py" <<'EOF'
+import functools, http.server, sys
+directory, port_file, log = sys.argv[1:4]
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        with open(log, "a") as f:
+            f.write(f"{self.path} authorization={'absent' if self.headers.get('Authorization') is None else 'present'}\n")
+        super().do_GET()
+    def log_message(self, *args):
+        pass
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=directory))
+with open(port_file, "w") as f:
+    f.write(str(server.server_address[1]))
+server.serve_forever()
+EOF
+python3 "${work}/serve.py" "$release" "${work}/port" "${work}/requests.log" &
+server_pid=$!
+for _ in $(seq 50); do [[ -s "${work}/port" ]] && break; sleep 0.1; done
+url="http://127.0.0.1:$(cat "${work}/port")"
+# one <env assignment>... -- <option>...: the published script as bash -c runs it.
+one() {
+  local envs=()
+  while (($#)) && [[ "$1" != -- ]]; do envs+=("$1"); shift; done
+  shift
+  env -u GITHUB_TOKEN -u TENKO_ADMIN_PASSWORD PATH="${work}/bin:${PATH}" TMPDIR="$work" TENKO_SCRIPTS_URL="$url" \
+    TENKO_DRY_RUN=1 var_unattended=yes NO_COLOR=1 TENKO_LOG="${work}/one.log" "${envs[@]}" \
+    bash -c "$(cat "$published")" bash "$@" </dev/null 2>&1
+}
+rc=0
+out="$(one -- --binary "$fake_binary")" || rc=$?
+((rc == 0)) && pass "exit 0" || fail "exit ${rc}: $(tail -n 5 <<<"$out")"
+for f in tenko-proxmox-common.sh tenko-proxmox-host.sh tenko-proxmox-container.sh tenko-proxmox-install.sh install.sh; do
+  grep -qx "/${f} authorization=absent" "${work}/requests.log" && pass "fetched ${f}, without a token" ||
+    fail "fetch of ${f}: $(grep -F "/${f}" "${work}/requests.log")"
+done
+[[ "$(grep -c -- "--proto =https --proto-redir =https" "${work}/curl-https.log")" -eq 5 ]] &&
+  pass "every fetch was https-only, on the request and on redirects" || fail "curl arguments: $(cat "${work}/curl-https.log")"
+has "$out" "/root/tenko-install.sh" "the fetched install script was pushed"
+has "$out" "/root/install.sh" "the fetched install.sh was pushed"
+[[ -z "$(find "$work" -mindepth 1 -maxdepth 1 -name 'tmp.*' -type d)" ]] && pass "the temporary root was removed" ||
+  fail "temporary root left behind: $(find "$work" -mindepth 1 -maxdepth 1 -name "tmp.*")"
+
+echo "== 10b. a release file that is not the pinned one stops the run before anything is sourced"
+printf '\necho TAMPERED-LIBRARY-RAN\n' >>"${release}/tenko-proxmox-host.sh"
+rc=0
+out="$(one -- --binary "$fake_binary")" || rc=$?
+((rc == 2)) && pass "exit 2" || fail "exit ${rc}: $(tail -n 5 <<<"$out")"
+has "$out" "tenko-proxmox-host.sh has the SHA-256" "the message names the file and its digest"
+lacks "$out" "TAMPERED-LIBRARY-RAN" "the changed library never ran"
+lacks "$out" "pct create" "nothing created"
+cp "${root}/lib/host.sh" "${release}/tenko-proxmox-host.sh"
+
+echo "== 10c. the repository's ct/tenko.sh, without pins, fetches nothing in one command"
+: >"${work}/curl-https.log"
+rc=0
+out="$(env -u GITHUB_TOKEN PATH="${work}/bin:${PATH}" TMPDIR="$work" NO_COLOR=1 bash -c "$(cat "$tenko_ct")" </dev/null 2>&1)" || rc=$?
+((rc == 2)) && pass "exit 2" || fail "exit ${rc}: $(tail -n 5 <<<"$out")"
+has "$out" "carries no release pins" "the message says why"
+has "$out" "releases/latest/download/tenko-proxmox.sh" "the message names the release file"
+[[ ! -s "${work}/curl-https.log" ]] && pass "nothing was fetched" || fail "curl ran: $(cat "${work}/curl-https.log")"
+kill "$server_pid" 2>/dev/null
+server_pid=""
 
 if ((failures > 0)); then
   echo "== dry run: ${failures} check(s) failed"

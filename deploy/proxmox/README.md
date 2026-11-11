@@ -19,6 +19,7 @@ Proxmox VE ships (`pct`, `pveam`, `pvesm`, `pvesh`, `whiptail`, `curl`).
 | `lib/host.sh` | The generic host flow: settings and dialogs, template, `pct create`, wait, push and run, update mode, dry run |
 | `lib/container.sh` | The generic container-side helpers of the install scripts |
 | `lib/common.sh` | Messages, the quiet/verbose switch, the runner release lookup |
+| `release-files.sh` | Writes a release's Proxmox files: `tenko-proxmox.sh` (`ct/tenko.sh` with the tag and the SHA-256 of each file it fetches pinned in it) and the files it fetches; the release workflow runs it |
 | `test/` | The checks; `bash deploy/proxmox/test/run.sh` runs them all |
 
 ## The Tenko container
@@ -50,9 +51,9 @@ Proxmox container. When the unit fails with status 226/NAMESPACE or 218/CAPABILI
 container without nesting, ../README.md, "LXC", has the drop-in that relaxes only the
 failing options.
 
-**Running it**, as root on the Proxmox host. While the repository is private, copy the
-binary to the host (a release asset or your musl build) and give it with `--binary`; it is
-pushed into the container with `pct push`:
+**Running it**, as root on the Proxmox host. Without `--binary` the container downloads the
+latest release itself; with `--binary`, copy the binary to the host (a release asset or
+your musl build) and it is pushed into the container with `pct push`:
 
 ```bash
 # From a checkout of the repository on the host:
@@ -63,13 +64,21 @@ read -rs TENKO_ADMIN_PASSWORD && export TENKO_ADMIN_PASSWORD     # type the pass
 bash deploy/proxmox/ct/tenko.sh --yes --binary /root/tenko-0.2.0-linux-x86_64 \
   --ip 192.0.2.60/24 --gw 192.0.2.1 --admin admin --storage local-lvm
 
-# In one command, without a checkout: GITHUB_TOKEN is a fine-grained token that can read
-# the contents; it fetches the scripts and, without --binary, the release in the container.
-bash -c "$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/linkztream/tenko/main/deploy/proxmox/ct/tenko.sh)"
-
-# Once the repository is public, from the release asset (pinned to the scripts of its tag):
-bash -c "$(curl -fsSL https://github.com/linkztream/tenko/releases/latest/download/tenko-proxmox.sh)"
+# In one command, without a checkout, from the release file:
+bash -c "$(curl -fsSL --proto '=https' --proto-redir '=https' https://github.com/linkztream/tenko/releases/latest/download/tenko-proxmox.sh)"
 ```
+
+The one-command form is the release file only. The published `tenko-proxmox.sh` is
+`ct/tenko.sh` with its release tag and the SHA-256 of each of the five files it fetches from
+the same release's download directory (`tenko-proxmox-common.sh`, `tenko-proxmox-host.sh`,
+`tenko-proxmox-container.sh`, `tenko-proxmox-install.sh` and `install.sh`). A file whose
+SHA-256 differs stops the run before anything is sourced. The fetches are https-only on the
+request and on every redirect, at most 4 MiB each, and send no token: no token is needed to
+fetch the scripts. `tenko-proxmox.sh` itself is listed in the release's `SHA256SUMS` and
+has a provenance attestation; [../../SECURITY.md](../../SECURITY.md), "Verifying a
+release", has `gh attestation verify tenko-proxmox.sh --repo linkztream/tenko`. The
+repository's own `ct/tenko.sh` has empty pins: started with `bash -c` it fetches nothing and
+prints the two ways, a checkout or the release file.
 
 The dialog shows the container settings and the Tenko answers together; "Create" takes
 them, "Advanced" asks each one. With an administrator named, a password box asks for the
@@ -100,12 +109,14 @@ every upgrade: `pct snapshot <ctid> <name>`.
 | `var_forwarders` | empty: the container's resolvers | `--forwarders` |
 | `var_language` | `en` | `--language` |
 | `var_kek` | `auto` | `--kek` |
-| `GITHUB_TOKEN` | empty | Fetches the scripts in the one-command form; without `--binary` it goes to the container on the install script's standard input for the download, and nowhere else |
+| `GITHUB_TOKEN` | empty | Only for the binary download in the container, from a private fork or a private mirror; without `--binary` it goes to the container on the install script's standard input, and nowhere else. It is never used to fetch the scripts |
+| `TENKO_SCRIPTS_URL` | `https://github.com/linkztream/tenko/releases/download/<the tag of the script>` | Optional. The directory the one-command form fetches the release files from; a mirror must serve the same files, since the pinned digests still decide |
 
 The generic settings of `lib/host.sh` (section "Settings") apply too, with the Tenko
 defaults `var_cpu=2`, `var_ram=2048`, `var_disk=8`, `var_tags=tenko`, `var_nesting=1`,
-`var_keyctl=0`. Without `--binary`, without a token and with a private repository the
-settings are refused before anything is created. The exit statuses are those of the
+`var_keyctl=0`. Without `--binary`, without a token and when the latest release does not
+answer without one (a private fork or mirror) the settings are refused before anything is
+created. The exit statuses are those of the
 runner script; 9 from the container means the node runs but setup failed.
 
 **Upgrade.** From the host, the installer again in the container, with a newer binary
@@ -170,21 +181,18 @@ Take a registration token on your workstation first; it is valid for one hour:
 gh api -X POST repos/linkztream/tenko/actions/runners/registration-token --jq .token
 ```
 
-Then, as root on the Proxmox host, one of:
+Then, as root on the Proxmox host, from a checkout of a reviewed commit or tag:
 
 ```bash
-# From a checkout of the repository on the host:
+git clone https://github.com/linkztream/tenko && cd tenko && git checkout <a reviewed commit or tag>
 bash deploy/proxmox/ct/tenko-ci-runner.sh
-
-# In one command, without a checkout. The repository is private: GITHUB_TOKEN is a
-# fine-grained token with read access to its contents.
-bash -c "$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" https://raw.githubusercontent.com/linkztream/tenko/main/deploy/proxmox/ct/tenko-ci-runner.sh)"
 ```
 
-In the one-command form the script fetches `lib/` and its install script with the same
-token into a temporary directory, removed on exit. It also uses the token for the GitHub
-API lookup of the runner release, then drops it; it never reaches the container. A failed
-fetch stops with a message that names the two ways above.
+The runner script has no one-command form. Nothing pins a script fetched from a branch, and
+the runner it registers runs jobs with passwordless sudo, so it runs from a checkout only.
+Started with `bash -c` it stops with exit status 2 before it fetches anything. The script
+uses `GITHUB_TOKEN`, when set, only for the GitHub API lookup of the runner release, then
+drops it; it never reaches the container.
 
 The script shows every setting with its default. "Create" takes them; "Advanced" asks for
 each one in turn, prefilled (storages and bridges as a menu when there is more than one).
@@ -250,8 +258,7 @@ The runner's own (`ct/tenko-ci-runner.sh`) and the environment:
 | `var_runner_sha256` | from the release notes | SHA-256 of `actions-runner-linux-x64-<version>.tar.gz` |
 | `RUNNER_TOKEN` | empty: a password box asks | Registration token; empty: register later by hand |
 | `CARGO_BUILD_JOBS` | empty: from the memory | Cap on cargo's parallel jobs in the runner's jobs (`/opt/actions-runner/.env`); empty: the memory in GiB divided by two, at most the core count |
-| `GITHUB_TOKEN` | empty | Fine-grained read token for the one-command form and the API lookup |
-| `TENKO_SCRIPTS_URL` | `https://raw.githubusercontent.com/linkztream/tenko/main/deploy/proxmox` | Where the one-command form fetches `lib/` and `install/` |
+| `GITHUB_TOKEN` | empty | Optional token for the GitHub API lookup of the runner release (it raises the rate limit); not sent anywhere else |
 | `TENKO_DRY_RUN` | `0` | `1`: print every `pct`, `pveam`, `pvesm` and `pvesh` command instead of running it, with canned answers; runs on any Linux |
 
 The runner version and its checksum are resolved on the host before anything is created,
@@ -286,8 +293,8 @@ Exit status 10 means installed, but the token was refused (they expire after an 
 
 ## Update mode
 
-Run the same script inside the runner container (`pct enter <ctid>`, then the one-command
-form, or the checkout path if the container has one). It creates nothing: it upgrades the
+Run the same script inside the runner container (`pct enter <ctid>`, then from a checkout
+of a reviewed commit or tag in it). It creates nothing: it upgrades the
 packages, offers `docker system prune --all --force` (default no), and prints the runner's
 version, whether its service is active, and the `CARGO_BUILD_JOBS` cap of `.env` next to
 the memory the container has now. The runner updates itself; the script does not reinstall
@@ -347,8 +354,8 @@ rather than cleaned after a compromise of the repository. The registration token
 touches disk, an argument list or a log: the host sends it on the install script's
 standard input, and the runner account's shell hands it to `config.sh` in
 `ACTIONS_RUNNER_INPUT_TOKEN`, which the runner reads as its `--token` and removes from its
-environment. The `GITHUB_TOKEN` of the one-command form goes to `curl` on standard input
-(`-H @-`) and stays on the host. The runner software is installed only from a tarball that
+environment. The `GITHUB_TOKEN` of the runner release lookup goes to `curl` on standard
+input (`-H @-`) and stays on the host. The runner software is installed only from a tarball that
 matches its SHA-256, and Docker only from Docker's signed apt repository. More in
 [../../.github/runner/README.md](../../.github/runner/README.md), "Security notes".
 
@@ -363,8 +370,10 @@ TENKO_TEST_BINARY=<musl tenko> TENKO_TEST_NEWER=<the same, a higher version> \
 (a) `bash -n` and shellcheck over every script and `../install.sh`; (b) the host flows of
 both ct scripts under `TENKO_DRY_RUN=1 var_unattended=yes` (`test/dry-run-test.sh`): the
 printed commands, the tokens and passwords in none of them, the by-hand lines without a
-token, invalid settings refused, the one-command bootstrap against a loopback server, and
-for `ct/tenko.sh` the container options, the pushed installer and binary, the answers
+token, invalid settings refused, the runner script refusing to run outside a checkout, the
+one-command form of `ct/tenko.sh` from the output of `release-files.sh` served by a
+loopback server (the pins, https-only fetches, no token, a changed file refused), and for
+`ct/tenko.sh` the container options, the pushed installer and binary, the answers
 passed to the install script, the download with a token and `--update`; (c) the runner's
 install script in a throwaway `ubuntu:24.04` container (`test/container-test.sh`, with
 `TENKO_INSTALL_TEST=1`, since that container has no systemd and no Docker daemon); (d) the

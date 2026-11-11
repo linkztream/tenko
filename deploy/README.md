@@ -278,9 +278,16 @@ It shows the container settings and the Tenko answers in one dialog ("Advanced" 
 creates an unprivileged Ubuntu 24.04 container, pushes the binary and `install.sh` into it,
 runs the installer unattended and prints the container ID, its address, the URL and the
 setup token. `--update <ctid>` runs the installer again in that container, which upgrades
-it. [proxmox/README.md](proxmox/README.md), "The Tenko container", has the settings, the
-one-command form with a token and, once the repository is public, the release asset
-`tenko-proxmox.sh`.
+it. [proxmox/README.md](proxmox/README.md), "The Tenko container", has the settings and the
+one-command form, which runs the release file `tenko-proxmox.sh`:
+
+```
+bash -c "$(curl -fsSL --proto '=https' --proto-redir '=https' https://github.com/linkztream/tenko/releases/latest/download/tenko-proxmox.sh)"
+```
+
+That script carries its release's tag and the SHA-256 of every file it fetches from that
+release (the libraries, the container's install script and `install.sh`), and runs none that
+differs.
 
 ### Docker
 

@@ -923,17 +923,17 @@ jobs:
           # this workflow, and the signature is added to the published release.
           ls -l dist
       # WP6.6: the installers as release assets, with their lines appended to SHA256SUMS
-      # (not to releases.json: they are no update of a node). The Proxmox script is pinned
-      # to the scripts of this tag. A signature of SHA256SUMS (SIGNING above) covers these
-      # lines and those of the SBOMs below.
+      # (not to releases.json: they are no update of a node). deploy/proxmox/release-files.sh
+      # writes install.sh, the Proxmox libraries and container script as release files, and
+      # tenko-proxmox.sh with this tag and the SHA-256 of each of those files pinned in it:
+      # its one-command form fetches them from this release and runs none that differs. A
+      # signature of SHA256SUMS (SIGNING above) covers these lines and those of the SBOMs below.
       - name: The installers
         run: |
           set -euo pipefail
-          cp deploy/install.sh dist/install.sh
-          sed "s#/linkztream/tenko/main/deploy/proxmox#/linkztream/tenko/${TAG}/deploy/proxmox#" \
-            deploy/proxmox/ct/tenko.sh > dist/tenko-proxmox.sh
-          grep -q "/linkztream/tenko/${TAG}/deploy/proxmox" dist/tenko-proxmox.sh
-          (cd dist && sha256sum install.sh tenko-proxmox.sh >> SHA256SUMS)
+          mapfile -t files < <(bash deploy/proxmox/release-files.sh "$TAG" dist)
+          test "${#files[@]}" -eq 6
+          (cd dist && sha256sum -- "${files[@]}" >> SHA256SUMS)
           sort -k 2 -o dist/SHA256SUMS dist/SHA256SUMS
       # L1.9: the SBOMs as release assets, listed in SHA256SUMS like the installers and not in
       # releases.json (release-manifest.mjs ignores them: they are no asset of a platform).
@@ -980,8 +980,9 @@ jobs:
       - name: Provenance of the release files
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          # Every binary, the MSI, the SBOMs, install.sh, tenko-proxmox.sh, releases.json and
-          # SHA256SUMS, in one attestation with a subject per file.
+          # Every binary, the MSI, the SBOMs, install.sh, tenko-proxmox.sh and the Proxmox
+          # files it fetches, releases.json and SHA256SUMS, in one attestation with a subject
+          # per file.
           subject-path: dist/*
       - name: SBOM of the Linux binary
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

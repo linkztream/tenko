@@ -971,9 +971,10 @@ start on those distributions is never published.
 | Windows binary | `tenko-<version>-windows-x86_64.exe` | |
 | Windows installer | `tenko-<version>-windows-x86_64.msi` | Built from the signed binary, signed (with a certificate) and smoke-tested by the jobs `msi`, `sign-msi` and `msi-smoke`; `deploy/windows/README.md` |
 | Container image | `ghcr.io/linkztream/tenko:<version>` | Built from the released Linux binary on a base pinned by digest; pushed by digest after the security round and the attestations, tagged when the release is published. The tag `latest` moves only for releases without a pre-release part |
-| Installers | `install.sh`, `tenko-proxmox.sh` | The Linux installer and the Proxmox script of this tag |
+| Installers | `install.sh`, `tenko-proxmox.sh` | The Linux installer and the Proxmox script of this tag; `tenko-proxmox.sh` carries the tag and the SHA-256 of each file its one-command form fetches (`deploy/proxmox/release-files.sh`) |
+| Proxmox files | `tenko-proxmox-common.sh`, `tenko-proxmox-host.sh`, `tenko-proxmox-container.sh`, `tenko-proxmox-install.sh` | The libraries and the container script that `tenko-proxmox.sh` fetches from this release and runs only when each has its pinned SHA-256 |
 | SBOMs | `tenko-<version>-linux-x86_64.cdx.json`, `tenko-<version>-windows-x86_64.cdx.json`, `tenko-<version>-ui.cdx.json`, `tenko-<version>-image.cdx.json` | CycloneDX JSON; not in `releases.json` |
-| Checksums | `SHA256SUMS` | `sha256sum` format, one line per binary, installer package, installer script and SBOM of this release, and one for `releases.json` |
+| Checksums | `SHA256SUMS` | `sha256sum` format, one line per binary, installer package, installer script, Proxmox file and SBOM of this release, and one for `releases.json` |
 | Manifest | `releases.json` | Section 6.3 |
 
 From the release after 0.0.10 on, a release also carries an SBOM in CycloneDX JSON for

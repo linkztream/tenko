@@ -9,24 +9,31 @@
 # Usage, as root on the Proxmox VE host:
 #   bash deploy/proxmox/ct/tenko.sh --binary /root/tenko-0.2.0-linux-x86_64    # from a checkout
 #   bash deploy/proxmox/ct/tenko.sh --update 120 --binary /root/tenko-0.3.0-linux-x86_64
-#   bash -c "$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-#     https://raw.githubusercontent.com/linkztream/tenko/main/deploy/proxmox/ct/tenko.sh)"
+#   bash -c "$(curl -fsSL --proto '=https' --proto-redir '=https' \
+#     https://github.com/linkztream/tenko/releases/latest/download/tenko-proxmox.sh)"
 # Options: --binary <file> (pushed into the container instead of a download), --update
 # <ctid>, --setup-token <ctid> (print the node's setup token and nothing else), --ip
 # <a.b.c.d/nn|dhcp>, --gw <a.b.c.d>, --ctid <n>, --storage <name>, --hostname <name>,
 # --admin <name>, --version <x.y.z>, --yes (no dialogs), --dry-run.
-# Settings: the var_* of lib/host.sh and below; GITHUB_TOKEN (the one-command form, and
-# the download in the container while the repository is private); TENKO_ADMIN_PASSWORD;
-# TENKO_SCRIPTS_URL; TENKO_DRY_RUN=1.
+# Settings: the var_* of lib/host.sh and below; GITHUB_TOKEN (the download in the container
+# from a private repository or a fork); TENKO_ADMIN_PASSWORD; TENKO_SCRIPTS_URL (a mirror of
+# the release files); TENKO_DRY_RUN=1.
 #
 # License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 # Secrets stay variables of this shell: exported, they would reach every child process.
 export -n GITHUB_TOKEN TENKO_ADMIN_PASSWORD 2>/dev/null || true
 
-# >>> bootstrap: the scripts root, as in ct/tenko-ci-runner.sh, plus deploy/install.sh,
-# which sits next to proxmox/ in deploy/ (a checkout) and is fetched next to the temporary
-# root otherwise.
+# >>> release pins: empty in the repository. deploy/proxmox/release-files.sh writes the tag and
+# the SHA-256 of every file the bootstrap below fetches into the copy that a release publishes
+# as tenko-proxmox.sh; the one-command form runs only with them.
+TENKO_RELEASE_TAG=""
+declare -A TENKO_RELEASE_SHA256=()
+# <<< release pins
+
+# >>> bootstrap: the scripts root. From a checkout, deploy/proxmox itself (and install.sh in
+# deploy/); in one command, the release files of TENKO_RELEASE_TAG, each checked against its
+# pin before anything runs.
 TENKO_CT_SCRIPT="tenko"
 TENKO_INSTALL="tenko-install"
 TENKO_BOOTSTRAP_TMP=""
@@ -34,35 +41,51 @@ if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" && -r "${BASH_SOURCE[0]
   # A checkout: ct/ and lib/ sit side by side in deploy/proxmox, install.sh in deploy/.
   TENKO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 else
-  # One command (bash -c "$(curl ...)"): the libraries, the install script and install.sh are
-  # fetched into a temporary root, removed on exit. The repository is private, so
-  # GITHUB_TOKEN goes in the Authorization header, which curl reads from standard input
-  # (-H @-): it is in no argument list and no file.
-  TENKO_SCRIPTS_URL="${TENKO_SCRIPTS_URL:-https://raw.githubusercontent.com/linkztream/tenko/main/deploy/proxmox}"
+  # One command (bash -c "$(curl ...)"), with the release file tenko-proxmox.sh: the
+  # libraries, the container's install script and install.sh are files of the same release,
+  # fetched from its download directory into a temporary root (removed on exit) and kept
+  # only when each has the SHA-256 pinned above. They run as root on this host, so a file
+  # that differs from what the release published stops the run before it is sourced.
+  # tenko-proxmox.sh itself is listed in the release's SHA256SUMS and carries a provenance
+  # attestation (SECURITY.md, "Verifying a release"). No token is sent: release files are
+  # public.
+  if [[ -z "$TENKO_RELEASE_TAG" || ${#TENKO_RELEASE_SHA256[@]} -ne 5 ]]; then
+    printf '\nThis copy of ct/%s.sh carries no release pins, so it does not fetch anything.\n' "$TENKO_CT_SCRIPT" >&2
+    printf 'Run it in one of two ways (deploy/proxmox/README.md):\n' >&2
+    printf '  1. From a checkout on this host:\n       bash deploy/proxmox/ct/%s.sh\n' "$TENKO_CT_SCRIPT" >&2
+    printf '  2. In one command, from the release file:\n' >&2
+    # shellcheck disable=SC2016 # The command is printed for the owner, not run.
+    printf '       bash -c "$(curl -fsSL --proto '\''=https'\'' --proto-redir '\''=https'\'' %s)"\n' \
+      "https://github.com/linkztream/tenko/releases/latest/download/tenko-proxmox.sh" >&2
+    exit 2
+  fi
+  TENKO_SCRIPTS_URL="${TENKO_SCRIPTS_URL:-https://github.com/linkztream/tenko/releases/download/${TENKO_RELEASE_TAG}}"
   TENKO_BOOTSTRAP_TMP="$(mktemp -d)" || exit 2
   trap 'rm -rf "$TENKO_BOOTSTRAP_TMP"' EXIT
   mkdir -p "${TENKO_BOOTSTRAP_TMP}/proxmox/lib" "${TENKO_BOOTSTRAP_TMP}/proxmox/install"
-  tenko_auth=()
-  [[ -n "${GITHUB_TOKEN:-}" ]] && tenko_auth=(-H @-)
-  for tenko_file in lib/common.sh lib/host.sh lib/container.sh "install/${TENKO_INSTALL}.sh" ../install.sh; do
-    tenko_url="${TENKO_SCRIPTS_URL}/${tenko_file}"
-    [[ "$tenko_file" == ../install.sh ]] && tenko_url="${TENKO_SCRIPTS_URL%/proxmox}/install.sh"
-    # https only, on the request and on every redirect: the files fetched here run as root.
-    if ! printf 'Authorization: Bearer %s\n' "${GITHUB_TOKEN:-}" |
-      curl -fsSL --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 "${tenko_auth[@]}" \
-        -o "${TENKO_BOOTSTRAP_TMP}/proxmox/${tenko_file}" "$tenko_url" ||
-      [[ ! -s "${TENKO_BOOTSTRAP_TMP}/proxmox/${tenko_file}" ]]; then
+  # <path under deploy/proxmox>:<release file>, as release-files.sh names them.
+  for tenko_file in lib/common.sh:tenko-proxmox-common.sh lib/host.sh:tenko-proxmox-host.sh \
+    lib/container.sh:tenko-proxmox-container.sh "install/${TENKO_INSTALL}.sh:tenko-proxmox-install.sh" \
+    ../install.sh:install.sh; do
+    tenko_url="${TENKO_SCRIPTS_URL}/${tenko_file#*:}"
+    tenko_dest="${TENKO_BOOTSTRAP_TMP}/proxmox/${tenko_file%%:*}"
+    tenko_want="${TENKO_RELEASE_SHA256[${tenko_file%%:*}]:-}"
+    # https only, on the request and on every redirect, and no file above 4 MiB.
+    if ! curl -fsSL --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 10 \
+      --max-filesize 4194304 -o "$tenko_dest" "$tenko_url" || [[ ! -s "$tenko_dest" ]]; then
       printf '\nCould not fetch %s\n' "$tenko_url" >&2
-      printf 'The repository is private; run this script in one of two ways (deploy/proxmox/README.md):\n' >&2
-      printf '  1. From a checkout on this host:\n       bash deploy/proxmox/ct/%s.sh\n' "$TENKO_CT_SCRIPT" >&2
-      printf '  2. In one command, with GITHUB_TOKEN set to a fine-grained token that can read the contents:\n' >&2
-      # shellcheck disable=SC2016 # The command is printed for the owner, not run.
-      printf '       bash -c "$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" %s/ct/%s.sh)"\n' \
-        "$TENKO_SCRIPTS_URL" "$TENKO_CT_SCRIPT" >&2
+      printf 'Run this script from a checkout instead: bash deploy/proxmox/ct/%s.sh\n' "$TENKO_CT_SCRIPT" >&2
+      exit 2
+    fi
+    tenko_got="$(sha256sum "$tenko_dest" | cut -d' ' -f1)"
+    if [[ -z "$tenko_want" || "$tenko_got" != "$tenko_want" ]]; then
+      printf '\n%s has the SHA-256 %s, not the %s that tenko-proxmox.sh of %s pins.\n' \
+        "$tenko_url" "$tenko_got" "${tenko_want:-(none)}" "$TENKO_RELEASE_TAG" >&2
+      printf 'Nothing was run. Fetch tenko-proxmox.sh again, or run from a checkout of the tag.\n' >&2
       exit 2
     fi
   done
-  unset tenko_auth tenko_file tenko_url
+  unset tenko_file tenko_url tenko_dest tenko_want tenko_got
   TENKO_ROOT="${TENKO_BOOTSTRAP_TMP}/proxmox"
 fi
 # <<< bootstrap
