@@ -42,6 +42,8 @@ export interface ListSource<T> {
   hasMore: Accessor<boolean>;
   loadMore: () => void;
   reload: () => void;
+  /** As `reload`, and resolves once the rows are in (or the read failed or was replaced). */
+  reread: () => Promise<void>;
   /** The store revision the rows were read at. */
   revision: Accessor<number | undefined>;
   /** Rows whose content changed in the last live update. */
@@ -229,6 +231,7 @@ export function createListSource<T>(options: ListSourceOptions<T>): ListSource<T
     hasMore: () => cursor() !== null,
     loadMore: () => void loadMore(),
     reload: () => void refresh(),
+    reread: () => refresh(),
     revision,
     flashed: (id) => flash().has(id),
   };

@@ -459,7 +459,7 @@ impl LocalNode {
             }
         };
         let limit = commands::page_limit(args.limit);
-        let (rows, next) = {
+        let (rows, next, complete) = {
             let table = self.leases.read();
             let mut matching: Vec<_> = table
                 .iter()
@@ -485,7 +485,8 @@ impl LocalNode {
                     ))
                 })
                 .collect();
-            (rows, next)
+            // Read under the same guard as the rows: the page holds every change up to it.
+            (rows, next, table.complete())
         };
         let items: Vec<commands::LeaseRow> = rows
             .into_iter()
@@ -498,6 +499,7 @@ impl LocalNode {
                 next,
                 items6: Vec::new(),
                 next6: None,
+                revision: Some(complete),
             })),
         )
     }
@@ -517,13 +519,17 @@ impl LocalNode {
         };
         // WP9.4: both history tables, merged newest first.
         match commands::read_history_both(view.as_ref(), &args) {
-            Ok(page) => CommandResult::done(
-                format!(
-                    "{} lease event(s) read",
-                    page.items.len() + page.items6.len()
-                ),
-                Output::History(Box::new(page)),
-            ),
+            Ok(mut page) => {
+                // The page states the view it was read from, never a later revision.
+                page.revision = Some(view.revision());
+                CommandResult::done(
+                    format!(
+                        "{} lease event(s) read",
+                        page.items.len() + page.items6.len()
+                    ),
+                    Output::History(Box::new(page)),
+                )
+            }
             Err(error) => CommandResult::failed(error.to_string()),
         }
     }

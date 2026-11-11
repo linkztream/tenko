@@ -59,6 +59,7 @@ impl LocalNode {
             next: None,
             items6: Vec::new(),
             next6: None,
+            revision: None,
         };
         if args.wants_v4() {
             let listed = self.list(raw);
@@ -67,11 +68,12 @@ impl LocalNode {
             };
             page.items = v4.items;
             page.next = v4.next;
+            page.revision = v4.revision;
         }
         if args.wants_v6() && page.next.is_none() {
             let room = limit - page.items.len().min(limit);
             let after = args.after6.and_then(|resume| resume.key());
-            let (rows, more) = {
+            let (rows, more, complete) = {
                 let table = self.leases6.read();
                 let addr = args.addr_filter6();
                 let mut matching: Vec<&Lease6> = table
@@ -93,8 +95,10 @@ impl LocalNode {
                         )
                     })
                     .collect();
-                (rows, more)
+                (rows, more, table.complete())
             };
+            // A page of both families is complete where the less complete table is.
+            page.revision = Some(page.revision.map_or(complete, |v4| v4.min(complete)));
             if more {
                 page.next6 = Some(match rows.last() {
                     Some((lease, _)) => Resume::From((lease.vrf, lease.addr6())),

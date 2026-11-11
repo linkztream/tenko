@@ -122,10 +122,15 @@ describe("the lease history", () => {
   });
 
   describe("the live view", () => {
-    function feed(subscribe: { mock: { calls: unknown[][] } }, n: number, tables = ["dhcp.history"]): void {
+    /**
+     * An event of a change the mock store committed: it raises the store's revision and names it,
+     * so the page read after it is at that revision (a page older than an event is read again).
+     */
+    function feed(subscribe: { mock: { calls: unknown[][] } }, _n: number, tables = ["dhcp.history"]): void {
       const handler = subscribe.mock.calls.find(([topic]) => topic === "dhcp")?.[1] as ((event: ApiEvent) => void) | undefined;
       if (!handler) throw new Error("the page did not subscribe to the dhcp topic");
-      const revision = db.revision + 100_000 + n;
+      db.revision += 1;
+      const revision = db.revision;
       handler({ topic: "dhcp", type: "dhcp", objects: [], deleted: [], revision, data: { tables, revision } });
     }
 

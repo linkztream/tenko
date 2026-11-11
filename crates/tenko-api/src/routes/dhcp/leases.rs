@@ -42,8 +42,8 @@ use tenko_cluster::{
     registry::NodeRegistry,
 };
 use tenko_core::{
-    Action, CodedError, MacAddr, NodeId, ObjectKind, ObjectRef, Principal, RequestCtx, Timestamp,
-    VrfId,
+    Action, CodedError, MacAddr, NodeId, ObjectKind, ObjectRef, Principal, RequestCtx, Revision,
+    Timestamp, VrfId,
     audit::AuditDraft,
     codec::to_cbor,
     dhcp::{Lease, Lease6, Lease6Event, LeaseEvent, audit, codes as dhcp_codes, scope_object},
@@ -678,11 +678,16 @@ async fn list(
         (None, Some(next6)) => Some(LeaseCursor::V6(next6)),
         (None, None) => None,
     };
+    // The rows come from the role's lease table, which applies a commit after the store has
+    // announced it: the page states the revision the table was complete at when it was read,
+    // so a client that saw a newer change reads again. Never the store's revision beside it,
+    // which can be ahead of the rows.
+    let revision = page.revision.unwrap_or(Revision::ZERO);
     let items = visible(app, &cx.principal, page.items, page.items6);
     Ok(Page::new(
         items,
         next.map(|next| encode_cursor(lease_scope(), &next)),
-        app.store.status().revision,
+        revision,
     ))
 }
 
@@ -776,10 +781,11 @@ async fn history(
             |item: &DhcpHistoryItem| (item.at, item.family == DhcpFamily::V6, item.vrf, item.addr);
         key(b).cmp(&key(a))
     });
+    // The revision of the view the role read, not the store's after the read and its record.
     Ok(Page::new(
         items,
         next.map(|next| encode_cursor(history_scope(), &next)),
-        app.store.status().revision,
+        page.revision.unwrap_or(Revision::ZERO),
     ))
 }
 

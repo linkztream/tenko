@@ -41,14 +41,19 @@ function leaseReads(spy: { mock: { calls: unknown[][] } }): URL[] {
   return spy.mock.calls.map(([url]) => new URL(String(url), "http://localhost")).filter((url) => url.pathname === "/api/v1/dhcp/leases");
 }
 
-/** The handler the page registered for the `dhcp` topic, to feed it events as the stream would. */
-function stream(): { feed: (n: number, tables?: string[]) => void } {
+/**
+ * The handler the page registered for the `dhcp` topic, to feed it events as the stream would.
+ * Each event is a change the mock store committed: it raises the store's revision and names it,
+ * so the page read after it is at that revision (a page older than an event is read again).
+ */
+function stream(): { feed: (_n: number, tables?: string[]) => void } {
   const subscribe = vi.spyOn(events, "subscribe");
   return {
-    feed: (n, tables = ["dhcp.leases"]) => {
+    feed: (_n, tables = ["dhcp.leases"]) => {
       const handler = subscribe.mock.calls.find(([topic]) => topic === "dhcp")?.[1];
       if (!handler) throw new Error("the page did not subscribe to the dhcp topic");
-      const event: ApiEvent = { topic: "dhcp", type: "dhcp", objects: [], deleted: [], revision: db.revision + 100_000 + n, data: { tables, revision: db.revision + 100_000 + n } };
+      db.revision += 1;
+      const event: ApiEvent = { topic: "dhcp", type: "dhcp", objects: [], deleted: [], revision: db.revision, data: { tables, revision: db.revision } };
       handler(event);
     },
   };

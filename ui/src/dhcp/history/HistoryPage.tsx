@@ -60,7 +60,7 @@ export default function HistoryPage() {
     // An event never changes: new ones appear, none flashes.
     signature: () => "",
   });
-  const live = createLiveRefresh({ table: HISTORY_TABLE, revision: list.revision, refresh: () => list.reload() });
+  const live = createLiveRefresh({ table: HISTORY_TABLE, revision: list.revision, refresh: () => list.reread() });
 
   const change = (name: (typeof HISTORY_FILTER_NAMES)[number], value: string) => setSearch({ [name]: value === "" ? undefined : value }, { replace: true });
   const reset = () => setSearch(Object.fromEntries(HISTORY_FILTER_NAMES.map((name) => [name, undefined])), { replace: true });

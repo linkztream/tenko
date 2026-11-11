@@ -312,6 +312,68 @@ async fn pages_go_through_the_dhcpv4_part_then_the_dhcpv6_part() {
     world.role.stop().await;
 }
 
+/// A lease page never states a revision ahead of its rows. The rows come from the role's
+/// lease table, which takes a commit after the store has announced it; a page that carried
+/// the store's revision then claimed a lease it did not hold, and the live lease view dropped
+/// that lease's event as already seen, so the lease stayed missing until the next change.
+/// The gate of this test: the role is stopped, so its table takes no further change, and a
+/// lease of each family is committed to the store after it. The API runs over the role's own
+/// store here, so a page could carry that store's revision.
+#[tokio::test]
+async fn a_lease_page_never_states_a_revision_ahead_of_its_rows() {
+    let World {
+        app, role, v4, v6, ..
+    } = world().await;
+    let slot = DhcpNodeSlot::default();
+    slot.set(role.node() as Arc<dyn DhcpNode>);
+    let (router, _) = tenko_api::api(AppState::new(Arc::clone(&app.store) as Arc<dyn Store>));
+    let router = router
+        .layer(axum::Extension(Arc::clone(&app.config)))
+        .layer(axum::Extension(slot));
+    let held = send(&router, "GET", "/dhcp/leases", None, &[]).await;
+    held.assert_status(200);
+    assert_eq!(addrs(&held).len(), 3);
+    role.stop().await;
+
+    let item = app.get(&format!("/dhcp/scopes/{v4}")).await;
+    let vrf: VrfId = serde_json::from_value(item.body["vrf"].clone()).expect("vrf");
+    let late4 = lease4(vrf, v4.parse().expect("prefix"), "192.0.2.101");
+    let late6 = lease6(
+        vrf,
+        v6.parse().expect("prefix"),
+        "2001:db8:1::102",
+        DUID_EN,
+        false,
+    );
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), Timestamp::now());
+    batch
+        .put_typed(&tables::LEASES, &(vrf, late4.addr), &late4)
+        .expect("lease");
+    batch
+        .put_typed(&tables::LEASES6, &(vrf, late6.addr6()), &late6)
+        .expect("lease");
+    let committed = app.store.propose(batch).await.expect("rows").revision;
+
+    let page = send(&router, "GET", "/dhcp/leases", None, &[]).await;
+    page.assert_status(200);
+    let listed = addrs(&page);
+    assert!(
+        !listed.contains(&"192.0.2.101".to_owned())
+            && !listed.contains(&"2001:db8:1::102".to_owned()),
+        "the stopped role's table holds no lease committed after it stopped: {listed:?}"
+    );
+    let revision = page.body["revision"].as_u64().expect("revision");
+    assert!(
+        revision < committed.0,
+        "the page states revision {revision}, at or after the leases it does not hold ({})",
+        committed.0
+    );
+    assert!(
+        revision >= held.body["revision"].as_u64().expect("revision"),
+        "the revision of a page does not go back"
+    );
+}
+
 #[tokio::test]
 async fn the_history_merges_both_tables_newest_first() {
     let world = world().await;

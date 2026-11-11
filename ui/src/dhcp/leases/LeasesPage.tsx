@@ -140,11 +140,12 @@ export default function LeasesPage() {
     signature: (lease) => `${lease.revision}/${lease.state}`,
   });
 
-  const reload = () => {
-    list.reload();
+  const reread = () => {
     setStripVersion((v) => v + 1);
+    return list.reread();
   };
-  const live = createLiveRefresh({ table: LEASE_TABLE, revision: list.revision, refresh: reload });
+  const reload = () => void reread();
+  const live = createLiveRefresh({ table: LEASE_TABLE, revision: list.revision, refresh: reread });
 
   const change = (name: (typeof LEASE_FILTER_NAMES)[number], value: string) => setSearch({ [name]: value === "" ? undefined : value }, { replace: true });
   const reset = () => setSearch(Object.fromEntries(LEASE_FILTER_NAMES.map((name) => [name, undefined])), { replace: true });

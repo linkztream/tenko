@@ -88,6 +88,10 @@ pub struct LeaseIndex {
     macs: HashMap<u64, u32>,
     hasher: RandomState,
     revision: Revision,
+    /// The revision up to which the table holds every change of the rows: the image it was
+    /// built from or the end of the feed's last delta. The role's own commits, applied before
+    /// the feed delivers them, do not move it, as they may finish out of order.
+    complete: Revision,
     /// The encoder's buffer, so that a row costs one allocation of its own size.
     scratch: Vec<u8>,
 }
@@ -129,6 +133,7 @@ impl LeaseIndex {
             table.apply_at(lease, at);
         }
         table.revision = revision;
+        table.complete = revision;
         table
     }
 
@@ -137,10 +142,19 @@ impl LeaseIndex {
         self.revision
     }
 
+    /// The revision up to which the table holds every change of the rows, which a read of
+    /// the table states as its own: a row written at a later revision may be missing yet.
+    pub fn complete(&self) -> Revision {
+        self.complete
+    }
+
     /// Records that the table holds every change up to `revision` (a feed delta's end).
     pub fn advance(&mut self, revision: Revision) {
         if revision > self.revision {
             self.revision = revision;
+        }
+        if revision > self.complete {
+            self.complete = revision;
         }
     }
 

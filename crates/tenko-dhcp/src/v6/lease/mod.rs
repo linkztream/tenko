@@ -100,6 +100,9 @@ pub struct Lease6Index {
     duids: HashMap<u64, u32>,
     hasher: std::hash::RandomState,
     revision: Revision,
+    /// The revision up to which the table holds every change of the rows, as
+    /// [`crate::lease::LeaseIndex::complete`].
+    complete: Revision,
 }
 
 impl Lease6Index {
@@ -118,6 +121,7 @@ impl Lease6Index {
             table.apply_at(lease, at);
         }
         table.revision = revision;
+        table.complete = revision;
         table
     }
 
@@ -126,10 +130,19 @@ impl Lease6Index {
         self.revision
     }
 
+    /// The revision up to which the table holds every change of the rows, which a read of
+    /// the table states as its own.
+    pub fn complete(&self) -> Revision {
+        self.complete
+    }
+
     /// Records that the table holds every change up to `revision`.
     pub fn advance(&mut self, revision: Revision) {
         if revision > self.revision {
             self.revision = revision;
+        }
+        if revision > self.complete {
+            self.complete = revision;
         }
     }
 

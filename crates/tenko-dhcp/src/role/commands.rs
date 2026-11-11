@@ -418,6 +418,11 @@ pub struct LeasePage {
     /// and DHCPv6 leases remain.
     #[serde(default)]
     pub next6: Option<Resume<(VrfId, Ipv6Addr)>>,
+    /// The revision the page is complete at: every change of the lease rows committed at or
+    /// before it is in the page. A lease committed later may be missing, so a client that saw
+    /// a newer change reads again. None from a node that does not say.
+    #[serde(default)]
+    pub revision: Option<Revision>,
 }
 
 /// The arguments of `dhcp.lease.release`.
@@ -548,6 +553,10 @@ pub struct HistoryPage {
     /// Where the DHCPv6 history of the next page continues, likewise.
     #[serde(default)]
     pub resume6: Option<Resume<History6Key>>,
+    /// The revision of the store view the page was read from. None from a node that does not
+    /// say.
+    #[serde(default)]
+    pub revision: Option<Revision>,
 }
 
 /// The MAC address in a DUID-LLT or DUID-LL of hardware type 1 (RFC 8415 sections 11.2
@@ -736,6 +745,7 @@ pub fn read_history_both(
         items6,
         resume: resume4,
         resume6,
+        revision: None,
     })
 }
 
@@ -789,6 +799,7 @@ fn v4_page(items: Vec<LeaseEvent>, next: Option<HistoryKey>) -> HistoryPage {
         items6: Vec::new(),
         resume: next.map(Resume::From),
         resume6: None,
+        revision: None,
     }
 }
 
