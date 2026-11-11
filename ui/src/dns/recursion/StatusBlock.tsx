@@ -3,8 +3,8 @@
 // hints come from and their date, the last priming (when, how it ended, how long it took) with
 // a "Prime now" button for those who may write DNS, the root servers with their smoothed
 // round-trip times, the sizes of the infrastructure cache against their bounds, and the counters
-// since the role started. What the node reports as wrong (`priming_failed`) is a warning. A
-// node whose resolver is off says so and where to switch it on.
+// since the role started. What the node reports as wrong (`priming_failed`, `unwanted_answers`)
+// is a warning. A node whose resolver is off says so and where to switch it on.
 //
 // WP10.4: the validation counters (secure, insecure, bogus, indeterminate since the role
 // started) as a card of their own, and the anchor keys the node validates with by state.
@@ -24,7 +24,12 @@ function ms(value: number): string {
 
 /** What the node reports as wrong: its words, or the code itself for one this version does not know. */
 function Problem(props: { code: string }) {
-  return <Show when={props.code === "priming_failed"} fallback={props.code}>{t("dns.recursion.problem.priming_failed")}</Show>;
+  return (
+    <Switch fallback={props.code}>
+      <Match when={props.code === "priming_failed"}>{t("dns.recursion.problem.priming_failed")}</Match>
+      <Match when={props.code === "unwanted_answers"}>{t("dns.recursion.problem.unwanted_answers")}</Match>
+    </Switch>
+  );
 }
 
 function Facts(props: { status: RecursionStatus }) {

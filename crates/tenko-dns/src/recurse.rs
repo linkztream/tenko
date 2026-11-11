@@ -74,7 +74,7 @@ use std::{
     pin::Pin,
     sync::{
         Arc, Mutex, PoisonError,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -120,6 +120,58 @@ const MAX_INFRA_TTL: u32 = 86_400;
 /// and goes flushes the cache at most once per hold.
 pub const CARRY_HOLD: Duration = Duration::from_secs(3600);
 
+/// The queries one client query may send to authorities in all, the sub-queries of its
+/// validation included, in resolutions' worth of `budget_queries` (32): 128, as Unbound's
+/// `max-global-quota` bounds a client query against its 32 per resolution.
+pub const QUOTA_RESOLUTIONS: u32 = 4;
+
+/// What one client query may still send to authorities, shared by its resolution and the
+/// sub-queries its validation makes through [`crate::validate::EngineFetch`], each of
+/// which is a resolution with a budget of its own as well: without it a deep chain of
+/// delegations makes a client query cost a budget per label (the `NXNSAttack` class).
+#[derive(Debug)]
+pub struct Quota {
+    left: AtomicU32,
+    /// The client query's wall clock: its resolution and every fetch of its validation
+    /// end by then, each also within its own `budget_ms`.
+    deadline: Instant,
+}
+
+impl Quota {
+    /// The quota of a client query under `budget`, handed over at `now`.
+    pub fn for_client(budget: &WorkBudget, now: Instant) -> Arc<Self> {
+        Arc::new(Self {
+            left: AtomicU32::new(u32::from(budget.queries) * QUOTA_RESOLUTIONS),
+            deadline: now + budget.wall,
+        })
+    }
+
+    /// The queries left.
+    pub fn left(&self) -> u32 {
+        self.left.load(Ordering::Relaxed)
+    }
+
+    /// Whether the client query may send nothing more at `now`: its queries or its time
+    /// are spent.
+    pub fn spent(&self, now: Instant) -> bool {
+        self.left() == 0 || now >= self.deadline
+    }
+
+    fn spend(&self, queries: u16) {
+        let mut left = self.left.load(Ordering::Relaxed);
+        loop {
+            let next = left.saturating_sub(u32::from(queries));
+            match self
+                .left
+                .compare_exchange_weak(left, next, Ordering::Relaxed, Ordering::Relaxed)
+            {
+                Ok(_) => return,
+                Err(now) => left = now,
+            }
+        }
+    }
+}
+
 /// The engine's settings: `[dns.recursion]` and the profile, as the role maps them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineSettings {
@@ -131,6 +183,10 @@ pub struct EngineSettings {
     pub local_zones_except: Vec<DnsName>,
     /// Count in the engine's metrics.
     pub metrics: bool,
+    /// Flush the answer cache when the node draws over
+    /// [`crate::infra::servers::UNWANTED_PER_NODE`] unwanted answers in an hour
+    /// (`[dns.recursion] unwanted_flush`, off by default: the node warns instead).
+    pub unwanted_flush: bool,
     /// The port the authorities are asked on: 53, another in the tests that run an authority
     /// of their own on a loopback address.
     #[cfg(test)]
@@ -144,6 +200,7 @@ impl Default for EngineSettings {
             hints: None,
             local_zones_except: Vec::new(),
             metrics: true,
+            unwanted_flush: false,
             #[cfg(test)]
             authority_port: 53,
         }
@@ -264,7 +321,8 @@ pub struct RecursionReport {
     pub counters: CounterValues,
     /// The work budget in force.
     pub budget: WorkBudget,
-    /// What is wrong: `priming_failed`.
+    /// What is wrong: `priming_failed`; `unwanted_answers` for the hour after the node drew
+    /// over [`crate::infra::servers::UNWANTED_PER_NODE`] unwanted answers.
     pub problems: Vec<String>,
 }
 
@@ -342,6 +400,9 @@ pub struct Resolved {
     /// without it does not show the RPZ triggers NSDNAME and NSIP the delegation it came
     /// from, so the answer cache must not keep it while the carry is on.
     pub carried: bool,
+    /// Whether the client query's [`Quota`] stopped it: a failure of that query, not of the
+    /// name (a validation fetch reports it as its budget, never as an unreachable zone).
+    pub stopped_by_quota: bool,
 }
 
 impl Resolved {
@@ -383,21 +444,39 @@ struct Work {
     stack: Vec<Vec<u8>>,
     /// The CNAME and DNAME links followed.
     links: u8,
+    /// The client query's quota, when the resolution is part of one.
+    quota: Option<Arc<Quota>>,
+    /// Whether the quota, not this resolution's own budget, stopped it.
+    quota_spent: bool,
 }
 
 impl Work {
-    fn new(budget: WorkBudget, now: Instant) -> Self {
+    fn new(budget: WorkBudget, now: Instant, quota: Option<Arc<Quota>>) -> Self {
+        let own = now + budget.wall;
         Self {
             budget,
-            deadline: now + budget.wall,
+            deadline: quota.as_ref().map_or(own, |quota| own.min(quota.deadline)),
             sent: 0,
             lower_case: Vec::new(),
             stack: Vec::new(),
             links: 0,
+            quota,
+            quota_spent: false,
         }
     }
 
-    fn check(&self, now: Instant) -> Result<(), FailureCause> {
+    fn check(&mut self, now: Instant) -> Result<(), FailureCause> {
+        // The client query's quota first: a resolution it stops failed for that query.
+        if let Some(quota) = &self.quota
+            && quota.spent(now)
+        {
+            self.quota_spent = true;
+            return Err(FailureCause::Budget(if quota.left() == 0 {
+                BudgetBound::Queries
+            } else {
+                BudgetBound::Time
+            }));
+        }
         if now >= self.deadline {
             return Err(FailureCause::Budget(BudgetBound::Time));
         }
@@ -405,6 +484,14 @@ impl Work {
             return Err(FailureCause::Budget(BudgetBound::Queries));
         }
         Ok(())
+    }
+
+    /// Counts `queries` sent, against the resolution's budget and the client query's quota.
+    fn spend(&mut self, queries: u16) {
+        self.sent = self.sent.saturating_add(queries);
+        if let Some(quota) = &self.quota {
+            quota.spend(queries);
+        }
     }
 }
 
@@ -446,6 +533,7 @@ pub struct Engine<A> {
     triggers_seen: Mutex<Option<Instant>>,
     // WP10.3: the names minimized questions showed to exist without a cut.
     names: Mutex<KnownNames>,
+    unwanted_flush: bool,
     #[cfg(test)]
     authority_port: u16,
 }
@@ -510,6 +598,7 @@ impl<A: Authority> Engine<A> {
             delegation: AtomicBool::new(false),
             triggers_seen: Mutex::new(None),
             names: Mutex::new(KnownNames::default()),
+            unwanted_flush: settings.unwanted_flush,
             #[cfg(test)]
             authority_port: settings.authority_port,
         };
@@ -566,6 +655,12 @@ impl<A: Authority> Engine<A> {
     #[cfg(test)]
     const fn authority_port(&self) -> u16 {
         self.authority_port
+    }
+
+    /// Whether the answer cache is flushed when the node crosses the threshold of unwanted
+    /// answers (`[dns.recursion] unwanted_flush`).
+    pub fn unwanted_flush(&self) -> bool {
+        self.unwanted_flush
     }
 
     /// Whether answers carry their delegation (see [`Engine::note_ns_triggers`]).
@@ -841,11 +936,20 @@ impl<A: Authority> Engine<A> {
                 .min()
                 .unwrap_or(0)
                 .clamp(1, MAX_INFRA_TTL * 7);
-            let names: Vec<DnsName> = ns
+            // The root's first 13 distinct servers, as a referral is followed.
+            let mut names: Vec<DnsName> = Vec::with_capacity(message::MAX_REFERRAL_SERVERS);
+            for name in ns
                 .iter()
                 .filter_map(|rr| rr.target())
                 .filter_map(|wire| DnsName::from_wire(&wire).ok().map(|(name, _)| name))
-                .collect();
+            {
+                if names.len() == message::MAX_REFERRAL_SERVERS {
+                    break;
+                }
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
             let now = Instant::now();
             for name in &names {
                 let wire = name.to_wire();
@@ -876,23 +980,33 @@ impl<A: Authority> Engine<A> {
 
     /// Resolves a client's question; identical questions in flight share one resolution.
     pub async fn resolve(&self, question: Question<'_>) -> Arc<Resolved> {
-        self.resolve_carrying(question, false).await
+        self.resolve_carrying(question, false, None).await
     }
 
     /// Resolves a client's question as [`Engine::resolve`] does; with `carry` the answer
     /// carries its delegation whatever the housekeeping noted last. The forwarder passes
     /// whether the catalog it reads has NSDNAME or NSIP triggers, so that an answer resolved
-    /// after a new trigger arrived carries it before the next tick.
-    pub async fn resolve_carrying(&self, question: Question<'_>, carry: bool) -> Arc<Resolved> {
+    /// after a new trigger arrived carries it before the next tick. With `quota` its queries
+    /// count against the client query's [`Quota`] as well.
+    pub async fn resolve_carrying(
+        &self,
+        question: Question<'_>,
+        carry: bool,
+        quota: Option<Arc<Quota>>,
+    ) -> Arc<Resolved> {
         let key = CacheKey::new(
             question.view,
             question.qname,
             question.qtype,
             question.qclass,
         );
+        // A question asked with the carry never joins one asked without it: the answer of the
+        // one would not show the RPZ triggers NSDNAME and NSIP the delegation the other needs.
+        let mut join = key.as_bytes().to_vec();
+        join.push(u8::from(carry));
         let (resolved, joined) = self
             .joins
-            .run(key.as_bytes(), || self.resolve_now(question, &key, carry))
+            .run(&join, || self.resolve_now(question, &key, carry, quota))
             .await;
         if joined {
             self.count(|c| &c.joined);
@@ -901,7 +1015,13 @@ impl<A: Authority> Engine<A> {
     }
 
     /// One resolution, the join table aside.
-    async fn resolve_now(&self, question: Question<'_>, key: &CacheKey, carry: bool) -> Resolved {
+    async fn resolve_now(
+        &self,
+        question: Question<'_>,
+        key: &CacheKey,
+        carry: bool,
+        quota: Option<Arc<Quota>>,
+    ) -> Resolved {
         let started = Instant::now();
         // Read when the answer is composed, after the walk: a carry that turned on during
         // the walk is in the answer.
@@ -932,6 +1052,7 @@ impl<A: Authority> Engine<A> {
                 },
                 subqueries: 0,
                 carried: carried(),
+                stopped_by_quota: false,
             };
         }
         if question.qclass != CLASS_IN {
@@ -941,9 +1062,10 @@ impl<A: Authority> Engine<A> {
                 outcome: Outcome::Refused,
                 subqueries: 0,
                 carried: carried(),
+                stopped_by_quota: false,
             };
         }
-        let mut work = Work::new(self.settings.budget, started);
+        let mut work = Work::new(self.settings.budget, started, quota);
         let result = self.iterate(qname, question.qtype, 0, &mut work).await;
         let subqueries = work.sent;
         self.counters
@@ -956,6 +1078,7 @@ impl<A: Authority> Engine<A> {
                 let (authority, additional) = self.delegation_records(&found, carried);
                 Resolved {
                     carried,
+                    stopped_by_quota: false,
                     message: compose(found.rcode, &found.answer, &authority, &additional),
                     rcode: found.rcode,
                     outcome: if local {
@@ -967,7 +1090,11 @@ impl<A: Authority> Engine<A> {
                 }
             }
             Err(failed) => {
-                self.failures.record(key, failed.cause, Instant::now());
+                // A resolution the client query's quota stopped failed for that query, not
+                // for the name: no other query is answered from it.
+                if !work.quota_spent {
+                    self.failures.record(key, failed.cause, Instant::now());
+                }
                 Resolved {
                     message: compose(2, &failed.chain, &[], &[]),
                     rcode: 2,
@@ -977,6 +1104,7 @@ impl<A: Authority> Engine<A> {
                     },
                     subqueries,
                     carried: carried(),
+                    stopped_by_quota: work.quota_spent,
                 }
             }
         };
@@ -1598,13 +1726,13 @@ impl<A: Authority> Engine<A> {
             fresh_port: self.settings.fresh_port,
             deadline,
         };
-        work.sent = work.sent.saturating_add(1);
+        work.spend(1);
         let result = self.authority.exchange(&query, buf).await;
         match result {
             Ok(exchange) => {
                 // The ladder's retries are queries too.
                 let extra = u16::from(exchange.truncated) + u16::from(query.edns && !exchange.edns);
-                work.sent = work.sent.saturating_add(extra);
+                work.spend(extra);
                 self.note_exchange(address, &exchange, query.edns);
                 Ok(exchange.transport == AuthorityTransport::Tcp)
             }
@@ -1708,6 +1836,9 @@ impl<A: Authority> Engine<A> {
         let mut problems = Vec::new();
         if last.is_some_and(|last| !last.ok) {
             problems.push("priming_failed".to_owned());
+        }
+        if self.servers.threshold_crossed_within_hour(now) {
+            problems.push("unwanted_answers".to_owned());
         }
         let bounds = self.settings.infra;
         RecursionReport {

@@ -1169,6 +1169,61 @@ fn a_referral_drops_glue_out_of_bailiwick_and_glue_for_names_it_does_not_delegat
 }
 
 #[test]
+fn a_referral_is_followed_with_at_most_its_first_name_servers_and_their_first_glue() {
+    // 300 NS records (one name twice), 10 addresses for the first name, one for each of
+    // the next 150: the referral keeps 13 distinct names and at most 4 addresses each.
+    let mut ns = vec![
+        ns_rec("child.example.test", 300, "ns0.child.example.test"),
+        ns_rec("child.example.test", 300, "NS0.child.example.test"),
+    ];
+    ns.extend((1..299).map(|n| {
+        ns_rec(
+            "child.example.test",
+            300,
+            &format!("ns{n}.child.example.test"),
+        )
+    }));
+    let mut glue: Vec<Rec> = (0..10u8)
+        .map(|last| a_rec("ns0.child.example.test", 100, [192, 0, 2, last]))
+        .collect();
+    glue.extend(
+        (1..150u8).map(|n| a_rec(&format!("ns{n}.child.example.test"), 100, [198, 51, 100, n])),
+    );
+    let msg = referral_msg(ns, glue);
+    let Step::Referral(referral) = referral_step(&msg) else {
+        panic!("a referral expected");
+    };
+    assert_eq!(referral.ns.len(), MAX_REFERRAL_SERVERS);
+    let hosts: Vec<Vec<u8>> = referral.ns.iter().filter_map(Rr::target).collect();
+    let mut distinct = hosts.clone();
+    distinct.dedup();
+    assert_eq!(distinct, hosts, "each name once");
+    assert_eq!(hosts[0], wire_name("ns0.child.example.test"));
+    assert_eq!(
+        hosts[1],
+        wire_name("ns1.child.example.test"),
+        "the repeat is skipped"
+    );
+    let first = referral
+        .glue
+        .iter()
+        .filter(|(owner, ..)| *owner == hosts[0])
+        .count();
+    assert_eq!(first, MAX_ADDRESSES_PER_SERVER);
+    assert!(
+        referral
+            .glue
+            .iter()
+            .all(|(owner, ..)| hosts.contains(owner)),
+        "no glue for a name the referral is not followed with"
+    );
+    assert_eq!(
+        referral.glue.len(),
+        MAX_ADDRESSES_PER_SERVER + MAX_REFERRAL_SERVERS - 1
+    );
+}
+
+#[test]
 fn a_referral_carries_the_ds_records_of_the_delegation_and_their_signatures() {
     let ns = ns_rec("child.example.test", 300, "ns1.child.example.test");
     let ds = ds_rec("child.example.test", 3600);

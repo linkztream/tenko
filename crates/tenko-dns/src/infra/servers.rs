@@ -16,8 +16,11 @@
 //! - **Unwanted answers** (recursion plan section 2.1): answers on a query's socket that
 //!   match no outstanding query (another id, another question, another source address). Over
 //!   [`UNWANTED_PER_SERVER`] in an hour the address is asked over TCP for the rest of the
-//!   hour; over [`UNWANTED_PER_NODE`] across the node in an hour the owner of the answer
-//!   cache flushes it ([`ServerTable::take_flush`]).
+//!   hour; over [`UNWANTED_PER_NODE`] across the node in an hour the node warns
+//!   ([`ServerTable::take_threshold`], once an hour at most), and flushes the answer cache
+//!   only where `[dns.recursion] unwanted_flush` asks for it: the per-address switch to TCP
+//!   answers a spoofing attempt at the server it targets, while a flush of the whole cache
+//!   costs every client for one server's traffic.
 //!
 //! Bounded like the infrastructure cache's server addresses, least recently used out.
 
@@ -55,7 +58,8 @@ pub const TRUNCATIONS: u8 = 3;
 /// Unwanted answers from one address in an hour before it is asked over TCP.
 pub const UNWANTED_PER_SERVER: u32 = 1_000;
 
-/// Unwanted answers across the node in an hour before the answer cache is flushed.
+/// Unwanted answers across the node in an hour before the node warns (and flushes the
+/// answer cache under `[dns.recursion] unwanted_flush`).
 pub const UNWANTED_PER_NODE: u64 = 100_000;
 
 const HOUR: Duration = Duration::from_secs(3600);
@@ -151,9 +155,11 @@ pub struct ServerTable {
     ttl: Duration,
     inner: Mutex<HashMap<IpAddr, Figures>>,
     tick: AtomicU64,
-    node: Mutex<(Instant, u64)>,
+    /// The start of the node's hour, its unwanted answers, and when the threshold was last
+    /// crossed.
+    node: Mutex<(Instant, u64, Option<Instant>)>,
     unwanted_total: AtomicU64,
-    flush_due: AtomicBool,
+    crossed: AtomicBool,
 }
 
 impl ServerTable {
@@ -164,9 +170,9 @@ impl ServerTable {
             ttl,
             inner: Mutex::new(HashMap::new()),
             tick: AtomicU64::new(0),
-            node: Mutex::new((Instant::now(), 0)),
+            node: Mutex::new((Instant::now(), 0, None)),
             unwanted_total: AtomicU64::new(0),
-            flush_due: AtomicBool::new(false),
+            crossed: AtomicBool::new(false),
         }
     }
 
@@ -294,6 +300,7 @@ impl ServerTable {
     /// `address`: counted per address and for the node.
     pub fn unwanted(&self, address: IpAddr, now: Instant) {
         self.unwanted_total.fetch_add(1, Ordering::Relaxed);
+        crate::metrics::UNWANTED_COUNTER.inc();
         self.with(address, now, |figures| {
             if now.saturating_duration_since(figures.unwanted_since) >= HOUR {
                 figures.unwanted_since = now;
@@ -311,11 +318,14 @@ impl ServerTable {
         });
         let mut node = self.node.lock().unwrap_or_else(PoisonError::into_inner);
         if now.saturating_duration_since(node.0) >= HOUR {
-            *node = (now, 0);
+            node.0 = now;
+            node.1 = 0;
         }
         node.1 += 1;
+        // Once per hour of the node: the count starts again only when the hour has passed.
         if node.1 == UNWANTED_PER_NODE + 1 {
-            self.flush_due.store(true, Ordering::Relaxed);
+            node.2 = Some(now);
+            self.crossed.store(true, Ordering::Relaxed);
         }
     }
 
@@ -326,10 +336,20 @@ impl ServerTable {
         })
     }
 
-    /// Whether the node crossed [`UNWANTED_PER_NODE`] since the last call (the owner of the
-    /// answer cache flushes it and audits `dns.recursion.unwanted_flush`).
-    pub fn take_flush(&self) -> bool {
-        self.flush_due.swap(false, Ordering::Relaxed)
+    /// Whether the node crossed [`UNWANTED_PER_NODE`] since the last call: true at most once
+    /// per hour of the node's count (the owner of the answer cache warns, and under
+    /// `unwanted_flush` flushes it and audits `dns.recursion.unwanted_flush`).
+    pub fn take_threshold(&self) -> bool {
+        self.crossed.swap(false, Ordering::Relaxed)
+    }
+
+    /// Whether the node crossed [`UNWANTED_PER_NODE`] in the hour before `now`.
+    pub fn threshold_crossed_within_hour(&self, now: Instant) -> bool {
+        self.node
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .2
+            .is_some_and(|at| now.saturating_duration_since(at) < HOUR)
     }
 
     /// Unwanted answers across the node since the start.
@@ -429,8 +449,40 @@ mod tests {
         }
         assert!(table.tcp_forced(server, now));
         assert!(!table.tcp_forced(server, now + HOUR));
-        assert!(!table.take_flush());
+        assert!(!table.take_threshold());
         assert_eq!(table.unwanted_total(), u64::from(UNWANTED_PER_SERVER) + 1);
+    }
+
+    #[test]
+    fn the_node_threshold_is_crossed_at_most_once_an_hour() {
+        let table = ServerTable::new(64, Duration::from_secs(900));
+        let start = Instant::now();
+        // Three times the threshold within the hour, from many addresses.
+        let mut crossings = 0;
+        for n in 0..3 * UNWANTED_PER_NODE {
+            let at = start + Duration::from_millis(n / 100);
+            table.unwanted(address(u8::try_from(n % 50).expect("last")), at);
+            crossings += usize::from(table.take_threshold());
+        }
+        assert_eq!(
+            crossings, 1,
+            "one warning, and under unwanted_flush one flush"
+        );
+        let crossed = start + Duration::from_millis(UNWANTED_PER_NODE / 100);
+        assert!(
+            table.threshold_crossed_within_hour(
+                crossed + HOUR.saturating_sub(Duration::from_secs(1))
+            )
+        );
+        assert!(!table.threshold_crossed_within_hour(crossed + HOUR));
+        // The next hour counts again from nothing.
+        let next = start + HOUR + Duration::from_secs(1);
+        for _ in 0..UNWANTED_PER_NODE {
+            table.unwanted(address(1), next);
+        }
+        assert!(!table.take_threshold());
+        table.unwanted(address(1), next);
+        assert!(table.take_threshold());
     }
 
     #[test]

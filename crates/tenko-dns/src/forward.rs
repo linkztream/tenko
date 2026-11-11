@@ -56,9 +56,10 @@
 //! NSIP triggers, E41) is read from the catalog of each resolution, and a synthesized denial
 //! carries its zone's while it does; the housekeeping primes the root (RFC 8109) when it is
 //! due, notes the triggers for the engine (flushing the answer cache once when the carry
-//! turns on, of the answers kept without it), flushes the answer cache on a flood of
-//! unwanted answers (audited as `dns.recursion.unwanted_flush`) and purges the
-//! infrastructure cache every minute.
+//! turns on, of the answers kept without it), warns on a flood of unwanted
+//! answers (and flushes the answer cache, audited as `dns.recursion.unwanted_flush`, where
+//! `[dns.recursion] unwanted_flush` asks for it) and purges the infrastructure cache every
+//! minute.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -859,6 +860,8 @@ impl Shared {
         // so that a new NSDNAME or NSIP trigger applies to the next resolution, not only
         // after the housekeeping noted it.
         let carry = self.catalog.load().policy().has_ns_triggers();
+        // One quota for the client query: its resolution and its validation's sub-queries.
+        let quota = crate::recurse::Quota::for_client(&engine.settings().budget, Instant::now());
         let resolved = engine
             .resolve_carrying(
                 crate::recurse::Question {
@@ -868,6 +871,7 @@ impl Shared {
                     view,
                 },
                 carry,
+                Some(Arc::clone(&quota)),
             )
             .await;
         // WP10.2: the validator's verdict decides the entry's state; a query with CD never
@@ -875,7 +879,7 @@ impl Shared {
         // it from what it holds.
         let validation = match (&self.validator, resolved.outcome) {
             (Some(validator), crate::recurse::Outcome::Answered) => {
-                let fetch = EngineFetch::new(Arc::clone(engine));
+                let fetch = EngineFetch::new(Arc::clone(engine)).with_quota(quota);
                 let fetch: &dyn KeyFetch = if question.cd { &NoFetch } else { &fetch };
                 Some(
                     self.validate(validator, &resolved.message, question, fetch)
@@ -1757,25 +1761,9 @@ fn recursion_housekeeping(
              the answer cache is flushed of the answers kept without it"
         );
     }
-    if engine.servers().take_flush() {
-        let flushed = shared
-            .cache
-            .as_ref()
-            .map_or(0, |cache| cache.flush(None).entries);
-        engine.count_unwanted_flush();
-        tracing::warn!(
-            entries = flushed,
-            "over 100,000 unwanted answers in an hour: the answer cache is flushed"
-        );
-        if let Some(audit) = shared.audit.get() {
-            audit.record(
-                tenko_core::audit::AuditDraft::success(
-                    tenko_core::dns::audit::RECURSION_UNWANTED_FLUSH,
-                    Vec::new(),
-                )
-                .with_context("entries", flushed.to_string()),
-            );
-        }
+    // Once an hour at most (the node's count starts again only after its hour).
+    if engine.servers().take_threshold() {
+        unwanted_threshold(shared, engine);
     }
     if shared.settings.metrics {
         let sizes = engine.infra().sizes();
@@ -1784,6 +1772,39 @@ fn recursion_housekeeping(
             metrics::INFRA_ENTRY_GAUGE.set(0, sizes.cuts as f64);
             metrics::INFRA_ENTRY_GAUGE.set(1, sizes.servers as f64);
         }
+    }
+}
+
+/// The node drew over 100,000 unwanted answers in an hour: a warning, the status's problem
+/// `unwanted_answers` for the hour, and under `[dns.recursion] unwanted_flush` a flush of
+/// the answer cache, audited. Called once an hour at most.
+fn unwanted_threshold(shared: &Arc<Shared>, engine: &Arc<Engine<NetAuthority>>) {
+    if !engine.unwanted_flush() {
+        tracing::warn!(
+            "over 100,000 unwanted answers in an hour across the node: the answer cache is \
+             kept ([dns.recursion] unwanted_flush is off); a server that drew over 1,000 of \
+             them is asked over TCP for the rest of the hour"
+        );
+        return;
+    }
+    let flushed = shared
+        .cache
+        .as_ref()
+        .map_or(0, |cache| cache.flush(None).entries);
+    engine.count_unwanted_flush();
+    tracing::warn!(
+        entries = flushed,
+        "over 100,000 unwanted answers in an hour across the node: the answer cache is \
+         flushed ([dns.recursion] unwanted_flush)"
+    );
+    if let Some(audit) = shared.audit.get() {
+        audit.record(
+            tenko_core::audit::AuditDraft::success(
+                tenko_core::dns::audit::RECURSION_UNWANTED_FLUSH,
+                Vec::new(),
+            )
+            .with_context("entries", flushed.to_string()),
+        );
     }
 }
 // WP10.1: end.

@@ -244,13 +244,16 @@ impl Chain3 {
     }
 }
 
-/// The most name servers of a zone's delegation kept beside its denials. A delegation
+/// The most name servers of a zone's delegation kept beside its denials: as many as the
+/// resolver follows a referral with, so that every delegation it carries fits. A delegation
 /// with more keeps none: a truncated set could miss the server an NSDNAME trigger names.
-pub const MAX_DELEGATION_SERVERS: usize = 13;
+pub const MAX_DELEGATION_SERVERS: usize = crate::recurse::message::MAX_REFERRAL_SERVERS;
 
-/// The most addresses of those name servers, both families together; with more the
-/// delegation is kept with none of them for the same reason (NSIP).
-pub const MAX_DELEGATION_ADDRESSES: usize = 26;
+/// The most addresses of those name servers, both families together (as many as the
+/// infrastructure cache keeps for them); with more the delegation is kept with none of them
+/// for the same reason (NSIP).
+pub const MAX_DELEGATION_ADDRESSES: usize =
+    MAX_DELEGATION_SERVERS * crate::recurse::message::MAX_ADDRESSES_PER_SERVER;
 
 /// The delegation a zone's denials came through: the NS RRset at the apex and the
 /// addresses of its name servers, as the resolver's answers carry them while an RPZ zone
@@ -386,6 +389,11 @@ pub struct Zone {
     pub cuts: HashMap<Box<[u8]>, Cut>,
     /// The delegation its denials came through, when an answer carried it.
     pub delegation: Option<Delegation>,
+    /// Whether the recursive resolver taught it records (a zone learned from forwarders
+    /// alone carries no delegation of the resolver's).
+    pub from_recursion: bool,
+    /// Whether an answer ever carried its delegation.
+    pub delegated: bool,
 }
 
 /// The key of a wildcard RRset: the type, then the owner.

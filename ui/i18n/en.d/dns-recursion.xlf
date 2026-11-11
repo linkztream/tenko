@@ -170,6 +170,10 @@
         <notes><note category="description">Problem of the resolver: no root server answered the priming query.</note></notes>
         <segment><source>No root server answered the priming query, so recursed names are answered SERVFAIL until a priming succeeds.</source></segment>
       </unit>
+      <unit id="dns.recursion.problem.unwanted_answers">
+        <notes><note category="description">Problem of the resolver: over 100,000 answers that matched no query reached the node in the last hour.</note></notes>
+        <segment><source>Over 100,000 answers that matched no query reached this node in the last hour, as a spoofing attempt sends them. A server that drew over 1,000 of them is asked over TCP; the cache is kept unless unwanted_flush is on.</source></segment>
+      </unit>
       <unit id="dns.recursion.roots.title">
         <notes><note category="description">Heading of the table of root servers the resolver uses.</note></notes>
         <segment><source>Root servers</source></segment>

@@ -691,6 +691,18 @@ impl LocalNode {
                     .to_owned(),
             );
         }
+        if report
+            .problems
+            .iter()
+            .any(|problem| problem == "unwanted_answers")
+        {
+            problems.push(
+                "recursion: over 100,000 unwanted answers across the node in the last hour \
+                 (answers that match no query, as a spoofing attempt sends them); a server \
+                 that drew over 1,000 of them is asked over TCP for the rest of the hour"
+                    .to_owned(),
+            );
+        }
         Some(report)
     }
 

@@ -2,12 +2,13 @@
 //! proof, name errors, NODATA with and without opt-out, wildcard answers and unsigned
 //! delegations, over records verified against the keys of the zone at `apex`.
 //!
-//! Hashing costs: every hash of a name counts against the cap of hashes per proof step
-//! (`ValidationCaps::nsec3_hashes_per_step`, the `KeyTrap` class). A step is the closest
-//! encloser search (one hash per label from the name up to its encloser), the wildcard
-//! check (one hash) or a match (one hash); a proof that needs more hashes than the cap
-//! fails as a cap, so a name more than the cap's labels below its closest encloser is
-//! not proven.
+//! Hashing costs: every hash of a name counts against the hash work of a proof step
+//! ([`step_work`]: `ValidationCaps::nsec3_hashes_per_step` hashes at the most iterations
+//! still judged secure, the `KeyTrap` class), a hash costing the chain's iterations plus
+//! one. A step is the closest encloser search (one hash per label from the name up to its
+//! encloser), the wildcard check (one hash) or a match (one hash); a proof that needs more
+//! work than that fails as a cap. Under zero iterations a step has room for every label
+//! of a name; under a hundred, for four.
 
 use std::cmp::Ordering;
 
@@ -25,6 +26,15 @@ use super::{
 
 /// The opt-out flag of an NSEC3 record (RFC 5155 section 3.1.2.1).
 pub const OPT_OUT: u8 = 1;
+
+/// The hash work one proof step may spend, in SHA-1 rounds (a hash of a chain with `n`
+/// iterations costs `n + 1`): the cap's hashes at the most iterations still judged secure
+/// (RFC 9276). A chain with fewer iterations gets as many more hashes, so that a zone of
+/// RFC 9276's zero iterations proves a name of any depth (an `ip6.arpa` name below a
+/// reverse zone) for no more work than four hashes at a hundred iterations.
+pub fn step_work(caps: &ValidationCaps) -> u64 {
+    u64::from(caps.nsec3_hashes_per_step) * (u64::from(caps.nsec3_insecure_above) + 1)
+}
 
 /// One NSEC3 record of a zone.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,14 +157,15 @@ impl<'a> Chain<'a> {
         budget.hashes = 0;
     }
 
-    /// Hashes `name` within the cap.
+    /// Hashes `name` within the step's hash work ([`step_work`]).
     fn hash(
         &self,
         name: &[u8],
         caps: &ValidationCaps,
         budget: &mut Budget,
     ) -> Result<[u8; HASH_LEN], ProofFault> {
-        if budget.hashes >= caps.nsec3_hashes_per_step {
+        let rounds = u64::from(self.iterations) + 1;
+        if (u64::from(budget.hashes) + 1) * rounds > step_work(caps) {
             return Err(ProofFault::Cap);
         }
         budget.hashes += 1;

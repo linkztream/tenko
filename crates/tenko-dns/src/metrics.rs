@@ -231,6 +231,13 @@ pub const FAILURE_CACHE_HITS: Desc = Desc::counter(
     "DNS answers from the resolution failure cache",
 );
 
+/// Answers on a query's socket to an authority that matched no outstanding query (another
+/// id, question, source or cookie).
+pub const UNWANTED: Desc = Desc::counter(
+    "tenko_dns_recursion_unwanted",
+    "Unwanted answers on the sockets of queries to authorities",
+);
+
 /// Priming runs, by outcome (`ok`, `failed`).
 pub const PRIMING: Desc =
     Desc::counter("tenko_dns_priming", "DNS root priming runs").labels(&["outcome"]);
@@ -252,7 +259,7 @@ pub const VALIDATION_KEY_SETS: Desc = Desc::gauge(
 );
 
 /// The families of the recursive resolver, for the contracts document.
-pub const RECURSION_ALL: [&Desc; 13] = [
+pub const RECURSION_ALL: [&Desc; 14] = [
     &RECURSION,
     &RECURSION_DURATION,
     &RECURSION_SUBQUERIES,
@@ -264,6 +271,7 @@ pub const RECURSION_ALL: [&Desc; 13] = [
     &INFRA_ENTRIES,
     &DENIAL,
     &FAILURE_CACHE_HITS,
+    &UNWANTED,
     &PRIMING,
     &TRUST_ANCHOR_KEYS,
 ];
@@ -381,6 +389,9 @@ pub static DENIAL_COUNTER: CounterVec = CounterVec::fixed(
 /// [`FAILURE_CACHE_HITS`].
 pub static FAILURE_CACHE_HIT_COUNTER: Counter = Counter::new(FAILURE_CACHE_HITS);
 
+/// [`UNWANTED`].
+pub static UNWANTED_COUNTER: Counter = Counter::new(UNWANTED);
+
 /// [`PRIMING`] by outcome (`ok`, `failed`).
 pub static PRIMING_COUNTER: CounterVec = CounterVec::fixed(PRIMING, &[&["ok"], &["failed"]]);
 
@@ -398,6 +409,7 @@ pub fn register_recursion(registry: &Registry) {
     VALIDATION_VERIFICATION_COUNTER.add(0);
     DENIAL_COUNTER.add(0, 0);
     FAILURE_CACHE_HIT_COUNTER.add(0);
+    UNWANTED_COUNTER.add(0);
     PRIMING_COUNTER.add(0, 0);
     registry.register(&RECURSION_COUNTER);
     registry.register(&RECURSION_LATENCY);
@@ -411,6 +423,7 @@ pub fn register_recursion(registry: &Registry) {
     registry.register(&INFRA_ENTRY_GAUGE);
     registry.register(&DENIAL_COUNTER);
     registry.register(&FAILURE_CACHE_HIT_COUNTER);
+    registry.register(&UNWANTED_COUNTER);
     registry.register(&PRIMING_COUNTER);
 }
 

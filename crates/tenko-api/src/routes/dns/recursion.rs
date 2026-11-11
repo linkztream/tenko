@@ -672,7 +672,7 @@ fn name_param(field: &str, raw: Option<String>) -> Result<Option<String>, ApiErr
     tag = "dns",
     operation_id = "get_node_dns_recursion",
     summary = "Get the recursive resolver of a node",
-    description = "Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The counters include the validation outcomes (`secure`, `insecure`, `bogus`, `indeterminate`); `trust_anchors` lists the anchor keys with their RFC 5011 state; `problems` adds `clock` and `trust_anchor_stale`.",
+    description = "Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`; `unwanted_answers` for the hour after over 100,000 answers that matched no query across the node). The counters include the validation outcomes (`secure`, `insecure`, `bogus`, `indeterminate`); `trust_anchors` lists the anchor keys with their RFC 5011 state; `problems` adds `clock` and `trust_anchor_stale`.",
     params(("id" = u64, Path, description = "Node id")),
     responses(
         (status = 200, description = "The resolver's status", body = RecursionStatus),

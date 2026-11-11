@@ -1069,6 +1069,13 @@ pub struct DnsRecursionSection {
     pub key_sentinel: bool,
     /// A fresh random source port for every query to an authority server (default true).
     pub fresh_port_per_query: bool,
+    /// Flush the answer cache when the node draws over 100,000 unwanted answers in an hour
+    /// (answers on a query's socket that match no query; default false). Off, the node
+    /// warns and its status shows `unwanted_answers` for the hour; either way each server
+    /// that drew over 1,000 is asked over TCP for the rest of the hour, which answers a
+    /// spoofing attempt at that server, while a flush costs every client for one
+    /// server's traffic. On, at most one flush an hour.
+    pub unwanted_flush: bool,
     /// Names under the locally served zones of RFC 6303 that are resolved all the same,
     /// for example a private reverse zone served elsewhere (default: none). Each is a DNS
     /// name.
@@ -1106,6 +1113,7 @@ impl Default for DnsRecursionSection {
             trust_anchor_signaling: None,
             key_sentinel: true,
             fresh_port_per_query: true,
+            unwanted_flush: false,
             local_zones_except: Vec::new(),
             rfc5011_hold_down_secs: None,
             validate: None,
@@ -1300,6 +1308,7 @@ mod recursion_tests {
             (900, 300)
         );
         assert!(section.aggressive_nsec && section.key_sentinel && section.fresh_port_per_query);
+        assert!(!section.unwanted_flush, "off by default");
         assert_eq!(section.local_zones_except, Vec::<String>::new());
         for (profile, infra, denial, signaling) in [
             (Profile::Home, 1_000, 2_000, true),
@@ -1466,7 +1475,7 @@ mod recursion_tests {
              aggressive_nsec = false\ndenial_entries = 5000\nfailure_cache_max_secs = 60\n\
              trust_anchor_signaling = false\nkey_sentinel = false\n\
              fresh_port_per_query = false\nlocal_zones_except = \"10.in-addr.arpa\"\n\
-             rfc5011_hold_down_secs = 120\n",
+             unwanted_flush = true\nrfc5011_hold_down_secs = 120\n",
         );
         assert_eq!(section.enabled, Some(true));
         assert_eq!(section.hints, Some(PathBuf::from("/etc/tenko/root.hints")));
@@ -1490,6 +1499,7 @@ mod recursion_tests {
         assert_eq!(section.trust_anchor_signaling, Some(false));
         assert_eq!(section.local_zones_except, ["10.in-addr.arpa"]);
         assert_eq!(section.rfc5011_hold_down_secs, Some(120));
+        assert!(section.unwanted_flush);
     }
 }
 // WP10.0: end.

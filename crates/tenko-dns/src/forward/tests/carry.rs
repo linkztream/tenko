@@ -182,6 +182,10 @@ struct Node {
 }
 
 fn node(root: &Root, servers: &[&str]) -> Node {
+    node_with(root, servers, false)
+}
+
+fn node_with(root: &Root, servers: &[&str], unwanted_flush: bool) -> Node {
     let hints = tempfile::tempdir().expect("a directory");
     let path = hints.path().join("root.hints");
     std::fs::write(
@@ -205,6 +209,7 @@ fn node(root: &Root, servers: &[&str]) -> Node {
             local_zones_except: vec![DnsName::new("test").expect("name")],
             metrics: false,
             authority_port: root.address.port(),
+            unwanted_flush,
         }),
         validation: None,
         ..ForwardSettings::default()
@@ -443,4 +448,43 @@ async fn a_synthesized_denial_is_judged_with_the_delegation_of_its_zone() {
         asked,
         "no query was sent"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_flood_of_unwanted_answers_warns_and_flushes_only_under_the_setting() {
+    use crate::infra::servers::UNWANTED_PER_NODE;
+    for flush in [false, true] {
+        let root = root();
+        let node = node_with(&root, &[], flush);
+        let answer = node.ask("kept.test").await;
+        assert!(natural_nxdomain(&answer));
+        let engine = node.forwarder.shared.engine.clone().expect("engine");
+        let stranger: std::net::IpAddr = "192.0.2.99".parse().expect("address");
+        // Twice the node's threshold within the hour.
+        for _ in 0..2 * UNWANTED_PER_NODE {
+            engine.servers().unwanted(stranger, Instant::now());
+        }
+        ticks().await;
+        let report = engine.report();
+        assert!(
+            report
+                .problems
+                .iter()
+                .any(|problem| problem == "unwanted_answers"),
+            "{:?}",
+            report.problems
+        );
+        assert_eq!(report.counters.unwanted, 2 * UNWANTED_PER_NODE);
+        assert_eq!(
+            report.counters.unwanted_flushes,
+            u64::from(flush),
+            "one flush an hour at most, and none unless asked for"
+        );
+        let (intake, _) = node.intake("kept.test");
+        assert_eq!(
+            matches!(intake, Intake::Answered { .. }),
+            !flush,
+            "flush {flush}: {intake:?}"
+        );
+    }
 }

@@ -5,7 +5,9 @@
 //! - **Zone cuts.** Per cut the NS set with its TTL, the DS state the validator fills and the
 //!   minimization fallback slot of WP10.3; at most `cuts` of them (1,000 under the Home
 //!   profile, 10,000 under the others).
-//! - **Name servers.** Per name-server name its A and AAAA addresses with their TTLs and
+//! - **Name servers.** Per name-server name its A and AAAA addresses, at most
+//!   [`MAX_ADDRESSES_PER_SERVER`] (a referral brings at most
+//!   [`crate::recurse::message::MAX_REFERRAL_SERVERS`] names to a cut), with their TTLs and
 //!   where they came from ([`AddressOrigin`]: the hints, sibling glue, in-domain glue, an
 //!   authoritative answer); a less trusted origin never replaces a more trusted one that
 //!   has not expired (RFC 2181 section 5.4.1).
@@ -35,9 +37,12 @@ use std::{
 pub use servers::{ServerFigures, ServerTable};
 use tenko_core::dns::DnsName;
 
-use crate::recursion::{
-    AddressOrigin, CutId, DsState, InfraBounds, InfraCache, InfraSizes, NameServer, ServerState,
-    ZoneCut, infra::ServerAddress,
+use crate::{
+    recurse::message::MAX_ADDRESSES_PER_SERVER,
+    recursion::{
+        AddressOrigin, CutId, DsState, InfraBounds, InfraCache, InfraSizes, NameServer,
+        ServerState, ZoneCut, infra::ServerAddress,
+    },
 };
 
 /// One entry with its last use.
@@ -275,11 +280,15 @@ impl InfraCache for Infra {
         known.retain(|address| address.origin >= origin);
         for (address, ttl) in addresses {
             let expires = now + Duration::from_secs(u64::from(*ttl));
+            let full = known.len() >= MAX_ADDRESSES_PER_SERVER;
             match known.iter_mut().find(|known| known.address == *address) {
                 Some(known) => {
                     known.origin = origin;
                     known.expires = expires;
                 }
+                // At most MAX_ADDRESSES_PER_SERVER, the first ones learned: an answer with
+                // hundreds of addresses for a name server costs no more than one with four.
+                None if full => {}
                 None => known.push(ServerAddress {
                     address: *address,
                     origin,

@@ -514,6 +514,7 @@ async fn harness(keys: &LabKeys, variant: Variant) -> Harness {
         local_zones_except: vec![name("test")],
         metrics: false,
         authority_port: 53,
+        unwanted_flush: false,
     };
     let infra = Arc::new(crate::infra::Infra::new(settings.recursion.infra));
     let engine = Engine::new(
@@ -950,6 +951,7 @@ async fn colliding_key_tags_in_a_zone_are_bogus_within_the_caps() {
         local_zones_except: vec![name("test")],
         metrics: false,
         authority_port: 53,
+        unwanted_flush: false,
     };
     let infra = Arc::new(crate::infra::Infra::new(settings.recursion.infra));
     let engine = Engine::new(
@@ -987,4 +989,53 @@ async fn colliding_key_tags_in_a_zone_are_bogus_within_the_caps() {
     assert!(took < Duration::from_millis(500), "{took:?}");
     assert_eq!(lab.validator.counters().caps, 1);
     assert!(lab.queries() > 0);
+}
+
+#[tokio::test]
+async fn a_validation_the_client_quota_stops_leaves_no_zone_bogus_for_others() {
+    // A client query whose quota is spent (by its own resolution, or by fetches a deep chain
+    // of its own made) cannot fetch the keys of a zone further on. That is its failure,
+    // never the zone's: the next client query validates the zone.
+    let keys = LabKeys::new();
+    let lab = harness(&keys, Variant::default()).await;
+    let wire = name("www.example.test").to_wire();
+    let resolved = lab
+        .engine
+        .resolve(Question {
+            qname: &wire,
+            qtype: A,
+            qclass: 1,
+            view: None,
+        })
+        .await;
+    let spent = crate::recurse::Quota::for_client(
+        &crate::recursion::WorkBudget {
+            queries: 0,
+            ..crate::recursion::WorkBudget::DEFAULT
+        },
+        std::time::Instant::now(),
+    );
+    let fetch = EngineFetch::new(Arc::clone(&lab.engine)).with_quota(spent);
+    let qname = name("www.example.test");
+    let root = DnsName::root();
+    let ctx = ChainContext {
+        qname: &qname,
+        qtype: A,
+        zone: &root,
+        cd: false,
+        anchors: &lab.anchors,
+        infra: lab.infra.as_ref(),
+        fetch: &fetch,
+        now: SystemTime::now(),
+        caps: lab.caps,
+    };
+    let stopped = lab.validator.validate(&resolved.message, &ctx).await;
+    assert_ne!(stopped.state, SecurityState::Bogus, "{stopped:?}");
+    assert_ne!(
+        stopped.state,
+        SecurityState::Secure,
+        "nothing was fetched: {stopped:?}"
+    );
+    let (validation, _) = lab.ask("www.example.test", A, false).await;
+    assert_eq!(validation.state, SecurityState::Secure, "{validation:?}");
 }

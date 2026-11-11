@@ -446,9 +446,11 @@ fn rfc5155_appendix_b_name_error() {
         chain.prove_nxdomain(&wire("ns1.example"), &caps, &mut budget),
         Err(ProofFault::Exists)
     );
-    // A deeper name than the cap allows is a cap, not a proof.
+    // A deeper name than the cap allows is a cap, not a proof: one hash of work at the
+    // chain's twelve iterations.
     let tight = ValidationCaps {
-        nsec3_hashes_per_step: 2,
+        nsec3_hashes_per_step: 1,
+        nsec3_insecure_above: 12,
         ..caps
     };
     assert_eq!(
@@ -540,4 +542,69 @@ fn rfc5155_appendix_b_no_data_and_wildcards() {
     let mut sha256 = zone.data[0].clone();
     sha256[0] = 2;
     assert!(Nsec3::parse(&zone.owners[0], &sha256, &apex).is_none());
+}
+
+/// The NSEC3 chain of `apex` (no salt, `iterations`) over `names` and their types: each
+/// record's owner and data, the records in hash order, the last pointing at the first.
+fn nsec3_ring(apex: &str, names: &[(&str, &[&str])], iterations: u16) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut hashed: Vec<([u8; 20], &[&str])> = names
+        .iter()
+        .map(|(name, types)| (nsec3_hash(&wire(name), &[], iterations), *types))
+        .collect();
+    hashed.sort_by_key(|entry| entry.0);
+    (0..hashed.len())
+        .map(|at| {
+            let (hash, types) = hashed[at];
+            let next = hashed[(at + 1) % hashed.len()].0;
+            let label = crate::dnssec::chain::base32hex(&hash);
+            let owner = wire(&format!(
+                "{}.{apex}",
+                std::str::from_utf8(&label).expect("base32hex")
+            ));
+            let mut data = vec![1, 0];
+            data.extend_from_slice(&iterations.to_be_bytes());
+            data.push(0);
+            data.push(20);
+            data.extend_from_slice(&next);
+            data.extend_from_slice(&bitmap(types));
+            (owner, data)
+        })
+        .collect()
+}
+
+#[test]
+fn a_deep_name_error_is_proven_within_the_hash_work_of_a_step() {
+    // A reverse zone's nonexistent name ten labels below the apex: the search hashes eleven
+    // names up to the apex. Under RFC 9276's zero iterations that is less work than four
+    // hashes at the hundred iterations the validator still calls secure, so it is proven;
+    // at a hundred iterations it is past the cap, as before.
+    let caps = ValidationCaps::DEFAULT;
+    let apex = wire("rev.test");
+    let qname = wire("a.b.c.d.e.f.g.h.i.j.rev.test");
+    let names: [(&str, &[&str]); 2] = [("rev.test", &["SOA", "NS"]), ("host.rev.test", &["A"])];
+    let ring = nsec3_ring("rev.test", &names, 0);
+    let records: Vec<Nsec3<'_>> = ring
+        .iter()
+        .map(|(owner, data)| Nsec3::parse(owner, data, &apex).expect("nsec3"))
+        .collect();
+    let chain = Chain::new(&records, &apex).expect("chain");
+    let mut budget = Budget::default();
+    assert_eq!(chain.prove_nxdomain(&qname, &caps, &mut budget), Ok(false));
+    let ring = nsec3_ring("rev.test", &names, 100);
+    let records: Vec<Nsec3<'_>> = ring
+        .iter()
+        .map(|(owner, data)| Nsec3::parse(owner, data, &apex).expect("nsec3"))
+        .collect();
+    let chain = Chain::new(&records, &apex).expect("chain");
+    let mut budget = Budget::default();
+    assert_eq!(
+        chain.prove_nxdomain(&qname, &caps, &mut budget),
+        Err(ProofFault::Cap)
+    );
+    // Four names (three labels below the apex) fit at a hundred iterations.
+    let mut budget = Budget::default();
+    assert_eq!(
+        chain.prove_nxdomain(&wire("x.y.z.rev.test"), &caps, &mut budget),
+        Ok(false)
+    );
 }

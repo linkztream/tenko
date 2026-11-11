@@ -626,6 +626,11 @@ max_upload = 64
 # key_sentinel = true
 # A fresh random source port for every query to an authority server.
 # fresh_port_per_query = true
+# Flush the answer cache when the node draws over 100000 unwanted answers in an hour (answers
+# that match no query). Off: the node warns and its status shows unwanted_answers; either
+# way a server that drew over 1000 is asked over TCP for the rest of the hour. On: at most
+# one flush an hour.
+# unwanted_flush = false
 # Names inside the locally served zones of RFC 6303 that are resolved all the same.
 # local_zones_except = []
 # Seconds of the RFC 5011 hold-downs (1 to 2592000), to test key rollovers. Not set: 30

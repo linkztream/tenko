@@ -23,6 +23,15 @@ use crate::{
 /// The most records the parser reads from one message.
 pub const MAX_RECORDS: usize = 512;
 
+/// The most name servers a referral is followed with, the first ones in the message (the
+/// root has 13): the rest are not stored, not looked up and not carried, so that a referral
+/// of hundreds of NS records costs no more than one of 13.
+pub const MAX_REFERRAL_SERVERS: usize = 13;
+
+/// The most addresses kept per name server, of both families: from a referral's glue and
+/// in the infrastructure cache.
+pub const MAX_ADDRESSES_PER_SERVER: usize = 4;
+
 /// Record types the engine reads.
 pub mod types {
     /// A.
@@ -583,17 +592,35 @@ fn referral(parsed: &Parsed, zone: &[u8], qname: &[u8], qtype: u16) -> Option<St
         // An upward or sideways referral: the server does not serve the zone.
         return Some(Step::Lame("an upward or sideways referral"));
     }
-    let ttl = ns.iter().map(|rr| rr.ttl).min().unwrap_or(0);
-    let hosts: Vec<Vec<u8>> = ns.iter().filter_map(|rr| rr.target()).collect();
+    // The first MAX_REFERRAL_SERVERS distinct name servers, each with at most
+    // MAX_ADDRESSES_PER_SERVER addresses of glue: every later lookup is in these short lists.
+    let mut hosts: Vec<Vec<u8>> = Vec::with_capacity(MAX_REFERRAL_SERVERS);
+    let mut kept: Vec<Rr> = Vec::with_capacity(MAX_REFERRAL_SERVERS);
+    for rr in &ns {
+        if hosts.len() == MAX_REFERRAL_SERVERS {
+            break;
+        }
+        if let Some(host) = rr.target()
+            && !hosts.contains(&host)
+        {
+            hosts.push(host);
+            kept.push((*rr).clone());
+        }
+    }
     if hosts.is_empty() {
         return Some(Step::Lame("a referral whose NS records do not parse"));
     }
+    let ttl = kept.iter().map(|rr| rr.ttl).min().unwrap_or(0);
+    let mut per_host = [0usize; MAX_REFERRAL_SERVERS];
     let mut glue = Vec::new();
     for rr in &parsed.additional {
         let Some(address) = rr.address() else {
             continue;
         };
-        if !hosts.contains(&rr.owner) {
+        let Some(index) = hosts.iter().position(|host| *host == rr.owner) else {
+            continue;
+        };
+        if per_host[index] == MAX_ADDRESSES_PER_SERVER {
             continue;
         }
         let kind = if within(&rr.owner, child) {
@@ -604,6 +631,7 @@ fn referral(parsed: &Parsed, zone: &[u8], qname: &[u8], qtype: u16) -> Option<St
             // Out of bailiwick: never used.
             continue;
         };
+        per_host[index] += 1;
         glue.push((rr.owner.clone(), address, rr.ttl, kind));
     }
     let ds = parsed
@@ -614,7 +642,7 @@ fn referral(parsed: &Parsed, zone: &[u8], qname: &[u8], qtype: u16) -> Option<St
         .collect();
     Some(Step::Referral(Referral {
         zone: child.clone(),
-        ns: ns.into_iter().cloned().collect(),
+        ns: kept,
         ttl,
         glue,
         ds,

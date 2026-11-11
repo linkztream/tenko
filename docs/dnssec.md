@@ -181,7 +181,7 @@ A query with CD set still runs the validator, so that the cache entry other clie
 
 ### The cost caps
 
-The KeyTrap class (CVE-2023-50387) is bounded by four caps: at most 8 signature verifications per RRset, 16 DNSKEY candidates per key tag, 4 NSEC3 hash computations per proof step (the closest encloser search, the wildcard check or a match) and 32 verifications per client query. Past a cap the answer is bogus with extended error 6 and counted under `reason="cap"`; a zone with sixty-four DNSKEY records whose tags collide with the signing key's is answered within the caps in the lab (`val.keytrap`, M38). A name more than four labels below its closest encloser in an NSEC3 zone is therefore not proven.
+The KeyTrap class (CVE-2023-50387) is bounded by four caps: at most 8 signature verifications per RRset, 16 DNSKEY candidates per key tag, the hash work of 4 NSEC3 hashes at 100 iterations per proof step (the closest encloser search, the wildcard check or a match; a hash costs the zone's iterations plus one, so a zone of RFC 9276's zero iterations gets 404 hashes, enough for any name) and 32 verifications per client query. Past a cap the answer is bogus with extended error 6 and counted under `reason="cap"`; a zone with sixty-four DNSKEY records whose tags collide with the signing key's is answered within the caps in the lab (`val.keytrap`, M38). A name more than four labels below its closest encloser is therefore not proven in an NSEC3 zone with 100 iterations; with zero iterations every name is, an `ip6.arpa` name below a reverse zone among them. The walk's table of zones evicts the least recently used one through an index by last use, without a scan.
 
 ### Trust anchors and RFC 5011
 

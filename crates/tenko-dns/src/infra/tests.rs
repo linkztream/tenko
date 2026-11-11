@@ -160,3 +160,38 @@ fn trim_drops_a_sixteenth_of_the_oldest() {
     assert_eq!(map.len(), 31, "two: the excess and a sixteenth of 32");
     assert!(!map.contains_key(&0) && !map.contains_key(&1));
 }
+
+#[test]
+fn a_name_server_keeps_at_most_its_first_addresses() {
+    let infra = Infra::new(InfraBounds::HOME);
+    let now = Instant::now();
+    let server = name("ns.many.test");
+    let many: Vec<(IpAddr, u32)> = (1..=200u8).map(|last| (v4(last), 600)).collect();
+    infra.put_addresses(&server, &many, AddressOrigin::Authoritative, now);
+    let known = infra.name_server(&server, now).expect("known");
+    let kept: Vec<IpAddr> = known
+        .addresses
+        .iter()
+        .map(|address| address.address)
+        .collect();
+    assert_eq!(
+        kept,
+        (1..=4u8).map(v4).collect::<Vec<_>>(),
+        "the first {MAX_ADDRESSES_PER_SERVER}"
+    );
+    // A known address is refreshed; a new one finds no room.
+    infra.put_addresses(
+        &server,
+        &[(v4(2), 900), (v4(250), 900)],
+        AddressOrigin::Authoritative,
+        now,
+    );
+    let known = infra.name_server(&server, now).expect("known");
+    assert_eq!(known.addresses.len(), MAX_ADDRESSES_PER_SERVER);
+    assert!(
+        !known
+            .addresses
+            .iter()
+            .any(|address| address.address == v4(250))
+    );
+}

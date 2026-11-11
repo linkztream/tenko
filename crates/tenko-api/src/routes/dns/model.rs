@@ -1595,8 +1595,9 @@ pub struct RecursionStatus {
     pub counters: RecursionCounters,
     /// The keys of the trust anchors with their RFC 5011 state and source.
     pub trust_anchors: Vec<AnchorKeyState>,
-    /// What is wrong now: `priming_failed`, `clock` (the root's DNSKEY signatures fail
-    /// on time) and `trust_anchor_stale` (a zone without a trusted key left).
+    /// What is wrong now: `priming_failed`, `unwanted_answers` (over 100,000 answers that
+    /// matched no query across the node in the last hour), `clock` (the root's DNSKEY
+    /// signatures fail on time) and `trust_anchor_stale` (a zone without a trusted key left).
     pub problems: Vec<String>,
 }
 

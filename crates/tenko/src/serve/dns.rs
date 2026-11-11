@@ -492,6 +492,7 @@ fn recursion_settings(
             .filter_map(|name| tenko_core::dns::DnsName::new(name).ok())
             .collect(),
         metrics: true,
+        unwanted_flush: keys.unwanted_flush,
     }))
 }
 // WP10.1: end.

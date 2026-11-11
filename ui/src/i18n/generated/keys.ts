@@ -3848,6 +3848,7 @@ export type MessageKey =
   | "dns.recursion.priming.never"
   | "dns.recursion.priming.ok"
   | "dns.recursion.problem.priming_failed"
+  | "dns.recursion.problem.unwanted_answers"
   | "dns.recursion.problems.title"
   | "dns.recursion.root_hints"
   | "dns.recursion.roots.col.address"
@@ -13681,6 +13682,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.recursion.priming.never",
   "dns.recursion.priming.ok",
   "dns.recursion.problem.priming_failed",
+  "dns.recursion.problem.unwanted_answers",
   "dns.recursion.problems.title",
   "dns.recursion.root_hints",
   "dns.recursion.roots.col.address",

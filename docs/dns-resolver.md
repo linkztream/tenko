@@ -853,6 +853,7 @@ A server is **lame** for the zone it was asked when it answers with an RCODE oth
 - **In-domain glue**, for a name server at or below the delegated zone, is cached as the name server's addresses with the origin `glue`.
 - **Sibling glue**, for a name server inside the zone that was asked but outside the delegated zone (for example a server in the sibling zone of the same parent), is used for this step and cached with the origin `sibling_glue`.
 - **Every other address** in the additional section is ignored: never cached, never asked. Glue for a name that is not in the referral's NS set is ignored as well.
+- **Bounds.** A referral is followed with its first 13 distinct name servers (as many as the root has) and at most 4 addresses of glue for each; the rest is not stored, looked up or carried, so a referral of hundreds of NS records costs what one of 13 does. A name server keeps at most 4 addresses in the infrastructure cache, the first ones learned.
 
 A name server's addresses carry their origin, ranked `hints` below `sibling_glue` below `glue` below `authoritative` (an address looked up from the name server's own authority). An address of a lower rank never replaces an address of a higher rank that has not expired (RFC 2181 section 5.4.1). The origin shows in the listing of section 10.12. The confirmation of sibling glue by an answer from the glue's own authority is not built: a `sibling_glue` address is used as any other and stays marked until a lookup of the name replaces it.
 
@@ -871,6 +872,8 @@ One client query may cause at most the work of this table (REC-Q12). The bounds 
 | Depth of name-server lookups | 6 | A name-server lookup that needs a name-server lookup (the fetch policy stops them at three levels with the defaults) | `budget_depth` |
 | Attempts per server and question | 3 | Each attempt at one server address in one step of the walk. A fourth is not made: the server is skipped. A 0x20 mismatch retried in lower case does not use an attempt | none |
 | Wall clock | 10,000 ms | The time from the hand-off to the answer | `budget_time` |
+
+**The client query's quota.** Validating the answer (dnssec.md section 12) fetches DS and DNSKEY sets through the engine, each fetch a resolution with the budget above. All of them together with the client's own resolution share one quota of four budgets' queries, 128 with the defaults (Unbound's `max-global-quota`), and one wall clock, the client query's `budget_ms` from the hand-off: a chain of delegations as deep as a name allows costs no more than that, whoever serves it. Past the quota a fetch stops and the answer cannot be validated (SERVFAIL); that failure is the client query's, not the name's or the zone's, so neither the failure cache nor the validator's table of zones remembers it, and another query asks again.
 
 The extended error 23 "Network Error" is for a step in which every attempt failed because the query could not be sent at all; a server that is only silent or lame is error 22.
 
@@ -894,7 +897,7 @@ Every query to an authority carries these, and the answer is used only if it mat
 - **0x20.** The letters of the question name get a random case, and the answer must carry the question in exactly that case. A mismatch is retried at once in lower case and counts as a strike for the server; after two strikes the address is asked in lower case for the infrastructure TTL, and the case is no longer checked for it. The lab has a server that breaks 0x20 on purpose (section 10.15).
 - **A fresh source port.** Each exchange binds a socket of its own to a random port and drops it after the answer (`[dns.recursion] fresh_port_per_query`, on). With the key off, authorities are asked from the shared sockets of the upstream pool, each used for up to 64 exchanges. What the bind costs is measured by M36 (WP10.5).
 - **Cookies (RFC 7873, RFC 9018).** The client cookie is 8 octets, the SipHash-2-4 of the server's address under a random 16-octet secret the engine makes at start. A server cookie that comes back is kept in the server's entry of the infrastructure cache and sent from then on. An answer whose cookie option carries another client cookie, a cookie to a query that sent none, a server cookie of a bad length or broken options is not ours: over UDP it is ignored like any unwanted answer, over TCP it is a malformed answer. BADCOOKIE is asked again once, with the server cookie the answer carried; a second BADCOOKIE, or one without a server cookie, is a failure. A server that never returns a cookie costs nothing.
-- **Unwanted answers.** A datagram on an exchange's socket that matches no outstanding query (another source address or port, another id, another question, a foreign cookie) is dropped, the wait goes on, and it is counted for the server asked. A server that draws more than 1,000 in an hour is asked over TCP for the rest of the hour; more than 100,000 across the node in an hour flushes the answer cache, as Unbound's `unwanted-reply-threshold` does, and the flush is logged and audited as `dns.recursion.unwanted_flush` with the number of entries. The count is `unwanted` in the status, the flushes `unwanted_flushes`.
+- **Unwanted answers.** A datagram on an exchange's socket that matches no outstanding query (another source address or port, another id, another question, a foreign cookie) is dropped, the wait goes on, and it is counted for the server asked. A server that draws more than 1,000 in an hour is asked over TCP for the rest of the hour, which answers a spoofing attempt at that server: an answer over TCP cannot be forged blind. More than 100,000 across the node in an hour is logged as a warning and shown as the problem `unwanted_answers` in the status for the hour. The answer cache is flushed then only under `[dns.recursion] unwanted_flush = true` (default false, as Unbound's `unwanted-reply-threshold` is off by default): a flush costs every client for one server's traffic, and the per-server switch already answers the attempt. With the setting on the flush comes at most once an hour (the node's count starts again only after its hour), logged and audited as `dns.recursion.unwanted_flush` with the number of entries. The count is `unwanted` in the status and `tenko_dns_recursion_unwanted_total` in the metrics, the flushes `unwanted_flushes`.
 - **Identical queries in flight** are joined (section 10.9).
 
 ### 10.6 The EDNS and transport ladder
@@ -958,7 +961,8 @@ What an operator can rely on once a trigger has reached the node's catalog:
 
 - **New resolutions** carry the delegation from the first query after the trigger arrived, and are judged by it.
 - **Answers from the answer cache** are judged at every answer, from the delegation they carry. The cache's answers carry it from the moment the first NSDNAME or NSIP trigger appears: the node then flushes the answer cache once, within 200 ms, of the answers it kept without it (logged at INFO). A trigger added or changed later needs no flush. After the last such trigger is gone, the answers go on carrying their delegation for an hour, so a list that adds and removes its last trigger flushes the cache at most once an hour.
-- **Answers synthesized from the denial cache** (section 11) carry the delegation of the zone they deny in, kept beside the zone's denial records from the answer that taught them, at most 13 name servers and 26 addresses and never longer than its shortest record lives. While the triggers exist, a zone whose delegation is not held (more name servers or addresses than kept, expired, or learned before the first trigger) is not synthesized: its names go to the resolver, whose answer carries the delegation and gives it to the zone again. A random-name flood into such a zone is answered by the resolver until its first answer comes back.
+- **Answers synthesized from the denial cache** (section 11) carry the delegation of the zone they deny in, kept beside the zone's denial records from the answer that taught them, at most 13 name servers and 52 addresses (as many as the resolver follows a referral with) and never longer than its shortest record lives. While the triggers exist, a zone whose delegation is not held (more name servers or addresses than kept, expired, or learned before the first trigger) is not synthesized: its names go to the resolver, whose answer carries the delegation and gives it to the zone again. A random-name flood into such a zone is answered by the resolver until its first answer comes back. A zone that only forwarders taught, whose answers never carried a delegation, is synthesized as before; a zone whose negative answers carry none because its servers are its parent's (no zone cut of its own) is left to the resolver while the triggers exist.
+- **Joined questions.** A question asked while the catalog has such triggers never shares a resolution with one asked before them, so its answer carries the delegation.
 
 The lab round has a row for each trigger (section 10.15 and the lab's README).
 
@@ -1021,6 +1025,7 @@ The role registers these families when the resolver is on (names as the metrics 
 | `tenko_dns_authority_rtt_seconds` | | Round-trip time of answered exchanges, in one histogram: the figures per server are in the listing of section 10.12, not in a label | WP10.1 |
 | `tenko_dns_infra_entries` | `kind`: `zone`, `server` | Entries of the infrastructure cache | WP10.1 |
 | `tenko_dns_failure_cache_hits_total` | | Questions answered from the failure cache, by the worker (WP10.3) or the engine | WP10.1 |
+| `tenko_dns_recursion_unwanted_total` | | Answers on the sockets of queries to authorities that matched no query | WP10.1 |
 | `tenko_dns_priming_total` | `outcome`: `ok`, `failed` | Priming runs | WP10.1 |
 | `tenko_dns_validation_total`, `tenko_dns_validation_verifications_total` | `state`, `reason` | Validation outcomes and signature checks | WP10.2 |
 | `tenko_dns_denial_total` | `kind`: `nxdomain`, `nodata`, `wildcard`, `nxdomain_cut` | Answers synthesized from the denial cache (section 11.2) | WP10.3 |
@@ -1038,7 +1043,7 @@ The keys of the section ([`deploy/tenko.example.toml`](../deploy/tenko.example.t
 | `hints` | not set: the shipped hints | WP10.1 | A root hints file in the format of `named.root`. A file that cannot be read stops the start (`config.invalid`) |
 | `outbound` | `auto` | WP10.1 | `auto`, `both`, `v4` (`ipv4`) or `v6` (`ipv6`) (section 10.7) |
 | `timeout_ms` | 2,000 | WP10.1 | The longest an attempt has, 100 to 30,000 (section 10.4) |
-| `budget_queries` | 32 | WP10.1 | Queries sent per client query, 1 to 256 |
+| `budget_queries` | 32 | WP10.1 | Queries sent per resolution, 1 to 256; a client query with the fetches of its validation sends four times as many at most (section 10.3) |
 | `budget_restarts` | 8 | WP10.1 | CNAME and DNAME links per name, 1 to 32 |
 | `budget_depth` | 6 | WP10.1 | Nesting of name-server lookups, 1 to 16 |
 | `budget_ms` | 10,000 | WP10.1 | Wall clock per client query, 100 to 60,000 |
@@ -1046,6 +1051,7 @@ The keys of the section ([`deploy/tenko.example.toml`](../deploy/tenko.example.t
 | `infra_ttl_secs` | 900 | WP10.1 | How long a learned lameness and a learned need for lower case hold, 10 to 86,400 |
 | `failure_cache_max_secs` | 300 | WP10.1, WP10.3 | The longest a failure is remembered, 5 to 3,600 |
 | `fresh_port_per_query` | `true` | WP10.1 | A fresh source port for every exchange with an authority |
+| `unwanted_flush` | `false` | WP10.1 | Flush the answer cache when the node draws over 100,000 unwanted answers in an hour, at most once an hour (section 10.4) |
 | `local_zones_except` | none | WP10.1 | Locally served zones that are resolved all the same (section 10.8) |
 | `qname_minimization` | `relaxed` | WP10.3 | `relaxed`, `strict` or `off` (section 11.1) |
 | `aggressive_nsec`, `denial_entries` | `true`; 2,000 (Home), 20,000 | WP10.3 | The denial cache (section 11.2) |

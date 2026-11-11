@@ -296,6 +296,7 @@ fn settings() -> EngineSettings {
         local_zones_except: vec![name("test")],
         metrics: false,
         authority_port: 53,
+        unwanted_flush: false,
     }
 }
 
@@ -939,7 +940,7 @@ async fn a_negative_answer_of_a_quirk_zone_carries_its_delegation_when_asked_to(
     assert!(!resolved.carried);
     let qname = wire_name("other.case.quirk.example.test");
     let resolved = engine
-        .resolve_carrying(question(&qname, types::A), true)
+        .resolve_carrying(question(&qname, types::A), true, None)
         .await;
     assert_eq!(resolved.rcode, 3, "NXDOMAIN");
     assert!(resolved.carried);
@@ -1224,3 +1225,107 @@ fn the_minimizer_adds_one_label_four_times_then_more_and_stops_at_ten() {
     assert_eq!(minimized_type(types::AAAA), types::AAAA);
 }
 // WP10.3: end.
+
+#[tokio::test]
+async fn the_sub_queries_of_a_validation_share_the_client_query_quota() {
+    use crate::recursion::KeyFetch;
+    // Four queries per resolution, so sixteen for the client query in all.
+    let lab = Arc::new(lab());
+    let mut settings = settings();
+    settings.recursion.budget = WorkBudget {
+        queries: 4,
+        ..WorkBudget::DEFAULT
+    };
+    let engine = Arc::new(engine_with(&lab, &settings));
+    engine.prime().await.expect("primed");
+    let warm = wire_name("www.example.test");
+    assert_eq!(engine.resolve(question(&warm, types::A)).await.rcode, 0);
+    lab.clear_log();
+    // Each name below example.test costs one query of its own: twenty of them through one
+    // fetcher, as a validation's DS and DNSKEY sub-queries go, each a resolution within
+    // its own budget of four.
+    let quota = Quota::for_client(&settings.recursion.budget, Instant::now());
+    assert_eq!(quota.left(), 16);
+    let fetch =
+        crate::validate::EngineFetch::new(Arc::clone(&engine)).with_quota(Arc::clone(&quota));
+    let mut answered = 0;
+    let mut stopped = Vec::new();
+    for n in 0..20 {
+        let name = name(&format!("gone{n}.example.test"));
+        match fetch.fetch(&name, tenko_core::dns::Rtype(types::A)).await {
+            Ok(_) => answered += 1,
+            Err(_) => stopped.push(name),
+        }
+    }
+    assert_eq!(
+        lab.asked().len(),
+        16,
+        "one client query, sixteen queries in all"
+    );
+    assert_eq!((answered, stopped.len()), (16, 4));
+    assert_eq!(quota.left(), 0);
+    // A name the quota stopped failed for that client query only: another query asks it.
+    let again = stopped[0].to_wire();
+    let resolved = engine.resolve(question(&again, types::A)).await;
+    assert_eq!(resolved.rcode, 3, "{resolved:?}");
+    assert_eq!(lab.asked().len(), 17);
+}
+
+#[tokio::test]
+async fn a_fetch_the_client_quota_stops_is_the_budget_not_an_unreachable_zone() {
+    use crate::recursion::{KeyFetch, validator::FetchError};
+    let lab = Arc::new(lab());
+    let mut settings = settings();
+    settings.recursion.budget = WorkBudget {
+        queries: 4,
+        ..WorkBudget::DEFAULT
+    };
+    let engine = Arc::new(engine_with(&lab, &settings));
+    engine.prime().await.expect("primed");
+    let warm = wire_name("www.example.test");
+    assert_eq!(engine.resolve(question(&warm, types::A)).await.rcode, 0);
+    lab.clear_log();
+    // Sixteen queries for the client query: fifteen names of one query each, then one that
+    // needs more (a referral to a quirk zone, then its answer).
+    let quota = Quota::for_client(&settings.recursion.budget, Instant::now());
+    let fetch =
+        crate::validate::EngineFetch::new(Arc::clone(&engine)).with_quota(Arc::clone(&quota));
+    for n in 0..15 {
+        let name = name(&format!("gone{n}.example.test"));
+        assert!(
+            fetch
+                .fetch(&name, tenko_core::dns::Rtype(types::A))
+                .await
+                .is_ok()
+        );
+    }
+    let deep = name("www.tc.quirk.example.test");
+    let stopped = fetch.fetch(&deep, tenko_core::dns::Rtype(types::A)).await;
+    assert!(
+        matches!(stopped, Err(FetchError::Budget)),
+        "{:?}",
+        stopped.err()
+    );
+    assert_eq!(quota.left(), 0);
+    // Spent: the next fetch sends nothing.
+    let asked = lab.asked().len();
+    let next = fetch
+        .fetch(&name("more.example.test"), tenko_core::dns::Rtype(types::A))
+        .await;
+    assert!(matches!(next, Err(FetchError::Budget)));
+    assert_eq!(lab.asked().len(), asked);
+    // The client query's wall clock bounds its fetches as well.
+    let late = Quota::for_client(
+        &WorkBudget {
+            wall: Duration::ZERO,
+            ..WorkBudget::DEFAULT
+        },
+        Instant::now(),
+    );
+    let fetch = crate::validate::EngineFetch::new(Arc::clone(&engine)).with_quota(late);
+    let timed_out = fetch
+        .fetch(&name("late.example.test"), tenko_core::dns::Rtype(types::A))
+        .await;
+    assert!(matches!(timed_out, Err(FetchError::Budget)));
+    assert_eq!(lab.asked().len(), asked, "nothing sent past the deadline");
+}

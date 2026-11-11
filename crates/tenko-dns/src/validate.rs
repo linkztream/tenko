@@ -654,10 +654,12 @@ impl KeyFetch for NoFetch {
 
 /// The sub-queries of the chain walk through the iterative engine: each one a
 /// resolution of its own (joined with any in flight, counted in the engine's figures),
-/// never through the answer cache.
+/// never through the answer cache, and with the client query's quota all of them together
+/// within it.
 pub struct EngineFetch<A> {
     engine: Arc<crate::recurse::Engine<A>>,
     sent: AtomicU64,
+    quota: Option<Arc<crate::recurse::Quota>>,
 }
 
 impl<A> std::fmt::Debug for EngineFetch<A> {
@@ -672,7 +674,15 @@ impl<A: Authority + 'static> EngineFetch<A> {
         Self {
             engine,
             sent: AtomicU64::new(0),
+            quota: None,
         }
+    }
+
+    /// The sub-queries counted against `quota`, the client query's.
+    #[must_use]
+    pub fn with_quota(mut self, quota: Arc<crate::recurse::Quota>) -> Self {
+        self.quota = Some(quota);
+        self
     }
 
     /// The queries the sub-queries sent to authorities.
@@ -684,15 +694,28 @@ impl<A: Authority + 'static> EngineFetch<A> {
 #[async_trait::async_trait]
 impl<A: Authority + 'static> KeyFetch for EngineFetch<A> {
     async fn fetch(&self, name: &DnsName, rtype: Rtype) -> Result<Fetched, FetchError> {
+        // The client query's quota spent: the walk stops as on its own budget (incomplete,
+        // remembered for no zone), never as an unreachable zone.
+        if self
+            .quota
+            .as_ref()
+            .is_some_and(|quota| quota.spent(std::time::Instant::now()))
+        {
+            return Err(FetchError::Budget);
+        }
         let qname = name.to_wire();
         let resolved = self
             .engine
-            .resolve(crate::recurse::Question {
-                qname: &qname,
-                qtype: rtype.0,
-                qclass: 1,
-                view: None,
-            })
+            .resolve_carrying(
+                crate::recurse::Question {
+                    qname: &qname,
+                    qtype: rtype.0,
+                    qclass: 1,
+                    view: None,
+                },
+                false,
+                self.quota.clone(),
+            )
             .await;
         self.sent
             .fetch_add(u64::from(resolved.subqueries), Ordering::Relaxed);
@@ -701,6 +724,7 @@ impl<A: Authority + 'static> KeyFetch for EngineFetch<A> {
                 message: resolved.message.clone(),
                 zone: name.clone(),
             }),
+            _ if resolved.stopped_by_quota => Err(FetchError::Budget),
             _ => Err(FetchError::Unreachable),
         }
     }

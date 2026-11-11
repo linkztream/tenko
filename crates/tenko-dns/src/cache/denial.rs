@@ -568,11 +568,18 @@ impl Denials {
         })?;
         let mut synth = zone.lookup(qname, qtype, now)?;
         if carry {
-            synth.delegation = Some(
-                zone.delegation
-                    .as_ref()
-                    .filter(|delegation| delegation.fresh(now))?,
-            );
+            match zone
+                .delegation
+                .as_ref()
+                .filter(|delegation| delegation.fresh(now))
+            {
+                Some(delegation) => synth.delegation = Some(delegation),
+                // The resolver's answers for the zone carry its delegation, so a synthesized
+                // one may not go without it. A zone only forwarders taught, whose answers never
+                // carried one, is synthesized as before.
+                None if zone.from_recursion || zone.delegated => return None,
+                None => {}
+            }
         }
         let rcode = synth::write(&synth, client, now, out)?;
         let index = DenialKind::ALL
@@ -688,10 +695,19 @@ impl DenialCache for Denials {
                 },
             );
         }
+        if origin == Origin::Recursion {
+            entry.from_recursion = true;
+        }
         match shown {
             Shown::Nothing => {}
-            Shown::TooLarge => entry.delegation = None,
-            Shown::Delegation(delegation) => entry.delegation = Some(delegation),
+            Shown::TooLarge => {
+                entry.delegation = None;
+                entry.delegated = true;
+            }
+            Shown::Delegation(delegation) => {
+                entry.delegation = Some(delegation);
+                entry.delegated = true;
+            }
         }
         let after = entry.count();
         store.records = (store.records + after).saturating_sub(before);

@@ -182,6 +182,17 @@ describe("the status block", () => {
     expect(screen.queryByTestId("dns-recursion-expires")).toBeNull();
   });
 
+  it("warns of a flood of unwanted answers in its own words", async () => {
+    const body = recursionStatus(dnsRecursionState());
+    server.use(
+      http.get("/api/v1/nodes/:id/dns/recursion", () => HttpResponse.json({ ...body, problems: ["unwanted_answers"] })),
+    );
+    open();
+    const problem = await screen.findByTestId("dns-recursion-problem");
+    expect(problem.dataset.code).toBe("unwanted_answers");
+    expect(problem.textContent).toContain("answers that matched no query");
+  });
+
   it("says the resolver is off and offers no priming", async () => {
     dnsRecursionState().enabled = false;
     open();

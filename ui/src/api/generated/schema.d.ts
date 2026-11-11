@@ -4157,7 +4157,7 @@ export interface paths {
         };
         /**
          * Get the recursive resolver of a node
-         * @description Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The counters include the validation outcomes (`secure`, `insecure`, `bogus`, `indeterminate`); `trust_anchors` lists the anchor keys with their RFC 5011 state; `problems` adds `clock` and `trust_anchor_stale`.
+         * @description Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`; `unwanted_answers` for the hour after over 100,000 answers that matched no query across the node). The counters include the validation outcomes (`secure`, `insecure`, `bogus`, `indeterminate`); `trust_anchors` lists the anchor keys with their RFC 5011 state; `problems` adds `clock` and `trust_anchor_stale`.
          */
         get: operations["get_node_dns_recursion"];
         put?: never;
@@ -20141,8 +20141,9 @@ export interface components {
             infra: components["schemas"]["InfraSizes"];
             last_priming?: components["schemas"]["PrimingItem"] | null;
             /**
-             * @description What is wrong now: `priming_failed`, `clock` (the root's DNSKEY signatures fail
-             *     on time) and `trust_anchor_stale` (a zone without a trusted key left).
+             * @description What is wrong now: `priming_failed`, `unwanted_answers` (over 100,000 answers that
+             *     matched no query across the node in the last hour), `clock` (the root's DNSKEY
+             *     signatures fail on time) and `trust_anchor_stale` (a zone without a trusted key left).
              */
             problems: string[];
             /**
