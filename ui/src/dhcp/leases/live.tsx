@@ -14,6 +14,12 @@ import { arrive, initialSampler, refreshed, SAMPLER, settle } from "./sampler";
 
 /** The longest pause between two reads of a page that is still older than a change seen. */
 const BEHIND_MAX_MS = 5_000;
+/**
+ * The reads again for one change, at most: about 16 seconds of pauses. A table that does not
+ * reach the change by then (a role whose feed failed and reads its rows again) is read again at
+ * the next change, not every few seconds while the page is open; each read is a recorded command.
+ */
+const BEHIND_READS = 8;
 
 /** The tables of the lease service an event names. */
 export const LEASE_TABLE = "dhcp.leases";
@@ -57,6 +63,8 @@ export function createLiveRefresh(options: LiveRefreshOptions): LiveRefresh {
   let wanted: number | undefined;
   /** The reads in a row that came back older than `wanted`. */
   let behind = 0;
+  /** The reads started; only the last one's page is checked (a newer read replaces an older one). */
+  let reads = 0;
   let disposed = false;
 
   /** `count` changes arrived (none for a read again): a sampled refresh is scheduled when none is. */
@@ -72,20 +80,31 @@ export function createLiveRefresh(options: LiveRefreshOptions): LiveRefresh {
     if (disposed || !live() || wanted === undefined) return;
     const seen = options.revision?.();
     if (seen === undefined || seen >= wanted) {
+      clearTimeout(behindTimer);
       wanted = undefined;
       behind = 0;
       return;
     }
+    if (behind >= BEHIND_READS) return;
     behind += 1;
     clearTimeout(behindTimer);
     behindTimer = setTimeout(() => schedule(0), Math.min(BEHIND_MAX_MS, SAMPLER.intervalMs * 2 ** (behind - 1)));
+  };
+
+  /** Reads the page; once the last read started is in, checks it against the newest change seen. */
+  const read = () => {
+    reads += 1;
+    const id = reads;
+    void Promise.resolve(options.refresh()).then(() => {
+      if (id === reads) check();
+    });
   };
 
   const run = () => {
     timer = undefined;
     state = refreshed(state, Date.now());
     setFolded(state.folded);
-    void Promise.resolve(options.refresh()).then(check);
+    read();
     clearTimeout(settleTimer);
     settleTimer = setTimeout(() => {
       state = settle(state, Date.now());
@@ -109,12 +128,16 @@ export function createLiveRefresh(options: LiveRefreshOptions): LiveRefresh {
     if (!live() || !touches(event, options.table)) return;
     const seen = options.revision?.();
     if (event.revision !== undefined && seen !== undefined && event.revision <= seen) return;
-    if (event.revision !== undefined) wanted = Math.max(wanted ?? 0, event.revision);
+    if (event.revision !== undefined) {
+      wanted = Math.max(wanted ?? 0, event.revision);
+      // A new change starts the reads again from the shortest pause.
+      behind = 0;
+    }
     schedule(1);
   });
   // eslint-disable-next-line solid/reactivity -- an event callback, like an event handler
   const offReset = stream.onReset("dhcp", () => {
-    if (live()) void options.refresh();
+    if (live()) read();
   });
   onCleanup(() => {
     disposed = true;
@@ -126,7 +149,7 @@ export function createLiveRefresh(options: LiveRefreshOptions): LiveRefresh {
   const setLive = (on: boolean) => {
     if (on === live()) return;
     setLiveSignal(on);
-    if (on) void options.refresh();
+    if (on) read();
     else stop();
   };
   return { live, setLive, folded };

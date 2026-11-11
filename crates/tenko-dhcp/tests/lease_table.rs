@@ -214,6 +214,9 @@ async fn the_follower_holds_the_rows_of_the_feed() {
     assert_eq!(follower.held(), Revision(9));
 }
 
+/// The role's own commits survive an older image and older deltas, and the revision the table
+/// is complete at moves with the image and the feed's deltas only: an own commit can finish
+/// before an older one, so it does not say that every change up to it is in the table.
 #[test]
 fn own_commits_survive_an_older_image_and_older_deltas() {
     let vrf = VrfId::generate();
@@ -230,6 +233,9 @@ fn own_commits_survive_an_older_image_and_older_deltas() {
         ..old.clone()
     };
     leases.apply_at(renewed.clone(), Revision(12));
+    // The table holds a row of 12 but not yet every change up to it: it is complete at 10.
+    assert_eq!(leases.read().revision(), Revision(12));
+    assert_eq!(leases.read().complete(), Revision(10));
     let other = lease(vrf, scopes, 2, 0, 2, 1, BindingState::Active);
     follower
         .apply(&Delta {
@@ -243,10 +249,13 @@ fn own_commits_survive_an_older_image_and_older_deltas() {
         })
         .expect("follows");
     assert_eq!(leases.read().lease(vrf, old.addr), Some(renewed.clone()));
+    assert_eq!(leases.read().complete(), Revision(11));
 
-    // An image older than the commit does not drop it either.
+    // An image older than the commit does not drop it either, and the row it carries over does
+    // not make the table complete past the image.
     follower.install(&data_with(Revision(11), &[old.clone(), other.clone()]));
     assert_eq!(leases.read().lease(vrf, old.addr), Some(renewed.clone()));
+    assert_eq!(leases.read().complete(), Revision(11));
     assert_eq!(leases.read().lease(vrf, other.addr), Some(other.clone()));
     follower
         .apply(&Delta {
@@ -258,6 +267,7 @@ fn own_commits_survive_an_older_image_and_older_deltas() {
     let table = leases.read();
     assert_eq!(table.lease(vrf, old.addr), Some(renewed.clone()));
     assert_eq!(table.revision(), Revision(12));
+    assert_eq!(table.complete(), Revision(12));
     assert_eq!(
         index_from_data(&data_with(Revision(12), &[renewed.clone(), other.clone()])).sorted_rows(),
         table.sorted_rows()
