@@ -12,20 +12,24 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use tenko_cluster::model::tables::NODES;
 use tenko_core::{
     Action, CodedError, ObjectRef,
     dns::{Origin, RrSet, ZoneId},
 };
 use tenko_dns::zone::{
     RrSetFilter, ZoneService,
-    import::{ImportReport, ImportRequest},
+    import::{
+        ClaimDigest, ClaimRequest, ClaimRule, HeldReason, ImportReport, ImportRequest, claim,
+    },
     records::{BatchOutcome, Change, Op},
 };
+use tenko_store::{KeyRange, ReadConsistency, ReadViewExt as _};
 
 use super::{
-    DnsJobStarted, DryRunParams, ExportParams, ImportLoss, ImportTypeCount, RecordBatch,
-    RecordBatchResult, RecordDiff, RecordFilters, RecordOp, RrSetItem, ZoneFileImport,
-    ZoneFileImportReport, Zones, parse_id,
+    ClaimHeldName, ClaimHeldReason, ClaimableName, DnsJobStarted, DryRunParams, ExportParams,
+    ImportLoss, ImportTypeCount, RecordBatch, RecordBatchResult, RecordDiff, RecordFilters,
+    RecordOp, RrSetItem, ZoneFileClaimable, ZoneFileImport, ZoneFileImportReport, Zones, parse_id,
 };
 use crate::{
     API_BASE,
@@ -201,6 +205,74 @@ pub(super) async fn change_dns_records(
     Ok(Json(batch_result(&outcome)?).into_response())
 }
 
+/// The reason a candidate stays static, in the answer's form.
+fn held_reason(reason: HeldReason) -> ClaimHeldReason {
+    match reason {
+        HeldReason::Reserved => ClaimHeldReason::Reserved,
+        HeldReason::ServiceName => ClaimHeldReason::ServiceName,
+        HeldReason::NameServer => ClaimHeldReason::NameServer,
+        HeldReason::TenkoNode => ClaimHeldReason::TenkoNode,
+        HeldReason::ServiceTarget => ClaimHeldReason::ServiceTarget,
+        HeldReason::NotAHost => ClaimHeldReason::NotAHost,
+        HeldReason::OtherData => ClaimHeldReason::OtherData,
+        HeldReason::Rule => ClaimHeldReason::Rule,
+        HeldReason::TooMany => ClaimHeldReason::TooMany,
+        HeldReason::NotApproved => ClaimHeldReason::NotApproved,
+    }
+}
+
+/// The claim part of an import request: the rule, the approval, the page, and the host
+/// names of the Tenko nodes, which no claimable name may take.
+async fn claim_request(
+    app: &AppState,
+    body: Option<ZoneFileClaimable>,
+) -> Result<ClaimRequest, ApiError> {
+    let body = body.unwrap_or_default();
+    let within = body
+        .within
+        .iter()
+        .map(|net| {
+            net.trim().parse::<ipnet::IpNet>().map_err(|_| {
+                ApiError::from_coded_error(
+                    CodedError::new(
+                        claim::CLAIMABLE_INVALID,
+                        400,
+                        format!("claimable.within: {net} is not a prefix (address/length)"),
+                    )
+                    .with_param("field", "within"),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let approval = body
+        .approve
+        .as_deref()
+        .map(str::parse::<ClaimDigest>)
+        .transpose()?;
+    let after = body.after.as_deref().map(claim::parse_cursor).transpose()?;
+    Ok(ClaimRequest {
+        rule: ClaimRule {
+            under: body.under,
+            within,
+            except: body.except,
+        },
+        approval,
+        after,
+        limit: body.limit.map(|limit| limit as usize),
+        reserved_hosts: node_hosts(app).await?,
+    })
+}
+
+/// The host names of the Tenko nodes: this node's and every enrolled node's.
+async fn node_hosts(app: &AppState) -> Result<Vec<String>, ApiError> {
+    let mut hosts: Vec<String> = app.platform.node.name.iter().cloned().collect();
+    let view = app.store.read(ReadConsistency::Local).await?;
+    let nodes = view.scan_typed(&NODES, KeyRange::all(), claim::MAX_RESERVED_HOSTS, false)?;
+    hosts.extend(nodes.into_iter().map(|(_, node, _)| node.name));
+    hosts.truncate(claim::MAX_RESERVED_HOSTS);
+    Ok(hosts)
+}
+
 /// The answer form of an import report.
 pub(crate) fn import_report(report: ImportReport) -> ZoneFileImportReport {
     ZoneFileImportReport {
@@ -228,6 +300,32 @@ pub(crate) fn import_report(report: ImportReport) -> ZoneFileImportReport {
         claimable: report.claimable,
         serial: report.serial,
         revision: report.revision,
+        claimable_digest: report.claimable_digest,
+        claimable_names: report
+            .claimable_names
+            .into_iter()
+            .map(|entry| ClaimableName {
+                name: entry.name,
+                rtype: entry.rtype,
+                line: entry.line,
+                claimant: entry.claimant,
+                records: entry.records,
+                more: entry.more,
+            })
+            .collect(),
+        claimable_next: report.claimable_next,
+        claimable_overflow: report.claimable_overflow,
+        held_back: report.held_back,
+        held_back_names: report
+            .held_back_names
+            .into_iter()
+            .map(|entry| ClaimHeldName {
+                name: entry.name,
+                rtype: entry.rtype,
+                line: entry.line,
+                reason: held_reason(entry.reason),
+            })
+            .collect(),
     }
 }
 
@@ -237,19 +335,20 @@ pub(crate) fn import_report(report: ImportReport) -> ZoneFileImportReport {
     tag = "dns",
     operation_id = "import_dns_zone_file",
     summary = "Import a zone file into a zone",
-    description = "Scope: `dns.write`. `$ORIGIN` and `$TTL` are honored, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).",
+    description = "Scope: `dns.write`. `$ORIGIN` and `$TTL` are honored, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON). In the `windows` dialect the preview also lists, a page at a time, the A, AAAA and PTR RRsets that would become claimable by the computer they name, with the digest that approves exactly that set, and the candidates that stay static with the reason. An import makes names claimable only with `claimable.approve` set to that digest; without it every candidate is imported static.",
     params(("id" = String, Path, description = "Zone identifier (UUID)"), DryRunParams),
     request_body(content = ZoneFileImport, content_type = "application/json"),
     responses(
         (status = 200, description = "The preview of a dry run", body = ZoneFileImportReport),
         (status = 202, description = "The import job; follow it at the `Location`", body = DnsJobStarted),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`), or the zone holds no records or lacks the scope (`dns.zone.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`), the zone holds no records or lacks the scope (`dns.zone.invalid`), or the claimable part is malformed or past its bounds, or given outside the `windows` dialect (`dns.import.claimable_invalid`, parameter `field`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 408, description = "The zone file did not arrive within ten minutes (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The approved claimable set is not the one the file, the zone and its records give now (`dns.import.claimable_changed`, parameter `digest`): preview again", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The request is larger than 512 MiB (`sys.body_too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 422, description = "The zone file does not parse, uses `$INCLUDE`, holds more than 10,000,000 records or makes more than 1,000,000 with `$GENERATE`, or would leave the zone with more than 10,000,000 RRsets (`dns.zonefile.invalid`, parameters `line` and `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "The zone file does not parse, uses `$INCLUDE`, holds more than 10,000,000 records or makes more than 1,000,000 with `$GENERATE`, or would leave the zone with more than 10,000,000 RRsets (`dns.zonefile.invalid`, parameters `line` and `reason`); or an approval of a file with more than 250,000 candidates (`dns.import.claimable_too_many`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "An import of the zone is running, or two imports are (`dns.import.busy`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -294,6 +393,7 @@ pub(super) async fn import_dns_zone_file(
             super::ZoneFileDialect::Rfc1035 => tenko_dns::zone::zonefile::Dialect::Rfc1035,
             super::ZoneFileDialect::Windows => tenko_dns::zone::zonefile::Dialect::Windows,
         },
+        claim: claim_request(&app, body.claimable).await?,
     };
     if query.dry_run.unwrap_or(false) {
         let report = service.preview_import(&cx, &request).await?;

@@ -213,14 +213,26 @@ for zone in corp.example.test _msdcs.corp.example.test 2.0.192.in-addr.arpa; do
 done
 ```
 
-**Expect** for each zone: the records per type, `claimable by their hosts (origin ad)` with
-the count of the dynamic RRsets, and as losses at most the SOA (kept as the zone's values) and
-WINS records if any. Then import for real and give the domain zone the name server's address
-and the delegation of `_msdcs` to Tenko:
+**Expect** for each zone: the records per type, the list under `would become claimable by
+their hosts (origin ad)`, one line per RRset with the computer account that may claim it, then
+`approve exactly these with: --approve-claimable <digest>`, then the list under `kept static`
+with the reason of each name, and as losses at most the SOA (kept as the zone's values) and
+WINS records if any. In the domain zone the claimable names are the dynamic A records of the
+members and the servers (`pc1`, `srv1` and the like); in the reverse zone, their PTR records;
+in `_msdcs` the locator names are held back as `reserved`, and a name that is a name server of
+the zone (`ns1`, or a controller's host name that is an NS host of the zone) is held back as
+`name_server`: it comes in static, and a controller is privileged and still changes it. Read
+each list and check that every name in it is a computer you expect, and that every name you
+do not want claimed is in the held-back list (narrow the set with `--claimable-under`,
+`--claimable-within` or `--claimable-except` and run the dry run again if not). Then import
+for real, approving the list you read, and give the domain zone the name server's address and
+the delegation of `_msdcs` to Tenko. The loop takes each zone's digest from its own dry run;
+that is only safe after you have read the lists above:
 
 ```
 for zone in corp.example.test _msdcs.corp.example.test 2.0.192.in-addr.arpa; do
-  tenko dns import "$zone" "$zone.dns" --windows
+  digest=$(tenko dns import "$zone" "$zone.dns" --windows --dry-run --json | jq -r .claimable_digest)
+  tenko dns import "$zone" "$zone.dns" --windows --approve-claimable "$digest"
 done
 tenko dns record replace corp.example.test ns1 A 192.0.2.53
 tenko dns record replace corp.example.test _msdcs NS ns1.corp.example.test.
@@ -265,8 +277,10 @@ PATCH /api/v1/dns/zones/{id}
     "update_proxy": "<DnsUpdateProxy SID>"}}}
 ```
 
-**Expect:** `record list --origin ad` shows the controller's names, `srv1` and the locator
-records; `--origin manual` shows `printer1` and the zone's apex records. The zone's **Owners**
+**Expect:** `record list --origin ad` shows exactly the names of the lists you approved
+(`srv1` and the other members' and servers' records); `--origin manual` shows `printer1`, the
+zone's apex records and the names held back with their reasons (the controller's host name when
+it is an NS host of the zone, `wpad` and `isatap` if the zone has them). The zone's **Owners**
 tab is empty: nothing is owned until a secure update claims it. **Keep:** the dry-run reports
 and the two record lists in `results/w4-import.txt`, a screenshot of the update settings in
 `results/w4-settings.png`.
@@ -486,7 +500,8 @@ in `results/w10.txt`.
 
 ## W11. The member server registers and refreshes its records
 
-`srv1` carried its records over from Windows in W4 (origin `ad`, claimable by `SRV1$`). Point
+`srv1` carried its records over from Windows in W4 (origin `ad`, claimable by `SRV1$`, since
+its name was in the list you approved there). Point
 its DNS client at Tenko and register:
 
 ```powershell

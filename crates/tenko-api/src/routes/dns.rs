@@ -156,6 +156,8 @@ pub use model::{
     ZoneCreate, ZoneFileDialect, ZoneFileImport, ZoneFileImportReport, ZoneItem, ZonePatch,
 };
 
+pub use model::{ClaimHeldName, ClaimHeldReason, ClaimableName, ZoneFileClaimable};
+
 // WP10.0: the recursive resolver.
 pub use model::{
     AnchorKeyState, InfraAddressItem, InfraCutItem, InfraFlushParams, InfraFlushed, InfraParams,

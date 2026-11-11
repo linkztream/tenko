@@ -17,7 +17,7 @@ expect. A step that fails stops the lab until the lead has read it with you.
 | W1 | The domain with the DNS Server role on `dc1`, aging on, `printer1` static, `srv1` joined | | | |
 | W2 | The starting state: records with and without timestamps, the zone exports with `[AGE:n]` | | `results/w2/` | |
 | W3 | The block of section 4.1 creates `TENKO-DNS$`; Tenko adopts it; versions agree; no finding | | `results/w3-account.txt` | |
-| W4 | The Windows-dialect import: dynamic records `ad`, `printer1` manual; the secure-only policy set | | `results/w4-import.txt`, `results/w4-settings.png` | |
+| W4 | The Windows-dialect import: the approved claimable names `ad`, the held-back names and `printer1` manual; the secure-only policy set | | `results/w4-import.txt`, `results/w4-settings.png` | |
 | W5 | `dc1` registers every record of its `Netlogon.dns` with GSS-TSIG; owns `dc1`; no refusal | | `captures/w5-dc1.pcapng`, `results/w5/` | |
 | W6 | The DNS Server role removed from `dc1`; registration still succeeds; dcdiag | | `results/w6-dcdiag.txt` | |
 | W7 | `dc2` promoted without the role through Tenko; registers every record; replication clean | | `captures/w7-dc2.pcapng`, `results/w7/` | |

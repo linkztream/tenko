@@ -17477,7 +17477,7 @@
           "dns"
         ],
         "summary": "Import a zone file into a zone",
-        "description": "Scope: `dns.write`. `$ORIGIN` and `$TTL` are honored, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).",
+        "description": "Scope: `dns.write`. `$ORIGIN` and `$TTL` are honored, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON). In the `windows` dialect the preview also lists, a page at a time, the A, AAAA and PTR RRsets that would become claimable by the computer they name, with the digest that approves exactly that set, and the candidates that stay static with the reason. An import makes names claimable only with `claimable.approve` set to that digest; without it every candidate is imported static.",
         "operationId": "import_dns_zone_file",
         "parameters": [
           {
@@ -17531,7 +17531,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`), or the zone holds no records or lacks the scope (`dns.zone.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`), the zone holds no records or lacks the scope (`dns.zone.invalid`), or the claimable part is malformed or past its bounds, or given outside the `windows` dialect (`dns.import.claimable_invalid`, parameter `field`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17580,6 +17580,16 @@
               }
             }
           },
+          "409": {
+            "description": "The approved claimable set is not the one the file, the zone and its records give now (`dns.import.claimable_changed`, parameter `digest`): preview again",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "413": {
             "description": "The request is larger than 512 MiB (`sys.body_too_large`)",
             "content": {
@@ -17591,7 +17601,7 @@
             }
           },
           "422": {
-            "description": "The zone file does not parse, uses `$INCLUDE`, holds more than 10,000,000 records or makes more than 1,000,000 with `$GENERATE`, or would leave the zone with more than 10,000,000 RRsets (`dns.zonefile.invalid`, parameters `line` and `reason`)",
+            "description": "The zone file does not parse, uses `$INCLUDE`, holds more than 10,000,000 records or makes more than 1,000,000 with `$GENERATE`, or would leave the zone with more than 10,000,000 RRsets (`dns.zonefile.invalid`, parameters `line` and `reason`); or an approval of a file with more than 250,000 candidates (`dns.import.claimable_too_many`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -45177,6 +45187,97 @@
           }
         },
         "additionalProperties": false
+      },
+      "ClaimHeldName": {
+        "type": "object",
+        "description": "One candidate of a Windows file that stays static, and why.",
+        "required": [
+          "name",
+          "rtype",
+          "line",
+          "reason"
+        ],
+        "properties": {
+          "line": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The line of the file where the RRset starts.",
+            "minimum": 0
+          },
+          "name": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The owner name."
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ClaimHeldReason",
+            "description": "Why it stays static."
+          },
+          "rtype": {
+            "$ref": "#/components/schemas/Rtype",
+            "description": "The type."
+          }
+        }
+      },
+      "ClaimHeldReason": {
+        "type": "string",
+        "description": "Why a candidate of a Windows file stays static.",
+        "enum": [
+          "reserved",
+          "service_name",
+          "name_server",
+          "tenko_node",
+          "service_target",
+          "not_a_host",
+          "other_data",
+          "rule",
+          "too_many",
+          "not_approved"
+        ]
+      },
+      "ClaimableName": {
+        "type": "object",
+        "description": "One RRset a Windows file makes claimable.",
+        "required": [
+          "name",
+          "rtype",
+          "line",
+          "claimant",
+          "records",
+          "more"
+        ],
+        "properties": {
+          "claimant": {
+            "type": "string",
+            "description": "The computer account that may claim it (`PC01$`)."
+          },
+          "line": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The line of the file where the RRset starts.",
+            "minimum": 0
+          },
+          "more": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Records not shown.",
+            "minimum": 0
+          },
+          "name": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The owner name."
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The first four records (addresses, or the targets of a PTR RRset)."
+          },
+          "rtype": {
+            "$ref": "#/components/schemas/Rtype",
+            "description": "A, AAAA or PTR."
+          }
+        }
       },
       "Class": {
         "type": "object",
@@ -89365,6 +89466,60 @@
           }
         }
       },
+      "ZoneFileClaimable": {
+        "type": "object",
+        "description": "The claimable names of a Windows zone file: which candidates the operator takes, the\napproval of the set a preview listed, and the page of that listing.",
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The page of a dry run's listing: the `claimable_next` of the page before."
+          },
+          "approve": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The approval: the `claimable_digest` of the preview, made with the same file and\nrule. An import that writes makes claimable exactly the set the preview listed, and\nis refused with `dns.import.claimable_changed` when the file, the zone or its\nrecords give another set now. A dry run ignores it."
+          },
+          "except": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsName"
+            },
+            "description": "Never these names (the owner of an RRset, or a target of a PTR RRset); at most\n10,000."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The size of a dry run's page: 1,000 when absent, at most 5,000.",
+            "minimum": 0
+          },
+          "under": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsName"
+            },
+            "description": "Only names at or below one of these (the owner of an A or AAAA RRset, every target\nof a PTR RRset); at most 256."
+          },
+          "within": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only addresses inside one of these prefixes (every address of an A or AAAA RRset,\nthe address a PTR RRset's name stands for); at most 256.",
+            "example": [
+              "192.0.2.0/24"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "ZoneFileDialect": {
         "type": "string",
         "description": "The dialect of a zone file.",
@@ -89380,11 +89535,22 @@
           "zone_file"
         ],
         "properties": {
+          "claimable": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ZoneFileClaimable",
+                "description": "The claimable names of a Windows file: the operator's rule, the approval and the\npage of the preview's listing. Without an approval an import makes nothing\nclaimable. Only with the `windows` dialect."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "dialect": {
             "oneOf": [
               {
                 "$ref": "#/components/schemas/ZoneFileDialect",
-                "description": "The dialect of the file: `rfc1035` (the default), or `windows` for a file the\nWindows DNS Server wrote (`dnscmd /ZoneExport`), whose records with an aging mark\n`[AGE:n]` are imported with the origin `ad` and without an owner."
+                "description": "The dialect of the file: `rfc1035` (the default), or `windows` for a file the\nWindows DNS Server wrote (`dnscmd /ZoneExport`), whose A, AAAA and PTR records with\nan aging mark `[AGE:n]` are candidates to become claimable (origin `ad`, no owner)."
               },
               {
                 "type": "null"
@@ -89433,12 +89599,50 @@
           "claimable": {
             "type": "integer",
             "format": "int64",
-            "description": "Of the RRsets added or replaced, those imported with the origin `ad` (a Windows\nfile's records with an aging mark): claimable by the host they name.",
+            "description": "The RRsets of a Windows file that become claimable by the host they name (origin\n`ad`, no owner): in a dry run, those an approval of `claimable_digest` makes\nclaimable.",
             "minimum": 0
+          },
+          "claimable_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The digest that approves the claimable set (a dry run in the `windows` dialect):\nsend it as `claimable.approve` with the same file and rule."
+          },
+          "claimable_names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClaimableName"
+            },
+            "description": "A page of the claimable RRsets in name order."
+          },
+          "claimable_next": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The cursor of the next page (`claimable.after`)."
+          },
+          "claimable_overflow": {
+            "type": "boolean",
+            "description": "The file has more than 250,000 candidates: none can become claimable."
           },
           "dry_run": {
             "type": "boolean",
             "description": "Nothing was written."
+          },
+          "held_back": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The candidates that stay static, every reason together.",
+            "minimum": 0
+          },
+          "held_back_names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClaimHeldName"
+            },
+            "description": "The first 1,000 of them in name order, with the reason."
           },
           "losses": {
             "type": "array",

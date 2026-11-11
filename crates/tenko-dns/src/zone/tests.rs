@@ -632,6 +632,7 @@ async fn an_import_previews_writes_and_exports_byte_stable() {
         text: ZONE_FILE.to_owned(),
         replace: false,
         dialect: crate::zone::zonefile::Dialect::Rfc1035,
+        claim: crate::zone::import::ClaimRequest::default(),
     };
     let preview = service
         .preview_import(&cx(), &request)
@@ -697,6 +698,7 @@ www 600 IN A 192.0.2.11
                 text: first.text.clone(),
                 replace: true,
                 dialect: crate::zone::zonefile::Dialect::Rfc1035,
+                claim: crate::zone::import::ClaimRequest::default(),
             },
         )
         .await
@@ -734,6 +736,7 @@ async fn replace_removes_what_the_file_does_not_hold() {
         text: "new 300 IN A 192.0.2.2\n".to_owned(),
         replace: true,
         dialect: crate::zone::zonefile::Dialect::Rfc1035,
+        claim: crate::zone::import::ClaimRequest::default(),
     };
     let preview = service
         .preview_import(&cx(), &request)
@@ -793,6 +796,7 @@ async fn a_large_import_runs_in_chunks() {
                 text,
                 replace: false,
                 dialect: crate::zone::zonefile::Dialect::Rfc1035,
+                claim: crate::zone::import::ClaimRequest::default(),
             },
         )
         .await
@@ -844,6 +848,7 @@ async fn include_is_refused_with_its_line() {
         text: "www IN A 192.0.2.1\n\n$INCLUDE other.zone\n".to_owned(),
         replace: false,
         dialect: crate::zone::zonefile::Dialect::Rfc1035,
+        claim: crate::zone::import::ClaimRequest::default(),
     };
     let error = service
         .preview_import(&cx(), &request)
@@ -1041,6 +1046,7 @@ async fn a_large_zone_file_round_trips() {
                 text,
                 replace: true,
                 dialect: crate::zone::zonefile::Dialect::Rfc1035,
+                claim: crate::zone::import::ClaimRequest::default(),
             },
         )
         .await
@@ -1084,6 +1090,7 @@ async fn a_large_zone_file_round_trips() {
                 text: first.text.clone(),
                 replace: true,
                 dialect: crate::zone::zonefile::Dialect::Rfc1035,
+                claim: crate::zone::import::ClaimRequest::default(),
             },
         )
         .await
@@ -1130,6 +1137,7 @@ async fn importing_an_export_into_its_own_zone_changes_nothing() {
             text: first.text.clone(),
             replace,
             dialect: crate::zone::zonefile::Dialect::Rfc1035,
+            claim: crate::zone::import::ClaimRequest::default(),
         };
         let preview = service
             .preview_import(&cx(), &request)

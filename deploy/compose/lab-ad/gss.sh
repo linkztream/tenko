@@ -385,10 +385,17 @@ admin_changes() {
     grep -q 198.51.100.48 <<<"$(dig_short ws-alice.lab.example.test A)" &&
     [[ "$(owner_of ws-alice.lab.example.test)" == "alice@$realm created" ]]
 }
-# The Windows file: wsbob dynamic (an aging mark), srv01 static.
+# The Windows file: wsbob dynamic (an aging mark), srv01 static. The dry run lists wsbob as
+# the one name that would become claimable (srv01 has no aging mark, so it is no candidate);
+# the import carries the dry run's digest as its approval.
 windows_file='wsbob [AGE:3660412] 60 A 198.51.100.61\nsrv01 60 A 198.51.100.62\n'
 imports_windows() {
-  api POST "/dns/zones/$zone_id/records/import" "{\"zone_file\": \"$windows_file\", \"dialect\": \"windows\"}" >/dev/null &&
+  local preview digest
+  preview="$(api POST "/dns/zones/$zone_id/records/import?dry_run=true" "{\"zone_file\": \"$windows_file\", \"dialect\": \"windows\"}")" &&
+    [[ "$(json_field '",".join(e["name"] for e in d["claimable_names"])' <<<"$preview")" == wsbob.lab.example.test ]] &&
+    digest="$(json_field 'd["claimable_digest"]' <<<"$preview")" &&
+    [[ -n "$digest" ]] &&
+    api POST "/dns/zones/$zone_id/records/import" "{\"zone_file\": \"$windows_file\", \"dialect\": \"windows\", \"claimable\": {\"approve\": \"$digest\"}}" >/dev/null &&
     for _ in $(seq 1 30); do
       [[ "$(dig_short wsbob.lab.example.test A)" == 198.51.100.61 && "$(dig_short srv01.lab.example.test A)" == 198.51.100.62 ]] && return 0
       sleep 1
@@ -419,7 +426,7 @@ row own.dc_refresh "the controller's next registration refreshes its names; the 
 row own.dc_refused "a user cannot change the controller's host record" user_refused_on_dc
 row own.locator "a user cannot write a locator name (_ldap._tcp)" user_refused_on_locator
 row own.admin "a domain administrator changes a name it does not own; the owner stays alice" admin_changes
-row own.import "a Windows zone file imports: wsbob (aging mark) and srv01 (static) answer" imports_windows
+row own.import "the dry run of a Windows zone file lists wsbob (aging mark) as claimable and not srv01 (static); the approved import makes wsbob claimable, and both answer" imports_windows
 row own.claim_other "another principal cannot claim the imported dynamic name" other_cannot_claim
 row own.claim "WSBOB\$ claims its own imported name and owns it (claimed)" host_claims
 row own.static "SRV01\$ cannot claim its static record" static_not_claimed

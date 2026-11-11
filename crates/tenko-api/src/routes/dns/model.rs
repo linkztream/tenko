@@ -302,10 +302,104 @@ pub struct ZoneFileImport {
     pub replace: bool,
     // WP13.4
     /// The dialect of the file: `rfc1035` (the default), or `windows` for a file the
-    /// Windows DNS Server wrote (`dnscmd /ZoneExport`), whose records with an aging mark
-    /// `[AGE:n]` are imported with the origin `ad` and without an owner.
+    /// Windows DNS Server wrote (`dnscmd /ZoneExport`), whose A, AAAA and PTR records with
+    /// an aging mark `[AGE:n]` are candidates to become claimable (origin `ad`, no owner).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialect: Option<ZoneFileDialect>,
+    /// The claimable names of a Windows file: the operator's rule, the approval and the
+    /// page of the preview's listing. Without an approval an import makes nothing
+    /// claimable. Only with the `windows` dialect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimable: Option<ZoneFileClaimable>,
+}
+
+/// The claimable names of a Windows zone file: which candidates the operator takes, the
+/// approval of the set a preview listed, and the page of that listing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ZoneFileClaimable {
+    /// Only names at or below one of these (the owner of an A or AAAA RRset, every target
+    /// of a PTR RRset); at most 256.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub under: Vec<DnsName>,
+    /// Only addresses inside one of these prefixes (every address of an A or AAAA RRset,
+    /// the address a PTR RRset's name stands for); at most 256.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>, example = json!(["192.0.2.0/24"]))]
+    pub within: Vec<String>,
+    /// Never these names (the owner of an RRset, or a target of a PTR RRset); at most
+    /// 10,000.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except: Vec<DnsName>,
+    /// The approval: the `claimable_digest` of the preview, made with the same file and
+    /// rule. An import that writes makes claimable exactly the set the preview listed, and
+    /// is refused with `dns.import.claimable_changed` when the file, the zone or its
+    /// records give another set now. A dry run ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approve: Option<String>,
+    /// The page of a dry run's listing: the `claimable_next` of the page before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+    /// The size of a dry run's page: 1,000 when absent, at most 5,000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One RRset a Windows file makes claimable.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ClaimableName {
+    /// The owner name.
+    pub name: DnsName,
+    /// A, AAAA or PTR.
+    pub rtype: Rtype,
+    /// The line of the file where the RRset starts.
+    pub line: u32,
+    /// The computer account that may claim it (`PC01$`).
+    pub claimant: String,
+    /// The first four records (addresses, or the targets of a PTR RRset).
+    pub records: Vec<String>,
+    /// Records not shown.
+    pub more: u32,
+}
+
+/// Why a candidate of a Windows file stays static.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimHeldReason {
+    /// The apex, a locator name, a wildcard, a name with a `_` label, or a PTR to one.
+    Reserved,
+    /// A well-known service name (`wpad`, `isatap`), or a PTR to one.
+    ServiceName,
+    /// A name server of the zone, or a PTR to one.
+    NameServer,
+    /// The host name of a Tenko node, or a PTR to one.
+    TenkoNode,
+    /// The target of an MX, SRV, CNAME or DNAME record of the file.
+    ServiceTarget,
+    /// No computer can claim it (not directly below the apex; PTR targets naming
+    /// different hosts).
+    NotAHost,
+    /// The name holds other records, in the file or in the store.
+    OtherData,
+    /// Outside the operator's rule.
+    Rule,
+    /// The file has more than 250,000 candidates.
+    TooMany,
+    /// The import carried no approval.
+    NotApproved,
+}
+
+/// One candidate of a Windows file that stays static, and why.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ClaimHeldName {
+    /// The owner name.
+    pub name: DnsName,
+    /// The type.
+    pub rtype: Rtype,
+    /// The line of the file where the RRset starts.
+    pub line: u32,
+    /// Why it stays static.
+    pub reason: ClaimHeldReason,
 }
 
 // WP13.4: the dialect of an imported zone file.
@@ -356,8 +450,9 @@ pub struct ZoneFileImportReport {
     pub types: Vec<ImportTypeCount>,
     /// What the import could not take.
     pub losses: Vec<ImportLoss>,
-    /// Of the RRsets added or replaced, those imported with the origin `ad` (a Windows
-    /// file's records with an aging mark): claimable by the host they name.
+    /// The RRsets of a Windows file that become claimable by the host they name (origin
+    /// `ad`, no owner): in a dry run, those an approval of `claimable_digest` makes
+    /// claimable.
     #[serde(default)]
     pub claimable: u64,
     /// The serial after the write.
@@ -366,6 +461,25 @@ pub struct ZoneFileImportReport {
     /// The store revision of the write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<Revision>,
+    /// The digest that approves the claimable set (a dry run in the `windows` dialect):
+    /// send it as `claimable.approve` with the same file and rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimable_digest: Option<String>,
+    /// A page of the claimable RRsets in name order.
+    #[serde(default)]
+    pub claimable_names: Vec<ClaimableName>,
+    /// The cursor of the next page (`claimable.after`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimable_next: Option<String>,
+    /// The file has more than 250,000 candidates: none can become claimable.
+    #[serde(default)]
+    pub claimable_overflow: bool,
+    /// The candidates that stay static, every reason together.
+    #[serde(default)]
+    pub held_back: u64,
+    /// The first 1,000 of them in name order, with the reason.
+    #[serde(default)]
+    pub held_back_names: Vec<ClaimHeldName>,
 }
 
 /// The query of `GET /dns/zones/{id}/records/export`.

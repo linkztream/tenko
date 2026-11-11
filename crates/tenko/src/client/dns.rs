@@ -1036,11 +1036,29 @@ pub struct ImportArgs {
     /// Show what the import would do without writing.
     #[arg(long)]
     pub dry_run: bool,
-    /// The file is a Windows DNS Server export (`dnscmd /ZoneExport`): its records with an
-    /// aging mark `[AGE:n]` are imported with the origin `ad`, claimable by the host they
-    /// name, and its WINS records are reported as losses.
+    /// The file is a Windows DNS Server export (`dnscmd /ZoneExport`): its A, AAAA and PTR
+    /// records with an aging mark `[AGE:n]` are candidates to become claimable by the host
+    /// they name, and its WINS records are reported as losses. A dry run lists every name
+    /// that would become claimable and the digest that approves them; without
+    /// --approve-claimable the import brings every candidate in static.
     #[arg(long)]
     pub windows: bool,
+    /// Make claimable the names the dry run listed: the digest it printed, for the same
+    /// file and the same --claimable-* options. The import is refused when the file or the
+    /// zone gives another set now.
+    #[arg(long, value_name = "DIGEST", requires = "windows")]
+    pub approve_claimable: Option<String>,
+    /// Only names at or below this name become claimable (the owner of an address record,
+    /// the target of a PTR record); repeat for more.
+    #[arg(long, value_name = "NAME", requires = "windows")]
+    pub claimable_under: Vec<String>,
+    /// Only addresses inside this prefix become claimable (the address of an address
+    /// record, the address a PTR record's name stands for); repeat for more.
+    #[arg(long, value_name = "PREFIX", requires = "windows")]
+    pub claimable_within: Vec<String>,
+    /// This name never becomes claimable; repeat for more.
+    #[arg(long, value_name = "NAME", requires = "windows")]
+    pub claimable_except: Vec<String>,
     /// Seconds to wait for the import job.
     #[arg(long, value_name = "SECONDS", default_value_t = 300)]
     pub wait_secs: u64,
@@ -2146,6 +2164,151 @@ fn type_counts(report: &Value) -> Vec<(String, u64)> {
     }
 }
 
+/// The claimable part of a Windows import's report: what becomes (or became) claimable,
+/// name by name, the digest that approves it, and what stays static with the reason.
+fn render_claimable(report: &Value, dry: bool, out: &mut String) {
+    let count = |key: &str| report.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let list = |key: &str| {
+        report
+            .get(key)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let digest = report
+        .get("claimable_digest")
+        .and_then(Value::as_str)
+        .filter(|digest| !digest.is_empty());
+    if report
+        .get("claimable_overflow")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        out.push_str(
+            "claimable: none; the file has more than 250,000 records with an aging mark: \
+             import it in parts to approve claimable names\n",
+        );
+    }
+    let names = list("claimable_names");
+    if count("claimable") > 0 || digest.is_some() {
+        let _ = writeln!(
+            out,
+            "{} by their hosts (origin ad): {} RRset(s)",
+            if dry {
+                "would become claimable"
+            } else {
+                "made claimable"
+            },
+            count("claimable")
+        );
+        for entry in &names {
+            let mut records: Vec<String> = entry
+                .get("records")
+                .and_then(Value::as_array)
+                .map(|records| {
+                    records
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let more = entry.get("more").and_then(Value::as_u64).unwrap_or(0);
+            if more > 0 {
+                records.push(format!("and {more} more"));
+            }
+            let _ = writeln!(
+                out,
+                "  {} {} by {}: {} (line {})",
+                text(entry, &["name"]),
+                text(entry, &["rtype"]),
+                text(entry, &["claimant"]),
+                records.join(", "),
+                number(entry, &["line"]),
+            );
+        }
+        if count("claimable") > names.len() as u64 {
+            let _ = writeln!(
+                out,
+                "  ... and {} more",
+                count("claimable") - names.len() as u64
+            );
+        }
+        if let Some(digest) = digest {
+            if dry {
+                let _ = writeln!(
+                    out,
+                    "approve exactly these with: --approve-claimable {digest}"
+                );
+            } else {
+                let _ = writeln!(out, "approved digest: {digest}");
+            }
+        }
+    }
+    render_held(report, out);
+}
+
+/// The candidates of a Windows import that stay static, with the reason in words.
+fn render_held(report: &Value, out: &mut String) {
+    let count = |key: &str| report.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let held = report
+        .get("held_back_names")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if count("held_back") > 0 {
+        let _ = writeln!(
+            out,
+            "kept static (records with an aging mark that stay manual): {} RRset(s)",
+            count("held_back")
+        );
+        for entry in &held {
+            let _ = writeln!(
+                out,
+                "  {} {}: {} (line {})",
+                text(entry, &["name"]),
+                text(entry, &["rtype"]),
+                held_reason(text(entry, &["reason"])),
+                number(entry, &["line"]),
+            );
+        }
+        if count("held_back") > held.len() as u64 {
+            let _ = writeln!(
+                out,
+                "  ... and {} more",
+                count("held_back") - held.len() as u64
+            );
+        }
+        if held
+            .iter()
+            .any(|entry| text(entry, &["reason"]) == "not_approved")
+        {
+            out.push_str(
+                "  their computers cannot refresh them until an administrator deletes the \
+                 records and they register anew; preview with --dry-run and import with \
+                 --approve-claimable to make them claimable\n",
+            );
+        }
+    }
+}
+
+/// The reason a candidate stays static, in words.
+fn held_reason(code: &str) -> &'static str {
+    match code {
+        "reserved" => "the apex, a locator, a wildcard or a name with a _ label",
+        "service_name" => "a well-known service name (wpad, isatap)",
+        "name_server" => "a name server of the zone",
+        "tenko_node" => "the host name of a Tenko node",
+        "service_target" => "the target of an MX, SRV, CNAME or DNAME record",
+        "not_a_host" => "no computer can claim it",
+        "other_data" => "the name holds other records",
+        "rule" => "outside the --claimable-* options",
+        "too_many" => "too many records with an aging mark",
+        "not_approved" => "not approved",
+        _ => "held back",
+    }
+}
+
 fn render_report(report: &Value) -> String {
     let count = |key: &str| report.get(key).and_then(Value::as_u64).unwrap_or(0);
     let dry = report
@@ -2161,13 +2324,7 @@ fn render_report(report: &Value) -> String {
         count("replaced"),
         count("removed"),
     );
-    if count("claimable") > 0 {
-        let _ = writeln!(
-            out,
-            "claimable by their hosts (origin ad): {} RRset(s)",
-            count("claimable")
-        );
-    }
+    render_claimable(report, dry, &mut out);
     let types = type_counts(report);
     if !types.is_empty() {
         let list: Vec<String> = types
@@ -2291,6 +2448,22 @@ async fn import(target: &Target, args: &ImportArgs) -> Result<Output, Failure> {
     let mut body = json!({ "zone_file": zone_file, "replace": args.replace });
     if args.windows {
         body["dialect"] = json!("windows");
+        let mut claimable = json!({});
+        if !args.claimable_under.is_empty() {
+            claimable["under"] = json!(args.claimable_under);
+        }
+        if !args.claimable_within.is_empty() {
+            claimable["within"] = json!(args.claimable_within);
+        }
+        if !args.claimable_except.is_empty() {
+            claimable["except"] = json!(args.claimable_except);
+        }
+        if let Some(digest) = &args.approve_claimable
+            && !args.dry_run
+        {
+            claimable["approve"] = json!(digest);
+        }
+        body["claimable"] = claimable;
     }
     if let Some(scope) = &args.scope {
         body["scope"] = json!(scope);
@@ -2302,7 +2475,43 @@ async fn import(target: &Target, args: &ImportArgs) -> Result<Output, Failure> {
     // No `Idempotency-Key`: the idempotency middleware compares a retry by reading its body
     // into a fingerprint, at most 32 MiB, less than a zone file may have, and an import is
     // checked again before it starts.
-    let answer: Value = client.post(&path, &body, None).await?;
+    let mut answer: Value = client.post(&path, &body, None).await?;
+    if args.dry_run && args.windows {
+        // The whole listing: the next pages of 5,000 until the last, so that what the
+        // operator reads (or a script keeps) is every name the digest approves.
+        let mut pages = 0;
+        while let Some(next) = answer
+            .get("claimable_next")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        {
+            // 250,000 candidates at most, 5,000 a page.
+            pages += 1;
+            if pages > 60 {
+                return Err(Failure::other("the claimable listing does not end"));
+            }
+            body["claimable"]["after"] = json!(next);
+            body["claimable"]["limit"] = json!(5_000);
+            let page: Value = client.post(&path, &body, None).await?;
+            if page.get("claimable_digest") != answer.get("claimable_digest") {
+                return Err(Failure::other(
+                    "the claimable names changed while they were listed; run the dry run again",
+                ));
+            }
+            let more = page
+                .get("claimable_names")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if let Some(names) = answer
+                .get_mut("claimable_names")
+                .and_then(Value::as_array_mut)
+            {
+                names.extend(more);
+            }
+            answer["claimable_next"] = page.get("claimable_next").cloned().unwrap_or(Value::Null);
+        }
+    }
     if args.dry_run {
         if target.json {
             return Ok(Output::json(&answer));
@@ -3768,6 +3977,29 @@ mod tests {
         assert!(text.contains("preview: 2 RRset(s) added, 1 replaced, 0 removed"));
         assert!(text.contains("records per type: A 2, MX 1"));
         assert!(text.contains("line 12: [dns.import.class] class CH"));
+    }
+
+    #[test]
+    fn a_windows_preview_lists_the_claimable_names_and_the_digest() {
+        let report = json!({
+            "dry_run": true, "added": 3, "replaced": 0, "removed": 0, "types": [],
+            "losses": [], "claimable": 1, "claimable_digest": "ab".repeat(32),
+            "claimable_names": [{"name": "ws01.corp.example.test", "rtype": "A", "line": 2,
+                "claimant": "WS01$", "records": ["192.0.2.21"], "more": 0}],
+            "held_back": 2,
+            "held_back_names": [
+                {"name": "wpad.corp.example.test", "rtype": "A", "line": 3,
+                 "reason": "service_name"},
+                {"name": "ws02.corp.example.test", "rtype": "A", "line": 4,
+                 "reason": "not_approved"}],
+        });
+        let text = render_report(&report);
+        assert!(text.contains("would become claimable by their hosts (origin ad): 1 RRset(s)"));
+        assert!(text.contains("  ws01.corp.example.test A by WS01$: 192.0.2.21 (line 2)"));
+        assert!(text.contains(&format!("--approve-claimable {}", "ab".repeat(32))));
+        assert!(text.contains("kept static (records with an aging mark that stay manual): 2"));
+        assert!(text.contains("  wpad.corp.example.test A: a well-known service name"));
+        assert!(text.contains("deletes the records and they register anew"));
     }
 
     #[test]

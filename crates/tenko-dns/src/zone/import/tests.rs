@@ -68,6 +68,7 @@ fn request(zone: &Zone, text: String) -> ImportRequest {
         text,
         replace: false,
         dialect: Dialect::Rfc1035,
+        claim: crate::zone::import::ClaimRequest::default(),
     }
 }
 
@@ -139,6 +140,8 @@ async fn imports_beyond_the_staging_bound_are_refused() {
                 journal: service.config.journal,
                 max_generate: 1,
                 state: None,
+                approved: None,
+                held: (0, Vec::new()),
             },
         );
         if let Some(job) = job {

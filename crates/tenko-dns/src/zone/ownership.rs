@@ -82,6 +82,30 @@ pub fn keeps_no_owner(zone: &DnsName, name: &DnsName) -> bool {
     is_locator(zone, name) || name.labels().next() == Some("*")
 }
 
+/// The first labels of well-known service names that a client finds by name alone and
+/// that the Windows DNS Server answers for nobody by default (its global query block list):
+/// web proxy auto-discovery (`wpad`) and the ISATAP router (`isatap`). Whoever holds such a
+/// name in a domain serves the proxy or the tunnel router of every client that looks for it,
+/// so a zone file import never makes one claimable.
+pub const SERVICE_LABELS: [&str; 2] = ["wpad", "isatap"];
+
+/// Whether the first label of `name` is one of [`SERVICE_LABELS`].
+pub fn is_service_name(name: &DnsName) -> bool {
+    name.labels().next().is_some_and(|first| {
+        SERVICE_LABELS
+            .iter()
+            .any(|known| first.eq_ignore_ascii_case(known))
+    })
+}
+
+/// Whether `name` is one no computer may ever claim from a zone file import, whatever the
+/// file says: a name that keeps no owner ([`keeps_no_owner`]: the apex, a locator name, a
+/// wildcard), and every name with a label that starts with `_` (a service or protocol label,
+/// which no computer's host name has).
+pub fn is_reserved(zone: &DnsName, name: &DnsName) -> bool {
+    keeps_no_owner(zone, name) || name.labels().any(|label| label.starts_with('_'))
+}
+
 /// The filter of an owner list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnerFilter {
@@ -711,5 +735,36 @@ mod tests {
             assert!(!keeps_no_owner(&zone, &name(host)), "{host}");
         }
         assert!(keeps_no_owner(&zone, &name("*.corp.example.test")));
+    }
+
+    /// The names a zone file import never makes claimable by name alone: the apex, the
+    /// locator names, a wildcard, any name with a `_` label, and the service names.
+    #[test]
+    fn the_reserved_and_service_names() {
+        let zone = name("corp.example.test");
+        for reserved in [
+            "corp.example.test",
+            "_ldap._tcp.corp.example.test",
+            "gc._msdcs.corp.example.test",
+            "*.corp.example.test",
+            "_sip._tls.corp.example.test",
+            "host._tcp.corp.example.test",
+        ] {
+            assert!(is_reserved(&zone, &name(reserved)), "{reserved}");
+        }
+        for host in ["pc01.corp.example.test", "wpad.corp.example.test"] {
+            assert!(!is_reserved(&zone, &name(host)), "{host}");
+        }
+        for service in [
+            "wpad.corp.example.test",
+            "WPAD.corp.example.test",
+            "isatap.corp.example.test",
+            "isatap.branch.corp.example.test",
+        ] {
+            assert!(is_service_name(&name(service)), "{service}");
+        }
+        for host in ["wpad2.corp.example.test", "pc01.wpad.corp.example.test"] {
+            assert!(!is_service_name(&name(host)), "{host}");
+        }
     }
 }

@@ -1137,23 +1137,53 @@ struct Row {
 #[allow(clippy::too_many_lines, reason = "the table is the test")]
 async fn dns_28_e46_the_remaining_rows() {
     let lab = lab().await;
-    // The Windows file first: what it marks `ad` and what it keeps `manual`.
-    let (job, preview) = lab
+    // The Windows file first: the preview lists what it would mark `ad` and what it keeps
+    // `manual`, and the import carries the approval of that list.
+    let request = |approval| tenko_dns::zone::import::ImportRequest {
+        zone: lab.zone.id,
+        scope: ScopeName::DEFAULT,
+        text: WINDOWS_FILE.to_owned(),
+        replace: false,
+        dialect: tenko_dns::zone::zonefile::Dialect::Windows,
+        claim: tenko_dns::zone::import::ClaimRequest {
+            approval,
+            ..Default::default()
+        },
+    };
+    let preview = lab
         .zones
-        .start_import(
-            &cx(),
-            tenko_dns::zone::import::ImportRequest {
-                zone: lab.zone.id,
-                scope: ScopeName::DEFAULT,
-                text: WINDOWS_FILE.to_owned(),
-                replace: false,
-                dialect: tenko_dns::zone::zonefile::Dialect::Windows,
-            },
-        )
+        .preview_import(&cx(), &request(None))
+        .await
+        .expect("preview");
+    assert_eq!(preview.claimable, 2, "ws05 and ws06; mixed stays manual");
+    let listed: Vec<(&str, &str)> = preview
+        .claimable_names
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.claimant.as_str()))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("ws05.corp.example.test", "WS05$"),
+            ("ws06.corp.example.test", "WS06$")
+        ]
+    );
+    assert_eq!(
+        preview.held_back, 1,
+        "mixed: a static record beside the aged one"
+    );
+    assert_eq!(preview.lost, 1, "the WINS record");
+    let digest = preview
+        .claimable_digest
+        .as_deref()
+        .expect("a digest")
+        .parse()
+        .expect("the digest reads");
+    let (job, _) = lab
+        .zones
+        .start_import(&cx(), request(Some(digest)))
         .await
         .expect("import");
-    assert_eq!(preview.claimable, 2, "ws05 and ws06; mixed stays manual");
-    assert_eq!(preview.lost, 1, "the WINS record");
     let direct = lab.zones.direct_jobs().expect("direct jobs");
     let report =
         tenko_dns::zone::import::report_of(&direct.job(job).expect("job")).expect("report");

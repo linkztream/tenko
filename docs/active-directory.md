@@ -123,7 +123,7 @@ Windows secures a dynamic update with GSS-TSIG (RFC 3645): the client negotiates
 | A locator name (every name of the `_msdcs` zone, the `_ldap`, `_kerberos`, `_kpasswd` and `_gc` names, `DomainDnsZones`, `ForestDnsZones`, the domain's apex) or a wildcard | Privileged principals only; it keeps no owner |
 | A new name | Any principal of the realm; it becomes the owner (a member of DnsUpdateProxy leaves it without one) |
 | An owned name | The owner and privileged principals |
-| A name imported from the Windows export with an aging timestamp (a record a client registered, origin `ad`) | The computer it names, which claims it (`PC01$` claims `pc01.corp.example.test` and the PTR names that point at it), and privileged principals |
+| A name imported from the Windows export with an aging timestamp (a record a client registered) that the import approved as claimable (origin `ad`) | The computer it names, which claims it (`PC01$` claims `pc01.corp.example.test` and the PTR names that point at it), and privileged principals |
 | A static record (an administrator's, imported without a timestamp, or written in Tenko) | Privileged principals only; the owner of the name beside it does not change it |
 
 Privileged principals are the members of the groups the zone names by SID: Domain Admins (RID 512), Domain Controllers (516), Enterprise Admins (519) and DnsAdmins. A privileged principal that writes a name without an owner becomes its owner, as on Windows, so the controllers own their host records. The zone's **Owners** tab lists every owner, since when and how the name was taken, and lets an administrator release a name (it becomes claimable again by the computer it names) or give it to another account, for example after a computer was rebuilt under a new account.
@@ -306,7 +306,7 @@ Way back: none needed; nothing was changed.
 
 ### Step 2. Bring the zones into Tenko, and build the scopes without serving them
 
-Tenko imports the zones from the files the Windows DNS Server exports, in its Windows dialect ([dns.md](dns.md) section 4). Those files mark each record that carries an aging timestamp, the records a client or a controller registered, with `[AGE:n]`; Tenko imports their A, AAAA and PTR records (the ones a client registers for itself) with the origin `ad` and without an owner, so that each computer claims its own names at its next registration (section 4), and keeps the records without a timestamp, an administrator's static records, as `manual`, which only privileged principals change. (A zone transfer carries no timestamps: everything it brings would be static, and no member could refresh its own name. When the in-place flip of a secondary zone exists, the takeover plan replaces this export and import by it.)
+Tenko imports the zones from the files the Windows DNS Server exports, in its Windows dialect ([dns.md](dns.md) section 4). Those files mark each record that carries an aging timestamp, the records a client or a controller registered, with `[AGE:n]`; Tenko offers their A, AAAA and PTR records (the ones a client registers for itself) as candidates: the names you approve are imported with the origin `ad` and without an owner, so that each computer claims its own names at its next registration (section 4), and the records without a timestamp, an administrator's static records, are imported as `manual`, which only privileged principals change. Nothing becomes claimable unless you read the list of names and approve it, as below. (A zone transfer carries no timestamps: everything it brings would be static, and no member could refresh its own name. When the in-place flip of a secondary zone exists, the takeover plan replaces this export and import by it.)
 
 Windows sets a timestamp only on records registered while aging is on for the zone. If step 1 showed aging off, turn it on and let the clients and the controllers register once more before the export (the controllers do every hour and at `nltest /dsregdns`; members at their next refresh, every 24 hours, or at `ipconfig /registerdns`):
 
@@ -333,10 +333,35 @@ Copy the files to a host that reaches the node. On the node, one primary zone pe
 tenko dns zone create corp.example.test --kind primary --ns tenko1.corp.example.test \
   --mname tenko1.corp.example.test --rname hostmaster.corp.example.test --serial date_counter
 tenko dns import corp.example.test corp.example.test.dns --windows --dry-run
-tenko dns import corp.example.test corp.example.test.dns --windows
 ```
 
-Repeat for `_msdcs.corp.example.test` and each reverse zone. Read the dry run: the records per type, `claimable by their hosts (origin ad)` with the count of the registered RRsets, and the losses. Records of a class other than IN, records outside the zone and names the model refuses (`dns.zonefile.class`, `.outside_zone`, `.data`) are listed and not imported; an AD zone should have none. WINS and WINS-R records, if the zone has them, are not served (CON-12) and are listed as `dns.zonefile.wins`. The SOA of the file becomes the zone's SOA (its `mname` is still `dc1` until step 3), and the NS set of the file replaces the zone's, so the apex NS names the controllers until step 3. An RRset that mixes records with and without a timestamp is imported as static.
+Read the dry run before you import. Besides the records per type and the losses, it prints the names that would become claimable, one line per RRset with the computer account that may claim it:
+
+```
+would become claimable by their hosts (origin ad): 2 RRset(s)
+  pc01.corp.example.test A by PC01$: 192.0.2.101 (line 41)
+  srv1.corp.example.test A by SRV1$: 192.0.2.20 (line 57)
+approve exactly these with: --approve-claimable <digest>
+kept static (records with an aging mark that stay manual): 1 RRset(s)
+  dc1.corp.example.test A: a name server of the zone (line 12)
+```
+
+Check each name in the first list: it should be a computer you expect, whose own account will register it. The second list holds the aged records that Tenko keeps static whatever the file says, each with its reason in words: the apex, the locator names, wildcards and names with a `_` label, `wpad` and `isatap`, the zone's name servers (the controllers, if they are the NS hosts of the zone: they are privileged and still change their records), the host names of the Tenko nodes, the targets of MX, SRV, CNAME and DNAME records, names that are not directly below the apex, and names that hold any other record. Section 4 of [dns.md](dns.md) has the list with the reason codes. If a name should not be claimable, narrow the set and run the dry run again: `--claimable-under NAME` takes only names at or below NAME (for a PTR record, its targets), `--claimable-within PREFIX` only addresses inside PREFIX (for a PTR record, the address its name stands for) and `--claimable-except NAME` never NAME; each can be repeated. Then import with the digest the dry run printed, with the same `--claimable-*` options:
+
+```
+tenko dns import corp.example.test corp.example.test.dns --windows --approve-claimable <digest>
+```
+
+The import computes the list again and refuses with `dns.import.claimable_changed` when the file, the zone or its records now give another list; run the dry run again and read it. A script takes the digest from the dry run's JSON (`--json` goes after the subcommand) and passes it on, which is safe only after you have read the list once:
+
+```
+digest=$(tenko dns import corp.example.test corp.example.test.dns --windows --dry-run --json | jq -r .claimable_digest)
+tenko dns import corp.example.test corp.example.test.dns --windows --approve-claimable "$digest"
+```
+
+Without the approval the import still works but brings every aged record in static (`manual`). That is safe, and its cost is that a computer whose record came in static cannot refresh it: its name stays as it is until you delete the record in Tenko, so that the computer registers the name anew and owns it. A file with more than 250,000 aged records cannot be approved at all (`dns.import.claimable_too_many`): import it in parts.
+
+Repeat for `_msdcs.corp.example.test` and each reverse zone (the same dry run, the same reading of the lists). The dry run also reports the records per type and the losses. Records of a class other than IN, records outside the zone and names the model refuses (`dns.zonefile.class`, `.outside_zone`, `.data`) are listed and not imported; an AD zone should have none. WINS and WINS-R records, if the zone has them, are not served (CON-12) and are listed as `dns.zonefile.wins`. The SOA of the file becomes the zone's SOA (its `mname` is still `dc1` until step 3), and the NS set of the file replaces the zone's, so the apex NS names the controllers until step 3. An RRset that mixes records with and without a timestamp is imported as static.
 
 **Variant: by zone transfer.** For the address-list footing of section 4.2, where no name has an owner, the zones can also come by transfer: Tenko takes them by AXFR as secondary zones, exports them as zone files, and creates primary zones from the files. Every record is then `manual`. The transfer has the access path and the limits of [dns.md](dns.md) section 10.13; Windows DNS does not sign transfers, so the access rests on the address restriction on both sides. On a controller, allow the transfer of each zone to the node and nothing else:
 
@@ -379,7 +404,7 @@ tenko dhcp option set scope:<prefix-id> 3=c0000201 6=c0000235 15=636f72702e65786
 
 (`c0000201` is `192.0.2.1`, `c0000235` is `192.0.2.53`, the third value is `corp.example.test`.) A scope does not answer until the gateway relays to the node, so building them changes nothing on the networks. Leave DDNS for step 10.
 
-Check: `tenko dns zone list` shows the primary zones with their record counts; `tenko dns record list corp.example.test --origin ad` lists the registered names and `--origin manual` the static ones; for a few names, `dig @192.0.2.53 <name>` and `dig @192.0.2.5 <name>` give the same answer; the audit log has `dns.record.import` for each import.
+Check: `tenko dns zone list` shows the primary zones with their record counts; `tenko dns record list corp.example.test --origin ad` lists the approved names and `--origin manual` the static ones, among them the names held back; for a few names, `dig @192.0.2.53 <name>` and `dig @192.0.2.5 <name>` give the same answer; the audit log has `dns.record.import` for each import.
 
 Way back: delete the Tenko zones (`tenko dns zone delete`) (and with the transfer variant, on the controllers set `-SecureSecondaries NoTransfer -Notify NoNotify`). The controllers' zones were never changed.
 
@@ -500,7 +525,7 @@ Do the second controller after the first checks out.
 
 **Secure only on the clients, too.** Once both controllers register, the update security level of the DNS client may be set to secure only by group policy (Computer Configuration, Administrative Templates, Network, DNS Client, *Update security level*: *Only secure*, `UpdateSecurityLevel` = 256), which saves the refused unsigned attempt; check with `nltest /dsregdns` and `nltest /dsquerydns` again.
 
-**The members register themselves.** Every member, servers with a static address included, registers its A and PTR records with a secure update at its start, every 24 hours and at `ipconfig /registerdns`, once its DNS server is Tenko (step 7): a name imported in step 2 with a timestamp is claimed by its computer at that registration, and a new name is owned by the computer that creates it. Nothing is added by hand. A member's static record that came over without a timestamp stays an administrator's, and a name holding one is given to no computer: delete the record in Tenko if the member should register it, and the member owns the name it registers next.
+**The members register themselves.** Every member, servers with a static address included, registers its A and PTR records with a secure update at its start, every 24 hours and at `ipconfig /registerdns`, once its DNS server is Tenko (step 7): a name imported in step 2 with a timestamp and approved in the dry run's list is claimed by its computer at that registration, and a new name is owned by the computer that creates it. Nothing is added by hand. A member's static record that came over without a timestamp, or with a timestamp but not approved, stays an administrator's, and a name holding one is given to no computer: delete the record in Tenko if the member should register it, and the member owns the name it registers next.
 
 Way back: set each controller's DNS list back to its own address (`Set-DnsClientServerAddress ... -ServerAddresses 192.0.2.5`) and run `nltest /dsregdns` again; the controller's own DNS Server answers the SOA with itself again and registers in its own zone. The records the controllers wrote into Tenko are harmless and go with the zone.
 
