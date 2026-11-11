@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # The round `recursion` of the DNS lab (WP10.1, dns-recursion-plan.md section 2.12): the
 # node under test resolves iteratively from the lab's own root, served by a second Tenko
-# node (`authority`), with the quirk responders beside it. smoke.sh sources this file and
+# node (`authority`), with the quirk responders beside it. driver.sh sources this file and
 # runs `recursion` for ROUNDS=recursion; README.md lists the rows.
 #
 # The zones are signed (NSEC, NSEC3 where said) and their DS records published in the
@@ -56,7 +56,7 @@ on() {
 # profile; prints the session cookie.
 setup_node() {
   local token password body
-  token="$(compose exec -T "$1" /usr/local/bin/tenko setup token --data-dir /var/lib/tenko | tr -d '\r\n')"
+  token="$(ctl setup-token "$1" | tr -d '\r\n')"
   [[ -n "$token" ]] || fail "recursion: no setup token on $1"
   password="$(admin_password)"
   body="{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"labadmin\", \"display_name\": \"Lab Admin\", \"password\": \"$password\"}, \"host_name\": \"$3\", \"language\": \"en\"}"
@@ -69,8 +69,10 @@ setup_node() {
 # own (a name outside its zones is REFUSED), the query log on as the witness.
 write_authority_config() {
   mkdir -p "$work/authority"
+  # A new file: the round rfc5011 writes it again, and the last one is read-only.
+  rm -f "$work/authority/authority.toml"
   cat >"$work/authority/authority.toml" <<TOML
-# The lab root's authority node (written by smoke.sh, round recursion).
+# The lab root's authority node (written by driver.sh, round recursion).
 roles = "controller,dns"
 modules = ["ipam", "dns"]
 
@@ -99,9 +101,9 @@ TOML
 
 # The configuration of the node under test: recursion from the lab root, no forwarder.
 write_recursion_config() {
-  rm -f "$work/tenko.toml"
-  cat >"$work/tenko.toml" <<TOML
-# The configuration of the round "recursion" (written by smoke.sh). Validation is on (the
+  rm -f "$node_dir/tenko.toml"
+  cat >"$node_dir/tenko.toml" <<TOML
+# The configuration of the round "recursion" (written by driver.sh). Validation is on (the
 # default); the lab root's DS replaces the shipped root anchor once the node is up (WP10.2).
 roles = "controller,dns"
 modules = ["ipam", "dns"]
@@ -128,7 +130,7 @@ ${recursion_extra:-}
 [dns.cache]
 prefetch = false
 TOML
-  chmod 0444 "$work/tenko.toml"
+  chmod 0444 "$node_dir/tenko.toml"
 }
 
 soa_lab() {
@@ -322,16 +324,10 @@ recursion() {
   declare -A zone_ids=()
   m40=()
   step "round recursion: iterative resolution from the lab root, then validation (E33)"
-  if [[ -z "${QUIRK_IMAGE:-}" ]]; then
-    export QUIRK_IMAGE=tenko-quirk:lab
-    # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
-    tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
-    docker build -f "$here/quirk.Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
-      -t "$QUIRK_IMAGE" "$repo"
-  fi
+  # smoke.sh built the quirk responders' image (QUIRK_IMAGE) before the run.
   write_authority_config
-  compose --profile recursion up -d --no-build authority quirk-noedns quirk-case quirk-tc \
-    quirk-slow quirk-spoof quirk-oob quirk-sub quirk-strip quirk-ent client bind bind-resolver delv
+  ctl up authority quirk-noedns quirk-case quirk-tc quirk-slow quirk-spoof quirk-oob \
+    quirk-sub quirk-strip quirk-ent bind bind-resolver >/dev/null
   retry "$wait_secs" "the authority to become healthy" healthy authority
   auth_cookie="$(setup_node authority "$authority_ip" a.root.test)"
   [[ -n "$auth_cookie" ]] || fail "recursion: the authority's setup did not sign in: $(cat "$work/api.out")"
@@ -342,8 +338,7 @@ recursion() {
     zone_ids[$name]="$id"
     import_zone "$id" "$here_recursion/zones/$file"
   done
-  retry 120 "the authority to answer www.example.test" \
-    bash -c "[[ \"\$(docker compose -f '$compose_file' exec -T client dig @$authority_ip +short +time=2 +tries=1 www.example.test)\" == 192.0.2.10 ]]"
+  retry 120 "the authority to answer www.example.test" answers "$authority_ip" 53 www.example.test 192.0.2.10
   # The DS records in the parents, once the children are signed: the root's child test,
   # test's child example.test and example.test's signed children; bogus.example.test gets
   # a DS that matches no key.
@@ -366,7 +361,7 @@ recursion() {
   bind_zones_setup
 
   write_recursion_config
-  compose up -d --no-build --force-recreate tenko
+  recreate tenko
   retry "$wait_secs" "tenko to become healthy" healthy tenko
   node_cookie="$(setup_node tenko "$tenko_ip" tenko.example.test)"
   [[ -n "$node_cookie" ]] || fail "recursion: the node's setup did not sign in: $(cat "$work/api.out")"

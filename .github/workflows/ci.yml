@@ -480,12 +480,13 @@ jobs:
         run: echo "::notice::deploy/compose/lab-cluster/smoke.sh does not exist yet; WP3.1c adds the compose lab."
       # WP6.1: the DNS lab with BIND 9 (deploy/compose/lab-dns): the resolver rounds over
       # plain DNS, DoT and DoH and the round of zone transfers both ways. It builds the image
-      # (the static musl binary) and needs openssl, curl and python3 on the runner.
+      # (the static musl binary) and the lab driver's image, and drives the lab from inside
+      # its network (deploy/compose/driver): the runner needs Docker with compose and bash.
       - name: DNS compose lab smoke
         run: bash deploy/compose/lab-dns/smoke.sh
       # WP10.2: the recursion rounds (E33, E34, E36, E41) against the lab root, with the
-      # image of the quirk responders built once here; the first run leaves it for the
-      # second.
+      # image of the quirk responders built once here; the first run leaves it (and the
+      # driver's image, which this run rebuilds from the cache) for the second.
       - name: DNS compose lab smoke, the recursion rounds
         run: |
           docker build -f deploy/compose/lab-dns/quirk.Dockerfile -t tenko-quirk:lab .

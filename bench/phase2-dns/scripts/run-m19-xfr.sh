@@ -64,12 +64,16 @@ if ! KEEP=1 ROUNDS=xfr bash "$LAB/smoke.sh" >"$smoke_log" 2>&1; then
   grep -E "^(PASS|FAIL)|smoke:" "$smoke_log" >&2 || true
   die "the lab smoke failed; see $smoke_log"
 fi
-LAB_DIR="$(sed -n 's/^    LAB_DIR=\([^ ]*\) .*/\1/p' "$smoke_log" | head -n 1)"
-[ -n "$LAB_DIR" ] && [ -f "$LAB_DIR/session.env" ] || die "no kept lab in $smoke_log"
-export LAB_DIR
+compose() { docker compose -f "$LAB/compose.yml" --profile recursion "$@"; }
+# The kept lab's files are in its volume (/work in the driver, the service client); the
+# session of the transfer round is copied out to a directory of this run. The measurement
+# itself calls the API from this host, which must reach the lab network (a Linux Docker
+# host).
+LAB_DIR="$(mktemp -d)"
+compose exec -T client cat /work/session.env >"$LAB_DIR/session.env" 2>/dev/null &&
+  [ -s "$LAB_DIR/session.env" ] || die "no kept lab after $smoke_log"
 # shellcheck disable=SC1091
 . "$LAB_DIR/session.env"
-compose() { docker compose -f "$LAB/compose.yml" "$@"; }
 teardown() {
   compose logs --no-color --timestamps bind tenko >"$ROOT/results/raw/m19-$STAMP-services.log" 2>&1 || true
   compose down --volumes --timeout 10 >/dev/null 2>&1 || true

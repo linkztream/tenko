@@ -1,27 +1,28 @@
 # shellcheck shell=bash
 # The validation rows of the round `recursion` (E33) and the round `rfc5011` (E34) of the
-# DNS lab (WP10.2, dns-recursion-plan.md sections 2.3, 2.4 and 2.12). smoke.sh sources this
+# DNS lab (WP10.2, dns-recursion-plan.md sections 2.3, 2.4 and 2.12). driver.sh sources this
 # file after recursion.sh; recursion() calls bind_zones_setup, anchor_setup and
-# validation_rows, and smoke.sh runs rfc5011 for ROUNDS=rfc5011. README.md lists the rows.
+# validation_rows, and driver.sh runs rfc5011 for ROUNDS=rfc5011. README.md lists the rows.
 #
-# The second validator is delv from the BIND image (service `delv`), with the lab root's DS
-# in LAB_DIR/delv/root.key: every state Tenko reports is checked against delv's verdict for
-# the same name through the same server. BIND signs the zones bind.example.test (the
-# independent signer), optout.example.test (NSEC3 opt-out, with an unsigned child),
-# expired.example.test (signatures in the past), badsig.example.test (a spoiled signature)
-# and keytrap.example.test (sixty-four DNSKEY records whose tag collides with the signing
-# key's) with its own keys per run; their DS records go into example.test on the authority.
+# The second validator is delv of BIND's own build, in the driver, with the lab root's DS in
+# the lab volume's delv/root.key: every state Tenko reports is checked against delv's
+# verdict for the same name through the same server. BIND's tools sign the zones
+# bind.example.test (the independent signer), optout.example.test (NSEC3 opt-out, with an
+# unsigned child), expired.example.test (signatures in the past), badsig.example.test (a
+# spoiled signature) and keytrap.example.test (sixty-four DNSKEY records whose tag collides
+# with the signing key's) with keys of the run, and BIND serves them; their DS records go
+# into example.test on the authority.
 
 bind_resolver_ip=203.0.113.20
 strip_ip=203.0.113.19
-delv_ip=203.0.113.12
 bind_signed_zones=(bind optout expired badsig keytrap)
 
-# bind_sh <script>: runs a shell script in the bind container, in the zones directory.
-bind_sh() { compose exec -T bind sh -ec "cd /var/lib/lab-zones && $1"; }
+# bind_sh <script>: runs a shell script with BIND's tools (the driver's), in the zones
+# directory BIND serves from (the lab volume's zones/, /var/lib/lab-zones in bind).
+bind_sh() { (cd "$work/zones" && sh -ec "$1"); }
 
 # zsk_tag <zone>: the key tag of the zone's zone-signing key (the key file without the SEP
-# flag) in LAB_DIR/zones/keys.
+# flag) in the lab volume's zones/keys.
 zsk_tag() {
   local file
   for file in "$work/zones/keys/K$1".+013+*.key; do
@@ -144,8 +145,6 @@ bind_zones_setup() {
     sign keytrap.example.test -P
     chmod 0644 *.signed
     chmod 0666 badsig.example.test.signed'
-  # The lab's shell rewrites this file, which BIND's user wrote in the container: on a Linux
-  # host the two are different users, hence the mode above (as for the zone files it copies).
   spoil_signature "$work/zones/badsig.example.test.signed" www.badsig.example.test >/dev/null
   {
     printf '// WP10.2: the zones BIND signs with its own keys (written by validation.sh).\n'
@@ -155,9 +154,8 @@ bind_zones_setup() {
     printf 'zone "child.optout.example.test" { type primary; file "/var/lib/lab-zones/child.optout.example.test.zone"; };\n'
   } >"$work/bind/recursion.conf"
   chmod 0444 "$work/bind/recursion.conf"
-  compose restart bind >/dev/null 2>&1
-  retry 60 "BIND to serve bind.example.test" \
-    bash -c "[[ \"\$(docker compose -f '$compose_file' exec -T client dig @$bind_ip +short +time=2 +tries=1 www.bind.example.test)\" == 192.0.2.50 ]]"
+  ctl restart bind >/dev/null 2>&1
+  retry 60 "BIND to serve bind.example.test" answers "$bind_ip" 53 www.bind.example.test 192.0.2.50
   # The DS records of the signed zones go into example.test on the authority.
   on authority
   for z in "${bind_signed_zones[@]}"; do
@@ -194,11 +192,13 @@ r = ds[0]
 print("%s %s %s %s" % (r["key_tag"], r["algorithm"], r["digest_type"], r["digest"]))' "$work/api.out"
 }
 
-# write_delv_anchor <ds>: the trust anchor file of delv (LAB_DIR/delv/root.key).
+# write_delv_anchor <ds>: the trust anchor file of delv (the lab volume's delv/root.key).
 write_delv_anchor() {
   local tag alg dt digest
   read -r tag alg dt digest <<<"$1"
   mkdir -p "$work/delv"
+  # A new file: the last one is read-only.
+  rm -f "$work/delv/root.key"
   printf 'trust-anchors {\n  . static-ds %s %s %s "%s";\n};\n' "$tag" "$alg" "$dt" "$digest" >"$work/delv/root.key"
   chmod 0444 "$work/delv/root.key"
   chmod 0755 "$work/delv"
@@ -223,7 +223,7 @@ anchor_setup() {
 # name through the server (delv asks with CD and validates itself).
 delv_verdict() {
   local out
-  out="$(compose exec -T delv delv "@$1" -p "$2" -a /lab/root.key +root=. "$3" "${4:-A}" 2>&1)" || true
+  out="$(delv "@$1" -p "$2" -a "$work/delv/root.key" +root=. "$3" "${4:-A}" 2>&1)" || true
   if grep -q "fully validated" <<<"$out"; then
     echo secure
   elif grep -q "unsigned answer" <<<"$out"; then
@@ -425,9 +425,9 @@ validation_rows() {
 
 # The configuration of the node under test for the roll: the hold-down in seconds.
 write_rfc5011_config() {
-  rm -f "$work/tenko.toml"
-  cat >"$work/tenko.toml" <<TOML
-# The configuration of the round "rfc5011" (written by smoke.sh): the RFC 5011 hold-downs
+  rm -f "$node_dir/tenko.toml"
+  cat >"$node_dir/tenko.toml" <<TOML
+# The configuration of the round "rfc5011" (written by driver.sh): the RFC 5011 hold-downs
 # are seconds under the Lab profile, so that the roll of the lab root's KSK is followed in
 # minutes.
 roles = "controller,dns"
@@ -454,11 +454,11 @@ rfc5011_hold_down_secs = 20
 [dns.cache]
 prefetch = false
 TOML
-  chmod 0444 "$work/tenko.toml"
+  chmod 0444 "$node_dir/tenko.toml"
 }
 
 # root_zone_file: the lab root's records with the DS of `test`, unsigned, into
-# LAB_DIR/zones/root.zone.
+# the lab volume's zones/root.zone.
 root_zone_file() {
   local records
   on authority
@@ -479,7 +479,7 @@ for r in d.get("ds") or []:
   chmod 0666 "$work/zones/root.zone"
 }
 
-# sign_root: signs LAB_DIR/zones/root.zone with the keys in LAB_DIR/zones/keys (every KSK
+# sign_root: signs the lab volume's zones/root.zone with the keys in the lab volume's zones/keys (every KSK
 # there signs the DNSKEY set) and imports it into the authority's root zone, replacing it.
 sign_root() {
   local body
@@ -558,18 +558,11 @@ for e in d.get('items', []):
     c = ((e.get('draft') or {}).get('details') or {}).get('context', {})
     print('T+%3ds  audit: key %s %s' % (seconds(e['at']) - $1, c.get('key_tag'), c.get('state')))"
 }
-volume_name() { echo "${COMPOSE_PROJECT_NAME:-tenkodnslab}_$1"; }
-copy_volume() {
-  # copy_volume <from> <to>: a copy of a data volume through the BIND image's shell.
-  docker volume create "$2" >/dev/null
-  docker run --rm --entrypoint sh -v "$1:/from" -v "$2:/to" "${BIND_IMAGE:-internetsystemsconsortium/bind9:9.20}" -c 'rm -rf /to/* && cp -a /from/. /to/'
-}
+# copy_volume <from> <to>: a copy of a data volume of the lab (the host makes it).
+copy_volume() { ctl copy-volume "$1" "$2" >/dev/null; }
 # fresh_service <service> <volume>: the service's container and data volume removed, so
 # that it starts as a new installation (an earlier round of the same run set it up).
-fresh_service() {
-  compose rm -sf "$1" >/dev/null 2>&1 || true
-  docker volume rm "$(volume_name "$2")" >/dev/null 2>&1 || true
-}
+fresh_service() { ctl fresh "$1" "$2" >/dev/null 2>&1 || true; }
 
 rfc5011() {
   local name file signing id parent ds_a tag_a tag_b t0 t1 t2 t3 t4 backup_at timeline
@@ -579,7 +572,7 @@ rfc5011() {
   fresh_service authority authority-data
   fresh_service tenko tenko-data
   write_authority_config
-  compose --profile recursion up -d --no-build authority client bind delv
+  ctl up authority bind >/dev/null
   retry "$wait_secs" "the authority to become healthy" healthy authority
   auth_cookie="$(setup_node authority "$authority_ip" a.root.test)"
   [[ -n "$auth_cookie" ]] || fail "rfc5011: the authority's setup did not sign in: $(cat "$work/api.out")"
@@ -595,8 +588,7 @@ rfc5011() {
     zone_ids[$name]="$id"
     import_zone "$id" "$here_recursion/zones/$file"
   done
-  retry 120 "the authority to answer www.example.test" \
-    bash -c "[[ \"\$(docker compose -f '$compose_file' exec -T client dig @$authority_ip +short +time=2 +tries=1 www.example.test)\" == 192.0.2.10 ]]"
+  retry 120 "the authority to answer www.example.test" answers "$authority_ip" 53 www.example.test 192.0.2.10
   retry 60 "the DS of example.test" publish_ds "${zone_ids[example.test]}" "${zone_ids[test]}" example.test
   for name in nsec3.example.test wild.example.test; do
     retry 60 "the DS of $name" publish_ds "${zone_ids[$name]}" "${zone_ids[example.test]}" "$name"
@@ -611,7 +603,7 @@ rfc5011() {
   ok "rfc5011: lab root" "imported, signed by BIND's tools with KSK $tag_a; DS $ds_a"
 
   write_rfc5011_config
-  compose up -d --no-build --force-recreate tenko
+  recreate tenko
   retry "$wait_secs" "tenko to become healthy" healthy tenko
   node_cookie="$(setup_node tenko "$tenko_ip" tenko.example.test)"
   [[ -n "$node_cookie" ]] || fail "rfc5011: the node's setup did not sign in: $(cat "$work/api.out")"
@@ -631,10 +623,10 @@ rfc5011() {
   timeline+=("$(printf 'T+%3ds  KSK %s published, seen as AddPend' $((t1 - t0)) "$tag_b")")
   row r11.pending.warning "the pending key shows as dns.trust_anchor.pending" system_warns dns.trust_anchor.pending
   # A backup of the node before the roll: a copy of its data volume while it is stopped.
-  compose stop tenko >/dev/null 2>&1
+  ctl stop tenko >/dev/null 2>&1
   backup_at="$(date +%s)"
-  copy_volume "$(volume_name tenko-data)" "$(volume_name tenko-backup)"
-  compose start tenko >/dev/null 2>&1
+  copy_volume tenko-data tenko-backup
+  ctl start tenko >/dev/null 2>&1
   retry "$wait_secs" "tenko to be healthy again" healthy tenko
   row r11.hold_down "after the hold-down the new anchor is Valid, before the old is revoked" within 60 anchor_is "$tag_b" valid
   t2="$(date +%s)"
@@ -660,15 +652,15 @@ rfc5011() {
   row r11.never.failed "validation never failed during the roll (the bogus counter is 0 for the root)" never_bogus
 
   # A node started from the backup follows the roll on start.
-  compose stop tenko >/dev/null 2>&1
-  copy_volume "$(volume_name tenko-backup)" "$(volume_name tenko-data)"
-  compose start tenko >/dev/null 2>&1
+  ctl stop tenko >/dev/null 2>&1
+  copy_volume tenko-backup tenko-data
+  ctl start tenko >/dev/null 2>&1
   retry "$wait_secs" "the restored node to be healthy" healthy tenko
   node_cookie="$(curl -sS -o /dev/null -w '' "http://$tenko_ip:8443/api/v1/system/status" >/dev/null; printf '%s' "$node_cookie")"
   row r11.restore.old "the restored node starts from the backup: $tag_b is the key it had learned before" within 30 learned_before "$tag_b" "$backup_at"
   row r11.restore.follow "the restored node makes $tag_b Valid and $tag_a Revoked without an operator" within 90 anchors_are "$tag_b" valid "$tag_a" revoked
   row r11.restore.secure "www.example.test is secure on the restored node" within 30 secure_now
-  docker volume rm "$(volume_name tenko-backup)" >/dev/null 2>&1 || true
+  ctl volume-rm tenko-backup >/dev/null 2>&1 || true
   printf '\n==> E34: the roll\n'
   printf '%s\n' "${timeline[@]}"
   summary+=("${timeline[@]}")

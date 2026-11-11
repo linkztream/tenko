@@ -12,10 +12,17 @@ lab, not a deployment example: `smoke.sh` generates the certificate for one run,
 profile makes the resolver open to every client, and every name and address is a
 documentation value (`203.0.113.0/24`, `example.test`).
 
-It is a Linux Docker host lab. It runs on Docker Desktop too; the maintainer's host is WSL
-Ubuntu 24.04 with Docker as root. It needs Docker with the compose plugin (and buildx to
-build the image) and `openssl` on the host; the round `xfr` also needs `curl` and `python3`
-on the host (see the transfer round below). `dig` and `nsupdate` come from the BIND image.
+The lab drives itself from inside its own network: the service `client` is the lab driver
+(BIND 9.20's own image with bash, GNU coreutils, grep and sed, `curl`, `openssl` and
+`python3` added), and every step that talks to the lab runs there at `203.0.113.4`: `dig`,
+`delv` and `nsupdate`, the API with `curl`, the certificates with `openssl`, the DNSSEC keys
+and signatures with BIND's tools, `python3` for JSON. The driver asks the host for container
+operations (start, recreate, restart, stop, health, logs, the setup token, the network cut of
+serve-stale, the volume copy of the round `rfc5011`) over its standard input and output; it
+has no Docker socket. The host needs Docker with the compose plugin (buildx for the builds)
+and bash, nothing else: no `openssl`, `curl` or `python3`, and no route to the lab network. It
+runs from Git Bash on Windows against Docker Desktop as well as on a Linux Docker host; the
+maintainer's host is WSL Ubuntu 24.04 with Docker as root.
 
 ## What runs
 
@@ -23,19 +30,29 @@ on the host (see the transfer round below). `dig` and `nsupdate` come from the B
 |---|---|---|
 | `bind` | The official ISC image (`internetsystemsconsortium/bind9:9.20`), authoritative for `example.test` (`named.conf`, `example.test.zone`), no recursion. Plain DNS on 53, DNS over TLS on 853, DNS over HTTPS on 443 (`/dns-query`), the last two with the lab certificate for `bind.example.test` and `203.0.113.2`. For the round `xfr` it is also the secondary and the primary of the zones in `transfer.conf`, with the TSIG key of the run in `keys.conf` and the primary zone files from `zones/`. The query log goes to its standard error | `203.0.113.2`; `bind` on the lab network |
 | `tenko` | One node with `--roles controller,dns`, the DNS module on and the Lab profile. The default forwarder is BIND over the transport of the round. The DNS role listens on `0.0.0.0:5300` (above 1024, so the container has no capability); the API is plain HTTP on 8443 (the Lab profile allows it), on the lab network only. In the round `xfr` it also serves DNS over TLS and zone transfers over TLS (XoT) on 8530, with the lab certificate for `tenko.example.test` | `203.0.113.3:5300` (UDP and TCP), `203.0.113.3:8530` (TLS, round `xfr`) |
-| `client` | The BIND image again, for `dig` and `nsupdate`; it asks Tenko and BIND, and changes BIND's zones in the round `xfr` | `docker compose exec client dig ...` |
+| `client` | The lab driver (image `tenko-lab-driver:local`, built from `deploy/compose/driver/Dockerfile`): `dig`, `delv`, `nsupdate`, `curl` and BIND's signing tools; it asks Tenko and BIND, calls Tenko's API, and changes BIND's zones in the round `xfr`. The lab volume is mounted at `/work` | `203.0.113.4`; `docker compose exec client ...` |
 
 The zone has `www.example.test A 192.0.2.10`, `api.example.test A 192.0.2.11`, the apex SOA
 and NS, and `ns` and `bind` at `203.0.113.2`. Every TTL is 5 seconds, the SOA's negative
 TTL too, so that an entry expires, and serve-stale has something to do, within seconds.
 
 The lab network is the bridge `tenkodnslab_lab`, `203.0.113.0/24`, with fixed addresses for
-the three containers. Nothing is published on the host. Tenko runs with a read-only root file
-system and no capabilities, its key-encryption key is a Docker secret
-(`[kek] provider = "file"`), and breach lookups and update checks are off: the lab has no
-route out.
+the three containers (BIND, Tenko and the driver). Nothing is published on the host.
+Tenko runs with a read-only root file system and no capabilities, its key-encryption key is a
+file of the lab volume (`secrets/kek`, mounted at `/run/secrets`; `[kek] provider = "file"`),
+and breach lookups and update checks are off: the lab has no route out.
 
-The configuration of a round is `tenko.toml` in the work directory, mounted into the
+The files of a run live in the compose volume `lab` (`tenkodnslab_lab`), which the driver
+mounts at `/work`; each service mounts only its part: `tls/` (the lab CA and the
+certificates; BIND's `/etc/bind/tls`), `secrets/kek` (the key-encryption key; `/run/secrets`
+in `tenko` and `authority`), `tenko/` (`tenko.toml`, `ca.pem`, `tenko.pem`, `tenko.key`,
+`root.hints`; `/lab` in `tenko`), `bind/` (`keys.conf`, `recursion.conf`; BIND's
+`/etc/bind/lab`), `zones/` (BIND's writable zone files and the signing keys; BIND's
+`/var/lib/lab-zones`), `authority/` (`authority.toml`; `/lab` in `authority`) and
+`delv/root.key`. `session.env` is `/work/session.env` in the driver. `docker compose down
+--volumes` removes the volume with the lab.
+
+The configuration of a round is `tenko.toml` in `tenko/` of the lab volume, mounted into the
 container. The part that changes is the default forwarder:
 
 ```toml
@@ -68,13 +85,16 @@ bash deploy/compose/lab-dns/smoke.sh                     # builds tenko:lab firs
 IMAGE=tenko:lab bash deploy/compose/lab-dns/smoke.sh     # reuses an image
 ```
 
-It builds the image from `deploy/Dockerfile` (a while: the web UI bundle and a release
-binary), generates a lab CA, the BIND certificate and a key-encryption key with `openssl`
-into a temporary directory, starts BIND and the client, and asks BIND over its three
-transports (`dig`, `dig +tls`, `dig +https`) before Tenko is involved. Then three rounds,
-`plain`, `dot` and `doh` (the fourth, `xfr`, is described below). Each writes `tenko.toml`, recreates the `tenko` container on it
-(`docker compose up -d --force-recreate tenko`, the data volume stays), waits until it
-answers, and checks:
+`smoke.sh` is the host side. It builds the images (`tenko:lab` from `deploy/Dockerfile`, a
+while: the web UI bundle and a release binary; the driver image `tenko-lab-driver:local` from
+`deploy/compose/driver/Dockerfile`; and `tenko-quirk:lab` when `ROUNDS` names `recursion`),
+starts the service `client`, which is the lab driver, and runs `driver.sh` in it. The driver
+generates a lab CA, the BIND certificate and a key-encryption key with `openssl` into the lab
+volume, has the host start BIND, and asks BIND over its three transports (`dig`, `dig +tls`,
+`dig +https`) before Tenko is involved. Then three rounds, `plain`, `dot` and `doh` (the
+fourth, `xfr`, is described below). Each writes `tenko.toml`, has the host recreate the
+`tenko` container on it (`docker compose up -d --force-recreate tenko`, the data volume
+stays), waits until it answers, and checks:
 
 - `www.example.test` resolves to `192.0.2.10`; the same query two seconds later has a lower
   TTL, and BIND's query log shows one query for the name in the round: the second answer came
@@ -90,11 +110,13 @@ passed, cut BIND off the lab network with `docker network disconnect`, query
 `www.example.test` and check that an answer with the stale TTL of RFC 8767 (30 seconds)
 comes back in at most 3 seconds, connect BIND again (`docker network connect --alias bind
 --ip 203.0.113.2`) and check that within 30 seconds an answer with a TTL of at most 5 comes
-back: the refresh. It prints a summary line per step, tears everything down (containers,
-volume, network, work directory), also when a step fails, after printing the logs of every
-service and the last `tenko.toml`.
+back: the refresh. It tears everything down (containers, volumes, network), also when a step
+fails. After a failure it first prints the logs of every service and the last `tenko.toml`;
+the summary, one line per step, is printed at the end, after the logs.
 
-Settings: `IMAGE`, `BIND_IMAGE` (the BIND image, for the server and for `dig`), `ROUNDS`
+Settings: `IMAGE`, `BIND_IMAGE` (the image of the BIND server and of `bind-resolver`; `dig`
+comes from the driver), `DRIVER_IMAGE` (an existing image of the lab driver; default: build
+`tenko-lab-driver:local`), `ROUNDS`
 (default `plain dot doh xfr update`; the serve-stale steps run after `doh`, the transfer rows in
 `xfr`, the update rows in `update`; the round `recursion` runs only when named, best alone),
 `QUIRK_IMAGE` (an existing image of the quirk responders for the round `recursion`; default:
@@ -104,16 +126,16 @@ differs and the network of the other is gone.
 
 ## The transfer round (WP6.1)
 
-The round `xfr` checks the zone transfers of [docs/dns.md](../../../docs/dns.md) section 10 against BIND in both directions: BIND as the secondary of zones Tenko holds as primary zones, and Tenko as the secondary of zones BIND holds as primary zones. Besides the tools above it needs `curl` and `python3` on the host, and a host that reaches the lab network `203.0.113.0/24` (a Linux Docker host does; Docker Desktop usually does not route to container addresses, so the round wants a Linux Docker host; it was run on WSL Ubuntu 24.04 with Docker as root). The host uses Tenko's API only; `dig` and `nsupdate` run in the `client` container.
+The round `xfr` checks the zone transfers of [docs/dns.md](../../../docs/dns.md) section 10 against BIND in both directions: BIND as the secondary of zones Tenko holds as primary zones, and Tenko as the secondary of zones BIND holds as primary zones. It needs nothing beyond the smoke's own requirements: the API calls (`curl`), `dig` and `nsupdate` all run in the `client` container, the lab driver, inside the lab network; it was run on WSL Ubuntu 24.04 with Docker as root.
 
 What it sets up:
 
-- **Tenko.** The configuration of the round is the one of the plain round plus `[dns.tls]`: DNS over TLS, and with it zone transfers over TLS (XoT), on `0.0.0.0:8530` with the lab certificate for `tenko.example.test` (`tenko.pem` and `tenko.key` in the work directory, signed by the lab CA). Port 8530 is above 1024, so the container still needs no capability.
-- **The API.** The first-run setup under the Lab profile runs through the API with curl from the host (`POST /api/v1/setup` with the token that `tenko setup token` prints in the container), and the session cookie of the new administrator signs the later requests.
-- **The key.** A TSIG key `xfr.example.test` (`hmac-sha256`) is generated for the run. Its secret is written to `LAB_DIR/bind/keys.conf`, which `named.conf` includes, and imported into Tenko (`POST /dns/keys` with the secret). Nothing of it is in the repository.
+- **Tenko.** The configuration of the round is the one of the plain round plus `[dns.tls]`: DNS over TLS, and with it zone transfers over TLS (XoT), on `0.0.0.0:8530` with the lab certificate for `tenko.example.test` (`tenko.pem` and `tenko.key` in `tenko/` of the lab volume, signed by the lab CA). Port 8530 is above 1024, so the container still needs no capability.
+- **The API.** The first-run setup under the Lab profile runs through the API with `curl` in the driver (`POST /api/v1/setup` with the token that `tenko setup token` prints in the container, which the host fetches for the driver), and the session cookie of the new administrator signs the later requests.
+- **The key.** A TSIG key `xfr.example.test` (`hmac-sha256`) is generated for the run. Its secret is written to `bind/keys.conf` in the lab volume, which `named.conf` includes, and imported into Tenko (`POST /dns/keys` with the secret). Nothing of it is in the repository.
 - **The access list.** `lab-secondaries` has one entry, the key `xfr.example.test`. The primary zones of Tenko name it in `transfer.allow` with `require_tsig`, and name BIND (`203.0.113.2`, port 53, the key) as the NOTIFY target.
 - **The zones.** Tenko holds the primary zones `out.example.test` (with 300 records of about 100 octets, so that a transfer spans several messages), `xot.example.test` (`xot` on: TLS only), `catalog.tenko.test` (a catalog zone) and `member.tenko.test`; and the secondary zones `in.example.test` (from BIND, port 53), `inxot.example.test` (from BIND's DNS over TLS port 853, with `xot` and the `tls_name` `bind.example.test`) and `catalog.bind.test` (a catalog zone). BIND holds the other side.
-- **BIND.** `transfer.conf` (included by `named.conf`) lists the zones of the round: the secondary zones of Tenko's, with the key and a `tls` block for XoT; the primary zones `in.example.test`, `inxot.example.test`, `catalog.bind.test` and `member.bind.test`, with `allow-transfer` for the key, `allow-update` for the key (so that the smoke can change them with `nsupdate`) and NOTIFY to Tenko, signed; and the secondary zone `big.example.test` of the measurement M19. The zone files of the primary zones are in `zones/`; the smoke copies them to `LAB_DIR/zones`, writable for BIND, which runs as an unprivileged user. `named.conf` also lists Tenko's catalog zone under `catalog-zones`.
+- **BIND.** `transfer.conf` (included by `named.conf`) lists the zones of the round: the secondary zones of Tenko's, with the key and a `tls` block for XoT; the primary zones `in.example.test`, `inxot.example.test`, `catalog.bind.test` and `member.bind.test`, with `allow-transfer` for the key, `allow-update` for the key (so that the smoke can change them with `nsupdate`) and NOTIFY to Tenko, signed; and the secondary zone `big.example.test` of the measurement M19. The zone files of the primary zones are in `zones/`; the driver copies them to `zones/` of the lab volume, writable for BIND, which runs as an unprivileged user. `named.conf` also lists Tenko's catalog zone under `catalog-zones`.
 
 The round prints one `PASS` or `FAIL` line per row and fails the smoke when a row fails (the check is repeated with a trace in the log):
 
@@ -131,11 +153,11 @@ The round prints one `PASS` or `FAIL` line per row and fails the smoke when a ro
 | `in.read_only` | A secondary zone refuses record changes | A batch change of `in.example.test` answers 409 `dns.zone.secondary` |
 | `in.status` | The transfer state of the API shows a successful transfer | `GET /dns/zones/{id}/transfer` of `inxot.example.test` has a `serial`, a `last_success` for the primary and no `last_error` |
 
-The measurement M19 (a change of 100 records on a zone of 100,000 records reaches BIND within 5 seconds, and only the change is transferred) runs on the same lab: `bench/phase2-dns/scripts/run-m19-xfr.sh` starts the smoke with `KEEP=1` and reads `LAB_DIR/session.env` (below). Its results are in `bench/phase2-dns/results/2026-10-18-m19-xfr.md`.
+The measurement M19 (a change of 100 records on a zone of 100,000 records reaches BIND within 5 seconds, and only the change is transferred) runs on the same lab: `bench/phase2-dns/scripts/run-m19-xfr.sh` starts the smoke with `KEEP=1` and copies `/work/session.env` out of the client container (below); the measurement itself still calls the API from the host and wants a Linux Docker host. Its results are in `bench/phase2-dns/results/2026-10-18-m19-xfr.md`.
 
 ## The update round (WP6.2)
 
-The round `update` checks the dynamic updates of [docs/dns.md](../../../docs/dns.md) section 13 with BIND's `nsupdate` from the `client` container against a zone of Tenko. It needs what the round `xfr` needs (`curl` and `python3` on the host, a host that reaches the lab network). After the round `xfr` it uses the node and the session that round set up; alone (`ROUNDS=update`) it starts Tenko with the configuration of the round `xfr` and runs the first-run setup itself.
+The round `update` checks the dynamic updates of [docs/dns.md](../../../docs/dns.md) section 13 with BIND's `nsupdate` from the `client` container against a zone of Tenko. It needs what the round `xfr` needs, which is nothing beyond the smoke's own requirements. After the round `xfr` it uses the node and the session that round set up; alone (`ROUNDS=update`) it starts Tenko with the configuration of the round `xfr` and runs the first-run setup itself.
 
 What it sets up, through the API:
 
@@ -158,12 +180,12 @@ The round prints one `PASS` or `FAIL` line per row and fails the smoke when a ro
 | `upd.origin` | What the update wrote | The records of the zone through the API: `host2` has the origin `dynamic` and the key's name |
 | `upd.ipam` | The origin rule | Deleting `cam.dyn.example.test A`, which IPAM manages, is REFUSED and the address stays |
 
-With `KEEP=1` the work directory's `session.env` also holds `upd_key`, `upd_secret`, `upd_acl` and `upd_zone` for hand tests:
+With `KEEP=1` the lab volume's `session.env` (`/work/session.env` in the client container) also holds `upd_key`, `upd_secret`, `upd_acl` and `upd_zone` for hand tests:
 
 ```sh
-. "$LAB_DIR/session.env"
-printf 'server 203.0.113.3 5300\nzone dyn.example.test\nupdate add printer.dyn.example.test 60 IN A 192.0.2.30\nsend\n' |
-  docker compose exec -T client nsupdate -y "hmac-sha256:$upd_key:$upd_secret"
+docker compose exec client bash -c '. /work/session.env
+printf "server 203.0.113.3 5300\nzone dyn.example.test\nupdate add printer.dyn.example.test 60 IN A 192.0.2.30\nsend\n" |
+  nsupdate -y "hmac-sha256:$upd_key:$upd_secret"'
 docker compose exec client dig @203.0.113.3 -p 5300 printer.dyn.example.test
 ```
 
@@ -172,25 +194,27 @@ The measurement M21 (the update rate end to end) does not run on the lab: `bench
 ## Keeping the lab for hand tests
 
 `KEEP=1` leaves the lab running after the smoke, also after a failure (with the configuration of
-the last round), and prints the work directory and the command that tears it down. After the
-round `xfr` the work directory also holds `session.env` (mode 0600), which a shell reads with
-`. "$LAB_DIR/session.env"`: the session `cookie` of the API, the name of the TSIG key (`xfr_key`)
-and its secret (`xfr_secret`), the identifier of the access list (`acl`) and the address of
-the API (`api_base`), for hand tests and for the measurement M19:
+the last round), and prints the command that tears it down. The files of the run stay in the
+lab volume, which is at `/work` in the client container. After the round `xfr` it also holds
+`session.env` (mode 0600), which a shell in the client reads with `. /work/session.env`: the
+session `cookie` of the API, the name of the TSIG key (`xfr_key`) and its secret
+(`xfr_secret`), the identifier of the access list (`acl`) and the address of the API
+(`api_base`), for hand tests and for the measurement M19:
 
 ```sh
 KEEP=1 IMAGE=tenko:lab bash deploy/compose/lab-dns/smoke.sh
-cd deploy/compose/lab-dns && export LAB_DIR=<work>
+cd deploy/compose/lab-dns
 docker compose exec client dig @203.0.113.3 -p 5300 www.example.test
-docker compose exec client dig @203.0.113.2 +tls +tls-ca=/lab/ca.pem +tls-hostname=bind.example.test www.example.test
+docker compose exec client dig @203.0.113.2 +tls +tls-ca=/work/tls/ca.pem +tls-hostname=bind.example.test www.example.test
 docker compose logs bind                                # the queries Tenko sent
 docker compose down --volumes
 ```
 
-To change the transport or the cache settings, edit `<work>/tenko.toml` (the smoke made it
-read-only: `chmod u+w` first) and recreate the container:
-`docker compose up -d --force-recreate tenko`. The settings are read at start. The faults
-are one command each:
+To change the transport or the cache settings, change `/work/tenko/tenko.toml` in the client
+container. The smoke made it read-only: run `docker compose exec client chmod u+w
+/work/tenko/tenko.toml` first, change it (for example with `vi` in the client), and recreate
+the container: `docker compose up -d --force-recreate tenko`. The settings are read at start.
+The faults are one command each:
 
 ```sh
 docker network disconnect tenkodnslab_lab "$(docker compose ps -q bind)"               # BIND gone
@@ -208,7 +232,7 @@ the lab network does not have.
 
 The round `recursion` checks the recursive resolver of [docs/dns-resolver.md](../../../docs/dns-resolver.md) section 10 against a root of the lab's own, so that no check touches the real root servers ([docs/plans/dns-recursion-plan.md](../../../docs/plans/dns-recursion-plan.md) section 2.12). It runs the rows of E36 (priming at start and again, the work budget, and the cases that fail), E41 (the RPZ triggers NSDNAME and NSIP on a delegation the resolver followed) and E33 (validation: every state with `delv` agreeing, the KeyTrap zone, the forwarded answers; `validation.sh`, WP10.2). Then the rows of E35 (`denial.sh`, WP10.3): QNAME minimization on the wire, with the authority's query log and the quirk responder `quirk-ent` (203.0.113.21, `ent.quirk.example.test`, a server that answers NXDOMAIN for its empty non-terminals and prints every question it gets) as the witnesses, and the denial cache (RFC 8198 and RFC 8020): a second name in a range an NSEC or NSEC3 record covers, a NODATA, a wildcard and a name below an NXDOMAIN of the unsigned zone are answered with no query to the authority, and `delv` validates the synthesized answers. At the end of the round the node is restarted twice, with `qname_minimization = "strict"` and `aggressive_nsec = false`, then with `qname_minimization = "off"`, for the rows of those settings, and once more with the defaults. With `M42=1` the round also measures M42 ([bench/phase2-dns/scripts/run-m42-denial.sh](../../../bench/phase2-dns/scripts/run-m42-denial.sh)). The rows are listed in [docs/dns-resolver.md](../../../docs/dns-resolver.md) section 11.7. The roll of E34 is the round `rfc5011` below.
 
-Like the rounds `xfr` and `update` it needs `curl` and `python3` on the host and a host that reaches the lab network `203.0.113.0/24` (a Linux Docker host). It runs best alone:
+Like the rounds `xfr` and `update` it runs entirely in the driver and needs nothing on the host beyond the smoke's own requirements. It runs best alone:
 
 ```sh
 ROUNDS=recursion bash deploy/compose/lab-dns/smoke.sh                       # builds tenko:lab and tenko-quirk:lab first
@@ -221,14 +245,13 @@ IMAGE=tenko:lab QUIRK_IMAGE=tenko-quirk:lab ROUNDS=recursion bash deploy/compose
 
 | Service | What | Reached at |
 |---|---|---|
-| `authority` | A second Tenko node (`--roles controller,dns`, the Lab profile, its own data volume `authority-data`, configuration `LAB_DIR/authority/authority.toml`: DNS on port 53, `[dns.recursion] enabled = false`, the query log on with addresses as the witness). The round sets it up through its API and creates the lab root `.` (NS `a.root.test`, glue `203.0.113.10`), the TLD `test`, `example.test` and its children `nsec3`, `wild`, `dname`, `cname`, `big`, `insecure` and `bogus`, with their records from `recursion/zones/`. The zones are signed online (NSEC; NSEC3 with zero iterations for `nsec3.example.test`; `insecure.example.test` unsigned) and the DS records are published in the parents; the DS of `bogus.example.test` has a digest that matches no key. It also holds the delegations of the failure cases: `lame.example.test` to `bind.example.test` (BIND serves `example.test`, not this zone), `loop.example.test` and `loop2.example.test` (each the other's name server, no glue), the TLD `unreachable` to `203.0.113.250` (where nothing answers) and the six zones under `quirk.example.test`, delegated with glue | `203.0.113.10:53` |
-| `bind` | As in the other rounds; here the target of the lame delegation, and (WP10.2) the server of the zones it signs with its own keys per run: `bind.example.test` (the independent signer of E33, NSEC), `optout.example.test` (NSEC3 with opt-out) and its unsigned child `child.optout.example.test`, `expired.example.test` (signed with an expiration in the past), `badsig.example.test` (the signature of `www` spoiled after signing) and `keytrap.example.test` (sixty-four DNSKEY records whose key tag collides with the zone-signing key's). `validation.sh` writes the zone files from `recursion/bind/`, generates the keys and signs with `dnssec-keygen` and `dnssec-signzone` in the container (`LAB_DIR/zones`, `named.conf` includes `LAB_DIR/bind/recursion.conf`), restarts BIND and publishes the DS records in `example.test` on the authority | `203.0.113.2` |
-| `bind-resolver` | WP10.2: BIND as a recursive resolver with validation off, resolving from the lab root (`recursion/bind-resolver.conf`): the upstream of the forwarding rule whose answers the node validates (the forwarded rows), and `delv`'s path for them | `203.0.113.20` |
+| `authority` | A second Tenko node (`--roles controller,dns`, the Lab profile, its own data volume `authority-data`, configuration `authority/authority.toml` in the lab volume: DNS on port 53, `[dns.recursion] enabled = false`, the query log on with addresses as the witness). The round sets it up through its API and creates the lab root `.` (NS `a.root.test`, glue `203.0.113.10`), the TLD `test`, `example.test` and its children `nsec3`, `wild`, `dname`, `cname`, `big`, `insecure` and `bogus`, with their records from `recursion/zones/`. The zones are signed online (NSEC; NSEC3 with zero iterations for `nsec3.example.test`; `insecure.example.test` unsigned) and the DS records are published in the parents; the DS of `bogus.example.test` has a digest that matches no key. It also holds the delegations of the failure cases: `lame.example.test` to `bind.example.test` (BIND serves `example.test`, not this zone), `loop.example.test` and `loop2.example.test` (each the other's name server, no glue), the TLD `unreachable` to `203.0.113.250` (where nothing answers) and the six zones under `quirk.example.test`, delegated with glue | `203.0.113.10:53` |
+| `bind` | As in the other rounds; here the target of the lame delegation, and (WP10.2) the server of the zones it signs with its own keys per run: `bind.example.test` (the independent signer of E33, NSEC), `optout.example.test` (NSEC3 with opt-out) and its unsigned child `child.optout.example.test`, `expired.example.test` (signed with an expiration in the past), `badsig.example.test` (the signature of `www` spoiled after signing) and `keytrap.example.test` (sixty-four DNSKEY records whose key tag collides with the zone-signing key's). `validation.sh` writes the zone files from `recursion/bind/`, generates the keys and signs with `dnssec-keygen` and `dnssec-signzone` in the driver, on `zones/` of the lab volume (`named.conf` includes `bind/recursion.conf` of the lab volume), has the host restart BIND and publishes the DS records in `example.test` on the authority | `203.0.113.2` |
+| `bind-resolver` | WP10.2: BIND as a recursive resolver with validation off, resolving from the lab root (`recursion/bind-resolver.conf`): the upstream of the forwarding rule whose answers the node validates (the forwarded rows), and `delv`'s path for them. It takes `BIND_IMAGE` like `bind` | `203.0.113.20` |
 | `quirk-strip` | WP10.2: the quirk responder as a proxy in front of `bind-resolver` (`--proxy 203.0.113.20 --strip-dnssec`) that leaves the RRSIG, NSEC and NSEC3 records out of every answer: the upstream that makes a rule's answers bogus and sets `dns.forwarder.strips_dnssec` | `203.0.113.19` |
 | `quirk-noedns`, `quirk-case`, `quirk-tc`, `quirk-slow`, `quirk-spoof`, `quirk-oob`, `quirk-sub` | The quirk responders: the engine's example authoritative server in quirk mode, one container per misbehavior, each authoritative for one zone (the SOA and NS at the apex, `www` with `192.0.2.7` and `2001:db8::7`, REFUSED outside). Flags and zones below | `203.0.113.11`, `.13`, `.14`, `.15`, `.16`, `.17`, `.18` |
 | `tenko` | The node under test, with `--roles controller,dns`. Its configuration is below | `203.0.113.3:5300` |
-| `client` | `dig`, as in the other rounds | `docker compose exec client dig ...` |
-| `delv` | The BIND image idling: the second validator of E33. `validation.sh` writes the lab root's DS into `LAB_DIR/delv/root.key` (a `trust-anchors` statement) and runs `delv @<server> -a /lab/root.key +root=.` for every validation row, through the node under test or through `bind-resolver` for the forwarded rows; `delv` asks with CD and validates by itself, and its verdict (`fully validated`, `unsigned answer`, `resolution failed`) must agree with the state Tenko reports | `203.0.113.12` |
+| `client` | The lab driver, as in the other rounds: `dig`, `delv`, `nsupdate`, `curl` and BIND's signing tools. It is also the second validator of E33: `validation.sh` writes the lab root's DS into `delv/root.key` of the lab volume (a `trust-anchors` statement) and runs `delv @<server> -a /work/delv/root.key +root=.` for every validation row, through the node under test or through `bind-resolver` for the forwarded rows; `delv` asks with CD and validates by itself, and its verdict (`fully validated`, `unsigned answer`, `resolution failed`) must agree with the state Tenko reports | `203.0.113.4`; `docker compose exec client dig ...` |
 
 | Quirk service | Address | Zone | Flags | What it does |
 |---|---|---|---|---|
@@ -240,7 +263,7 @@ IMAGE=tenko:lab QUIRK_IMAGE=tenko-quirk:lab ROUNDS=recursion bash deploy/compose
 | `quirk-oob` | `203.0.113.17` | `oob.quirk.example.test` | `--referral sub.oob.quirk.example.test=ns.elsewhere.test`, `--glue ns.elsewhere.test=203.0.113.66` | Refers `sub.oob.quirk.example.test` to a name server whose glue is out of bailiwick and points at an address where nothing answers |
 | `quirk-sub` | `203.0.113.18` | `sub.oob.quirk.example.test` | none | The real server behind the referral; its address is the A record of `ns.elsewhere.test` in the zone `test` |
 
-The configuration of the node under test is written by the round (`LAB_DIR/tenko.toml`); there is no `[dns] forwarders`:
+The configuration of the node under test is written by the round (`tenko/tenko.toml` in the lab volume); there is no `[dns] forwarders`:
 
 ```toml
 [dns]
@@ -318,7 +341,7 @@ After the rows the round prints the heading `E33: the states with delv` (one lin
 
 ## The RFC 5011 round (WP10.2)
 
-The round `rfc5011` (`ROUNDS=rfc5011`; `validation.sh`) rolls the lab root's KSK and watches the node follow it without an operator (E34). The lab root is created on the authority in `imported` mode and signed per step with BIND's tools in the `bind` container (`dnssec-keygen`, `dnssec-signzone`, `dnssec-revoke`; the zone file holds the DS of `test`, which Tenko signs online as in the round `recursion`), so that the REVOKE bit of RFC 5011 is real; the node under test runs with `[dns.recursion] rfc5011_hold_down_secs = 20`, which makes the hold-downs seconds and the service's refresh pace with them (Lab only).
+The round `rfc5011` (`ROUNDS=rfc5011`; `validation.sh`) rolls the lab root's KSK and watches the node follow it without an operator (E34). The lab root is created on the authority in `imported` mode and signed per step with BIND's tools in the driver, on `zones/` of the lab volume (`dnssec-keygen`, `dnssec-signzone`, `dnssec-dsfromkey`, `dnssec-revoke`; the zone file holds the DS of `test`, which Tenko signs online as in the round `recursion`), so that the REVOKE bit of RFC 5011 is real; the node under test runs with `[dns.recursion] rfc5011_hold_down_secs = 20`, which makes the hold-downs seconds and the service's refresh pace with them (Lab only).
 
 | Row | What is checked |
 |---|---|
@@ -336,7 +359,7 @@ To look at the lab afterwards, `KEEP=1` leaves it running (see above); the node 
 
 ```sh
 KEEP=1 ROUNDS=recursion bash deploy/compose/lab-dns/smoke.sh
-cd deploy/compose/lab-dns && export LAB_DIR=<work>
+cd deploy/compose/lab-dns
 docker compose exec client dig @203.0.113.3 -p 5300 www.example.test
 docker compose --profile recursion logs authority quirk-tc
 docker compose --profile recursion down --volumes

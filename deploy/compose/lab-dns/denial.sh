@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # The rows of E35 in the round `recursion` (WP10.3, dns-recursion-plan.md sections 2.2 and
 # 2.6): QNAME minimization on the wire (RFC 9156) and the denial cache (RFC 8198, RFC 8020).
-# smoke.sh sources this file; recursion.sh runs `denial_rows` with the node's default
+# driver.sh sources this file; recursion.sh runs `denial_rows` with the node's default
 # settings (relaxed minimization, the denial cache on) and `denial_mode_rows` at the end of
 # the round, which restarts the node with `qname_minimization = "strict"` and
 # `aggressive_nsec = false`, then with `qname_minimization = "off"`. With M42=1 the round
@@ -76,7 +76,7 @@ PY
 }
 
 # ent_asked: the names quirk-ent was asked, one per line, oldest first.
-ent_asked() { compose logs --no-log-prefix quirk-ent 2>/dev/null | sed -n 's/^asked \([^ ]*\) .*/\1/p'; }
+ent_asked() { ctl logs quirk-ent 2>/dev/null | sed -n 's/^asked \([^ ]*\) .*/\1/p'; }
 
 # rcode_ad <name> <type>: the RCODE and, when set, `ad`, as the node answers with DO.
 rcode_ad() {
@@ -224,10 +224,12 @@ denial_rows() {
 restart_node() {
   recursion_extra="$1"
   write_recursion_config
-  compose up -d --no-build --force-recreate tenko >/dev/null
+  recreate tenko
   retry "$wait_secs" "tenko to become healthy" healthy tenko
-  retry 60 "the node to resolve again" \
-    bash -c "[[ \"\$(docker compose -f '$compose_file' exec -T client dig @$tenko_ip -p $dns_port +short +time=5 +tries=1 www.example.test)\" == 192.0.2.10 ]]"
+  retry 60 "the node to resolve again" node_resolves
+}
+node_resolves() {
+  [[ "$(dig_client "@$tenko_ip" -p "$dns_port" +short +time=5 +tries=1 www.example.test)" == 192.0.2.10 ]]
 }
 
 # denial_mode_rows: the rows of the other settings; the node runs the defaults again after.
@@ -257,7 +259,7 @@ for _ in range(1000):
     print('m' + ''.join(random.choice('abcdefghijklmnopqrstuvwxyz0123456789') for _ in range(12)) + '.$suffix A')")"
   since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   sleep 1
-  compose exec -T client dig "@$tenko_ip" -p "$dns_port" +time=5 +tries=1 +noall -f /dev/stdin <<<"$names" >/dev/null 2>&1 || true
+  dig_client "@$tenko_ip" -p "$dns_port" +time=5 +tries=1 +noall -f /dev/stdin <<<"$names" >/dev/null 2>&1 || true
   count="$(auth_since "$since" "$suffix")"
   m42+=("$(printf '%-34s %5s authority queries per 1,000 names' "$label" "$count")")
 }
