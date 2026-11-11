@@ -1089,23 +1089,29 @@ mod tests {
     }
 
     // The outputs of `whoami /user /groups /priv /fo csv /nh` below keep the shape and the
-    // well-known SIDs of real tokens; account names and the SIDs of accounts are placeholders.
+    // well-known SIDs of real tokens; where a sample is not a real token, account names and
+    // the SIDs of accounts are placeholders.
 
     /// The Windows service as `tenko service install` and the MSI set it up: a virtual
     /// account whose token keeps `SeChangeNotifyPrivilege` alone, with the high label the
-    /// Service Control Manager gives a service.
-    const NARROWED_SERVICE: &str = r#""nt service\tenko-smoke","S-1-5-80-1111111111-2222222222-3333333333-4444444444-555555555"
+    /// Service Control Manager gives a service. The real token of the smoke's service on a
+    /// hosted runner (2026-11-11), read from the running service with `OpenProcessToken` by
+    /// `deploy/windows/smoke.ps1` and printed in whoami's shape, the attributes as numbers.
+    /// The user's SID is the one Windows derives from the service name `tenko-smoke`.
+    const NARROWED_SERVICE: &str = r#""nt service\tenko-smoke","S-1-5-80-3479874966-2534006701-744376333-3032499961-207429074"
 
-"Mandatory Label\High Mandatory Level","Label","S-1-16-12288",""
-"Everyone","Well-known group","S-1-1-0","Mandatory group, Enabled by default, Enabled group"
-"BUILTIN\Users","Alias","S-1-5-32-545","Mandatory group, Enabled by default, Enabled group"
-"NT AUTHORITY\SERVICE","Well-known group","S-1-5-6","Mandatory group, Enabled by default, Enabled group"
-"CONSOLE LOGON","Well-known group","S-1-2-1","Mandatory group, Enabled by default, Enabled group"
-"NT AUTHORITY\Authenticated Users","Well-known group","S-1-5-11","Mandatory group, Enabled by default, Enabled group"
-"NT AUTHORITY\This Organization","Well-known group","S-1-5-15","Mandatory group, Enabled by default, Enabled group"
-"LOCAL","Well-known group","S-1-2-0","Mandatory group, Enabled by default, Enabled group"
+"Everyone","Group","S-1-1-0","0x7"
+"BUILTIN\Users","Group","S-1-5-32-545","0x7"
+"NT AUTHORITY\SERVICE","Group","S-1-5-6","0x7"
+"CONSOLE LOGON","Group","S-1-2-1","0x7"
+"NT AUTHORITY\Authenticated Users","Group","S-1-5-11","0x7"
+"NT AUTHORITY\This Organization","Group","S-1-5-15","0x7"
+"LOCAL","Group","S-1-2-0","0x7"
+"S-1-5-5-0-4971674","Group","S-1-5-5-0-4971674","0xc0000007"
+"NT SERVICE\ALL SERVICES","Group","S-1-5-80-0","0x7"
+"S-1-16-12288","Label","S-1-16-12288",""
 
-"SeChangeNotifyPrivilege","Bypass traverse checking","Enabled"
+"SeChangeNotifyPrivilege","","Enabled"
 "#;
 
     /// A service created by hand (`sc create`) under a virtual account: the token keeps the
@@ -1234,8 +1240,8 @@ mod tests {
     fn the_narrowed_service_is_not_privileged_whatever_its_label() {
         assert_eq!(token::classify(NARROWED_SERVICE), Privilege::Unprivileged);
         let system_label = NARROWED_SERVICE.replace(
-            r#""Mandatory Label\High Mandatory Level","Label","S-1-16-12288",""#,
-            r#""Mandatory Label\System Mandatory Level","Label","S-1-16-16384",""#,
+            r#""S-1-16-12288","Label","S-1-16-12288",""#,
+            r#""S-1-16-16384","Label","S-1-16-16384",""#,
         );
         assert_ne!(system_label, NARROWED_SERVICE);
         assert_eq!(token::classify(&system_label), Privilege::Unprivileged);
@@ -1357,9 +1363,10 @@ mod tests {
                 "{privilege}"
             );
             let output = NARROWED_SERVICE.replace(
-                "\"SeChangeNotifyPrivilege\",\"Bypass traverse checking\",\"Enabled\"",
+                "\"SeChangeNotifyPrivilege\",\"\",\"Enabled\"",
                 &format!("\"{privilege}\",\"\",\"Disabled\""),
             );
+            assert_ne!(output, NARROWED_SERVICE);
             assert_eq!(
                 token::classify(&output),
                 Privilege::Unprivileged,
@@ -1368,9 +1375,10 @@ mod tests {
         }
         for privilege in token::BEYOND_THE_ACCOUNT {
             let output = NARROWED_SERVICE.replace(
-                "\"SeChangeNotifyPrivilege\",\"Bypass traverse checking\",\"Enabled\"",
+                "\"SeChangeNotifyPrivilege\",\"\",\"Enabled\"",
                 &format!("\"{privilege}\",\"\",\"Disabled\""),
             );
+            assert_ne!(output, NARROWED_SERVICE);
             assert!(is_privileged(&token::classify(&output)), "{privilege}");
         }
     }
