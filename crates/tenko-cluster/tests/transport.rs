@@ -1146,6 +1146,7 @@ async fn metrics_snapshot_answers_the_newest_sample_to_a_controller() {
         at: Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("time"),
         encoding: SAMPLE_ENCODING.to_owned(),
         payload: vec![0xa1, 0x61, 0x6e, 0x01],
+        closed: vec![0xa0],
     };
     controller
         .registry
@@ -1166,6 +1167,122 @@ async fn metrics_snapshot_answers_the_newest_sample_to_a_controller() {
         PeerReply::Failed(_)
     ));
     assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+// WP18.0: the history of a controller's dashboard figures.
+/// A source with a sample and, when given, a history.
+struct WithHistory(
+    tenko_cluster::metrics::EncodedSample,
+    Option<tenko_cluster::metrics::EncodedHistory>,
+);
+
+impl tenko_cluster::metrics::MetricsSource for WithHistory {
+    fn current(
+        &self,
+    ) -> futures::future::BoxFuture<'_, Option<tenko_cluster::metrics::EncodedSample>> {
+        Box::pin(async { Some(self.0.clone()) })
+    }
+
+    fn history(
+        &self,
+    ) -> futures::future::BoxFuture<'_, Option<tenko_cluster::metrics::EncodedHistory>> {
+        Box::pin(async { self.1.clone() })
+    }
+}
+
+/// `Metrics.History` answers a controller with the callee's history; a callee that keeps none
+/// (the default of the source, as a build before the history) answers `UNIMPLEMENTED`, which
+/// the caller reports as unsupported, so it is combined as a missing controller. A probe may
+/// not read it.
+#[tokio::test]
+async fn metrics_history_answers_a_controller_and_an_older_source_is_unsupported() {
+    use tenko_cluster::{
+        metrics::{EncodedHistory, EncodedSample, HistoryReply, SAMPLE_ENCODING, fetch_history},
+        peers::{PeerNetwork, PeerTimings},
+    };
+
+    let controller = Controller::start().await;
+    let dir = tempfile::tempdir().expect("dir");
+    let token = controller
+        .token(NewEnrollment {
+            roles: vec![Role::Controller],
+            ..NewEnrollment::default()
+        })
+        .await;
+    let (credentials, _) = controller
+        .enroll_with(dir.path(), "controller-2", &token, vec![1])
+        .await
+        .expect("a controller enrolls");
+    let network = PeerNetwork::new(credentials.identity.node, PeerTimings::default());
+    network.set_tls(credentials.client_config().expect("client configuration"));
+    network.pin(NodeId(1), controller.addr.to_string());
+    let deadline = Duration::from_millis(500);
+    let at = Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("time");
+
+    // Before the API started there is no source.
+    let HistoryReply::Failed(detail) = fetch_history(&network, NodeId(1), deadline).await else {
+        panic!("no history before the source is set");
+    };
+    assert!(detail.contains("no metrics sample yet"), "{detail}");
+
+    let sample = EncodedSample {
+        node: NodeId(1),
+        at,
+        encoding: SAMPLE_ENCODING.to_owned(),
+        payload: vec![0xa0],
+        closed: Vec::new(),
+    };
+    // A source of the previous kind: a sample and no history.
+    controller
+        .registry
+        .set_metrics_source(Arc::new(FixedSample(sample.clone())));
+    assert_eq!(
+        fetch_history(&network, NodeId(1), deadline).await,
+        HistoryReply::Unsupported
+    );
+
+    // The registry keeps its first source, so a second controller has the history.
+    let second = Controller::start().await;
+    let history = EncodedHistory {
+        node: NodeId(1),
+        at,
+        encoding: SAMPLE_ENCODING.to_owned(),
+        payload: vec![0xa2, 0x01, 0x02, 0x03, 0x04],
+    };
+    second
+        .registry
+        .set_metrics_source(Arc::new(WithHistory(sample, Some(history.clone()))));
+    let token = second
+        .token(NewEnrollment {
+            roles: vec![Role::Controller],
+            ..NewEnrollment::default()
+        })
+        .await;
+    let other = tempfile::tempdir().expect("dir");
+    let (credentials, _) = second
+        .enroll_with(other.path(), "controller-3", &token, vec![1])
+        .await
+        .expect("a controller enrolls");
+    let network = PeerNetwork::new(credentials.identity.node, PeerTimings::default());
+    network.set_tls(credentials.client_config().expect("client configuration"));
+    network.pin(NodeId(1), second.addr.to_string());
+    assert_eq!(
+        fetch_history(&network, NodeId(1), deadline).await,
+        HistoryReply::History(history)
+    );
+
+    // A probe may not read it.
+    let probe = tempfile::tempdir().expect("dir");
+    let channel = enrolled_channel(&second, probe.path(), "probe-history").await;
+    let refused = v1::metrics_client::MetricsClient::new(channel)
+        .history(v1::HistoryRequest::default())
+        .await
+        .expect_err("a probe may not read it");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied, "{refused:?}");
+    assert_eq!(
+        tenko_cluster::server::code_of(&refused),
+        Some("cluster.peer.not_controller")
+    );
 }
 
 #[tokio::test]

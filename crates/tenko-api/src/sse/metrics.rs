@@ -53,8 +53,8 @@ use crate::{
     state::AppState,
 };
 
-/// The `kind` of the events of the `metrics` topic.
-pub const SNAPSHOT_KIND: &str = "metrics.snapshot";
+/// The `kind` of the per-second events of the `metrics` topic.
+pub const SNAPSHOT_KIND: &str = crate::dto::events::METRICS_SNAPSHOT_KIND;
 /// The tick of the publisher.
 pub const TICK: Duration = Duration::from_secs(1);
 /// How long the publisher waits for a peer's sample.
@@ -219,6 +219,8 @@ impl MetricsSource for Sampler {
                 at: local.sample.at,
                 encoding: SAMPLE_ENCODING.to_owned(),
                 payload: local.encoded.to_vec(),
+                // WP18.0: the history's closed buckets come with the sampler's tiers.
+                closed: Vec::new(),
             })
         })
     }
@@ -376,6 +378,8 @@ impl MetricsPublisher {
         let snapshot = MetricsSnapshot {
             cluster: cluster_sum(&nodes, at),
             nodes,
+            // WP18.0: the history's closed buckets come with the sampler's tiers.
+            closed: Vec::new(),
         };
         let mut data = EventData::new(Topic::Metrics, None);
         data.kind = Some(SNAPSHOT_KIND.to_owned());
@@ -610,6 +614,7 @@ mod tests {
             at: sample.at,
             encoding: SAMPLE_ENCODING.to_owned(),
             payload: to_cbor(&sample).expect("cbor").to_vec(),
+            closed: Vec::new(),
         };
         assert_eq!(
             answer_of(PeerReply::Sample(encoded.clone())),

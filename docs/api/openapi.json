@@ -51086,6 +51086,17 @@
             },
             "description": "Objects removed from the store."
           },
+          "history": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsHistory",
+                "description": "The history of the dashboard's tiles (topic `metrics`, kind `metrics.history`): the\nfirst event of the topic on every stream that receives it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "kind": {
             "type": [
               "string",
@@ -60609,6 +60620,27 @@
           }
         }
       },
+      "MetricsClosed": {
+        "type": "object",
+        "description": "One figure's buckets that closed, in a [`MetricsSnapshot::closed`]. A bucket is closed once\nits step has ended on the controller's clock and the fold has moved to the next one: a\ncontroller never changes it again (a clock that jumps back folds into the open bucket, never\ninto a closed one). Only the serving controller's combination may send a closed bucket again\nwith a late controller's part added.",
+        "required": [
+          "figure",
+          "tiers"
+        ],
+        "properties": {
+          "figure": {
+            "$ref": "#/components/schemas/MetricsFigure",
+            "description": "The figure."
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsTier"
+            },
+            "description": "The tiers with a bucket that closed in this tick or the tick before, finest first;\n`open` is never set here."
+          }
+        }
+      },
       "MetricsDhcp": {
         "type": "object",
         "description": "The `dhcp` role in a sample (OPS-20): the leases it granted, the time from a REQUEST to its\nACK, the leases it holds, the fullest pools, the NAKs and DECLINEs and the DDNS outcomes over\nthe interval.",
@@ -61058,6 +61090,124 @@
           }
         }
       },
+      "MetricsFigure": {
+        "type": "string",
+        "description": "A figure of the dashboard: one tile, one history. The name is the tile's\n(`metrics-tile-<name>` in the UI), and [`MetricsFigure::value`] is the number the tile shows\nfor a sample, in the tile's unit; the history keeps the lowest, highest and mean of that\nnumber per bucket. The figures of a role exist while a controller of the cluster runs the\nrole. 25 figures: the controller's 8, the host's 3, DNS 8 and DHCP 6.",
+        "enum": [
+          "requests",
+          "commit",
+          "store",
+          "raft",
+          "jobs",
+          "ingest",
+          "sse",
+          "nodes",
+          "host-cpu",
+          "host-memory",
+          "host-disk",
+          "dns-queries",
+          "dns-cache",
+          "dns-answers",
+          "dns-blocked",
+          "dns-upstreams",
+          "dns-subqueries",
+          "dns-validation",
+          "dns-encrypted",
+          "dhcp-leases",
+          "dhcp-ack",
+          "dhcp-active",
+          "dhcp-pools",
+          "dhcp-naks",
+          "dhcp-ddns"
+        ]
+      },
+      "MetricsFigureHistory": {
+        "type": "object",
+        "description": "One figure of a [`MetricsHistory`].",
+        "required": [
+          "figure",
+          "merge",
+          "tiers"
+        ],
+        "properties": {
+          "figure": {
+            "$ref": "#/components/schemas/MetricsFigure",
+            "description": "The figure."
+          },
+          "merge": {
+            "$ref": "#/components/schemas/MetricsMerge",
+            "description": "How the cluster combined it, which the readout says (\"The mean is exact; the true\nrange lies inside\")."
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsTier"
+            },
+            "description": "Its tiers, finest first, at most five; a tier without a bucket yet is left out."
+          }
+        }
+      },
+      "MetricsHistory": {
+        "type": "object",
+        "description": "The history of the dashboard's tiles: the data of the `metrics.history` event, the first\nevent of the `metrics` topic on a stream (see [`METRICS_HISTORY_KIND`] for the order).\n\nTwo days of every figure in five tiers (DH-Q2 (b); [`HISTORY_TIERS`]), combined for the\ncluster from each controller's own tiers (DH-Q5 (a), [`MetricsMerge`]); on a single\ncontroller, its own. The serving controller builds it as buckets close and encodes it once\nper change; every new subscriber gets that one cached frame, so nothing is built per\nsubscription. Kept in memory only (DH-Q3 (a)): a controller that restarted has no history\nbefore its start. With 25 figures and three controllers the frame stays under 300 KB\n(M84); its values carry [`HISTORY_SIGNIFICANT_DIGITS`] significant digits.",
+        "required": [
+          "at",
+          "controllers",
+          "figures"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "The moment the history ends, by the serving controller's clock: the end (`at`) of the\nnewest sample folded into it. The chart draws at the controller's time, not the\nbrowser's."
+          },
+          "controllers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsHistoryController"
+            },
+            "description": "The controllers whose tiers the history combines, the serving controller first, the\nothers as in `MetricsSnapshot.nodes`."
+          },
+          "figures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsFigureHistory"
+            },
+            "description": "The figures, in the order of `MetricsFigure`: those a controller of the cluster\nproduces (its roles run them). A figure that is missing has no tile."
+          }
+        }
+      },
+      "MetricsHistoryController": {
+        "type": "object",
+        "description": "A controller whose tiers a [`MetricsHistory`] combines.",
+        "properties": {
+          "node": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NodeId",
+                "description": "The controller; absent on a single controller without a node id."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "started": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When its history starts: the controller's start, by its own clock. A history kept in\nmemory has nothing before it, so the chart marks it as a restart and hatches the time\nbefore it (\"No history before 07:21, when this controller restarted\"). Absent while the\ncontroller has sent no history (it has not answered yet, or it runs the previous\nrelease)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unsupported": {
+            "type": "boolean",
+            "description": "The controller runs a release without the history (it answered `Metrics.History` with\n`UNIMPLEMENTED`): it is missing from every bucket, drawn and worded like a controller\nthat is down."
+          }
+        }
+      },
       "MetricsHost": {
         "type": "object",
         "description": "The host in a sample (OPS-20): the latest reading of the machine under the controller. It is\nread every five seconds, so consecutive samples repeat it. A figure that could not be read is\nabsent. The cluster's sample holds, for each figure, the controller that is worst off: the\nbusiest CPU, the smallest share of memory and of disk available.",
@@ -61169,6 +61319,16 @@
             "description": "The member."
           }
         }
+      },
+      "MetricsMerge": {
+        "type": "string",
+        "description": "How the cluster combines a figure's buckets from each controller's own (plan section 4,\nthe per-field rule of the live sample). A sum of maxima is not the maximum of the sum, so\neach rule says what its numbers are.",
+        "enum": [
+          "sum",
+          "highest",
+          "least_available",
+          "ratio"
+        ]
       },
       "MetricsNode": {
         "type": "object",
@@ -61347,6 +61507,13 @@
           "cluster"
         ],
         "properties": {
+          "closed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsClosed"
+            },
+            "description": "The buckets of the tiles' history that closed in this tick or in the tick before,\ncombined for the cluster as in [`MetricsHistory`]: per figure, the tiers that have such\na bucket (normally the two newest one-second buckets, and a coarser tier's bucket in the\ntwo ticks after its step ended); no bucket of a `closed` is open. Absent when nothing\nclosed, and from a server of the previous release.\n\nEvery closed bucket therefore arrives in two consecutive snapshots, so one missed second\nloses nothing. The buckets of a tier here are consecutive like a history's, and the\nclient keeps one bucket per tier and start: a bucket whose start it already holds\nreplaces the one it holds (the open bucket of the history, or a combined bucket the\nserving controller completed when a late controller's part arrived); a bucket after the\nnewest it holds is appended, and the oldest are dropped beyond the tier's `ring`. A\nclient that finds a hole between the newest start it holds and the oldest start of a\ntier here, or a figure or tier its history lacks, opens the stream again for a fresh\n[`MetricsHistory`]. The client only appends and never aggregates. About 2 KB a second\nwith 25 figures."
+          },
           "cluster": {
             "$ref": "#/components/schemas/MetricsSample",
             "description": "The cluster: rates, sizes and counts summed over the controllers whose sample is\ncurrent, the highest quantiles, terms and lags. On a single controller, its own\nsample without its node id."
@@ -61371,6 +61538,21 @@
             "type": "integer",
             "format": "int64",
             "description": "Open event streams.",
+            "minimum": 0
+          }
+        }
+      },
+      "MetricsStatus": {
+        "type": "object",
+        "description": "The live metrics of the dashboard on this controller, for `GET /system/status`.",
+        "required": [
+          "history_bytes"
+        ],
+        "properties": {
+          "history_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes the history of the tiles holds in memory, allocated once at start: this\ncontroller's rings (32 bytes a bucket, 274 buckets a figure, about 214 KiB for 25\nfigures), on the controller that serves a cluster's dashboard also the peers' tiers and\nthe combined history with its encoded frame (about 1.0 MiB with three controllers).",
             "minimum": 0
           }
         }
@@ -61403,6 +61585,95 @@
             ],
             "format": "int64",
             "description": "Bytes on disk: the Raft log, the state file and the snapshots; absent for an\nin-memory store.",
+            "minimum": 0
+          }
+        }
+      },
+      "MetricsTier": {
+        "type": "object",
+        "description": "Consecutive buckets of one tier of a figure, oldest first, as columns: element `i` of every\narray is bucket `i`, and every array has the same length, at least one.\n\nBucket `i` covers `[start − (n − 1 − i) × step_ms, … + step_ms)` where `n` is the length:\nthe buckets follow each other without a hole, and the starts are whole multiples of\n`step_ms` since the Unix epoch on the controller's clock in UTC (a minute bucket starts at a\nwhole minute, an hour bucket at a whole hour). A bucket without any data is still in the\narrays: its `covered_ms` and `controllers` are 0 and its `lowest`, `highest` and `mean` are\nnull; the chart hatches it. A bucket with some time missing has values and a\n`covered_ms` below `step_ms` (\"41 s of 1 min\"). A finer tier covers the time until the next\ncoarser bucket starts, so the client holds both where they overlap. A history never has\nmore buckets in a tier than its ring ([`TierSpec::buckets`]), and none before the\ncontrollers' start.",
+        "required": [
+          "step_ms",
+          "start",
+          "lowest",
+          "highest",
+          "mean",
+          "covered_ms",
+          "controllers"
+        ],
+        "properties": {
+          "controllers": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "How many controllers each bucket covers; below the number of `controllers` of the\nhistory, the chart draws a lighter band and a bar under the baseline (\"2 of 3\ncontrollers reported\"). 0 for a bucket without data."
+          },
+          "covered_ms": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The time each bucket had data, in milliseconds, at most `step_ms`: the parts of the\nsamples' intervals that fall into it (see [`Reading`]), so a second without a sample of\nits own is not a gap when a longer interval covers it. For the cluster, the longest of\nthe controllers' covered times."
+          },
+          "highest": {
+            "type": "array",
+            "items": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "description": "The highest value of each bucket, in the figure's unit; null without data. With\n`lowest`, the band of the chart."
+          },
+          "lowest": {
+            "type": "array",
+            "items": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "description": "The lowest value of each bucket, in the figure's unit; null without data."
+          },
+          "mean": {
+            "type": "array",
+            "items": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "description": "The mean of each bucket over its covered time, in the figure's unit (a ratio's\nrecomputed from the counts); null without data. The line of the chart."
+          },
+          "open": {
+            "type": "boolean",
+            "description": "The newest bucket is the open one, still filling: its values change until its step\nends, and a `closed` of a later snapshot replaces it. Only in a history; absent when\nevery bucket is closed."
+          },
+          "ring": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The most buckets the client keeps of this tier, the open one included (the ring of the\ncontrollers, [`TierSpec::buckets`]): after appending the buckets of a `closed`, the\nclient drops the oldest beyond it. Present in a history, absent in a `closed`.",
+            "minimum": 0
+          },
+          "start": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "The start of the newest bucket, the last of the arrays."
+          },
+          "step_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The length of a bucket in milliseconds: 1,000 (5,000 for the ratio figures), 10,000,\n60,000, 600,000 or 3,600,000.",
             "minimum": 0
           }
         }
@@ -83640,6 +83911,17 @@
               {
                 "$ref": "#/components/schemas/LeaderStatus",
                 "description": "The leader-only work of this controller (plan section 2.3): whether it leads, the\nleader epoch of its term of office and the state of every leader service; absent\non servers without the leader supervisor."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metrics": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsStatus",
+                "description": "The live metrics of the dashboard (OPS-20, OPS-21); absent on servers that keep no\nhistory of the tiles."
               },
               {
                 "type": "null"

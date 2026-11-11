@@ -10016,6 +10016,7 @@ export interface components {
             audit?: components["schemas"]["AuditSeq"][];
             /** @description Objects removed from the store. */
             deleted?: components["schemas"]["ObjectRef"][];
+            history?: components["schemas"]["MetricsHistory"] | null;
             /** @description Kind of a system event that did not come from the store, for example an alarm code. */
             kind?: string | null;
             metrics?: components["schemas"]["MetricsSnapshot"] | null;
@@ -13639,6 +13640,22 @@ export interface components {
             requests_per_second: number;
         };
         /**
+         * @description One figure's buckets that closed, in a [`MetricsSnapshot::closed`]. A bucket is closed once
+         *     its step has ended on the controller's clock and the fold has moved to the next one: a
+         *     controller never changes it again (a clock that jumps back folds into the open bucket, never
+         *     into a closed one). Only the serving controller's combination may send a closed bucket again
+         *     with a late controller's part added.
+         */
+        MetricsClosed: {
+            /** @description The figure. */
+            figure: components["schemas"]["MetricsFigure"];
+            /**
+             * @description The tiers with a bucket that closed in this tick or the tick before, finest first;
+             *     `open` is never set here.
+             */
+            tiers: components["schemas"]["MetricsTier"][];
+        };
+        /**
          * @description The `dhcp` role in a sample (OPS-20): the leases it granted, the time from a REQUEST to its
          *     ACK, the leases it holds, the fullest pools, the NAKs and DECLINEs and the DDNS outcomes over
          *     the interval.
@@ -13930,6 +13947,68 @@ export interface components {
             secure: number;
         };
         /**
+         * @description A figure of the dashboard: one tile, one history. The name is the tile's
+         *     (`metrics-tile-<name>` in the UI), and [`MetricsFigure::value`] is the number the tile shows
+         *     for a sample, in the tile's unit; the history keeps the lowest, highest and mean of that
+         *     number per bucket. The figures of a role exist while a controller of the cluster runs the
+         *     role. 25 figures: the controller's 8, the host's 3, DNS 8 and DHCP 6.
+         * @enum {string}
+         */
+        MetricsFigure: "requests" | "commit" | "store" | "raft" | "jobs" | "ingest" | "sse" | "nodes" | "host-cpu" | "host-memory" | "host-disk" | "dns-queries" | "dns-cache" | "dns-answers" | "dns-blocked" | "dns-upstreams" | "dns-subqueries" | "dns-validation" | "dns-encrypted" | "dhcp-leases" | "dhcp-ack" | "dhcp-active" | "dhcp-pools" | "dhcp-naks" | "dhcp-ddns";
+        /** @description One figure of a [`MetricsHistory`]. */
+        MetricsFigureHistory: {
+            /** @description The figure. */
+            figure: components["schemas"]["MetricsFigure"];
+            /**
+             * @description How the cluster combined it, which the readout says ("The mean is exact; the true
+             *     range lies inside").
+             */
+            merge: components["schemas"]["MetricsMerge"];
+            /** @description Its tiers, finest first, at most five; a tier without a bucket yet is left out. */
+            tiers: components["schemas"]["MetricsTier"][];
+        };
+        /**
+         * @description The history of the dashboard's tiles: the data of the `metrics.history` event, the first
+         *     event of the `metrics` topic on a stream (see [`METRICS_HISTORY_KIND`] for the order).
+         *
+         *     Two days of every figure in five tiers (DH-Q2 (b); [`HISTORY_TIERS`]), combined for the
+         *     cluster from each controller's own tiers (DH-Q5 (a), [`MetricsMerge`]); on a single
+         *     controller, its own. The serving controller builds it as buckets close and encodes it once
+         *     per change; every new subscriber gets that one cached frame, so nothing is built per
+         *     subscription. Kept in memory only (DH-Q3 (a)): a controller that restarted has no history
+         *     before its start. With 25 figures and three controllers the frame stays under 300 KB
+         *     (M84); its values carry [`HISTORY_SIGNIFICANT_DIGITS`] significant digits.
+         */
+        MetricsHistory: {
+            /**
+             * @description The moment the history ends, by the serving controller's clock: the end (`at`) of the
+             *     newest sample folded into it. The chart draws at the controller's time, not the
+             *     browser's.
+             */
+            at: components["schemas"]["Timestamp"];
+            /**
+             * @description The controllers whose tiers the history combines, the serving controller first, the
+             *     others as in `MetricsSnapshot.nodes`.
+             */
+            controllers: components["schemas"]["MetricsHistoryController"][];
+            /**
+             * @description The figures, in the order of `MetricsFigure`: those a controller of the cluster
+             *     produces (its roles run them). A figure that is missing has no tile.
+             */
+            figures: components["schemas"]["MetricsFigureHistory"][];
+        };
+        /** @description A controller whose tiers a [`MetricsHistory`] combines. */
+        MetricsHistoryController: {
+            node?: components["schemas"]["NodeId"] | null;
+            started?: components["schemas"]["Timestamp"] | null;
+            /**
+             * @description The controller runs a release without the history (it answered `Metrics.History` with
+             *     `UNIMPLEMENTED`): it is missing from every bucket, drawn and worded like a controller
+             *     that is down.
+             */
+            unsupported?: boolean;
+        };
+        /**
          * @description The host in a sample (OPS-20): the latest reading of the machine under the controller. It is
          *     read every five seconds, so consecutive samples repeat it. A figure that could not be read is
          *     absent. The cluster's sample holds, for each figure, the controller that is worst off: the
@@ -14002,6 +14081,13 @@ export interface components {
             /** @description The member. */
             node: components["schemas"]["NodeId"];
         };
+        /**
+         * @description How the cluster combines a figure's buckets from each controller's own (plan section 4,
+         *     the per-field rule of the live sample). A sum of maxima is not the maximum of the sum, so
+         *     each rule says what its numbers are.
+         * @enum {string}
+         */
+        MetricsMerge: "sum" | "highest" | "least_available" | "ratio";
         /** @description A node connected to the controller. */
         MetricsNode: {
             /**
@@ -14082,6 +14168,25 @@ export interface components {
          */
         MetricsSnapshot: {
             /**
+             * @description The buckets of the tiles' history that closed in this tick or in the tick before,
+             *     combined for the cluster as in [`MetricsHistory`]: per figure, the tiers that have such
+             *     a bucket (normally the two newest one-second buckets, and a coarser tier's bucket in the
+             *     two ticks after its step ended); no bucket of a `closed` is open. Absent when nothing
+             *     closed, and from a server of the previous release.
+             *
+             *     Every closed bucket therefore arrives in two consecutive snapshots, so one missed second
+             *     loses nothing. The buckets of a tier here are consecutive like a history's, and the
+             *     client keeps one bucket per tier and start: a bucket whose start it already holds
+             *     replaces the one it holds (the open bucket of the history, or a combined bucket the
+             *     serving controller completed when a late controller's part arrived); a bucket after the
+             *     newest it holds is appended, and the oldest are dropped beyond the tier's `ring`. A
+             *     client that finds a hole between the newest start it holds and the oldest start of a
+             *     tier here, or a figure or tier its history lacks, opens the stream again for a fresh
+             *     [`MetricsHistory`]. The client only appends and never aggregates. About 2 KB a second
+             *     with 25 figures.
+             */
+            closed?: components["schemas"]["MetricsClosed"][];
+            /**
              * @description The cluster: rates, sizes and counts summed over the controllers whose sample is
              *     current, the highest quantiles, terms and lags. On a single controller, its own
              *     sample without its node id.
@@ -14097,6 +14202,17 @@ export interface components {
              * @description Open event streams.
              */
             subscribers: number;
+        };
+        /** @description The live metrics of the dashboard on this controller, for `GET /system/status`. */
+        MetricsStatus: {
+            /**
+             * Format: int64
+             * @description Bytes the history of the tiles holds in memory, allocated once at start: this
+             *     controller's rings (32 bytes a bucket, 274 buckets a figure, about 214 KiB for 25
+             *     figures), on the controller that serves a cluster's dashboard also the peers' tiers and
+             *     the combined history with its encoded frame (about 1.0 MiB with three controllers).
+             */
+            history_bytes: number;
         };
         /** @description The store of a sample. */
         MetricsStore: {
@@ -14117,6 +14233,69 @@ export interface components {
              *     in-memory store.
              */
             file_bytes?: number | null;
+        };
+        /**
+         * @description Consecutive buckets of one tier of a figure, oldest first, as columns: element `i` of every
+         *     array is bucket `i`, and every array has the same length, at least one.
+         *
+         *     Bucket `i` covers `[start − (n − 1 − i) × step_ms, … + step_ms)` where `n` is the length:
+         *     the buckets follow each other without a hole, and the starts are whole multiples of
+         *     `step_ms` since the Unix epoch on the controller's clock in UTC (a minute bucket starts at a
+         *     whole minute, an hour bucket at a whole hour). A bucket without any data is still in the
+         *     arrays: its `covered_ms` and `controllers` are 0 and its `lowest`, `highest` and `mean` are
+         *     null; the chart hatches it. A bucket with some time missing has values and a
+         *     `covered_ms` below `step_ms` ("41 s of 1 min"). A finer tier covers the time until the next
+         *     coarser bucket starts, so the client holds both where they overlap. A history never has
+         *     more buckets in a tier than its ring ([`TierSpec::buckets`]), and none before the
+         *     controllers' start.
+         */
+        MetricsTier: {
+            /**
+             * @description How many controllers each bucket covers; below the number of `controllers` of the
+             *     history, the chart draws a lighter band and a bar under the baseline ("2 of 3
+             *     controllers reported"). 0 for a bucket without data.
+             */
+            controllers: number[];
+            /**
+             * @description The time each bucket had data, in milliseconds, at most `step_ms`: the parts of the
+             *     samples' intervals that fall into it (see [`Reading`]), so a second without a sample of
+             *     its own is not a gap when a longer interval covers it. For the cluster, the longest of
+             *     the controllers' covered times.
+             */
+            covered_ms: number[];
+            /**
+             * @description The highest value of each bucket, in the figure's unit; null without data. With
+             *     `lowest`, the band of the chart.
+             */
+            highest: (number | null)[];
+            /** @description The lowest value of each bucket, in the figure's unit; null without data. */
+            lowest: (number | null)[];
+            /**
+             * @description The mean of each bucket over its covered time, in the figure's unit (a ratio's
+             *     recomputed from the counts); null without data. The line of the chart.
+             */
+            mean: (number | null)[];
+            /**
+             * @description The newest bucket is the open one, still filling: its values change until its step
+             *     ends, and a `closed` of a later snapshot replaces it. Only in a history; absent when
+             *     every bucket is closed.
+             */
+            open?: boolean;
+            /**
+             * Format: int32
+             * @description The most buckets the client keeps of this tier, the open one included (the ring of the
+             *     controllers, [`TierSpec::buckets`]): after appending the buckets of a `closed`, the
+             *     client drops the oldest beyond it. Present in a history, absent in a `closed`.
+             */
+            ring?: number | null;
+            /** @description The start of the newest bucket, the last of the arrays. */
+            start: components["schemas"]["Timestamp"];
+            /**
+             * Format: int32
+             * @description The length of a bucket in milliseconds: 1,000 (5,000 for the ratio figures), 10,000,
+             *     60,000, 600,000 or 3,600,000.
+             */
+            step_ms: number;
         };
         /**
          * @description Who must use a second factor (TGL-02). The PIN coupling rule (IAM-07) can force it
@@ -23124,6 +23303,7 @@ export interface components {
             host?: components["schemas"]["HostStatus"] | null;
             kek?: components["schemas"]["KekSummaryView"] | null;
             leader?: components["schemas"]["LeaderStatus"] | null;
+            metrics?: components["schemas"]["MetricsStatus"] | null;
             /**
              * @description The product modules this installation runs (OPS-25); the UI shows only their
              *     areas. Absent in answers of servers that predate the module switch: all modules.

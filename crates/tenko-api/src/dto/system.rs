@@ -78,6 +78,21 @@ pub struct SystemStatus {
     /// `node.disk.low` in `warnings` says the file system is running out of room.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<HostStatus>,
+    // WP18.0: the memory of the dashboard's history.
+    /// The live metrics of the dashboard (OPS-20, OPS-21); absent on servers that keep no
+    /// history of the tiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<MetricsStatus>,
+}
+
+/// The live metrics of the dashboard on this controller, for `GET /system/status`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsStatus {
+    /// Bytes the history of the tiles holds in memory, allocated once at start: this
+    /// controller's rings (32 bytes a bucket, 274 buckets a figure, about 214 KiB for 25
+    /// figures), on the controller that serves a cluster's dashboard also the peers' tiers and
+    /// the combined history with its encoded frame (about 1.0 MiB with three controllers).
+    pub history_bytes: u64,
 }
 
 /// The host under the node, for `GET /system/status`. A figure that could not be read is absent;

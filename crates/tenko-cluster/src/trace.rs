@@ -10,8 +10,8 @@
 //!   `tenko.cluster.peer` (the other controller's node id, when known) and
 //!   `rpc.grpc.status_code`, nothing from the messages.
 //!
-//! Traced: the `Cluster` service (except `TransferKek`, the key-generation exchange) and
-//! `Metrics.Snapshot`. Not traced: the `Raft` service (its heartbeats every few hundred
+//! Traced: the `Cluster` service (except `TransferKek`, the key-generation exchange),
+//! `Metrics.Snapshot` and `Metrics.History`. Not traced: the `Raft` service (its heartbeats every few hundred
 //! milliseconds would drown everything else) and the node services.
 //!
 //! The propagator is the process-wide one of `opentelemetry::global`, which `tenko serve`

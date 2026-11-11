@@ -639,6 +639,7 @@ pub fn fuzz_request(data: &[u8]) {
             drop(v1::CampaignRequest::decode(input));
             drop(v1::ReadIndexRequest::decode(input));
             drop(v1::SnapshotRequest::decode(input));
+            drop(v1::HistoryRequest::decode(input));
         }
         _ => drop(PeerIdentity::from_der(input)),
     }

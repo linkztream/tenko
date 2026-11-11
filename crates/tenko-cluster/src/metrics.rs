@@ -1,5 +1,6 @@
 //! Metrics between controllers (OPS-20): the `Metrics.Snapshot` call that lets the start
-//! page of any controller show the whole cluster.
+//! page of any controller show the whole cluster, and the `Metrics.History` call that brings
+//! the history of a peer's dashboard tiles.
 //!
 //! The callee answers its newest one-second sample, encoded by the API layer
 //! ([`MetricsSource`], set on the node registry by the server binary with
@@ -8,6 +9,14 @@
 //! `metrics` topic, once per second per peer, through [`fetch`]: a deadline of its own, the
 //! peer transport's connection, and the answer `UNIMPLEMENTED` of an older build reported
 //! as [`PeerReply::Unsupported`].
+//!
+//! The history (dashboard history plan, section 2): the answer to `Metrics.Snapshot` also
+//! carries the buckets of the callee's tiers that closed in its last two ticks
+//! ([`EncodedSample::closed`], empty from an older build), and [`fetch_history`] reads all of
+//! a peer's tiers once, when the peer first appears and when it answers again after missing
+//! calls. A source without a history ([`MetricsSource::history`] answers `None`, the default)
+//! makes the callee answer `UNIMPLEMENTED`, as a build before the history does, and the caller
+//! reports both as [`HistoryReply::Unsupported`].
 //!
 //! A caller must hold a controller certificate. When the caller has a node record (every
 //! controller that joined), the record must name the role and hold the certificate; the
@@ -27,9 +36,11 @@ use crate::{
 };
 
 /// The encoding of a sample in [`v1::MetricsSnapshot::payload`] (CBOR of the API's
-/// `MetricsSample`).
+/// `MetricsSample`), and of the tiers in [`v1::MetricsSnapshot::closed`] and
+/// [`v1::MetricsHistory::payload`] (CBOR of the API's `ControllerTiers`).
 pub const SAMPLE_ENCODING: &str = "cbor/1";
-/// The largest answer the caller accepts.
+/// The largest answer the caller accepts, for either call. A whole history of 25 figures is
+/// about 230 KB.
 const MAX_ANSWER_BYTES: usize = 1024 * 1024;
 
 /// One controller's sample as it travels between controllers.
@@ -39,10 +50,14 @@ pub struct EncodedSample {
     pub node: NodeId,
     /// When it was taken, by that controller's clock.
     pub at: Timestamp,
-    /// The encoding of `payload`, such as [`SAMPLE_ENCODING`].
+    /// The encoding of `payload` and `closed`, such as [`SAMPLE_ENCODING`].
     pub encoding: String,
     /// The sample.
     pub payload: Vec<u8>,
+    // WP18.0: the history's closed buckets.
+    /// The buckets of the controller's history that closed in its last two ticks, with its
+    /// start (always set by a controller with the history); empty from an older build.
+    pub closed: Vec<u8>,
 }
 
 impl EncodedSample {
@@ -53,6 +68,7 @@ impl EncodedSample {
             at: Some(timestamp_to_proto(self.at)),
             encoding: self.encoding.clone(),
             payload: self.payload.clone(),
+            closed: self.closed.clone(),
         }
     }
 
@@ -63,14 +79,58 @@ impl EncodedSample {
             at: message.at.as_ref().and_then(timestamp_from_proto)?,
             encoding: message.encoding,
             payload: message.payload,
+            closed: message.closed,
         })
     }
 }
 
-/// Where `Metrics.Snapshot` reads this controller's newest sample.
+// WP18.0: a controller's history as it travels between controllers.
+/// One controller's history of the dashboard's figures as it travels between controllers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncodedHistory {
+    /// The controller whose history it is.
+    pub node: NodeId,
+    /// The end of the newest sample folded into it, by that controller's clock.
+    pub at: Timestamp,
+    /// The encoding of `payload`, such as [`SAMPLE_ENCODING`].
+    pub encoding: String,
+    /// The history.
+    pub payload: Vec<u8>,
+}
+
+impl EncodedHistory {
+    /// The protobuf message.
+    pub fn to_proto(&self) -> v1::MetricsHistory {
+        v1::MetricsHistory {
+            node_id: self.node.0,
+            at: Some(timestamp_to_proto(self.at)),
+            encoding: self.encoding.clone(),
+            payload: self.payload.clone(),
+        }
+    }
+
+    /// From the protobuf message; `None` without a valid time.
+    pub fn from_proto(message: v1::MetricsHistory) -> Option<Self> {
+        Some(Self {
+            node: NodeId(message.node_id),
+            at: message.at.as_ref().and_then(timestamp_from_proto)?,
+            encoding: message.encoding,
+            payload: message.payload,
+        })
+    }
+}
+
+/// Where `Metrics.Snapshot` and `Metrics.History` read this controller's figures.
 pub trait MetricsSource: Send + Sync + 'static {
     /// The newest sample; `None` while there is none.
     fn current(&self) -> BoxFuture<'_, Option<EncodedSample>>;
+
+    /// This controller's history of the dashboard's figures, encoded once per change and
+    /// shared; `None` when it keeps none, which `Metrics.History` answers with
+    /// `UNIMPLEMENTED`. The default keeps none.
+    fn history(&self) -> BoxFuture<'_, Option<EncodedHistory>> {
+        Box::pin(async { None })
+    }
 }
 
 /// What a peer answered.
@@ -84,20 +144,23 @@ pub enum PeerReply {
     Failed(String),
 }
 
+/// What a peer answered to `Metrics.History`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HistoryReply {
+    /// Its history.
+    History(EncodedHistory),
+    /// It keeps no history (an older build): the call answered `UNIMPLEMENTED`. The caller
+    /// combines it as a missing controller.
+    Unsupported,
+    /// No answer within the deadline, or an error.
+    Failed(String),
+}
+
 /// Asks controller `node` for its newest sample through `network`, within `deadline` (the
 /// connection included).
 pub async fn fetch(network: &PeerNetwork, node: NodeId, deadline: Duration) -> PeerReply {
     let call = async {
-        let endpoint = network
-            .endpoint(node, None)
-            .await
-            .map_err(|error| error.detail().to_owned())?;
-        let channel = network
-            .channel(&endpoint)
-            .await
-            .map_err(|error| error.detail().to_owned())?;
-        let mut client = v1::metrics_client::MetricsClient::new(channel)
-            .max_decoding_message_size(MAX_ANSWER_BYTES);
+        let mut client = client(network, node).await?;
         let answer = crate::trace::rpc(Some(node), crate::trace::METRICS, "Snapshot", async {
             let mut request = Request::new(v1::SnapshotRequest {});
             request.set_timeout(deadline);
@@ -119,4 +182,52 @@ pub async fn fetch(network: &PeerNetwork, node: NodeId, deadline: Duration) -> P
             None => PeerReply::Failed("the answer has no valid time".to_owned()),
         },
     }
+}
+
+/// Asks controller `node` for its history through `network`, within `deadline` (the
+/// connection included).
+pub async fn fetch_history(
+    network: &PeerNetwork,
+    node: NodeId,
+    deadline: Duration,
+) -> HistoryReply {
+    let call = async {
+        let mut client = client(network, node).await?;
+        let answer = crate::trace::rpc(Some(node), crate::trace::METRICS, "History", async {
+            let mut request = Request::new(v1::HistoryRequest {});
+            request.set_timeout(deadline);
+            crate::trace::inject(&mut request);
+            client.history(request).await
+        })
+        .await;
+        Ok::<_, String>(answer)
+    };
+    match tokio::time::timeout(deadline, call).await {
+        Err(_) => HistoryReply::Failed(format!("no answer within {} ms", deadline.as_millis())),
+        Ok(Err(detail)) => HistoryReply::Failed(detail),
+        Ok(Ok(Err(status))) if status.code() == tonic::Code::Unimplemented => {
+            HistoryReply::Unsupported
+        }
+        Ok(Ok(Err(status))) => HistoryReply::Failed(status.message().to_owned()),
+        Ok(Ok(Ok(answer))) => match EncodedHistory::from_proto(answer.into_inner()) {
+            Some(history) => HistoryReply::History(history),
+            None => HistoryReply::Failed("the answer has no valid time".to_owned()),
+        },
+    }
+}
+
+/// A client of the `Metrics` service of `node`, with the answer limit.
+async fn client(
+    network: &PeerNetwork,
+    node: NodeId,
+) -> Result<v1::metrics_client::MetricsClient<tonic::transport::Channel>, String> {
+    let endpoint = network
+        .endpoint(node, None)
+        .await
+        .map_err(|error| error.detail().to_owned())?;
+    let channel = network
+        .channel(&endpoint)
+        .await
+        .map_err(|error| error.detail().to_owned())?;
+    Ok(v1::metrics_client::MetricsClient::new(channel).max_decoding_message_size(MAX_ANSWER_BYTES))
 }

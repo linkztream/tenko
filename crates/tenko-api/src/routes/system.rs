@@ -1090,6 +1090,8 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
             disk_available: host.disk_available,
             sampled_at: host.sampled_at,
         }),
+        // WP18.0: set from the sampler's history once it keeps one.
+        metrics: None,
     }
 }
 

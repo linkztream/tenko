@@ -1,10 +1,11 @@
 // Tenko node transport, major version 1: metrics of a controller.
 // See handshake.proto for the transport, the errors and the evolution rule.
 //
-// The service Metrics lets a controller read another controller's current figures, so the
-// dashboard of any controller shows the whole cluster. A caller needs the role
-// `controller`. A build before work package WP3.5 answers UNIMPLEMENTED; a controller whose
-// API has not started yet answers UNAVAILABLE.
+// The service Metrics lets a controller read another controller's current figures and the
+// history of its dashboard tiles, so the dashboard of any controller shows the whole cluster.
+// A caller needs the role `controller`. A build before work package WP3.5 answers
+// UNIMPLEMENTED to both methods, a build before the dashboard history (WP18.1) to History; a
+// controller whose API has not started yet answers UNAVAILABLE.
 syntax = "proto3";
 
 package tenko.cluster.v1;
@@ -15,6 +16,11 @@ import "google/protobuf/timestamp.proto";
 service Metrics {
   // The callee's newest one-second snapshot of its metrics.
   rpc Snapshot(SnapshotRequest) returns (MetricsSnapshot);
+  // The callee's own history of the dashboard's figures: every bucket of its tiers, the open
+  // ones included. Called when a peer first appears and when it answers again after missing
+  // calls, never per subscription; from then on the caller takes the peer's closed buckets
+  // from `MetricsSnapshot.closed`.
+  rpc History(HistoryRequest) returns (MetricsHistory);
 }
 
 message SnapshotRequest {}
@@ -24,8 +30,26 @@ message MetricsSnapshot {
   uint64 node_id = 1;
   // When it was taken, by the callee's clock.
   google.protobuf.Timestamp at = 2;
-  // The encoding of `payload`, for example `cbor/1`.
+  // The encoding of `payload` and `closed`, for example `cbor/1`.
   string encoding = 3;
   // The snapshot, in `encoding`.
+  bytes payload = 4;
+  // The buckets of the callee's history that closed in its last two ticks, in `encoding`
+  // (for `cbor/1` the CBOR of the API's `ControllerTiers`). A callee with the history always
+  // sets it, with its start and no figure when nothing closed, so a restart shows within a
+  // second; empty from a build without the history.
+  bytes closed = 5;
+}
+
+message HistoryRequest {}
+
+message MetricsHistory {
+  // The node id of the controller whose history it is.
+  uint64 node_id = 1;
+  // The end of the newest sample folded into it, by the callee's clock.
+  google.protobuf.Timestamp at = 2;
+  // The encoding of `payload`, for example `cbor/1`.
+  string encoding = 3;
+  // The history, in `encoding` (for `cbor/1` the CBOR of the API's `ControllerTiers`).
   bytes payload = 4;
 }
