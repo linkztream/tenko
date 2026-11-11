@@ -47234,7 +47234,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal may not decide proposals */
+            /** @description The principal may not decide proposals (`auth.forbidden`), or its grant to decide them is limited to a scope (`auth.out_of_scope`): a run spans the whole installation */
             403: {
                 headers: {
                     [name: string]: unknown;

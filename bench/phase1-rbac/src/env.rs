@@ -133,12 +133,16 @@ pub async fn build_stack(kind: StoreKind, data_root: &Path) -> Result<Stack> {
             ..EngineConfig::default()
         },
     );
-    tenko_ipam::jobs::register_steps(&mut engine);
+    // The writes that run after their request are checked with the requester's rights,
+    // as `tenko serve` wires them.
+    let guard = tenko_ipam::scope::ScopeGuard::new(auth.authorizer(), Arc::clone(&scope));
+    tenko_ipam::jobs::register_steps(&mut engine, &guard);
     let ipam = IpamService::new(
         Arc::clone(&store),
         Arc::new(engine.clone()),
         IpamConfig::default(),
     )?;
+    ipam.set_scope_guard(guard);
     let tree = Arc::clone(ipam.tree());
     engine.set_prefix_resolver(Arc::new(move |prefix| {
         tree.prefix(prefix).map(|(_, network)| network)
@@ -273,6 +277,7 @@ pub async fn login(auth: &AuthService, name: &str, passphrase: &str) -> Result<S
             &PasswordLogin {
                 user_name: name.to_owned(),
                 password: SecretString::new(passphrase),
+                provider: None,
             },
         )
         .await

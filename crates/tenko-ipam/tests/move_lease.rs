@@ -148,10 +148,23 @@ impl World {
     async fn new() -> Self {
         let store: Arc<dyn Store> = Arc::new(MemStore::default());
         let mut engine = JobEngine::new(Arc::clone(&store), tenko_jobs::EngineConfig::default());
-        register_steps(&mut engine);
+        register_steps(
+            &mut engine,
+            &tenko_ipam::scope::ScopeGuard::new(
+                std::sync::Arc::new(tenko_core::principal::AllowAll),
+                std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+            ),
+        );
         let role = Arc::new(FakeRole::default());
         let slot = DhcpMoves::with(Arc::clone(&role) as Arc<dyn DhcpRolePort>);
-        tenko_ipam::moves::dhcp::register_steps(&mut engine, &slot);
+        tenko_ipam::moves::dhcp::register_steps(
+            &mut engine,
+            &slot,
+            &tenko_ipam::scope::ScopeGuard::new(
+                std::sync::Arc::new(tenko_core::principal::AllowAll),
+                std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+            ),
+        );
         let l2 = Arc::new(L2Probe::default());
         engine.register(Arc::new(L2Step(Arc::clone(&l2))));
         let service = IpamService::new(

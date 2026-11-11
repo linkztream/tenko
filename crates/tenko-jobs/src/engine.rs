@@ -267,6 +267,20 @@ impl JobEngine {
             .insert(handler.kind(), handler);
     }
 
+    /// The step kinds that have a handler, sorted: what a wiring check walks.
+    pub fn kinds(&self) -> Vec<StepKind> {
+        let mut kinds: Vec<StepKind> = self
+            .inner
+            .handlers
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .cloned()
+            .collect();
+        kinds.sort();
+        kinds
+    }
+
     /// Sets how prefixes resolve for [`ObservedPredicate::LeaseInPrefix`](crate::ObservedPredicate).
     pub fn set_prefix_resolver(&self, resolver: Arc<dyn PrefixResolver>) {
         *self

@@ -255,7 +255,7 @@ The job rolls back when the migration deadline passes, when a step fails, or whe
 - The automatic **DNS step** plans again without the move and writes the old address's records back; when that fails the reconciler's next run does it.
 - The automatic **DHCP step** releases a lease the device already took at the new address; the new reservation goes with the new address when the intent step is undone, and the old reservation was never touched, so a cancel restores both.
 - The **manual steps** have no undo task: a rollback never waits for a person to take back the DHCP reservation of a network outside Tenko, the DNS records of a name outside Tenko or a manual L2 change. The job's error names the reason, and the jobs view lists what was done.
-- The **intent step** removes the new address, restores the old one if needed, and tags the moved object `move-failed`. The tag goes away with the next successful move of the object.
+- The **intent step** removes the new address and tags the moved object `move-failed`; the old address stays as it is (only the cleanup, the last step, removes it, so an old address that is gone was removed by someone else and stays so). The tag goes away with the next successful move of the object.
 
 The job ends `rolled_back` with the reason in its error, or `canceled` when a cancel started the rollback. Every address has its own job, so a failure rolls back that address only and never touches the other devices of the move.
 
@@ -297,7 +297,7 @@ The jobs of one move form one job group whose limit is the move's parallelism: 4
 | `ipam.move.dhcp_release_failed` | 503 | The role could not release a lease (`cause` names its code); the DHCP step's compensation reports it, the cleanup logs it and goes on |
 | `ipam.move.no_engine` | 503 | The server runs no job engine |
 
-A submit needs `Update` on every named object, `Execute` on jobs and `Execute` on every connector an automatic L2 step writes through. A preview needs `Read` on every named object.
+A submit needs `Update` on every named object and on the target network, `Execute` on jobs and `Execute` on every connector an automatic L2 step writes through. A preview needs the same rights except `Execute`, since it shows what the move would write. For a principal whose grants are limited to a prefix or a site (IAM-01, [access.md](access.md) section 3), every moved address, its host and the target must lie inside the scope, at the request and again at each step that writes intent: the intent and cleanup steps check the rights the principal who started the move holds when they run, so a grant revoked or an account disabled since the start refuses the step (`auth.out_of_scope`, `auth.forbidden`) and the job rolls back. The rollback itself is not checked. A move started under an earlier version records no requester; its next write is refused with 409 `ipam.job.requester_unknown` and it rolls back.
 
 ## 10 Limits
 

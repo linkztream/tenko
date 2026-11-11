@@ -704,6 +704,118 @@ pub fn prefix_addresses(
     })
 }
 
+/// The addresses inside a prefix as a reader sees them who may read only the addresses
+/// `keep` admits, with the free gaps (when `include_free`): every other address counts as
+/// free space and is skipped while the store is scanned, so the items, the gaps and the
+/// cursor of every page derive from the readable addresses only and tell nothing of where
+/// the others sit. Pages stay full: the scan goes on past the hidden addresses until the
+/// page is full or the prefix ends.
+///
+/// # Errors
+///
+/// As [`prefix_addresses`].
+pub fn prefix_addresses_where(
+    view: &dyn ReadView,
+    prefix: PrefixId,
+    include_free: bool,
+    cursor: Option<&str>,
+    limit: Option<usize>,
+    keep: &dyn Fn(&Address) -> bool,
+) -> IpamResult<Page<PrefixAddressItem>> {
+    let limit = limit_of(limit)?;
+    let prefix = get::<Prefix>(view, prefix)?;
+    let family = Family::of_net(&prefix.cidr);
+    let (first, last) = bounds(&prefix.cidr);
+    let (lo, hi) = match prefix.role {
+        PrefixRole::Network => host_bounds(&prefix.cidr),
+        PrefixRole::Supernet => (first, last),
+    };
+    let start = match decode_cursor(cursor)? {
+        Some(bytes) => {
+            let bytes: [u8; 16] = bytes.try_into().map_err(|_| {
+                IpamError::new(codes::INVALID_CURSOR, 400, "the cursor is malformed")
+                    .field("cursor", codes::INVALID_CURSOR)
+            })?;
+            u128::from_be_bytes(bytes).max(first)
+        }
+        None => first,
+    };
+    if start > last {
+        return Ok(Page {
+            items: Vec::new(),
+            next_cursor: None,
+            revision: view.revision(),
+        });
+    }
+    let gap = |from: u128, to: Option<u128>| {
+        let to = to?;
+        let (gap_first, gap_last) = (from.max(lo), to.min(hi));
+        (include_free && gap_first <= gap_last).then_some((gap_first, gap_last))
+    };
+    let mut items = Vec::new();
+    // The first number not yet shown; `None` once the end of the space was passed.
+    let mut position = Some(start);
+    let mut next = None;
+    let mut scan_from = start;
+    'scan: loop {
+        let range = KeyRange {
+            start: std::ops::Bound::Included(
+                ADDRESS_IPS.key(&(prefix.vrf, u128_to_ip(family, scan_from))),
+            ),
+            end: std::ops::Bound::Included(
+                ADDRESS_IPS.key(&(prefix.vrf, u128_to_ip(family, last))),
+            ),
+        };
+        let batch = view.scan_typed(&ADDRESS_IPS, range, limit + 1, false)?;
+        let full = batch.len() == limit + 1;
+        let mut scanned = None;
+        for ((_, ip), id, _) in batch {
+            let value = ip_to_u128(ip);
+            scanned = Some(value);
+            let address = get::<Address>(view, id)?;
+            if !keep(&address) {
+                continue;
+            }
+            if let Some(from) = position
+                && let Some((gap_first, gap_last)) = gap(from, value.checked_sub(1))
+            {
+                if items.len() == limit {
+                    next = Some(gap_first);
+                    break 'scan;
+                }
+                items.push(free_item(family, gap_first, gap_last));
+            }
+            if items.len() == limit {
+                next = Some(value);
+                break 'scan;
+            }
+            items.push(PrefixAddressItem::Address(Box::new(AddressRow::from(
+                address,
+            ))));
+            position = value.checked_add(1);
+        }
+        match scanned.and_then(|value| value.checked_add(1)) {
+            Some(after) if full && after <= last => scan_from = after,
+            _ => break,
+        }
+    }
+    if next.is_none()
+        && let Some(from) = position
+        && let Some((gap_first, gap_last)) = gap(from, Some(last))
+    {
+        if items.len() == limit {
+            next = Some(gap_first);
+        } else {
+            items.push(free_item(family, gap_first, gap_last));
+        }
+    }
+    Ok(Page {
+        items,
+        next_cursor: next.map(|position| to_hex(&position.to_be_bytes())),
+        revision: view.revision(),
+    })
+}
+
 fn free_item(family: Family, first: u128, last: u128) -> PrefixAddressItem {
     PrefixAddressItem::Free {
         first: u128_to_ip(family, first),

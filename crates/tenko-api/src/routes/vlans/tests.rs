@@ -39,10 +39,10 @@ impl Api {
     fn new(state: AppState, controllers: bool) -> Self {
         let store: Arc<dyn Store> = Arc::new(MemStore::default());
         let mut engine = JobEngine::new(Arc::clone(&store), EngineConfig::default());
-        tenko_ipam::jobs::register_steps(&mut engine);
+        tenko_ipam::jobs::register_steps(&mut engine, &crate::routes::common::test_guard());
         let memory = MemoryControllers::new(vec![MemoryController::new("unifi.example.test")]);
         let slot = Controllers::with(memory.clone());
-        tenko_ipam::vlan::register_steps(&mut engine, &slot);
+        tenko_ipam::vlan::register_steps(&mut engine, &slot, &crate::routes::common::test_guard());
         let service = IpamService::new(store, Arc::new(engine.clone()), IpamConfig::default())
             .expect("service");
         let (router, _) = OpenApiRouter::<AppState>::new()

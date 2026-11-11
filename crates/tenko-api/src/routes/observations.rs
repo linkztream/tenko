@@ -228,19 +228,34 @@ async fn get_observation(
     let subject: SubjectQuery = subject.parse()?;
     let view = ipam.view(at_least).await?;
     ipam.leases().caught_up(view.revision()).await;
-    let found = subject_view(
-        view.as_ref(),
-        Some(ipam.leases()),
-        &subject,
-        Timestamp::now(),
-    )?;
-    if !subject_in_scope(&app, &cx, &ipam, &found) {
-        return Err(Denied {
+    let out_of_scope = || -> ApiError {
+        Denied {
             action: Action::Read,
             object: new_of(ObjectKind::Observation),
             reason: DenyReason::OutOfScope,
         }
-        .into());
+        .into()
+    };
+    let found = match subject_view(
+        view.as_ref(),
+        Some(ipam.leases()),
+        &subject,
+        Timestamp::now(),
+    ) {
+        Ok(found) => found,
+        // A scoped principal sees a subject only through a fact inside its scope, so a
+        // subject nobody saw answers as one seen outside the scope: the answer never tells
+        // whether something was observed there (IAM-01).
+        Err(error)
+            if error.is(tenko_ipam::codes::NOT_FOUND)
+                && !ipam.read_scope(&cx, ObjectKind::Observation).is_all() =>
+        {
+            return Err(out_of_scope());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if !subject_in_scope(&app, &cx, &ipam, &found) {
+        return Err(out_of_scope());
     }
     Ok(Json(found))
 }

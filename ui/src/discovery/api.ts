@@ -126,12 +126,16 @@ export function reconcileNow(): Promise<ReconcileReport> {
   return api.post("/api/v1/proposals/reconcile");
 }
 
-/** The picture of one subject (a MAC address, an IP address or a name); null when no fact names it. */
+/**
+ * The picture of one subject (a MAC address, an IP address or a name); null when no fact names it.
+ * A principal whose grants are limited to a scope gets `auth.out_of_scope` both for a subject seen
+ * outside its scope and for one nobody saw, so for it that answer means the same: nothing to show.
+ */
 export async function getSubject(subject: string, signal?: AbortSignal): Promise<SubjectView | null> {
   try {
     return await api.get("/api/v1/observations/{subject}", { path: { subject }, signal });
   } catch (err) {
-    if (isApiError(err, "ipam.not_found")) return null;
+    if (isApiError(err, "ipam.not_found") || isApiError(err, "auth.out_of_scope")) return null;
     throw err;
   }
 }

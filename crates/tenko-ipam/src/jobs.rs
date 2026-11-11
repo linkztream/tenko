@@ -265,14 +265,180 @@ impl JobSink for tenko_jobs::JobEngine {
     }
 }
 
+/// The refusal of a write whose requester is not recorded: the job was started under an
+/// earlier version. `what` names the job ("move", "import", "VLAN provisioning").
+pub(crate) fn requester_unknown(what: &str) -> StepError {
+    StepError::Coded(Box::new(tenko_core::CodedError::new(
+        crate::codes::REQUESTER_UNKNOWN,
+        409,
+        format!(
+            "this {what} was started under an earlier version of Tenko that did not record who started it, so its next change cannot be checked against that person's rights; it is rolled back, which undoes what its earlier steps changed and nothing else. Start the {what} again"
+        ),
+    )))
+}
+
+/// The principal a step checks: the stored requester's identity, with the rights it
+/// holds now.
+///
+/// # Errors
+///
+/// `ipam.job.requester_unknown` (409) for a job started under an earlier version.
+pub(crate) fn requester_principal(
+    requester: Option<&crate::scope::Requester>,
+    what: &str,
+) -> Result<tenko_core::Principal, StepError> {
+    requester
+        .map(crate::scope::Requester::principal)
+        .ok_or_else(|| requester_unknown(what))
+}
+
+/// [`ScopeGuard::precheck`](crate::scope::ScopeGuard::precheck) as a step's error.
+pub(crate) fn precheck_step(
+    guard: &crate::scope::ScopeGuard,
+    principal: &tenko_core::Principal,
+    commands: &[crate::IpamCommand],
+) -> Result<(), StepError> {
+    guard
+        .precheck(principal, commands)
+        .map_err(|denied| StepError::coded(&crate::IpamError::from(denied)))
+}
+
+/// Whether the requester may still change `objects` (each checked as an update of the
+/// stored object): a step that writes the network on the requester's behalf (a switch
+/// port, a client VLAN, a network on a controller) checks this before it writes, so a
+/// grant revoked or an account disabled since the start stops it.
+///
+/// # Errors
+///
+/// `ipam.job.requester_unknown` for a job started under an earlier version, the refusal
+/// of the guard otherwise.
+pub(crate) fn still_allowed(
+    guard: &crate::scope::ScopeGuard,
+    requester: Option<&crate::scope::Requester>,
+    what: &str,
+    objects: &[tenko_core::ObjectRef],
+) -> Result<(), StepError> {
+    use crate::command::{
+        AddressPatch, HostPatch, PrefixPatch, UpdateAddress, UpdateHost, UpdatePrefix, UpdateVlan,
+        VlanPatch,
+    };
+    use tenko_core::ObjectKind;
+    let principal = requester_principal(requester, what)?;
+    let commands: Vec<crate::IpamCommand> = objects
+        .iter()
+        .filter_map(|object| match object.kind {
+            ObjectKind::Address => Some(crate::IpamCommand::UpdateAddress(UpdateAddress {
+                id: object.id.into(),
+                expected: None,
+                patch: AddressPatch::default(),
+            })),
+            ObjectKind::Host => Some(crate::IpamCommand::UpdateHost(UpdateHost {
+                id: object.id.into(),
+                expected: None,
+                patch: HostPatch::default(),
+            })),
+            ObjectKind::Vlan => Some(crate::IpamCommand::UpdateVlan(UpdateVlan {
+                id: object.id.into(),
+                expected: None,
+                patch: VlanPatch::default(),
+            })),
+            ObjectKind::Prefix => Some(crate::IpamCommand::UpdatePrefix(UpdatePrefix {
+                id: object.id.into(),
+                expected: None,
+                patch: PrefixPatch::default(),
+            })),
+            _ => None,
+        })
+        .collect();
+    precheck_step(guard, &principal, &commands)
+}
+
+/// [`ScopeGuard::check`](crate::scope::ScopeGuard::check) as a step's error.
+pub(crate) fn check_step_plan(
+    guard: &crate::scope::ScopeGuard,
+    principal: &tenko_core::Principal,
+    plan: &crate::plan::IpamPlan,
+) -> Result<(), StepError> {
+    guard
+        .check(principal, plan)
+        .map_err(|denied| StepError::coded(&crate::IpamError::from(denied)))
+}
+
 /// Registers the step handlers of the IPAM domain with the job engine: `ipam.write` and
-/// the steps of a move (`ipam.move.*`).
-pub fn register_steps(engine: &mut tenko_jobs::JobEngine) {
+/// the steps of a move (`ipam.move.*`). The steps that write intent after the request
+/// (a move's intent and cleanup, an import's chunks) check every write with `guard`
+/// against the rights their requester holds when they run; none of them can be built
+/// without a guard.
+pub fn register_steps(engine: &mut tenko_jobs::JobEngine, guard: &crate::scope::ScopeGuard) {
     engine.register(Arc::new(IpamWriteStep));
-    for handler in crate::moves::move_step_handlers() {
+    for handler in crate::moves::move_step_handlers(guard) {
         engine.register(handler);
     }
 }
+
+/// How a step kind of the IPAM domain stands to the scope check of writes that run
+/// after their request (the server's wiring test walks every registered kind).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepWrites {
+    /// It writes IPAM intent or the network on the requester's behalf; its handler cannot
+    /// be built without a guard and checks the requester's rights when it runs.
+    Guarded,
+    /// It writes no IPAM intent after the request, for the reason given.
+    NoIntent(&'static str),
+}
+
+/// Every step kind the IPAM domain registers, with how it stands to the scope check.
+pub const STEP_KINDS: &[(&str, StepWrites)] = &[
+    ("import.chunk", StepWrites::Guarded),
+    (
+        "import.finish",
+        StepWrites::NoIntent(
+            "removes only the vault secrets the import replaced; its chunks were checked",
+        ),
+    ),
+    ("ipam.move.cleanup", StepWrites::Guarded),
+    ("ipam.move.controller", StepWrites::Guarded),
+    (
+        "ipam.move.device",
+        StepWrites::NoIntent("a task for a person"),
+    ),
+    (
+        "ipam.move.dhcp",
+        StepWrites::NoIntent("asks the DHCP role for the lease state of the move; no intent"),
+    ),
+    (
+        "ipam.move.dns",
+        StepWrites::NoIntent("DNS records derived from intent the move's checked steps wrote"),
+    ),
+    ("ipam.move.intent", StepWrites::Guarded),
+    ("ipam.move.l2", StepWrites::NoIntent("a task for a person")),
+    (
+        "ipam.move.lease",
+        StepWrites::NoIntent("the moving client's lease state; no intent"),
+    ),
+    ("ipam.move.nudge", StepWrites::Guarded),
+    (
+        "ipam.move.observe",
+        StepWrites::NoIntent("waits for the device to be seen; no intent"),
+    ),
+    (
+        "ipam.move.prepare",
+        StepWrites::NoIntent("the moving client's lease state; no intent"),
+    ),
+    ("ipam.vlan.activate", StepWrites::Guarded),
+    ("ipam.vlan.controller", StepWrites::Guarded),
+    ("ipam.vlan.intent", StepWrites::Guarded),
+    (
+        "ipam.vlan.manual",
+        StepWrites::NoIntent("a task for a person"),
+    ),
+    (
+        "ipam.write",
+        StepWrites::NoIntent(
+            "runs inline in the request that planned and checked the batch; never runs later (the batch lives only in the request's task)",
+        ),
+    ),
+];
 
 /// The handler of `ipam.write`: stages (under the engine) or proposes the batch handed over
 /// with [`with_batch`]; when it proposes, the output is the CBOR of the

@@ -1002,6 +1002,10 @@ impl Reconciler {
         let snapshot = Snapshot::load(view.as_ref(), Some(self.ipam.leases()), now)?;
         drop(view);
         let cx = reconciler_cx(now);
+        // The reconciler is no four-eyes boundary: an adoption is checked, when it is
+        // applied, against the rights of the principal who set the policy, and a server
+        // without the check adopts nothing.
+        let guard = self.ipam.scope_guard();
         for (proposal, _) in snapshot.open.values() {
             let Some((prefix, host_mode)) = adoption::adopter(
                 &snapshot.intent,
@@ -1012,18 +1016,32 @@ impl Reconciler {
                 continue;
             };
             let applier = Applier::Policy { prefix, host_mode };
-            match decide::apply(
-                &self.ipam,
-                proposal.id,
-                &cx,
-                &PlanOptions::default(),
-                false,
-                None,
-                applier,
-                &decide::ApproveRequest::default(),
-            )
-            .await
-            {
+            let outcome = match (&guard, snapshot.policies.get(&prefix)) {
+                (Ok(guard), Some(policy)) => {
+                    decide::apply(
+                        &self.ipam,
+                        proposal.id,
+                        &cx,
+                        &PlanOptions::default(),
+                        false,
+                        None,
+                        applier,
+                        &decide::ApproveRequest::default(),
+                        decide::Authority {
+                            guard: Some(guard),
+                            principal: &policy.updated.by,
+                        },
+                    )
+                    .await
+                }
+                (Err(error), _) => Err(error.clone()),
+                (Ok(_), None) => Err(crate::IpamError::new(
+                    crate::codes::REFERENCE_MISSING,
+                    409,
+                    "the adoption policy is gone",
+                )),
+            };
+            match outcome {
                 Ok(_) => report.adopted += 1,
                 Err(error) => {
                     tracing::info!(proposal = %proposal.id, error = %error.code_str(), "adoption failed");

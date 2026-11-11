@@ -410,7 +410,7 @@ The commands are applied as the intent stands at the approval: a VLAN the propos
 
 ### 5.3 Run now
 
-`POST /api/v1/proposals/reconcile` needs `approve` on proposals and runs the reconciler once, now, on the server that answers. It returns the report of section 3.2. A server without a reconciler answers 503 `ipam.reconciler.unavailable`.
+`POST /api/v1/proposals/reconcile` needs `approve` on proposals without a scope and runs the reconciler once, now, on the server that answers; a principal whose grant to decide proposals is limited to a prefix or a site gets 403 `auth.out_of_scope`, since a run spans the whole installation ([access.md](access.md) section 10). It returns the report of section 3.2. A server without a reconciler answers 503 `ipam.reconciler.unavailable`.
 
 ### 5.4 Audit actions
 
@@ -440,7 +440,7 @@ An approval of a proposal that offers names adds to `ipam.proposal.approve` the 
 
 ## 6. Adoption policies
 
-A prefix can carry an adoption policy that lets the reconciler apply some proposals without a person (IPAM-15, "auto-adopt in network Z"). Adoption is on by default; the `adopt` setting of the reconciler switches it off for a server, and then every proposal waits for a person. An example policy:
+A prefix can carry an adoption policy that lets the reconciler apply some proposals without a person (IPAM-15, "auto-adopt in network Z"). Adoption is on by default; the `adopt` setting of the reconciler switches it off for a server, and then every proposal waits for a person. The reconciler is no four-eyes boundary: each adoption is checked, when it is applied, against the rights the person or token that set the policy in force holds then (IAM-01, [access.md](access.md) section 3.4). An adoption that would change something outside that principal's scope, or whose principal was disabled since, is refused and recorded on the proposal as a failed adoption. An example policy:
 
 ```json
 {

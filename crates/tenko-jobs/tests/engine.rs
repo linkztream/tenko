@@ -68,6 +68,22 @@ fn engine_with(handlers: &[&Scripted]) -> TestEngine {
     t
 }
 
+// --- Registration ------------------------------------------------------------------------
+
+#[test]
+fn kinds_lists_every_registered_handler_sorted() {
+    let b = Scripted::new("jobs.test.b");
+    let a = Scripted::new("jobs.test.a");
+    let t = engine_with(&[&b, &a]);
+    let kinds: Vec<String> = t
+        .engine
+        .kinds()
+        .iter()
+        .map(|kind| kind.as_str().to_owned())
+        .collect();
+    assert_eq!(kinds, ["jobs.manual", "jobs.test.a", "jobs.test.b"]);
+}
+
 // --- Preview -----------------------------------------------------------------------------
 
 #[tokio::test]

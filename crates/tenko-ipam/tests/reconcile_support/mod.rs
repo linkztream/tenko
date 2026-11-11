@@ -60,6 +60,12 @@ impl World {
         service: Arc<IpamService>,
         config: ReconcilerConfig,
     ) -> Self {
+        // Adoptions are checked against the policy setter's rights; these tests let every
+        // write through unless a test set a guard of its own first.
+        service.set_scope_guard(tenko_ipam::scope::ScopeGuard::new(
+            Arc::new(tenko_core::principal::AllowAll),
+            Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+        ));
         let reconciler = Reconciler::new(Arc::clone(&service), config).expect("reconciler");
         Self {
             store,

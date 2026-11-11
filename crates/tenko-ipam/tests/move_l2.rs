@@ -279,8 +279,21 @@ impl World {
             EngineConfig::default(),
             Arc::clone(&clock) as Arc<dyn tenko_jobs::Clock>,
         );
-        tenko_ipam::jobs::register_steps(&mut engine);
-        moves::register_steps(&mut engine, &slot);
+        tenko_ipam::jobs::register_steps(
+            &mut engine,
+            &tenko_ipam::scope::ScopeGuard::new(
+                std::sync::Arc::new(tenko_core::principal::AllowAll),
+                std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+            ),
+        );
+        moves::register_steps(
+            &mut engine,
+            &slot,
+            &tenko_ipam::scope::ScopeGuard::new(
+                std::sync::Arc::new(tenko_core::principal::AllowAll),
+                std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+            ),
+        );
         let service = IpamService::new(
             Arc::clone(&store),
             Arc::new(engine.clone()),
@@ -429,14 +442,22 @@ impl World {
     }
 
     async fn preview(&self, request: &MoveRequest) -> MovePreview {
-        moves::preview_move(&self.service, &self.slot, request, &person(), None)
+        moves::preview_move(&self.service, &self.slot, request, &person(), None, None)
             .await
             .expect("preview")
     }
 
     #[allow(clippy::result_large_err)] // The authorization callback answers the port's coded error.
     async fn try_submit(&self, request: &MoveRequest) -> IpamResult<MoveSubmitted> {
-        moves::submit_move(&self.service, &self.slot, request, &person(), &|_| Ok(())).await
+        moves::submit_move(
+            &self.service,
+            &self.slot,
+            request,
+            &person(),
+            &|_| Ok(()),
+            None,
+        )
+        .await
     }
 
     async fn submit(&self, request: &MoveRequest) -> MoveSubmitted {

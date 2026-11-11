@@ -153,11 +153,19 @@ use crate::{
 /// `ipam.move.nudge`, with the engine; the other steps of a move come with
 /// [`crate::jobs::register_steps`]. [`nudge::register_steps`] registers the nudge again with
 /// the dhcp role's slot, so that it sees the client's exchange on the target network.
-pub fn register_steps(engine: &mut JobEngine, controllers: &Arc<Controllers>) {
-    engine.register(Arc::new(MoveControllerStep::new(Arc::clone(controllers))));
+pub fn register_steps(
+    engine: &mut JobEngine,
+    controllers: &Arc<Controllers>,
+    guard: &crate::scope::ScopeGuard,
+) {
+    engine.register(Arc::new(MoveControllerStep::new(
+        Arc::clone(controllers),
+        guard.clone(),
+    )));
     engine.register(Arc::new(nudge::MoveNudgeStep::new(
         Arc::clone(controllers),
         None,
+        guard.clone(),
     )));
 }
 

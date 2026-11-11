@@ -43,12 +43,25 @@ impl World {
             EngineConfig::default(),
             clock as Arc<dyn tenko_jobs::Clock>,
         );
-        tenko_ipam::jobs::register_steps(&mut engine);
+        tenko_ipam::jobs::register_steps(
+            &mut engine,
+            &tenko_ipam::scope::ScopeGuard::new(
+                std::sync::Arc::new(tenko_core::principal::AllowAll),
+                std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+            ),
+        );
         let slot = Controllers::new();
         if let Some(controllers) = controllers {
             slot.set(controllers);
         }
-        tenko_ipam::vlan::register_steps(&mut engine, &slot);
+        tenko_ipam::vlan::register_steps(
+            &mut engine,
+            &slot,
+            &tenko_ipam::scope::ScopeGuard::new(
+                std::sync::Arc::new(tenko_core::principal::AllowAll),
+                std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+            ),
+        );
         let service = IpamService::new(store, Arc::new(engine.clone()), IpamConfig::default())
             .expect("service");
         Self {
@@ -607,10 +620,16 @@ async fn the_write_is_undone_when_a_later_step_fails() {
     let job = world.drive(submitted.job_id).await;
     assert_eq!(job.state, JobState::Succeeded);
     let output = job.steps[1].output.clone().expect("output").0;
-    let handler = tenko_ipam::vlan::step_handlers(&world.controllers)
-        .into_iter()
-        .find(|h| h.kind().as_str() == "ipam.vlan.controller")
-        .expect("handler");
+    let handler = tenko_ipam::vlan::step_handlers(
+        &world.controllers,
+        &tenko_ipam::scope::ScopeGuard::new(
+            std::sync::Arc::new(tenko_core::principal::AllowAll),
+            std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+        ),
+    )
+    .into_iter()
+    .find(|h| h.kind().as_str() == "ipam.vlan.controller")
+    .expect("handler");
     let cx = tenko_jobs::StepContext {
         job: submitted.job_id,
         step: 1,

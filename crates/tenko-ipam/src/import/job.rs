@@ -93,6 +93,11 @@ pub struct ChunkParams {
     pub last: u32,
     /// The frozen model's digest.
     pub model: Digest,
+    /// Who applied the import: each chunk is checked with the rights this principal holds
+    /// when the chunk runs. Absent in an import applied under an earlier version, whose
+    /// next chunk is refused so that the import rolls back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requester: Option<crate::scope::Requester>,
 }
 
 /// Parameters of the final step.
@@ -193,7 +198,12 @@ fn spec_error(error: &tenko_core::codec::CodecError) -> IpamError {
 /// # Errors
 ///
 /// Returns an internal error if the parameters do not encode.
-pub fn apply_job(id: ImportId, model: Digest, chunks: &[Range<usize>]) -> IpamResult<JobSpec> {
+pub fn apply_job(
+    id: ImportId,
+    model: Digest,
+    chunks: &[Range<usize>],
+    requester: Option<crate::scope::Requester>,
+) -> IpamResult<JobSpec> {
     let count = u32::try_from(chunks.len()).unwrap_or(u32::MAX);
     let mut steps = Vec::with_capacity(chunks.len() + 1);
     for (index, range) in chunks.iter().enumerate() {
@@ -204,6 +214,7 @@ pub fn apply_job(id: ImportId, model: Digest, chunks: &[Range<usize>]) -> IpamRe
             first: u32::try_from(range.start).unwrap_or(u32::MAX),
             last: u32::try_from(range.end).unwrap_or(u32::MAX),
             model,
+            requester,
         };
         steps.push(StepSpec {
             kind: chunk_step_kind(),
@@ -247,6 +258,33 @@ fn service_gone() -> StepError {
         503,
         "the import service is not running on this node",
     )
+}
+
+/// A credential changes its host even when nothing else of the host does: the principal
+/// must be allowed to change each existing host that gets one.
+fn check_credentials(
+    guard: &crate::scope::ScopeGuard,
+    principal: &tenko_core::Principal,
+    plan: &crate::plan::IpamPlan,
+    credentials: &[CredentialOp],
+) -> Result<(), StepError> {
+    for credential in credentials {
+        let created = plan.changes.iter().any(|change| {
+            change.object == ObjectRef::from(credential.host_id)
+                && change.action == crate::history::ChangeAction::Create
+        });
+        if !created {
+            let touch = IpamCommand::UpdateHost(UpdateHost {
+                id: credential.host_id,
+                expected: None,
+                patch: HostPatch::default(),
+            });
+            guard
+                .precheck(principal, &[touch])
+                .map_err(|denied| ipam_error(denied.into()))?;
+        }
+    }
+    Ok(())
 }
 
 /// The `import.chunk` step.
@@ -316,10 +354,22 @@ impl StepHandler for ChunkStep {
             supernet_step: true,
             ..PlanOptions::default()
         };
+        // The chunk writes with the rights of whoever applied the import, as they are
+        // now: checked before planning and on the plan. A server without the check, or an
+        // import whose requester is not recorded, writes nothing.
+        let principal = crate::jobs::requester_principal(params.requester.as_ref(), "import")?;
+        let guard = service.ipam().scope_guard().map_err(ipam_error)?;
+        guard
+            .precheck(&principal, &reconciled.commands)
+            .map_err(|denied| ipam_error(denied.into()))?;
         let plan = service
             .ipam()
             .plan(view.as_ref(), &cx.request, &options, &reconciled.commands)
             .map_err(ipam_error)?;
+        guard
+            .check(&principal, &plan)
+            .map_err(|denied| ipam_error(denied.into()))?;
+        check_credentials(guard, &principal, &plan, &reconciled.credentials)?;
         let unacknowledged = plan.unacknowledged();
         if !unacknowledged.is_empty() {
             return Err(failed(

@@ -28,7 +28,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    Action, AddressId, JobId, PrefixId, RequestCtx, Revision,
+    Action, AddressId, JobId, ObjectKind, PrefixId, RequestCtx, Revision,
     audit::AuditAction,
     ipam::{Address, Host, Interface},
 };
@@ -173,6 +173,22 @@ async fn reserve(
     let args = write_args(filters, false)?;
     // The commands carry identifiers chosen per request, so a receipt could never match.
     cx.idempotency = None;
+    // What the request names is authorized before anything is read: an answer never
+    // tells a principal about an address, a host or a reservation outside its scope.
+    match target {
+        ReserveTarget::Address(id) => authorize(app, &cx, Action::Update, id.into())?,
+        ReserveTarget::ByValue => {
+            if let Some(ip) = input.ip {
+                ipam.authorize_place(&cx, Action::Update, ObjectKind::Address, input.vrf, ip)?;
+            }
+        }
+    }
+    if let Some(host) = input.host {
+        authorize(app, &cx, Action::Update, host.into())?;
+    }
+    if let Some(interface) = input.interface {
+        authorize(app, &cx, Action::Update, interface.into())?;
+    }
     let view = ipam.view(None).await?;
     let reservation = reserve::commands(view.as_ref(), target, input)?;
     drop(view);

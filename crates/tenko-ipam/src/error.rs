@@ -88,6 +88,12 @@ pub mod codes {
     pub const PLAN_STALE: &str = "ipam.plan.stale";
     /// Concurrent writers kept invalidating the plan (503); try again.
     pub const CONTENDED: &str = "ipam.contended";
+    /// A write that runs after its request (a job step, an adoption) found no scope check
+    /// wired: the server is misconfigured, and nothing was written (500).
+    pub const SCOPE_UNWIRED: &str = "ipam.scope.unwired";
+    /// A move or an import started under an earlier version records no requester, so its
+    /// later writes cannot be checked: it is rolled back (409). Start it again.
+    pub const REQUESTER_UNKNOWN: &str = "ipam.job.requester_unknown";
     /// The idempotency key was used for a different request (422).
     pub const IDEMPOTENCY_MISMATCH: &str = "ipam.idempotency_mismatch";
     /// The bulk request is too large (413). Params: `count`, `limit`.
@@ -161,6 +167,17 @@ impl IpamError {
     #[must_use]
     pub fn field(mut self, field: impl Into<String>, code: &'static str) -> Self {
         self.0.errors.push(FieldError::new(field, code));
+        self
+    }
+
+    /// The error with another detail and without the named parameters: what a principal
+    /// with a narrowed scope is told ([`crate::scope::redact_error`]).
+    #[must_use]
+    pub(crate) fn redacted(mut self, detail: impl Into<String>, drop: &[&str]) -> Self {
+        self.0.detail = detail.into();
+        for key in drop {
+            self.0.params.remove(*key);
+        }
         self
     }
 
@@ -313,6 +330,12 @@ impl Coded for IpamError {
 
     fn to_coded_error(&self) -> CodedError {
         (*self.0).clone()
+    }
+}
+
+impl From<tenko_core::Denied> for IpamError {
+    fn from(denied: tenko_core::Denied) -> Self {
+        Self::from_coded_error(tenko_core::Coded::to_coded_error(&denied))
     }
 }
 

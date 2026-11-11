@@ -1420,7 +1420,12 @@ impl ImportService {
             ],
         )
         .await?;
-        job::apply_job(id, model_digest, &chunks)
+        job::apply_job(
+            id,
+            model_digest,
+            &chunks,
+            crate::scope::Requester::of(&cx.principal),
+        )
     }
 
     /// Applies an import as a job (`POST /imports/{id}/apply`); returns the job. While an

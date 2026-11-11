@@ -130,8 +130,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    Action, CodedError, ObjectKind, ObjectRef, PrefixId, ProposalId, RequestCtx, Revision,
-    Timestamp,
+    Action, CodedError, Denied, DenyReason, ObjectKind, ObjectRef, PrefixId, ProposalId,
+    RequestCtx, Revision, Timestamp,
 };
 use tenko_ipam::{
     PlanOptions,
@@ -483,6 +483,7 @@ async fn approve_proposal(
         args.dry_run,
         expected,
         &request,
+        ipam.guard().as_ref(),
     )
     .await?;
     if !decision.dry_run {
@@ -596,8 +597,17 @@ async fn approve_proposals(
         let choice = request.choices.get(&id).cloned().unwrap_or_default();
         let outcome = async {
             authorize_approval(&app, &each, &ipam, id, &options, &choice).await?;
-            let decision =
-                proposals::approve_with(&ipam, id, &each, &options, false, None, &choice).await?;
+            let decision = proposals::approve_with(
+                &ipam,
+                id,
+                &each,
+                &options,
+                false,
+                None,
+                &choice,
+                ipam.guard().as_ref(),
+            )
+            .await?;
             Ok::<_, ApiError>(decision)
         }
         .await;
@@ -705,7 +715,7 @@ fn check_batch_size(count: usize) -> Result<(), ApiError> {
     responses(
         (status = 200, description = "What the run did: proposals opened, refreshed, superseded, expired and adopted, the revision of its write, how many batches the write took, and what a batch that failed twice left for the next run (`unwritten`, `failure`)", body = ReconcileReport),
         (status = 400, description = "A parameter is unknown (`sys.invalid_query`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal may not decide proposals", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal may not decide proposals (`auth.forbidden`), or its grant to decide them is limited to a scope (`auth.out_of_scope`): a run spans the whole installation", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "The reconciler does not run on this server (`ipam.reconciler.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -717,6 +727,21 @@ async fn reconcile_proposals(
 ) -> Result<Json<ReconcileReport>, ApiError> {
     filters.only(&[])?;
     authorize(&app, &cx, Action::Approve, new_of(ObjectKind::Proposal))?;
+    // A run reads every observation and opens, refreshes and adopts proposals across the
+    // installation, and its report counts them all: a principal whose grant is limited to
+    // a scope may not start one (IAM-01). The reconciler runs on its own schedule for it.
+    if let Some(authorizer) = &app.authorizer
+        && !authorizer
+            .scope(&cx.principal, Action::Approve, ObjectKind::Proposal)
+            .is_all()
+    {
+        return Err(Denied {
+            action: Action::Approve,
+            object: new_of(ObjectKind::Proposal),
+            reason: DenyReason::OutOfScope,
+        }
+        .into());
+    }
     let Some(Extension(reconciler)) = reconciler else {
         return Err(reconciler_unavailable());
     };
@@ -796,6 +821,9 @@ async fn set_adoption_policy(
     filters.only(&[])?;
     let expected = if_match(&headers)?;
     authorize(&app, &cx, Action::Update, ObjectRef::from(id))?;
+    // The policy governs every prefix below it that has none of its own: a scoped
+    // principal needs them all inside its scope (IAM-01).
+    ipam.authorize_subtree(&cx, id).await?;
     let view = proposals::set_policy(&ipam, id, Some(policy), &cx, expected).await?;
     nudge(reconciler.as_ref());
     Ok(policy_response(view))
@@ -831,6 +859,7 @@ async fn clear_adoption_policy(
     filters.only(&[])?;
     let expected = if_match(&headers)?;
     authorize(&app, &cx, Action::Update, ObjectRef::from(id))?;
+    ipam.authorize_subtree(&cx, id).await?;
     let view = proposals::set_policy(&ipam, id, None, &cx, expected).await?;
     nudge(reconciler.as_ref());
     Ok(policy_response(view))

@@ -47,7 +47,7 @@ use axum::{
 use tenko_core::{Action, ObjectKind, ObjectRef, Revision};
 use tenko_ipam::{
     MovePreview, MoveRequest, MoveSubmitted,
-    moves::{preview_move, submit_move},
+    moves::{MAX_OBJECTS, preview_move, submit_move},
     vlan::Controllers,
 };
 use utoipa::IntoParams;
@@ -110,20 +110,31 @@ async fn create_move(
     let dry_run = filters.boolean("dry_run")?.unwrap_or(false);
     let at_least = filters.page()?.at_least.map(Revision);
     let controllers = controllers.map_or_else(Arc::default, |Extension(slot)| slot);
-    if dry_run {
-        for object in &request.objects {
-            authorize(&app, &cx, Action::Read, *object)?;
-        }
-        authorize(&app, &cx, Action::Read, ObjectRef::from(request.target))?;
-        let preview = preview_move(&ipam, &controllers, &request, &cx, at_least).await?;
-        return Ok((StatusCode::OK, Json(preview)).into_response());
+    // The size limit comes before any object is looked at.
+    if request.objects.len() > MAX_OBJECTS {
+        return Err(ApiError::from(
+            tenko_ipam::IpamError::new(
+                tenko_ipam::codes::VALIDATION,
+                400,
+                format!("a move takes at most {MAX_OBJECTS} objects"),
+            )
+            .field("objects", tenko_ipam::codes::VALIDATION),
+        ));
     }
+    // A preview shows what the move would write, so it needs the rights of the move
+    // itself (IAM-01): every moved object, the target, and through the plan check below
+    // the host of every moved address. A scoped principal needs all of them inside its
+    // scope.
     for object in &request.objects {
         authorize(&app, &cx, Action::Update, *object)?;
     }
-    // The move writes addresses into the target, so a scoped principal needs the target
-    // inside its scope as well as every moved object (IAM-01).
     authorize(&app, &cx, Action::Update, ObjectRef::from(request.target))?;
+    let guard = ipam.guard();
+    if dry_run {
+        let preview =
+            preview_move(&ipam, &controllers, &request, &cx, at_least, guard.as_ref()).await?;
+        return Ok((StatusCode::OK, Json(preview)).into_response());
+    }
     authorize(&app, &cx, Action::Execute, new_of(ObjectKind::Job))?;
     // The move service takes the refusal as the `CodedError` of the controllers' port.
     #[allow(clippy::result_large_err)]
@@ -131,7 +142,15 @@ async fn create_move(
         authorize(&app, &cx, Action::Execute, ObjectRef::from(info.id))
             .map_err(|error| error.coded_error().clone())
     };
-    let submitted = submit_move(&ipam, &controllers, &request, &cx, &connector).await?;
+    let submitted = submit_move(
+        &ipam,
+        &controllers,
+        &request,
+        &cx,
+        &connector,
+        guard.as_ref(),
+    )
+    .await?;
     Ok((StatusCode::ACCEPTED, Json(submitted)).into_response())
 }
 
@@ -211,10 +230,14 @@ mod tests {
         async fn build(state: AppState, memory: Option<MemoryControllers>) -> Self {
             let store: Arc<dyn Store> = Arc::new(MemStore::default());
             let mut engine = JobEngine::new(Arc::clone(&store), EngineConfig::default());
-            register_steps(&mut engine);
+            register_steps(&mut engine, &crate::routes::common::test_guard());
             let slot = memory.clone().map(Controllers::with);
             if let Some(slot) = &slot {
-                tenko_ipam::moves::register_steps(&mut engine, slot);
+                tenko_ipam::moves::register_steps(
+                    &mut engine,
+                    slot,
+                    &crate::routes::common::test_guard(),
+                );
             }
             let service = IpamService::new(store, Arc::new(engine.clone()), IpamConfig::default())
                 .expect("service");
@@ -808,7 +831,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reader_may_preview_but_only_an_operator_may_move() {
+    async fn only_a_principal_that_may_move_may_preview_or_submit() {
         let reader = Policy::new(true, false);
         let api = Api::with_state(AppState {
             authorizer: Some(Arc::clone(&reader) as Arc<dyn Authorizer>),
@@ -819,14 +842,14 @@ mod tests {
             .host("nas01", AssignmentMode::Static, "192.0.2.10")
             .await;
         let body = api.body(&[host.into()]);
+        // A preview shows what the move would write: it needs the rights of the move.
         api.post("/moves?dry_run=true", None, &body)
             .await
-            .assert_json(200);
+            .assert_problem(403, "auth.forbidden");
         api.post("/moves", None, &body)
             .await
             .assert_problem(403, "auth.forbidden");
         let asked = reader.asked();
-        assert!(asked.contains(&(Action::Read, host.into())), "{asked:?}");
         assert!(asked.contains(&(Action::Update, host.into())), "{asked:?}");
 
         let operator = Policy::new(true, true);
@@ -839,6 +862,9 @@ mod tests {
             .layer(Extension(api.engine.clone())),
             ..api
         };
+        api.post("/moves?dry_run=true", None, &body)
+            .await
+            .assert_json(200);
         api.post("/moves", None, &body).await.assert_json(202);
         let asked = operator.asked();
         assert!(

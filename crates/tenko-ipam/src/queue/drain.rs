@@ -202,6 +202,13 @@ impl Drainer {
     /// Plans, checks and applies an item, or records its conflict.
     async fn apply(&self, item: &QueueItem, author: UserId) -> Result<Settled, IpamError> {
         let cx = system_cx(item, author)?;
+        // The author's rights now, before anything is planned: a refusal records no plan,
+        // so the conflict tells nothing of objects outside the author's scope.
+        if let Err(denied) = self.precheck_rights(&item.principal, &item.commands) {
+            return self
+                .conflict(item, author, None, Conflict::of(&denied))
+                .await;
+        }
         for _ in 0..MAX_ATTEMPTS {
             let view = self
                 .service
@@ -217,6 +224,7 @@ impl Drainer {
                 Ok(plan) => plan,
                 Err(error) if transient(&error) => return Err(error),
                 Err(error) => {
+                    let error = self.narrowed(&item.principal, error);
                     return self
                         .conflict(item, author, None, Conflict::of(&error))
                         .await;
@@ -227,9 +235,9 @@ impl Drainer {
                 return Ok(Settled::Applied);
             }
             if let Err(denied) = self.check_rights(&item.principal, &plan) {
-                let view = plan.view();
+                // The plan reaches outside the author's rights: it is not kept.
                 return self
-                    .conflict(item, author, Some(view), Conflict::of(&denied))
+                    .conflict(item, author, None, Conflict::of(&denied))
                     .await;
             }
             if Fingerprint::of_plan(&plan) != item.fingerprint {
@@ -260,6 +268,32 @@ impl Drainer {
             }
         }
         Err(IpamError::contended(MAX_ATTEMPTS))
+    }
+
+    /// The author's current rights on what the commands name, before planning
+    /// ([`ScopeIndex::precheck`]); passes without an authorizer or an anchors index.
+    fn precheck_rights(
+        &self,
+        principal: &Principal,
+        commands: &[crate::IpamCommand],
+    ) -> Result<(), tenko_core::Denied> {
+        match (&self.authorizer, &self.scope) {
+            (Some(authorizer), Some(scope)) => {
+                scope.precheck(authorizer.as_ref(), principal, commands)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// A planning error as the author may see it: narrowed for an author whose rights are
+    /// limited to a scope ([`crate::scope::redact_error`]).
+    fn narrowed(&self, principal: &Principal, error: IpamError) -> IpamError {
+        match &self.authorizer {
+            Some(authorizer) if !ScopeIndex::reaches_everything(authorizer.as_ref(), principal) => {
+                crate::scope::redact_error(error)
+            }
+            _ => error,
+        }
     }
 
     /// The author's current rights on every change of the plan.

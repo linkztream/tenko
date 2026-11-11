@@ -528,6 +528,7 @@ async fn compute(
         network: spec,
         expected_diff: controller.diff.clone(),
         task: task.clone(),
+        requester: None,
     };
     Ok(Computed {
         preview: VlanProvisionPreview {
@@ -677,6 +678,7 @@ fn job_spec(computed: &Computed, cx: &RequestCtx) -> IpamResult<JobSpec> {
     for (kind, task) in &computed.steps {
         let params = VlanStepParams {
             task: task.clone(),
+            requester: crate::scope::Requester::of(&cx.principal),
             ..computed.params.clone()
         };
         steps.push(StepSpec {

@@ -84,13 +84,23 @@ pub struct MoveNudgeOutput {
 pub struct MoveNudgeStep {
     controllers: Arc<Controllers>,
     dhcp: Option<DhcpMoves>,
+    guard: crate::scope::ScopeGuard,
 }
 
 impl MoveNudgeStep {
     /// The handler over the controller slot and, when the dhcp role runs in the process,
-    /// its slot.
-    pub fn new(controllers: Arc<Controllers>, dhcp: Option<DhcpMoves>) -> Self {
-        Self { controllers, dhcp }
+    /// its slot; it bounces or kicks only while the requester may still change the moved
+    /// address and its host (`guard`).
+    pub fn new(
+        controllers: Arc<Controllers>,
+        dhcp: Option<DhcpMoves>,
+        guard: crate::scope::ScopeGuard,
+    ) -> Self {
+        Self {
+            controllers,
+            dhcp,
+            guard,
+        }
     }
 
     /// Whether the client came back by itself since `since`, and how it was seen.
@@ -252,6 +262,12 @@ impl StepHandler for MoveNudgeStep {
         let Some(nudge) = plan.nudge.clone() else {
             return Ok(StepOutcome::Skip);
         };
+        crate::jobs::still_allowed(
+            &self.guard,
+            params.requester.as_ref(),
+            "move",
+            &super::steps::moved_objects(&params),
+        )?;
         let mut output = MoveNudgeOutput {
             change: nudge.change.clone(),
             reappeared_at: None,
@@ -335,9 +351,15 @@ impl StepHandler for MoveNudgeStep {
 
 /// Registers `ipam.move.nudge` over the controller slot and the dhcp role's slot, in place
 /// of the handler without the role.
-pub fn register_steps(engine: &mut JobEngine, controllers: &Arc<Controllers>, dhcp: &DhcpMoves) {
+pub fn register_steps(
+    engine: &mut JobEngine,
+    controllers: &Arc<Controllers>,
+    dhcp: &DhcpMoves,
+    guard: &crate::scope::ScopeGuard,
+) {
     engine.register(Arc::new(MoveNudgeStep::new(
         Arc::clone(controllers),
         Some(dhcp.clone()),
+        guard.clone(),
     )));
 }

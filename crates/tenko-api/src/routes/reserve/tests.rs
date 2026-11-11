@@ -392,7 +392,9 @@ async fn the_route_asks_for_the_ipam_writes_it_makes_and_nothing_else() {
         "static"
     );
 
-    // A writer is asked exactly for the updates of the host, the interface and the address.
+    // A writer is asked first for what the request names (the address, the host), before
+    // anything is read, then exactly for the updates of the host, the interface and the
+    // address.
     let policy = Policy::new(true, true);
     let writer = owner.sibling(AppState {
         authorizer: Some(Arc::clone(&policy) as Arc<dyn tenko_core::Authorizer>),
@@ -408,6 +410,8 @@ async fn the_route_asks_for_the_ipam_writes_it_makes_and_nothing_else() {
     assert_eq!(
         asked,
         [
+            (Action::Update, ObjectKind::Address),
+            (Action::Update, ObjectKind::Host),
             (Action::Update, ObjectKind::Host),
             (Action::Update, ObjectKind::Interface),
             (Action::Update, ObjectKind::Address),

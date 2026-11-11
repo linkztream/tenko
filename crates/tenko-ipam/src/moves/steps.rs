@@ -22,7 +22,9 @@ use tenko_store::{ReadConsistency, ReadView, ReadViewExt};
 use super::{MOVE_FAILED_TAG, MoveAttachment, MoveL2Action, codes, preview::move_failed_tag};
 use crate::{
     command::{AddressInput, AddressPatch, HostPatch, IpamCommand, UpdateAddress, UpdateHost},
+    jobs::{check_step_plan, precheck_step, requester_principal},
     plan::{PlanOptions, plan},
+    scope::{Requester, ScopeGuard},
     tables::{ADDRESSES, HOSTS},
     vlan::controllers::{
         AttachmentChange, ControllerAttachments, Controllers, DiffEntry, NetworkReceipt,
@@ -102,6 +104,11 @@ pub struct MoveStepParams {
     /// inputs (ADR 0027); absent when the job does not follow the client's DHCP.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease: Option<super::lease::LeasePlan>,
+    /// Who started the move: every IPAM write of a step is checked with the rights this
+    /// principal holds when the step runs. Absent in a move started under an earlier
+    /// version, whose next write is refused so that the move rolls back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requester: Option<Requester>,
 }
 
 /// What the controller step changes, as the submit planned it.
@@ -188,21 +195,64 @@ fn step_error(error: &crate::IpamError) -> StepError {
     StepError::coded(error)
 }
 
+/// Whose rights a step's write is checked with.
+#[derive(Clone, Copy)]
+enum WriteAs<'a> {
+    /// The requester's rights now: checked before the commands are planned and on the
+    /// plan, so a scope that shrank or an account that was disabled since the start
+    /// refuses the write and the move rolls back.
+    Requester {
+        guard: &'a ScopeGuard,
+        params: &'a MoveStepParams,
+    },
+    /// A rollback: it undoes only what the job's own steps wrote (the new address it
+    /// created, the old address it removed, its failure tag), so that a requester who
+    /// lost its rights never leaves half a move behind.
+    Rollback,
+}
+
 /// Plans `commands` against the step's view and stages the batch with the step's state
-/// (or proposes it outside the engine).
+/// (or proposes it outside the engine), checked as `write_as` says.
 async fn write(
     cx: &StepContext,
     view: &dyn ReadView,
     commands: &[IpamCommand],
+    write_as: WriteAs<'_>,
 ) -> Result<(), StepError> {
-    if commands.is_empty() {
-        return Ok(());
+    match planned(cx, view, commands, write_as)? {
+        Some(planned) => stage_planned(cx, &planned).await,
+        None => Ok(()),
     }
+}
+
+/// The plan of `commands`, checked as `write_as` says; `None` when nothing changes.
+fn planned(
+    cx: &StepContext,
+    view: &dyn ReadView,
+    commands: &[IpamCommand],
+    write_as: WriteAs<'_>,
+) -> Result<Option<crate::plan::IpamPlan>, StepError> {
+    if commands.is_empty() {
+        return Ok(None);
+    }
+    let checked = match write_as {
+        WriteAs::Requester { guard, params } => {
+            let principal = requester_principal(params.requester.as_ref(), "move")?;
+            precheck_step(guard, &principal, commands)?;
+            Some((guard, principal))
+        }
+        WriteAs::Rollback => None,
+    };
     let planned = plan(view, &cx.request, &PlanOptions::default(), commands)
         .map_err(|error| step_error(&error))?;
-    if planned.is_empty() {
-        return Ok(());
+    if let Some((guard, principal)) = &checked {
+        check_step_plan(guard, principal, &planned)?;
     }
+    Ok((!planned.is_empty()).then_some(planned))
+}
+
+/// Stages a checked plan with the step's state (or proposes it outside the engine).
+async fn stage_planned(cx: &StepContext, planned: &crate::plan::IpamPlan) -> Result<(), StepError> {
     let batch = planned.to_batch();
     match tenko_jobs::stage(cx, batch.clone()) {
         Ok(()) => Ok(()),
@@ -286,10 +336,20 @@ fn automatic_preview(summary: &'static str, params: &MoveStepParams) -> StepPrev
 }
 
 /// `ipam.move.intent`: creates the new address as planned intent on the interface and
-/// keeps the old one. Its compensation removes the new address, keeps the old one and
-/// tags the requested object `move-failed`.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct MoveIntentStep;
+/// keeps the old one, checked with the requester's rights when it runs. Its compensation
+/// removes the new address, keeps the old one and tags the requested object
+/// `move-failed`.
+#[derive(Debug, Clone)]
+pub struct MoveIntentStep {
+    guard: ScopeGuard,
+}
+
+impl MoveIntentStep {
+    /// The step, checking its write with `guard`.
+    pub fn new(guard: ScopeGuard) -> Self {
+        Self { guard }
+    }
+}
 
 #[async_trait::async_trait]
 impl StepHandler for MoveIntentStep {
@@ -336,7 +396,11 @@ impl StepHandler for MoveIntentStep {
             custom: old.meta.custom.clone(),
             description: old.meta.description.clone(),
         });
-        write(cx, view.as_ref(), &[command]).await?;
+        let write_as = WriteAs::Requester {
+            guard: &self.guard,
+            params: &params,
+        };
+        write(cx, view.as_ref(), &[command], write_as).await?;
         Ok(StepOutcome::Done { output: None })
     }
 
@@ -358,18 +422,13 @@ impl StepHandler for MoveIntentStep {
                 cascade: false,
             });
         }
-        if live_address(view.as_ref(), params.address)?.is_none()
-            && view.get_typed(&ADDRESSES, &params.address)?.is_some()
-        {
-            commands.push(IpamCommand::Restore {
-                object: params.address.into(),
-                expected: None,
-            });
-        }
+        // The old address is removed only by the cleanup, the last step, which nothing
+        // undoes: when it is gone now, someone else removed it, and the rollback leaves it
+        // so.
         if let Some(tag) = tag_command(view.as_ref(), params.requested, true)? {
             commands.push(tag);
         }
-        write(cx, view.as_ref(), &commands).await
+        write(cx, view.as_ref(), &commands, WriteAs::Rollback).await
     }
 }
 
@@ -379,8 +438,9 @@ impl StepHandler for MoveIntentStep {
 /// the node command `dhcp.lease.release` ([`super::dhcp::release_held`]); the old
 /// reservation goes with the old address. A release that fails is logged and left to the
 /// lease's expiry: the cleanup never rolls a confirmed move back.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MoveCleanupStep {
+    guard: ScopeGuard,
     dhcp: Option<super::dhcp::DhcpMoves>,
 }
 
@@ -393,9 +453,17 @@ pub struct MoveCleanupOutput {
 }
 
 impl MoveCleanupStep {
+    /// The cleanup, checking its write with `guard`.
+    pub fn new(guard: ScopeGuard) -> Self {
+        Self { guard, dhcp: None }
+    }
+
     /// The cleanup that also releases the old lease through the role of `slot`.
-    pub fn with_dhcp(slot: super::dhcp::DhcpMoves) -> Self {
-        Self { dhcp: Some(slot) }
+    pub fn with_dhcp(guard: ScopeGuard, slot: super::dhcp::DhcpMoves) -> Self {
+        Self {
+            guard,
+            dhcp: Some(slot),
+        }
     }
 
     /// Releases the old lease when the role runs and the interface's MAC holds it.
@@ -488,8 +556,17 @@ impl StepHandler for MoveCleanupStep {
         if let Some(tag) = tag_command(view.as_ref(), params.requested, false)? {
             commands.push(tag);
         }
+        // The requester's rights are checked on the whole plan before anything happens, the
+        // release of the old lease included.
+        let write_as = WriteAs::Requester {
+            guard: &self.guard,
+            params: &params,
+        };
+        let checked = planned(cx, view.as_ref(), &commands, write_as)?;
         let released_old_lease = self.release_old(view.as_ref(), &params, cx).await;
-        write(cx, view.as_ref(), &commands).await?;
+        if let Some(checked) = &checked {
+            stage_planned(cx, checked).await?;
+        }
         // ADR 0027: the move is confirmed; the client is no longer moving.
         super::lease::stage_clear(cx, view.as_ref()).await?;
         if self.dhcp.is_none() {
@@ -584,13 +661,22 @@ impl StepHandler for MoveManualStep {
 #[derive(Debug, Clone)]
 pub struct MoveControllerStep {
     controllers: Arc<Controllers>,
+    guard: ScopeGuard,
 }
 
 impl MoveControllerStep {
-    /// The handler over the controller slot.
-    pub fn new(controllers: Arc<Controllers>) -> Self {
-        Self { controllers }
+    /// The handler over the controller slot; it writes only while the requester may still
+    /// change the moved address and its host (`guard`).
+    pub fn new(controllers: Arc<Controllers>, guard: ScopeGuard) -> Self {
+        Self { controllers, guard }
     }
+}
+
+/// The objects whose rights a move's network steps need: the moved address and its host.
+pub(super) fn moved_objects(params: &MoveStepParams) -> Vec<ObjectRef> {
+    let mut objects = vec![ObjectRef::from(params.address)];
+    objects.extend(params.host.map(ObjectRef::from));
+    objects
 }
 
 fn changed(plan: &L2StepPlan, what: &str) -> StepError {
@@ -716,6 +802,12 @@ impl StepHandler for MoveControllerStep {
 
     async fn execute(&self, params: &[u8], cx: &StepContext) -> Result<StepOutcome, StepError> {
         let params = MoveStepParams::decode(params)?;
+        crate::jobs::still_allowed(
+            &self.guard,
+            params.requester.as_ref(),
+            "move",
+            &moved_objects(&params),
+        )?;
         let Some(plan) = params.l2 else {
             return Err(StepError::InvalidParams(
                 "the controller step carries no change".to_owned(),
@@ -828,13 +920,13 @@ impl StepHandler for MoveControllerStep {
 }
 
 /// Every step handler of a move job.
-pub fn move_step_handlers() -> Vec<Arc<dyn StepHandler>> {
+pub fn move_step_handlers(guard: &ScopeGuard) -> Vec<Arc<dyn StepHandler>> {
     vec![
         // ADR 0027: the moving client and the wait for the short lease.
         Arc::new(super::lease::MovePrepareStep::default()),
         Arc::new(super::lease::MoveLeaseStep),
-        Arc::new(MoveIntentStep),
-        Arc::new(MoveCleanupStep::default()),
+        Arc::new(MoveIntentStep::new(guard.clone())),
+        Arc::new(MoveCleanupStep::new(guard.clone())),
         Arc::new(super::dhcp::MoveDhcpStep::default()),
         Arc::new(super::dns::MoveDnsStep::manual()),
         Arc::new(MoveManualStep::new(DEVICE)),

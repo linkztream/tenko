@@ -1324,13 +1324,12 @@ async fn start(
                     ),
                 ));
             }
-            tenko_ipam::jobs::register_steps(&mut engine);
-            tenko_ipam::vlan::register_steps(&mut engine, &vlan_controllers);
-            tenko_ipam::moves::register_steps(&mut engine, &vlan_controllers);
-            // WP8.1: the automatic DHCP step and the cleanup that releases the old lease.
-            tenko_ipam::moves::dhcp::register_steps(&mut engine, &dhcp_moves);
-            // ADR 0028: the nudge after the network change sees the client's DHCP exchange.
-            tenko_ipam::moves::nudge::register_steps(&mut engine, &vlan_controllers, &dhcp_moves);
+            // The writes that run after their request (the steps of moves, VLAN
+            // provisioning and imports, the reconciler's adoptions) are checked with the
+            // rights their requester holds when they run (IAM-01).
+            let scope_guard =
+                tenko_ipam::scope::ScopeGuard::new(auth.authorizer(), Arc::clone(&scope));
+            register_ipam_steps(&mut engine, &scope_guard, &vlan_controllers, &dhcp_moves);
             let ipam = IpamService::new(
                 Arc::clone(&store_dyn),
                 Arc::new(engine.clone()),
@@ -1345,6 +1344,7 @@ async fn start(
                 .register_index(scope.clone())
                 .map_err(|error| StartError::coded("ipam", &error))?;
             auth.set_anchor_resolver(scope.clone());
+            ipam.set_scope_guard(scope_guard);
             let tree = Arc::clone(ipam.tree());
             engine.set_prefix_resolver(Arc::new(move |prefix| {
                 tree.prefix(prefix).map(|(_, network)| network)
@@ -2480,9 +2480,92 @@ fn public_url(resolved: &Resolved, services: &Services, addrs: &[SocketAddr]) ->
     format!("{scheme}://{host}:{}/", addr.port())
 }
 
+/// Registers the step handlers of the IPAM module. The steps that write IPAM intent after
+/// their request check every write with `scope_guard` against the rights their requester
+/// holds when they run; their handlers cannot be built without it.
+fn register_ipam_steps(
+    engine: &mut JobEngine,
+    scope_guard: &tenko_ipam::scope::ScopeGuard,
+    vlan_controllers: &Arc<tenko_ipam::vlan::Controllers>,
+    dhcp_moves: &tenko_ipam::moves::dhcp::DhcpMoves,
+) {
+    tenko_ipam::jobs::register_steps(engine, scope_guard);
+    tenko_ipam::vlan::register_steps(engine, vlan_controllers, scope_guard);
+    tenko_ipam::moves::register_steps(engine, vlan_controllers, scope_guard);
+    // WP8.1: the automatic DHCP step and the cleanup that releases the old lease.
+    tenko_ipam::moves::dhcp::register_steps(engine, dhcp_moves, scope_guard);
+    // ADR 0028: the nudge after the network change sees the client's DHCP exchange.
+    tenko_ipam::moves::nudge::register_steps(engine, vlan_controllers, dhcp_moves, scope_guard);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every step kind the server's IPAM wiring registers is classified: a kind that
+    /// writes intent after its request and cannot be built without the scope guard, a kind
+    /// that writes no intent (with the reason), or the engine's own. A kind added later
+    /// without a class fails here.
+    #[tokio::test]
+    async fn every_ipam_step_kind_the_server_registers_is_classified() {
+        use tenko_ipam::jobs::{STEP_KINDS, StepWrites};
+        /// The engine's own kinds.
+        const ENGINE: &[&str] = &["jobs.manual"];
+        let env = tenko_auth::testing::TestEnv::new().await;
+        let store: Arc<dyn tenko_store::Store> = env.store.clone();
+        let mut engine = JobEngine::new(Arc::clone(&store), EngineConfig::default());
+        let scope = Arc::new(tenko_ipam::scope::ScopeIndex::new());
+        let guard = tenko_ipam::scope::ScopeGuard::new(env.service.authorizer(), scope);
+        let controllers = tenko_ipam::vlan::Controllers::new();
+        let dhcp = tenko_ipam::moves::dhcp::DhcpMoves::new();
+        register_ipam_steps(&mut engine, &guard, &controllers, &dhcp);
+        // The import service registers its steps over the same engine (`imports.rs`).
+        let ipam = IpamService::new(
+            Arc::clone(&store),
+            Arc::new(engine.clone()),
+            IpamConfig::default(),
+        )
+        .expect("the IPAM service");
+        let staging = tempfile::tempdir().expect("a staging directory");
+        let _imports = tenko_ipam::import::ImportService::new(
+            ipam,
+            engine.clone(),
+            None,
+            tenko_ipam::import::ImportConfig {
+                staging_dir: staging.path().to_path_buf(),
+                ..tenko_ipam::import::ImportConfig::default()
+            },
+        )
+        .expect("the import service");
+        let mut unclassified = Vec::new();
+        for kind in engine.kinds() {
+            let kind = kind.as_str();
+            if ENGINE.contains(&kind) {
+                continue;
+            }
+            if !STEP_KINDS.iter().any(|(known, _)| *known == kind) {
+                unclassified.push(kind.to_owned());
+            }
+        }
+        assert!(
+            unclassified.is_empty(),
+            "step kinds without a class in tenko_ipam::jobs::STEP_KINDS: {unclassified:?}"
+        );
+        let registered: Vec<String> = engine
+            .kinds()
+            .iter()
+            .map(|kind| kind.as_str().to_owned())
+            .collect();
+        for (kind, writes) in STEP_KINDS {
+            assert!(
+                registered.iter().any(|known| known == kind),
+                "{kind} is classified but the server does not register it"
+            );
+            if let StepWrites::NoIntent(reason) = writes {
+                assert!(!reason.is_empty(), "{kind} needs a reason");
+            }
+        }
+    }
 
     /// Uses about 4 MiB of stack: more than the 1 MiB of the main thread of a Windows
     /// executable and the 2 MiB of a test thread, as a deep router does in a debug build.

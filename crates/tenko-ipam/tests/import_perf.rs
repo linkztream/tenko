@@ -56,9 +56,19 @@ async fn ten_thousand_rows_preview_and_apply_in_time() {
     let store = Arc::new(MemStore::default());
     let dyn_store: Arc<dyn Store> = Arc::clone(&store) as Arc<dyn Store>;
     let mut engine = JobEngine::new(Arc::clone(&dyn_store), EngineConfig::default());
-    register_steps(&mut engine);
+    register_steps(
+        &mut engine,
+        &tenko_ipam::scope::ScopeGuard::new(
+            std::sync::Arc::new(tenko_core::principal::AllowAll),
+            std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+        ),
+    );
     let ipam =
         IpamService::new(dyn_store, Arc::new(engine.clone()), IpamConfig::default()).expect("ipam");
+    ipam.set_scope_guard(tenko_ipam::scope::ScopeGuard::new(
+        std::sync::Arc::new(tenko_core::principal::AllowAll),
+        std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+    ));
     let staging: PathBuf =
         std::env::temp_dir().join(format!("tenko-import-perf-{}", uuid::Uuid::now_v7()));
     let imports = ImportService::new(

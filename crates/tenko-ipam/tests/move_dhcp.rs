@@ -93,10 +93,23 @@ impl Moving {
     async fn new(scope: bool, wait: Duration) -> Self {
         let store: Arc<dyn Store> = Arc::new(MemStore::default());
         let mut engine = JobEngine::new(Arc::clone(&store), EngineConfig::default());
-        register_steps(&mut engine);
+        register_steps(
+            &mut engine,
+            &tenko_ipam::scope::ScopeGuard::new(
+                std::sync::Arc::new(tenko_core::principal::AllowAll),
+                std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+            ),
+        );
         let role = Arc::new(FakeRole::default());
         let slot = DhcpMoves::with(Arc::clone(&role) as Arc<dyn DhcpRolePort>);
-        tenko_ipam::moves::dhcp::register_steps(&mut engine, &slot);
+        tenko_ipam::moves::dhcp::register_steps(
+            &mut engine,
+            &slot,
+            &tenko_ipam::scope::ScopeGuard::new(
+                std::sync::Arc::new(tenko_core::principal::AllowAll),
+                std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+            ),
+        );
         engine.register(Arc::new(MoveDhcpStep::new(slot).with_wait(wait)));
         let service = IpamService::new(
             Arc::clone(&store),

@@ -40,9 +40,19 @@ fn env() -> Env {
     let store = Arc::new(MemStore::default());
     let dyn_store: Arc<dyn Store> = Arc::clone(&store) as Arc<dyn Store>;
     let mut engine = JobEngine::new(Arc::clone(&dyn_store), EngineConfig::default());
-    register_steps(&mut engine);
+    register_steps(
+        &mut engine,
+        &tenko_ipam::scope::ScopeGuard::new(
+            std::sync::Arc::new(tenko_core::principal::AllowAll),
+            std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+        ),
+    );
     let ipam =
         IpamService::new(dyn_store, Arc::new(engine.clone()), IpamConfig::default()).expect("ipam");
+    ipam.set_scope_guard(tenko_ipam::scope::ScopeGuard::new(
+        std::sync::Arc::new(tenko_core::principal::AllowAll),
+        std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+    ));
     let imports = ImportService::new(
         ipam,
         engine.clone(),

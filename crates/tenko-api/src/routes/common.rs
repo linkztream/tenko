@@ -192,19 +192,107 @@ impl IpamHandle {
         options: &PlanOptions,
     ) -> Result<IpamPlan, ApiError> {
         match (&self.authorizer, &self.scope) {
-            (Some(authorizer), Some(index)) => {
-                precheck(authorizer.as_ref(), index, cx, commands)?;
-                index
-                    .preview_checked(&self.service, authorizer.as_ref(), commands, cx, options)
-                    .await
-                    .map_err(scoped_error)
-            }
+            (Some(authorizer), Some(index)) => index
+                .preview_checked(&self.service, authorizer.as_ref(), commands, cx, options)
+                .await
+                .map_err(scoped_error),
             (Some(authorizer), None)
                 if !ScopeIndex::unrestricted(authorizer.as_ref(), &cx.principal) =>
             {
                 Err(out_of_scope(commands))
             }
             _ => Ok(self.service.preview(commands, cx, options, None).await?),
+        }
+    }
+
+    /// Whether `action` on an object of `kind` at `ip` (in `vrf`, or in every VRF holding it)
+    /// is inside the principal's scope: checked before anything is read, so that the answer
+    /// for a place outside the scope is the same whether something is there or not.
+    pub(crate) fn authorize_place(
+        &self,
+        cx: &RequestCtx,
+        action: Action,
+        kind: ObjectKind,
+        vrf: Option<VrfId>,
+        ip: std::net::IpAddr,
+    ) -> Result<(), ApiError> {
+        let Some(authorizer) = &self.authorizer else {
+            return Ok(());
+        };
+        let object = new_of(kind);
+        let refuse = |reason| -> ApiError {
+            Denied {
+                action,
+                object,
+                reason,
+            }
+            .into()
+        };
+        match authorizer.scope(&cx.principal, action, kind) {
+            ScopeFilter::All => Ok(()),
+            ScopeFilter::Nothing => Err(refuse(DenyReason::MissingPermission)),
+            filter @ ScopeFilter::Only(_) => match &self.scope {
+                Some(index)
+                    if filter.admits(&index.anchors_of_ip(object, vrf, ip), AnchorMode::All) =>
+                {
+                    Ok(())
+                }
+                _ => Err(refuse(DenyReason::OutOfScope)),
+            },
+        }
+    }
+
+    /// Whether the principal may change every prefix inside `prefix` (itself included): what
+    /// a setting inherited down the tree (an adoption policy) needs, since it governs them
+    /// all. Passes at once for a principal that changes every prefix.
+    pub(crate) async fn authorize_subtree(
+        &self,
+        cx: &RequestCtx,
+        prefix: PrefixId,
+    ) -> Result<(), ApiError> {
+        let Some(authorizer) = &self.authorizer else {
+            return Ok(());
+        };
+        let filter = authorizer.scope(&cx.principal, Action::Update, ObjectKind::Prefix);
+        if filter.is_all() {
+            return Ok(());
+        }
+        let refused = || -> ApiError {
+            Denied {
+                action: Action::Update,
+                object: ObjectRef::from(prefix),
+                reason: DenyReason::OutOfScope,
+            }
+            .into()
+        };
+        let Some(index) = &self.scope else {
+            return Err(refused());
+        };
+        let view = self.view(None).await?;
+        let found = query::get::<Prefix>(view.as_ref(), prefix)?;
+        drop(view);
+        let inside = index.anchors_within(Some(found.vrf), &found.cidr, None);
+        if inside
+            .iter()
+            .all(|anchors| filter.admits(anchors, AnchorMode::All))
+        {
+            Ok(())
+        } else {
+            Err(refused())
+        }
+    }
+
+    /// The check of the writes a request leaves to a later step or to another component
+    /// (an approved proposal): the request's authorizer with the anchors index. `None`
+    /// without an authorizer (every principal reaches everything) and, for a principal
+    /// with a narrowed scope, without the index (such a write is refused before).
+    pub(crate) fn guard(&self) -> Option<tenko_ipam::scope::ScopeGuard> {
+        match (&self.authorizer, &self.scope) {
+            (Some(authorizer), Some(index)) => Some(tenko_ipam::scope::ScopeGuard::new(
+                Arc::clone(authorizer),
+                Arc::clone(index),
+            )),
+            _ => None,
         }
     }
 
@@ -234,13 +322,10 @@ impl IpamHandle {
         options: &PlanOptions,
     ) -> Result<Applied, ApiError> {
         match (&self.authorizer, &self.scope) {
-            (Some(authorizer), Some(index)) => {
-                precheck(authorizer.as_ref(), index, cx, commands)?;
-                index
-                    .execute_checked(&self.service, authorizer.as_ref(), commands, cx, options)
-                    .await
-                    .map_err(scoped_error)
-            }
+            (Some(authorizer), Some(index)) => index
+                .execute_checked(&self.service, authorizer.as_ref(), commands, cx, options)
+                .await
+                .map_err(scoped_error),
             (Some(authorizer), None)
                 if !ScopeIndex::unrestricted(authorizer.as_ref(), &cx.principal) =>
             {
@@ -249,86 +334,6 @@ impl IpamHandle {
             _ => Ok(self.service.execute(commands, cx, options).await?),
         }
     }
-}
-
-/// Where the addresses and networks a write names land, checked before planning: a
-/// principal whose scope does not cover the place gets `auth.out_of_scope` at once, so a
-/// planning error (an overlap, a taken address) never describes an object outside its
-/// scope (R24). A prefix's new network is checked whole: every existing prefix inside it
-/// must lie inside the scope as well, since the network would hold it. The plan check
-/// after planning stays the authority; this check only refuses early.
-fn precheck(
-    authorizer: &dyn Authorizer,
-    index: &ScopeIndex,
-    cx: &RequestCtx,
-    commands: &[IpamCommand],
-) -> Result<(), ApiError> {
-    for command in commands {
-        let (action, kind, vrf, ip, network) = match command {
-            IpamCommand::CreatePrefix(input) => (
-                Action::Create,
-                ObjectKind::Prefix,
-                input.vrf,
-                input.cidr.network(),
-                Some((input.cidr, input.vrf, None)),
-            ),
-            IpamCommand::CreateAddress(input) => (
-                Action::Create,
-                ObjectKind::Address,
-                input.vrf,
-                input.ip,
-                None,
-            ),
-            IpamCommand::UpdatePrefix(update) => match update.patch.cidr {
-                Some(cidr) => (
-                    Action::Update,
-                    ObjectKind::Prefix,
-                    None,
-                    cidr.network(),
-                    Some((
-                        cidr,
-                        index.anchors(&ObjectRef::from(update.id)).vrf,
-                        Some(update.id),
-                    )),
-                ),
-                None => continue,
-            },
-            IpamCommand::UpdateAddress(update) => match update.patch.ip {
-                Some(ip) => (Action::Update, ObjectKind::Address, None, ip, None),
-                None => continue,
-            },
-            _ => continue,
-        };
-        let scope = authorizer.scope(&cx.principal, action, kind);
-        if scope.is_all() {
-            continue;
-        }
-        let object = new_of(kind);
-        let refused = Denied {
-            action,
-            object,
-            reason: DenyReason::OutOfScope,
-        };
-        if !scope.admits(&index.anchors_of_ip(object, vrf, ip), AnchorMode::All) {
-            return Err(refused.into());
-        }
-        if let Some((cidr, vrf, except)) = network {
-            // A prefix already below the one that changes keeps its place.
-            let below = |anchors: &Anchors| {
-                except.is_some_and(|id| anchors.prefixes.iter().any(|chain| chain.contains(&id)))
-            };
-            let held = authorizer.scope(&cx.principal, Action::Update, ObjectKind::Prefix);
-            if !held.is_all()
-                && !index
-                    .anchors_within(vrf, &cidr, except)
-                    .iter()
-                    .all(|anchors| below(anchors) || held.admits(anchors, AnchorMode::All))
-            {
-                return Err(refused.into());
-            }
-        }
-    }
-    Ok(())
 }
 
 /// The problem of a refused scoped write.
@@ -402,6 +407,28 @@ impl ReadScope {
         self.admits_by(|index| index.anchors_of_targets(object, targets))
     }
 
+    /// Whether every existing target of an object that stands for its targets (a job) may
+    /// be read: what such an object shows (its parameters, its steps) speaks of all of them.
+    /// A target the index does not know (an address a step has yet to create, an object of
+    /// another kind such as a connector) asks for nothing; one that was deleted keeps its
+    /// place in the index.
+    pub(crate) fn admits_every_target(&self, targets: &[ObjectRef]) -> bool {
+        match &self.filter {
+            ScopeFilter::All => true,
+            ScopeFilter::Nothing => false,
+            ScopeFilter::Only(_) => self.index.as_ref().is_some_and(|index| {
+                targets.iter().all(|target| {
+                    let anchors = index.anchors(target);
+                    let unknown = anchors.tenant.is_none()
+                        && anchors.vrf.is_none()
+                        && anchors.sites.is_empty()
+                        && anchors.prefixes.is_empty();
+                    unknown || self.admits_anchors(&anchors)
+                })
+            }),
+        }
+    }
+
     /// Whether an object may be read whose anchors `anchors` finds in the index (a fact, a
     /// proposal, an address seen by a device).
     pub(crate) fn admits_by(&self, anchors: impl FnOnce(&ScopeIndex) -> Anchors) -> bool {
@@ -439,6 +466,23 @@ pub(crate) fn read_scope(
         filter => filter,
     };
     ReadScope { filter, index }
+}
+
+/// A scope guard that lets every write through, for the tests of routes whose jobs write
+/// later (moves, imports, VLAN provisioning) and do not test scopes.
+#[cfg(test)]
+pub(crate) fn test_guard() -> tenko_ipam::scope::ScopeGuard {
+    struct Open;
+    impl Authorizer for Open {
+        fn check(&self, _: &tenko_core::Principal, _: Action, _: &ObjectRef) -> Result<(), Denied> {
+            Ok(())
+        }
+
+        fn scope(&self, _: &tenko_core::Principal, _: Action, _: ObjectKind) -> ScopeFilter {
+            ScopeFilter::All
+        }
+    }
+    tenko_ipam::scope::ScopeGuard::new(Arc::new(Open), Arc::new(ScopeIndex::new()))
 }
 
 /// A JSON body refused with problem details instead of plain text: 400

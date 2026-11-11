@@ -25,7 +25,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 
 use tenko_core::Coded;
@@ -77,6 +77,9 @@ pub struct IpamService {
     alloc_locks: Mutex<HashMap<PrefixId, Arc<tokio::sync::Mutex<Revision>>>>,
     // ADR 0031: the lease tables as the observation source `dhcp:<node>`.
     leases: Arc<crate::observe::dhcp::LeaseFacts>,
+    /// The check of the writes that run after a request (the reconciler's adoptions),
+    /// set once by the server ([`IpamService::set_scope_guard`]).
+    scope_guard: OnceLock<crate::scope::ScopeGuard>,
 }
 
 impl std::fmt::Debug for IpamService {
@@ -108,6 +111,7 @@ impl IpamService {
             config,
             alloc_locks: Mutex::new(HashMap::new()),
             leases: crate::observe::dhcp::LeaseFacts::new(crate::observe::ObserveConfig::default()),
+            scope_guard: OnceLock::new(),
         }))
     }
 
@@ -134,6 +138,32 @@ impl IpamService {
     /// The prefix tree.
     pub fn tree(&self) -> &Arc<PrefixTree> {
         &self.tree
+    }
+
+    /// Sets the check of the writes that run after a request (the reconciler's adoptions
+    /// are checked against the scope of the principal who set the policy). Set once; a
+    /// second call keeps the first guard.
+    pub fn set_scope_guard(&self, guard: crate::scope::ScopeGuard) {
+        if self.scope_guard.set(guard).is_err() {
+            tracing::warn!("the IPAM scope guard was set twice; the first one stays");
+        }
+    }
+
+    /// The check of the writes that run after a request.
+    ///
+    /// # Errors
+    ///
+    /// `ipam.scope.unwired` (500) when the server set none: such a write is refused,
+    /// never applied unchecked.
+    pub fn scope_guard(&self) -> IpamResult<&crate::scope::ScopeGuard> {
+        self.scope_guard.get().ok_or_else(|| {
+            IpamError::new(
+                codes::SCOPE_UNWIRED,
+                500,
+                "the server is wired without the scope check of background writes; nothing was written",
+            )
+            .titled("Scope check not wired")
+        })
     }
 
     // ADR 0031: the lease view.

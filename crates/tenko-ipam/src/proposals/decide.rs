@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    Coded, JobId, ObjectRef, PrefixId, ProposalId, RequestCtx, Revision, VlanId,
+    Coded, JobId, ObjectRef, PrefixId, Principal, ProposalId, RequestCtx, Revision, VlanId,
     audit::{AuditAction, AuditDraft},
     ipam::{AssignmentMode, Stamp, Vlan},
     net::HostName,
@@ -34,6 +34,7 @@ use crate::{
     jobs::{WriteStepParams, committed_revision, edit_job, with_batch},
     plan::{PlanOptions, PlanView, PlanWarning},
     reconcile::names::{self, HostNameChoice, NameSource},
+    scope::ScopeGuard,
     service::IpamService,
     tables::{HOSTS, VLAN_VIDS, VLANS},
 };
@@ -71,6 +72,34 @@ pub(crate) enum Applier {
         prefix: PrefixId,
         host_mode: AssignmentMode,
     },
+}
+
+/// Whose rights an application is checked against: the approver's, or for an adoption
+/// the rights of the principal who set the policy. Checked before the commands are
+/// planned and on every plan, the retries after a stale plan included, so what is checked
+/// is what is applied.
+#[derive(Clone, Copy)]
+pub(crate) struct Authority<'a> {
+    /// The check; none for a caller that reaches everything without an authorizer.
+    pub(crate) guard: Option<&'a ScopeGuard>,
+    /// The principal whose rights count.
+    pub(crate) principal: &'a Principal,
+}
+
+impl Authority<'_> {
+    fn precheck(&self, commands: &[IpamCommand]) -> IpamResult<()> {
+        match self.guard {
+            Some(guard) => Ok(guard.precheck(self.principal, commands)?),
+            None => Ok(()),
+        }
+    }
+
+    fn check(&self, plan: &crate::plan::IpamPlan) -> IpamResult<()> {
+        match self.guard {
+            Some(guard) => Ok(guard.check(self.principal, plan)?),
+            None => Ok(()),
+        }
+    }
 }
 
 /// Reads a proposal with its revision.
@@ -314,17 +343,24 @@ pub async fn approve(
         expected,
         Applier::Person,
         &ApproveRequest::default(),
+        Authority {
+            guard: None,
+            principal: &cx.principal,
+        },
     )
     .await
 }
 
 /// Approves a proposal as [`approve`] does, with the operator's choice of name and what
-/// to remember of it ([`ApproveRequest`]).
+/// to remember of it ([`ApproveRequest`]). With `guard`, the approver's rights are checked
+/// before the commands are planned and on the plan that is applied, every retry included.
 ///
 /// # Errors
 ///
 /// Those of [`approve`], and 422 `ipam.proposal.choice_invalid` for a choice the proposal
-/// does not offer; with `remember: source` also 422 `ipam.name_authority.invalid`.
+/// does not offer; with `remember: source` also 422 `ipam.name_authority.invalid`; 403
+/// `auth.out_of_scope` or `auth.forbidden` from `guard`.
+#[allow(clippy::too_many_arguments)]
 pub async fn approve_with(
     ipam: &IpamService,
     id: ProposalId,
@@ -333,6 +369,7 @@ pub async fn approve_with(
     dry_run: bool,
     expected: Option<Revision>,
     request: &ApproveRequest,
+    guard: Option<&ScopeGuard>,
 ) -> IpamResult<Decision> {
     apply(
         ipam,
@@ -343,6 +380,10 @@ pub async fn approve_with(
         expected,
         Applier::Person,
         request,
+        Authority {
+            guard,
+            principal: &cx.principal,
+        },
     )
     .await
 }
@@ -638,6 +679,7 @@ pub(crate) async fn apply(
     expected: Option<Revision>,
     applier: Applier,
     request: &ApproveRequest,
+    authority: Authority<'_>,
 ) -> IpamResult<Decision> {
     let attempts = ipam.config().max_attempts.max(1);
     for attempt in 0..attempts {
@@ -692,7 +734,9 @@ pub(crate) async fn apply(
             }
         }
         let commands = commands_for(commands, applier);
+        authority.precheck(&commands)?;
         let mut plan = ipam.plan(view.as_ref(), cx, options, &commands)?;
+        authority.check(&plan)?;
         if dry_run {
             return Ok(Decision {
                 proposal,

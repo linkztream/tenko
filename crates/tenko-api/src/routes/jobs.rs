@@ -62,7 +62,8 @@ use serde::{
     de::{IntoDeserializer, value::StrDeserializer},
 };
 use tenko_core::{
-    Action, Coded, CodedError, JobId, ObjectKind, ObjectRef, RequestCtx, Revision, error::codes,
+    Action, Coded, CodedError, Denied, DenyReason, JobId, ObjectKind, ObjectRef, RequestCtx,
+    Revision, error::codes,
 };
 use tenko_ipam::scope::ScopeIndex;
 use tenko_jobs::{
@@ -381,8 +382,11 @@ async fn list_jobs(
             None => ReadConsistency::Local,
         })
         .await?;
+    // A scoped reader sees a job when every existing target is readable: the job shows
+    // its parameters and steps, which speak of all of them (IAM-01).
     let keep = |job: &tenko_jobs::model::Job| {
         readable.admits_targets(ObjectRef::from(job.id), &job.spec.targets)
+            && readable.admits_every_target(&job.spec.targets)
     };
     let filter = JobFilter {
         group,
@@ -420,6 +424,7 @@ async fn get_job(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
     engine: Option<Extension<JobEngine>>,
+    index: Option<Extension<Arc<ScopeIndex>>>,
     Path(id): Path<String>,
     filters: Filters,
 ) -> Result<Json<JobDetail>, ApiError> {
@@ -427,7 +432,24 @@ async fn get_job(
     let id = parse_id(&id)?;
     let at_least = detail_at_least(&filters)?;
     authorize(&app, &cx, Action::Read, id)?;
-    Ok(Json(engine.detail(id, at_least).await?))
+    let detail = engine.detail(id, at_least).await?;
+    // The detail shows the parameters and steps of every target: a scoped reader needs
+    // each existing target readable, and is answered as for a job outside its scope.
+    let readable = read_scope(
+        app.authorizer.as_deref(),
+        index.map(|Extension(index)| index),
+        &cx,
+        ObjectKind::Job,
+    );
+    if !readable.admits_every_target(&detail.job.spec.targets) {
+        return Err(Denied {
+            action: Action::Read,
+            object: ObjectRef::from(id),
+            reason: DenyReason::OutOfScope,
+        }
+        .into());
+    }
+    Ok(Json(detail))
 }
 
 /// Cancels a job.

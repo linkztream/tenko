@@ -419,9 +419,9 @@ dependencies = [
 
 [[package]]
 name = "calamine"
-version = "0.37.0"
+version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9ca341b94bc4b29e08970b1a03914fad2dfe177e2ecb67fcd6de9046004aafb"
+checksum = "f431b67cba6122a1f7d26b7adafc71bbdf07026095fe811f5efc025d8748e1d8"
 dependencies = [
  "atoi_simd",
  "byteorder",
@@ -2943,7 +2943,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-api"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "arc-swap",
  "aws-lc-rs",
@@ -2985,7 +2985,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-auth"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -3018,7 +3018,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-cluster"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3058,7 +3058,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -3095,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-core"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3113,7 +3113,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-dhcp"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3139,7 +3139,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-dns"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3161,6 +3161,7 @@ dependencies = [
  "socket2",
  "tenko-core",
  "tenko-jobs",
+ "tenko-krb",
  "tenko-store",
  "tenko-vault",
  "thiserror 2.0.21",
@@ -3174,7 +3175,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-ipam"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3183,6 +3184,7 @@ dependencies = [
  "calamine",
  "csv",
  "encoding_rs",
+ "futures",
  "ipnet",
  "serde",
  "serde_json",
@@ -3203,7 +3205,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-jobs"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3220,8 +3222,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tenko-krb"
+version = "0.0.11"
+dependencies = [
+ "aws-lc-rs",
+ "tenko-core",
+ "thiserror 2.0.21",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
 name = "tenko-scan"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -3250,7 +3263,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-store"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3269,7 +3282,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-vault"
-version = "0.0.9"
+version = "0.0.11"
 dependencies = [
  "async-trait",
  "aws-lc-rs",

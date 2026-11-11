@@ -43,7 +43,13 @@ impl World {
             EngineConfig::default(),
             Arc::clone(&clock) as Arc<dyn tenko_jobs::Clock>,
         );
-        register_steps(&mut engine);
+        register_steps(
+            &mut engine,
+            &tenko_ipam::scope::ScopeGuard::new(
+                std::sync::Arc::new(tenko_core::principal::AllowAll),
+                std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+            ),
+        );
         let service = IpamService::new(store, Arc::new(engine.clone()), IpamConfig::default())
             .expect("service");
         let source = prefix(None, "192.0.2.0/24");

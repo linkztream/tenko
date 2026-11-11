@@ -19,7 +19,8 @@
 //!
 //! ```ignore
 //! let mut engine = tenko_jobs::JobEngine::new(store.clone(), engine_config);
-//! tenko_ipam::jobs::register_steps(&mut engine);
+//! let guard = tenko_ipam::scope::ScopeGuard::new(authorizer, scope_index);
+//! tenko_ipam::jobs::register_steps(&mut engine, &guard);
 //! let ipam = IpamService::new(store.clone(), Arc::new(engine.clone()), IpamConfig::default())?;
 //! let router = router.layer(axum::Extension(ipam.clone()));   // the IPAM routes
 //! tokio::spawn(ipam.clone().run_alarms(shutdown));             // alarms of remote changes

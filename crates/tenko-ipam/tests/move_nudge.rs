@@ -96,6 +96,10 @@ fn rig() -> Rig {
     let step = MoveNudgeStep::new(
         Controllers::with(memory.clone()),
         Some(DhcpMoves::with(Arc::clone(&role) as Arc<dyn DhcpRolePort>)),
+        tenko_ipam::scope::ScopeGuard::new(
+            Arc::new(tenko_core::principal::AllowAll),
+            Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+        ),
     );
     Rig {
         step,
@@ -124,6 +128,9 @@ fn params(connector: ConnectorId, reappear_secs: u32) -> Vec<u8> {
         interface: None,
         dns_name: None,
         task: None,
+        requester: Some(tenko_ipam::scope::Requester::System {
+            component: tenko_core::SystemComponent::Jobs,
+        }),
         l2: Some(L2StepPlan {
             connector,
             connector_name: "unifi.example.test".to_owned(),

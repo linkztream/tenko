@@ -26,7 +26,9 @@ use super::{
     preview::{Computed, StepPlan, compute, finish},
 };
 use crate::{
+    command::{AddressInput, IpamCommand},
     error::{IpamError, IpamResult, codes},
+    scope::ScopeGuard,
     service::IpamService,
     tables::MOVE_RECEIPTS,
     vlan::controllers::{ControllerInfo, Controllers},
@@ -49,10 +51,12 @@ pub async fn preview_move(
     request: &MoveRequest,
     cx: &RequestCtx,
     at_least: Option<Revision>,
+    guard: Option<&ScopeGuard>,
 ) -> IpamResult<MovePreview> {
     let view = ipam.view(at_least).await?;
     let base = compute(view.as_ref(), cx, &ipam.config(), request)?;
     drop(view);
+    check_items(guard, cx, &base.target, &base.items)?;
     let plans = l2::plan(
         controllers,
         &base.items,
@@ -62,6 +66,42 @@ pub async fn preview_move(
     )
     .await;
     Ok(finish(base, plans, request)?.preview)
+}
+
+/// What the steps of a move will write, checked for the requester before anything is
+/// shown or started: each moved address gets a new address in the target, bound to the
+/// same interface (so the requester must be allowed to change its host), and the old one
+/// is removed. The steps check their writes again with the requester's rights when they
+/// run.
+fn check_items(
+    guard: Option<&ScopeGuard>,
+    cx: &RequestCtx,
+    target: &super::MoveTarget,
+    items: &[MoveItem],
+) -> IpamResult<()> {
+    let Some(guard) = guard else {
+        return Ok(());
+    };
+    let mut commands = Vec::with_capacity(items.len() * 2);
+    for item in items {
+        commands.push(IpamCommand::CreateAddress(AddressInput {
+            id: None,
+            vrf: Some(target.vrf),
+            ip: item.new_ip,
+            status: None,
+            interface: item.interface,
+            dns_name: None,
+            tags: std::collections::BTreeSet::new(),
+            custom: std::collections::BTreeMap::new(),
+            description: None,
+        }));
+        commands.push(IpamCommand::Delete {
+            object: item.object,
+            expected: None,
+            cascade: false,
+        });
+    }
+    Ok(guard.precheck(&cx.principal, &commands)?)
 }
 
 /// Submits a move: computes the plan again from a fresh view and fresh controller reads,
@@ -83,6 +123,7 @@ pub async fn submit_move(
     request: &MoveRequest,
     cx: &RequestCtx,
     authorize: AuthorizeController<'_>,
+    guard: Option<&ScopeGuard>,
 ) -> IpamResult<MoveSubmitted> {
     let fingerprint = Digest(canonical_sha256(request)?);
     let key = cx
@@ -97,6 +138,7 @@ pub async fn submit_move(
     let view = ipam.store().read(ReadConsistency::Linearizable).await?;
     let base = compute(view.as_ref(), cx, &ipam.config(), request)?;
     drop(view);
+    check_items(guard, cx, &base.target, &base.items)?;
     let plans = l2::plan(
         controllers,
         &base.items,
@@ -228,7 +270,7 @@ impl IpamService {
         cx: &RequestCtx,
         at_least: Option<Revision>,
     ) -> IpamResult<MovePreview> {
-        preview_move(self, &Controllers::default(), request, cx, at_least).await
+        preview_move(self, &Controllers::default(), request, cx, at_least, None).await
     }
 
     /// Submits a move without network controllers, like [`submit_move`]: every L2 step
@@ -242,7 +284,15 @@ impl IpamService {
         request: &MoveRequest,
         cx: &RequestCtx,
     ) -> IpamResult<MoveSubmitted> {
-        submit_move(self, &Controllers::default(), request, cx, &|_| Ok(())).await
+        submit_move(
+            self,
+            &Controllers::default(),
+            request,
+            cx,
+            &|_| Ok(()),
+            None,
+        )
+        .await
     }
 
     async fn move_receipt(&self, key: &(String, String)) -> IpamResult<Option<MoveReceipt>> {
@@ -318,6 +368,7 @@ fn job_spec(
         dns: None,
         dhcp: None,
         lease: lease.cloned(),
+        requester: crate::scope::Requester::of(&cx.principal),
     };
     let mut steps = Vec::with_capacity(plans.len());
     for plan in plans {

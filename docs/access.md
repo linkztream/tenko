@@ -102,20 +102,40 @@ Each object kind has anchors that a rule is matched against.
 | Host | Its tenant, its site (and that site's ancestors), one chain per prefix of its addresses, and its VRF when all its addresses are in one VRF |
 | Interface | The anchors of its host |
 | Observation, proposal | The chain of the prefix of the subject address, merged with the objects the proposal names |
-| Job | The anchors of its targets, merged |
+| Job | The anchors of its targets, merged; a target that does not exist yet (the address a move will create) or that IPAM does not place (a connector) is left out |
 
 ### 3.3 Read any, write all
 
 - **Read.** An object is readable when one of its anchors is covered by a rule of a grant whose role allows the read. A host with addresses in two prefixes is readable when the principal holds one of them.
 - **Create, update, delete.** Every anchor of the object must be covered, and the object must lie inside the scope both where it is and where it goes. A host with addresses in two prefixes can be changed only by a principal that holds both, or holds a rule that covers the host whole (its VRF or its site). A prefix rule never admits a write to a host that has an address outside the rule. An object that has a part with no prefix chain at all carries an empty chain and so needs a rule that covers it whole.
 
-Writes are planned first. A scoped principal's change is planned as for anybody, and every planned change is checked before and after it is applied: a prefix cannot be moved out of or into a scope the principal does not hold, and an interface or an address bound to a host needs the right to change that host before and after. A prefix created, resized or restored around existing prefixes changes the chain of each of them, so each of them must lie inside the scope where it is and where it goes, and a create or resize whose new network holds a prefix outside the scope is refused before planning. A refused plan changes nothing and answers 403 `auth.out_of_scope`. Releasing a DHCP lease needs `execute` on the DHCP scope that holds the lease, and a lease in a scope the principal may not read answers 404 `dhcp.lease.not_found`, as reading it does.
+Writes are checked before they are planned. Every object a scoped principal's change names, and every place it writes to, must lie inside the scope before the planner reads anything: the stored object of a change, the prefix a range, an address or a prefix is created in or moved to, the host an interface or an address is bound to, the parent of a site and the site of a VLAN. An object that does not exist is outside every scope, so the answer for an object outside the scope and for one that does not exist is the same, and a planning error after this check describes only objects inside the scope. Three answers that could still count or name objects elsewhere are narrowed for a scoped principal: a duplicate MAC address warning keeps the address and leaves out the other interface, `ipam.in_use` leaves out the count, and an invalid default zone of a tenant leaves out the zone's name and reason.
 
-### 3.4 Context kinds
+A write never places an object in another group's view: giving a host or a prefix a site needs a rule that covers that site (a site rule, or a site rule of an ancestor), unless the prefix takes the site its enclosing prefixes already give it, and tying a prefix to a VLAN needs read access to that VLAN. A prefix rule therefore keeps a host where it is but cannot move it into a site.
+
+Writes are then planned as for anybody, and every planned change is checked before and after it is applied: a prefix cannot be moved out of or into a scope the principal does not hold, and an interface or an address bound to a host needs the right to change that host before and after. A prefix created, resized or restored around existing prefixes changes the chain of each of them, so each of them must lie inside the scope where it is and where it goes, and a create or resize whose new network holds a prefix outside the scope is refused before planning. A refused plan changes nothing and answers 403 `auth.out_of_scope`. Releasing a DHCP lease needs `execute` on the DHCP scope that holds the lease, and a lease in a scope the principal may not read answers 404 `dhcp.lease.not_found`, as reading it does.
+
+### 3.4 Writes that run later
+
+Some writes run after the request that asked for them, as job steps or by the reconciler. Each of them is checked, when it runs, with the rights its principal holds at that moment, before it is planned and on the plan:
+
+| Write | Whose rights | Checked |
+|---|---|---|
+| The steps of a move that write intent (the new address, the cleanup that removes the old one) or the network (the switch port or client VLAN through the network controller, the bounce or kick after it) | The person or token that started the move | At each step |
+| The steps of a VLAN provisioning that write intent (the VLAN and prefix, their activation) or the network (the network on the controller) | The person or token that asked for it | At each step |
+| The chunks of an import | The person or token that applied it | At each chunk |
+| An adoption by the reconciler | The person or token that set the adoption policy in force | At each adoption |
+| A change queued while the controller was cut off from its cluster | Its author | When the queue drains, before planning and on the plan; a refused change keeps no plan |
+
+The identity is kept with the job, never a copy of its grants. A grant revoked or narrowed since the start, or an account disabled since, refuses the write: a job rolls back what its earlier steps changed and ends with `auth.out_of_scope` or `auth.forbidden`, and an adoption is recorded as failed on its proposal and not tried again until the proposal changes. A rollback undoes only what the job's own steps wrote and is not checked, so a revoked operator never leaves half a move behind. The reconciler is no four-eyes boundary: an adoption policy set by an operator limited to a prefix adopts only what that operator may change, and setting or removing a policy needs the right to change every prefix below the prefix, since the policy governs them all. A server wired without this check refuses these writes (500 `ipam.scope.unwired`) instead of applying them unchecked.
+
+A job started under an earlier version did not record its requester: its next write is refused with 409 `ipam.job.requester_unknown` and it rolls back. Start it again.
+
+### 3.5 Context kinds
 
 Every principal with a grant may read tenants, VRFs, sites and custom field definitions, whatever the rule covers, so that names and forms can be shown. Changing them still needs a rule that covers them.
 
-### 3.5 Global-only kinds and the two special objects
+### 3.6 Global-only kinds and the two special objects
 
 Section 2 lists the global-only kinds. A check "somewhere" (an object of the kind anywhere in reach) passes for a principal when some grant reaches the kind; the route then filters the list or checks each planned object. A check against the nil identifier of a scoped kind is refused, so a route that does neither leaks nothing.
 
@@ -238,12 +258,15 @@ A principal whose reach is scoped receives only what its rules cover. Lists filt
 | Lists of a kind the principal reaches nothing of | `200` with no items, never 403 (section 1) |
 | Single reads and history | 403 `auth.out_of_scope` outside the scope |
 | Prefix tree | The prefixes in scope as nodes; see below |
+| Addresses of a prefix (`/prefixes/{id}/addresses`) | Only the addresses in scope; an address outside the scope counts as free, so the free gaps tell nothing of where it sits |
 | Search | Only hits in scope |
 | Exports (`/exports/*.csv`) | Only objects in scope |
 | Audit log | See below |
-| Proposals | Listed by the prefix of the subject address; an approval is planned and checked against the scope before it applies |
-| Jobs | Listed and read when one of the targets is in scope; canceled or completed when all targets are |
-| Moves | Update on every moved object and on the target prefix; a preview needs Read on them |
+| Proposals | Listed by the prefix of the subject address; an approval is checked before it is planned and on every plan it applies, the retries after a stale plan included |
+| Running the reconciler (`POST /proposals/reconcile`) | 403 `auth.out_of_scope`: a run spans the whole installation; the reconciler runs on its own schedule |
+| Observations of a subject | 403 `auth.out_of_scope` for a subject seen outside the scope and for one never seen |
+| Jobs | Listed and read when every target that exists is in scope; canceled or completed when all targets are |
+| Moves | Update on every moved object, on the target prefix and on the host of every moved address; a preview needs the same, since it shows what the move would write |
 | VLAN provisioning | Refused, because it writes through a network controller, which is global-only in Phase 1 |
 | Secrets | An empty list and 403 on single reads |
 | Events | See below |
@@ -258,6 +281,8 @@ A principal whose reach is scoped receives only what its rules cover. Lists filt
 ```
 
 (Fields of a node beyond those shown are omitted.)
+
+The utilization of a node leaves out the prefixes below it that the principal may not read: their space counts as space of the node without addresses, ranges or child prefixes, so a supernet read with a rule that does not cover its children shows nothing of what they hold.
 
 **Audit log.** A principal that may read the audit log (a global role that reads the system, the auditor, a token with `audit:read`) sees every record. A principal that does not, but whose grants reach IPAM objects, sees only the records that name at least one object and all of whose objects are of a scoped kind inside its scope. `GET /audit/verify` needs the global permission.
 

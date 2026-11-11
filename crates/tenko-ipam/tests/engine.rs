@@ -17,7 +17,13 @@ use tenko_store::{MemStore, ReadViewExt, Store};
 fn service() -> (Arc<IpamService>, JobEngine) {
     let store: Arc<dyn Store> = Arc::new(MemStore::default());
     let mut engine = JobEngine::new(Arc::clone(&store), EngineConfig::default());
-    register_steps(&mut engine);
+    register_steps(
+        &mut engine,
+        &tenko_ipam::scope::ScopeGuard::new(
+            std::sync::Arc::new(tenko_core::principal::AllowAll),
+            std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+        ),
+    );
     let service =
         IpamService::new(store, Arc::new(engine.clone()), IpamConfig::default()).expect("service");
     (service, engine)

@@ -47,9 +47,10 @@ use std::{
 use arc_swap::ArcSwap;
 use ipnet::IpNet;
 use tenko_core::{
-    Action, AddressId, AnchorMode, Anchors, Authorizer, Denied, DenyReason, HostId, InterfaceId,
-    JobId, ObjectKind, ObjectRef, PrefixId, Principal, ProposalId, RangeId, RequestCtx, Revision,
-    ScopeFilter, SiteId, TenantId, VlanId, VrfId,
+    Action, AddressId, AnchorMode, Anchors, ApiTokenId, AuthStrength, Authorizer, Denied,
+    DenyReason, HostId, InterfaceId, JobId, ObjectKind, ObjectRef, PrefixId, Principal, ProposalId,
+    RangeId, RequestCtx, Revision, ScopeFilter, SessionId, SiteId, SystemComponent, TenantId,
+    UserId, VlanId, VrfId,
 };
 use tenko_store::{
     AnchorResolver, ChangeSet, DerivedIndex, IndexImage, KeyRange, ReadConsistency, ReadView,
@@ -933,34 +934,20 @@ impl ScopeIndex {
         net: &IpNet,
         except: Option<PrefixId>,
     ) -> Vec<Anchors> {
-        self.with(|image| {
-            let family = Family::of_net(net).index();
-            let mut vrfs: Vec<VrfId> = match vrf {
-                Some(vrf) => vec![vrf],
-                None => image
-                    .nets
-                    .keys()
-                    .filter(|(_, index)| *index == family)
-                    .map(|(vrf, _)| *vrf)
-                    .collect(),
-            };
-            vrfs.sort();
-            vrfs.dedup();
-            vrfs.into_iter()
-                .flat_map(|vrf| image.within(vrf, net))
-                .filter(|id| Some(*id) != except)
-                .map(|id| anchors_with(image, ObjectRef::from(id)))
-                .collect()
-        })
+        self.with(|image| within_anchors(image, vrf, net, except))
     }
 
     /// The anchors of an object that stands for its targets (a job): the targets' anchors
     /// merged ([`merge`]).
     pub fn anchors_of_targets(&self, object: ObjectRef, targets: &[ObjectRef]) -> Anchors {
         self.with(|image| {
+            // A target the index does not know (the address a move's step has yet to
+            // create, a connector) places the job nowhere: it neither widens nor narrows
+            // where the job lies. A deleted target keeps its place in the index.
             let parts: Vec<Anchors> = targets
                 .iter()
                 .map(|target| anchors_with(image, *target))
+                .filter(anchored)
                 .collect();
             merge(object, &parts)
         })
@@ -1016,22 +1003,7 @@ impl ScopeIndex {
     /// The anchors of an address in a VRF, or in every VRF that holds it when the VRF is
     /// not known (an observation that names only the address).
     pub fn anchors_of_ip(&self, object: ObjectRef, vrf: Option<VrfId>, ip: IpAddr) -> Anchors {
-        self.with(|image| {
-            let vrfs = match vrf {
-                Some(vrf) => vec![vrf],
-                None => image.vrfs_holding(ip),
-            };
-            let parts: Vec<Anchors> = vrfs
-                .into_iter()
-                .filter_map(|vrf| image.containing(vrf, ip))
-                .map(|prefix| prefix_anchors(image, object, prefix))
-                .collect();
-            if parts.is_empty() {
-                Anchors::of(object)
-            } else {
-                merge(object, &parts)
-            }
-        })
+        self.with(|image| anchors_at_ip(image, object, vrf, ip))
     }
 
     /// The anchors of an observed fact: the prefixes of the addresses it names (in its VRF
@@ -1085,6 +1057,7 @@ impl ScopeIndex {
     ///
     /// [`Denied`] with `auth.forbidden` when no grant allows the change, or
     /// `auth.out_of_scope` for an object outside the scope.
+    #[allow(clippy::too_many_lines)] // One pass over the changes, every rule in its order.
     pub fn check_plan(
         &self,
         authorizer: &dyn Authorizer,
@@ -1133,12 +1106,26 @@ impl ScopeIndex {
                 }
                 hosts.extend(owning_host(&overlay, change.after.as_ref()));
             }
-            // A prefix created, resized or restored around existing prefixes changes their
-            // chains: each of them is changed as well, so it must lie inside the scope
-            // where it is and where it goes.
-            if let Some(IpamObject::Prefix(prefix)) = &change.after
-                && !prefix.meta.is_deleted()
+            // A write never places an object in a site the principal does not hold, and
+            // never ties a prefix to a VLAN it may not read: either would hand the object
+            // to another group's view, or tell of an object outside the scope.
+            if let Some(after) = &change.after
+                && !scope.is_all()
+                && !placed_in_scope(
+                    &scope,
+                    &filter(Action::Read, ObjectKind::Vlan),
+                    &overlay,
+                    change.before.as_ref(),
+                    after,
+                )
             {
+                return Err(refuse(action, object, DenyReason::OutOfScope));
+            }
+            // A prefix created, resized, restored or deleted around existing prefixes changes
+            // their chains (a deleted one hands them to its parent, and the parent's site):
+            // each of them is changed as well, so it must lie inside the scope where it is
+            // and where it goes.
+            if let Some(IpamObject::Prefix(prefix)) = &change.after {
                 let scope = filter(Action::Update, ObjectKind::Prefix);
                 if !scope.is_all() {
                     for inner in image.within(prefix.vrf, &prefix.cidr) {
@@ -1172,10 +1159,12 @@ impl ScopeIndex {
                 if scope.is_all() {
                     continue;
                 }
+                // The host is not what the request named: the refusal does not name it.
+                let unnamed = new_object(ObjectKind::Host);
                 if matches!(scope, ScopeFilter::Nothing) {
                     return Err(refuse(
                         Action::Update,
-                        host_ref,
+                        unnamed,
                         DenyReason::MissingPermission,
                     ));
                 }
@@ -1184,7 +1173,7 @@ impl ScopeIndex {
                     new_host || scope.admits(&anchors_with(&*image, host_ref), AnchorMode::All);
                 let after_ok = scope.admits(&anchors_with(&overlay, host_ref), AnchorMode::All);
                 if !(before_ok && after_ok) {
-                    return Err(refuse(Action::Update, host_ref, DenyReason::OutOfScope));
+                    return Err(refuse(Action::Update, unnamed, DenyReason::OutOfScope));
                 }
             }
         }
@@ -1206,6 +1195,15 @@ impl ScopeIndex {
         })
     }
 
+    /// Whether `principal` creates, changes and deletes every IPAM kind without a scope.
+    pub fn reaches_everything(authorizer: &dyn Authorizer, principal: &Principal) -> bool {
+        crate::object::IPAM_KINDS.into_iter().all(|kind| {
+            [Action::Create, Action::Update, Action::Delete]
+                .into_iter()
+                .all(|action| authorizer.scope(principal, action, kind).is_all())
+        })
+    }
+
     /// Plans `commands` without applying them and checks the plan for the principal of
     /// `cx` (the dry run of a scoped principal, API-09).
     ///
@@ -1221,8 +1219,13 @@ impl ScopeIndex {
         cx: &RequestCtx,
         options: &PlanOptions,
     ) -> Result<IpamPlan, ScopedWriteError> {
-        let plan = ipam.preview(commands, cx, options, None).await?;
+        self.precheck(authorizer, &cx.principal, commands)?;
+        let mut plan = ipam
+            .preview(commands, cx, options, None)
+            .await
+            .map_err(redact_error)?;
         self.check_plan(authorizer, &cx.principal, &plan)?;
+        redact_warnings(&mut plan.warnings);
         Ok(plan)
     }
 
@@ -1245,6 +1248,7 @@ impl ScopeIndex {
         if Self::unrestricted(authorizer, &cx.principal) {
             return Ok(ipam.execute(commands, cx, options).await?);
         }
+        self.precheck(authorizer, &cx.principal, commands)?;
         let attempts = ipam.config().max_attempts;
         for attempt in 0..attempts {
             let consistency = if attempt == 0 {
@@ -1257,12 +1261,15 @@ impl ScopeIndex {
                 .read(consistency)
                 .await
                 .map_err(IpamError::from)?;
-            let plan = ipam.plan(view.as_ref(), cx, options, commands)?;
+            let plan = ipam
+                .plan(view.as_ref(), cx, options, commands)
+                .map_err(redact_error)?;
             drop(view);
             self.check_plan(authorizer, &cx.principal, &plan)?;
             match ipam.apply(&plan, cx).await {
                 Ok(mut applied) => {
                     applied.retries = attempt;
+                    redact_warnings(&mut applied.warnings);
                     return Ok(applied);
                 }
                 Err(error) if error.is(codes::PLAN_STALE) => {
@@ -1271,11 +1278,747 @@ impl ScopeIndex {
                     ))
                     .await;
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(redact_error(error).into()),
             }
         }
         Err(IpamError::contended(attempts).into())
     }
+}
+
+/// The filters of one principal, asked of the authorizer once per action and kind.
+struct Filters<'a> {
+    authorizer: &'a dyn Authorizer,
+    principal: &'a Principal,
+    known: HashMap<(Action, ObjectKind), ScopeFilter>,
+}
+
+impl<'a> Filters<'a> {
+    fn new(authorizer: &'a dyn Authorizer, principal: &'a Principal) -> Self {
+        Self {
+            authorizer,
+            principal,
+            known: HashMap::new(),
+        }
+    }
+
+    fn of(&mut self, action: Action, kind: ObjectKind) -> &ScopeFilter {
+        self.known
+            .entry((action, kind))
+            .or_insert_with(|| self.authorizer.scope(self.principal, action, kind))
+    }
+
+    /// Whether `action` on an object of `kind` with the anchors `anchors` computes is
+    /// inside the scope (`mode`); the anchors are computed only for a narrowed scope. No
+    /// anchors stand for an object an earlier command of the same request creates: the
+    /// plan check places it.
+    fn admit(
+        &mut self,
+        action: Action,
+        kind: ObjectKind,
+        object: ObjectRef,
+        mode: AnchorMode,
+        anchors: impl FnOnce() -> Option<Anchors>,
+    ) -> Result<(), Denied> {
+        let reason = match self.of(action, kind) {
+            ScopeFilter::All => return Ok(()),
+            ScopeFilter::Nothing => DenyReason::MissingPermission,
+            filter @ ScopeFilter::Only(_) => match anchors() {
+                None => return Ok(()),
+                Some(anchors) if filter.admits(&anchors, mode) => return Ok(()),
+                Some(_) => DenyReason::OutOfScope,
+            },
+        };
+        Err(Denied {
+            action,
+            object,
+            reason,
+        })
+    }
+}
+
+/// An object of `kind` that does not exist yet: what a refused create names.
+fn new_object(kind: ObjectKind) -> ObjectRef {
+    ObjectRef::new(kind, uuid::Uuid::nil())
+}
+
+impl ScopeIndex {
+    /// Checks, before anything is planned, that every object `commands` name and every
+    /// place they write to lies inside the scope of `principal`: the stored object of a
+    /// change, the prefix a range, an address or a prefix is created in or moved to, the
+    /// host an interface or an address is bound to, the site a host or a prefix is given,
+    /// the VLAN a prefix is tied to, the parent of a site and the site of a VLAN. An object
+    /// that does not exist is outside every scope, so a refusal says nothing about what
+    /// exists outside; a planning error after this check describes only objects inside
+    /// the scope (with the exceptions the API strips for scoped principals). Passes at
+    /// once for a principal that reaches everything. [`Self::check_plan`] stays the
+    /// authority after planning.
+    ///
+    /// # Errors
+    ///
+    /// [`Denied`] with `auth.forbidden` without a grant for the action, `auth.out_of_scope`
+    /// for an object or a place outside the scope.
+    #[allow(clippy::too_many_lines)] // One arm per command kind.
+    pub fn precheck(
+        &self,
+        authorizer: &dyn Authorizer,
+        principal: &Principal,
+        commands: &[IpamCommand],
+    ) -> Result<(), Denied> {
+        // Only a principal that reaches everything skips the check: one that reaches
+        // nothing (a disabled account) is refused below.
+        if Self::reaches_everything(authorizer, principal) {
+            return Ok(());
+        }
+        let image = self.image.load();
+        let image = image.read().unwrap_or_else(PoisonError::into_inner);
+        let image: &Image = &image;
+        let mut filters = Filters::new(authorizer, principal);
+        let created = created_by(commands);
+        let created = &created;
+        let stored = |object: ObjectRef| {
+            move || (!created.contains(&object)).then(|| anchors_with(image, object))
+        };
+        let site_anchors = |site: SiteId| {
+            move || {
+                (!created.contains(&ObjectRef::from(site))).then(|| Anchors {
+                    sites: site_chain(image, site),
+                    ..Anchors::default()
+                })
+            }
+        };
+        for command in commands {
+            match command {
+                IpamCommand::CreateTenant(_)
+                | IpamCommand::CreateVrf(_)
+                | IpamCommand::CreateCustomField(_)
+                | IpamCommand::UpdateCustomField(_)
+                | IpamCommand::DeleteCustomField { .. } => {}
+                IpamCommand::CreateSite(input) => {
+                    let kind = ObjectKind::Site;
+                    let object = new_object(kind);
+                    match input.parent {
+                        Some(parent) => filters.admit(
+                            Action::Create,
+                            kind,
+                            object,
+                            AnchorMode::All,
+                            site_anchors(parent),
+                        )?,
+                        None => {
+                            filters.admit(Action::Create, kind, object, AnchorMode::All, || {
+                                Some(Anchors::of(object))
+                            })?;
+                        }
+                    }
+                }
+                IpamCommand::CreateVlan(input) => {
+                    let kind = ObjectKind::Vlan;
+                    let object = new_object(kind);
+                    match input.site {
+                        Some(site) => filters.admit(
+                            Action::Create,
+                            kind,
+                            object,
+                            AnchorMode::All,
+                            site_anchors(site),
+                        )?,
+                        None => {
+                            filters.admit(Action::Create, kind, object, AnchorMode::All, || {
+                                Some(Anchors::of(object))
+                            })?;
+                        }
+                    }
+                }
+                IpamCommand::CreatePrefix(input) => {
+                    Self::precheck_network(
+                        image,
+                        &mut filters,
+                        Action::Create,
+                        input.vrf,
+                        &input.cidr,
+                        None,
+                    )?;
+                    precheck_site_and_vlan(
+                        image,
+                        created,
+                        &mut filters,
+                        Action::Create,
+                        ObjectKind::Prefix,
+                        input.site,
+                        input.vlan,
+                        Self::place_site(image, input.vrf, input.cidr.network()),
+                    )?;
+                }
+                IpamCommand::AllocatePrefix(input) => {
+                    let object = new_object(ObjectKind::Prefix);
+                    filters.admit(
+                        Action::Create,
+                        ObjectKind::Prefix,
+                        object,
+                        AnchorMode::All,
+                        stored(ObjectRef::from(input.parent)),
+                    )?;
+                    precheck_site_and_vlan(
+                        image,
+                        created,
+                        &mut filters,
+                        Action::Create,
+                        ObjectKind::Prefix,
+                        input.site,
+                        input.vlan,
+                        chain_sites(image, &prefix_chain(image, input.parent))
+                            .first()
+                            .copied(),
+                    )?;
+                }
+                IpamCommand::CreateRange(input) => {
+                    filters.admit(
+                        Action::Create,
+                        ObjectKind::Range,
+                        new_object(ObjectKind::Range),
+                        AnchorMode::All,
+                        stored(ObjectRef::from(input.prefix)),
+                    )?;
+                }
+                IpamCommand::CreateAddress(input) => {
+                    let object = new_object(ObjectKind::Address);
+                    filters.admit(
+                        Action::Create,
+                        ObjectKind::Address,
+                        object,
+                        AnchorMode::All,
+                        || Some(anchors_at_ip(image, object, input.vrf, input.ip)),
+                    )?;
+                    if let Some(interface) = input.interface {
+                        precheck_binding(image, created, &mut filters, interface)?;
+                    }
+                }
+                IpamCommand::AllocateAddress(input) => {
+                    let object = new_object(ObjectKind::Address);
+                    filters.admit(
+                        Action::Create,
+                        ObjectKind::Address,
+                        object,
+                        AnchorMode::All,
+                        stored(ObjectRef::from(input.prefix)),
+                    )?;
+                    if let Some(range) = input.range {
+                        filters.admit(
+                            Action::Create,
+                            ObjectKind::Address,
+                            object,
+                            AnchorMode::All,
+                            stored(ObjectRef::from(range)),
+                        )?;
+                    }
+                    if let Some(interface) = input.interface {
+                        precheck_binding(image, created, &mut filters, interface)?;
+                    }
+                }
+                IpamCommand::CreateHost(input) => {
+                    if let Some(site) = input.site {
+                        let object = new_object(ObjectKind::Host);
+                        filters.admit(
+                            Action::Create,
+                            ObjectKind::Host,
+                            object,
+                            AnchorMode::All,
+                            site_anchors(site),
+                        )?;
+                    }
+                }
+                IpamCommand::CreateInterface(input) => {
+                    if let Some(host) = input.host {
+                        let host = ObjectRef::from(host);
+                        filters.admit(
+                            Action::Create,
+                            ObjectKind::Interface,
+                            new_object(ObjectKind::Interface),
+                            AnchorMode::All,
+                            stored(host),
+                        )?;
+                        filters.admit(
+                            Action::Update,
+                            ObjectKind::Host,
+                            host,
+                            AnchorMode::All,
+                            stored(host),
+                        )?;
+                    }
+                }
+                IpamCommand::UpdateTenant(update) => {
+                    let object = ObjectRef::from(update.id);
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                }
+                IpamCommand::UpdateVrf(update) => {
+                    let object = ObjectRef::from(update.id);
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                }
+                IpamCommand::UpdateSite(update) => {
+                    let object = ObjectRef::from(update.id);
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                    if let Some(Some(parent)) = update.patch.parent {
+                        filters.admit(
+                            Action::Update,
+                            object.kind,
+                            object,
+                            AnchorMode::All,
+                            site_anchors(parent),
+                        )?;
+                    }
+                }
+                IpamCommand::UpdateVlan(update) => {
+                    let object = ObjectRef::from(update.id);
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                    if let Some(Some(site)) = update.patch.site {
+                        filters.admit(
+                            Action::Update,
+                            object.kind,
+                            object,
+                            AnchorMode::All,
+                            site_anchors(site),
+                        )?;
+                    }
+                }
+                IpamCommand::UpdatePrefix(update) => {
+                    let object = ObjectRef::from(update.id);
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                    let current = image.prefix(update.id);
+                    if let Some(cidr) = update.patch.cidr {
+                        Self::precheck_network(
+                            image,
+                            &mut filters,
+                            Action::Update,
+                            current.map(|found| found.vrf),
+                            &cidr,
+                            Some(update.id),
+                        )?;
+                    }
+                    precheck_site_and_vlan(
+                        image,
+                        created,
+                        &mut filters,
+                        Action::Update,
+                        ObjectKind::Prefix,
+                        update.patch.site.flatten(),
+                        update.patch.vlan.flatten(),
+                        anchors_with(image, object).sites.first().copied(),
+                    )?;
+                }
+                IpamCommand::UpdateRange(update) => {
+                    let object = ObjectRef::from(update.id);
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                }
+                IpamCommand::UpdateAddress(update) => {
+                    let object = ObjectRef::from(update.id);
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                    let current = image.address(update.id);
+                    if let Some(ip) = update.patch.ip {
+                        let vrf = current.map(|found| found.vrf);
+                        filters.admit(
+                            Action::Update,
+                            object.kind,
+                            object,
+                            AnchorMode::All,
+                            || Some(anchors_at_ip(image, object, vrf, ip)),
+                        )?;
+                    }
+                    if let Some(binding) = update.patch.interface {
+                        if let Some(old) = current.and_then(|found| found.interface) {
+                            precheck_binding(image, created, &mut filters, old)?;
+                        }
+                        if let Some(new) = binding {
+                            precheck_binding(image, created, &mut filters, new)?;
+                        }
+                    }
+                }
+                IpamCommand::UpdateHost(update) => {
+                    let object = ObjectRef::from(update.id);
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                    if let Some(Some(site)) = update.patch.site
+                        && image.host(update.id).and_then(|host| host.site) != Some(site)
+                    {
+                        filters.admit(
+                            Action::Update,
+                            object.kind,
+                            object,
+                            AnchorMode::All,
+                            site_anchors(site),
+                        )?;
+                    }
+                }
+                IpamCommand::UpdateInterface(update) => {
+                    let object = ObjectRef::from(update.id);
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                }
+                IpamCommand::SetLock { host, .. } | IpamCommand::SetMode { host, .. } => {
+                    let object = ObjectRef::from(*host);
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                }
+                IpamCommand::DecommissionHost(input) => {
+                    let object = ObjectRef::from(input.host);
+                    filters.admit(
+                        Action::Delete,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                }
+                IpamCommand::ReinstateHost { host, .. } => {
+                    let object = ObjectRef::from(*host);
+                    filters.admit(
+                        Action::Delete,
+                        object.kind,
+                        object,
+                        AnchorMode::All,
+                        stored(object),
+                    )?;
+                }
+                IpamCommand::Delete { object, .. } => {
+                    filters.admit(
+                        Action::Delete,
+                        object.kind,
+                        *object,
+                        AnchorMode::All,
+                        stored(*object),
+                    )?;
+                }
+                IpamCommand::Restore { object, .. } => {
+                    filters.admit(
+                        Action::Update,
+                        object.kind,
+                        *object,
+                        AnchorMode::All,
+                        stored(*object),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The site the prefix holding `ip` gives what is created there.
+    fn place_site(image: &Image, vrf: Option<VrfId>, ip: IpAddr) -> Option<SiteId> {
+        anchors_at_ip(image, new_object(ObjectKind::Prefix), vrf, ip)
+            .sites
+            .first()
+            .copied()
+    }
+
+    /// The place of a prefix created or moved to `cidr`: the prefix that would hold it, and
+    /// every existing prefix it would hold (other than `except`, the prefix that moves, and
+    /// those already below it), must lie inside the scope.
+    fn precheck_network(
+        image: &Image,
+        filters: &mut Filters<'_>,
+        action: Action,
+        vrf: Option<VrfId>,
+        cidr: &IpNet,
+        except: Option<PrefixId>,
+    ) -> Result<(), Denied> {
+        let object = except.map_or_else(|| new_object(ObjectKind::Prefix), ObjectRef::from);
+        filters.admit(action, ObjectKind::Prefix, object, AnchorMode::All, || {
+            Some(anchors_at_ip(image, object, vrf, cidr.network()))
+        })?;
+        let below = |anchors: &Anchors| {
+            except.is_some_and(|id| anchors.prefixes.iter().any(|chain| chain.contains(&id)))
+        };
+        let held = filters.of(Action::Update, ObjectKind::Prefix).clone();
+        if held.is_all() {
+            return Ok(());
+        }
+        let inside = within_anchors(image, vrf, cidr, except);
+        if inside
+            .iter()
+            .all(|anchors| below(anchors) || held.admits(anchors, AnchorMode::All))
+        {
+            Ok(())
+        } else {
+            Err(Denied {
+                action,
+                object,
+                reason: DenyReason::OutOfScope,
+            })
+        }
+    }
+}
+
+/// The anchors of every live prefix inside `net` other than `except` (see
+/// [`ScopeIndex::anchors_within`]).
+fn within_anchors(
+    image: &Image,
+    vrf: Option<VrfId>,
+    net: &IpNet,
+    except: Option<PrefixId>,
+) -> Vec<Anchors> {
+    let family = Family::of_net(net).index();
+    let mut vrfs: Vec<VrfId> = match vrf {
+        Some(vrf) => vec![vrf],
+        None => image
+            .nets
+            .keys()
+            .filter(|(_, index)| *index == family)
+            .map(|(vrf, _)| *vrf)
+            .collect(),
+    };
+    vrfs.sort();
+    vrfs.dedup();
+    vrfs.into_iter()
+        .flat_map(|vrf| image.within(vrf, net))
+        .filter(|id| Some(*id) != except)
+        .map(|id| anchors_with(image, ObjectRef::from(id)))
+        .collect()
+}
+
+/// The anchors of an object at `ip`: those of the most specific prefix holding it, in
+/// `vrf` or in every VRF that holds it.
+fn anchors_at_ip(image: &Image, object: ObjectRef, vrf: Option<VrfId>, ip: IpAddr) -> Anchors {
+    let vrfs = match vrf {
+        Some(vrf) => vec![vrf],
+        None => image.vrfs_holding(ip),
+    };
+    let parts: Vec<Anchors> = vrfs
+        .into_iter()
+        .filter_map(|vrf| image.containing(vrf, ip))
+        .map(|prefix| prefix_anchors(image, object, prefix))
+        .collect();
+    if parts.is_empty() {
+        Anchors::of(object)
+    } else {
+        merge(object, &parts)
+    }
+}
+
+/// Binding to `interface` changes its host: the principal must be allowed to change the
+/// host, which an interface that does not exist never is.
+fn precheck_binding(
+    image: &Image,
+    created: &HashSet<ObjectRef>,
+    filters: &mut Filters<'_>,
+    interface: InterfaceId,
+) -> Result<(), Denied> {
+    let object = ObjectRef::from(interface);
+    // The host is not what the request named: the refusal does not name it.
+    let host = new_object(ObjectKind::Host);
+    filters.admit(
+        Action::Update,
+        ObjectKind::Host,
+        host,
+        AnchorMode::All,
+        || (!created.contains(&object)).then(|| anchors_with(image, object)),
+    )
+}
+
+/// The objects `commands` create with identifiers the caller chose: a later command of the
+/// same request may name them before they exist.
+fn created_by(commands: &[IpamCommand]) -> HashSet<ObjectRef> {
+    let mut out = HashSet::new();
+    for command in commands {
+        match command {
+            IpamCommand::CreateTenant(input) => out.extend(input.id.map(ObjectRef::from)),
+            IpamCommand::CreateVrf(input) => out.extend(input.id.map(ObjectRef::from)),
+            IpamCommand::CreateSite(input) => out.extend(input.id.map(ObjectRef::from)),
+            IpamCommand::CreateVlan(input) => out.extend(input.id.map(ObjectRef::from)),
+            IpamCommand::CreatePrefix(input) => out.extend(input.id.map(ObjectRef::from)),
+            IpamCommand::AllocatePrefix(input) => out.extend(input.id.map(ObjectRef::from)),
+            IpamCommand::CreateRange(input) => out.extend(input.id.map(ObjectRef::from)),
+            IpamCommand::CreateAddress(input) => out.extend(input.id.map(ObjectRef::from)),
+            IpamCommand::AllocateAddress(input) => out.extend(input.id.map(ObjectRef::from)),
+            IpamCommand::CreateHost(input) => {
+                out.extend(input.id.map(ObjectRef::from));
+                out.extend(
+                    input
+                        .interfaces
+                        .iter()
+                        .filter_map(|interface| interface.id.map(ObjectRef::from)),
+                );
+            }
+            IpamCommand::CreateInterface(input) => out.extend(input.id.map(ObjectRef::from)),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The site and the VLAN a prefix is given: a site other than the one its place already
+/// gives it must be held whole, and the VLAN must be readable.
+#[allow(clippy::too_many_arguments)] // The two references of a prefix and their context.
+fn precheck_site_and_vlan(
+    image: &Image,
+    created: &HashSet<ObjectRef>,
+    filters: &mut Filters<'_>,
+    action: Action,
+    kind: ObjectKind,
+    site: Option<SiteId>,
+    vlan: Option<VlanId>,
+    place_site: Option<SiteId>,
+) -> Result<(), Denied> {
+    if let Some(site) = site
+        && place_site != Some(site)
+    {
+        filters.admit(action, kind, new_object(kind), AnchorMode::All, || {
+            (!created.contains(&ObjectRef::from(site))).then(|| Anchors {
+                sites: site_chain(image, site),
+                ..Anchors::default()
+            })
+        })?;
+    }
+    if let Some(vlan) = vlan {
+        let object = ObjectRef::from(vlan);
+        filters.admit(
+            Action::Read,
+            ObjectKind::Vlan,
+            object,
+            AnchorMode::Any,
+            || (!created.contains(&object)).then(|| anchors_with(image, object)),
+        )?;
+    }
+    Ok(())
+}
+
+/// The site a change gives a host or a live prefix of its own when the object did not have
+/// it before. A prefix that names the site its enclosing prefixes already give it changes
+/// no one's view and places nothing.
+fn planted_site(
+    facts: &dyn Facts,
+    before: Option<&IpamObject>,
+    after: &IpamObject,
+) -> Option<SiteId> {
+    let (site, old) = match after {
+        IpamObject::Host(host) if !host.meta.is_deleted() => (
+            host.site?,
+            match before {
+                Some(IpamObject::Host(old)) => old.site,
+                _ => None,
+            },
+        ),
+        IpamObject::Prefix(prefix) if !prefix.meta.is_deleted() => {
+            let site = prefix.site?;
+            let old = match before {
+                Some(IpamObject::Prefix(old)) => old.site,
+                _ => None,
+            };
+            let inherited = facts
+                .enclosing(prefix.vrf, &prefix.cidr, prefix.id)
+                .map(|parent| chain_sites(facts, &prefix_chain(facts, parent)));
+            if inherited.as_ref().and_then(|sites| sites.first()) == Some(&site) {
+                return None;
+            }
+            (site, old)
+        }
+        _ => return None,
+    };
+    (old != Some(site)).then_some(site)
+}
+
+/// Whether a change leaves its object where `scope` may put it: a site it gives the object
+/// is held (`planted_site`), and a VLAN it ties a prefix to is readable under `vlans`.
+fn placed_in_scope(
+    scope: &ScopeFilter,
+    vlans: &ScopeFilter,
+    overlay: &dyn Facts,
+    before: Option<&IpamObject>,
+    after: &IpamObject,
+) -> bool {
+    if let Some(site) = planted_site(overlay, before, after)
+        && !site_held(scope, overlay, site)
+    {
+        return false;
+    }
+    new_vlan(before, after).is_none_or(|vlan| {
+        vlans.admits(
+            &anchors_with(overlay, ObjectRef::from(vlan)),
+            AnchorMode::Any,
+        )
+    })
+}
+
+/// Whether `scope` holds `site` as a whole: a site rule covers it.
+fn site_held(scope: &ScopeFilter, facts: &dyn Facts, site: SiteId) -> bool {
+    scope.admits(
+        &Anchors {
+            sites: site_chain(facts, site),
+            ..Anchors::default()
+        },
+        AnchorMode::All,
+    )
+}
+
+/// The VLAN a change ties a live prefix to when it was not tied to it before.
+fn new_vlan(before: Option<&IpamObject>, after: &IpamObject) -> Option<VlanId> {
+    let IpamObject::Prefix(prefix) = after else {
+        return None;
+    };
+    if prefix.meta.is_deleted() {
+        return None;
+    }
+    let vlan = prefix.vlan?;
+    let old = match before {
+        Some(IpamObject::Prefix(old)) => old.vlan,
+        _ => None,
+    };
+    (old != Some(vlan)).then_some(vlan)
 }
 
 /// The host an interface or an address belongs to, as `facts` see it.
@@ -1308,6 +2051,158 @@ impl From<Denied> for ScopedWriteError {
 impl From<IpamError> for ScopedWriteError {
     fn from(error: IpamError) -> Self {
         Self::Ipam(error)
+    }
+}
+
+/// What a planning error may tell a principal with a narrowed scope. After
+/// [`ScopeIndex::precheck`] every object an error describes lies inside the scope, with
+/// three exceptions that count or name objects anywhere in the installation: the number
+/// of objects that still use an object (`ipam.in_use`), and the name and owner of a DNS
+/// zone given as a tenant's default zone. Those lose the count and the name.
+pub fn redact_error(error: IpamError) -> IpamError {
+    match error.code_str() {
+        codes::IN_USE => error.redacted(
+            "the object is still in use; delete or move what uses it first",
+            &["count"],
+        ),
+        tenko_core::dns::codes::DEFAULT_ZONE_INVALID => error.redacted(
+            "the default zone must be a primary forward zone of the tenant",
+            &["reason"],
+        ),
+        _ => error,
+    }
+}
+
+/// What plan warnings may tell a principal with a narrowed scope: a duplicate MAC address
+/// can sit on an interface anywhere, so the warning keeps the address and loses the
+/// other interface.
+pub fn redact_warnings(warnings: &mut [crate::PlanWarning]) {
+    for warning in warnings {
+        if warning.code == codes::WARN_DUPLICATE_MAC {
+            warning.params.remove("other");
+            let mac = warning.params.get("mac").cloned().unwrap_or_default();
+            warning.message = format!("MAC address {mac} is also on another interface");
+        }
+    }
+}
+
+/// Who asked for a job whose steps write later (a move, an import): the identity whose
+/// grants are looked up when a step writes, never a copy of the grants, so a scope that
+/// shrank or an account that was disabled since refuses the write. Stored with the job's
+/// step parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Requester {
+    /// A person with an interactive session, at the strength it signed in with.
+    User {
+        /// The user.
+        id: UserId,
+        /// The strength of the session that asked.
+        strength: AuthStrength,
+    },
+    /// A personal or scoped API token: its grants are read again at each step.
+    Token {
+        /// The token.
+        id: ApiTokenId,
+        /// Its owner.
+        owner: UserId,
+    },
+    /// A component of Tenko itself.
+    System {
+        /// The component.
+        component: SystemComponent,
+    },
+}
+
+impl Requester {
+    /// The requester of a request; none for a cluster node, which starts no job.
+    pub fn of(principal: &Principal) -> Option<Self> {
+        match principal {
+            Principal::User { id, strength, .. } => Some(Self::User {
+                id: *id,
+                strength: *strength,
+            }),
+            Principal::Token { id, owner } => Some(Self::Token {
+                id: *id,
+                owner: *owner,
+            }),
+            Principal::System { component, .. } => Some(Self::System {
+                component: *component,
+            }),
+            Principal::Node { .. } => None,
+        }
+    }
+
+    /// The principal whose rights a step checks. A user's session may have ended since:
+    /// what counts is the account, its grants now and the strength it asked with.
+    pub fn principal(&self) -> Principal {
+        match *self {
+            Self::User { id, strength } => Principal::User {
+                id,
+                session: SessionId::from_uuid(uuid::Uuid::nil()),
+                strength,
+            },
+            Self::Token { id, owner } => Principal::Token { id, owner },
+            Self::System { component } => Principal::system(component),
+        }
+    }
+}
+
+/// The check of writes that run after the request that asked for them: the steps of a
+/// move job, the chunks of an import, the adoptions of the reconciler. Each write is
+/// checked with the rights its principal holds when it runs ([`ScopeIndex::precheck`]
+/// before planning, [`ScopeIndex::check_plan`] after), so a scope that shrank or an
+/// account that was disabled since the start refuses it.
+///
+/// There is no guard that lets everything through: a server wires the authorizer of
+/// `tenko-auth` and its anchors index, and tests use the allow-all authorizer of
+/// `tenko-core`'s `testing` feature.
+#[derive(Clone)]
+pub struct ScopeGuard {
+    authorizer: Arc<dyn Authorizer>,
+    index: Arc<ScopeIndex>,
+}
+
+impl std::fmt::Debug for ScopeGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScopeGuard").finish_non_exhaustive()
+    }
+}
+
+impl ScopeGuard {
+    /// A guard over `authorizer` with the anchors of `index`.
+    pub fn new(authorizer: Arc<dyn Authorizer>, index: Arc<ScopeIndex>) -> Self {
+        Self { authorizer, index }
+    }
+
+    /// The authorizer.
+    pub fn authorizer(&self) -> &Arc<dyn Authorizer> {
+        &self.authorizer
+    }
+
+    /// The anchors index.
+    pub fn index(&self) -> &Arc<ScopeIndex> {
+        &self.index
+    }
+
+    /// [`ScopeIndex::precheck`] for `principal`.
+    ///
+    /// # Errors
+    ///
+    /// [`Denied`] when a command names an object or a place outside the scope.
+    pub fn precheck(&self, principal: &Principal, commands: &[IpamCommand]) -> Result<(), Denied> {
+        self.index
+            .precheck(self.authorizer.as_ref(), principal, commands)
+    }
+
+    /// [`ScopeIndex::check_plan`] for `principal`.
+    ///
+    /// # Errors
+    ///
+    /// [`Denied`] when the plan leaves the scope or the principal may no longer write.
+    pub fn check(&self, principal: &Principal, plan: &IpamPlan) -> Result<(), Denied> {
+        self.index
+            .check_plan(self.authorizer.as_ref(), principal, plan)
     }
 }
 
@@ -1458,8 +2353,9 @@ mod tests {
     use super::*;
     use crate::{
         command::{
-            AddressInput, AddressPatch, HostInput, InterfaceInput, PrefixInput, PrefixPatch,
-            RangeInput, SiteInput, TenantInput, UpdateAddress, UpdatePrefix, VlanInput, VrfInput,
+            AddressInput, AddressPatch, HostInput, HostPatch, InterfaceInput, PrefixInput,
+            PrefixPatch, RangeInput, SiteInput, TenantInput, UpdateAddress, UpdateHost,
+            UpdatePrefix, VlanInput, VrfInput,
         },
         observe::model::FactSubject,
         proposals::model::{
@@ -2317,7 +3213,9 @@ mod tests {
         let refused = denied(world.check(&auth, &plan));
         assert_eq!(refused.reason, DenyReason::OutOfScope);
         assert_eq!(refused.action, Action::Update);
-        assert_eq!(refused.object, ObjectRef::from(host));
+        // The refusal names the kind, not the host: the request never named it.
+        assert_eq!(refused.object, new_object(ObjectKind::Host));
+        assert_ne!(refused.object, ObjectRef::from(host));
         // With the host's prefix in scope too, the same plan passes.
         let both = FakeAuthorizer::only(vec![rule(world.p1), rule(world.p2)]);
         world.check(&both, &plan).expect("both prefixes");
@@ -2633,5 +3531,333 @@ mod tests {
             .await
             .expect_err("out of scope");
         assert!(matches!(error, ScopedWriteError::Denied(_)));
+    }
+
+    // ----- placing in sites, tying to VLANs, the check before planning -----------------------
+
+    /// A host with one interface and an address in `p1` (192.0.2.30).
+    async fn host_in_p1(world: &World) -> (HostId, InterfaceId) {
+        let interface = InterfaceId::generate();
+        let (host, input) = host_input(
+            "web01",
+            None,
+            None,
+            vec![interface_input(interface, "eth0", 9)],
+        );
+        let (_, address) = new_address(world.vrf, "192.0.2.30", Some(interface));
+        world
+            .run(vec![
+                IpamCommand::CreateHost(input),
+                IpamCommand::CreateAddress(address),
+            ])
+            .await;
+        (host, interface)
+    }
+
+    fn site_of_host(host: HostId, site: SiteId) -> IpamCommand {
+        IpamCommand::UpdateHost(UpdateHost {
+            id: host,
+            expected: None,
+            patch: HostPatch {
+                site: Some(Some(site)),
+                ..HostPatch::default()
+            },
+        })
+    }
+
+    #[tokio::test]
+    async fn a_principal_never_places_its_object_in_a_site_it_does_not_hold() {
+        let world = World::new().await;
+        let (host, _) = host_in_p1(&world).await;
+        let commands = vec![site_of_host(host, world.site)];
+        // Under a prefix rule the host is writable, but the site belongs to another group.
+        let prefix_rule = FakeAuthorizer::only(vec![rule(world.p1)]);
+        let plan = world.plan(commands.clone()).await;
+        assert_eq!(
+            denied(world.check(&prefix_rule, &plan)).reason,
+            DenyReason::OutOfScope
+        );
+        assert_eq!(
+            denied(
+                world
+                    .index
+                    .precheck(&prefix_rule, &cx().principal, &commands)
+            )
+            .reason,
+            DenyReason::OutOfScope
+        );
+        // A principal that holds the site may place the host there.
+        let site_rule = FakeAuthorizer::only(vec![
+            rule(world.p1),
+            ScopeRule::Site {
+                id: world.site,
+                subtree: true,
+            },
+        ]);
+        world.check(&site_rule, &plan).expect("the site is held");
+        world
+            .index
+            .precheck(&site_rule, &cx().principal, &commands)
+            .expect("the site is held");
+        // Other changes of a host that sits in a site stay possible under the prefix rule.
+        world.run(commands).await;
+        let describe = vec![IpamCommand::UpdateHost(UpdateHost {
+            id: host,
+            expected: None,
+            patch: HostPatch {
+                description: Some(Some("front end".to_owned())),
+                ..HostPatch::default()
+            },
+        })];
+        let plan = world.plan(describe.clone()).await;
+        world.check(&prefix_rule, &plan).expect("no new site");
+        world
+            .index
+            .precheck(&prefix_rule, &cx().principal, &describe)
+            .expect("no new site");
+    }
+
+    #[tokio::test]
+    async fn a_prefix_takes_the_site_its_place_gives_it_without_holding_the_site() {
+        let world = World::new().await;
+        // p1 lies at the child site: a child of p1 that names that site places nothing.
+        let (_, child) = prefix_input(world.vrf, "192.0.2.0/26", Some(world.child_site));
+        let commands = vec![IpamCommand::CreatePrefix(child)];
+        let auth = FakeAuthorizer::only(vec![rule(world.p1)]);
+        world
+            .index
+            .precheck(&auth, &cx().principal, &commands)
+            .expect("the inherited site");
+        let plan = world.plan(commands).await;
+        world.check(&auth, &plan).expect("the inherited site");
+        // Another site is refused.
+        let (_, elsewhere) = prefix_input(world.vrf, "192.0.2.64/26", Some(world.site));
+        let commands = vec![IpamCommand::CreatePrefix(elsewhere)];
+        assert_eq!(
+            denied(world.index.precheck(&auth, &cx().principal, &commands)).reason,
+            DenyReason::OutOfScope
+        );
+        let plan = world.plan(commands).await;
+        assert_eq!(
+            denied(world.check(&auth, &plan)).reason,
+            DenyReason::OutOfScope
+        );
+    }
+
+    #[tokio::test]
+    async fn a_prefix_is_never_tied_to_a_vlan_the_principal_cannot_read() {
+        let world = World::new().await;
+        let vlan = VlanId::generate();
+        world
+            .run(vec![IpamCommand::CreateVlan(VlanInput {
+                id: Some(vlan),
+                vid: 40,
+                vni: None,
+                name: "guests".to_owned(),
+                site: Some(world.site),
+                status: None,
+                tags: BTreeSet::new(),
+                custom: BTreeMap::new(),
+                description: None,
+            })])
+            .await;
+        let commands = vec![IpamCommand::UpdatePrefix(UpdatePrefix {
+            id: world.p1,
+            expected: None,
+            patch: PrefixPatch {
+                vlan: Some(Some(vlan)),
+                ..PrefixPatch::default()
+            },
+        })];
+        let auth = FakeAuthorizer::only(vec![rule(world.p1)]);
+        assert_eq!(
+            denied(world.index.precheck(&auth, &cx().principal, &commands)).reason,
+            DenyReason::OutOfScope
+        );
+        let plan = world.plan(commands).await;
+        assert_eq!(
+            denied(world.check(&auth, &plan)).reason,
+            DenyReason::OutOfScope
+        );
+    }
+
+    #[tokio::test]
+    async fn the_check_before_planning_answers_alike_for_an_object_outside_and_one_that_does_not_exist()
+     {
+        let world = World::new().await;
+        let outside = InterfaceId::generate();
+        let (_, host) = host_input(
+            "db01",
+            None,
+            None,
+            vec![interface_input(outside, "eth0", 4)],
+        );
+        let (_, bound) = new_address(world.vrf, "198.51.100.40", Some(outside));
+        world
+            .run(vec![
+                IpamCommand::CreateHost(host),
+                IpamCommand::CreateAddress(bound),
+            ])
+            .await;
+        let auth = FakeAuthorizer::only(vec![rule(world.p1)]);
+        let bind = |interface| {
+            let (_, mut input) = new_address(world.vrf, "192.0.2.41", None);
+            input.interface = Some(interface);
+            vec![IpamCommand::CreateAddress(input)]
+        };
+        let existing = denied(world.index.precheck(&auth, &cx().principal, &bind(outside)));
+        let missing = denied(world.index.precheck(
+            &auth,
+            &cx().principal,
+            &bind(InterfaceId::generate()),
+        ));
+        assert_eq!(existing, missing);
+        assert_eq!(existing.object, new_object(ObjectKind::Host));
+        // A range in a prefix outside the scope, and in one that does not exist.
+        let range = |prefix| {
+            vec![IpamCommand::CreateRange(RangeInput {
+                id: None,
+                prefix,
+                first: ip("198.51.100.100"),
+                last: ip("198.51.100.110"),
+                role: RangeRole::Reserved,
+                status: None,
+                lease_secs: None,
+                delegated_len: None,
+                tags: BTreeSet::new(),
+                custom: BTreeMap::new(),
+                description: None,
+            })]
+        };
+        let existing = denied(
+            world
+                .index
+                .precheck(&auth, &cx().principal, &range(world.p2)),
+        );
+        let missing = denied(world.index.precheck(
+            &auth,
+            &cx().principal,
+            &range(PrefixId::generate()),
+        ));
+        assert_eq!(existing, missing);
+        // Inside the scope the check passes; a principal that reaches everything is not
+        // checked at all.
+        world
+            .index
+            .precheck(&auth, &cx().principal, &range(world.p1))
+            .expect("inside");
+        world
+            .index
+            .precheck(
+                &FakeAuthorizer::uniform(ScopeFilter::All),
+                &cx().principal,
+                &bind(outside),
+            )
+            .expect("everything");
+    }
+
+    #[tokio::test]
+    async fn deleting_a_prefix_that_hands_its_children_to_another_site_is_refused() {
+        let world = World::new().await;
+        let (a, b) = (SiteId::generate(), SiteId::generate());
+        let (_, outer) = prefix_input(world.vrf, "203.0.113.0/24", Some(b));
+        let (middle, mut middle_input) = prefix_input(world.vrf, "203.0.113.0/25", Some(a));
+        middle_input.role = Some(PrefixRole::Supernet);
+        let (_, inner) = prefix_input(world.vrf, "203.0.113.0/26", None);
+        let mut outer = outer;
+        outer.role = Some(PrefixRole::Supernet);
+        world
+            .run(vec![
+                World::site_command(a, "site-a", None),
+                World::site_command(b, "site-b", None),
+                IpamCommand::CreatePrefix(outer),
+                IpamCommand::CreatePrefix(middle_input),
+                IpamCommand::CreatePrefix(inner),
+            ])
+            .await;
+        let auth = FakeAuthorizer::only(vec![ScopeRule::Site {
+            id: a,
+            subtree: true,
+        }]);
+        let plan = world.plan(vec![delete(middle)]).await;
+        // The inner prefix takes site B from the outer one once the middle one is gone.
+        assert_eq!(
+            denied(world.check(&auth, &plan)).reason,
+            DenyReason::OutOfScope
+        );
+        // A principal that holds both sites may delete it.
+        let both = FakeAuthorizer::only(vec![
+            ScopeRule::Site {
+                id: a,
+                subtree: true,
+            },
+            ScopeRule::Site {
+                id: b,
+                subtree: true,
+            },
+        ]);
+        world.check(&both, &plan).expect("both sites");
+    }
+
+    #[test]
+    fn a_duplicate_mac_warning_keeps_the_address_and_loses_the_other_interface() {
+        let other = InterfaceId::generate();
+        let mut warnings = vec![crate::PlanWarning {
+            code: codes::WARN_DUPLICATE_MAC.to_owned(),
+            message: format!("MAC address 00:00:5e:00:53:01 is also on interface {other}"),
+            object: None,
+            params: BTreeMap::from([
+                ("mac".to_owned(), "00:00:5e:00:53:01".to_owned()),
+                ("other".to_owned(), other.to_string()),
+            ]),
+            requires_ack: false,
+            acknowledged: false,
+        }];
+        redact_warnings(&mut warnings);
+        assert!(!warnings[0].message.contains(&other.to_string()));
+        assert!(!warnings[0].params.contains_key("other"));
+        assert_eq!(warnings[0].params["mac"], "00:00:5e:00:53:01");
+    }
+
+    #[test]
+    fn an_in_use_error_loses_its_count() {
+        let error = IpamError::in_use(ObjectRef::from(SiteId::generate()), "prefixes", 7);
+        let redacted = redact_error(error);
+        assert!(!redacted.to_string().contains(" 7 "), "{redacted}");
+        assert_eq!(redacted.code_str(), codes::IN_USE);
+    }
+
+    #[test]
+    fn a_requester_keeps_the_identity_and_never_the_session() {
+        let user = UserId::generate();
+        let principal = Principal::User {
+            id: user,
+            session: SessionId::generate(),
+            strength: AuthStrength::Passkey,
+        };
+        let requester = Requester::of(&principal).expect("a person");
+        let encoded = tenko_core::codec::to_cbor(&requester).expect("encode");
+        let decoded: Requester = tenko_core::codec::from_cbor(&encoded).expect("decode");
+        assert_eq!(decoded, requester);
+        match decoded.principal() {
+            Principal::User {
+                id,
+                session,
+                strength,
+            } => {
+                assert_eq!(id, user);
+                assert_eq!(strength, AuthStrength::Passkey);
+                assert_eq!(
+                    session,
+                    SessionId::from_uuid(uuid::Uuid::nil()),
+                    "no session is kept"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        let node = Principal::Node {
+            id: tenko_core::NodeId(7),
+        };
+        assert_eq!(Requester::of(&node), None);
     }
 }

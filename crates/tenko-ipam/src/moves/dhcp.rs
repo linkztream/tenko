@@ -174,10 +174,14 @@ impl DhcpMoves {
 }
 
 /// Registers the automatic DHCP step and the cleanup that releases the old lease, over
-/// `slot`, in place of the manual handlers of [`super::move_step_handlers`].
-pub fn register_steps(engine: &mut JobEngine, slot: &DhcpMoves) {
+/// `slot`, in place of the manual handlers of [`super::move_step_handlers`]; the cleanup
+/// checks its write with `guard`.
+pub fn register_steps(engine: &mut JobEngine, slot: &DhcpMoves, guard: &crate::scope::ScopeGuard) {
     engine.register(Arc::new(MoveDhcpStep::new(slot.clone())));
-    engine.register(Arc::new(MoveCleanupStep::with_dhcp(slot.clone())));
+    engine.register(Arc::new(MoveCleanupStep::with_dhcp(
+        guard.clone(),
+        slot.clone(),
+    )));
     // ADR 0027: the moving client, whose removal waits for the role's image.
     super::lease::register_steps(engine, slot);
 }

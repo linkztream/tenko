@@ -1223,13 +1223,14 @@ pub(super) mod testkit {
         pub fn with(setup: Setup) -> Self {
             let store: Arc<dyn Store> = Arc::new(MemStore::default());
             let mut engine = JobEngine::new(Arc::clone(&store), EngineConfig::default());
-            register_steps(&mut engine);
+            register_steps(&mut engine, &crate::routes::common::test_guard());
             let ipam = IpamService::new(
                 Arc::clone(&store),
                 Arc::new(engine.clone()),
                 IpamConfig::default(),
             )
             .expect("IPAM service");
+            ipam.set_scope_guard(crate::routes::common::test_guard());
             let staging = std::env::temp_dir().join(format!("tenko-api-import-{}", Uuid::now_v7()));
             let mut config = ImportConfig {
                 staging_dir: staging.clone(),

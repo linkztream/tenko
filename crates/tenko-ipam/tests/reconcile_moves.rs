@@ -33,7 +33,13 @@ impl Moving {
             EngineConfig::default(),
             Arc::clone(&clock) as Arc<dyn tenko_jobs::Clock>,
         );
-        register_steps(&mut engine);
+        register_steps(
+            &mut engine,
+            &tenko_ipam::scope::ScopeGuard::new(
+                std::sync::Arc::new(tenko_core::principal::AllowAll),
+                std::sync::Arc::new(tenko_ipam::scope::ScopeIndex::new()),
+            ),
+        );
         let service = IpamService::new(
             Arc::clone(&store),
             Arc::new(engine.clone()),

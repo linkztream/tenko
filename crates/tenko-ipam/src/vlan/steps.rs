@@ -21,7 +21,9 @@ use crate::{
     command::{
         IpamCommand, PrefixInput, PrefixPatch, UpdatePrefix, UpdateVlan, VlanInput, VlanPatch,
     },
+    jobs::{check_step_plan, precheck_step, requester_principal},
     plan::{PlanOptions, plan},
+    scope::ScopeGuard,
     tables::{PREFIXES, VLANS},
 };
 
@@ -60,6 +62,11 @@ pub struct VlanStepParams {
     /// The task of the manual step.
     #[serde(default)]
     pub task: Option<ManualTask>,
+    /// Who asked for the provisioning: the steps that write intent check every write with
+    /// the rights this principal holds when they run. Absent in a job started under an
+    /// earlier version, whose next write is refused so that the job rolls back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requester: Option<crate::scope::Requester>,
 }
 
 impl VlanStepParams {
@@ -114,17 +121,31 @@ async fn view_of(cx: &StepContext) -> Result<Arc<dyn ReadView>, StepError> {
 }
 
 /// Plans `commands` against the step's view and stages the batch with the step's state
-/// (or proposes it outside the engine).
+/// (or proposes it outside the engine). With `checked`, the requester's rights are
+/// checked before planning and on the plan; a rollback (`None`) undoes only what the job
+/// created.
 async fn write(
     cx: &StepContext,
     view: &dyn ReadView,
     commands: &[IpamCommand],
+    checked: Option<(&ScopeGuard, &VlanStepParams)>,
 ) -> Result<(), StepError> {
     if commands.is_empty() {
         return Ok(());
     }
+    let checked = match checked {
+        Some((guard, params)) => {
+            let principal = requester_principal(params.requester.as_ref(), "VLAN provisioning")?;
+            precheck_step(guard, &principal, commands)?;
+            Some((guard, principal))
+        }
+        None => None,
+    };
     let planned = plan(view, &cx.request, &PlanOptions::default(), commands)
         .map_err(|error| ipam_error(&error))?;
+    if let Some((guard, principal)) = &checked {
+        check_step_plan(guard, principal, &planned)?;
+    }
     if planned.is_empty() {
         return Ok(());
     }
@@ -163,11 +184,13 @@ fn automatic_preview(summary: &'static str, params: &VlanStepParams) -> StepPrev
     }
 }
 
-/// `ipam.vlan.intent`: creates the new VLAN and prefix as `planned`. Its compensation
-/// soft-deletes what the job created; when that is refused (something was added to the
-/// prefix meanwhile) a person is asked.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct IntentStep;
+/// `ipam.vlan.intent`: creates the new VLAN and prefix as `planned`, checked with the
+/// requester's rights when it runs. Its compensation soft-deletes what the job created;
+/// when that is refused (something was added to the prefix meanwhile) a person is asked.
+#[derive(Debug, Clone)]
+pub struct IntentStep {
+    guard: ScopeGuard,
+}
 
 #[async_trait::async_trait]
 impl StepHandler for IntentStep {
@@ -199,7 +222,7 @@ impl StepHandler for IntentStep {
         {
             commands.push(IpamCommand::CreatePrefix(input.clone()));
         }
-        write(cx, view.as_ref(), &commands).await?;
+        write(cx, view.as_ref(), &commands, Some((&self.guard, &params))).await?;
         Ok(StepOutcome::Done { output: None })
     }
 
@@ -228,7 +251,7 @@ impl StepHandler for IntentStep {
                 cascade: false,
             });
         }
-        match write(cx, view.as_ref(), &commands).await {
+        match write(cx, view.as_ref(), &commands, None).await {
             Ok(()) => Ok(()),
             // Something now uses the VLAN or the prefix: a person decides.
             Err(StepError::Coded(error)) if error.code.starts_with("ipam.") => {
@@ -246,12 +269,14 @@ impl StepHandler for IntentStep {
 #[derive(Debug, Clone)]
 pub struct ControllerStep {
     controllers: Arc<Controllers>,
+    guard: ScopeGuard,
 }
 
 impl ControllerStep {
-    /// The handler over the controller slot.
-    pub fn new(controllers: Arc<Controllers>) -> Self {
-        Self { controllers }
+    /// The handler over the controller slot; it writes only while the requester may still
+    /// change the VLAN and the prefix of the job (`guard`).
+    pub fn new(controllers: Arc<Controllers>, guard: ScopeGuard) -> Self {
+        Self { controllers, guard }
     }
 }
 
@@ -274,6 +299,14 @@ impl StepHandler for ControllerStep {
 
     async fn execute(&self, params: &[u8], cx: &StepContext) -> Result<StepOutcome, StepError> {
         let params = VlanStepParams::decode(params)?;
+        let mut objects = vec![ObjectRef::from(params.vlan)];
+        objects.extend(params.prefix_id().map(ObjectRef::from));
+        crate::jobs::still_allowed(
+            &self.guard,
+            params.requester.as_ref(),
+            "VLAN provisioning",
+            &objects,
+        )?;
         let Some(connector) = params.connector else {
             return Err(StepError::InvalidParams(
                 "the network step names no connector".to_owned(),
@@ -422,9 +455,12 @@ impl StepHandler for ManualNetworkStep {
     }
 }
 
-/// `ipam.vlan.activate`: the VLAN and prefix the job created become `active`.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ActivateStep;
+/// `ipam.vlan.activate`: the VLAN and prefix the job created become `active`, checked
+/// with the requester's rights when it runs.
+#[derive(Debug, Clone)]
+pub struct ActivateStep {
+    guard: ScopeGuard,
+}
 
 #[async_trait::async_trait]
 impl StepHandler for ActivateStep {
@@ -472,7 +508,7 @@ impl StepHandler for ActivateStep {
                 },
             }));
         }
-        write(cx, view.as_ref(), &commands).await?;
+        write(cx, view.as_ref(), &commands, Some((&self.guard, &params))).await?;
         Ok(StepOutcome::Done { output: None })
     }
 
@@ -487,19 +523,27 @@ impl StepHandler for ActivateStep {
     }
 }
 
-/// Every step handler of a provision job, over the controller slot.
-pub fn step_handlers(controllers: &Arc<Controllers>) -> Vec<Arc<dyn StepHandler>> {
+/// Every step handler of a provision job, over the controller slot; the steps that write
+/// intent check it with `guard`.
+pub fn step_handlers(
+    controllers: &Arc<Controllers>,
+    guard: &ScopeGuard,
+) -> Vec<Arc<dyn StepHandler>> {
     vec![
-        Arc::new(IntentStep),
-        Arc::new(ControllerStep::new(Arc::clone(controllers))),
+        Arc::new(IntentStep {
+            guard: guard.clone(),
+        }),
+        Arc::new(ControllerStep::new(Arc::clone(controllers), guard.clone())),
         Arc::new(ManualNetworkStep),
-        Arc::new(ActivateStep),
+        Arc::new(ActivateStep {
+            guard: guard.clone(),
+        }),
     ]
 }
 
 /// Registers the step handlers of the provision job with the engine.
-pub fn register_steps(engine: &mut JobEngine, controllers: &Arc<Controllers>) {
-    for handler in step_handlers(controllers) {
+pub fn register_steps(engine: &mut JobEngine, controllers: &Arc<Controllers>, guard: &ScopeGuard) {
+    for handler in step_handlers(controllers, guard) {
         engine.register(handler);
     }
 }
@@ -528,6 +572,7 @@ mod tests {
                 after: Some("IoT".to_owned()),
             }],
             task: None,
+            requester: None,
         };
         let bytes = to_cbor(&params).expect("cbor");
         assert_eq!(VlanStepParams::decode(&bytes).expect("decode"), params);

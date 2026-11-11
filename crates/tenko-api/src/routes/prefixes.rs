@@ -158,6 +158,7 @@ pub(crate) struct TreeContextNode {
 /// and everything else is left out. `full` is the same tree without a depth limit, from
 /// which the visibility of deeper prefixes is known.
 fn scoped_tree(
+    tree: &tenko_ipam::PrefixTree,
     scope: &ReadScope,
     nodes: Vec<TreeNode>,
     full: &[TreeNode],
@@ -180,12 +181,16 @@ fn scoped_tree(
             }
         }
     }
+    let hidden = hidden_subtrees(full, &readable);
     let mut kept = Vec::new();
     let mut context = Vec::new();
     for mut node in nodes {
         let children = seen_children.get(&node.id).copied().unwrap_or_default();
         if readable.contains(&node.id) {
             node.children = children;
+            if let Some(below) = hidden.get(&node.id) {
+                hide_unreadable_usage(tree, &mut node, below);
+            }
             kept.push(node);
         } else if visible.contains(&node.id) {
             context.push(TreeContextNode {
@@ -198,6 +203,79 @@ fn scoped_tree(
         }
     }
     (kept, context)
+}
+
+/// For every readable node, the subtrees below it that the reader may not read: each
+/// unreadable prefix whose parent is readable, charged to every readable ancestor, and
+/// whether it is a direct child. One pass over the tree in pre-order (`full`), then a walk up
+/// the ancestors of each such prefix.
+fn hidden_subtrees(
+    full: &[TreeNode],
+    readable: &HashSet<PrefixId>,
+) -> HashMap<PrefixId, Vec<(PrefixId, bool)>> {
+    let parents: HashMap<PrefixId, Option<PrefixId>> =
+        full.iter().map(|node| (node.id, node.parent)).collect();
+    let mut out: HashMap<PrefixId, Vec<(PrefixId, bool)>> = HashMap::new();
+    for node in full {
+        if readable.contains(&node.id) || !node.parent.is_some_and(|p| readable.contains(&p)) {
+            continue;
+        }
+        let mut ancestor = node.parent;
+        let mut direct = true;
+        // A chain of the tree is at most 129 prefixes long; the bound guards bad data.
+        for _ in 0..256 {
+            let Some(current) = ancestor else {
+                break;
+            };
+            if readable.contains(&current) {
+                out.entry(current).or_default().push((node.id, direct));
+            }
+            direct = false;
+            ancestor = parents.get(&current).copied().flatten();
+        }
+    }
+    out
+}
+
+/// The utilization of a readable node without the subtrees below it that the reader may not
+/// read (`hidden`, from [`hidden_subtrees`]): each counts as space of the node without
+/// addresses, ranges or child prefixes, so the numbers tell nothing of what lies outside
+/// the scope (a readable prefix inside such a subtree is left out of the node's sums too).
+fn hide_unreadable_usage(
+    tree: &tenko_ipam::PrefixTree,
+    node: &mut TreeNode,
+    hidden: &[(PrefixId, bool)],
+) {
+    let Some(mut usage) = tree.utilization(node.id) else {
+        return;
+    };
+    for (child, direct) in hidden {
+        let Some(inner) = tree.utilization(*child) else {
+            continue;
+        };
+        usage.used = usage.used.saturating_sub(inner.used);
+        usage.reserved = usage.reserved.saturating_sub(inner.reserved);
+        if node.role == PrefixRole::Supernet {
+            usage.capacity = usage
+                .capacity
+                .saturating_add(inner.size.saturating_sub(inner.capacity));
+        }
+        if *direct {
+            usage.covered = usage.covered.saturating_sub(inner.size);
+        }
+        for (role, (size, used)) in inner.by_role {
+            if let Some(entry) = usage.by_role.get_mut(&role) {
+                entry.0 = entry.0.saturating_sub(size);
+                entry.1 = entry.1.saturating_sub(used);
+            }
+        }
+    }
+    usage.by_role.retain(|_, (size, _)| *size > 0);
+    usage.free = usage
+        .capacity
+        .saturating_sub(usage.used.saturating_add(usage.reserved));
+    node.level = usage.level(node.alarm);
+    node.utilization = usage.view();
 }
 
 /// The optional body of `POST /prefixes/{id}/next-free-address`: how the new address is
@@ -533,7 +611,7 @@ async fn get_prefix_tree(
             } else {
                 nodes.clone()
             };
-            scoped_tree(&scope, nodes, &full)
+            scoped_tree(ipam.tree(), &scope, nodes, &full)
         }
         _ => (nodes, Vec::new()),
     };
@@ -830,22 +908,27 @@ async fn list_prefix_addresses(
         query::get::<Prefix>(view.as_ref(), id)?;
         return Ok(Json(Page::new(Vec::new(), None, view.revision())));
     }
-    let mut found = query::prefix_addresses(
-        view.as_ref(),
-        id,
-        include_free,
-        cursor.as_deref(),
-        Some(limit),
-    )?;
-    // A scoped principal sees the addresses of the page inside its scope (a supernet's
-    // list also holds the addresses of its child prefixes); the free gaps stay as computed
-    // over every address, and the page may hold fewer items than `limit`.
-    if !readable.is_all() {
-        found.items.retain(|item| match item {
-            PrefixAddressItem::Address(row) => readable.admits(&row.address.id.into()),
-            PrefixAddressItem::Free { .. } => true,
-        });
-    }
+    // A scoped principal sees the addresses inside its scope (a supernet's list also holds
+    // the addresses of its child prefixes); an address outside it counts as free space and
+    // is skipped while the page is read, so no page, gap or cursor tells where it sits.
+    let mut found = if readable.is_all() {
+        query::prefix_addresses(
+            view.as_ref(),
+            id,
+            include_free,
+            cursor.as_deref(),
+            Some(limit),
+        )?
+    } else {
+        query::prefix_addresses_where(
+            view.as_ref(),
+            id,
+            include_free,
+            cursor.as_deref(),
+            Some(limit),
+            &|address: &Address| readable.admits(&address.id.into()),
+        )?
+    };
     if expand && may_expand_hosts(&app, &cx) {
         HostExpander::new(view.as_ref()).expand_items(&mut found.items)?;
     }
@@ -945,6 +1028,9 @@ async fn create_range(
 ) -> Result<Response, ApiError> {
     let args = write_args(&filters, false)?;
     authorize(&app, &cx, Action::Create, new_of(ObjectKind::Range))?;
+    // The prefix of the path is authorized before it is looked up, so a prefix outside
+    // the scope answers as one that does not exist.
+    authorize(&app, &cx, Action::Read, id.into())?;
     ensure_prefix(&ipam, id).await?;
     let command = IpamCommand::CreateRange(RangeInput {
         id: body.id,
@@ -1072,6 +1158,11 @@ async fn delete_range(
     };
     write_one::<Range>(&ipam, &cx, vec![command], &args, false).await
 }
+/// The scope table: every IPAM route as a scoped principal (IAM-01).
+#[cfg(test)]
+#[path = "scope_table.rs"]
+mod scope_table;
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -3591,7 +3682,10 @@ mod tests {
             .await;
         assert_eq!(
             ask(&policy, mark),
-            [(Action::Create, new_of(ObjectKind::Range))]
+            [
+                (Action::Create, new_of(ObjectKind::Range)),
+                (Action::Read, prefix_ref)
+            ]
         );
         let range_ref = ObjectRef::new(ObjectKind::Range, range.id().parse().expect("uuid"));
 
