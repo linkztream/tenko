@@ -130,7 +130,15 @@ async fn a_forwarded_write_follows_a_leader_change() {
 async fn linearizable_reads_share_leadership_rounds_with_one_voter_down() {
     const READS: usize = 40;
     const CONFIRMED_AT_MOST: u64 = 2;
-    let cluster = InProcessCluster::start_with(3, &ConformanceConfig::default(), quick).await;
+    // The test is about sharing, not about isolation. The whole cluster runs on this one
+    // thread, and a stall of the host longer than a short isolation threshold would make
+    // the leader count itself as out of contact, so that its reads fail with `NoQuorum`
+    // although the quorum is up. A minute is far beyond the test's duration.
+    let cluster = InProcessCluster::start_with(3, &ConformanceConfig::default(), |config| {
+        config.isolation_after = Duration::from_secs(60);
+        config.leader_wait = Duration::from_secs(10);
+    })
+    .await;
     let leader = cluster.wait_for_leader().await;
     let revision = put(&leader, 1, "before").await.expect("write");
     let followers: Vec<u64> = cluster

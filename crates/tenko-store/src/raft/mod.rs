@@ -442,8 +442,9 @@ pub struct EngineStats {
     /// Leadership confirmation rounds run for linearizable reads; the reads that wait at
     /// the same time share one.
     pub leadership_rounds: u64,
-    /// The leadership rounds that a quorum confirmed, apart from the rounds it missed. Every
-    /// linearizable read the leader answers is answered by exactly one of them.
+    /// The leadership rounds that a quorum confirmed, apart from the rounds it missed. Each
+    /// linearizable read the leader answers is answered by exactly one of them; a confirmed
+    /// round may answer none, when every one of its readers timed out or was canceled.
     pub leadership_rounds_confirmed: u64,
 }
 

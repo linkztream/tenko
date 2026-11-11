@@ -34,6 +34,13 @@
 //! while the round task waits out the pause: none of them comes back alone, finds no round
 //! running and starts a round of its own, which would add heartbeats on the follower whose
 //! slowness made the round miss, and split the readers again at every miss.
+//!
+//! The pause is shared by every read that arrives during it, not only by the readers of
+//! the missed round: a new read, or a follower's read index, that arrives in the pause
+//! joins the next round and so waits up to one heartbeat interval before its round starts,
+//! where it would have started a round at once before. Such a reader saw no missed round,
+//! so it does not end early with `NoQuorum` when the pause would pass its deadline: a
+//! deadline that passes during the pause ends it with `Timeout`.
 
 use std::{
     sync::{
@@ -112,9 +119,10 @@ impl Confirmer {
         self.rounds.load(Ordering::Relaxed)
     }
 
-    /// The rounds so far that ended in a quorum's acknowledgment. Every read that a round
-    /// answers is answered by exactly one of them, so reads that share rounds outnumber
-    /// these, however many rounds a quorum missed in between.
+    /// The rounds so far that ended in a quorum's acknowledgment, however many rounds a
+    /// quorum missed in between. Each answered read is answered by exactly one of them; a
+    /// confirmed round may answer none, when every one of its readers timed out or was
+    /// canceled before it ended.
     pub(super) fn confirmed_rounds(&self) -> u64 {
         self.confirmed.load(Ordering::Relaxed)
     }
