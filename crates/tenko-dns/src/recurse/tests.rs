@@ -295,6 +295,7 @@ fn settings() -> EngineSettings {
         hints: None,
         local_zones_except: vec![name("test")],
         metrics: false,
+        authority_port: 53,
     }
 }
 
@@ -908,7 +909,10 @@ async fn ipv6_addresses_without_a_route_are_marked_and_skipped() {
 async fn answers_carry_the_delegation_for_the_rpz_triggers() {
     let lab = Arc::new(lab());
     let engine = primed(&lab).await;
-    engine.carry_delegation(true);
+    assert!(
+        engine.note_ns_triggers(true, Instant::now()),
+        "the carry turns on"
+    );
     let qname = wire_name("www.case.quirk.example.test");
     let resolved = engine.resolve(question(&qname, types::A)).await;
     let found = records(&resolved.message);
@@ -919,6 +923,81 @@ async fn answers_carry_the_delegation_for_the_rpz_triggers() {
     assert!(
         found.contains(&(2, "ns.case.quirk.example.test".to_owned(), types::A)),
         "{found:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_negative_answer_of_a_quirk_zone_carries_its_delegation_when_asked_to() {
+    // The lab row rec.rpz.nsdname: a name that does not exist under the zone of the server
+    // that breaks 0x20, resolved after the trigger reached the catalog but before the
+    // housekeeping noted it. The forwarder passes the catalog's view as `carry`.
+    let lab = Arc::new(lab());
+    let engine = primed(&lab).await;
+    assert!(!engine.carries());
+    let warm = wire_name("www.case.quirk.example.test");
+    let resolved = engine.resolve(question(&warm, types::A)).await;
+    assert!(!resolved.carried);
+    let qname = wire_name("other.case.quirk.example.test");
+    let resolved = engine
+        .resolve_carrying(question(&qname, types::A), true)
+        .await;
+    assert_eq!(resolved.rcode, 3, "NXDOMAIN");
+    assert!(resolved.carried);
+    let found = records(&resolved.message);
+    assert!(
+        found.contains(&(1, "case.quirk.example.test".to_owned(), types::NS)),
+        "{found:?}"
+    );
+    assert!(
+        found.contains(&(2, "ns.case.quirk.example.test".to_owned(), types::A)),
+        "{found:?}"
+    );
+    // Without the carry the same answer has no NS record, and says so.
+    let other = wire_name("more.case.quirk.example.test");
+    let resolved = engine.resolve(question(&other, types::A)).await;
+    assert!(!resolved.carried);
+    assert!(
+        !records(&resolved.message)
+            .iter()
+            .any(|(_, _, rtype)| *rtype == types::NS)
+    );
+}
+
+#[test]
+fn the_carry_turns_on_once_and_is_held_after_the_last_trigger() {
+    let lab = Arc::new(lab());
+    let engine = engine_with(&lab, &settings());
+    let start = Instant::now();
+    assert!(
+        !engine.note_ns_triggers(false, start),
+        "no trigger, no carry"
+    );
+    assert!(!engine.carries());
+    assert!(
+        engine.note_ns_triggers(true, start),
+        "the first trigger turns it on"
+    );
+    assert!(engine.carries());
+    assert!(!engine.note_ns_triggers(true, start + Duration::from_secs(1)));
+    // A trigger set that comes and goes within the hold never turns it on again, so the
+    // forwarder never flushes the answer cache again for it.
+    let gone = start + Duration::from_secs(2);
+    for step in 0..100u64 {
+        let now = gone + Duration::from_millis(200 * step);
+        assert!(!engine.note_ns_triggers(step % 2 == 0, now), "step {step}");
+        assert!(engine.carries());
+    }
+    let last = gone + Duration::from_millis(200 * 98);
+    assert!(!engine.note_ns_triggers(
+        false,
+        last + CARRY_HOLD.saturating_sub(Duration::from_secs(1))
+    ));
+    assert!(engine.carries(), "held until the hold has passed");
+    assert!(!engine.note_ns_triggers(false, last + CARRY_HOLD));
+    assert!(!engine.carries(), "off one hold after the last trigger");
+    assert!(
+        engine.note_ns_triggers(true, last + CARRY_HOLD + Duration::from_secs(1)),
+        "on again: a flush is due"
     );
 }
 

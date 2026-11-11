@@ -1,12 +1,83 @@
 #![no_main]
 
+use std::time::Instant;
+
 use libfuzzer_sys::fuzz_target;
-use tenko_dns::recurse::message::{
-    Composed, GlueKind, MAX_RECORDS, Rr, Step, classify, compose, parse, within,
+use tenko_dns::{
+    cache::{
+        Client, Denials, DenialSettings, Verdict,
+        denial::store::{MAX_DELEGATION_ADDRESSES, MAX_DELEGATION_SERVERS},
+    },
+    recurse::message::{Composed, GlueKind, MAX_RECORDS, Rr, Step, classify, compose, parse, within},
+    recursion::denial::{DenialCache, Origin},
+    wire,
 };
 
 /// The zones a server can be asked as: lowercase wire names, the root and two levels down.
 const ZONES: [&[u8]; 3] = [b"\x00", b"\x04test\x00", b"\x07example\x04test\x00"];
+
+/// The denial cache fed the server's answer as the resolver keeps it, then asked for a name
+/// below the one it denies, with and without the carry of the delegation (the RPZ triggers
+/// NSDNAME and NSIP): a synthesized answer parses, and under the carry it holds no more
+/// name servers and addresses than the caps keep.
+fn check_denials(message: &[u8], qname: &[u8]) {
+    let cache = Denials::new(DenialSettings::default());
+    let now = Instant::now();
+    if !cache.insert(None, message, &Verdict::UNVALIDATED, Origin::Recursion, now) {
+        return;
+    }
+    let mut below = b"x".to_vec();
+    below.extend_from_slice(qname);
+    if below.len() > 255 {
+        return;
+    }
+    let mut query = Vec::new();
+    let mut text = String::new();
+    for label in tenko_dns::name::Labels::new(&below) {
+        if !label.iter().all(u8::is_ascii_alphanumeric) {
+            return;
+        }
+        text.push_str(std::str::from_utf8(label).unwrap_or("x"));
+        text.push('.');
+    }
+    wire::write_query(&mut query, 1, &text, 1, None);
+    let Some(question_end) = wire::questions_end(&query, 1) else {
+        return;
+    };
+    for (carry, max_len) in [(false, 512), (true, 512), (true, 65_535)] {
+        let client = Client {
+            message: &query,
+            question_end,
+            id: 1,
+            rd: true,
+            cd: false,
+            ad: false,
+            edns: None,
+            max_len,
+        };
+        let mut out = Vec::with_capacity(65_535);
+        if cache
+            .answer_carrying(None, &below, 1, &client, now, &mut out, carry)
+            .is_none()
+        {
+            continue;
+        }
+        assert!(out.len() <= max_len, "a synthesized answer over the client's length");
+        let Some(synthesized) = parse(&out) else {
+            panic!("a synthesized answer that does not parse: {out:02x?}");
+        };
+        let ns = synthesized.authority.iter().filter(|rr| rr.rtype == 2).count();
+        assert!(ns <= MAX_DELEGATION_SERVERS, "{ns} name servers written");
+        assert!(
+            synthesized.additional.len() <= MAX_DELEGATION_ADDRESSES,
+            "{} addresses written",
+            synthesized.additional.len()
+        );
+        if !carry {
+            assert_eq!(ns, 0, "a delegation written without the carry");
+        }
+    }
+}
 
 fn check_within(records: &[Rr], zone: &[u8], what: &str) {
     for rr in records {
@@ -20,6 +91,7 @@ fn check_within(records: &[Rr], zone: &[u8], what: &str) {
 }
 
 // The first octet picks the zone the server was asked as, the rest is the server's answer.
+// The answer goes into a denial cache as well (`check_denials`).
 // A message that parses is classified for the question it carries; the step must keep to
 // the bailiwick rules (RFC 9471, RFC 2181 section 5.4.1): a referral goes strictly below
 // the zone, its glue is within the zone and in-domain glue within the delegated zone, and
@@ -33,6 +105,7 @@ fuzz_target!(|data: &[u8]| {
     let Some(parsed) = parse(message) else {
         return;
     };
+    check_denials(message, &parsed.qname);
     let step = classify(&parsed, zone, &parsed.qname, parsed.qtype);
     let (rcode, answer, authority): (u8, &[Rr], &[Rr]) = match &step {
         Step::Referral(referral) => {

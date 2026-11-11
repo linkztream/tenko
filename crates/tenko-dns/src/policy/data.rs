@@ -341,4 +341,10 @@ impl PolicyData {
                 .iter()
                 .any(|zone| zone.zone.has_answer_triggers() || zone.zone.triggers() > 0)
     }
+
+    /// Whether some RPZ zone has NSDNAME or NSIP triggers: the resolver's answers then carry
+    /// the delegation they came from.
+    pub fn has_ns_triggers(&self) -> bool {
+        self.zones.iter().any(|zone| zone.zone.has_ns_triggers())
+    }
 }

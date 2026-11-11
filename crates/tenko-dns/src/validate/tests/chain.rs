@@ -513,6 +513,7 @@ async fn harness(keys: &LabKeys, variant: Variant) -> Harness {
         hints: None,
         local_zones_except: vec![name("test")],
         metrics: false,
+        authority_port: 53,
     };
     let infra = Arc::new(crate::infra::Infra::new(settings.recursion.infra));
     let engine = Engine::new(
@@ -948,6 +949,7 @@ async fn colliding_key_tags_in_a_zone_are_bogus_within_the_caps() {
         hints: None,
         local_zones_except: vec![name("test")],
         metrics: false,
+        authority_port: 53,
     };
     let infra = Arc::new(crate::infra::Infra::new(settings.recursion.infra));
     let engine = Engine::new(

@@ -839,3 +839,6 @@ async fn an_answer_to_a_full_connection_channel_is_dropped_and_counted() {
     assert!(receiver.try_recv().is_err(), "nothing waited behind it");
     stop.cancel();
 }
+
+// The RPZ triggers NSDNAME and NSIP on the resolver's answers.
+mod carry;

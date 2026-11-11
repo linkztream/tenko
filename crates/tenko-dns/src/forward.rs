@@ -52,10 +52,13 @@
 //! every profile, REC-Q2); a view that says `forward` uses `[dns] forwarders`, one that
 //! says `refuse` is refused with the extended error "Prohibited". The engine's answers go
 //! into the same cache and through the same reply path; a failure is answered SERVFAIL with
-//! its extended error. The housekeeping primes the root (RFC 8109) when it is due, tells
-//! the engine whether answers must carry their delegation (an RPZ zone with NSDNAME or NSIP
-//! triggers, E41), flushes the answer cache on a flood of unwanted answers (audited as
-//! `dns.recursion.unwanted_flush`) and purges the infrastructure cache every minute.
+//! its extended error. Whether an answer carries its delegation (an RPZ zone with NSDNAME or
+//! NSIP triggers, E41) is read from the catalog of each resolution, and a synthesized denial
+//! carries its zone's while it does; the housekeeping primes the root (RFC 8109) when it is
+//! due, notes the triggers for the engine (flushing the answer cache once when the carry
+//! turns on, of the answers kept without it), flushes the answer cache on a flood of
+//! unwanted answers (audited as `dns.recursion.unwanted_flush`) and purges the
+//! infrastructure cache every minute.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -852,13 +855,20 @@ impl Shared {
         key: Option<&CacheKey>,
         view: Option<ViewId>,
     ) -> (Arc<Resolved>, Option<Validation>) {
+        // The catalog the policy reads decides whether the answer carries its delegation,
+        // so that a new NSDNAME or NSIP trigger applies to the next resolution, not only
+        // after the housekeeping noted it.
+        let carry = self.catalog.load().policy().has_ns_triggers();
         let resolved = engine
-            .resolve(crate::recurse::Question {
-                qname: &question.qname,
-                qtype: question.qtype,
-                qclass: question.qclass,
-                view,
-            })
+            .resolve_carrying(
+                crate::recurse::Question {
+                    qname: &question.qname,
+                    qtype: question.qtype,
+                    qclass: question.qclass,
+                    view,
+                },
+                carry,
+            )
             .await;
         // WP10.2: the validator's verdict decides the entry's state; a query with CD never
         // waits for a sub-query, and its answer is cached only when the walk could judge
@@ -874,6 +884,10 @@ impl Shared {
             }
             _ => None,
         };
+        // An answer composed without its delegation while the carry is on (joined with a
+        // question asked before the trigger came) is answered but not kept: the cache would
+        // serve it past the triggers NSDNAME and NSIP.
+        let keep = resolved.carried || !(carry || engine.carries());
         if resolved.cacheable()
             && let (Some(cache), Some(key)) = (&self.cache, key)
         {
@@ -892,10 +906,12 @@ impl Shared {
                         verdict.max_ttl =
                             Some(u32::try_from(hold.as_secs()).unwrap_or(u32::MAX).max(1));
                     }
-                    cache.insert_with(key, &resolved.message, Instant::now(), None, &verdict);
-                    self.keep_denials(view, &resolved.message, &verdict, Origin::Recursion);
+                    if keep {
+                        cache.insert_with(key, &resolved.message, Instant::now(), None, &verdict);
+                        self.keep_denials(view, &resolved.message, &verdict, Origin::Recursion);
+                    }
                 }
-                _ if !question.cd => {
+                _ if !question.cd && keep => {
                     cache.insert(key, &resolved.message, Instant::now(), None);
                     self.keep_denials(
                         view,
@@ -905,6 +921,11 @@ impl Shared {
                     );
                 }
                 _ => {}
+            }
+            // The carry turned on, and the cache was flushed, between the composition and the
+            // insert: the answer kept without its delegation goes again.
+            if keep && !resolved.carried && engine.carries() {
+                cache.flush(Some(&question.qname));
             }
         }
         (resolved, validation)
@@ -1536,9 +1557,23 @@ impl ForwardSink for Forwarder {
                         validation: None,
                     };
                 }
+                // While the resolver's answers carry their delegation (an RPZ zone has NSDNAME
+                // or NSIP triggers), a zone answers only with its delegation in the answer.
+                let carry = catalog.policy().has_ns_triggers()
+                    || shared
+                        .engine
+                        .as_ref()
+                        .is_some_and(|engine| engine.carries());
                 if let Some(denials) = &shared.denials
-                    && let Some(hit) =
-                        denials.answer(query.view, qname, request.qtype, &client, query.now, out)
+                    && let Some(hit) = denials.answer_carrying(
+                        query.view,
+                        qname,
+                        request.qtype,
+                        &client,
+                        query.now,
+                        out,
+                        carry,
+                    )
                 {
                     let kind = DenialKind::ALL
                         .iter()
@@ -1708,13 +1743,20 @@ fn recursion_housekeeping(
         }));
     }
     let catalog = shared.catalog.load();
-    engine.carry_delegation(
-        catalog
-            .policy()
-            .zones()
-            .iter()
-            .any(|zone| zone.zone.has_ns_triggers()),
-    );
+    // The answers kept before the first NSDNAME or NSIP trigger came carry no delegation
+    // for it to match: flushed once when the carry turns on (held an hour after the last
+    // trigger, so a trigger set that comes and goes flushes at most once an hour).
+    if engine.note_ns_triggers(catalog.policy().has_ns_triggers(), now) {
+        let flushed = shared
+            .cache
+            .as_ref()
+            .map_or(0, |cache| cache.flush(None).entries);
+        tracing::info!(
+            entries = flushed,
+            "an RPZ zone has NSDNAME or NSIP triggers: answers now carry their delegation, and \
+             the answer cache is flushed of the answers kept without it"
+        );
+    }
     if engine.servers().take_flush() {
         let flushed = shared
             .cache

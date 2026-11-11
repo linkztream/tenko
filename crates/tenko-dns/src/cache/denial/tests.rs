@@ -906,3 +906,240 @@ fn a_delegation_covering_the_wildcard_proves_nothing_below_it() {
     assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
     assert!(synthesize(&cache, None, "x.sub.example.test", A, true).is_none());
 }
+
+// The delegation kept beside the denials for the RPZ triggers NSDNAME and NSIP.
+
+/// An NXDOMAIN of the unsigned zone `zone` for `qname` as the resolver composes it while
+/// answers carry their delegation: the SOA and `servers` NS records at the apex in the
+/// authority section (NS TTL `ns_ttl`), `per_server` A records of each in the additional.
+fn carried(qname: &str, zone: &str, servers: &[String], per_server: u8, ns_ttl: u32) -> Vec<u8> {
+    let mut authority = vec![soa(zone, 600)];
+    let mut additional = Vec::new();
+    for (index, server) in servers.iter().enumerate() {
+        authority.push(rr(zone, types::NS, ns_ttl, wire_name(server)));
+        for last in 0..per_server {
+            let third = u8::try_from(index).expect("index");
+            additional.push(rr(
+                &server.to_ascii_lowercase(),
+                A,
+                600,
+                vec![198, 51, third, last + 1],
+            ));
+        }
+    }
+    compose(&Composed {
+        qname: &wire_name(qname),
+        qtype: A,
+        qclass: 1,
+        rcode: 3,
+        answer: &[],
+        authority: &authority,
+        additional: &additional,
+    })
+}
+
+/// What the cache synthesizes with `carry` at `now`: the records of every section.
+fn synthesize_carrying(
+    cache: &Denials,
+    qname: &str,
+    now: Instant,
+    carry: bool,
+    max_len: usize,
+) -> Option<(wire::RawHeader, Vec<Record>)> {
+    let asked = ask(qname, A);
+    let mut out = Vec::with_capacity(65_535);
+    cache.answer_carrying(
+        None,
+        &wire_name(qname),
+        A,
+        &client(&asked, false, max_len),
+        now,
+        &mut out,
+        carry,
+    )?;
+    let header = wire::parse_header(&out).expect("header");
+    let parsed = parse(&out).expect("parses");
+    let mut records = Vec::new();
+    for (section, list) in [parsed.answer, parsed.authority, parsed.additional]
+        .into_iter()
+        .enumerate()
+    {
+        for rr in list {
+            let owner = DnsName::from_wire(&rr.owner).expect("owner").0;
+            records.push((section, owner.as_str().to_owned(), rr.rtype, rr.ttl));
+        }
+    }
+    Some((header, records))
+}
+
+fn servers(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| (*name).to_owned()).collect()
+}
+
+#[test]
+fn a_carried_delegation_is_kept_beside_the_denials_and_written_under_the_carry() {
+    let cache = denials();
+    let now = Instant::now();
+    let answer = carried(
+        "gone.plain.test",
+        "plain.test",
+        &servers(&["ns1.plain.test", "NS2.Elsewhere.test"]),
+        1,
+        120,
+    );
+    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    // The name of RFC 8020, two NS records and two addresses.
+    assert_eq!(DenialCache::len(&cache), 5);
+    let (header, records) =
+        synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).expect("synthesized");
+    assert_eq!(header.rcode, 3);
+    assert_eq!(
+        kinds(&records),
+        vec![
+            (1, "plain.test", types::SOA),
+            (1, "plain.test", types::NS),
+            (1, "plain.test", types::NS),
+            (2, "ns1.plain.test", A),
+            (2, "ns2.elsewhere.test", A),
+        ]
+    );
+    assert!(
+        records.iter().all(|record| record.3 <= 120),
+        "no record outlives the NS set: {records:?}"
+    );
+    // Without the carry the answer is the one it always was.
+    let (_, records) =
+        synthesize_carrying(&cache, "x.gone.plain.test", now, false, 1232).expect("synthesized");
+    assert_eq!(kinds(&records), vec![(1, "plain.test", types::SOA)]);
+}
+
+#[test]
+fn under_the_carry_a_zone_without_its_delegation_is_left_to_the_resolver() {
+    let cache = denials();
+    let now = Instant::now();
+    let answer = message("gone.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
+    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(synthesize_carrying(&cache, "x.gone.plain.test", now, false, 1232).is_some());
+    assert!(
+        synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).is_none(),
+        "a synthesized answer without the delegation would pass the NSDNAME and NSIP triggers"
+    );
+    // An answer that carries it later gives the zone its delegation.
+    let answer = carried(
+        "other.plain.test",
+        "plain.test",
+        &servers(&["ns1.plain.test"]),
+        1,
+        600,
+    );
+    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).is_some());
+}
+
+#[test]
+fn an_expired_delegation_stops_the_synthesis_under_the_carry() {
+    let cache = denials();
+    let now = Instant::now();
+    let answer = carried(
+        "gone.plain.test",
+        "plain.test",
+        &servers(&["ns1.plain.test"]),
+        1,
+        2,
+    );
+    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    let (_, records) =
+        synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).expect("synthesized");
+    assert!(records.iter().all(|record| record.3 <= 2), "{records:?}");
+    let later = now + Duration::from_secs(3);
+    assert!(
+        synthesize_carrying(&cache, "x.gone.plain.test", later, true, 1232).is_none(),
+        "stale name servers are never written"
+    );
+    assert!(synthesize_carrying(&cache, "x.gone.plain.test", later, false, 1232).is_some());
+    // The purge takes the expired delegation out of the count.
+    assert_eq!(cache.purge(later), 2);
+    assert_eq!(DenialCache::len(&cache), 1);
+}
+
+#[test]
+fn a_delegation_over_the_caps_is_kept_with_none() {
+    let many: Vec<String> = (0..=store::MAX_DELEGATION_SERVERS)
+        .map(|index| format!("ns{index}.plain.test"))
+        .collect();
+    let cache = denials();
+    let now = Instant::now();
+    // One within the caps first, then an answer with one name server too many.
+    let answer = carried("gone.plain.test", "plain.test", &many[..2], 1, 600);
+    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).is_some());
+    let answer = carried("other.plain.test", "plain.test", &many, 1, 600);
+    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(
+        synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).is_none(),
+        "a truncated set could miss the server a trigger names"
+    );
+    assert_eq!(DenialCache::len(&cache), 2, "the two names, no delegation");
+    // Within the name servers but over the addresses.
+    let cache = denials();
+    let per_server =
+        u8::try_from(store::MAX_DELEGATION_ADDRESSES / 2 + 1).expect("addresses per server");
+    let answer = carried("gone.plain.test", "plain.test", &many[..2], per_server, 600);
+    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).is_none());
+}
+
+/// A name server name of 255 octets in wire form under `plain.test`, told apart by `tag`.
+fn longest_server(tag: usize) -> String {
+    let first = format!("{tag:02}{}", "a".repeat(61));
+    format!(
+        "{first}.{}.{}.{}.plain.test",
+        "b".repeat(63),
+        "c".repeat(63),
+        "d".repeat(50)
+    )
+}
+
+#[test]
+fn a_full_delegation_with_names_at_the_length_limit_is_kept_counted_and_written() {
+    let names: Vec<String> = (0..store::MAX_DELEGATION_SERVERS)
+        .map(longest_server)
+        .collect();
+    assert_eq!(wire_name(&names[0]).len(), 255);
+    let per_server = u8::try_from(store::MAX_DELEGATION_ADDRESSES / store::MAX_DELEGATION_SERVERS)
+        .expect("addresses per server");
+    let cache = denials();
+    let now = Instant::now();
+    let answer = carried("gone.plain.test", "plain.test", &names, per_server, 600);
+    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert_eq!(
+        DenialCache::len(&cache),
+        1 + store::MAX_DELEGATION_SERVERS + store::MAX_DELEGATION_ADDRESSES
+    );
+    let (header, records) =
+        synthesize_carrying(&cache, "x.gone.plain.test", now, true, 65_535).expect("synthesized");
+    assert!(!header.tc);
+    let ns = records
+        .iter()
+        .filter(|record| record.2 == types::NS)
+        .count();
+    let addresses = records.iter().filter(|record| record.0 == 2).count();
+    assert_eq!(
+        (ns, addresses),
+        (
+            store::MAX_DELEGATION_SERVERS,
+            store::MAX_DELEGATION_ADDRESSES
+        )
+    );
+    // Over UDP it does not fit: truncated, with no record, so the client asks over TCP.
+    let (header, records) =
+        synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).expect("synthesized");
+    assert!(header.tc);
+    assert_eq!(records.len(), 0, "{records:?}");
+    // A flush of the zone takes the delegation with it.
+    assert_eq!(
+        DenialCache::flush(&cache, Some(&wire_name("plain.test"))),
+        1 + store::MAX_DELEGATION_SERVERS + store::MAX_DELEGATION_ADDRESSES
+    );
+    assert!(cache.is_empty());
+}

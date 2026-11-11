@@ -244,6 +244,119 @@ impl Chain3 {
     }
 }
 
+/// The most name servers of a zone's delegation kept beside its denials. A delegation
+/// with more keeps none: a truncated set could miss the server an NSDNAME trigger names.
+pub const MAX_DELEGATION_SERVERS: usize = 13;
+
+/// The most addresses of those name servers, both families together; with more the
+/// delegation is kept with none of them for the same reason (NSIP).
+pub const MAX_DELEGATION_ADDRESSES: usize = 26;
+
+/// The delegation a zone's denials came through: the NS RRset at the apex and the
+/// addresses of its name servers, as the resolver's answers carry them while an RPZ zone
+/// has NSDNAME or NSIP triggers. A synthesized answer writes it, so that those triggers
+/// judge the synthesized answer as they judge one from the answer cache; it lives as long
+/// as its shortest record.
+#[derive(Debug)]
+pub struct Delegation {
+    /// The NS records at the apex.
+    pub ns: Set,
+    /// The A and AAAA RRsets of the name servers.
+    pub addresses: Vec<Set>,
+    /// When the first of them expires, in the cache's seconds.
+    pub expires: u32,
+    /// When it was used last.
+    pub used: AtomicU32,
+}
+
+impl Delegation {
+    /// The records it holds, as the bound counts them.
+    pub fn records(&self) -> usize {
+        usize::from(self.ns.plain)
+            + self
+                .addresses
+                .iter()
+                .map(|set| usize::from(set.plain))
+                .sum::<usize>()
+    }
+
+    /// Whether it is still alive at `now`.
+    pub fn fresh(&self, now: u32) -> bool {
+        self.expires > now
+    }
+
+    /// Every set it writes, the NS set first.
+    pub fn sets(&self) -> impl Iterator<Item = &Set> + '_ {
+        std::iter::once(&self.ns).chain(&self.addresses)
+    }
+}
+
+/// What an answer shows of the delegation of the zone at `apex`.
+#[derive(Debug)]
+pub enum Shown {
+    /// No NS record at the apex: what the zone holds stays.
+    Nothing,
+    /// More name servers or addresses than kept: the zone keeps none.
+    TooLarge,
+    /// The delegation.
+    Delegation(Delegation),
+}
+
+/// The delegation of the zone at `apex` in `authority` (the NS records at the apex) and
+/// `additional` (the addresses of those name servers), stored at `now`.
+pub fn delegation_of(apex: &[u8], authority: &[Rr], additional: &[Rr], now: u32) -> Shown {
+    const NS: u16 = 2;
+    const A: u16 = 1;
+    const AAAA: u16 = 28;
+    let ns: Vec<&Rr> = authority
+        .iter()
+        .filter(|rr| rr.rtype == NS && *rr.owner == *apex)
+        .collect();
+    if ns.is_empty() {
+        return Shown::Nothing;
+    }
+    if ns.len() > MAX_DELEGATION_SERVERS {
+        return Shown::TooLarge;
+    }
+    let Some(ns_set) = Set::build(apex, &ns, &[], now, 0) else {
+        return Shown::Nothing;
+    };
+    let mut addresses = Vec::new();
+    let mut count = 0usize;
+    let mut seen: Vec<Vec<u8>> = Vec::with_capacity(ns.len());
+    for server in &ns {
+        // Owners are lowercase; a name server's name in the data keeps its case.
+        let host = server.data.to_ascii_lowercase();
+        if seen.contains(&host) {
+            continue;
+        }
+        for rtype in [A, AAAA] {
+            let found: Vec<&Rr> = additional
+                .iter()
+                .filter(|rr| rr.rtype == rtype && *rr.owner == *host)
+                .collect();
+            count += found.len();
+            if count > MAX_DELEGATION_ADDRESSES {
+                return Shown::TooLarge;
+            }
+            if let Some(set) = Set::build(&host, &found, &[], now, 0) {
+                addresses.push(set);
+            }
+        }
+        seen.push(host);
+    }
+    let expires = addresses
+        .iter()
+        .map(|set| set.expires)
+        .fold(ns_set.expires, u32::min);
+    Shown::Delegation(Delegation {
+        ns: ns_set,
+        addresses,
+        expires,
+        used: AtomicU32::new(now),
+    })
+}
+
 /// A name known not to exist in an unsigned zone (RFC 8020).
 #[derive(Debug)]
 pub struct Cut {
@@ -271,6 +384,8 @@ pub struct Zone {
     pub wildcards: HashMap<Box<[u8]>, Set>,
     /// The names of RFC 8020, wire form.
     pub cuts: HashMap<Box<[u8]>, Cut>,
+    /// The delegation its denials came through, when an answer carried it.
+    pub delegation: Option<Delegation>,
 }
 
 /// The key of a wildcard RRset: the type, then the owner.
@@ -296,6 +411,9 @@ pub struct Synth<'a> {
     pub answer: Option<&'a Set>,
     /// The NSEC or NSEC3 records of the proof, each once.
     pub proofs: [Option<&'a Set>; 3],
+    /// The zone's delegation, written while answers carry it (the RPZ triggers NSDNAME
+    /// and NSIP).
+    pub delegation: Option<&'a Delegation>,
 }
 
 impl<'a> Synth<'a> {
@@ -320,6 +438,7 @@ impl<'a> Synth<'a> {
             soa,
             answer: None,
             proofs: unique,
+            delegation: None,
         }
     }
 
@@ -348,6 +467,7 @@ impl Zone {
             + self.nsec3.as_ref().map_or(0, |chain| chain.records.len())
             + self.wildcards.len()
             + self.cuts.len()
+            + self.delegation.as_ref().map_or(0, Delegation::records)
     }
 
     /// The answer to `qname`/`qtype` this zone's records prove at `now`, if any.
@@ -567,6 +687,11 @@ impl Zone {
                 .values()
                 .map(|cut| cut.used.load(Ordering::Relaxed)),
         );
+        out.extend(
+            self.delegation
+                .iter()
+                .map(|delegation| delegation.used.load(Ordering::Relaxed)),
+        );
     }
 
     /// Drops the records `keep` refuses; returns how many went.
@@ -583,6 +708,15 @@ impl Zone {
             .retain(|_, set| keep(&set.owner, set.expires, set.used()));
         self.cuts
             .retain(|owner, cut| keep(owner, cut.expires, cut.used.load(Ordering::Relaxed)));
+        if self.delegation.as_ref().is_some_and(|delegation| {
+            !keep(
+                &delegation.ns.owner,
+                delegation.expires,
+                delegation.used.load(Ordering::Relaxed),
+            )
+        }) {
+            self.delegation = None;
+        }
         before - self.count()
     }
 }

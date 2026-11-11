@@ -16,6 +16,13 @@
 //!   last name of a CNAME chain, below the SOA's zone; from a forwarder the question name
 //!   only. A signed SOA in such an answer keeps nothing, and an insecure answer never
 //!   replaces a zone held from secure ones.
+//! - **The delegation** of a zone, when the answer that taught its records carried one (the
+//!   resolver's answers do while an RPZ zone has NSDNAME or NSIP triggers): the NS records
+//!   at the apex and the addresses of those name servers, at most
+//!   [`store::MAX_DELEGATION_SERVERS`] and [`store::MAX_DELEGATION_ADDRESSES`] (more keeps
+//!   none), living as long as the shortest of them. [`Denials::answer_carrying`] writes it
+//!   into the synthesized answer for those triggers to judge, and under the carry answers
+//!   nothing from a zone that does not hold a fresh one.
 //! - **The bound** (`denial_entries`: 2,000 under Home, 20,000 otherwise) counts records and
 //!   names; past it the least recently used sixteenth goes.
 //! - **The lookup** ([`Denials::answer`], the worker): for a name the answer cache has
@@ -47,7 +54,7 @@ use std::{
 
 use tenko_core::dns::{SecurityState, ViewId};
 
-use self::store::{Chain3, Cut, Nsec, Nsec3, Set, Zone, nsec3_params, wildcard_key};
+use self::store::{Chain3, Cut, Nsec, Nsec3, Set, Shown, Zone, nsec3_params, wildcard_key};
 use crate::{
     cache::{Client, Verdict},
     dnssec::chain::base32hex_decode,
@@ -524,8 +531,17 @@ impl Denials {
     }
 }
 
-impl DenialCache for Denials {
-    fn answer(
+impl Denials {
+    /// Synthesizes as [`DenialCache::answer`] does; with `carry` (the resolver's answers
+    /// carry their delegation for the RPZ triggers NSDNAME and NSIP) only from a zone whose
+    /// delegation is held and fresh, and with that delegation in the answer, so that the
+    /// triggers judge it as they judge an answer from the answer cache. A zone without one
+    /// is left to the resolver, whose answer carries it.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the trait's arguments and the carry"
+    )]
+    pub fn answer_carrying(
         &self,
         view: Option<ViewId>,
         qname: &[u8],
@@ -533,6 +549,7 @@ impl DenialCache for Denials {
         client: &Client<'_>,
         now: Instant,
         out: &mut Vec<u8>,
+        carry: bool,
     ) -> Option<DenialHit> {
         if !self.settings.aggressive || unsynthesized(qtype) {
             return None;
@@ -549,7 +566,14 @@ impl DenialCache for Denials {
                 .zones
                 .get(zone_key(view, name::suffix(qname, skip), &mut buf))
         })?;
-        let synth = zone.lookup(qname, qtype, now)?;
+        let mut synth = zone.lookup(qname, qtype, now)?;
+        if carry {
+            synth.delegation = Some(
+                zone.delegation
+                    .as_ref()
+                    .filter(|delegation| delegation.fresh(now))?,
+            );
+        }
         let rcode = synth::write(&synth, client, now, out)?;
         let index = DenialKind::ALL
             .iter()
@@ -560,6 +584,20 @@ impl DenialCache for Denials {
             kind: synth.kind,
             rcode,
         })
+    }
+}
+
+impl DenialCache for Denials {
+    fn answer(
+        &self,
+        view: Option<ViewId>,
+        qname: &[u8],
+        qtype: u16,
+        client: &Client<'_>,
+        now: Instant,
+        out: &mut Vec<u8>,
+    ) -> Option<DenialHit> {
+        self.answer_carrying(view, qname, qtype, client, now, out, false)
     }
 
     fn insert(
@@ -587,6 +625,8 @@ impl DenialCache for Denials {
             return false;
         };
         let apex = learned.apex;
+        // The delegation the answer carried, built before the lock is taken.
+        let shown = store::delegation_of(&apex, &parsed.authority, &parsed.additional, now);
         let mut buf = [0u8; ZONE_KEY_MAX];
         let key: Box<[u8]> = zone_key(view, &apex, &mut buf).into();
         let mut guard = self.store.write().unwrap_or_else(PoisonError::into_inner);
@@ -648,8 +688,13 @@ impl DenialCache for Denials {
                 },
             );
         }
+        match shown {
+            Shown::Nothing => {}
+            Shown::TooLarge => entry.delegation = None,
+            Shown::Delegation(delegation) => entry.delegation = Some(delegation),
+        }
         let after = entry.count();
-        store.records = store.records + after - before.min(after);
+        store.records = (store.records + after).saturating_sub(before);
         self.trim(store);
         true
     }

@@ -4,7 +4,10 @@
 //! section and, for a client with DO, the NSEC or NSEC3 records of the proof and every
 //! signature; a wildcard answer with the wildcard's records under the name asked and, for
 //! DO, the proof that the name itself does not exist. Every TTL is the smallest left of
-//! the records used (a negative answer no longer than the SOA's MINIMUM, RFC 2308).
+//! the records used (a negative answer no longer than the SOA's MINIMUM, RFC 2308). Under the
+//! carry of the RPZ triggers NSDNAME and NSIP the zone's delegation follows: its NS records
+//! in the authority section, their addresses in the additional section, and no TTL past
+//! the delegation's.
 
 use tenko_core::dns::SecurityState;
 
@@ -29,6 +32,10 @@ pub fn write(synth: &Synth<'_>, client: &Client<'_>, now: u32, out: &mut Vec<u8>
     let rendering = state.render(client.flags(), None);
     let dnssec = rendering.dnssec_records;
     let mut ttl = synth.sets().map(|set| set.left(now)).min()?;
+    // A delegation written with the answer never outlives what it was learned from.
+    if let Some(delegation) = synth.delegation {
+        ttl = ttl.min(delegation.expires.saturating_sub(now));
+    }
     if let Some(minimum) = synth.soa.and_then(Set::soa_minimum) {
         ttl = ttl.min(minimum);
     }
@@ -59,6 +66,17 @@ pub fn write(synth: &Synth<'_>, client: &Client<'_>, now: u32, out: &mut Vec<u8>
     }
     out[6..8].copy_from_slice(&answers.to_be_bytes());
     out[8..10].copy_from_slice(&authority.to_be_bytes());
+    // The delegation the RPZ triggers NSDNAME and NSIP look at, as the resolver's answers
+    // carry it: the NS records in the authority section, their addresses in the additional.
+    if let Some(delegation) = synth.delegation {
+        authority += push_set(out, &delegation.ns.owner, &delegation.ns, false, ttl);
+        out[8..10].copy_from_slice(&authority.to_be_bytes());
+        let mut additional = 0u16;
+        for set in &delegation.addresses {
+            additional += push_set(out, &set.owner, set, false, ttl);
+        }
+        out[10..12].copy_from_slice(&additional.to_be_bytes());
+    }
     let edns = client.edns;
     if let Some(edns) = &edns {
         push_opt(out, edns, None);
@@ -73,6 +91,11 @@ pub fn write(synth: &Synth<'_>, client: &Client<'_>, now: u32, out: &mut Vec<u8>
     }
     for set in synth.sets() {
         set.touch(now);
+    }
+    if let Some(delegation) = synth.delegation {
+        delegation
+            .used
+            .store(now, std::sync::atomic::Ordering::Relaxed);
     }
     Some(synth.rcode)
 }

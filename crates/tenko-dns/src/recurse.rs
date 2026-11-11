@@ -114,6 +114,12 @@ const PRIMING_MAX_BACKOFF: Duration = Duration::from_secs(300);
 /// The longest a learned NS set or address is kept, whatever its TTL (one day).
 const MAX_INFRA_TTL: u32 = 86_400;
 
+/// How long answers go on carrying their delegation after the last NSDNAME or NSIP trigger
+/// of the catalog is gone. The carry turns on, and the answer cache is flushed of the
+/// answers kept without their delegation, only when it was off: a trigger set that comes
+/// and goes flushes the cache at most once per hold.
+pub const CARRY_HOLD: Duration = Duration::from_secs(3600);
+
 /// The engine's settings: `[dns.recursion]` and the profile, as the role maps them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineSettings {
@@ -125,6 +131,10 @@ pub struct EngineSettings {
     pub local_zones_except: Vec<DnsName>,
     /// Count in the engine's metrics.
     pub metrics: bool,
+    /// The port the authorities are asked on: 53, another in the tests that run an authority
+    /// of their own on a loopback address.
+    #[cfg(test)]
+    pub authority_port: u16,
 }
 
 impl Default for EngineSettings {
@@ -134,6 +144,8 @@ impl Default for EngineSettings {
             hints: None,
             local_zones_except: Vec::new(),
             metrics: true,
+            #[cfg(test)]
+            authority_port: 53,
         }
     }
 }
@@ -326,6 +338,10 @@ pub struct Resolved {
     pub outcome: Outcome,
     /// Queries sent to authorities.
     pub subqueries: u16,
+    /// Whether it was composed while answers carry their delegation. An answer composed
+    /// without it does not show the RPZ triggers NSDNAME and NSIP the delegation it came
+    /// from, so the answer cache must not keep it while the carry is on.
+    pub carried: bool,
 }
 
 impl Resolved {
@@ -424,9 +440,14 @@ pub struct Engine<A> {
     priming: Mutex<Priming>,
     joins: Joins<Resolved>,
     counters: Counters,
+    /// Whether answers carry their delegation, held for [`CARRY_HOLD`] after the last
+    /// name-server trigger was seen, and when that was.
     delegation: AtomicBool,
+    triggers_seen: Mutex<Option<Instant>>,
     // WP10.3: the names minimized questions showed to exist without a cut.
     names: Mutex<KnownNames>,
+    #[cfg(test)]
+    authority_port: u16,
 }
 
 // WP10.3: QNAME minimization's memory.
@@ -487,7 +508,10 @@ impl<A: Authority> Engine<A> {
             joins: Joins::default(),
             counters: Counters::default(),
             delegation: AtomicBool::new(false),
+            triggers_seen: Mutex::new(None),
             names: Mutex::new(KnownNames::default()),
+            #[cfg(test)]
+            authority_port: settings.authority_port,
         };
         engine.install_hints(now);
         engine
@@ -513,12 +537,40 @@ impl<A: Authority> Engine<A> {
         &self.authority
     }
 
-    /// Whether answers carry the delegation that was followed (its NS records in the
-    /// authority section and their addresses in the additional section), so that the RPZ
-    /// triggers NSDNAME and NSIP match it (E41). The forwarder sets it while an RPZ zone
-    /// of the catalog has such triggers.
-    pub fn carry_delegation(&self, on: bool) {
-        self.delegation.store(on, Ordering::Relaxed);
+    /// Notes whether an RPZ zone of the catalog has NSDNAME or NSIP triggers (the
+    /// forwarder's housekeeping, every tick). While it has, and for [`CARRY_HOLD`] after,
+    /// answers carry the delegation that was followed (its NS records in the authority
+    /// section and their addresses in the additional section), so that those triggers match
+    /// them (E41), from the answer cache as well. Returns true when the carry turned on:
+    /// the answers the cache kept before do not carry it, and the forwarder flushes them.
+    pub fn note_ns_triggers(&self, present: bool, now: Instant) -> bool {
+        let mut seen = self
+            .triggers_seen
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if present {
+            *seen = Some(now);
+        }
+        let on = seen.is_some_and(|at| now.saturating_duration_since(at) < CARRY_HOLD);
+        let was = self.delegation.swap(on, Ordering::SeqCst);
+        on && !was
+    }
+
+    /// The port the authorities are asked on.
+    #[cfg(not(test))]
+    #[allow(clippy::unused_self, reason = "the tests' port is a field")]
+    const fn authority_port(&self) -> u16 {
+        53
+    }
+
+    #[cfg(test)]
+    const fn authority_port(&self) -> u16 {
+        self.authority_port
+    }
+
+    /// Whether answers carry their delegation (see [`Engine::note_ns_triggers`]).
+    pub fn carries(&self) -> bool {
+        self.delegation.load(Ordering::SeqCst)
     }
 
     fn lock_priming(&self) -> std::sync::MutexGuard<'_, Priming> {
@@ -751,7 +803,7 @@ impl<A: Authority> Engine<A> {
             let timeout = self.servers.timeout(address, self.settings.timeout);
             let state = self.infra.server(address, now);
             let query = AuthorityQuery {
-                server: SocketAddr::new(address, 53),
+                server: SocketAddr::new(address, self.authority_port()),
                 qname: &root,
                 qtype: types::NS,
                 qclass: CLASS_IN,
@@ -824,6 +876,14 @@ impl<A: Authority> Engine<A> {
 
     /// Resolves a client's question; identical questions in flight share one resolution.
     pub async fn resolve(&self, question: Question<'_>) -> Arc<Resolved> {
+        self.resolve_carrying(question, false).await
+    }
+
+    /// Resolves a client's question as [`Engine::resolve`] does; with `carry` the answer
+    /// carries its delegation whatever the housekeeping noted last. The forwarder passes
+    /// whether the catalog it reads has NSDNAME or NSIP triggers, so that an answer resolved
+    /// after a new trigger arrived carries it before the next tick.
+    pub async fn resolve_carrying(&self, question: Question<'_>, carry: bool) -> Arc<Resolved> {
         let key = CacheKey::new(
             question.view,
             question.qname,
@@ -832,7 +892,7 @@ impl<A: Authority> Engine<A> {
         );
         let (resolved, joined) = self
             .joins
-            .run(key.as_bytes(), || self.resolve_now(question, &key))
+            .run(key.as_bytes(), || self.resolve_now(question, &key, carry))
             .await;
         if joined {
             self.count(|c| &c.joined);
@@ -841,8 +901,11 @@ impl<A: Authority> Engine<A> {
     }
 
     /// One resolution, the join table aside.
-    async fn resolve_now(&self, question: Question<'_>, key: &CacheKey) -> Resolved {
+    async fn resolve_now(&self, question: Question<'_>, key: &CacheKey, carry: bool) -> Resolved {
         let started = Instant::now();
+        // Read when the answer is composed, after the walk: a carry that turned on during
+        // the walk is in the answer.
+        let carried = || carry || self.carries();
         let qname = question.qname;
         let compose = |rcode: u8, answer: &[Rr], authority: &[Rr], additional: &[Rr]| {
             message::compose(&Composed {
@@ -868,6 +931,7 @@ impl<A: Authority> Engine<A> {
                     cached: true,
                 },
                 subqueries: 0,
+                carried: carried(),
             };
         }
         if question.qclass != CLASS_IN {
@@ -876,6 +940,7 @@ impl<A: Authority> Engine<A> {
                 rcode: 5,
                 outcome: Outcome::Refused,
                 subqueries: 0,
+                carried: carried(),
             };
         }
         let mut work = Work::new(self.settings.budget, started);
@@ -887,8 +952,10 @@ impl<A: Authority> Engine<A> {
         let resolved = match result {
             Ok(found) => {
                 let local = found.cut.is_none() && subqueries == 0;
-                let (authority, additional) = self.delegation_records(&found);
+                let carried = carried();
+                let (authority, additional) = self.delegation_records(&found, carried);
                 Resolved {
+                    carried,
                     message: compose(found.rcode, &found.answer, &authority, &additional),
                     rcode: found.rcode,
                     outcome: if local {
@@ -909,6 +976,7 @@ impl<A: Authority> Engine<A> {
                         cached: false,
                     },
                     subqueries,
+                    carried: carried(),
                 }
             }
         };
@@ -961,8 +1029,8 @@ impl<A: Authority> Engine<A> {
     }
 
     /// The NS records and addresses of the cut an answer came from, when answers carry
-    /// the delegation.
-    fn delegation_records(&self, found: &Found) -> (Vec<Rr>, Vec<Rr>) {
+    /// the delegation (`carry`).
+    fn delegation_records(&self, found: &Found, carry: bool) -> (Vec<Rr>, Vec<Rr>) {
         let mut authority = found.authority.clone();
         let mut additional = Vec::new();
         // WP10.2: a negative answer carries the delegation only when it is the SOA's zone
@@ -975,10 +1043,11 @@ impl<A: Authority> Engine<A> {
             .find(|rr| rr.rtype == types::SOA)
             .map(|rr| rr.owner.as_slice());
         let negative = found.rcode != 0 || soa_owner.is_some();
-        let Some(cut) = found.cut.as_ref().filter(|cut| {
-            self.delegation.load(Ordering::Relaxed)
-                && (!negative || soa_owner == Some(cut.zone.to_wire().as_slice()))
-        }) else {
+        let Some(cut) = found
+            .cut
+            .as_ref()
+            .filter(|cut| carry && (!negative || soa_owner == Some(cut.zone.to_wire().as_slice())))
+        else {
             return (authority, additional);
         };
         let now = Instant::now();
@@ -1517,7 +1586,7 @@ impl<A: Authority> Engine<A> {
         let timeout = self.servers.timeout(address, self.settings.timeout);
         let deadline = (now + timeout).min(work.deadline);
         let query = AuthorityQuery {
-            server: SocketAddr::new(address, 53),
+            server: SocketAddr::new(address, self.authority_port()),
             qname: &sent_name,
             qtype,
             qclass: CLASS_IN,
