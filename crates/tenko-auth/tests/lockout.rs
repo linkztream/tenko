@@ -12,6 +12,7 @@ use tenko_auth::{
         FailureOutcome, LockPolicy, LockoutMode, LockoutPolicy, Retry, Schedule, Throttle,
         ThrottleKey,
     },
+    settings::Profile,
 };
 use tenko_core::Timestamp;
 use utoipa::PartialSchema;
@@ -413,44 +414,293 @@ fn unlocking_an_account_forgets_every_network() {
     assert!(throttle.check(&other, &policy, clock.now()).is_err());
 }
 
+/// `docs/SECURITY-PROFILES.md`, read at test time.
+fn security_profiles() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/SECURITY-PROFILES.md"
+    ))
+    .expect("the security profiles document")
+}
+
+/// The cells of the Markdown table row that starts with `first` (the first cell).
+fn row<'a>(doc: &'a str, first: &str) -> Vec<&'a str> {
+    let line = doc
+        .lines()
+        .find(|line| {
+            line.split('|')
+                .nth(1)
+                .is_some_and(|cell| cell.trim() == first)
+        })
+        .unwrap_or_else(|| panic!("the document has a row {first}"));
+    line.trim()
+        .trim_matches('|')
+        .split('|')
+        .map(str::trim)
+        .collect()
+}
+
+/// A number of seconds as the document writes one: `1 s`, `one minute`, `one day`, or a
+/// plain number.
+fn seconds(text: &str) -> u32 {
+    match text.trim() {
+        "one minute" => 60,
+        "one day" => 86_400,
+        other => other
+            .trim_end_matches(" s")
+            .replace(',', "")
+            .parse()
+            .unwrap_or_else(|_| panic!("a number: {other}")),
+    }
+}
+
+/// The bounds of a cell `<low> to <high>`, ignoring a note in parentheses.
+fn bounds(cell: &str) -> (u32, u32) {
+    let cell = cell.split(" (").next().unwrap_or(cell);
+    let (low, high) = cell.split_once(" to ").expect("a range");
+    (seconds(low), seconds(high))
+}
+
+/// A wait as the TGL-07 row writes it: `10 s`, `3 min`.
+fn wait_text(secs: u32) -> String {
+    if secs >= 60 && secs.is_multiple_of(60) {
+        format!("{} min", secs / 60)
+    } else {
+        format!("{secs} s")
+    }
+}
+
+/// `1,440` for 1440.
+fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+/// Whether a policy with `field` set by `set` validates.
+fn valid_with(set: impl FnOnce(&mut LockPolicy)) -> bool {
+    let mut policy = LockPolicy::default();
+    set(&mut policy);
+    policy.validate().is_ok()
+}
+
+/// The product's lock policy against the table of `docs/SECURITY-PROFILES.md`: each default
+/// and each bound at its edges. Each side is read from its source, so a change to either
+/// alone fails here.
 #[test]
-fn engine_policies_match_their_documented_values() {
-    let home = policy(LockoutMode::ProgressiveDelay);
-    assert_eq!(home.free_attempts, 5);
-    assert_eq!(home.base_delay, secs(1));
-    assert_eq!(home.max_delay, secs(60));
-    assert_eq!(home.reset_after, mins(15));
+fn the_lock_policy_matches_the_security_profiles_document() {
+    let doc = security_profiles();
+    let default = LockPolicy::default();
 
-    let standard = policy(LockoutMode::DelayThenTemporaryLock);
-    assert_eq!(standard.free_attempts, 5);
-    assert_eq!(standard.base_delay, secs(1));
-    assert_eq!(standard.max_delay, secs(60));
-    assert_eq!(standard.lock_after, 10);
-    assert_eq!(standard.lock_duration, mins(15));
-    assert_eq!(standard.reset_after, mins(60));
+    // The policy table: the defaults.
+    assert_eq!(row(&doc, "`attempts`")[1], default.attempts.to_string());
+    let waits: Vec<String> = default.waits_secs.iter().map(u32::to_string).collect();
+    assert_eq!(row(&doc, "`waits_secs`")[1], waits.join(", "));
+    assert_eq!(
+        row(&doc, "`lock_secs`")[1],
+        format!(
+            "{} ({} minutes)",
+            thousands(u64::from(default.lock_secs)),
+            default.lock_secs / 60
+        )
+    );
+    assert_eq!(
+        row(&doc, "`account_max_delay_secs`")[1],
+        default.account_max_delay_secs.to_string()
+    );
+    assert_eq!(row(&doc, "`passkey_holds_lock`")[1], "Hardened only");
+    assert_eq!(
+        row(&doc, "`alarm_after_failures`")[1],
+        default.alarm_after_failures.to_string()
+    );
 
-    let hardened = policy(LockoutMode::LockUntilUnlock);
-    assert_eq!(hardened.free_attempts, 3);
-    assert_eq!(hardened.base_delay, secs(2));
-    assert_eq!(hardened.max_delay, secs(60));
-    assert_eq!(hardened.lock_after, 5);
-    assert_eq!(hardened.lock_duration, mins(30));
-    assert_eq!(hardened.reset_after, mins(24 * 60));
+    // The policy table: the bounds, at their edges.
+    let (low, high) = bounds(row(&doc, "`attempts`")[2]);
+    assert!(valid_with(|p| p.attempts = low) && valid_with(|p| p.attempts = high));
+    assert!(!valid_with(|p| p.attempts = low - 1) && !valid_with(|p| p.attempts = high + 1));
+    let (low, high) = bounds(row(&doc, "`lock_secs`")[2]);
+    assert!(valid_with(|p| p.lock_secs = low) && valid_with(|p| p.lock_secs = high));
+    assert!(!valid_with(|p| p.lock_secs = low - 1) && !valid_with(|p| p.lock_secs = high + 1));
+    let (low, high) = bounds(row(&doc, "`account_max_delay_secs`")[2]);
+    assert_eq!(low, 0);
+    assert!(valid_with(|p| p.account_max_delay_secs = low));
+    assert!(valid_with(|p| p.account_max_delay_secs = high));
+    assert!(!valid_with(|p| p.account_max_delay_secs = high + 1));
+    let (low, high) = bounds(row(&doc, "`alarm_after_failures`")[2]);
+    assert!(valid_with(|p| p.alarm_after_failures = low));
+    assert!(valid_with(|p| p.alarm_after_failures = high));
+    assert!(!valid_with(|p| p.alarm_after_failures = low - 1));
+    assert!(!valid_with(|p| p.alarm_after_failures = high + 1));
+    // `1 to 10 waits, each 1 s to one day`.
+    let waits_cell = row(&doc, "`waits_secs`")[2];
+    let (count, each) = waits_cell
+        .split_once(" waits, each ")
+        .expect("count and each");
+    let (fewest, most) = bounds(count);
+    let (shortest, longest) = bounds(each);
+    let n = |count: u32| usize::try_from(count).expect("small");
+    assert!(valid_with(|p| p.waits_secs = vec![shortest; n(fewest)]));
+    assert!(valid_with(|p| p.waits_secs = vec![longest; n(most)]));
+    assert!(!valid_with(|p| p.waits_secs = vec![shortest; n(fewest) - 1]));
+    assert!(!valid_with(|p| p.waits_secs = vec![shortest; n(most) + 1]));
+    assert!(!valid_with(|p| p.waits_secs = vec![shortest - 1]));
+    assert!(!valid_with(|p| p.waits_secs = vec![longest + 1]));
+}
 
-    let lab = policy(LockoutMode::Off);
-    assert_eq!(lab.mode, LockoutMode::Off);
-    assert_eq!(lab.delay_after(u32::MAX), Duration::ZERO);
+/// The TGL-07 row of every profile in `docs/SECURITY-PROFILES.md` against the profile's
+/// preset: its mode and its numbers.
+#[test]
+fn the_profiles_lock_presets_match_the_security_profiles_document() {
+    let doc = security_profiles();
+    let default = LockPolicy::default();
+    let tgl = row(&doc, "TGL-07");
+    let waits_text = {
+        let mut texts: Vec<String> = default.waits_secs.iter().map(|w| wait_text(*w)).collect();
+        let last = texts.pop().expect("a wait");
+        format!("{} and {last}", texts.join(", "))
+    };
+    for (profile, cell) in [
+        (Profile::Home, tgl[2]),
+        (Profile::Standard, tgl[3]),
+        (Profile::Hardened, tgl[4]),
+        (Profile::Lab, tgl[5]),
+    ] {
+        let preset = profile.defaults();
+        let policy = preset.lockout_policy.clone().expect("a preset policy");
+        let expected_mode = match profile {
+            Profile::Home => {
+                assert_eq!(
+                    cell,
+                    format!(
+                        "On: {} attempts per account and network, then waits of {waits_text} \
+                         (the last repeats)",
+                        policy.attempts
+                    )
+                );
+                LockoutMode::ProgressiveDelay
+            }
+            Profile::Standard => {
+                assert_eq!(
+                    cell,
+                    format!(
+                        "On: as Home, then a lock of {} minutes that ends by itself",
+                        policy.lock_secs / 60
+                    )
+                );
+                LockoutMode::DelayThenTemporaryLock
+            }
+            Profile::Hardened => {
+                assert!(cell.starts_with("On: as Standard"), "{cell}");
+                assert!(
+                    cell.contains("an earlier unlock by an administrator"),
+                    "{cell}"
+                );
+                assert_eq!(
+                    cell.contains("the lock holds for a passkey too"),
+                    policy.passkey_holds_lock
+                );
+                LockoutMode::LockUntilUnlock
+            }
+            Profile::Lab => {
+                assert_eq!(cell, "Off");
+                LockoutMode::Off
+            }
+        };
+        assert_eq!(preset.lockout, expected_mode, "{profile:?}");
+        // Apart from the passkey, which only Hardened's row names, every profile has the
+        // numbers of the policy table.
+        assert_eq!(
+            LockPolicy {
+                passkey_holds_lock: false,
+                ..policy
+            },
+            default,
+            "{profile:?}"
+        );
+    }
+}
 
+/// The numbers `docs/SECURITY-PROFILES.md` derives from the default policy, and its figures
+/// of attempts per day, against the product.
+#[test]
+fn the_derived_numbers_match_the_security_profiles_document() {
+    let doc = security_profiles();
+    let default = LockPolicy::default();
+    let threshold = default.lock_threshold();
+    let waits_count = u32::try_from(default.waits_secs.len()).expect("small");
+    assert_eq!(threshold, default.attempts + waits_count);
+    assert!(doc.contains(&format!(
+        "({threshold} with the default policy: {} attempts and {waits_count} waits)",
+        default.attempts
+    )));
+    assert!(doc.contains(&format!(
+        "as often as one network may before its lock ({threshold} with the defaults)"
+    )));
+    assert!(doc.contains(&format!(
+        "failed {} times across networks",
+        default.alarm_after_failures
+    )));
     let source = LockoutPolicy::source_policy();
-    assert_eq!(source.free_attempts, 20);
-    assert_eq!(source.base_delay, secs(1));
-    assert_eq!(source.max_delay, secs(30));
+    assert!(doc.contains(&format!(
+        "*The network across every account*: {} attempts, then {} s doubling up to {} s",
+        source.free_attempts,
+        source.base_delay.as_secs(),
+        source.max_delay.as_secs()
+    )));
+
+    // Attempts per day from one network and across networks.
+    let day = 86_400u64;
+    let longest = u64::from(*default.waits_secs.iter().max().expect("a wait"));
+    let cycle = default
+        .waits_secs
+        .iter()
+        .map(|w| u64::from(*w))
+        .sum::<u64>()
+        + u64::from(default.lock_secs);
+    let figures = [
+        ("One network, Home", day / longest),
+        (
+            "One network, Standard",
+            (day * u64::from(threshold) + cycle / 2) / cycle,
+        ),
+        (
+            "Any number of networks against any account",
+            day / u64::from(default.account_max_delay_secs),
+        ),
+    ];
+    for (who, per_day) in figures {
+        let line = doc
+            .lines()
+            .find(|line| line.starts_with(&format!("| {who}")))
+            .unwrap_or_else(|| panic!("a row for {who}"));
+        assert!(
+            line.contains(&format!("| about {} |", thousands(per_day))),
+            "{who}: {per_day} a day, the document says {line}"
+        );
+    }
+}
+
+/// The engine's own policies: the spraying policy of a network across every account never
+/// locks and is forgotten after 15 minutes, and `Off` never delays.
+#[test]
+fn the_spraying_policy_never_locks_and_off_never_delays() {
+    let source = LockoutPolicy::source_policy();
     assert_eq!(source.reset_after, mins(15));
     assert_eq!(
         source.mode,
         LockoutMode::ProgressiveDelay,
         "the source policy never locks"
     );
+    assert_eq!(source.lock_after, 0);
+    let lab = LockoutPolicy::for_mode(LockoutMode::Off);
+    assert_eq!(lab.mode, LockoutMode::Off);
+    assert_eq!(lab.delay_after(u32::MAX), Duration::ZERO);
 }
 
 #[test]
