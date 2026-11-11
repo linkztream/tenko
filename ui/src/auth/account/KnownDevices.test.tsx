@@ -70,7 +70,7 @@ describe("known devices", () => {
     expect(within(rows()[0] as HTMLElement).getByText("This browser")).toBeTruthy();
   });
 
-  it("leaves everything as it is when the confirmation is cancelled", async () => {
+  it("leaves everything as it is when the confirmation is canceled", async () => {
     await signInAlex();
     show();
     await screen.findByTestId("known-devices");
