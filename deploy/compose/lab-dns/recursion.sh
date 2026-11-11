@@ -23,6 +23,7 @@ auth_cookie=""
 node_cookie=""
 node_id=""
 auth_node_id=""
+rpz_zone_id=""
 # The zones of the authority in creation order: name, file, signing.
 recursion_zones=(
   ".|root.zone|nsec"
@@ -267,6 +268,7 @@ rpz_setup() {
   api POST /dns/zones "{\"name\": \"rpz.lab.test\", \"kind\": \"rpz\", \"serial\": \"counter\", \"soa\": $(soa_lab), \"name_servers\": [\"a.root.test\"]}" >/dev/null ||
     fail "recursion: the RPZ zone could not be created ($api_status: $(cat "$work/api.out"))"
   id="$(field "d['id']" <"$work/api.out")"
+  rpz_zone_id="$id"
   api POST "/dns/zones/$id/records/batch" '{"changes": [
     {"op": "set", "name": "ns.case.quirk.example.test.rpz-nsdname.rpz.lab.test", "type": "CNAME", "ttl": 60, "records": [{"type": "CNAME", "target": "."}]},
     {"op": "set", "name": "32.14.113.0.203.rpz-nsip.rpz.lab.test", "type": "CNAME", "ttl": 60, "records": [{"type": "CNAME", "target": "."}]}
@@ -278,6 +280,35 @@ blocked_by() {
   [[ "$(rcode_of <<<"$out")" == NXDOMAIN && "$(ede_of <<<"$out")" == 15 ]]
 }
 not_blocked() { [[ "$(rcode_of <<<"$(dig_node "$1" A)")" == NOERROR ]]; }
+
+# rpz_evidence <name>: what a failed E41 row shows of its cause, in the log: the triggers of
+# the RPZ zone as the node holds them, the node's whole answer for the name (a blocked answer
+# carries the extended error 15; an answer judged without its delegation has no NS record in
+# the authority section), whether the name is in the node's answer cache, and the
+# resolver's counters (the denial cache's synthesized answers among them).
+rpz_evidence() {
+  on tenko
+  printf '\n==> E41 evidence for %s\n' "$1" >&2
+  printf 'the triggers the node holds:\n' >&2
+  if api GET "/dns/zones/$rpz_zone_id/records?limit=100" >/dev/null; then
+    python3 -c "
+import json
+for r in json.load(open('$work/api.out')).get('items', []):
+    print(' ', r.get('name'), r.get('type'), json.dumps(r.get('records')))" >&2 || true
+  else
+    printf '  (not read: %s)\n' "$api_status" >&2
+  fi
+  printf "the node's answer:\n" >&2
+  dig_node "$1" A +additional >&2 || true
+  printf "the node's answer cache under the name:\n" >&2
+  if api GET "/nodes/$node_id/dns/cache?suffix=$1&limit=10" >/dev/null; then
+    head -c 4000 "$work/api.out" >&2
+  fi
+  printf "\nthe resolver's counters:\n" >&2
+  if node_status >/dev/null; then
+    python3 -c "import json; print(json.load(open('$work/recursion.json'))['counters'])" >&2 || true
+  fi
+}
 
 authority_saw() {
   on authority
@@ -375,8 +406,12 @@ recursion() {
 
   # E41: NSDNAME and NSIP on the delegation the resolver followed.
   rpz_setup
+  local failed_before=$rows_failed
   row rec.rpz.nsdname "NSDNAME ns.case.quirk.example.test blocks a name of its zone" within 30 blocked_by other.case.quirk.example.test
+  ((rows_failed == failed_before)) || rpz_evidence other.case.quirk.example.test
+  failed_before=$rows_failed
   row rec.rpz.nsip "NSIP 203.0.113.14/32 blocks a name of the zone it serves" within 30 blocked_by other.tc.quirk.example.test
+  ((rows_failed == failed_before)) || rpz_evidence other.tc.quirk.example.test
   row rec.rpz.pass "a name whose delegation no trigger names still resolves" not_blocked www.wild.example.test
 
   # WP10.3: QNAME minimization and the denial cache (E35).
