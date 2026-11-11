@@ -565,8 +565,12 @@ mod tests {
             .expect("marker")
             .expect("some");
         format::write_marker(&copy.join("store"), &marker).expect("marker");
+        // A work directory under a parent of its own: a check that copied the store would
+        // create the parent, and its clean-up removes only the work directory itself.
+        let elsewhere = dir.join("not-in-place");
         let options = Options {
             disposable: true,
+            work_dir: Some(elsewhere.join("work")),
             ..options()
         };
         // The store was written at format 1; the binary of format 1 finds it current.
@@ -578,6 +582,10 @@ mod tests {
             .await
             .expect("the check finishes");
         assert_eq!(report.verdict, Verdict::Current, "{report:?}");
+        assert!(
+            !elsewhere.exists(),
+            "the check copied the store instead of running in place"
+        );
         running.shutdown().await.expect("shutdown");
         drop(running);
         std::fs::remove_dir_all(&dir).expect("clean up");

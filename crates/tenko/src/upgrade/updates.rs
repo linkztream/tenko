@@ -1719,9 +1719,15 @@ mod tests {
             .await
             .expect("fetched");
         assert!(updates.source_has_answered().await);
-        assert!(
-            updates.check().await.is_err(),
-            "the code and the detail of the failure are kept"
+        let error = updates
+            .check()
+            .await
+            .expect_err("nothing listens on port 9");
+        assert_eq!(error.code, "update.fetch_failed");
+        assert_eq!(
+            updates.check_state().last_error.as_deref(),
+            Some("update.fetch_failed"),
+            "the code of the failure is kept for the status"
         );
     }
 
@@ -1768,6 +1774,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "every block with its status and its refused install, read top to bottom"
+    )]
     async fn the_policy_and_the_deployment_block_installs() {
         let store = Arc::new(MemStore::default());
         let ctx = admin();
@@ -1823,14 +1833,19 @@ mod tests {
             status.install.pull_command.as_deref(),
             Some("docker pull ghcr.io/linkztream/tenko:0.2.0")
         );
+        assert_install_blocked(&container, &ctx, "container").await;
 
-        for (env, block) in [
+        // Each block the status shows also refuses the install, with the reason the install
+        // answers: for a platform without a release file the install finds no file for it
+        // (`no_asset`), which the status reports as the unsupported platform.
+        for (env, block, refused) in [
             (
                 Environment {
                     layout: false,
                     ..environment("0.1.0")
                 },
                 InstallBlock::LayoutMissing,
+                "layout_missing",
             ),
             (
                 Environment {
@@ -1838,6 +1853,7 @@ mod tests {
                     ..environment("0.1.0")
                 },
                 InstallBlock::Unsupervised,
+                "unsupervised",
             ),
             (
                 Environment {
@@ -1845,11 +1861,13 @@ mod tests {
                     ..environment("0.1.0")
                 },
                 InstallBlock::UnsupportedPlatform,
+                "no_asset",
             ),
         ] {
             let updates = service_with(&store, env, UpdateInstall::Ui, true, section());
             let status = updates.status_now().await.expect("status");
             assert_eq!(status.install.from_source_blocked, Some(block));
+            assert_install_blocked(&updates, &ctx, refused).await;
         }
 
         let air_gapped = service_with(
@@ -1870,6 +1888,35 @@ mod tests {
         );
         let error = air_gapped.check_now(&ctx).await.expect_err("air-gapped");
         assert_eq!(error.code, "update.check_off");
+        assert_install_blocked(&air_gapped, &ctx, "air_gapped").await;
+        // None of the refused installs started a job.
+        let jobs = store
+            .read(ReadConsistency::Local)
+            .await
+            .expect("view")
+            .scan_typed(
+                &tenko_jobs::tables::JOBS,
+                tenko_store::KeyRange::all(),
+                100,
+                false,
+            )
+            .expect("jobs")
+            .len();
+        assert_eq!(jobs, 0, "a refused install started a job");
+    }
+
+    /// Asserts that an install of 0.2.0 from the source is refused with `reason`.
+    async fn assert_install_blocked(updates: &Updates, ctx: &RequestCtx, reason: &str) {
+        let error = updates
+            .install(ctx, request("0.2.0", None))
+            .await
+            .expect_err(reason);
+        assert_eq!(error.code, "update.install_blocked", "{reason}: {error:?}");
+        assert_eq!(
+            error.params.get("reason").map(String::as_str),
+            Some(reason),
+            "{error:?}"
+        );
     }
 
     #[tokio::test]

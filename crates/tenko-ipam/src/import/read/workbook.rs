@@ -740,6 +740,24 @@ mod tests {
         ReadLimits::default()
     }
 
+    /// Asserts that `result` is the refusal [`ReadError::Malformed`] whose message holds `part`.
+    fn assert_malformed<T>(result: Result<T, ReadError>, part: &str) {
+        let error = result.err().expect("the file is refused");
+        assert!(
+            matches!(&error, ReadError::Malformed(m) if m.contains(part)),
+            "{error:?}"
+        );
+    }
+
+    /// Asserts that `result` is the refusal [`ReadError::TooLarge`] whose message holds `part`.
+    fn assert_too_large<T>(result: Result<T, ReadError>, part: &str) {
+        let error = result.err().expect("the file is refused");
+        assert!(
+            matches!(&error, ReadError::TooLarge(m) if m.contains(part)),
+            "{error:?}"
+        );
+    }
+
     fn texts(sheet: &Sheet) -> Vec<Vec<String>> {
         sheet
             .rows
@@ -988,9 +1006,9 @@ mod tests {
     }
 
     /// A cell reference whose column has more letters than a sheet has columns overflows the
-    /// arithmetic of `calamine`'s reference parser: a panic where overflow is checked, a
-    /// wrapped position otherwise. Either way the file is refused or bounded, and nothing
-    /// escapes the reader.
+    /// arithmetic of `calamine`'s reference parser: a panic where overflow is checked (the
+    /// reader turns it into a damaged workbook), a wrapped position otherwise (a column
+    /// beyond `max_columns`). The file is refused either way and nothing escapes the reader.
     #[test]
     fn an_overlong_cell_reference_is_refused_without_a_panic() {
         let bytes = xlsx_with_sheet(&sheet_xml(None, &[("A1", "1"), ("ZZZZZZZZZZZZ1", "2")]));
@@ -998,11 +1016,12 @@ mod tests {
             read_workbook("r.xlsx", &bytes, SourceFormat::Xlsx, &limits())
         })
         .expect("no panic leaves the reader");
-        match result {
-            Err(ReadError::Malformed(_) | ReadError::TooLarge(_)) => {}
-            Ok(file) => assert!(file.sheets[0].width() <= limits().max_columns),
-            Err(other) => panic!("unexpected {other:?}"),
-        }
+        let error = result.expect_err("the file is refused, not read");
+        assert!(
+            matches!(&error, ReadError::Malformed(m) if m == "the workbook structure is damaged")
+                || matches!(&error, ReadError::TooLarge(m) if m.contains("max_columns")),
+            "{error:?}"
+        );
     }
 
     #[test]
@@ -1063,12 +1082,12 @@ mod tests {
         let bytes = xlsx_with_sheet(&sheet_xml(None, &[("B3", "1")]));
         let file = read_workbook("t.xlsx", &bytes, SourceFormat::Xlsx, &tight).unwrap();
         assert_eq!(file.sheets[0].cell(2, 1), &Cell::number("1"));
-        for reference in ["B4", "C3"] {
+        for (reference, limit) in [("B4", "max_rows"), ("C3", "max_columns")] {
             let bytes = xlsx_with_sheet(&sheet_xml(None, &[(reference, "1")]));
-            assert!(matches!(
+            assert_too_large(
                 read_workbook("t.xlsx", &bytes, SourceFormat::Xlsx, &tight),
-                Err(ReadError::TooLarge(_))
-            ));
+                limit,
+            );
         }
     }
 
@@ -1102,46 +1121,47 @@ mod tests {
 
     #[test]
     fn damaged_workbooks_are_malformed() {
-        for format in [SourceFormat::Xlsx, SourceFormat::Ods, SourceFormat::Xls] {
+        for (format, message) in [
+            (SourceFormat::Xlsx, "not a valid zip archive"),
+            (SourceFormat::Ods, "ods workbooks are not read"),
+            (SourceFormat::Xls, "xls workbooks are not read"),
+        ] {
             // Not a zip, not an OLE file.
-            assert!(matches!(
+            assert_malformed(
                 read_workbook("x", b"definitely not a workbook", format, &limits()),
-                Err(ReadError::Malformed(_))
-            ));
-            assert!(matches!(
-                read_workbook("x", b"", format, &limits()),
-                Err(ReadError::Malformed(_))
-            ));
+                message,
+            );
+            assert_malformed(read_workbook("x", b"", format, &limits()), message);
         }
         // A zip prefix with its directory cut off.
         let whole = zip(&[("a.txt", b"hello")]);
         let cut = &whole[..whole.len() - 30];
-        assert!(matches!(
+        assert_malformed(
             read_workbook("x.xlsx", cut, SourceFormat::Xlsx, &limits()),
-            Err(ReadError::Malformed(_))
-        ));
+            "not a valid zip archive",
+        );
         // A valid zip that holds no workbook.
-        assert!(matches!(
+        assert_malformed(
             read_workbook("x.xlsx", &whole, SourceFormat::Xlsx, &limits()),
-            Err(ReadError::Malformed(_))
-        ));
+            "xlsx workbook cannot be read",
+        );
         // An OLE signature followed by garbage.
         let mut ole = vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
         ole.extend_from_slice(&[0x55; 600]);
-        assert!(matches!(
+        assert_malformed(
             read_workbook("x.xls", &ole, SourceFormat::Xls, &limits()),
-            Err(ReadError::Malformed(_))
-        ));
+            "xls workbooks are not read",
+        );
     }
 
     #[test]
     fn truncated_xlsx_is_malformed() {
         let bytes = xlsx_with_all_kinds();
         let half = &bytes[..bytes.len() / 2];
-        assert!(matches!(
+        assert_malformed(
             read_workbook("x.xlsx", half, SourceFormat::Xlsx, &limits()),
-            Err(ReadError::Malformed(_))
-        ));
+            "not a valid zip archive",
+        );
     }
 
     #[test]
@@ -1156,26 +1176,17 @@ mod tests {
             .nth(1)
             .unwrap();
         bytes[position + 2] = 0x7F;
-        assert!(matches!(
-            read_directory(&bytes, &limits()),
-            Err(ReadError::Malformed(_))
-        ));
+        assert_malformed(read_directory(&bytes, &limits()), "not a valid zip archive");
         // A directory size larger than the file.
         let mut bytes = zip(&[("a.txt", b"hello")]);
         let eocd = bytes.len() - 22;
         bytes[eocd + 12..eocd + 16].copy_from_slice(&0x00FF_0000u32.to_le_bytes());
-        assert!(matches!(
-            read_directory(&bytes, &limits()),
-            Err(ReadError::Malformed(_))
-        ));
+        assert_malformed(read_directory(&bytes, &limits()), "not a valid zip archive");
         // A name that runs past the directory.
         let mut bytes = zip(&[("a.txt", b"hello")]);
         let entry = bytes.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
         bytes[entry + 28..entry + 30].copy_from_slice(&0x4000u16.to_le_bytes());
-        assert!(matches!(
-            read_directory(&bytes, &limits()),
-            Err(ReadError::Malformed(_))
-        ));
+        assert_malformed(read_directory(&bytes, &limits()), "not a valid zip archive");
     }
 
     #[test]
@@ -1197,27 +1208,27 @@ mod tests {
         };
         assert_eq!(read_directory(&bytes, &fits).unwrap().entries.len(), 3);
         // The guard runs before the bytes reach the workbook parser.
-        let error = read_workbook("bomb.xlsx", &bytes, SourceFormat::Xlsx, &tiny).unwrap_err();
-        assert!(matches!(error, ReadError::TooLarge(_)));
+        assert_too_large(
+            read_workbook("bomb.xlsx", &bytes, SourceFormat::Xlsx, &tiny),
+            "max_uncompressed",
+        );
         // An ods workbook is refused before its sizes matter.
-        let error = read_workbook("bomb.ods", &bytes, SourceFormat::Ods, &tiny).unwrap_err();
-        assert!(matches!(error, ReadError::Malformed(_)));
+        assert_malformed(
+            read_workbook("bomb.ods", &bytes, SourceFormat::Ods, &tiny),
+            "ods workbooks are not read",
+        );
     }
 
     #[test]
     fn zip64_sentinels_are_refused() {
         // A declared uncompressed size of 0xFFFFFFFF.
         let bytes = zip_declaring(&[("a.xml", b"x", 0xFFFF_FFFF)]);
-        let error = read_directory(&bytes, &limits()).err().unwrap();
-        assert!(matches!(error, ReadError::TooLarge(_)), "{error:?}");
+        assert_too_large(read_directory(&bytes, &limits()), "zip64");
         // Sentinel in the end record.
         let mut bytes = zip(&[("a.xml", b"x")]);
         let eocd = bytes.len() - 22;
         bytes[eocd + 16..eocd + 20].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
-        assert!(matches!(
-            read_directory(&bytes, &limits()),
-            Err(ReadError::TooLarge(_))
-        ));
+        assert_too_large(read_directory(&bytes, &limits()), "zip64");
         // A zip64 locator before the end record.
         let mut bytes = zip(&[("a.xml", b"x")]);
         let eocd = bytes.len() - 22;
@@ -1225,10 +1236,7 @@ mod tests {
         with_locator.extend_from_slice(b"PK\x06\x07");
         with_locator.extend_from_slice(&[0; 16]);
         with_locator.extend_from_slice(&bytes.split_off(eocd));
-        assert!(matches!(
-            read_directory(&with_locator, &limits()),
-            Err(ReadError::TooLarge(_))
-        ));
+        assert_too_large(read_directory(&with_locator, &limits()), "zip64");
     }
 
     #[test]
@@ -1448,6 +1456,30 @@ mod tests {
         let bytes = workbook.save_to_buffer().unwrap();
         let error = read_workbook("b.xlsx", &bytes, SourceFormat::Xlsx, &tight).unwrap_err();
         assert!(matches!(&error, ReadError::TooLarge(m) if m.contains("max_text_bytes")));
+
+        // Nothing of a value over the budget is kept: the charge comes before the cell is
+        // built or stored, so the sheet under construction holds only what was paid for.
+        let narrow = ReadLimits {
+            max_text_bytes: 10,
+            ..limits()
+        };
+        let mut budget = Budget::new(&narrow);
+        let mut cells = SheetCells::new(&narrow);
+        let paid = "p".repeat(10);
+        cells
+            .insert(0, 0, &DataRef::SharedString(&paid), &mut budget)
+            .unwrap();
+        assert_eq!(cells.cells.len(), 1);
+        let refused = "r".repeat(11);
+        for value in [DataRef::SharedString(&refused), DataRef::SharedString(" ")] {
+            let error = cells.insert(1, 0, &value, &mut budget).unwrap_err();
+            assert!(
+                matches!(&error, ReadError::TooLarge(m) if m.contains("max_text_bytes")),
+                "{error:?}"
+            );
+        }
+        assert_eq!(cells.cells.len(), 1, "a refused value was kept");
+        assert_eq!(cells.last_row, Some(0));
     }
 
     /// The shared-strings table is loaded whole when the workbook is opened, before a cell
@@ -1475,5 +1507,31 @@ mod tests {
             ..limits()
         };
         assert!(read_workbook("s.xlsx", &bytes, SourceFormat::Xlsx, &roomy).is_ok());
+
+        // The charge comes before the workbook is opened. This package has no sheets and
+        // cannot be opened at all; its table declares a gigabyte, far beyond the budget. It
+        // is refused for the table, without the table being read (its data is six bytes).
+        let package = |declared: u32| {
+            zip_declaring(&[
+                ("[Content_Types].xml", b"<Types/>", 8),
+                ("xl/workbook.xml", b"<workbook/>", 11),
+                ("xl/sharedStrings.xml", b"<sst/>", declared),
+            ])
+        };
+        let wide = ReadLimits {
+            max_uncompressed: 1 << 40,
+            max_text_bytes: 3_000,
+            ..limits()
+        };
+        assert_too_large(
+            read_workbook("g.xlsx", &package(1_000_000_000), SourceFormat::Xlsx, &wide),
+            "max_text_bytes",
+        );
+        // With the table declared as small as it is, the same package gets as far as being
+        // opened, which fails: it is the declared size that is refused above.
+        assert_malformed(
+            read_workbook("g.xlsx", &package(6), SourceFormat::Xlsx, &wide),
+            "xlsx workbook cannot be read",
+        );
     }
 }

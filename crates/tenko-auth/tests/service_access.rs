@@ -1539,8 +1539,7 @@ async fn a_mirror_scope_cannot_be_requested_through_the_token_api() {
         .create_account_token(&lab.admin().await, account.id, &with_scopes(&[scope]))
         .await;
     let error = result.expect_err("the mirror scope is refused");
-    assert_eq!(error.code(), "auth.invalid_request");
-    assert!(error.to_string().contains("mirror"), "{error}");
+    assert_mirror_refusal(&error);
     lab.user("mona", Some(ADMIN_PASSWORD), &[RoleName::Admin])
         .await;
     let ctx = lab.sign_in("mona", ADMIN_PASSWORD).await;
@@ -1549,7 +1548,26 @@ async fn a_mirror_scope_cannot_be_requested_through_the_token_api() {
         .service
         .create_token_with(&ctx, &with_scopes(&[TokenScope::Metrics, scope]))
         .await;
-    assert!(result.is_err(), "refused beside another scope too");
+    assert_mirror_refusal(&result.expect_err("refused beside another scope too"));
+    // The same request without the mirror scope passes, so the scope alone was refused.
+    lab.env
+        .service
+        .create_token_with(&ctx, &with_scopes(&[TokenScope::Metrics]))
+        .await
+        .expect("the metrics scope alone");
+    // Nothing was minted behind the refusals: one token, the metrics one.
+    let tokens = lab.env.service.list_tokens(&ctx).await.expect("list");
+    assert_eq!(tokens.len(), 1, "{tokens:?}");
+}
+
+/// The refusal of a requested mirror scope: an invalid request naming the `scopes` field.
+fn assert_mirror_refusal(error: &AuthError) {
+    match error {
+        AuthError::Invalid { field, .. } => assert_eq!(*field, "scopes", "{error}"),
+        other => panic!("expected an invalid `scopes` field, got {other:?}"),
+    }
+    assert_eq!(error.code(), "auth.invalid_request");
+    assert!(error.to_string().contains("mirror"), "{error}");
 }
 
 #[tokio::test]

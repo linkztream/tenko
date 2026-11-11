@@ -34,7 +34,7 @@ use tenko_cluster::{
 use tenko_core::{NodeId, RequestCtx, Role, SystemComponent};
 use tenko_jobs::{EngineConfig, JobEngine};
 use tenko_store::{
-    ReadConsistency, Store, StoreRole,
+    KeyRange, ReadConsistency, ReadViewExt as _, Store, StoreRole,
     raft::{RaftStore, RaftStoreConfig, SnapshotPolicy},
     testing::{ClusterFixture, ConformanceConfig},
 };
@@ -675,14 +675,22 @@ async fn the_raft_service_refuses_probes_and_foreign_controllers() {
         .controller_identity(&other_vault, &system())
         .await
         .expect("foreign controller certificate");
-    let foreign = PeerNetwork::new(NodeId(1), PeerTimings::default());
-    foreign.set_tls(
-        tenko_cluster::mtls::client_config(other_registry.ca().root_der(), chain, &key)
-            .expect("config"),
-    );
-    assert!(
-        foreign.channel(&lab.first.addr.to_string()).await.is_err(),
-        "a foreign CA is refused"
+    // The foreign client trusts this installation's CA, so the client accepts the server:
+    // what refuses the connection is the server's check of the client certificate. In TLS
+    // 1.3 the server's refusal can arrive with the first call after the handshake; either
+    // way no Raft code answers, which only a call that reached the service would carry.
+    let refused = raft_vote_refusal(
+        &lab,
+        NodeId(1),
+        chain,
+        &key,
+        lab.first.addr,
+        "a controller certificate of another installation",
+    )
+    .await;
+    assert_eq!(
+        refused, None,
+        "the foreign certificate must fail the TLS handshake, not reach the Raft service"
     );
     lab.stop().await;
 }
@@ -991,6 +999,40 @@ async fn key_transfer_forwarded_changes_and_step_down() {
         .await
         .expect_err("a second transfer with the same token");
     assert_eq!(code_of(&again), Some("vault.kek.transfer.used"));
+    // Audited once, for the transfer that happened: the node, its enrollment token and the
+    // generation identifiers, never the sealed material.
+    let leader = lab.leader().await;
+    let view = leader
+        .store
+        .read(ReadConsistency::Linearizable)
+        .await
+        .expect("the leader reads");
+    let transfers: Vec<_> = view
+        .scan_typed(&tenko_store::tables::AUDIT, KeyRange::all(), 100_000, false)
+        .expect("audit")
+        .into_iter()
+        .map(|(_, record, _)| record)
+        .filter(|record| record.draft.action.as_str() == "vault.kek.transfer")
+        .collect();
+    drop(view);
+    assert_eq!(transfers.len(), 1, "{transfers:?}");
+    let record = &transfers[0];
+    let context = &record.draft.details.context;
+    let field = |name: &str| context.get(name).map(String::as_str);
+    assert_eq!(field("purpose"), Some("join"));
+    assert_eq!(field("generations"), Some("kek-test-1"));
+    assert_eq!(field("node"), Some(node.to_string().as_str()));
+    assert_eq!(field("enrollment"), Some(token.to_string().as_str()));
+    assert_eq!(
+        record.draft.objects,
+        vec![tenko_core::ObjectRef::node(node)],
+        "the record names the controller that received the keys"
+    );
+    assert_eq!(
+        context.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["enrollment", "generations", "node", "purpose"],
+        "nothing but the identifiers"
+    );
 
     // Removal asked of a follower runs on the leader; the removed controller's
     // certificates are revoked.

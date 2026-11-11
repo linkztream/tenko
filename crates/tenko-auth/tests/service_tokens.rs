@@ -15,7 +15,7 @@ use tenko_auth::{
         UserCreate, UserInfo, UserUpdate, WebAuthnLoginFinish, WebAuthnLoginStart,
         WebAuthnRegisterFinish, WebAuthnRegisterStart, types::SecretString,
     },
-    settings::{Profile, SettingsPatch, TokenMaxLifetime},
+    settings::{MAX_TOKEN_DAYS, Profile, SettingsPatch, TokenMaxLifetime},
     testing::{
         SoftAttestation, SoftAuthenticator, SoftKeyAlg, TestEnv,
         env::{ADMIN, ADMIN_PASSWORD, ORIGIN},
@@ -205,6 +205,20 @@ async fn audit_records(env: &TestEnv) -> Vec<AuditRecord> {
         .into_iter()
         .map(|(_, record, _)| record)
         .collect()
+}
+
+/// How many audit records with `action` the store holds.
+async fn audited(env: &TestEnv, action: &str) -> usize {
+    audit_records(env)
+        .await
+        .iter()
+        .filter(|record| record.draft.action.as_str() == action)
+        .count()
+}
+
+/// Whether `result` is the refusal of a credential that does not authenticate.
+fn unauthenticated<T>(result: &Result<T, AuthError>) -> bool {
+    matches!(result, Err(AuthError::Unauthenticated))
 }
 
 async fn register(
@@ -496,21 +510,19 @@ async fn unknown_and_malformed_tokens_are_refused() {
         );
     }
     // A token is not a session cookie, nor the other way round.
-    assert!(
-        env.service
+    assert!(unauthenticated(
+        &env.service
             .authenticate_credentials(&Credentials::Session(real), env.now())
             .await
-            .is_err()
-    );
-    assert!(
-        env.service
+    ));
+    assert!(unauthenticated(
+        &env.service
             .authenticate_credentials(
                 &Credentials::Bearer(session.secret.expose().to_owned()),
                 env.now()
             )
             .await
-            .is_err()
-    );
+    ));
 }
 
 #[tokio::test]
@@ -653,19 +665,19 @@ async fn a_token_stays_revoked_when_its_owner_is_enabled_again() {
         .expect("token");
     let admin = env.session_ctx(&admin_session).await.expect("ctx");
     set_disabled(&env, &admin, owner.id, true).await;
-    assert!(
-        env.service
+    assert!(unauthenticated(
+        &env.service
             .authenticate_credentials(&bearer(&created), env.now())
             .await
-            .is_err()
-    );
+    ));
     set_disabled(&env, &admin, owner.id, false).await;
     // The session did not come back, and neither may the token that was issued before.
     assert!(
-        env.service
-            .authenticate_credentials(&bearer(&created), env.now())
-            .await
-            .is_err(),
+        unauthenticated(
+            &env.service
+                .authenticate_credentials(&bearer(&created), env.now())
+                .await
+        ),
         "a token issued before the account was disabled works again"
     );
 }
@@ -749,12 +761,11 @@ async fn an_administrator_revokes_another_users_token_but_a_non_administrator_ca
         .revoke_token(&admin, created.info.id)
         .await
         .expect("an administrator revokes it");
-    assert!(
-        env.service
+    assert!(unauthenticated(
+        &env.service
             .authenticate_credentials(&bearer(&created), env.now())
             .await
-            .is_err()
-    );
+    ));
     let viewer_ctx = env.session_ctx(&viewer_session).await.expect("ctx");
     let remaining = env.service.list_tokens(&viewer_ctx).await.expect("list");
     assert_eq!(remaining, []);
@@ -788,12 +799,11 @@ async fn an_owner_revokes_their_own_token() {
         .revoke_token(&ctx, created.info.id)
         .await
         .expect("revoke");
-    assert!(
-        env.service
+    assert!(unauthenticated(
+        &env.service
             .authenticate_credentials(&bearer(&created), env.now())
             .await
-            .is_err()
-    );
+    ));
 }
 
 // ---------------------------------------------------------------------------------------
@@ -867,13 +877,15 @@ async fn a_token_cannot_end_the_owners_sessions() {
         .await
         .expect("token");
     let token_ctx = env.ctx_for(&bearer(&created)).await.expect("ctx");
+    let revokes_before = audited(&env, "auth.session.revoke").await;
     let result = env
         .service
         .revoke_session(&token_ctx, session.info.session_id)
         .await;
-    assert!(
-        result.is_err(),
-        "a bearer token ended an interactive session of its owner"
+    assert_eq!(
+        result,
+        Err(AuthError::Unauthenticated),
+        "a bearer token is no interactive session: ending sessions is refused before the session is looked up"
     );
     env.service
         .authenticate_credentials(
@@ -882,6 +894,11 @@ async fn a_token_cannot_end_the_owners_sessions() {
         )
         .await
         .expect("the session survives");
+    assert_eq!(
+        audited(&env, "auth.session.revoke").await,
+        revokes_before,
+        "no revocation was recorded"
+    );
 }
 
 #[tokio::test]
@@ -894,15 +911,32 @@ async fn a_token_cannot_revoke_the_owners_other_tokens() {
         .await
         .expect("token");
     let token_ctx = env.ctx_for(&bearer(&acting)).await.expect("ctx");
+    let revokes_before = audited(&env, "auth.token.revoke").await;
     let result = env.service.revoke_token(&token_ctx, victim.info.id).await;
-    assert!(
-        result.is_err(),
-        "a bearer token revoked another token of its owner"
+    assert_eq!(
+        result,
+        Err(AuthError::NotFound { kind: "token" }),
+        "a bearer token sees no other token of its owner"
     );
     env.service
         .authenticate_credentials(&bearer(&victim), env.now())
         .await
         .expect("the other token still works");
+    let owner_ctx = env.session_ctx(&session).await.expect("ctx");
+    assert_eq!(
+        env.service
+            .list_tokens(&owner_ctx)
+            .await
+            .expect("list")
+            .len(),
+        2,
+        "both tokens are still listed"
+    );
+    assert_eq!(
+        audited(&env, "auth.token.revoke").await,
+        revokes_before,
+        "no revocation was recorded"
+    );
 }
 
 #[tokio::test]
@@ -1161,28 +1195,47 @@ async fn tokens_are_listed_per_owner_only() {
 async fn a_token_always_expires_while_a_maximum_is_configured() {
     let (env, admin_session) = TestEnv::installed(Profile::Home).await;
     let admin = env.session_ctx(&admin_session).await.expect("ctx");
-    let outcome = env
-        .service
-        .update_security_settings(
-            &admin,
-            &SettingsPatch {
-                token_max_lifetime: Some(TokenMaxLifetime::Days(4_000_000_000)),
-                ..SettingsPatch::default()
-            },
-            None,
-        )
-        .await;
-    if outcome.is_err() {
-        // Refusing an absurd maximum is a correct way to keep the invariant.
-        return;
-    }
-    for requested in [None, Some(4_000_000_000_u32)] {
-        if let Ok(created) = make_token(&env, &admin_session, "far", requested).await {
-            assert!(
-                created.info.expires_at.is_some(),
-                "requested {requested:?}: the token never expires although TGL-05 sets a maximum"
-            );
+    let set_maximum = |days: u32| SettingsPatch {
+        token_max_lifetime: Some(TokenMaxLifetime::Days(days)),
+        ..SettingsPatch::default()
+    };
+    // A maximum the calendar cannot hold is refused, and the setting stays as it was.
+    for absurd in [MAX_TOKEN_DAYS + 1, 4_000_000_000] {
+        match env
+            .service
+            .update_security_settings(&admin, &set_maximum(absurd), None)
+            .await
+        {
+            Err(AuthError::Invalid { field, .. }) => assert_eq!(field, "token_max_days"),
+            other => panic!("a maximum of {absurd} days: {other:?}"),
         }
+        assert_eq!(env.service.settings().token_max_days, Some(365));
+    }
+    // The largest maximum that is accepted still makes every token expire: by default after
+    // the maximum, on request earlier, and never later.
+    env.service
+        .update_security_settings(&admin, &set_maximum(MAX_TOKEN_DAYS), None)
+        .await
+        .expect("the largest maximum");
+    assert_eq!(env.service.settings().token_max_days, Some(MAX_TOKEN_DAYS));
+    let by_default = make_token(&env, &admin_session, "far", None)
+        .await
+        .expect("a token with the default lifetime");
+    assert_eq!(by_default.info.expires_at, after(&env, MAX_TOKEN_DAYS));
+    let at_maximum = make_token(&env, &admin_session, "edge", Some(MAX_TOKEN_DAYS))
+        .await
+        .expect("the maximum itself");
+    assert_eq!(at_maximum.info.expires_at, after(&env, MAX_TOKEN_DAYS));
+    for beyond in [MAX_TOKEN_DAYS + 1, u32::MAX] {
+        assert_eq!(
+            make_token(&env, &admin_session, "beyond", Some(beyond))
+                .await
+                .expect_err("beyond the maximum"),
+            AuthError::TokenLifetime {
+                max_days: u64::from(MAX_TOKEN_DAYS)
+            },
+            "{beyond}"
+        );
     }
 }
 

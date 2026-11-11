@@ -345,17 +345,43 @@ mod tests {
 
     use super::*;
 
+    /// Every endpoint of the module table, each with a request its extractors accept (an
+    /// install names a version, an upload its query); the manifest goes without a body, so
+    /// the absent service answers before the manifest is read.
     #[tokio::test]
     async fn without_a_service_the_endpoints_answer_unavailable() {
-        for (method, path) in [
-            ("GET", "/api/v1/system/updates"),
-            ("GET", "/api/v1/system/updates/whats-new"),
-        ] {
-            let request = Request::builder()
-                .method(method)
-                .uri(path)
-                .body(Body::empty())
-                .expect("request");
+        let endpoints = [
+            ("GET", "/api/v1/system/updates", None),
+            ("POST", "/api/v1/system/updates/check", None),
+            ("PUT", "/api/v1/system/updates/manifest", None),
+            (
+                "POST",
+                "/api/v1/system/updates/install",
+                Some(r#"{"version":"0.2.0"}"#),
+            ),
+            (
+                "POST",
+                "/api/v1/system/updates/upload?version=0.2.0&backup=skip",
+                None,
+            ),
+            ("GET", "/api/v1/system/updates/whats-new", None),
+            ("POST", "/api/v1/system/updates/whats-new/seen", None),
+        ];
+        let documented = crate::openapi();
+        for (method, path, json) in endpoints {
+            let route = path.split('?').next().unwrap_or(path);
+            assert!(
+                documented.paths.paths.contains_key(route),
+                "{route} is an endpoint of the API"
+            );
+            let request = Request::builder().method(method).uri(path);
+            let request = match json {
+                Some(json) => request
+                    .header("content-type", "application/json")
+                    .body(Body::from(json)),
+                None => request.body(Body::empty()),
+            }
+            .expect("request");
             let response = crate::router().oneshot(request).await.expect("response");
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
             let body = to_bytes(response.into_body(), 64 * 1024)

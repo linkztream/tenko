@@ -566,8 +566,18 @@ mod tests {
         let (generation, id, back) = decode(&bytes).expect("decode");
         assert_eq!((generation, id.as_str()), (3, "plain-3-0011aabb"));
         assert_eq!(back.as_ref(), key.as_ref());
-        assert!(decode(&bytes[..bytes.len() - 1]).is_err());
-        assert!(decode(b"nope").is_err());
+        let malformed = VaultError::Malformed { what: "KEK file" };
+        assert_eq!(
+            decode(&bytes[..bytes.len() - 1]).err(),
+            Some(malformed.clone())
+        );
+        assert_eq!(decode(b"nope").err(), Some(malformed.clone()));
+        let mut other_version = bytes.to_vec();
+        other_version[MAGIC.len()] = VERSION + 1;
+        assert_eq!(decode(&other_version).err(), Some(malformed.clone()));
+        let mut long_key = bytes.to_vec();
+        long_key.push(0);
+        assert_eq!(decode(&long_key).err(), Some(malformed));
     }
 
     /// A stand-in for a sealing mechanism (DPAPI, `systemd-creds`) on every platform:
@@ -655,7 +665,17 @@ mod tests {
             matches!(error, VaultError::PlainRefused { .. }),
             "{error:?}"
         );
-        assert!(plain.clone().allowing_plain(true).create_next().is_ok());
+        assert!(
+            !dir.join("kek-000003.plain").exists(),
+            "nothing was written"
+        );
+        let allowed = plain
+            .clone()
+            .allowing_plain(true)
+            .create_next()
+            .expect("allowed on purpose");
+        assert!(allowed.id().starts_with("plain-3-"), "{}", allowed.id());
+        assert_eq!(allowed.protection(), KekProtection::PlainFile);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -703,6 +723,14 @@ mod tests {
             plain.import(&[transferred("dpapi-5-ee", 5)]),
             Err(VaultError::PlainRefused { .. })
         ));
+        assert!(
+            !dir.join("kek-000004.plain").exists(),
+            "nothing was written"
+        );
+        assert_eq!(
+            kek_dir.load(KekInit::Require).expect("load").ids().count(),
+            3
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -753,13 +781,30 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// A generation that cannot be read stops the whole load, also when a newer generation
+    /// could serve as the active one: a ring without it could not open the secrets it
+    /// sealed.
     #[test]
     fn a_corrupt_generation_stops_the_load() {
         let dir = temp_dir("dir-corrupt");
         let kek_dir = KekDir::new(&dir, Arc::new(PlainSealer));
         kek_dir.load(KekInit::CreateIfMissing).expect("create");
+        kek_dir.create_next().expect("a second generation");
         fs::write(dir.join("kek-000001.plain"), b"garbage").expect("write");
-        assert!(kek_dir.load(KekInit::Require).is_err());
+        assert_eq!(
+            kek_dir.load(KekInit::Require).err(),
+            Some(VaultError::Malformed { what: "KEK file" })
+        );
+        // A file whose content belongs to another generation number stops it too.
+        fs::copy(dir.join("kek-000002.plain"), dir.join("kek-000001.plain")).expect("copy");
+        assert!(
+            matches!(
+                kek_dir.load(KekInit::Require),
+                Err(VaultError::KekUnavailable { ref reason, .. }) if reason.contains("holds generation 2")
+            ),
+            "{:?}",
+            kek_dir.load(KekInit::Require).err()
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

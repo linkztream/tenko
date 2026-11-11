@@ -571,25 +571,30 @@ mod tests {
     fn damaged_zip_is_malformed() {
         let mut bytes = ZIP_MAGIC.to_vec();
         bytes.extend_from_slice(&[0x13; 200]);
-        assert!(matches!(
-            read("plan.xlsx", &bytes),
-            Err(ReadError::Malformed(_))
-        ));
+        let error = read("plan.xlsx", &bytes).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::Malformed(m) if m.contains("not a valid zip archive")),
+            "{error:?}"
+        );
         let xlsx = xlsx_bytes();
-        assert!(matches!(
-            read("plan.xlsx", &xlsx[..xlsx.len() - 40]),
-            Err(ReadError::Malformed(_))
-        ));
+        let error = read("plan.xlsx", &xlsx[..xlsx.len() - 40]).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::Malformed(m) if m.contains("not a valid zip archive")),
+            "{error:?}"
+        );
     }
 
+    /// The content decides: an OLE file reaches the xls branch whatever its name says, which
+    /// shows in the message of that branch (an ods or an xlsx file would give another).
     #[test]
     fn ole_files_are_read_as_xls() {
         let mut bytes = OLE_MAGIC.to_vec();
         bytes.extend_from_slice(&[0x42; 700]);
-        for name in ["plan.xls", "plan.csv", "plan"] {
+        for name in ["plan.xls", "plan.csv", "plan.xlsx", "plan.ods", "plan"] {
+            let error = read(name, &bytes).unwrap_err();
             assert!(
-                matches!(read(name, &bytes), Err(ReadError::Malformed(_))),
-                "{name}"
+                matches!(&error, ReadError::Malformed(m) if m.contains("xls workbooks are not read")),
+                "{name}: {error:?}"
             );
         }
     }
@@ -630,16 +635,18 @@ mod tests {
             max_uncompressed: 120_000,
             ..ReadLimits::default()
         };
-        assert!(matches!(
-            read_file("bomb.xlsx", &bytes, &roomy),
-            Err(ReadError::Malformed(_))
-        ));
+        let error = read_file("bomb.xlsx", &bytes, &roomy).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::Malformed(m) if m.contains("xlsx workbook cannot be read")),
+            "{error:?}"
+        );
         // zip64 sentinels are refused too.
         let zip64 = zip_declaring(&[("xl/workbook.xml", b"x", 0xFFFF_FFFF)]);
-        assert!(matches!(
-            read("big.xlsx", &zip64),
-            Err(ReadError::TooLarge(_))
-        ));
+        let error = read("big.xlsx", &zip64).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::TooLarge(m) if m.contains("zip64")),
+            "{error:?}"
+        );
     }
 
     #[test]
@@ -698,6 +705,30 @@ mod tests {
         .unwrap_err();
         assert!(
             matches!(&error, ReadError::TooLarge(m) if m.contains("max_cells")),
+            "{error}"
+        );
+
+        // The text shares its budget the same way: each file holds eight bytes of text, within
+        // the ten of `max_text_bytes`, and two of them together do not.
+        let text = ReadLimits {
+            max_text_bytes: 10,
+            ..ReadLimits::default()
+        };
+        let file = b"aaaa,bbbb\n".as_slice();
+        assert!(read_upload([("a.csv", file)], &text).is_ok());
+        assert!(
+            read_upload(
+                [("a.csv", file), ("b.csv", file)],
+                &ReadLimits {
+                    max_text_bytes: 16,
+                    ..ReadLimits::default()
+                }
+            )
+            .is_ok()
+        );
+        let error = read_upload([("a.csv", file), ("b.csv", file)], &text).unwrap_err();
+        assert!(
+            matches!(&error, ReadError::TooLarge(m) if m.contains("10 bytes of text (max_text_bytes)")),
             "{error}"
         );
     }

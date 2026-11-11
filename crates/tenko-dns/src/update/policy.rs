@@ -303,29 +303,39 @@ mod tests {
             check(&zone, find, standard, denied, &Signer::None),
             Err("no update access list allows the client, or one denies it")
         );
-        assert!(check(&zone, find, standard, other, &Signer::None).is_ok());
+        assert_eq!(check(&zone, find, standard, other, &Signer::None), Ok(()));
     }
 
-    /// TGL-09: the profile defaults of the signature.
+    /// TGL-09: the profile defaults of the signature, in both directions for every profile:
+    /// what each profile takes and what it refuses, with the reason of the refusal.
     #[test]
     fn the_profiles_decide_the_signature() {
+        const NONE_HOME: &str = "no access list allows updates of the zone (the Home profile allows no external updates)";
+        const NONE: &str = "no access list allows updates of the zone";
+        const NOT_ALLOWED: &str = "no update access list allows the client, or one denies it";
+        const NEEDS_KEY: &str = "the zone's updates need a TSIG key";
+        const HARDENED_UNSIGNED: &str =
+            "unsigned updates are refused (Hardened profile); sign with a TSIG key or GSS-TSIG";
+        const NOT_NAMED: &str = "the TSIG key is not named by the zone's update access lists";
+        const SECONDARY: &str = "the zone is a secondary zone; send updates to its primary";
+        use UpdateProfile::{Hardened, Home, Lab, Standard};
+        /// A zone, a profile, a client, a signer and the decision.
+        type Case<'a> = (
+            &'a Zone,
+            UpdateProfile,
+            IpAddr,
+            &'a Signer,
+            Result<(), Refusal>,
+        );
+
         let (signed, lan) = lists();
         let find = |id: AclId| [&signed, &lan].into_iter().find(|acl| acl.id == id);
         let client: IpAddr = "192.0.2.10".parse().expect("address");
         let outside: IpAddr = "198.51.100.10".parse().expect("address");
-        let key = name("update.example.test");
+        let key = Signer::Tsig(name("update.example.test"));
+        let other_key = Signer::Tsig(name("other.example.test"));
         let none = zone(UpdatePolicy::default());
-        for profile in [
-            UpdateProfile::Home,
-            UpdateProfile::Standard,
-            UpdateProfile::Hardened,
-            UpdateProfile::Lab,
-        ] {
-            assert!(
-                check(&none, find, profile, client, &Signer::Tsig(key.clone())).is_err(),
-                "none means nobody"
-            );
-        }
+        // `signed` names the key, `lan` holds the client's address.
         let both = zone(UpdatePolicy {
             allowed: vec![signed.id, lan.id],
             require_tsig: true,
@@ -333,32 +343,6 @@ mod tests {
             dhcp: None,
             kerberos: None,
         });
-        assert!(
-            check(
-                &both,
-                find,
-                UpdateProfile::Standard,
-                client,
-                &Signer::Tsig(key.clone())
-            )
-            .is_ok()
-        );
-        assert!(
-            check(
-                &both,
-                find,
-                UpdateProfile::Standard,
-                outside,
-                &Signer::Tsig(key.clone())
-            )
-            .is_ok()
-        );
-        assert!(check(&both, find, UpdateProfile::Standard, client, &Signer::None).is_err());
-        assert!(check(&both, find, UpdateProfile::Lab, client, &Signer::None).is_ok());
-        assert!(
-            check(&both, find, UpdateProfile::Lab, outside, &Signer::None).is_err(),
-            "outside the lists"
-        );
         let unsigned = zone(UpdatePolicy {
             allowed: vec![lan.id],
             require_tsig: false,
@@ -366,41 +350,76 @@ mod tests {
             dhcp: None,
             kerberos: None,
         });
-        assert!(check(&unsigned, find, UpdateProfile::Home, client, &Signer::None).is_ok());
-        assert!(
-            check(
-                &unsigned,
-                find,
-                UpdateProfile::Hardened,
-                client,
-                &Signer::None
-            )
-            .is_err()
-        );
-        let other = name("other.example.test");
-        assert!(
-            check(
-                &both,
-                find,
-                UpdateProfile::Hardened,
-                client,
-                &Signer::Tsig(other.clone())
-            )
-            .is_err(),
-            "a key the lists do not name"
-        );
         let mut secondary = both.clone();
         secondary.kind = ZoneKind::Secondary;
-        assert!(
-            check(
-                &secondary,
-                find,
-                UpdateProfile::Lab,
+
+        // The signature each profile requires, for a zone that asks for one and one that
+        // does not.
+        for (profile, with, without) in [
+            (Home, true, false),
+            (Standard, true, false),
+            (Hardened, true, true),
+            (Lab, false, false),
+        ] {
+            assert_eq!(require_tsig(&both, profile), with, "{profile:?}");
+            assert_eq!(require_tsig(&unsigned, profile), without, "{profile:?}");
+        }
+
+        let cases: [Case<'_>; 30] = [
+            // No access list: nobody, whatever the profile.
+            (&none, Home, client, &key, Err(NONE_HOME)),
+            (&none, Standard, client, &key, Err(NONE)),
+            (&none, Hardened, client, &key, Err(NONE)),
+            (&none, Lab, client, &Signer::None, Err(NONE)),
+            // A zone that requires TSIG.
+            (&both, Home, client, &key, Ok(())),
+            (&both, Home, client, &Signer::None, Err(NEEDS_KEY)),
+            (&both, Standard, client, &key, Ok(())),
+            (&both, Standard, outside, &key, Ok(())),
+            (&both, Standard, client, &Signer::None, Err(NEEDS_KEY)),
+            (&both, Standard, outside, &Signer::None, Err(NOT_ALLOWED)),
+            (&both, Standard, client, &other_key, Err(NOT_NAMED)),
+            (&both, Hardened, client, &key, Ok(())),
+            (
+                &both,
+                Hardened,
                 client,
-                &Signer::Tsig(key.clone())
-            )
-            .is_err()
-        );
+                &Signer::None,
+                Err(HARDENED_UNSIGNED),
+            ),
+            (&both, Hardened, client, &other_key, Err(NOT_NAMED)),
+            (&both, Lab, client, &Signer::None, Ok(())),
+            (&both, Lab, client, &key, Ok(())),
+            (&both, Lab, client, &other_key, Ok(())),
+            (&both, Lab, outside, &Signer::None, Err(NOT_ALLOWED)),
+            // A zone that switched TSIG off: Home, Standard and Lab follow it, Hardened not.
+            (&unsigned, Home, client, &Signer::None, Ok(())),
+            (&unsigned, Home, client, &key, Ok(())),
+            (&unsigned, Standard, client, &Signer::None, Ok(())),
+            (&unsigned, Standard, outside, &key, Err(NOT_ALLOWED)),
+            (
+                &unsigned,
+                Hardened,
+                client,
+                &Signer::None,
+                Err(HARDENED_UNSIGNED),
+            ),
+            (&unsigned, Hardened, client, &key, Err(NOT_NAMED)),
+            (&unsigned, Lab, client, &Signer::None, Ok(())),
+            (&unsigned, Lab, outside, &Signer::None, Err(NOT_ALLOWED)),
+            // A secondary zone takes no update under any profile.
+            (&secondary, Home, client, &key, Err(SECONDARY)),
+            (&secondary, Standard, client, &key, Err(SECONDARY)),
+            (&secondary, Hardened, client, &key, Err(SECONDARY)),
+            (&secondary, Lab, client, &key, Err(SECONDARY)),
+        ];
+        for (index, (zone, profile, from, signer, expected)) in cases.into_iter().enumerate() {
+            assert_eq!(
+                check(zone, find, profile, from, signer),
+                expected,
+                "case {index}: {profile:?} from {from}"
+            );
+        }
     }
 }
 
@@ -492,31 +511,37 @@ mod gss_tests {
         let pc01 = gss("pc01$@CORP.EXAMPLE.TEST");
         assert_eq!(check(&secure, find, std, inside, &pc01), Ok(()));
         let alice = gss("alice@CORP.EXAMPLE.TEST");
-        assert!(
-            check(&secure, find, std, inside, &alice).is_err(),
+        assert_eq!(
+            check(&secure, find, std, inside, &alice),
+            Err("no update access list allows the principal, or one denies it"),
             "the pattern"
         );
-        assert!(
-            check(&secure, find, std, outside, &pc01).is_err(),
+        assert_eq!(
+            check(&secure, find, std, outside, &pc01),
+            Err("no update access list allows the principal, or one denies it"),
             "the prefix"
         );
         let other = gss("pc01$@OTHER.EXAMPLE.TEST");
-        assert!(
-            check(&secure, find, std, inside, &other).is_err(),
+        assert_eq!(
+            check(&secure, find, std, inside, &other),
+            Err("the zone takes no GSS-TSIG updates from the principal's realm"),
             "the realm"
         );
-        assert!(
-            check(&secure, find, std, inside, &Signer::None).is_err(),
+        assert_eq!(
+            check(&secure, find, std, inside, &Signer::None),
+            Err("no update access list allows the client, or one denies it"),
             "unsigned"
         );
         let without = zone(None, vec![computers.id]);
-        assert!(
-            check(&without, find, std, inside, &pc01).is_err(),
+        assert_eq!(
+            check(&without, find, std, inside, &pc01),
+            Err("the zone takes no GSS-TSIG updates (it has no Kerberos settings)"),
             "no Kerberos settings"
         );
         let by_address = zone(kerberos, vec![lan.id]);
-        assert!(
-            check(&by_address, find, std, inside, &pc01).is_err(),
+        assert_eq!(
+            check(&by_address, find, std, inside, &pc01),
+            Err("the principal is not named by a Kerberos entry of the zone's update access lists"),
             "a prefix entry allows the address but names no principal"
         );
         assert_eq!(

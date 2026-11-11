@@ -901,12 +901,105 @@ fn the_kind_tables_cover_every_object_kind_once() {
     }
 }
 
+/// The fixture is read by the product's own scope rules ([`ScopeFilter::admits`]) the way the
+/// conventions of `Anchors` say: a rule without its subtree matches the first entry of a
+/// prefix chain or a site list only, so the order of the fixture decides what the matrix
+/// above checks. A fixture in another order, or a product that read the order differently,
+/// fails here.
 #[test]
 fn the_fixed_anchors_follow_the_documented_conventions() {
+    use tenko_core::AnchorMode;
+
     let anchors = FixedAnchors::new().0;
+    let only = |rule: ScopeRule| ScopeFilter::Only(vec![rule]);
+    let admits =
+        |rule: ScopeRule, anchors: &Anchors, mode: AnchorMode| only(rule).admits(anchors, mode);
     let p2 = &anchors[&ObjectRef::from(P2)];
-    assert_eq!(p2.prefixes, vec![vec![P2, P1]], "most specific first");
-    assert_eq!(p2.sites, [S2, S1], "own site first, then ancestors");
+    for mode in [AnchorMode::Any, AnchorMode::All] {
+        // The prefix itself first: P2 without its subtree covers P2, P1 without its subtree
+        // does not, P1 with its subtree does.
+        assert!(
+            admits(
+                ScopeRule::Prefix {
+                    id: P2,
+                    subtree: false
+                },
+                p2,
+                mode
+            ),
+            "{mode:?}: a prefix chain starts with the prefix itself"
+        );
+        assert!(
+            !admits(
+                ScopeRule::Prefix {
+                    id: P1,
+                    subtree: false
+                },
+                p2,
+                mode
+            ),
+            "{mode:?}: the parent is not first in the chain"
+        );
+        assert!(admits(
+            ScopeRule::Prefix {
+                id: P1,
+                subtree: true
+            },
+            p2,
+            mode
+        ));
+        // The object's own site first: S2 alone covers it, S1 alone does not.
+        assert!(
+            admits(
+                ScopeRule::Site {
+                    id: S2,
+                    subtree: false
+                },
+                p2,
+                mode
+            ),
+            "{mode:?}: a site list starts with the object's own site"
+        );
+        assert!(
+            !admits(
+                ScopeRule::Site {
+                    id: S1,
+                    subtree: false
+                },
+                p2,
+                mode
+            ),
+            "{mode:?}: the parent site is not first"
+        );
+        assert!(admits(
+            ScopeRule::Site {
+                id: S1,
+                subtree: true
+            },
+            p2,
+            mode
+        ));
+    }
+    // One chain per prefix of the host: a read needs one covered chain, a write all of them.
     let host = &anchors[&object(ObjectKind::Host, Slot::Straddling)];
-    assert_eq!(host.prefixes.len(), 2, "one chain per prefix of the host");
+    let in_p1 = ScopeRule::Prefix {
+        id: P1,
+        subtree: true,
+    };
+    assert!(admits(in_p1.clone(), host, AnchorMode::Any));
+    assert!(
+        !admits(in_p1.clone(), host, AnchorMode::All),
+        "the host's second chain (P3) is outside P1"
+    );
+    assert!(
+        ScopeFilter::Only(vec![
+            in_p1,
+            ScopeRule::Prefix {
+                id: P3,
+                subtree: false
+            }
+        ])
+        .admits(host, AnchorMode::All),
+        "every chain covered"
+    );
 }

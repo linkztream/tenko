@@ -31,7 +31,9 @@ use tenko_dns::{
     tsig::{self, Signer, TsigKey, Verifier},
     update::{
         UpdatePath, UpdateSettings, UpdateSink as _,
-        message::{CLASS_ANY, CLASS_IN, CLASS_NONE, TYPE_ANY, push_record, rcode, write_request},
+        message::{
+            CLASS_ANY, CLASS_IN, CLASS_NONE, TYPE_ANY, ede, push_record, rcode, write_request,
+        },
         policy::{ProfileCell, UpdateProfile},
     },
     wire::{self, MAX_MESSAGE_LEN},
@@ -404,11 +406,12 @@ fn now() -> u64 {
 }
 
 /// What came back: the RCODE, the TSIG error when the answer carries one, the extended
-/// error text.
+/// error's info code and text.
 #[derive(Debug)]
 struct Got {
     rcode: u16,
     tsig_error: Option<u16>,
+    ede: Option<u16>,
     text: Option<String>,
 }
 
@@ -417,6 +420,7 @@ fn read(answer: &[u8]) -> Got {
     assert!(header.qr);
     assert_eq!(header.opcode, 5);
     let tsig_error = tsig::find(answer).expect("tsig").map(|view| view.error);
+    let mut ede = None;
     let mut text = None;
     let mut pos = wire::questions_end(answer, header.qdcount).expect("zone");
     for _ in 0..header.arcount {
@@ -424,6 +428,7 @@ fn read(answer: &[u8]) -> Got {
         if record.rtype == wire::TYPE_OPT {
             for (code, value) in wire::options(record.data(answer)) {
                 if code == wire::OPTION_EXTENDED_ERROR && value.len() >= 2 {
+                    ede = Some(u16::from_be_bytes([value[0], value[1]]));
                     text = Some(String::from_utf8_lossy(&value[2..]).into_owned());
                 }
             }
@@ -433,6 +438,7 @@ fn read(answer: &[u8]) -> Got {
     Got {
         rcode: u16::from(header.rcode),
         tsig_error,
+        ede,
         text,
     }
 }
@@ -702,6 +708,16 @@ async fn the_key_and_the_access_lists_decide() {
     let got = lab.send(&add, "192.0.2.10", Some(&forged)).await;
     assert_eq!((got.rcode, got.tsig_error), (rcode::NOTAUTH, Some(16)));
     assert!(lab.rrset("new.example.test", Rtype::A).await.is_none());
+    // From an address no prefix entry of the lists holds, only the key entry of `updaters`
+    // can allow the update: signed with the key it is applied.
+    let got = lab.signed(&add, "198.51.100.7").await;
+    assert_eq!(got.rcode, 0, "the key entry allows the client: {got:?}");
+    assert_eq!(lab.served("new.example.test", Rtype::A), vec![A_9.to_vec()]);
+    let rrset = lab
+        .rrset("new.example.test", Rtype::A)
+        .await
+        .expect("applied");
+    assert_eq!(rrset.key.as_ref().map(DnsName::as_str), Some(KEY));
     let refusals = lab.refusals.0.lock().expect("refusals");
     assert!(
         refusals
@@ -828,6 +844,11 @@ async fn an_index_that_does_not_follow_answers_not_ready() {
         )
         .await;
     assert_eq!(got.rcode, rcode::SERVFAIL);
+    assert_eq!(got.ede, Some(ede::NOT_READY), "{got:?}");
+    assert_eq!(
+        got.text.as_deref(),
+        Some("the update is committed; the server does not answer from it yet")
+    );
     assert!(
         lab.rrset("new.example.test", Rtype::A).await.is_some(),
         "committed"
@@ -913,6 +934,12 @@ async fn concurrent_updates_of_one_zone_all_land() {
 #[tokio::test]
 async fn cname_rules_and_the_soa_are_kept() {
     let lab = lab().await;
+    let soa_before = lab
+        .rrset(ZONE, Rtype::SOA)
+        .await
+        .expect("soa")
+        .records()
+        .expect("records");
     // A CNAME at a name that holds data is ignored, data beside a CNAME too.
     let got = lab
         .signed(
@@ -932,6 +959,51 @@ async fn cname_rules_and_the_soa_are_kept() {
             .is_some()
     );
     assert!(lab.rrset("alias.example.test", Rtype::A).await.is_none());
+    // The SOA of the update is ignored: the zone keeps the SOA its settings write, with the
+    // serial one step on for the commit and nothing else changed.
+    let soa_after = lab
+        .rrset(ZONE, Rtype::SOA)
+        .await
+        .expect("soa")
+        .records()
+        .expect("records");
+    let renumbered = |record: &RecordData, to: u32| match record.clone() {
+        RecordData::Soa {
+            mname,
+            rname,
+            refresh,
+            retry,
+            expire,
+            minimum,
+            ..
+        } => RecordData::Soa {
+            mname,
+            rname,
+            serial: to,
+            refresh,
+            retry,
+            expire,
+            minimum,
+        },
+        other => panic!("not an SOA: {other:?}"),
+    };
+    let RecordData::Soa { serial: before, .. } = soa_before[0] else {
+        panic!("not an SOA: {soa_before:?}");
+    };
+    assert_eq!(soa_after, vec![renumbered(&soa_before[0], before + 1)]);
+    // An update that holds nothing but an SOA changes nothing at all.
+    let got = lab
+        .signed(&Msg::default().add(ZONE, 6, 60, &[0; 22]), "192.0.2.10")
+        .await;
+    assert_eq!(got.rcode, 0, "{got:?}");
+    assert_eq!(
+        lab.rrset(ZONE, Rtype::SOA)
+            .await
+            .expect("soa")
+            .records()
+            .expect("records"),
+        soa_after
+    );
 }
 
 /// DNS-11: the sink admits an UPDATE before it copies it. Over the node's bound or the

@@ -6,7 +6,7 @@ use std::{
     collections::BTreeMap,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -34,8 +34,8 @@ use tenko_auth::{
         types::SecretString,
     },
     settings::{
-        MfaRequirement, Profile, RevealPolicy, RevealStepUp, SessionLifetime, SettingsPatch,
-        TokenMaxLifetime,
+        MAX_SESSION_SECS, MfaRequirement, Profile, RevealPolicy, RevealStepUp, SessionLifetime,
+        SettingsPatch, TokenMaxLifetime,
     },
     testing::{
         SoftAttestation, SoftAuthenticator, SoftKeyAlg, TestEnv,
@@ -736,12 +736,12 @@ async fn an_administrator_password_reset_forces_a_change_and_ends_the_sessions()
         .await
         .expect("reset");
     assert!(reset.password_change_required);
-    assert!(
+    assert!(matches!(
         env.service
             .authenticate_credentials(&credentials(&old), env.now())
-            .await
-            .is_err()
-    );
+            .await,
+        Err(AuthError::Unauthenticated)
+    ));
     assert!(matches!(
         password_login(&env, "pelle", "481273").await,
         Err(AuthError::InvalidCredentials)
@@ -840,10 +840,12 @@ async fn disabling_a_user_ends_their_sessions_and_blocks_new_ones() {
     assert!(!enabled.disabled);
     login(&env, "dora", "481273").await;
     assert!(
-        env.service
-            .authenticate_credentials(&credentials(&first), env.now())
-            .await
-            .is_err(),
+        matches!(
+            env.service
+                .authenticate_credentials(&credentials(&first), env.now())
+                .await,
+            Err(AuthError::Unauthenticated)
+        ),
         "enabling does not revive an ended session"
     );
     let records = audit_of(&env, "auth.user.update").await;
@@ -1084,9 +1086,10 @@ async fn deleting_a_user_removes_their_sessions_tokens_credentials_and_seed() {
         password_login(&env, "carol", "481273").await,
         Err(AuthError::InvalidCredentials)
     ));
+    let gone = passkey_login(&env, &mut key).await;
     assert!(
-        passkey_login(&env, &mut key).await.is_err(),
-        "the passkey is gone too"
+        matches!(gone, Err(AuthError::InvalidCredentials)),
+        "the passkey is gone too: {gone:?}"
     );
     assert_eq!(
         env.service
@@ -1220,12 +1223,12 @@ async fn revoking_all_sessions_of_a_user_ends_each_of_them() {
         2
     );
     for ended in [&first, &second] {
-        assert!(
+        assert!(matches!(
             env.service
                 .authenticate_credentials(&credentials(ended), env.now())
-                .await
-                .is_err()
-        );
+                .await,
+            Err(AuthError::Unauthenticated)
+        ));
     }
     env.service
         .authenticate_credentials(&credentials(&session), env.now())
@@ -2337,20 +2340,55 @@ async fn every_settings_change_passes_while_the_vault_has_no_operator_secret() {
 // Concurrent requests
 // ---------------------------------------------------------------------------------------
 
-/// A store that holds every proposal at a gate until two are waiting, so that two requests
-/// read the same state before either of them writes. A request that is serialized behind
-/// the other one never reaches the gate together with it, so the wait is bounded.
+/// How long a proposal waits at the gate for the other request's proposal. The limit is no
+/// part of what the tests check: a proposal that reaches it means the race did not happen,
+/// and [`GatedStore::assert_raced`] fails the test.
+const GATE_LIMIT: Duration = Duration::from_secs(30);
+
+/// A store that holds the proposals of two requests at a gate until both are waiting, so
+/// that the two read the same state before either of them writes. Once they met, the gate
+/// opens for the rest of the requests' proposals. A request that the service serialized
+/// behind the other one never reaches the gate together with it: the wait ends at
+/// [`GATE_LIMIT`] and the test fails, because the race it names did not happen.
 struct GatedStore {
     inner: Arc<MemStore>,
     gate: Barrier,
     armed: AtomicBool,
+    /// Proposals that passed the gate together with another one.
+    met: AtomicUsize,
+    /// Proposals that waited at the gate alone until its time-out.
+    missed: AtomicUsize,
+}
+
+impl GatedStore {
+    /// Asserts that the two requests met at the gate: both proposals passed it together,
+    /// none waited alone.
+    fn assert_raced(&self) {
+        assert_eq!(
+            (
+                self.met.load(Ordering::SeqCst),
+                self.missed.load(Ordering::SeqCst)
+            ),
+            (2, 0),
+            "the two requests did not reach the store together: the race did not happen"
+        );
+    }
 }
 
 #[async_trait::async_trait]
 impl Store for GatedStore {
     async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
         if self.armed.load(Ordering::SeqCst) {
-            let _ = tokio::time::timeout(Duration::from_secs(1), self.gate.wait()).await;
+            match tokio::time::timeout(GATE_LIMIT, self.gate.wait()).await {
+                Ok(_) => {
+                    self.met.fetch_add(1, Ordering::SeqCst);
+                    // One race per arming: later proposals of the same requests pass.
+                    self.armed.store(false, Ordering::SeqCst);
+                }
+                Err(_) => {
+                    self.missed.fetch_add(1, Ordering::SeqCst);
+                }
+            }
         }
         self.inner.propose(batch).await
     }
@@ -2396,6 +2434,8 @@ async fn gated_service() -> (Arc<AuthService>, Arc<GatedStore>, RequestCtx) {
         inner: mem,
         gate: Barrier::new(2),
         armed: AtomicBool::new(false),
+        met: AtomicUsize::new(0),
+        missed: AtomicUsize::new(0),
     });
     let service = AuthService::new(store.clone(), vault, AuthConfig::default())
         .await
@@ -2466,6 +2506,7 @@ async fn two_concurrent_setups_complete_exactly_once() {
         service.complete_setup(&system, None, &second)
     );
     store.armed.store(false, Ordering::SeqCst);
+    store.assert_raced();
     assert_eq!([a.is_ok(), b.is_ok()].iter().filter(|ok| **ok).count(), 1);
     assert!(
         matches!(a, Err(AuthError::SetupClosed)) || matches!(b, Err(AuthError::SetupClosed)),
@@ -2515,6 +2556,7 @@ async fn remove_both_administrators_at_once(removal: Removal) -> usize {
     gated.store.armed.store(true, Ordering::SeqCst);
     let (first, second) = tokio::join!(remove(gated.admins[0].id), remove(gated.admins[1].id));
     gated.store.armed.store(false, Ordering::SeqCst);
+    gated.store.assert_raced();
     let removed = [first, second]
         .iter()
         .filter(|result| result.is_ok())
@@ -2568,6 +2610,7 @@ async fn concurrent_logins_of_one_account_both_succeed() {
     gated.store.armed.store(true, Ordering::SeqCst);
     let (first, second) = tokio::join!(login_admin(), login_admin());
     gated.store.armed.store(false, Ordering::SeqCst);
+    gated.store.assert_raced();
     for outcome in [first, second] {
         assert!(
             matches!(outcome, Ok(LoginOutcome::Session(_))),
@@ -2591,6 +2634,7 @@ async fn concurrent_creations_of_one_name_yield_exactly_one_user() {
     gated.store.armed.store(true, Ordering::SeqCst);
     let (first, second) = tokio::join!(create_dora(), create_dora());
     gated.store.armed.store(false, Ordering::SeqCst);
+    gated.store.assert_raced();
     let outcomes = [first, second];
     assert_eq!(outcomes.iter().filter(|result| result.is_ok()).count(), 1);
     assert!(
@@ -2634,6 +2678,7 @@ async fn concurrent_updates_with_the_same_revision_conflict() {
     gated.store.armed.store(true, Ordering::SeqCst);
     let (first, second) = tokio::join!(rename("One"), rename("Two"));
     gated.store.armed.store(false, Ordering::SeqCst);
+    gated.store.assert_raced();
     let outcomes = [first, second];
     assert_eq!(outcomes.iter().filter(|result| result.is_ok()).count(), 1);
     assert!(
@@ -2770,25 +2815,41 @@ async fn the_lab_profile_has_no_lockout_at_all() {
 async fn an_absurd_session_lifetime_is_refused_or_the_session_still_works() {
     let (env, session) = TestEnv::installed(Profile::Home).await;
     let admin = ctx(&env, &session).await;
-    let outcome = env
-        .service
-        .update_security_settings(
-            &admin,
-            &SettingsPatch {
-                session: Some(SessionLifetime {
-                    absolute_secs: 1_000_000_000_000,
-                    idle_secs: 1_000_000_000_000,
-                }),
-                ..SettingsPatch::default()
-            },
-            None,
-        )
-        .await;
-    if outcome.is_err() {
-        // Refusing an absurd lifetime is a correct way to keep the invariant.
-        return;
+    let lifetime = |secs: u64| SettingsPatch {
+        session: Some(SessionLifetime {
+            absolute_secs: secs,
+            idle_secs: secs,
+        }),
+        ..SettingsPatch::default()
+    };
+    let home = env.service.settings().session;
+    // Lifetimes beyond the limit, up to one the calendar cannot hold, are refused for the
+    // `session` field, and the setting stays as it was.
+    for absurd in [MAX_SESSION_SECS + 1, 1_000_000_000_000, u64::MAX] {
+        match env
+            .service
+            .update_security_settings(&admin, &lifetime(absurd), None)
+            .await
+        {
+            Err(AuthError::Invalid { field, .. }) => assert_eq!(field, "session", "{absurd}"),
+            other => panic!("a lifetime of {absurd} s: {other:?}"),
+        }
+        assert_eq!(env.service.settings().session, home, "{absurd}");
     }
+    // The longest lifetime that is accepted gives a session that works and ends when the
+    // setting says.
+    env.service
+        .update_security_settings(&admin, &lifetime(MAX_SESSION_SECS), None)
+        .await
+        .expect("the longest lifetime");
     let fresh = login(&env, ADMIN, ADMIN_PASSWORD).await;
+    assert_eq!(
+        Some(fresh.info.absolute_expires_at),
+        fresh
+            .info
+            .created_at
+            .checked_add(Duration::from_secs(MAX_SESSION_SECS)),
+    );
     env.service
         .authenticate_credentials(&credentials(&fresh), env.now())
         .await

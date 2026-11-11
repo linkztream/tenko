@@ -83,6 +83,40 @@ fn tcp_axfr(server: SocketAddr, zone: &str) -> Vec<u8> {
     answer
 }
 
+/// The first message of a TCP AXFR answer to a request signed with `key`.
+fn tcp_axfr_signed(
+    server: SocketAddr,
+    zone: &str,
+    key: &std::sync::Arc<tenko_dns::tsig::TsigKey>,
+) -> Vec<u8> {
+    let mut query = Vec::new();
+    wire::write_query(&mut query, 11, zone, TYPE_AXFR, None);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let mut signer = tenko_dns::tsig::Signer::request(std::sync::Arc::clone(key));
+    assert!(signer.sign(&mut query, now, 0, &[], wire::MAX_MESSAGE_LEN));
+    tcp_exchange(server, &query)
+}
+
+/// Sends `query` over TCP and reads the first message of the answer.
+fn tcp_exchange(server: SocketAddr, query: &[u8]) -> Vec<u8> {
+    let mut stream =
+        TcpStream::connect_timeout(&server, Duration::from_secs(10)).expect("connect over TCP");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("timeout");
+    let len = u16::try_from(query.len()).expect("length");
+    stream.write_all(&len.to_be_bytes()).expect("write");
+    stream.write_all(query).expect("write");
+    let mut prefix = [0u8; 2];
+    stream.read_exact(&mut prefix).expect("the answer's length");
+    let mut answer = vec![0u8; usize::from(u16::from_be_bytes(prefix))];
+    stream.read_exact(&mut answer).expect("the answer");
+    answer
+}
+
 struct Side {
     node: Node,
     server: Proc,
@@ -217,7 +251,61 @@ fn zones_transfer_between_two_nodes_with_tsig_notify_ixfr_and_catalogs() {
     let zone_id = zone["id"].as_str().expect("zone id").to_owned();
     add_a(&primary.api, &zone_id, "www.example.test", "192.0.2.10");
 
-    // Without the key, and for a zone nobody may transfer, AXFR is refused.
+    // A zone that names no transfer access list is refused even to a request signed with
+    // a key the node holds, and the refusal is audited with its reason; the same request
+    // for the zone with the list is answered, so the missing list alone decided. This is
+    // the first refusal from this client, so it is due for the audit (one a minute).
+    let key = tenko_dns::tsig::TsigKey::new(
+        &tenko_core::dns::DnsName::new(KEY).expect("key name"),
+        tenko_core::dns::TsigAlgorithm::HmacSha256,
+        &tenko_dns::zone::encoding::base64_decode(&secret).expect("base64 secret"),
+    );
+    let key = std::sync::Arc::new(key);
+    primary
+        .api
+        .post(
+            "/dns/zones",
+            &json!({
+                "name": "closed.test",
+                "kind": "primary",
+                "serial": "counter",
+                "soa": soa(3600, 600, 86_400),
+                "name_servers": ["ns1.example.test"],
+                "transfer": {"allow": [], "notify": [], "require_tsig": true},
+            }),
+        )
+        .expect(201);
+    assert_eq!(
+        rcode(&tcp_axfr_signed(primary.dns, "closed.test", &key)),
+        5,
+        "REFUSED for a zone without transfer access lists, signed or not"
+    );
+    assert_eq!(
+        rcode(&tcp_axfr_signed(primary.dns, "example.test", &key)),
+        0,
+        "the same signed request for a zone with the list is answered"
+    );
+    let mut refusal = Value::Null;
+    wait_until(Duration::from_secs(15), "the audited refusal", || {
+        let audited = primary
+            .api
+            .get("/audit?action=dns.zone.transfer_out&limit=100")
+            .expect(200);
+        if let Some(found) = audited["items"].as_array().and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["draft"]["details"]["context"]["zone"] == "closed.test")
+        }) {
+            refusal = found.clone();
+        }
+        !refusal.is_null()
+    });
+    let context = &refusal["draft"]["details"]["context"];
+    assert_eq!(context["code"], "no_access_list", "{refusal}");
+    assert_eq!(context["key"], KEY, "{refusal}");
+    assert_eq!(refusal["draft"]["outcome"]["kind"], "denied", "{refusal}");
+
+    // Without the key, and outside the zones, AXFR is refused.
     assert_eq!(
         rcode(&tcp_axfr(primary.dns, "example.test")),
         5,

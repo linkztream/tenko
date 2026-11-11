@@ -508,11 +508,62 @@ async fn the_checker_is_shareable_across_tasks() {
     }
 }
 
+/// The HTTP source serves the checker as its range source: against a range server on
+/// loopback it asks for the uppercase prefix with padding requested and the checker finds the
+/// password's count in the answer.
 #[cfg(feature = "online")]
-#[test]
-fn the_http_source_is_a_range_source() {
-    let source = tenko_auth::hibp::HttpRangeSource::new().expect("client");
-    let _checker = BreachChecker::new(BreachMode::Online, Some(Arc::new(source)), None);
+#[tokio::test]
+async fn the_http_source_is_a_range_source() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind the range server");
+    let port = listener.local_addr().expect("address").port();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("a request");
+        let mut head = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while !head.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = socket.read(&mut buffer).await.expect("read the request");
+            assert!(read > 0, "the request ended early");
+            head.extend_from_slice(&buffer[..read]);
+        }
+        let answer = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{RANGE_PASSWORD}",
+            RANGE_PASSWORD.len()
+        );
+        socket
+            .write_all(answer.as_bytes())
+            .await
+            .expect("write the answer");
+        String::from_utf8(head).expect("an ASCII request")
+    });
+    let source =
+        tenko_auth::hibp::HttpRangeSource::with_base_url(format!("http://127.0.0.1:{port}/range"))
+            .expect("client");
+    let checker = BreachChecker::new(BreachMode::Online, Some(Arc::new(source)), None);
+    assert_eq!(
+        checker.check(PASSWORD).await,
+        BreachOutcome::Breached {
+            count: Some(PASSWORD_COUNT)
+        }
+    );
+    let request = server.await.expect("the range server");
+    let lines: Vec<String> = request.lines().map(str::to_ascii_lowercase).collect();
+    assert_eq!(
+        request.lines().next(),
+        Some("GET /range/5BAA6 HTTP/1.1"),
+        "{request}"
+    );
+    assert!(
+        lines.iter().any(|line| line == "add-padding: true"),
+        "{request}"
+    );
+    assert!(
+        lines.iter().any(|line| line == "user-agent: tenko-ddi"),
+        "{request}"
+    );
 }
 
 // ---------------------------------------------------------------------------------------
