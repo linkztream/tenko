@@ -105,17 +105,25 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   findings: ["shell.nav.badge.", "shell.status.findings."],
 };
 
+/** The time zone of the unit tests; src/app/testing/host.ts holds the locale. */
+const TEST_TIME_ZONE = "UTC";
+
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const mock = mode === "mock" || env.VITE_TENKO_MOCK === "1";
   const testing = process.env.VITEST !== undefined;
+  // The unit tests run in one time zone on every host (docs/testing/rules.md): set here, before
+  // vitest starts its workers, which inherit it. The locale is fixed by the first setup file.
+  if (testing) process.env.TZ = TEST_TIME_ZONE;
 
   return {
     define: {
       // The switch index.tsx reads; replaced at build time, so production never has it.
       "import.meta.env.VITE_TENKO_MOCK": JSON.stringify(mock && command === "serve" ? "1" : ""),
-      // Under test only: lets a timing test widen its budget on a CI runner.
-      "import.meta.env.CI": JSON.stringify(testing ? (process.env.CI ?? "") : ""),
+      // A test has the same time budget on every host: the gate runs the unit tests without
+      // CI, push CI with it, and a test that read the switch got five times the budget on a
+      // hosted runner. Fixed under test to the value it had in CI, whatever the environment says.
+      "import.meta.env.CI": JSON.stringify(testing ? "1" : ""),
     },
     plugins: [
       // No hot-reload wrappers under test: vitest cannot resolve their runtime.
@@ -166,7 +174,8 @@ export default defineConfig(({ command, mode }) => {
       // Stylesheets are empty modules under test, except the shared one, which the dialog
       // test reads as text (`?raw`) to check its rules against the rendered panel.
       css: { include: [/app[/]styles[/]app[.]css/] },
-      setupFiles: ["src/app/testing/setup.ts"],
+      // host.ts first: it fixes the locale and checks the time zone before any module reads them.
+      setupFiles: ["src/app/testing/host.ts", "src/app/testing/setup.ts"],
       restoreMocks: true,
       // Solid and its libraries go through Vite (with the browser condition, the DOM build);
       // everything else loads in Node with Node's own conditions.
