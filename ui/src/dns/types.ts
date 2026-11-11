@@ -66,6 +66,9 @@ export type NameOwnerReleased = S["NameOwnerReleased"];
 export type OwnerSource = S["OwnerSource"];
 export type KerberosUpdate = S["KerberosUpdate"];
 export type ZoneFileDialect = S["ZoneFileDialect"];
+export type ClaimableName = S["ClaimableName"];
+export type ClaimHeldName = S["ClaimHeldName"];
+export type ClaimHeldReason = S["ClaimHeldReason"];
 
 /** One change of a batch; `take_over` replaces an RRset of another origin (sent only when true). */
 export type RecordChange = S["RecordChange"] & { take_over?: boolean };

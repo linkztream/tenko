@@ -87,19 +87,52 @@ function wireChange(change: RecordChange): RecordChange {
 // ---------------------------------------------------------------------------------
 // Zone files
 
+/** The claimable names of a Windows file: the operator's rule, the approval and the page of a preview. */
+export interface ClaimableInput {
+  /** Only names at or below one of these. */
+  under?: readonly string[];
+  /** Only addresses inside one of these prefixes. */
+  within?: readonly string[];
+  /** Never these names. */
+  except?: readonly string[];
+  /** The `claimable_digest` of the preview the person approved (an import only). */
+  approve?: string;
+  /** The `claimable_next` of the page before (a preview only). */
+  after?: string;
+  /** The size of a preview page. */
+  limit?: number;
+}
+
 export interface ImportInput {
   zoneFile: string;
   replace: boolean;
   /** The dialect of the file; RFC 1035 when absent (then not sent). */
   dialect?: ZoneFileDialect;
+  /** Sent only with the Windows dialect, and only when it holds something. */
+  claimable?: ClaimableInput;
 }
 
-/** The request body of an import: the dialect goes out only when it is not the default. */
+/** The claimable part of the body without the empty lists and fields; `undefined` when nothing is left. */
+function claimableBody(part: ClaimableInput | undefined): components["schemas"]["ZoneFileClaimable"] | undefined {
+  if (!part) return undefined;
+  const body: components["schemas"]["ZoneFileClaimable"] = {};
+  if (part.under?.length) body.under = [...part.under];
+  if (part.within?.length) body.within = [...part.within];
+  if (part.except?.length) body.except = [...part.except];
+  if (part.approve) body.approve = part.approve;
+  if (part.after) body.after = part.after;
+  if (part.limit !== undefined) body.limit = part.limit;
+  return Object.keys(body).length > 0 ? body : undefined;
+}
+
+/** The request body of an import: the dialect goes out only when it is not the default, the claimable part only with the Windows one. */
 function importBody(input: ImportInput) {
+  const claimable = input.dialect === "windows" ? claimableBody(input.claimable) : undefined;
   return {
     zone_file: input.zoneFile,
     replace: input.replace,
     ...(input.dialect && input.dialect !== "rfc1035" ? { dialect: input.dialect } : {}),
+    ...(claimable ? { claimable } : {}),
   };
 }
 

@@ -14,8 +14,9 @@ import { ErrorNotice, Notice } from "../components/Notice";
 import { PageHead } from "../components/PageHead";
 import { formatNumber, t, tDynamic } from "../i18n";
 import { JobStateChip } from "../jobs/StateChip";
-import { applyImport, getZone, importReportOf, previewImport, type ImportReport, type ZoneFileDialect } from "./api";
+import { applyImport, getZone, importReportOf, previewImport, type ClaimableInput, type ClaimableName, type ImportReport, type ZoneFileDialect } from "./api";
 import { DnsNav } from "./DnsNav";
+import { ClaimableSection, entriesOf, HeldBack, type RuleText, type Stale } from "./ImportClaimable";
 import { DnsProblem, unavailable } from "./Parts";
 import { dnsPaths } from "./paths";
 import "../import/import.css";
@@ -27,6 +28,9 @@ const DIALECTS: readonly ZoneFileDialect[] = ["rfc1035", "windows"];
 const FINAL = new Set(["succeeded", "failed", "canceled", "rolled_back"]);
 /** The largest zone file the browser reads into the request (the server has its own limit). */
 export const MAX_ZONE_FILE_BYTES = 64 * 1024 * 1024;
+
+/** The page of the claimable list that "Show more" reads: the largest the server answers. */
+const CLAIM_PAGE = 5000;
 
 export default function ImportWizard() {
   const params = useParams<{ id: string }>();
@@ -54,7 +58,23 @@ export default function ImportWizard() {
   const [final, setFinal] = createSignal<ImportReport | null>(null);
   const [failed, setFailed] = createSignal(false);
   const [over, setOver] = createSignal(false);
+  // The claimable names of a Windows file: the rule as typed, the rule the preview was made with
+  // (an import sends this one, with the digest of that preview), the pages of the listing read so
+  // far, the approval, and whether the listing or the approval went stale.
+  const [rule, setRule] = createSignal<RuleText>({ under: "", within: "", except: "" });
+  const [appliedRule, setAppliedRule] = createSignal<ClaimableInput>({});
+  const [claimNames, setClaimNames] = createSignal<ClaimableName[]>([]);
+  const [claimNext, setClaimNext] = createSignal<string | null>(null);
+  const [stale, setStale] = createSignal<Stale | null>(null);
+  const [approved, setApproved] = createSignal(false);
   let fileInput!: HTMLInputElement;
+
+  // The approval is for the digest of the preview the person looked at: any change of the file,
+  // the format, the scope or the rule takes it back.
+  createEffect(on([text, dialect, replace, rule], () => setApproved(false), { defer: true }));
+
+  const ruleOf = (): ClaimableInput => ({ under: entriesOf(rule().under), within: entriesOf(rule().within), except: entriesOf(rule().except) });
+  const ruleDirty = () => JSON.stringify(ruleOf()) !== JSON.stringify({ under: [], within: [], except: [], ...appliedRule() });
 
   const read = async (file: File | undefined) => {
     if (!file) return;
@@ -68,8 +88,40 @@ export default function ImportWizard() {
     setBusy(true);
     setError(undefined);
     try {
-      setPreview(await previewImport(id(), { zoneFile: text(), replace: replace(), dialect: dialect() }));
+      const claimable = ruleOf();
+      const report = await previewImport(id(), { zoneFile: text(), replace: replace(), dialect: dialect(), claimable });
+      setAppliedRule(claimable);
+      setClaimNames(report.claimable_names ?? []);
+      setClaimNext(report.claimable_next ?? null);
+      setStale(null);
+      setApproved(false);
+      setPreview(report);
       setStep("preview");
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** The next page of the listing; a page with another digest than the first one discards the list. */
+  const showMore = async () => {
+    const after = claimNext();
+    const first = preview();
+    if (!after || !first) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const page = await previewImport(id(), { zoneFile: text(), replace: replace(), dialect: dialect(), claimable: { ...appliedRule(), after, limit: CLAIM_PAGE } });
+      if ((page.claimable_digest ?? null) !== (first.claimable_digest ?? null)) {
+        setClaimNames([]);
+        setClaimNext(null);
+        setStale("list");
+        setApproved(false);
+      } else {
+        setClaimNames((names) => [...names, ...(page.claimable_names ?? [])]);
+        setClaimNext(page.claimable_next ?? null);
+      }
     } catch (err) {
       setError(err);
     } finally {
@@ -81,7 +133,9 @@ export default function ImportWizard() {
     setBusy(true);
     setError(undefined);
     try {
-      const answer = await applyImport(id(), { zoneFile: text(), replace: replace(), dialect: dialect() });
+      const digest = preview()?.claimable_digest;
+      const claimable: ClaimableInput = { ...appliedRule(), ...(approved() && digest ? { approve: digest } : {}) };
+      const answer = await applyImport(id(), { zoneFile: text(), replace: replace(), dialect: dialect(), claimable });
       if ("jobId" in answer) {
         setJobId(answer.jobId);
         setStep("apply");
@@ -91,6 +145,14 @@ export default function ImportWizard() {
       }
     } catch (err) {
       setError(err);
+      if (err instanceof ApiError && err.code === "dns.import.claimable_changed") {
+        // The file, the zone or its records give another set now: the preview is out of date.
+        setApproved(false);
+        setClaimNames([]);
+        setClaimNext(null);
+        setStale("approval");
+        setStep("preview");
+      }
     } finally {
       setBusy(false);
     }
@@ -127,6 +189,12 @@ export default function ImportWizard() {
     setJobId(null);
     setFailed(false);
     setError(undefined);
+    setRule({ under: "", within: "", except: "" });
+    setAppliedRule({});
+    setClaimNames([]);
+    setClaimNext(null);
+    setStale(null);
+    setApproved(false);
   };
 
   const zoneFileError = () => {
@@ -276,6 +344,22 @@ export default function ImportWizard() {
                   <h2 id="dns-import-preview">{t("dns.import.preview.title")}</h2>
                   <ReportFacts report={report()} />
                   <TypeCounts report={report()} />
+                  <Show when={dialect() === "windows"}>
+                    <ClaimableSection
+                      report={report()}
+                      names={claimNames()}
+                      next={claimNext()}
+                      stale={stale()}
+                      approved={approved()}
+                      onApprove={setApproved}
+                      rule={rule()}
+                      onRule={(field, value) => setRule((r) => ({ ...r, [field]: value }))}
+                      dirty={ruleDirty()}
+                      onPreview={() => void runPreview()}
+                      onMore={() => void showMore()}
+                      busy={busy()}
+                    />
+                  </Show>
                   <Losses report={report()} />
                   <div class="import-actions">
                     <button type="button" class="btn" data-testid="import-back" onClick={() => setStep("upload")}>
@@ -321,7 +405,8 @@ export default function ImportWizard() {
                   <Show when={final()}>
                     {(report) => (
                       <>
-                        <ReportFacts report={report()} />
+                        <ReportFacts report={report()} result />
+                        <HeldBack count={report().held_back ?? 0} names={report().held_back_names ?? []} />
                         <Show when={typeof report().serial === "number"}>
                           <p data-testid="import-serial" data-key={String(report().serial)}>
                             {t("dns.import.apply.serial", { serial: String(report().serial) })}
@@ -356,7 +441,7 @@ export default function ImportWizard() {
   );
 }
 
-function ReportFacts(props: { report: ImportReport }) {
+function ReportFacts(props: { report: ImportReport; /** The report of a finished import: it says how many names were made claimable. */ result?: boolean }) {
   const facts = createMemo(() => [
     { key: "added", value: props.report.added },
     { key: "replaced", value: props.report.replaced },
@@ -374,9 +459,9 @@ function ReportFacts(props: { report: ImportReport }) {
           )}
         </For>
       </div>
-      <Show when={(props.report.claimable ?? 0) > 0}>
+      <Show when={props.result && (props.report.claimable ?? 0) > 0}>
         <p data-testid="import-claimable" data-count={props.report.claimable}>
-          {t("dns.import.claimable", { count: props.report.claimable ?? 0 })}
+          {t("dns.import.result.claimable", { count: props.report.claimable ?? 0 })}
         </p>
       </Show>
     </>

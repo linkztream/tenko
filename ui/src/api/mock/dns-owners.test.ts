@@ -124,18 +124,146 @@ describe("the Kerberos settings of an update policy", () => {
 
 describe("the Windows dialect of an import", () => {
   const file = ["pc07 [AGE:36] 1200 IN A 192.0.2.77", "static 3600 IN A 192.0.2.78", "@ 0 IN WINS 192.0.2.10", ""].join("\n");
-  it("imports aged records as origin ad and loses WINS records", () => {
-    const report = importZoneFile(state, ctx, EX, { zone_file: file, dialect: "windows" }, true);
-    expect(report).toMatchObject({ added: 2, claimable: 1 });
+  const origin = (name: string) => (state.rrsets.get(EX) ?? []).find((s) => s.name === name)?.origin;
+  const windows = (zone_file: string, claimable?: Record<string, unknown>, write = false) =>
+    importZoneFile(state, ctx, EX, { zone_file, dialect: "windows", ...(claimable ? { claimable } : {}) }, write);
+
+  it("lists the aged names with a digest in a dry run and writes nothing", () => {
+    const report = windows(file);
+    expect(report).toMatchObject({ added: 2, claimable: 1, dry_run: true, held_back: 0 });
+    expect(report.claimable_digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(report.claimable_names).toEqual([{ name: "pc07.example.test", rtype: "A", line: 1, claimant: "PC07$", records: ["192.0.2.77"], more: 0 }]);
     expect(report.losses.map((l) => l.code)).toEqual(["dns.zonefile.wins"]);
-    const sets = state.rrsets.get(EX) ?? [];
-    expect(sets.find((s) => s.name === "pc07.example.test")?.origin).toBe("ad");
-    expect(sets.find((s) => s.name === "static.example.test")?.origin).toBe("manual");
+    expect(origin("pc07.example.test")).toBeUndefined();
+  });
+
+  it("imports the names static without the approval and holds them back as not approved", () => {
+    const report = windows(file, undefined, true);
+    expect(report).toMatchObject({ added: 2, claimable: 0, held_back: 1, held_back_names: [{ name: "pc07.example.test", rtype: "A", reason: "not_approved" }] });
+    expect(origin("pc07.example.test")).toBe("manual");
+    expect(origin("static.example.test")).toBe("manual");
+  });
+
+  it("makes the names claimable with the digest of the preview", () => {
+    const digest = windows(file).claimable_digest as string;
+    const report = windows(file, { approve: digest }, true);
+    expect(report).toMatchObject({ added: 2, claimable: 1, held_back: 0 });
+    expect(origin("pc07.example.test")).toBe("ad");
+    expect(origin("static.example.test")).toBe("manual");
+  });
+
+  it("refuses an approval of another file or rule with 409 and writes nothing", () => {
+    const digest = windows(file).claimable_digest as string;
+    for (const [text, rule] of [
+      [`${file}pc09 [AGE:3] 1200 IN A 192.0.2.79\n`, { approve: digest }],
+      [file, { approve: digest, except: ["pc07.example.test"] }],
+    ] as const) {
+      const err = refusal(() => windows(text, rule, true));
+      expect([err.status, err.code, err.params.digest]).toEqual([409, "dns.import.claimable_changed", digest]);
+    }
+    expect(origin("pc07.example.test")).toBeUndefined();
+  });
+
+  it("holds back the names the server never makes claimable, each with its reason", () => {
+    const text = [
+      "wpad [AGE:1] 1200 IN A 192.0.2.5",
+      "isatap [AGE:1] 1200 IN A 192.0.2.6",
+      "@ [AGE:1] 1200 IN A 192.0.2.7",
+      "_ldap [AGE:1] 1200 IN A 192.0.2.8",
+      "*.lab [AGE:1] 1200 IN A 192.0.2.9",
+      "a.b [AGE:1] 1200 IN A 192.0.2.10",
+      "srv [AGE:1] 1200 IN A 192.0.2.11",
+      "srv 3600 IN TXT \"x\"",
+      "mixed [AGE:1] 1200 IN A 192.0.2.12",
+      "mixed 3600 IN A 192.0.2.13",
+      "ns9 [AGE:1] 1200 IN A 192.0.2.14",
+      "@ 3600 IN NS ns9",
+      "mail [AGE:1] 1200 IN A 192.0.2.15",
+      "@ 3600 IN MX 10 mail",
+      "ok [AGE:1] 1200 IN A 192.0.2.16",
+      "off [AGE:0] 1200 IN A 192.0.2.17",
+      "",
+    ].join("\n");
+    const report = windows(text);
+    const held = Object.fromEntries((report.held_back_names ?? []).map((h) => [h.name, h.reason]));
+    expect(held).toEqual({
+      "wpad.example.test": "service_name",
+      "isatap.example.test": "service_name",
+      "example.test": "reserved",
+      "_ldap.example.test": "reserved",
+      "*.lab.example.test": "reserved",
+      "a.b.example.test": "not_a_host",
+      "srv.example.test": "other_data",
+      "mixed.example.test": "other_data",
+      "ns9.example.test": "name_server",
+      "mail.example.test": "service_target",
+    });
+    expect(report.held_back).toBe(10);
+    expect(report.claimable_names?.map((n) => n.name)).toEqual(["ok.example.test"]);
+  });
+
+  it("applies the rule: names under, addresses within, names never", () => {
+    const text = [
+      "ws01 [AGE:1] 1200 IN A 192.0.2.21",
+      "ws02 [AGE:1] 1200 IN A 198.51.100.5",
+      "ws03 [AGE:1] 1200 IN A 192.0.2.22",
+      "ws04 [AGE:1] 1200 IN A 192.0.2.23",
+      "",
+    ].join("\n");
+    const names = (r: ReturnType<typeof windows>) => r.claimable_names?.map((n) => n.name.split(".")[0]);
+    expect(names(windows(text, { within: ["192.0.2.0/24"] }))).toEqual(["ws01", "ws03", "ws04"]);
+    expect(names(windows(text, { except: ["ws03.example.test."] }))).toEqual(["ws01", "ws02", "ws04"]);
+    expect(names(windows(text, { under: ["lab.example.test"] }))).toEqual([]);
+    const ruled = windows(text, { within: ["192.0.2.0/24"], except: ["ws03.example.test"] });
+    expect(names(ruled)).toEqual(["ws01", "ws04"]);
+    expect(ruled.held_back_names?.map((h) => [h.name.split(".")[0], h.reason])).toEqual([
+      ["ws02", "rule"],
+      ["ws03", "rule"],
+    ]);
+    // The digest follows the rule: an approval made for another rule is refused.
+    expect(ruled.claimable_digest).not.toBe(windows(text).claimable_digest);
+  });
+
+  it("pages the listing with after and limit, and keeps the digest across pages", () => {
+    const text = Array.from({ length: 5 }, (_, i) => `h${i} [AGE:1] 1200 IN A 192.0.2.${100 + i}`).join("\n");
+    const first = windows(text, { limit: 2 });
+    expect(first.claimable).toBe(5);
+    expect(first.claimable_names?.map((n) => n.name)).toEqual(["h0.example.test", "h1.example.test"]);
+    expect(first.claimable_next).toBe("h1.example.test/A");
+    const second = windows(text, { limit: 2, after: first.claimable_next as string });
+    expect(second.claimable_names?.map((n) => n.name)).toEqual(["h2.example.test", "h3.example.test"]);
+    const last = windows(text, { limit: 2, after: second.claimable_next as string });
+    expect(last.claimable_names?.map((n) => n.name)).toEqual(["h4.example.test"]);
+    expect(last.claimable_next).toBeUndefined();
+    expect([second.claimable_digest, last.claimable_digest]).toEqual([first.claimable_digest, first.claimable_digest]);
+  });
+
+  it("treats a mark of 0 as a static record", () => {
+    const report = windows("off [AGE:0] 1200 IN A 192.0.2.17\n");
+    expect(report.claimable).toBe(0);
+    expect(report.held_back).toBe(0);
+  });
+
+  it("refuses a malformed claimable part, or one outside the Windows dialect, naming the field", () => {
+    const field = (claimable: Record<string, unknown>) => {
+      const err = refusal(() => windows(file, claimable));
+      expect([err.status, err.code]).toEqual([400, "dns.import.claimable_invalid"]);
+      return err.params.field;
+    };
+    expect(field({ within: ["not-a-prefix"] })).toBe("claimable.within");
+    expect(field({ under: ["bad name"] })).toBe("claimable.under");
+    expect(field({ limit: 0 })).toBe("claimable.limit");
+    expect(field({ limit: 5001 })).toBe("claimable.limit");
+    expect(field({ approve: "abc" })).toBe("claimable.approve");
+    expect(field({ after: "nothing/A" })).toBe("claimable.after");
+    const plain = refusal(() => importZoneFile(state, ctx, EX, { zone_file: file, claimable: { except: [] } }, false));
+    expect([plain.status, plain.code, plain.params.field]).toEqual([400, "dns.import.claimable_invalid", "claimable"]);
   });
 
   it("reads the same file as plain RFC 1035 and refuses an unknown dialect", () => {
     const plain = importZoneFile(state, ctx, EX, { zone_file: file }, false);
     expect(plain.claimable).toBe(0);
+    expect(plain).not.toHaveProperty("claimable_digest");
     expect(plain.losses.map((l) => l.code)).not.toContain("dns.zonefile.wins");
     expect(refusal(() => importZoneFile(state, ctx, EX, { zone_file: file, dialect: "bind" }, false)).code).toBe("sys.invalid_request");
   });

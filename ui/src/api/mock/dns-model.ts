@@ -12,6 +12,19 @@
 import type { components } from "../generated/schema";
 import type { ImportReport, NameOwner, OriginCount, RecordChange, TypeCount, Zone } from "../../dns/types";
 import { canonical, inZone, parseRecord, rrsetKey, sameRecord, validName } from "../../dns/model";
+import {
+  CLAIM_HELD_LISTED,
+  claimDigest,
+  claimPage,
+  claimPart,
+  planClaims,
+  type ClaimableName,
+  type ClaimContext,
+  type ClaimHeldName,
+  type ClaimPart,
+  type ClaimPlan,
+  type ClaimSet,
+} from "./dns-claimable";
 
 type S = components["schemas"];
 type RecordData = S["RecordData"];
@@ -706,7 +719,9 @@ interface FileRecord {
   type: string;
   ttl: number;
   data: RecordData;
-  /** The line had an aging mark (the Windows dialect): the RRset is claimable by its host. */
+  /** The line of the file where the record starts. */
+  line: number;
+  /** The line had an aging mark `[AGE:n]` with n above 0 (the Windows dialect): a candidate to be claimable by its host. */
   aged?: boolean;
 }
 
@@ -758,12 +773,13 @@ export function parseZoneFile(text: string, zone: string, dialect: S["ZoneFileDi
   for (const { line, text: raw } of logicalLines(text)) {
     const startsBlank = /^\s/.test(raw);
     const tokens = raw.trim().split(/\s+/);
-    // The Windows dialect: [AGE:n] (dnscmd writes [Aging:n]) marks a record a host registered itself.
+    // The Windows dialect: [AGE:n] marks a record a host registered itself. The server reads no other
+    // spelling, and a mark with n = 0 is a static record; the mark is dropped from the line either way.
     let aged = false;
     if (dialect === "windows") {
-      const mark = tokens.findIndex((tok) => /^\[AG(E|ING):\d+\]$/i.test(tok));
+      const mark = tokens.findIndex((tok) => /^\[AGE:\d+\]$/i.test(tok));
       if (mark >= 0) {
-        aged = true;
+        aged = Number((tokens[mark] as string).slice(5, -1)) > 0;
         tokens.splice(mark, 1);
       }
     }
@@ -825,22 +841,58 @@ export function parseZoneFile(text: string, zone: string, dialect: S["ZoneFileDi
         continue;
       }
       broken(line, `the data of the ${type} record is not valid`);
-    } else records.push({ name: owner, type, ttl, data: parsed.data, ...(aged ? { aged } : {}) });
+    } else records.push({ name: owner, type, ttl, line, data: parsed.data, ...(aged ? { aged } : {}) });
   }
   return { records, losses };
 }
 
-function groupFile(records: readonly FileRecord[]): Map<string, { name: string; type: string; ttl: number; records: RecordData[]; aged: boolean }> {
-  const sets = new Map<string, { name: string; type: string; ttl: number; records: RecordData[]; aged: boolean }>();
+interface FileSet extends ClaimSet {
+  ttl: number;
+}
+
+/** The RRsets of a file: `aged` when every record carries the mark, `mixed` when only some do. */
+function groupFile(records: readonly FileRecord[]): Map<string, FileSet> {
+  const sets = new Map<string, FileSet>();
+  const marks = new Map<string, { aged: number; plain: number }>();
   for (const r of records) {
     const key = rrsetKey({ scope: "default", name: r.name, type: r.type });
-    const set = sets.get(key) ?? { name: r.name, type: r.type, ttl: r.ttl, records: [], aged: false };
-    set.aged ||= r.aged === true;
+    const set = sets.get(key) ?? { name: r.name, type: r.type, ttl: r.ttl, line: r.line, records: [], aged: false, mixed: false };
+    const count = marks.get(key) ?? { aged: 0, plain: 0 };
+    if (r.aged) count.aged += 1;
+    else count.plain += 1;
+    marks.set(key, count);
+    set.aged = count.aged > 0 && count.plain === 0;
+    set.mixed = count.aged > 0 && count.plain > 0;
     if (!set.records.some((x) => sameRecord(x, r.data))) set.records.push(r.data);
     set.ttl = Math.min(set.ttl, r.ttl);
     sets.set(key, set);
   }
   return sets;
+}
+
+/** The context a Windows file's candidates are judged in: name servers, service targets, names with other data. */
+function claimContext(zone: DnsZone, fileSets: ReadonlyMap<string, FileSet>, before: readonly DnsRrSet[]): ClaimContext {
+  const nameServers = new Set<string>();
+  const serviceTargets = new Set<string>();
+  const otherData = new Set<string>();
+  const read = (sets: Iterable<{ name: string; type: string; records: RecordData[] }>, inFile: boolean) => {
+    for (const set of sets) {
+      if (set.type !== "A" && set.type !== "AAAA" && set.type !== "PTR") otherData.add(set.name);
+      for (const r of set.records) {
+        if (r.type === "NS") nameServers.add(r.host);
+        else if (inFile && r.type === "MX") serviceTargets.add(r.exchange);
+        else if (inFile && (r.type === "SRV" || r.type === "CNAME" || r.type === "DNAME")) serviceTargets.add(r.target);
+      }
+    }
+  };
+  read(fileSets.values(), true);
+  read(before, false);
+  return { zone: zone.name, nameServers, serviceTargets, otherData };
+}
+
+/** Held-back names in name order. */
+function sortHeld(held: ClaimHeldName[]): ClaimHeldName[] {
+  return held.sort((a, b) => compareNames(a.name, b.name) || (a.rtype < b.rtype ? -1 : a.rtype > b.rtype ? 1 : 0));
 }
 
 /** The report of an import, and with `write` the import itself. */
@@ -857,14 +909,36 @@ export function importZoneFile(
   if (body.dialect !== undefined && body.dialect !== null && body.dialect !== "rfc1035" && body.dialect !== "windows") {
     return fail(400, "sys.invalid_request", {}, "the dialect is not rfc1035 or windows");
   }
-  const { records, losses } = parseZoneFile(body.zone_file, zone.name, body.dialect === "windows" ? "windows" : "rfc1035");
+  const windows = body.dialect === "windows";
+  const part = claimPart(body.claimable, windows, (field) => fail(400, "dns.import.claimable_invalid", { field }));
+  const { records, losses } = parseZoneFile(body.zone_file, zone.name, windows ? "windows" : "rfc1035");
   const fileSets = groupFile(records);
   const before = setsOf(state, zone);
   const was = new Map(before.map((s) => [rrsetKey(s), s]));
+  // The candidates: aged RRsets that another writer does not already hold.
+  const ordered = [...fileSets.values()].sort((a, b) => compareNames(a.name, b.name) || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0));
+  const plan: ClaimPlan = windows
+    ? planClaims(
+        ordered.filter((s) => {
+          const old = was.get(rrsetKey({ scope: "default", name: s.name, type: s.type }));
+          return !old || old.origin === "manual";
+        }),
+        claimContext(zone, fileSets, before),
+        part.rule,
+      )
+    : { claimable: [], held: [], overflow: false };
+  const digest = windows && !plan.overflow ? claimDigest(zone.id, body.zone_file, plan.claimable) : null;
+  // An import that writes makes claimable only what its approval names; a dry run ignores it.
+  let approved = false;
+  if (write && part.approve !== undefined) {
+    if (plan.overflow) return fail(422, "dns.import.claimable_too_many", {});
+    if (part.approve !== digest) return fail(409, "dns.import.claimable_changed", { digest: part.approve });
+    approved = true;
+  }
+  const claimKeys = new Set(plan.claimable.map((c) => rrsetKey({ scope: "default", name: c.name, type: c.rtype })));
   let added = 0;
   let replaced = 0;
   let removed = 0;
-  let claimable = 0;
   const after = before.map((s) => ({ ...s }));
   for (const [key, set] of fileSets) {
     const old = was.get(key);
@@ -872,11 +946,11 @@ export function importZoneFile(
       losses.push({ line: 0, code: "dns.import.origin", detail: `${set.name} ${set.type} belongs to ${old.origin} and was kept` });
       continue;
     }
+    const origin = approved && claimKeys.has(key) ? "ad" : "manual";
     if (!old) added += 1;
     else if (JSON.stringify(old.records) !== JSON.stringify(set.records) || old.ttl !== set.ttl) replaced += 1;
-    else continue;
-    if (set.aged) claimable += 1;
-    const next: DnsRrSet = { scope: "default", name: set.name, type: set.type, ttl: set.ttl, records: set.records, origin: set.aged ? "ad" : "manual", key: null, updated: stamp(ctx) };
+    else if (old.origin === origin) continue;
+    const next: DnsRrSet = { scope: "default", name: set.name, type: set.type, ttl: set.ttl, records: set.records, origin, key: null, updated: stamp(ctx) };
     const index = after.findIndex((s) => rrsetKey(s) === key);
     if (index >= 0) after[index] = next;
     else after.push(next);
@@ -893,11 +967,44 @@ export function importZoneFile(
   const counts = new Map<string, number>();
   for (const r of records) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);
   const types: TypeCount[] = [...counts.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([rtype, n]) => ({ rtype, records: n }));
-  const report: ImportReport = { added, replaced, removed, claimable, losses, types, dry_run: !write, revision: null, serial: null };
+  const made = !write || approved ? plan.claimable : [];
+  const report: ImportReport = {
+    added,
+    replaced,
+    removed,
+    claimable: made.length,
+    losses,
+    types,
+    dry_run: !write,
+    revision: null,
+    serial: null,
+    ...(windows ? claimReport(plan, digest, made, write && !approved, part) : {}),
+  };
   if (!write) return report;
   state.rrsets.set(zone.id, kept.sort(compareSets));
   bump(state, ctx, zone, ctx.nextRevision());
   return { ...report, revision: zone.revision, serial: zone.soa_serial };
+}
+
+/**
+ * The claimable part of the report of a Windows import: the page of the listing, the digest and
+ * the held-back names. An import that writes without an approval holds every candidate back as
+ * `not_approved`.
+ */
+function claimReport(plan: ClaimPlan, digest: string | null, made: readonly ClaimableName[], notApproved: boolean, part: ClaimPart): Partial<ImportReport> {
+  const held = sortHeld([
+    ...plan.held,
+    ...(notApproved ? plan.claimable.map((c): ClaimHeldName => ({ name: c.name, rtype: c.rtype, line: c.line, reason: "not_approved" })) : []),
+  ]);
+  const page = claimPage(made, part.after, part.limit, (field) => fail(400, "dns.import.claimable_invalid", { field }));
+  return {
+    ...(digest ? { claimable_digest: digest } : {}),
+    claimable_names: page.names,
+    ...(page.next ? { claimable_next: page.next } : {}),
+    ...(plan.overflow ? { claimable_overflow: true } : {}),
+    held_back: held.length,
+    held_back_names: held.slice(0, CLAIM_HELD_LISTED),
+  };
 }
 
 function quoted(text: string): string {

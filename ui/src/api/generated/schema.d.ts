@@ -2734,7 +2734,7 @@ export interface paths {
         put?: never;
         /**
          * Import a zone file into a zone
-         * @description Scope: `dns.write`. `$ORIGIN` and `$TTL` are honored, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON).
+         * @description Scope: `dns.write`. `$ORIGIN` and `$TTL` are honored, `$GENERATE` is expanded, `$INCLUDE` is refused. With `dry_run=true` the file is read against the zone and the answer is the preview: records per type, the RRsets that would be added, replaced and removed, and the losses. Without it the preview runs first and then the import job (`dns.import`) starts; its steps write the RRsets in chunks and its final step's output is the report (JSON). In the `windows` dialect the preview also lists, a page at a time, the A, AAAA and PTR RRsets that would become claimable by the computer they name, with the digest that approves exactly that set, and the candidates that stay static with the reason. An import makes names claimable only with `claimable.approve` set to that digest; without it every candidate is imported static.
          */
         post: operations["import_dns_zone_file"];
         delete?: never;
@@ -7578,6 +7578,46 @@ export interface components {
         ChooseRoot: {
             /** @description The source whose candidate is the root. */
             source: components["schemas"]["RootSource"];
+        };
+        /** @description One candidate of a Windows file that stays static, and why. */
+        ClaimHeldName: {
+            /**
+             * Format: int32
+             * @description The line of the file where the RRset starts.
+             */
+            line: number;
+            /** @description The owner name. */
+            name: components["schemas"]["DnsName"];
+            /** @description Why it stays static. */
+            reason: components["schemas"]["ClaimHeldReason"];
+            /** @description The type. */
+            rtype: components["schemas"]["Rtype"];
+        };
+        /**
+         * @description Why a candidate of a Windows file stays static.
+         * @enum {string}
+         */
+        ClaimHeldReason: "reserved" | "service_name" | "name_server" | "tenko_node" | "service_target" | "not_a_host" | "other_data" | "rule" | "too_many" | "not_approved";
+        /** @description One RRset a Windows file makes claimable. */
+        ClaimableName: {
+            /** @description The computer account that may claim it (`PC01$`). */
+            claimant: string;
+            /**
+             * Format: int32
+             * @description The line of the file where the RRset starts.
+             */
+            line: number;
+            /**
+             * Format: int32
+             * @description Records not shown.
+             */
+            more: number;
+            /** @description The owner name. */
+            name: components["schemas"]["DnsName"];
+            /** @description The first four records (addresses, or the targets of a PTR RRset). */
+            records: string[];
+            /** @description A, AAAA or PTR. */
+            rtype: components["schemas"]["Rtype"];
         };
         /**
          * @description A named match on requests (`dhcp.classes`, DHCP-03): it matches when any of its
@@ -25286,12 +25326,51 @@ export interface components {
             update?: components["schemas"]["DnsUpdatePolicy"] | null;
         };
         /**
+         * @description The claimable names of a Windows zone file: which candidates the operator takes, the
+         *     approval of the set a preview listed, and the page of that listing.
+         */
+        ZoneFileClaimable: {
+            /** @description The page of a dry run's listing: the `claimable_next` of the page before. */
+            after?: string | null;
+            /**
+             * @description The approval: the `claimable_digest` of the preview, made with the same file and
+             *     rule. An import that writes makes claimable exactly the set the preview listed, and
+             *     is refused with `dns.import.claimable_changed` when the file, the zone or its
+             *     records give another set now. A dry run ignores it.
+             */
+            approve?: string | null;
+            /**
+             * @description Never these names (the owner of an RRset, or a target of a PTR RRset); at most
+             *     10,000.
+             */
+            except?: components["schemas"]["DnsName"][];
+            /**
+             * Format: int32
+             * @description The size of a dry run's page: 1,000 when absent, at most 5,000.
+             */
+            limit?: number | null;
+            /**
+             * @description Only names at or below one of these (the owner of an A or AAAA RRset, every target
+             *     of a PTR RRset); at most 256.
+             */
+            under?: components["schemas"]["DnsName"][];
+            /**
+             * @description Only addresses inside one of these prefixes (every address of an A or AAAA RRset,
+             *     the address a PTR RRset's name stands for); at most 256.
+             * @example [
+             *       "192.0.2.0/24"
+             *     ]
+             */
+            within?: string[];
+        };
+        /**
          * @description The dialect of a zone file.
          * @enum {string}
          */
         ZoneFileDialect: "rfc1035" | "windows";
         /** @description `POST /dns/zones/{id}/records/import`: a zone file (RFC 1035 master format). */
         ZoneFileImport: {
+            claimable?: components["schemas"]["ZoneFileClaimable"] | null;
             dialect?: components["schemas"]["ZoneFileDialect"] | null;
             /** @description Replace the scope's records (`true`) or merge into them (`false`). */
             replace?: boolean;
@@ -25308,12 +25387,31 @@ export interface components {
             added: number;
             /**
              * Format: int64
-             * @description Of the RRsets added or replaced, those imported with the origin `ad` (a Windows
-             *     file's records with an aging mark): claimable by the host they name.
+             * @description The RRsets of a Windows file that become claimable by the host they name (origin
+             *     `ad`, no owner): in a dry run, those an approval of `claimable_digest` makes
+             *     claimable.
              */
             claimable?: number;
+            /**
+             * @description The digest that approves the claimable set (a dry run in the `windows` dialect):
+             *     send it as `claimable.approve` with the same file and rule.
+             */
+            claimable_digest?: string | null;
+            /** @description A page of the claimable RRsets in name order. */
+            claimable_names?: components["schemas"]["ClaimableName"][];
+            /** @description The cursor of the next page (`claimable.after`). */
+            claimable_next?: string | null;
+            /** @description The file has more than 250,000 candidates: none can become claimable. */
+            claimable_overflow?: boolean;
             /** @description Nothing was written. */
             dry_run: boolean;
+            /**
+             * Format: int64
+             * @description The candidates that stay static, every reason together.
+             */
+            held_back?: number;
+            /** @description The first 1,000 of them in name order, with the reason. */
+            held_back_names?: components["schemas"]["ClaimHeldName"][];
             /** @description What the import could not take. */
             losses: components["schemas"]["ImportLoss"][];
             /**
@@ -38783,7 +38881,7 @@ export interface operations {
                     "application/json": components["schemas"]["DnsJobStarted"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`), or the zone holds no records or lacks the scope (`dns.zone.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`), the zone holds no records or lacks the scope (`dns.zone.invalid`), or the claimable part is malformed or past its bounds, or given outside the `windows` dialect (`dns.import.claimable_invalid`, parameter `field`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -38828,6 +38926,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description The approved claimable set is not the one the file, the zone and its records give now (`dns.import.claimable_changed`, parameter `digest`): preview again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description The request is larger than 512 MiB (`sys.body_too_large`) */
             413: {
                 headers: {
@@ -38837,7 +38944,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The zone file does not parse, uses `$INCLUDE`, holds more than 10,000,000 records or makes more than 1,000,000 with `$GENERATE`, or would leave the zone with more than 10,000,000 RRsets (`dns.zonefile.invalid`, parameters `line` and `reason`) */
+            /** @description The zone file does not parse, uses `$INCLUDE`, holds more than 10,000,000 records or makes more than 1,000,000 with `$GENERATE`, or would leave the zone with more than 10,000,000 RRsets (`dns.zonefile.invalid`, parameters `line` and `reason`); or an approval of a file with more than 250,000 candidates (`dns.import.claimable_too_many`) */
             422: {
                 headers: {
                     [name: string]: unknown;

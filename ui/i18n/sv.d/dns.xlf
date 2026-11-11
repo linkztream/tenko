@@ -2695,8 +2695,120 @@
       <unit id="dns.import.dialect.windows_help">
         <segment><source>Records with an aging mark are imported as claimable by their host; static records stay manual. WINS records are not kept.</source><target>Poster med åldringsmarkering importeras så att värden de hör till kan ta över dem; statiska poster förblir manuella. WINS-poster behålls inte.</target></segment>
       </unit>
-      <unit id="dns.import.claimable">
-        <segment><source>{count, plural, one {# RRset is claimable by its host} other {# RRsets are claimable by their host}}</source><target>{count, plural, one {# RRset kan tas över av sin värd} other {# RRset kan tas över av sin värd}}</target></segment>
+      <unit id="dns.import.result.claimable">
+        <notes><note category="description">Result of a Windows file import: how many names were made claimable by the computers they name.</note></notes>
+        <segment><source>{count, plural, one {# name was made claimable by its computer} other {# names were made claimable by their computers}}</source><target>{count, plural, one {# namn kan nu tas över av sin dator} other {# namn kan nu tas över av sina datorer}}</target></segment>
+      </unit>
+      <unit id="dns.import.claim.title">
+        <notes><note category="description">Heading of the list of names a Windows file makes claimable, with their number.</note></notes>
+        <segment><source>{count, plural, one {# name becomes claimable} other {# names become claimable}}</source><target>{count, plural, one {# namn kan tas över av sin värd} other {# namn kan tas över av sin värd}}</target></segment>
+      </unit>
+      <unit id="dns.import.claim.intro">
+        <segment><source>These records carry an aging mark: a computer registered each one itself. Once you approve them, the computer named in the Computer account column may refresh its record.</source><target>Dessa poster har en åldringsmarkering: en dator har själv registrerat var och en. När du godkänner dem får datorn i kolumnen Datorkonto förnya sin post.</target></segment>
+      </unit>
+      <unit id="dns.import.claim.claimant">
+        <segment><source>Computer account</source><target>Datorkonto</target></segment>
+      </unit>
+      <unit id="dns.import.claim.records">
+        <segment><source>Records</source><target>Poster</target></segment>
+      </unit>
+      <unit id="dns.import.claim.more_records">
+        <segment><source>+{count} more</source><target>+{count} till</target></segment>
+      </unit>
+      <unit id="dns.import.claim.shown">
+        <segment><source>Showing {shown} of {total}</source><target>Visar {shown} av {total}</target></segment>
+      </unit>
+      <unit id="dns.import.claim.more">
+        <segment><source>Show more</source><target>Visa fler</target></segment>
+      </unit>
+      <unit id="dns.import.claim.stale">
+        <segment><source>The file or the zone changed while you read the list. Run the preview again.</source><target>Filen eller zonen ändrades medan du läste listan. Förhandsgranska igen.</target></segment>
+      </unit>
+      <unit id="dns.import.claim.overflow">
+        <segment><source>The file has more than 250,000 records with an aging mark. None of them can be imported so that its computer may claim it. Import the file in parts.</source><target>Filen har fler än 250 000 poster med åldringsmarkering. Ingen av dem kan importeras så att datorn kan ta över den. Importera filen i delar.</target></segment>
+      </unit>
+      <unit id="dns.import.rule.title">
+        <notes><note category="description">Summary of the collapsed advanced part where the operator limits which names become claimable.</note></notes>
+        <segment><source>Limit the names (advanced)</source><target>Begränsa namnen (avancerat)</target></segment>
+      </unit>
+      <unit id="dns.import.rule.help">
+        <segment><source>Names outside the rule stay static. Leave a field empty to set no limit of that kind.</source><target>Namn utanför regeln förblir statiska. Lämna ett fält tomt för att inte begränsa på det sättet.</target></segment>
+      </unit>
+      <unit id="dns.import.rule.under">
+        <segment><source>Only names under (one per line, or separated by commas)</source><target>Endast namn under (ett per rad, eller åtskilda med kommatecken)</target></segment>
+      </unit>
+      <unit id="dns.import.rule.within">
+        <segment><source>Only addresses inside these prefixes, for example 192.0.2.0/24</source><target>Endast adresser inom dessa prefix, till exempel 192.0.2.0/24</target></segment>
+      </unit>
+      <unit id="dns.import.rule.except">
+        <segment><source>Never make these names claimable</source><target>Låt aldrig dessa namn tas över</target></segment>
+      </unit>
+      <unit id="dns.import.rule.apply">
+        <segment><source>Preview again with this rule</source><target>Förhandsgranska igen med regeln</target></segment>
+      </unit>
+      <unit id="dns.import.rule.dirty">
+        <segment><source>The rule was changed. Preview again before you approve.</source><target>Regeln har ändrats. Förhandsgranska igen innan du godkänner.</target></segment>
+      </unit>
+      <unit id="dns.import.held.title">
+        <notes><note category="description">Heading of the list of names of a Windows file that are imported static, with their number.</note></notes>
+        <segment><source>{count, plural, one {# name stays static} other {# names stay static}}</source><target>{count, plural, one {# namn förblir statiskt} other {# namn förblir statiska}}</target></segment>
+      </unit>
+      <unit id="dns.import.held.reason">
+        <segment><source>Why</source><target>Varför</target></segment>
+      </unit>
+      <unit id="dns.import.held.more">
+        <segment><source>and {count} more</source><target>och {count} till</target></segment>
+      </unit>
+      <unit id="dns.import.held.reserved">
+        <segment><source>The apex, a locator name (a label starting with _) or a wildcard</source><target>Zonens topp, ett lokaliseringsnamn (en etikett som börjar med _) eller ett jokertecken</target></segment>
+      </unit>
+      <unit id="dns.import.held.service_name">
+        <segment><source>A name clients use to find a service (wpad, isatap)</source><target>Ett namn som klienter använder för att hitta en tjänst (wpad, isatap)</target></segment>
+      </unit>
+      <unit id="dns.import.held.name_server">
+        <segment><source>A name server of the zone</source><target>En namnserver i zonen</target></segment>
+      </unit>
+      <unit id="dns.import.held.tenko_node">
+        <segment><source>The host name of a Tenko node</source><target>Värdnamnet för en Tenko-nod</target></segment>
+      </unit>
+      <unit id="dns.import.held.service_target">
+        <segment><source>The target of an MX, SRV, CNAME or DNAME record in the file</source><target>Målet för en MX-, SRV-, CNAME- eller DNAME-post i filen</target></segment>
+      </unit>
+      <unit id="dns.import.held.not_a_host">
+        <segment><source>Not the name of one host: it is not directly below the zone, or a PTR record names different hosts</source><target>Inte namnet på en enskild värd: det ligger inte direkt under zonen, eller en PTR-post pekar på olika värdar</target></segment>
+      </unit>
+      <unit id="dns.import.held.other_data">
+        <segment><source>The name holds other records</source><target>Namnet har andra poster</target></segment>
+      </unit>
+      <unit id="dns.import.held.rule">
+        <segment><source>Outside the rule you set</source><target>Utanför regeln du angav</target></segment>
+      </unit>
+      <unit id="dns.import.held.too_many">
+        <segment><source>More names than one import can make claimable</source><target>Fler namn än en import kan låta datorerna ta över</target></segment>
+      </unit>
+      <unit id="dns.import.held.not_approved">
+        <segment><source>Not approved</source><target>Inte godkänt</target></segment>
+      </unit>
+      <unit id="dns.import.approve.label">
+        <segment><source>{count, plural, one {Make this name claimable by the computer it names} other {Make these # names claimable by the computers they name}}</source><target>{count, plural, one {Låt datorn som namnet tillhör ta över det} other {Låt datorerna som namnen tillhör ta över dessa # namn}}</target></segment>
+      </unit>
+      <unit id="dns.import.approve.help">
+        <segment><source>Without this, the records are imported static: their computers cannot refresh them until an administrator deletes the records and the computers register them anew.</source><target>Utan detta importeras posterna som statiska: deras datorer kan inte förnya dem förrän en administratör har tagit bort posterna och datorerna har registrerat dem på nytt.</target></segment>
+      </unit>
+      <unit id="dns.import.approve.none">
+        <segment><source>No name qualifies, so there is nothing to approve.</source><target>Inget namn uppfyller kraven, så det finns inget att godkänna.</target></segment>
+      </unit>
+      <unit id="dns.import.approve.whole">
+        <segment><source>Show the whole list before you approve it: the approval covers every name in it.</source><target>Visa hela listan innan du godkänner den: godkännandet gäller alla namn i den.</target></segment>
+      </unit>
+      <unit id="errors.dns.import.claimable_changed">
+        <segment><source>The file, the zone or its records changed since the preview, so your approval no longer fits. Run the preview again.</source><target>Filen, zonen eller dess poster har ändrats sedan förhandsgranskningen, så ditt godkännande gäller inte längre. Förhandsgranska igen.</target></segment>
+      </unit>
+      <unit id="errors.dns.import.claimable_too_many">
+        <segment><source>The file has more than 250,000 records with an aging mark, and none of them can be approved. Import the file in parts.</source><target>Filen har fler än 250 000 poster med åldringsmarkering, och ingen av dem kan godkännas. Importera filen i delar.</target></segment>
+      </unit>
+      <unit id="errors.dns.import.claimable_invalid">
+        <segment><source>The rule for the claimable names is not valid ({field}).</source><target>Regeln för namnen som kan tas över är inte giltig ({field}).</target></segment>
       </unit>
       <unit id="dns.loss.wins">
         <segment><source>WINS records are not kept.</source><target>WINS-poster behålls inte.</target></segment>

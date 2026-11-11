@@ -2695,8 +2695,120 @@
       <unit id="dns.import.dialect.windows_help">
         <segment><source>Records with an aging mark are imported as claimable by their host; static records stay manual. WINS records are not kept.</source></segment>
       </unit>
-      <unit id="dns.import.claimable">
-        <segment><source>{count, plural, one {# RRset is claimable by its host} other {# RRsets are claimable by their host}}</source></segment>
+      <unit id="dns.import.result.claimable">
+        <notes><note category="description">Result of a Windows file import: how many names were made claimable by the computers they name.</note></notes>
+        <segment><source>{count, plural, one {# name was made claimable by its computer} other {# names were made claimable by their computers}}</source></segment>
+      </unit>
+      <unit id="dns.import.claim.title">
+        <notes><note category="description">Heading of the list of names a Windows file makes claimable, with their number.</note></notes>
+        <segment><source>{count, plural, one {# name becomes claimable} other {# names become claimable}}</source></segment>
+      </unit>
+      <unit id="dns.import.claim.intro">
+        <segment><source>These records carry an aging mark: a computer registered each one itself. Once you approve them, the computer named in the Computer account column may refresh its record.</source></segment>
+      </unit>
+      <unit id="dns.import.claim.claimant">
+        <segment><source>Computer account</source></segment>
+      </unit>
+      <unit id="dns.import.claim.records">
+        <segment><source>Records</source></segment>
+      </unit>
+      <unit id="dns.import.claim.more_records">
+        <segment><source>+{count} more</source></segment>
+      </unit>
+      <unit id="dns.import.claim.shown">
+        <segment><source>Showing {shown} of {total}</source></segment>
+      </unit>
+      <unit id="dns.import.claim.more">
+        <segment><source>Show more</source></segment>
+      </unit>
+      <unit id="dns.import.claim.stale">
+        <segment><source>The file or the zone changed while you read the list. Run the preview again.</source></segment>
+      </unit>
+      <unit id="dns.import.claim.overflow">
+        <segment><source>The file has more than 250,000 records with an aging mark. None of them can be imported so that its computer may claim it. Import the file in parts.</source></segment>
+      </unit>
+      <unit id="dns.import.rule.title">
+        <notes><note category="description">Summary of the collapsed advanced part where the operator limits which names become claimable.</note></notes>
+        <segment><source>Limit the names (advanced)</source></segment>
+      </unit>
+      <unit id="dns.import.rule.help">
+        <segment><source>Names outside the rule stay static. Leave a field empty to set no limit of that kind.</source></segment>
+      </unit>
+      <unit id="dns.import.rule.under">
+        <segment><source>Only names under (one per line, or separated by commas)</source></segment>
+      </unit>
+      <unit id="dns.import.rule.within">
+        <segment><source>Only addresses inside these prefixes, for example 192.0.2.0/24</source></segment>
+      </unit>
+      <unit id="dns.import.rule.except">
+        <segment><source>Never make these names claimable</source></segment>
+      </unit>
+      <unit id="dns.import.rule.apply">
+        <segment><source>Preview again with this rule</source></segment>
+      </unit>
+      <unit id="dns.import.rule.dirty">
+        <segment><source>The rule was changed. Preview again before you approve.</source></segment>
+      </unit>
+      <unit id="dns.import.held.title">
+        <notes><note category="description">Heading of the list of names of a Windows file that are imported static, with their number.</note></notes>
+        <segment><source>{count, plural, one {# name stays static} other {# names stay static}}</source></segment>
+      </unit>
+      <unit id="dns.import.held.reason">
+        <segment><source>Why</source></segment>
+      </unit>
+      <unit id="dns.import.held.more">
+        <segment><source>and {count} more</source></segment>
+      </unit>
+      <unit id="dns.import.held.reserved">
+        <segment><source>The apex, a locator name (a label starting with _) or a wildcard</source></segment>
+      </unit>
+      <unit id="dns.import.held.service_name">
+        <segment><source>A name clients use to find a service (wpad, isatap)</source></segment>
+      </unit>
+      <unit id="dns.import.held.name_server">
+        <segment><source>A name server of the zone</source></segment>
+      </unit>
+      <unit id="dns.import.held.tenko_node">
+        <segment><source>The host name of a Tenko node</source></segment>
+      </unit>
+      <unit id="dns.import.held.service_target">
+        <segment><source>The target of an MX, SRV, CNAME or DNAME record in the file</source></segment>
+      </unit>
+      <unit id="dns.import.held.not_a_host">
+        <segment><source>Not the name of one host: it is not directly below the zone, or a PTR record names different hosts</source></segment>
+      </unit>
+      <unit id="dns.import.held.other_data">
+        <segment><source>The name holds other records</source></segment>
+      </unit>
+      <unit id="dns.import.held.rule">
+        <segment><source>Outside the rule you set</source></segment>
+      </unit>
+      <unit id="dns.import.held.too_many">
+        <segment><source>More names than one import can make claimable</source></segment>
+      </unit>
+      <unit id="dns.import.held.not_approved">
+        <segment><source>Not approved</source></segment>
+      </unit>
+      <unit id="dns.import.approve.label">
+        <segment><source>{count, plural, one {Make this name claimable by the computer it names} other {Make these # names claimable by the computers they name}}</source></segment>
+      </unit>
+      <unit id="dns.import.approve.help">
+        <segment><source>Without this, the records are imported static: their computers cannot refresh them until an administrator deletes the records and the computers register them anew.</source></segment>
+      </unit>
+      <unit id="dns.import.approve.none">
+        <segment><source>No name qualifies, so there is nothing to approve.</source></segment>
+      </unit>
+      <unit id="dns.import.approve.whole">
+        <segment><source>Show the whole list before you approve it: the approval covers every name in it.</source></segment>
+      </unit>
+      <unit id="errors.dns.import.claimable_changed">
+        <segment><source>The file, the zone or its records changed since the preview, so your approval no longer fits. Run the preview again.</source></segment>
+      </unit>
+      <unit id="errors.dns.import.claimable_too_many">
+        <segment><source>The file has more than 250,000 records with an aging mark, and none of them can be approved. Import the file in parts.</source></segment>
+      </unit>
+      <unit id="errors.dns.import.claimable_invalid">
+        <segment><source>The rule for the claimable names is not valid ({field}).</source></segment>
       </unit>
       <unit id="dns.loss.wins">
         <segment><source>WINS records are not kept.</source></segment>

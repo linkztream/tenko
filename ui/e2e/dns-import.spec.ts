@@ -1,7 +1,7 @@
 // WP4.5: the zone file import and export of the DNS area. Choose a zone file, preview what it
 // adds, replaces and removes with the records per type and the loss report, apply it as a job,
-// export the zone as a download and import that export again without a change; a file that does
-// not parse; Swedish.
+// export the zone as a download and import that export again without a change; a Windows export
+// whose aged names become claimable only with the approval; a file that does not parse; Swedish.
 //
 // THESE SCENARIOS FAKE THE DNS ROUTES and the import job (support/dns-mock.ts, which says why);
 // the rest of the API is the real server.
@@ -79,6 +79,50 @@ test("imports a zone file through the preview and a job, then exports the zone",
   await expect(fact(page, "added")).toHaveAttribute("data-count", "0");
   await expect(fact(page, "replaced")).toHaveAttribute("data-count", "0");
   await expect(fact(page, "removed")).toHaveAttribute("data-count", "0");
+});
+
+const WINDOWS_FILE = [
+  "$ORIGIN example.test.",
+  "@        3600 IN SOA ns1 hostmaster ( 1 3600 900 1209600 300 )",
+  "ws01     [AGE:3660412] 1200 IN A 192.0.2.21",
+  "ws02     [AGE:3660412] 1200 IN A 192.0.2.22",
+  "wpad     [AGE:3660412] 1200 IN A 192.0.2.7",
+  "",
+].join("\n");
+
+test("imports a Windows export and makes the approved names claimable", async ({ page, signedIn }) => {
+  void signedIn;
+  const fake = await FakeDns.install(page);
+  await page.goto(`/dns/import/${fake.zone("example.test")?.id}`);
+  await page.getByTestId("field-zone_file").fill(WINDOWS_FILE);
+  await page.getByTestId("field-dialect-windows").check();
+  await page.getByTestId("import-preview").click();
+
+  // The preview lists the two hosts as claimable and holds wpad back, with its reason.
+  const report = page.getByTestId("import-preview-report");
+  await expect(report.getByTestId("import-claim-count")).toHaveAttribute("data-count", "2");
+  await expect(report.getByTestId("import-claim-row")).toHaveCount(2);
+  await expect(report.locator('[data-testid="import-claim-row"][data-key="ws01.example.test/A"]')).toHaveAttribute("data-claimant", "WS01$");
+  await expect(report.locator('[data-testid="import-claim-row"][data-key="ws02.example.test/A"]')).toHaveAttribute("data-claimant", "WS02$");
+  const held = report.locator('[data-testid="import-held-row"][data-key="wpad.example.test/A"]');
+  await expect(held).toHaveAttribute("data-reason", "service_name");
+  await expect(held).toContainText("wpad, isatap");
+
+  // Nothing becomes claimable unless the person approves the listing.
+  const approve = report.getByTestId("field-claim-approve");
+  await expect(approve).not.toBeChecked();
+  await approve.check();
+  await report.getByTestId("import-apply").click();
+
+  const result = page.getByTestId("import-result");
+  await expect(result).toHaveAttribute("data-state", "done");
+  await expect(result.getByTestId("import-claimable")).toHaveAttribute("data-count", "2");
+  await expect(result.getByTestId("import-held-count")).toHaveAttribute("data-count", "1");
+  expect(fake.sent.at(-1)?.body).toMatchObject({ dialect: "windows", claimable: { approve: expect.stringMatching(/^[0-9a-f]{64}$/) } });
+  const sets = fake.rrsets("example.test");
+  expect(sets.find((s) => s.name === "ws01.example.test")?.origin).toBe("ad");
+  expect(sets.find((s) => s.name === "ws02.example.test")?.origin).toBe("ad");
+  expect(sets.find((s) => s.name === "wpad.example.test")?.origin).toBe("manual");
 });
 
 test("says on which line a zone file does not parse", async ({ page, signedIn }) => {

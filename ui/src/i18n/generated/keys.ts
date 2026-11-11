@@ -3322,7 +3322,19 @@ export type MessageKey =
   | "dns.import.apply.rolled_back"
   | "dns.import.apply.running"
   | "dns.import.apply.serial"
-  | "dns.import.claimable"
+  | "dns.import.approve.help"
+  | "dns.import.approve.label"
+  | "dns.import.approve.none"
+  | "dns.import.approve.whole"
+  | "dns.import.claim.claimant"
+  | "dns.import.claim.intro"
+  | "dns.import.claim.more"
+  | "dns.import.claim.more_records"
+  | "dns.import.claim.overflow"
+  | "dns.import.claim.records"
+  | "dns.import.claim.shown"
+  | "dns.import.claim.stale"
+  | "dns.import.claim.title"
   | "dns.import.dialect.rfc1035"
   | "dns.import.dialect.rfc1035_help"
   | "dns.import.dialect.windows"
@@ -3331,6 +3343,19 @@ export type MessageKey =
   | "dns.import.fact.added"
   | "dns.import.fact.removed"
   | "dns.import.fact.replaced"
+  | "dns.import.held.more"
+  | "dns.import.held.name_server"
+  | "dns.import.held.not_a_host"
+  | "dns.import.held.not_approved"
+  | "dns.import.held.other_data"
+  | "dns.import.held.reason"
+  | "dns.import.held.reserved"
+  | "dns.import.held.rule"
+  | "dns.import.held.service_name"
+  | "dns.import.held.service_target"
+  | "dns.import.held.tenko_node"
+  | "dns.import.held.title"
+  | "dns.import.held.too_many"
   | "dns.import.losses.line"
   | "dns.import.losses.none"
   | "dns.import.losses.title"
@@ -3339,6 +3364,14 @@ export type MessageKey =
   | "dns.import.preview.apply"
   | "dns.import.preview.back"
   | "dns.import.preview.title"
+  | "dns.import.result.claimable"
+  | "dns.import.rule.apply"
+  | "dns.import.rule.dirty"
+  | "dns.import.rule.except"
+  | "dns.import.rule.help"
+  | "dns.import.rule.title"
+  | "dns.import.rule.under"
+  | "dns.import.rule.within"
   | "dns.import.step.apply"
   | "dns.import.step.done"
   | "dns.import.step.preview"
@@ -4383,6 +4416,9 @@ export type MessageKey =
   | "errors.dns.forwarder.invalid"
   | "errors.dns.forwarder.not_found"
   | "errors.dns.gss.refused"
+  | "errors.dns.import.claimable_changed"
+  | "errors.dns.import.claimable_invalid"
+  | "errors.dns.import.claimable_too_many"
   | "errors.dns.key.exists"
   | "errors.dns.key.not_found"
   | "errors.dns.krb.account.exists"
@@ -8886,12 +8922,18 @@ export interface MessageArgs {
   "dns.fwd.saved": { suffix: string | number };
   "dns.import.apply.progress": { done: string | number; total: string | number };
   "dns.import.apply.serial": { serial: string | number };
-  "dns.import.claimable": { count: number };
+  "dns.import.approve.label": { count: number };
+  "dns.import.claim.more_records": { count: string | number };
+  "dns.import.claim.shown": { shown: string | number; total: string | number };
+  "dns.import.claim.title": { count: number };
   "dns.import.fact.added": { count: number };
   "dns.import.fact.removed": { count: number };
   "dns.import.fact.replaced": { count: number };
+  "dns.import.held.more": { count: string | number };
+  "dns.import.held.title": { count: number };
   "dns.import.losses.title": { count: number };
   "dns.import.parse_error": { line: string | number };
+  "dns.import.result.claimable": { count: number };
   "dns.import.upload.lines": { count: number };
   "dns.infra.empty_suffix": { suffix: string | number };
   "dns.infra.flush_body_suffix": { suffix: string | number };
@@ -9057,6 +9099,7 @@ export interface MessageArgs {
   "errors.dhcp.shared_network.in_use": { count: number };
   "errors.dhcp.shared_network.invalid": { field: string | number };
   "errors.dns.default_zone.invalid": { reason: string };
+  "errors.dns.import.claimable_invalid": { field: string | number };
   "errors.dns.record.conflict": { name: string | number };
   "errors.dns.record.invalid": { name: string | number; type: string | number };
   "errors.dns.record.origin": { name: string | number; type: string | number };
@@ -13204,7 +13247,19 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.import.apply.rolled_back",
   "dns.import.apply.running",
   "dns.import.apply.serial",
-  "dns.import.claimable",
+  "dns.import.approve.help",
+  "dns.import.approve.label",
+  "dns.import.approve.none",
+  "dns.import.approve.whole",
+  "dns.import.claim.claimant",
+  "dns.import.claim.intro",
+  "dns.import.claim.more",
+  "dns.import.claim.more_records",
+  "dns.import.claim.overflow",
+  "dns.import.claim.records",
+  "dns.import.claim.shown",
+  "dns.import.claim.stale",
+  "dns.import.claim.title",
   "dns.import.dialect.rfc1035",
   "dns.import.dialect.rfc1035_help",
   "dns.import.dialect.windows",
@@ -13213,6 +13268,19 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.import.fact.added",
   "dns.import.fact.removed",
   "dns.import.fact.replaced",
+  "dns.import.held.more",
+  "dns.import.held.name_server",
+  "dns.import.held.not_a_host",
+  "dns.import.held.not_approved",
+  "dns.import.held.other_data",
+  "dns.import.held.reason",
+  "dns.import.held.reserved",
+  "dns.import.held.rule",
+  "dns.import.held.service_name",
+  "dns.import.held.service_target",
+  "dns.import.held.tenko_node",
+  "dns.import.held.title",
+  "dns.import.held.too_many",
   "dns.import.losses.line",
   "dns.import.losses.none",
   "dns.import.losses.title",
@@ -13221,6 +13289,14 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.import.preview.apply",
   "dns.import.preview.back",
   "dns.import.preview.title",
+  "dns.import.result.claimable",
+  "dns.import.rule.apply",
+  "dns.import.rule.dirty",
+  "dns.import.rule.except",
+  "dns.import.rule.help",
+  "dns.import.rule.title",
+  "dns.import.rule.under",
+  "dns.import.rule.within",
   "dns.import.step.apply",
   "dns.import.step.done",
   "dns.import.step.preview",
@@ -14265,6 +14341,9 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.dns.forwarder.invalid",
   "errors.dns.forwarder.not_found",
   "errors.dns.gss.refused",
+  "errors.dns.import.claimable_changed",
+  "errors.dns.import.claimable_invalid",
+  "errors.dns.import.claimable_too_many",
   "errors.dns.key.exists",
   "errors.dns.key.not_found",
   "errors.dns.krb.account.exists",

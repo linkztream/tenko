@@ -29,6 +29,11 @@
 .dns-modes { display: flex; gap: var(--sp-6); border: 0; margin: 0; padding: 0; }
 .dns-modes legend { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); margin-bottom: var(--sp-2); }
 .dns-zonefile { min-height: 180px; width: 100%; }
+.dns-claim, .dns-claim-held { display: grid; gap: var(--sp-4); }
+.dns-claim-list { max-block-size: 24rem; overflow: auto; }
+.dns-claim-fields { display: grid; gap: var(--sp-4); }
+.dns-claim-fields .input { width: 100%; }
+.dns-claim-paging { display: flex; align-items: center; gap: var(--sp-4); margin: 0; }
 
 .dialog.dns-dialog { width: min(720px, calc(100vw - 32px)); }
 .dns-diff td { vertical-align: top; }
