@@ -3,8 +3,9 @@
 //! never runs with full privileges over files that belong to another account.
 //!
 //! Before [`crate::execute`] runs one of the commands in [`offline_paths`], `main` asks this
-//! module whether the process runs as root (on Windows: as `SYSTEM` or with an elevated
-//! token) and whether this binary's own file, the data directory or another directory the
+//! module whether the process runs as root (on Windows: as `SYSTEM`, as an elevated member
+//! of Administrators, or with a token that holds a privilege acting beyond its account, see
+//! the module `token`; a Windows token that cannot be read counts as privileged) and whether this binary's own file, the data directory or another directory the
 //! command writes into belongs to an account other than the privileged ones. When both
 //! hold, the command does not run: the process exits with status 2 (`exit::USAGE`) and
 //! prints one line that names the code, the file and its owner, and the same command in
@@ -63,17 +64,40 @@ impl fmt::Display for Owner {
     }
 }
 
+/// What the process may do beyond its own account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Privilege {
+    /// Nothing beyond its own account.
+    Unprivileged,
+    /// It cannot be told (Unix other than Linux); the check does not refuse.
+    Unknown,
+    /// More than its own account.
+    Privileged {
+        /// Why, for the refusal: "the effective uid is 0", "its token holds …".
+        why: String,
+        /// What to do instead, when it is not the platform's usual advice.
+        advice: Option<String>,
+    },
+}
+
 /// What the check reads from the process and the file system.
 pub trait Facts {
-    /// Whether this process runs with full privileges: the effective uid is 0, or on
-    /// Windows the token is `SYSTEM` or elevated. `None` when it cannot be told; the check
-    /// then does not refuse (it protects against a slip with the genuine binary, ADR 0023
-    /// item 3, and cannot do more than the facts it gets).
-    fn privileged(&self) -> Option<bool>;
+    /// Whether this process runs with full privileges. On Linux: the effective uid is 0;
+    /// elsewhere on Unix it is not known, and the check does not refuse (it protects against
+    /// a slip with the genuine binary, ADR 0023 item 3, and cannot do more than the facts it
+    /// gets). On Windows: the token is `SYSTEM`, an elevated member of Administrators, or
+    /// holds a privilege that acts beyond its account; a token that cannot be read counts
+    /// as privileged.
+    fn privilege(&self) -> Privilege;
 
-    /// The owner of `path`, following links an administrator made; `None` when the path
-    /// does not exist or cannot be examined.
-    fn owner(&self, path: &Path) -> Option<Owner>;
+    /// The owner of `path`, following links an administrator made; `Ok(None)` when the
+    /// path does not exist, an error when it exists and its owner cannot be read. A
+    /// privileged process refuses a path whose owner cannot be read.
+    ///
+    /// # Errors
+    ///
+    /// Why the owner of an existing path cannot be read.
+    fn owner(&self, path: &Path) -> Result<Option<Owner>, String>;
 
     /// This binary's own file.
     fn exe(&self) -> Option<PathBuf>;
@@ -88,16 +112,21 @@ pub struct Refusal {
     pub path: PathBuf,
     /// Whether `path` is this binary's own file.
     pub binary: bool,
-    /// Its owner.
-    pub owner: Owner,
+    /// Its owner, or why it could not be read.
+    pub owner: Result<Owner, String>,
     /// The arguments of the command line after the program name.
     pub arguments: Vec<String>,
+    /// Why the process counts as privileged.
+    pub why: String,
+    /// What to do instead, when it is not the platform's usual advice.
+    pub advice: Option<String>,
 }
 
 impl Refusal {
     /// The same command run as the owner: `runuser -u <account> -- tenko …`.
     pub fn as_owner(&self) -> String {
-        let mut line = format!("runuser -u {} -- tenko", shell_word(self.owner.account()));
+        let account = self.owner.as_ref().map_or("<owner>", Owner::account);
+        let mut line = format!("runuser -u {} -- tenko", shell_word(account));
         for argument in &self.arguments {
             line.push(' ');
             line.push_str(&shell_word(argument));
@@ -113,19 +142,30 @@ impl fmt::Display for Refusal {
         } else {
             "the directory"
         };
-        write!(
-            f,
-            "tenko {}: [{CODE}] refusing to run {}: {what} {} belongs to {}; ",
-            self.command,
-            if cfg!(windows) {
-                "with an elevated token"
-            } else {
-                "as root"
-            },
-            self.path.display(),
-            self.owner
-        )?;
         if cfg!(windows) {
+            write!(
+                f,
+                "tenko {}: [{CODE}] refusing to run with a privileged token ({}): ",
+                self.command, self.why
+            )?;
+        } else {
+            write!(
+                f,
+                "tenko {}: [{CODE}] refusing to run as root: ",
+                self.command
+            )?;
+        }
+        match &self.owner {
+            Ok(owner) => write!(f, "{what} {} belongs to {owner}; ", self.path.display())?,
+            Err(error) => write!(
+                f,
+                "{what} {} has an owner that could not be read ({error}); ",
+                self.path.display()
+            )?,
+        }
+        if let Some(advice) = &self.advice {
+            f.write_str(advice)
+        } else if cfg!(windows) {
             f.write_str(
                 "run the MSI's payload C:\\Program Files\\Tenko\\tenko.exe from the elevated \
                  prompt instead; the service account's own files are changed by the service",
@@ -226,27 +266,33 @@ pub fn offline_paths(cli: &Cli) -> Option<Vec<PathBuf>> {
 /// refusal as the command to run as the owner.
 pub fn check(cli: &Cli, facts: &dyn Facts, arguments: &[String]) -> Option<Refusal> {
     let paths = offline_paths(cli)?;
-    if facts.privileged() != Some(true) {
+    let Privilege::Privileged { why, advice } = facts.privilege() else {
         return None;
-    }
+    };
     let command = cli.command.name();
-    let refusal = |path: PathBuf, binary: bool, owner: Owner| Refusal {
+    let refusal = |path: PathBuf, binary: bool, owner: Result<Owner, String>| Refusal {
         command,
         path,
         binary,
         owner,
         arguments: arguments.to_vec(),
+        why: why.clone(),
+        advice: advice.clone(),
+    };
+    // Another account's file, or one whose owner cannot be read, refuses (fail closed).
+    let unsafe_owner = |path: &Path| match facts.owner(path) {
+        Ok(Some(owner)) if owner.privileged => None,
+        Ok(None) => None,
+        Ok(Some(owner)) => Some(Ok(owner)),
+        Err(error) => Some(Err(error)),
     };
     if let Some(exe) = facts.exe()
-        && let Some(owner) = facts.owner(&exe)
-        && !owner.privileged
+        && let Some(owner) = unsafe_owner(&exe)
     {
         return Some(refusal(exe, true, owner));
     }
     for path in paths {
-        if let Some(owner) = facts.owner(&path)
-            && !owner.privileged
-        {
+        if let Some(owner) = unsafe_owner(&path) {
             return Some(refusal(path, false, owner));
         }
     }
@@ -258,11 +304,11 @@ pub fn check(cli: &Cli, facts: &dyn Facts, arguments: &[String]) -> Option<Refus
 pub struct Host;
 
 impl Facts for Host {
-    fn privileged(&self) -> Option<bool> {
-        host::privileged()
+    fn privilege(&self) -> Privilege {
+        host::privilege()
     }
 
-    fn owner(&self, path: &Path) -> Option<Owner> {
+    fn owner(&self, path: &Path) -> Result<Option<Owner>, String> {
         host::owner(path)
     }
 
@@ -275,16 +321,25 @@ impl Facts for Host {
 mod host {
     use std::{os::unix::fs::MetadataExt as _, path::Path};
 
-    use super::Owner;
+    use super::{Owner, Privilege};
 
     /// The effective uid from `/proc/self/status` (`Uid: real effective saved fs`), which
     /// needs no library; elsewhere than Linux it is not known.
-    pub(super) fn privileged() -> Option<bool> {
+    pub(super) fn privilege() -> Privilege {
         if !cfg!(target_os = "linux") {
-            return None;
+            return Privilege::Unknown;
         }
-        let status = std::fs::read_to_string("/proc/self/status").ok()?;
-        effective_uid(&status).map(|uid| uid == 0)
+        match std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|status| effective_uid(&status))
+        {
+            Some(0) => Privilege::Privileged {
+                why: "the effective uid is 0".to_owned(),
+                advice: None,
+            },
+            Some(_) => Privilege::Unprivileged,
+            None => Privilege::Unknown,
+        }
     }
 
     pub(super) fn effective_uid(status: &str) -> Option<u32> {
@@ -295,14 +350,18 @@ mod host {
             .and_then(|uid| uid.parse().ok())
     }
 
-    pub(super) fn owner(path: &Path) -> Option<Owner> {
-        let uid = std::fs::metadata(path).ok()?.uid();
+    pub(super) fn owner(path: &Path) -> Result<Option<Owner>, String> {
+        let uid = match std::fs::metadata(path) {
+            Ok(metadata) => metadata.uid(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
         let passwd = std::fs::read_to_string("/etc/passwd").unwrap_or_default();
-        Some(Owner {
+        Ok(Some(Owner {
             id: uid.to_string(),
             name: account_name(&passwd, uid),
             privileged: uid == 0,
-        })
+        }))
     }
 
     /// The name of `uid` in a `passwd` text (`name:x:uid:gid:…`).
@@ -318,9 +377,14 @@ mod host {
 
 #[cfg(windows)]
 mod host {
-    use std::{path::Path, process::Command};
+    use std::{
+        io::Read as _,
+        path::{Component, Path, PathBuf, Prefix},
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    };
 
-    use super::Owner;
+    use super::{Owner, Privilege, token};
 
     /// The well-known SIDs that may own what a privileged process uses: `SYSTEM`, the
     /// Administrators group and the trusted installer.
@@ -329,37 +393,111 @@ mod host {
         "S-1-5-32-544",
         "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
     ];
-    /// The mandatory integrity labels of an elevated token and of `SYSTEM`.
-    const ELEVATED_LABELS: [&str; 2] = ["S-1-16-12288", "S-1-16-16384"];
 
-    /// The path of a tool in the system directory (a privileged process runs nothing else,
-    /// ADR 0023 I1).
-    fn system_tool(name: &str) -> std::path::PathBuf {
-        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-        Path::new(&root).join("System32").join(name)
+    /// How long a system tool may take before the check gives up on it.
+    const TOOL_LIMIT: Duration = Duration::from_secs(30);
+
+    /// The system directory: `%SystemRoot%\System32`, when `SystemRoot` is an absolute path
+    /// on a drive letter (not a share) with nothing but plain names after it. A privileged process runs nothing
+    /// else (ADR 0023 I1), and never a program found through `PATH` or the current
+    /// directory.
+    pub(super) fn system_dir(root: Option<&std::ffi::OsStr>) -> Result<PathBuf, String> {
+        let root = PathBuf::from(root.ok_or_else(|| "SystemRoot is not set".to_owned())?);
+        let mut components = root.components();
+        let plain = matches!(components.next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_)))
+            && matches!(components.next(), Some(Component::RootDir))
+            && components.all(|component| matches!(component, Component::Normal(_)));
+        if !plain {
+            return Err(format!(
+                "SystemRoot `{}` is not a plain absolute path",
+                root.display()
+            ));
+        }
+        Ok(root.join("System32"))
     }
 
-    fn run(tool: &str, arguments: &[&str]) -> Option<String> {
-        let output = Command::new(system_tool(tool))
+    /// Runs `tool` (a path below the system directory) with `arguments`, with a cleared
+    /// environment that keeps only `SystemRoot`, no standard input, for at most
+    /// [`TOOL_LIMIT`]; returns its standard output when it exits with status 0.
+    fn run(tool: &str, arguments: &[&str]) -> Result<String, String> {
+        run_within(tool, arguments, TOOL_LIMIT)
+    }
+
+    /// [`run`] with the time limit as an argument.
+    pub(super) fn run_within(
+        tool: &str,
+        arguments: &[&str],
+        limit: Duration,
+    ) -> Result<String, String> {
+        let root = std::env::var_os("SystemRoot");
+        let dir = system_dir(root.as_deref())?;
+        let path = dir.join(tool);
+        let mut child = Command::new(&path)
             .args(arguments)
-            .output()
-            .ok()?;
-        output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+            .env_clear()
+            .env("SystemRoot", root.unwrap_or_default())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("cannot run {}: {error}", path.display()))?;
+        // Read while the tool runs, so that a full pipe cannot hold it.
+        let mut stdout = child.stdout.take();
+        let reader = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(stdout) = stdout.as_mut() {
+                let _ = stdout.read_to_end(&mut bytes);
+            }
+            bytes
+        });
+        let deadline = Instant::now() + limit;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "{} did not end within {} s",
+                        path.display(),
+                        limit.as_secs()
+                    ));
+                }
+                Err(error) => {
+                    return Err(format!("cannot wait for {}: {error}", path.display()));
+                }
+            }
+        };
+        let bytes = reader
+            .join()
+            .map_err(|_| format!("cannot read the output of {}", path.display()))?;
+        if !status.success() {
+            return Err(format!("{} ended with {status}", path.display()));
+        }
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
-    /// Whether the token carries the high or system integrity label (`whoami /groups`).
-    pub(super) fn privileged() -> Option<bool> {
-        let groups = run("whoami.exe", &["/groups", "/fo", "csv", "/nh"])?;
-        Some(ELEVATED_LABELS.iter().any(|label| groups.contains(label)))
+    /// What the token may do, from `whoami /user /groups /priv /fo csv /nh`; a token that
+    /// cannot be read counts as privileged (fail closed).
+    pub(super) fn privilege() -> Privilege {
+        match run(
+            "whoami.exe",
+            &["/user", "/groups", "/priv", "/fo", "csv", "/nh"],
+        ) {
+            Ok(output) => token::classify(&output),
+            Err(error) => token::unreadable(&error),
+        }
     }
 
     /// The owner through the access list of the path, as a SID and a name.
-    pub(super) fn owner(path: &Path) -> Option<Owner> {
-        if !path.exists() {
-            return None;
+    pub(super) fn owner(path: &Path) -> Result<Option<Owner>, String> {
+        match std::fs::metadata(path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
         }
         let literal = path.to_string_lossy().replace('\'', "''");
         let script = format!(
@@ -374,13 +512,16 @@ mod host {
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty());
-        let id = lines.next()?.to_owned();
+        let id = lines
+            .next()
+            .ok_or_else(|| "Get-Acl printed no owner".to_owned())?
+            .to_owned();
         let name = lines.next().map(str::to_owned);
-        Some(Owner {
+        Ok(Some(Owner {
             privileged: PRIVILEGED_SIDS.contains(&id.as_str()),
             id,
             name,
-        })
+        }))
     }
 }
 
@@ -388,14 +529,180 @@ mod host {
 mod host {
     use std::path::Path;
 
-    use super::Owner;
+    use super::{Owner, Privilege};
 
-    pub(super) fn privileged() -> Option<bool> {
-        None
+    pub(super) fn privilege() -> Privilege {
+        Privilege::Unknown
     }
 
-    pub(super) fn owner(_path: &Path) -> Option<Owner> {
-        None
+    pub(super) fn owner(_path: &Path) -> Result<Option<Owner>, String> {
+        Ok(None)
+    }
+}
+
+/// What a Windows token may do beyond its own account, read from the output of
+/// `whoami /user /groups /priv /fo csv /nh`. Only what Windows does not translate is read:
+/// the SIDs (the user, the groups, the integrity label) and the constant names of the
+/// privileges. The names of accounts and groups, the attributes of a group and the state
+/// and description of a privilege are translated, and the decision never reads them. A
+/// privilege counts when the token holds it, enabled or not: the process can enable it.
+///
+/// The integrity label alone does not make a token privileged: the Service Control Manager
+/// gives every service a high or system label, also the virtual account of a Tenko service
+/// whose token keeps `SeChangeNotifyPrivilege` alone and can do nothing beyond its account.
+#[cfg(any(windows, test))]
+mod token {
+    use super::Privilege;
+
+    /// `SYSTEM`.
+    const SYSTEM: &str = "S-1-5-18";
+    /// `BUILTIN\Administrators`.
+    const ADMINISTRATORS: &str = "S-1-5-32-544";
+    /// `NT AUTHORITY\SERVICE`: in the token of every service the Service Control Manager
+    /// starts.
+    const SERVICE: &str = "S-1-5-6";
+    /// The prefix of a virtual service account, `NT SERVICE\<name>`.
+    const VIRTUAL_ACCOUNT: &str = "S-1-5-80-";
+    /// The integrity label of an elevated token (`High`); `System` is above it.
+    const HIGH_INTEGRITY: u32 = 12288;
+
+    /// The privileges that let a token act beyond its own account: read, write or take any
+    /// file, act as or impersonate another account, change what another account's process
+    /// runs, or run code in the kernel or below it.
+    pub(super) const BEYOND_THE_ACCOUNT: [&str; 17] = [
+        // Start a process with another account's token.
+        "SeAssignPrimaryTokenPrivilege",
+        // Read any file whatever its access list.
+        "SeBackupPrivilege",
+        // Write any file and set any owner.
+        "SeRestorePrivilege",
+        // Take the ownership of any object.
+        "SeTakeOwnershipPrivilege",
+        // Open any process, SYSTEM's included.
+        "SeDebugPrivilege",
+        // Act as part of the operating system: make tokens for any account.
+        "SeTcbPrivilege",
+        // Impersonate any token it gets a handle to: the usual way to SYSTEM.
+        "SeImpersonatePrivilege",
+        // Get an impersonation token of another user in the same session.
+        "SeDelegateSessionUserImpersonatePrivilege",
+        // Make a token from nothing.
+        "SeCreateTokenPrivilege",
+        // Load a driver: code in the kernel.
+        "SeLoadDriverPrivilege",
+        // Open a volume raw: read and write every file on it.
+        "SeManageVolumePrivilege",
+        // Change the integrity labels of objects it does not own.
+        "SeRelabelPrivilege",
+        // Manage the security log: clear the evidence.
+        "SeSecurityPrivilege",
+        // Change firmware variables: code before the operating system.
+        "SeSystemEnvironmentPrivilege",
+        // Read the stored credentials of other accounts as a trusted caller.
+        "SeTrustedCredManAccessPrivilege",
+        // Read every object of the directory whatever its access list.
+        "SeSyncAgentPrivilege",
+        // Mark accounts as trusted for delegation in the directory.
+        "SeEnableDelegationPrivilege",
+    ];
+
+    /// One line of `whoami /fo csv` as its fields, or nothing for a line that is not one.
+    fn fields(line: &str) -> Option<Vec<&str>> {
+        let inner = line.trim().strip_prefix('"')?.strip_suffix('"')?;
+        Some(inner.split("\",\"").collect())
+    }
+
+    fn is_sid(field: &str) -> bool {
+        field.strip_prefix("S-1-").is_some_and(|rest| {
+            rest.split('-')
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+    }
+
+    fn is_privilege(field: &str) -> bool {
+        field.len() > "SePrivilege".len()
+            && field.starts_with("Se")
+            && field.ends_with("Privilege")
+            && field.bytes().all(|byte| byte.is_ascii_alphabetic())
+    }
+
+    /// A token that could not be read: privileged, so that the check fails closed.
+    pub(super) fn unreadable(reason: &str) -> Privilege {
+        Privilege::Privileged {
+            why: format!("its token could not be read ({reason})"),
+            advice: None,
+        }
+    }
+
+    /// Classifies the output of `whoami /user /groups /priv /fo csv /nh`.
+    pub(super) fn classify(output: &str) -> Privilege {
+        let rows: Vec<Vec<&str>> = output.lines().filter_map(fields).collect();
+        // The user's row comes first and has two fields: the name and the SID.
+        let Some((user_name, user)) = rows
+            .first()
+            .filter(|row| row.len() == 2 && is_sid(row[1]))
+            .map(|row| (row[0], row[1]))
+        else {
+            return unreadable("whoami printed no user");
+        };
+        let sids: Vec<&str> = rows
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|field| is_sid(field))
+            .collect();
+        let mut labels: Vec<u32> = sids
+            .iter()
+            .filter_map(|sid| sid.strip_prefix("S-1-16-"))
+            .filter_map(|rid| rid.parse().ok())
+            .collect();
+        // The same label printed twice is one label; two different labels are not read.
+        labels.sort_unstable();
+        labels.dedup();
+        let [label] = labels[..] else {
+            return unreadable("whoami printed no single integrity label");
+        };
+        let held: Vec<&str> = rows
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|field| is_privilege(field))
+            .collect();
+        // Every token holds SeChangeNotifyPrivilege at least: no privilege means whoami did
+        // not print the privileges.
+        if held.is_empty() {
+            return unreadable("whoami printed no privileges");
+        }
+        if user == SYSTEM {
+            return Privilege::Privileged {
+                why: "it runs as SYSTEM".to_owned(),
+                advice: None,
+            };
+        }
+        if label >= HIGH_INTEGRITY && sids.contains(&ADMINISTRATORS) {
+            return Privilege::Privileged {
+                why: "its token is an elevated member of Administrators".to_owned(),
+                advice: None,
+            };
+        }
+        let beyond: Vec<&str> = BEYOND_THE_ACCOUNT
+            .iter()
+            .copied()
+            .filter(|privilege| held.contains(privilege))
+            .collect();
+        if beyond.is_empty() {
+            return Privilege::Unprivileged;
+        }
+        let why = format!("its token holds {}", beyond.join(", "));
+        let advice = (sids.contains(&SERVICE) && user.starts_with(VIRTUAL_ACCOUNT)).then(|| {
+            let service = user_name.rsplit('\\').next().unwrap_or("<service>");
+            format!(
+                "a Tenko service keeps SeChangeNotifyPrivilege alone: from an elevated prompt \
+                 run `sc.exe privs {service} SeChangeNotifyPrivilege` and restart the service, \
+                 or install it with `tenko service install`, which narrows it"
+            )
+        });
+        Privilege::Privileged { why, advice }
     }
 }
 
@@ -409,18 +716,23 @@ mod tests {
 
     /// Facts built by hand: who runs, who owns what.
     struct Fixed {
-        privileged: Option<bool>,
+        privileged: Privilege,
         exe: PathBuf,
         owners: BTreeMap<PathBuf, Owner>,
+        /// Paths whose owner cannot be read.
+        unreadable: Vec<PathBuf>,
     }
 
     impl Facts for Fixed {
-        fn privileged(&self) -> Option<bool> {
-            self.privileged
+        fn privilege(&self) -> Privilege {
+            self.privileged.clone()
         }
 
-        fn owner(&self, path: &Path) -> Option<Owner> {
-            self.owners.get(path).cloned()
+        fn owner(&self, path: &Path) -> Result<Option<Owner>, String> {
+            if self.unreadable.iter().any(|unreadable| unreadable == path) {
+                return Err("access denied".to_owned());
+            }
+            Ok(self.owners.get(path).cloned())
         }
 
         fn exe(&self) -> Option<PathBuf> {
@@ -463,11 +775,24 @@ mod tests {
         (dir, data)
     }
 
+    /// `Some(true)`: privileged; `Some(false)`: not; `None`: not known.
+    fn privilege(privileged: Option<bool>) -> Privilege {
+        match privileged {
+            Some(true) => Privilege::Privileged {
+                why: "the test says so".to_owned(),
+                advice: None,
+            },
+            Some(false) => Privilege::Unprivileged,
+            None => Privilege::Unknown,
+        }
+    }
+
     fn facts(privileged: Option<bool>, exe_owner: Owner, data: &Path, owner: Owner) -> Fixed {
         let exe = PathBuf::from("/var/lib/tenko/updates/0.0.12/tenko");
         Fixed {
-            privileged,
+            privileged: privilege(privileged),
             owners: BTreeMap::from([(exe.clone(), exe_owner), (data.to_path_buf(), owner)]),
+            unreadable: Vec::new(),
             exe,
         }
     }
@@ -487,7 +812,7 @@ mod tests {
         assert_eq!(refusal.command, "backup restore");
         assert_eq!(refusal.path, data);
         assert!(!refusal.binary);
-        assert_eq!(refusal.owner, account());
+        assert_eq!(refusal.owner, Ok(account()));
         assert_eq!(
             refusal.as_owner(),
             format!(
@@ -687,9 +1012,10 @@ mod tests {
         let cli = parse(&args);
         assert_eq!(offline_paths(&cli), Some(Vec::new()));
         let facts = Fixed {
-            privileged: Some(true),
+            privileged: privilege(Some(true)),
             exe: PathBuf::from("/opt/tenko/cli/tenko"),
             owners: BTreeMap::from([(PathBuf::from("/opt/tenko/cli/tenko"), account())]),
+            unreadable: Vec::new(),
         };
         assert!(check(&cli, &facts, &arguments(&args)).is_some());
     }
@@ -717,8 +1043,478 @@ mod tests {
         assert_eq!(host::account_name(passwd, 7), None);
         // The real files: this process owns what it created.
         let dir = tempfile::tempdir().expect("dir");
-        let owner = Host.owner(dir.path()).expect("owner");
+        let owner = Host.owner(dir.path()).expect("readable").expect("owner");
         assert_eq!(owner.privileged, owner.id == "0");
-        assert!(Host.owner(&dir.path().join("missing")).is_none());
+        assert_eq!(Host.owner(&dir.path().join("missing")), Ok(None));
+    }
+
+    // The outputs of `whoami /user /groups /priv /fo csv /nh` below keep the shape and the
+    // well-known SIDs of real tokens; account names and the SIDs of accounts are placeholders.
+
+    /// The Windows service as `tenko service install` and the MSI set it up: a virtual
+    /// account whose token keeps `SeChangeNotifyPrivilege` alone, with the high label the
+    /// Service Control Manager gives a service.
+    const NARROWED_SERVICE: &str = r#""nt service\tenko-smoke","S-1-5-80-1111111111-2222222222-3333333333-4444444444-555555555"
+
+"Mandatory Label\High Mandatory Level","Label","S-1-16-12288",""
+"Everyone","Well-known group","S-1-1-0","Mandatory group, Enabled by default, Enabled group"
+"BUILTIN\Users","Alias","S-1-5-32-545","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\SERVICE","Well-known group","S-1-5-6","Mandatory group, Enabled by default, Enabled group"
+"CONSOLE LOGON","Well-known group","S-1-2-1","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\Authenticated Users","Well-known group","S-1-5-11","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\This Organization","Well-known group","S-1-5-15","Mandatory group, Enabled by default, Enabled group"
+"LOCAL","Well-known group","S-1-2-0","Mandatory group, Enabled by default, Enabled group"
+
+"SeChangeNotifyPrivilege","Bypass traverse checking","Enabled"
+"#;
+
+    /// A service created by hand (`sc create`) under a virtual account: the token keeps the
+    /// default privileges of a service, `SeImpersonatePrivilege` among them.
+    const UNNARROWED_SERVICE: &str = r#""nt service\tenko-hand","S-1-5-80-6666666666-7777777777-8888888888-9999999999-111111111"
+
+"Mandatory Label\High Mandatory Level","Label","S-1-16-12288",""
+"Everyone","Well-known group","S-1-1-0","Mandatory group, Enabled by default, Enabled group"
+"BUILTIN\Users","Alias","S-1-5-32-545","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\SERVICE","Well-known group","S-1-5-6","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\Authenticated Users","Well-known group","S-1-5-11","Mandatory group, Enabled by default, Enabled group"
+"LOCAL","Well-known group","S-1-2-0","Mandatory group, Enabled by default, Enabled group"
+
+"SeAssignPrimaryTokenPrivilege","Replace a process level token","Disabled"
+"SeIncreaseQuotaPrivilege","Adjust memory quotas for a process","Disabled"
+"SeChangeNotifyPrivilege","Bypass traverse checking","Enabled"
+"SeCreateGlobalPrivilege","Create global objects","Enabled"
+"SeImpersonatePrivilege","Impersonate a client after authentication","Enabled"
+"#;
+
+    /// An administrator in an elevated prompt: the token of the Windows service smoke on a
+    /// hosted runner (2026-11-11), as `whoami` printed it; the machine name is replaced.
+    const ELEVATED_ADMINISTRATOR: &str = r#""runnervmm7ud1\runneradmin","S-1-5-21-3289802278-1561746829-1498425070-500"
+
+"Everyone","Well-known group","S-1-1-0","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\Local account and member of Administrators group","Well-known group","S-1-5-114","Mandatory group, Enabled by default, Enabled group"
+"BUILTIN\Administrators","Alias","S-1-5-32-544","Mandatory group, Enabled by default, Enabled group, Group owner"
+"BUILTIN\Users","Alias","S-1-5-32-545","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\INTERACTIVE","Well-known group","S-1-5-4","Mandatory group, Enabled by default, Enabled group"
+"CONSOLE LOGON","Well-known group","S-1-2-1","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\Authenticated Users","Well-known group","S-1-5-11","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\This Organization","Well-known group","S-1-5-15","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\Local account","Well-known group","S-1-5-113","Mandatory group, Enabled by default, Enabled group"
+"LOCAL","Well-known group","S-1-2-0","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\NTLM Authentication","Well-known group","S-1-5-64-10","Mandatory group, Enabled by default, Enabled group"
+"Mandatory Label\High Mandatory Level","Label","S-1-16-12288",""
+
+"SeIncreaseQuotaPrivilege","Adjust memory quotas for a process","Disabled"
+"SeSecurityPrivilege","Manage auditing and security log","Disabled"
+"SeTakeOwnershipPrivilege","Take ownership of files or other objects","Disabled"
+"SeLoadDriverPrivilege","Load and unload device drivers","Disabled"
+"SeSystemProfilePrivilege","Profile system performance","Disabled"
+"SeSystemtimePrivilege","Change the system time","Disabled"
+"SeProfileSingleProcessPrivilege","Profile single process","Disabled"
+"SeIncreaseBasePriorityPrivilege","Increase scheduling priority","Disabled"
+"SeCreatePagefilePrivilege","Create a pagefile","Disabled"
+"SeBackupPrivilege","Back up files and directories","Disabled"
+"SeRestorePrivilege","Restore files and directories","Disabled"
+"SeShutdownPrivilege","Shut down the system","Disabled"
+"SeDebugPrivilege","Debug programs","Enabled"
+"SeSystemEnvironmentPrivilege","Modify firmware environment values","Disabled"
+"SeChangeNotifyPrivilege","Bypass traverse checking","Enabled"
+"SeRemoteShutdownPrivilege","Force shutdown from a remote system","Disabled"
+"SeUndockPrivilege","Remove computer from docking station","Disabled"
+"SeManageVolumePrivilege","Perform volume maintenance tasks","Disabled"
+"SeImpersonatePrivilege","Impersonate a client after authentication","Enabled"
+"SeCreateGlobalPrivilege","Create global objects","Enabled"
+"SeIncreaseWorkingSetPrivilege","Increase a process working set","Disabled"
+"SeTimeZonePrivilege","Change the time zone","Disabled"
+"SeCreateSymbolicLinkPrivilege","Create symbolic links","Disabled"
+"SeDelegateSessionUserImpersonatePrivilege","Obtain an impersonation token for another user in the same session","Disabled"
+"#;
+
+    /// The same administrator without elevation, on a Swedish Windows: Administrators is a
+    /// deny-only group, the label is medium, the names and descriptions are translated.
+    const FILTERED_ADMINISTRATOR_SWEDISH: &str = r#""exempel\admin","S-1-5-21-1000000001-1000000002-1000000003-1001"
+
+"Alla","Well-known group","S-1-1-0","Mandatory group, Enabled by default, Enabled group"
+"BUILTIN\Administratörer","Alias","S-1-5-32-544","Group used for deny only"
+"BUILTIN\Användare","Alias","S-1-5-32-545","Mandatory group, Enabled by default, Enabled group"
+"NT instans\Interaktiv","Well-known group","S-1-5-4","Mandatory group, Enabled by default, Enabled group"
+"NT instans\Autentiserade användare","Well-known group","S-1-5-11","Mandatory group, Enabled by default, Enabled group"
+"Obligatorisk etikett\Medelhög obligatorisk nivå","Label","S-1-16-8192",""
+
+"SeShutdownPrivilege","Avsluta datorn","Disabled"
+"SeChangeNotifyPrivilege","Kringgå bläddringskontroll","Enabled"
+"SeUndockPrivilege","Ta bort datorn från dockningsstationen","Disabled"
+"SeIncreaseWorkingSetPrivilege","Öka allokerat minne för en process","Disabled"
+"SeTimeZonePrivilege","Ändra tidszon","Disabled"
+"#;
+
+    /// `LocalSystem`.
+    const SYSTEM: &str = r#""nt authority\system","S-1-5-18"
+
+"BUILTIN\Administrators","Alias","S-1-5-32-544","Enabled by default, Enabled group, Group owner"
+"Everyone","Well-known group","S-1-1-0","Mandatory group, Enabled by default, Enabled group"
+"NT AUTHORITY\Authenticated Users","Well-known group","S-1-5-11","Mandatory group, Enabled by default, Enabled group"
+"Mandatory Label\System Mandatory Level","Label","S-1-16-16384",""
+
+"SeAssignPrimaryTokenPrivilege","Replace a process level token","Disabled"
+"SeTcbPrivilege","Act as part of the operating system","Enabled"
+"SeChangeNotifyPrivilege","Bypass traverse checking","Enabled"
+"#;
+
+    /// A member of Backup Operators in an elevated prompt: not an administrator, and still
+    /// able to read and write every file.
+    const ELEVATED_BACKUP_OPERATOR: &str = r#""example\backup","S-1-5-21-1000000001-1000000002-1000000003-1002"
+
+"BUILTIN\Backup Operators","Alias","S-1-5-32-551","Mandatory group, Enabled by default, Enabled group"
+"BUILTIN\Users","Alias","S-1-5-32-545","Mandatory group, Enabled by default, Enabled group"
+"Mandatory Label\High Mandatory Level","Label","S-1-16-12288",""
+
+"SeBackupPrivilege","Back up files and directories","Disabled"
+"SeRestorePrivilege","Restore files and directories","Disabled"
+"SeChangeNotifyPrivilege","Bypass traverse checking","Enabled"
+"#;
+
+    /// The lines of `text` that `keep` accepts, each with its line end.
+    fn lines_where(text: &str, keep: impl Fn(&str) -> bool) -> String {
+        text.lines()
+            .filter(|line| keep(line))
+            .flat_map(|line| {
+                [
+                    line, "
+",
+                ]
+            })
+            .collect()
+    }
+
+    fn is_privileged(privilege: &Privilege) -> bool {
+        matches!(privilege, Privilege::Privileged { .. })
+    }
+
+    #[test]
+    fn the_narrowed_service_is_not_privileged_whatever_its_label() {
+        assert_eq!(token::classify(NARROWED_SERVICE), Privilege::Unprivileged);
+        let system_label = NARROWED_SERVICE.replace(
+            r#""Mandatory Label\High Mandatory Level","Label","S-1-16-12288",""#,
+            r#""Mandatory Label\System Mandatory Level","Label","S-1-16-16384",""#,
+        );
+        assert_ne!(system_label, NARROWED_SERVICE);
+        assert_eq!(token::classify(&system_label), Privilege::Unprivileged);
+    }
+
+    #[test]
+    fn a_service_that_keeps_its_default_privileges_is_privileged_and_told_what_to_narrow() {
+        let Privilege::Privileged { why, advice } = token::classify(UNNARROWED_SERVICE) else {
+            panic!("a service holding SeImpersonatePrivilege is privileged");
+        };
+        assert_eq!(
+            why,
+            "its token holds SeAssignPrimaryTokenPrivilege, SeImpersonatePrivilege"
+        );
+        let advice = advice.expect("advice for a service");
+        assert!(
+            advice.contains("sc.exe privs tenko-hand SeChangeNotifyPrivilege"),
+            "{advice}"
+        );
+        assert!(advice.contains("tenko service install"), "{advice}");
+    }
+
+    #[test]
+    fn administrators_system_and_backup_operators_are_privileged() {
+        for (output, why) in [
+            (
+                ELEVATED_ADMINISTRATOR,
+                "its token is an elevated member of Administrators",
+            ),
+            (SYSTEM, "it runs as SYSTEM"),
+            (
+                ELEVATED_BACKUP_OPERATOR,
+                "its token holds SeBackupPrivilege, SeRestorePrivilege",
+            ),
+        ] {
+            assert_eq!(
+                token::classify(output),
+                Privilege::Privileged {
+                    why: why.to_owned(),
+                    advice: None
+                }
+            );
+        }
+        // An elevated administrator stays privileged with every privilege removed.
+        let stripped = lines_where(ELEVATED_ADMINISTRATOR, |line| !line.starts_with("\"Se"));
+        assert!(is_privileged(&token::classify(&stripped)));
+    }
+
+    #[test]
+    fn a_filtered_administrator_on_a_translated_windows_is_not_privileged() {
+        assert_eq!(
+            token::classify(FILTERED_ADMINISTRATOR_SWEDISH),
+            Privilege::Unprivileged
+        );
+    }
+
+    #[test]
+    fn a_token_that_cannot_be_read_counts_as_privileged() {
+        let no_label = lines_where(NARROWED_SERVICE, |line| !line.contains("S-1-16-"));
+        let two_labels = format!(
+            "{NARROWED_SERVICE}\"Mandatory Label\\Low Mandatory Level\",\"Label\",\"S-1-16-4096\",\"\"\n"
+        );
+        let no_user = lines_where(NARROWED_SERVICE, |line| !line.contains("S-1-5-80-"));
+        let no_privileges = lines_where(NARROWED_SERVICE, |line| !line.starts_with("\"Se"));
+        for output in [
+            "",
+            "ERROR: Access is denied.\n",
+            no_label.as_str(),
+            two_labels.as_str(),
+            no_user.as_str(),
+            no_privileges.as_str(),
+        ] {
+            let privilege = token::classify(output);
+            let Privilege::Privileged { why, .. } = &privilege else {
+                panic!("{output:?} is read as {privilege:?}");
+            };
+            assert!(why.starts_with("its token could not be read"), "{why}");
+        }
+        assert!(is_privileged(&token::unreadable(
+            "whoami.exe did not end within 30 s"
+        )));
+    }
+
+    /// The privileges a token holds that do not reach beyond its account, and why: these
+    /// never make a token privileged on their own.
+    #[test]
+    fn the_privileges_left_out_reach_no_further_than_the_account() {
+        let left_out = [
+            // Creates symbolic links; following one still checks the target's access list,
+            // and Developer Mode gives it to every user.
+            "SeCreateSymbolicLinkPrivilege",
+            // Creates named objects in the global namespace; opens nothing of another
+            // account's. Every service holds it by default.
+            "SeCreateGlobalPrivilege",
+            // Sets the memory quotas of a process; starting a process as another account
+            // needs SeAssignPrimaryTokenPrivilege as well, which is on the list.
+            "SeIncreaseQuotaPrivilege",
+            // Writes events into the security log; reads and clears nothing.
+            "SeAuditPrivilege",
+            // The traversal of directories: every token holds it.
+            "SeChangeNotifyPrivilege",
+            "SeShutdownPrivilege",
+            "SeUndockPrivilege",
+            "SeIncreaseWorkingSetPrivilege",
+            "SeTimeZonePrivilege",
+            "SeSystemtimePrivilege",
+            "SeIncreaseBasePriorityPrivilege",
+            "SeCreatePagefilePrivilege",
+            "SeCreatePermanentPrivilege",
+            "SeLockMemoryPrivilege",
+            "SeProfileSingleProcessPrivilege",
+            "SeSystemProfilePrivilege",
+            "SeRemoteShutdownPrivilege",
+            "SeMachineAccountPrivilege",
+        ];
+        for privilege in left_out {
+            assert!(
+                !token::BEYOND_THE_ACCOUNT.contains(&privilege),
+                "{privilege}"
+            );
+            let output = NARROWED_SERVICE.replace(
+                "\"SeChangeNotifyPrivilege\",\"Bypass traverse checking\",\"Enabled\"",
+                &format!("\"{privilege}\",\"\",\"Disabled\""),
+            );
+            assert_eq!(
+                token::classify(&output),
+                Privilege::Unprivileged,
+                "{privilege}"
+            );
+        }
+        for privilege in token::BEYOND_THE_ACCOUNT {
+            let output = NARROWED_SERVICE.replace(
+                "\"SeChangeNotifyPrivilege\",\"Bypass traverse checking\",\"Enabled\"",
+                &format!("\"{privilege}\",\"\",\"Disabled\""),
+            );
+            assert!(is_privileged(&token::classify(&output)), "{privilege}");
+        }
+    }
+
+    /// The owner of what the service writes: its virtual account.
+    fn service_account() -> Owner {
+        Owner {
+            id: "S-1-5-80-1111111111-2222222222-3333333333-4444444444-555555555".to_owned(),
+            name: Some("NT SERVICE\\tenko-smoke".to_owned()),
+            privileged: false,
+        }
+    }
+
+    fn token_facts(output: &str, data: &Path) -> Fixed {
+        let exe = PathBuf::from("C:/ProgramData/Tenko/data/updates/0.0.12/tenko.exe");
+        Fixed {
+            privileged: token::classify(output),
+            owners: BTreeMap::from([
+                (exe.clone(), service_account()),
+                (data.to_path_buf(), service_account()),
+            ]),
+            unreadable: Vec::new(),
+            exe,
+        }
+    }
+
+    /// The update's dry run: the service runs the new binary's `upgrade check` over a copy of
+    /// its own state, the binary and the copy both its own.
+    #[test]
+    fn the_narrowed_service_runs_the_dry_run_over_its_own_files() {
+        let (_dir, data) = data_dir();
+        let data_arg = data.to_str().expect("UTF-8");
+        let args = [
+            "upgrade",
+            "check",
+            "--data-dir",
+            data_arg,
+            "--disposable",
+            "--node-id",
+            "1",
+            "--json",
+        ];
+        let cli = parse(&args);
+        assert!(
+            check(
+                &cli,
+                &token_facts(NARROWED_SERVICE, &data),
+                &arguments(&args)
+            )
+            .is_none()
+        );
+        let refusal = check(
+            &cli,
+            &token_facts(UNNARROWED_SERVICE, &data),
+            &arguments(&args),
+        )
+        .expect("an unnarrowed service is refused");
+        let line = refusal.to_string();
+        assert!(
+            line.contains("sc.exe privs tenko-hand SeChangeNotifyPrivilege"),
+            "{line}"
+        );
+        assert_eq!(line.lines().count(), 1, "{line}");
+    }
+
+    /// The offline commands an administrator runs from an elevated prompt over the service
+    /// account's files are refused as before, and so is SYSTEM.
+    #[test]
+    fn an_elevated_administrator_and_system_are_still_refused_over_the_service_accounts_files() {
+        let (_dir, data) = data_dir();
+        let data_arg = data.to_str().expect("UTF-8");
+        let commands: [&[&str]; 5] = [
+            &["backup", "restore", "f.tkbk", "--data-dir", data_arg],
+            &["user", "unlock", "admin", "--data-dir", data_arg],
+            &["kek", "rotate", "--data-dir", data_arg],
+            &["upgrade", "check", "--data-dir", data_arg],
+            &["upgrade", "layout", "--data-dir", data_arg],
+        ];
+        for output in [ELEVATED_ADMINISTRATOR, SYSTEM] {
+            for args in commands {
+                let cli = parse(args);
+                let refusal = check(&cli, &token_facts(output, &data), &arguments(args))
+                    .unwrap_or_else(|| panic!("{args:?} is refused"));
+                assert!(
+                    refusal.binary,
+                    "the binary is the service account's: {args:?}"
+                );
+                assert!(refusal.advice.is_none());
+                #[cfg(windows)]
+                {
+                    let line = refusal.to_string();
+                    assert!(
+                        line.contains("refusing to run with a privileged token ("),
+                        "{line}"
+                    );
+                    assert!(
+                        line.contains("C:\\Program Files\\Tenko\\tenko.exe"),
+                        "{line}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_system_directory_comes_from_a_plain_system_root_only() {
+        use std::ffi::OsStr;
+        assert_eq!(
+            host::system_dir(Some(OsStr::new("C:\\Windows"))),
+            Ok(PathBuf::from("C:\\Windows\\System32"))
+        );
+        for root in [
+            "Windows",
+            "C:Windows",
+            "C:\\Windows\\..\\Users\\x",
+            "\\\\server\\share\\Windows",
+            "\\\\?\\C:\\Windows",
+            "",
+        ] {
+            assert!(host::system_dir(Some(OsStr::new(root))).is_err(), "{root}");
+        }
+        assert!(host::system_dir(None).is_err());
+    }
+
+    /// The real token of this process is read and classified: whoami.exe runs from the
+    /// system directory with a cleared environment.
+    #[cfg(windows)]
+    #[test]
+    fn the_token_of_this_process_is_read() {
+        let privilege = Host.privilege();
+        if let Privilege::Privileged { why, .. } = &privilege {
+            assert!(!why.starts_with("its token could not be read"), "{why}");
+        }
+        assert_ne!(privilege, Privilege::Unknown);
+    }
+
+    /// A privileged process refuses a file whose owner it cannot read; an unprivileged one
+    /// does not look.
+    #[test]
+    fn an_owner_that_cannot_be_read_refuses_a_privileged_process() {
+        let (_dir, data) = data_dir();
+        let args = ["kek", "rotate", "--data-dir", data.to_str().expect("UTF-8")];
+        let cli = parse(&args);
+        let mut facts = facts(Some(true), root(), &data, root());
+        facts.unreadable.push(data.clone());
+        let refusal = check(&cli, &facts, &arguments(&args)).expect("refused");
+        assert_eq!(refusal.path, data);
+        assert_eq!(refusal.owner, Err("access denied".to_owned()));
+        let line = refusal.to_string();
+        assert!(
+            line.contains("has an owner that could not be read (access denied)"),
+            "{line}"
+        );
+        facts.unreadable = vec![facts.exe.clone()];
+        let refusal = check(&cli, &facts, &arguments(&args)).expect("refused");
+        assert!(refusal.binary);
+        facts.privileged = Privilege::Unprivileged;
+        assert!(check(&cli, &facts, &arguments(&args)).is_none());
+    }
+
+    /// The tool runner fails on a missing tool, a status other than 0 and a tool over its
+    /// limit, and each of these makes the token unreadable, so privileged.
+    #[cfg(windows)]
+    #[test]
+    fn the_tool_runner_fails_on_a_missing_tool_a_bad_status_and_a_slow_tool() {
+        use std::time::Duration;
+        let missing = host::run_within("no-such-tool.exe", &[], Duration::from_secs(5));
+        assert!(missing.is_err(), "{missing:?}");
+        let status = host::run_within("cmd.exe", &["/c", "exit", "3"], Duration::from_secs(10));
+        assert!(status.is_err(), "{status:?}");
+        let started = std::time::Instant::now();
+        let slow = host::run_within(
+            "ping.exe",
+            &["-n", "30", "127.0.0.1"],
+            Duration::from_secs(1),
+        );
+        assert!(
+            slow.as_ref()
+                .is_err_and(|error| error.contains("did not end within 1 s")),
+            "{slow:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(20));
+        let ok = host::run_within("cmd.exe", &["/c", "echo", "fine"], Duration::from_secs(10));
+        assert_eq!(ok.as_deref().map(str::trim), Ok("fine"));
     }
 }
