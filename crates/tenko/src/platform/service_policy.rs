@@ -136,18 +136,38 @@ pub fn icacls_grant_arguments(dir: &Path, account: &str) -> Vec<OsString> {
     ]
 }
 
-/// The `powershell.exe` arguments that print the security descriptor of `dir` in SDDL, the
-/// owner first (`O:`), then the discretionary list (`D:`). `-LiteralPath` takes the path as
-/// it is; a quote in it is doubled, as PowerShell's single-quoted strings require.
-pub fn powershell_sddl_arguments(dir: &Path) -> Vec<OsString> {
-    let path = dir.to_string_lossy().replace('\'', "''");
+/// The environment variable that hands the path to the script of
+/// [`powershell_acl_arguments`].
+pub const ACL_PATH_VARIABLE: &str = "TENKO_ACL_PATH";
+
+/// The `powershell.exe` arguments that print the security descriptor of the path in
+/// [`ACL_PATH_VARIABLE`]: in SDDL on the first line (the owner `O:`, the group `G:`, the
+/// discretionary list `D:`), the owner's name on the second. A path that cannot be read
+/// stops the script with status 1.
+///
+/// - The path is never part of the script: PowerShell takes the quotation marks `‘ ’ ‚ ‛`
+///   for `'` as well, so a path spliced into a quoted string could run a command.
+/// - `Get-Acl` comes from the system's `Microsoft.PowerShell.Security`, imported by its
+///   full path under `$PSHOME` (the directory of `powershell.exe` itself), so the module
+///   path is not searched for it. Started from PowerShell 7, the module path named
+///   PowerShell 7's own copy first, which Windows PowerShell cannot load; a module planted
+///   in a directory it names would have loaded.
+/// - Commands and properties, no calls on .NET types: the script also runs in Constrained
+///   Language mode, which Windows Defender Application Control sets.
+pub fn powershell_acl_arguments() -> Vec<OsString> {
     vec![
         "-NoProfile".into(),
         "-NonInteractive".into(),
         "-ExecutionPolicy".into(),
         "Bypass".into(),
         "-Command".into(),
-        format!("(Get-Acl -LiteralPath '{path}').Sddl").into(),
+        format!(
+            "$ErrorActionPreference = 'Stop'; \
+             Import-Module -Name \
+             \"$PSHOME\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1\"; \
+             $acl = Get-Acl -LiteralPath $env:{ACL_PATH_VARIABLE}; $acl.Sddl; $acl.Owner"
+        )
+        .into(),
     ]
 }
 
@@ -508,8 +528,8 @@ mod tests {
     }
 
     #[test]
-    fn powershell_reads_the_descriptor_of_the_literal_path() {
-        let arguments = text(&powershell_sddl_arguments(Path::new(r"D:\Tenko's data")));
+    fn powershell_reads_the_descriptor_of_the_path_in_the_environment() {
+        let arguments = text(&powershell_acl_arguments());
         assert_eq!(
             arguments[..5],
             [
@@ -522,7 +542,9 @@ mod tests {
         );
         assert_eq!(
             arguments[5],
-            r"(Get-Acl -LiteralPath 'D:\Tenko''s data').Sddl"
+            "$ErrorActionPreference = 'Stop'; Import-Module -Name \
+             \"$PSHOME\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1\"; \
+             $acl = Get-Acl -LiteralPath $env:TENKO_ACL_PATH; $acl.Sddl; $acl.Owner"
         );
     }
 

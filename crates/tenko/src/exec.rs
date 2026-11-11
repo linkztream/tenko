@@ -36,6 +36,9 @@ use crate::{
 /// The error code of the refusal.
 pub const CODE: &str = "exec.unsafe_owner";
 
+#[cfg(windows)]
+pub(crate) use host::system_command;
+
 /// The owner of a file or directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Owner {
@@ -385,6 +388,7 @@ mod host {
     };
 
     use super::{Owner, Privilege, token};
+    use crate::platform::service_policy;
 
     /// The well-known SIDs that may own what a privileged process uses: `SYSTEM`, the
     /// Administrators group and the trusted installer.
@@ -416,9 +420,42 @@ mod host {
         Ok(root.join("System32"))
     }
 
-    /// Runs `tool` (a path below the system directory) with `arguments`, with a cleared
-    /// environment that keeps only `SystemRoot`, no standard input, for at most
-    /// [`TOOL_LIMIT`]; returns its standard output when it exits with status 0.
+    /// The command that starts `tool` (a path below the system directory) the way a
+    /// privileged process starts one (ADR 0023 I1): by its full path under
+    /// `%SystemRoot%\System32`, never through `PATH` or the current directory, with no
+    /// standard input, the system directory as its working directory (a path argument must
+    /// be absolute), and with an environment of fixed values only. `SystemRoot` is the
+    /// validated one, and `PSModulePath` names the system module directory and nothing
+    /// else.
+    ///
+    /// Nothing of the caller's environment reaches the tool. An inherited `PSModulePath`
+    /// decides which module Windows PowerShell loads for a command: started from PowerShell 7,
+    /// it names PowerShell 7's own `Microsoft.PowerShell.Security` first, which Windows
+    /// PowerShell cannot load, so `Get-Acl` failed. A module planted in a directory of the
+    /// caller's would load the same way. With no `PSModulePath` at all, Windows PowerShell
+    /// builds one that begins with the user's Documents folder. With this one it adds only
+    /// `Program Files\WindowsPowerShell\Modules`, where only administrators write.
+    ///
+    /// # Errors
+    ///
+    /// `SystemRoot` is not set or is not a plain absolute path on a drive.
+    pub(crate) fn system_command(tool: &str) -> Result<Command, String> {
+        let root = std::env::var_os("SystemRoot");
+        let dir = system_dir(root.as_deref())?;
+        let modules = dir.join("WindowsPowerShell").join("v1.0").join("Modules");
+        let mut command = Command::new(dir.join(tool));
+        command
+            .env_clear()
+            .env("SystemRoot", root.unwrap_or_default())
+            .env("PSModulePath", modules)
+            .current_dir(&dir)
+            .stdin(Stdio::null());
+        Ok(command)
+    }
+
+    /// Runs `tool` (a path below the system directory) with `arguments`, started by
+    /// [`system_command`], for at most [`TOOL_LIMIT`]; returns its standard output when it
+    /// exits with status 0.
     fn run(tool: &str, arguments: &[&str]) -> Result<String, String> {
         run_within(tool, arguments, TOOL_LIMIT)
     }
@@ -429,14 +466,16 @@ mod host {
         arguments: &[&str],
         limit: Duration,
     ) -> Result<String, String> {
-        let root = std::env::var_os("SystemRoot");
-        let dir = system_dir(root.as_deref())?;
-        let path = dir.join(tool);
-        let mut child = Command::new(&path)
-            .args(arguments)
-            .env_clear()
-            .env("SystemRoot", root.unwrap_or_default())
-            .stdin(Stdio::null())
+        let mut command = system_command(tool)?;
+        command.args(arguments);
+        run_command(command, limit)
+    }
+
+    /// Runs a command of [`system_command`] for at most `limit`; returns its standard
+    /// output when it exits with status 0.
+    fn run_command(mut command: Command, limit: Duration) -> Result<String, String> {
+        let path = PathBuf::from(command.get_program());
+        let mut child = command
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -499,23 +538,24 @@ mod host {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.to_string()),
         }
-        let literal = path.to_string_lossy().replace('\'', "''");
-        let script = format!(
-            "$acl = Get-Acl -LiteralPath '{literal}'; \
-             $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value; $acl.Owner"
-        );
-        let output = run(
-            "WindowsPowerShell\\v1.0\\powershell.exe",
-            &["-NoProfile", "-NonInteractive", "-Command", &script],
-        )?;
+        // The path goes to the script through the environment, never into its text, and the
+        // owner's SID is read from the SDDL line (see `powershell_acl_arguments`). The
+        // tool's working directory is the system directory, so the path is made absolute.
+        let absolute = std::path::absolute(path).map_err(|error| error.to_string())?;
+        let mut command = system_command(r"WindowsPowerShell\v1.0\powershell.exe")?;
+        command
+            .args(service_policy::powershell_acl_arguments())
+            .env(service_policy::ACL_PATH_VARIABLE, &absolute);
+        let output = run_command(command, TOOL_LIMIT)?;
         let mut lines = output
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty());
         let id = lines
             .next()
-            .ok_or_else(|| "Get-Acl printed no owner".to_owned())?
-            .to_owned();
+            .and_then(service_policy::parse_sddl)
+            .map(|descriptor| descriptor.owner)
+            .ok_or_else(|| "powershell.exe printed no security descriptor".to_owned())?;
         let name = lines.next().map(str::to_owned);
         Ok(Some(Owner {
             privileged: PRIVILEGED_SIDS.contains(&id.as_str()),
@@ -1516,5 +1556,144 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(20));
         let ok = host::run_within("cmd.exe", &["/c", "echo", "fine"], Duration::from_secs(10));
         assert_eq!(ok.as_deref().map(str::trim), Ok("fine"));
+    }
+
+    /// Windows PowerShell started by the guard sees a module path of the system's module
+    /// directories alone: not the user's Documents folder, which it adds itself when the
+    /// variable is missing, and not what the caller's environment names.
+    #[cfg(windows)]
+    #[test]
+    fn windows_powershell_gets_the_system_module_path_alone() {
+        let printed = host::run_within(
+            r"WindowsPowerShell\v1.0\powershell.exe",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$env:PSModulePath",
+            ],
+            std::time::Duration::from_secs(30),
+        )
+        .expect("powershell.exe runs");
+        let root = std::env::var("SystemRoot").expect("SystemRoot");
+        let program_files = std::env::var("ProgramFiles").expect("ProgramFiles");
+        let allowed = [
+            format!(r"{root}\System32\WindowsPowerShell\v1.0\Modules"),
+            format!(r"{program_files}\WindowsPowerShell\Modules"),
+        ];
+        let entries: Vec<&str> = printed
+            .trim()
+            .split(';')
+            .filter(|entry| !entry.is_empty())
+            .collect();
+        assert!(!entries.is_empty(), "{printed}");
+        for entry in entries {
+            assert!(
+                allowed
+                    .iter()
+                    .any(|dir| dir.eq_ignore_ascii_case(entry.trim_end_matches('\\'))),
+                "{entry} in {printed}"
+            );
+        }
+    }
+
+    /// The owner of a file and of a directory is read as the guard reads it; a missing
+    /// path has none, and quotation marks, `$` and backticks in the name are taken
+    /// literally.
+    #[cfg(windows)]
+    #[test]
+    fn the_owner_of_a_file_and_of_a_directory_is_read() {
+        let root = std::env::var("SystemRoot").expect("SystemRoot");
+        let whoami = Path::new(&root).join("System32").join("whoami.exe");
+        let owner = Host
+            .owner(&whoami)
+            .expect("readable")
+            .expect("whoami.exe exists");
+        assert!(owner.privileged, "{owner:?}");
+        assert_eq!(
+            owner.id,
+            "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+        );
+        assert!(owner.name.is_some(), "{owner:?}");
+        // PowerShell takes the typographic quotation marks for `'` as well.
+        let dir = tempfile::tempdir().expect("dir");
+        for name in [
+            "it's data",
+            "Per\u{2019}s \u{2018}data\u{201a}\u{201b} $x `y",
+        ] {
+            let quoted = dir.path().join(name);
+            std::fs::create_dir(&quoted).expect("dir");
+            let owner = Host.owner(&quoted).expect("readable").expect("exists");
+            assert!(owner.id.starts_with("S-1-"), "{name}: {owner:?}");
+            assert_eq!(Host.owner(&quoted.join("missing")), Ok(None));
+        }
+    }
+
+    /// The guard's tools read the token and the owner of a directory; also run by
+    /// [`the_tools_ignore_a_module_planted_in_the_callers_module_path`] under a planted
+    /// module path.
+    #[cfg(windows)]
+    #[test]
+    fn the_guard_reads_token_and_owner_under_a_planted_module_path() {
+        let privilege = Host.privilege();
+        if let Privilege::Privileged { why, .. } = &privilege {
+            assert!(!why.starts_with("its token could not be read"), "{why}");
+        }
+        let dir = tempfile::tempdir().expect("dir");
+        let owner = Host.owner(dir.path()).expect("readable").expect("exists");
+        assert!(owner.id.starts_with("S-1-"), "{owner:?}");
+    }
+
+    /// A `PSModulePath` in the caller's environment that names a planted
+    /// `Microsoft.PowerShell.Security` reaches neither the guard's tools nor the service
+    /// installer's: PowerShell 7 hands such a path to every program it starts, with its own
+    /// copy of the module first, and a planted one would load the same way.
+    #[cfg(windows)]
+    #[test]
+    fn the_tools_ignore_a_module_planted_in_the_callers_module_path() {
+        planted_module::run_under_planted_module_path(
+            "exec::tests::the_guard_reads_token_and_owner_under_a_planted_module_path",
+        );
+    }
+}
+
+/// Runs one test of this test binary in a child whose environment names a planted
+/// `Microsoft.PowerShell.Security` first in `PSModulePath`, as a caller could: the module
+/// writes a marker when it loads and replaces `Get-Acl`. The test must pass and the marker
+/// must not be written.
+#[cfg(all(test, windows))]
+pub(crate) mod planted_module {
+    pub(crate) fn run_under_planted_module_path(test: &str) {
+        let dir = tempfile::tempdir().expect("dir");
+        let modules = dir.path().join("Modules");
+        let module = modules.join("Microsoft.PowerShell.Security");
+        std::fs::create_dir_all(&module).expect("module dir");
+        let marker = dir.path().join("loaded.txt");
+        let script = format!(
+            "[System.IO.File]::WriteAllText('{}', 'loaded')\nfunction Get-Acl {{ 'planted' }}\n",
+            marker.display()
+        );
+        std::fs::write(module.join("Microsoft.PowerShell.Security.psm1"), script)
+            .expect("planted module");
+        let mut path = std::ffi::OsString::from(modules.as_os_str());
+        if let Some(inherited) = std::env::var_os("PSModulePath") {
+            path.push(";");
+            path.push(inherited);
+        }
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args(["--exact", test, "--test-threads", "1"])
+            .env("PSModulePath", path)
+            .output()
+            .expect("the test binary runs");
+        let printed = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.status.success() && printed.contains("1 passed"),
+            "{printed}"
+        );
+        assert!(!marker.exists(), "the planted module was loaded: {printed}");
     }
 }

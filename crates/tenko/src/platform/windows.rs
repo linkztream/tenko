@@ -66,7 +66,7 @@ use super::{
 };
 use crate::{
     config::{self, Config, ConfigError, Resolved, Sources},
-    exit,
+    exec, exit,
     logging::{self, Sink},
     serve::{self, Hooks, Ready, Shutdown},
     upgrade::{self, Adoption, layout::Layout},
@@ -647,10 +647,19 @@ fn inspect_data_dir(
     })
 }
 
-/// Runs a system tool and returns what it printed; a failure is the tool's output.
+/// Runs a system tool as [`exec::system_command`] starts one (its full path in the system
+/// directory, an environment of fixed values) and returns what it printed; a failure is
+/// the tool's output.
 fn run_tool(tool: &str, arguments: &[OsString]) -> Result<String, String> {
-    let output = Command::new(system_tool(tool))
-        .args(arguments)
+    let mut command = exec::system_command(tool)?;
+    command.args(arguments);
+    run_command(command, tool)
+}
+
+/// Runs a command of [`exec::system_command`] and returns what it printed; a failure is
+/// the tool's output.
+fn run_command(mut command: Command, tool: &str) -> Result<String, String> {
+    let output = command
         .output()
         .map_err(|error| format!("cannot run {tool}: {error}"))?;
     if output.status.success() {
@@ -669,28 +678,25 @@ fn account_sid(account: &str) -> Result<String, String> {
         .ok_or_else(|| format!("sc.exe showsid printed no service SID for {service}"))
 }
 
-/// The owner and the access list of `dir`, read with PowerShell's `Get-Acl`.
+/// The owner and the access list of `dir`, read by Windows PowerShell through .NET (see
+/// [`service_policy::powershell_sddl_arguments`]).
 fn read_descriptor(dir: &Path) -> Result<service_policy::Descriptor, String> {
-    let powershell = system_root()
-        .join("System32")
-        .join("WindowsPowerShell")
-        .join("v1.0")
-        .join("powershell.exe");
-    let output = Command::new(powershell)
-        .args(service_policy::powershell_sddl_arguments(dir))
-        .output()
-        .map_err(|error| format!("cannot run powershell.exe: {error}"))?;
-    if !output.status.success() {
-        return Err(format!("Get-Acl: {}", tool_output(&output)));
-    }
-    let sddl = String::from_utf8_lossy(&output.stdout);
-    service_policy::parse_sddl(&sddl).ok_or_else(|| {
+    let mut command = exec::system_command(POWERSHELL)?;
+    command
+        .args(service_policy::powershell_acl_arguments())
+        .env(service_policy::ACL_PATH_VARIABLE, dir);
+    let output = run_command(command, "powershell.exe")?;
+    let sddl = output.lines().next().unwrap_or_default();
+    service_policy::parse_sddl(sddl).ok_or_else(|| {
         format!(
-            "Get-Acl printed `{}`, which is not an SDDL string",
+            "powershell.exe printed `{}`, which is not an SDDL string",
             sddl.trim()
         )
     })
 }
+
+/// Windows PowerShell, below the system directory.
+const POWERSHELL: &str = r"WindowsPowerShell\v1.0\powershell.exe";
 
 /// The Program Files directories of this machine, where only administrators write.
 fn program_files() -> Vec<PathBuf> {
@@ -768,13 +774,7 @@ fn configure(service: &Service, out: &mut impl Write, err: &mut impl Write) {
     }
 }
 
-/// The path of a tool in the system directory. An elevated process does not search its own
-/// directory or `PATH` for it.
-fn system_tool(name: &str) -> PathBuf {
-    system_root().join("System32").join(name)
-}
-
-/// `%SystemRoot%`.
+/// `%SystemRoot%`, where the event message file is looked for.
 fn system_root() -> PathBuf {
     std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
 }
@@ -817,13 +817,8 @@ fn register_event_source(name: &str, out: &mut impl Write, err: &mut impl Write)
     let message_file = logging::event_log::message_file(&system_root());
     let message_file = message_file.is_file().then_some(message_file);
     for arguments in event_source_arguments(name, message_file.as_deref()) {
-        let outcome = Command::new(system_tool("reg.exe"))
-            .args(&arguments)
-            .output();
-        let problem = match outcome {
-            Ok(output) if output.status.success() => continue,
-            Ok(output) => tool_output(&output),
-            Err(error) => error.to_string(),
+        let Err(problem) = run_tool("reg.exe", &arguments) else {
+            continue;
         };
         let _ = writeln!(
             err,
@@ -843,10 +838,8 @@ fn register_event_source(name: &str, out: &mut impl Write, err: &mut impl Write)
 /// Removes the event source of the service; a source that is not registered is fine.
 fn remove_event_source(name: &str, out: &mut impl Write) {
     let key = logging::event_log::source_key(name);
-    let output = Command::new(system_tool("reg.exe"))
-        .args(["delete", key.as_str(), "/f"])
-        .output();
-    if output.is_ok_and(|output| output.status.success()) {
+    let arguments: [OsString; 3] = ["delete".into(), key.into(), "/f".into()];
+    if run_tool("reg.exe", &arguments).is_ok() {
         let _ = writeln!(out, "removed the event source `{name}`");
     }
 }
@@ -1495,6 +1488,47 @@ mod tests {
 
     fn access_denied() -> ScmError {
         ScmError::Winapi(io::Error::from_raw_os_error(ERROR_ACCESS_DENIED))
+    }
+
+    /// The installer's tools, started as the installer starts them: the access list of a
+    /// directory through Windows PowerShell, a service SID through `sc.exe`, an access list
+    /// through `icacls.exe` and a value through `reg.exe` (each read only). Also run by
+    /// [`the_installer_tools_ignore_a_module_planted_in_the_callers_module_path`].
+    #[test]
+    fn the_installer_tools_run_as_the_installer_runs_them() {
+        let dir = tempfile::tempdir().expect("dir");
+        // PowerShell takes the typographic quotation marks for `'` as well.
+        let quoted = dir.path().join("it's \u{2019}data\u{2018} $x");
+        std::fs::create_dir(&quoted).expect("dir");
+        let descriptor = read_descriptor(&quoted).expect("the access list is read");
+        assert!(descriptor.owner.starts_with("S-1-"), "{descriptor:?}");
+        assert!(!descriptor.entries.is_empty(), "{descriptor:?}");
+        let sid = account_sid(r"NT SERVICE\tenko-test-never-registered").expect("sc.exe showsid");
+        assert!(sid.starts_with("S-1-5-80-"), "{sid}");
+        let listed =
+            run_tool("icacls.exe", &[quoted.clone().into_os_string()]).expect("icacls.exe");
+        assert!(listed.contains("it's"), "{listed}");
+        let value = run_tool(
+            "reg.exe",
+            &[
+                r"query".into(),
+                r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion".into(),
+                "/v".into(),
+                "SystemRoot".into(),
+            ],
+        )
+        .expect("reg.exe query");
+        assert!(value.contains("SystemRoot"), "{value}");
+    }
+
+    /// The access-list comparison of `service install` works when the caller's
+    /// `PSModulePath` names a planted `Microsoft.PowerShell.Security` first, as a
+    /// PowerShell 7 caller's names its own copy, which Windows PowerShell cannot load.
+    #[test]
+    fn the_installer_tools_ignore_a_module_planted_in_the_callers_module_path() {
+        crate::exec::planted_module::run_under_planted_module_path(
+            "platform::windows::tests::the_installer_tools_run_as_the_installer_runs_them",
+        );
     }
 
     #[test]
