@@ -540,6 +540,105 @@ fn check_target(zone: &Zone, scope: &ScopeName) -> ZoneResult<()> {
     Ok(())
 }
 
+/// The 429 of an import while [`MAX_STAGED`] imports are staged.
+fn busy() -> ZoneError {
+    ZoneError::new(
+        IMPORT_BUSY,
+        429,
+        format!(
+            "{MAX_STAGED} zone file imports are running; start this one when one of them has ended"
+        ),
+    )
+}
+
+/// The 429 of an import of a zone that has one running.
+fn zone_busy() -> ZoneError {
+    ZoneError::new(
+        IMPORT_BUSY,
+        429,
+        "an import of this zone is running; start this one when it has ended",
+    )
+}
+
+impl ZoneService {
+    /// Lets go of staged imports whose job has ended (succeeded, failed, rolled back,
+    /// canceled, or gone), then refuses a new import of `zone` while one of it runs or
+    /// while [`MAX_STAGED`] imports are staged.
+    async fn check_staging(&self, zone: ZoneId) -> ZoneResult<()> {
+        let staged = self.staging.jobs();
+        if staged.iter().any(|(_, job)| job.is_some()) {
+            let view = self.view(None).await?;
+            for (id, job) in staged {
+                let Some(job) = job else { continue };
+                let ended = view
+                    .get_typed(&tenko_jobs::tables::JOBS, &job)?
+                    .is_none_or(|(job, _)| job.state.is_terminal());
+                if ended {
+                    self.staging.take(id);
+                }
+            }
+        }
+        if self.staging.holds_zone(zone) {
+            return Err(zone_busy());
+        }
+        if self.staging.len() >= MAX_STAGED {
+            return Err(busy());
+        }
+        Ok(())
+    }
+}
+
+/// The code of [`busy`].
+pub const IMPORT_BUSY: &str = "dns.import.busy";
+
+/// Refuses an import after which the zone would hold more than [`MAX_ZONE_RRSETS`] RRsets
+/// (`max`) over all its scopes. `remaining` is what a replacing import keeps of the scope; the
+/// other scopes, and the whole scope of an import that does not replace, are counted.
+async fn check_zone_bound(
+    view: &dyn ReadView,
+    zone: &Zone,
+    scope: &ScopeName,
+    report: &ImportReport,
+    remaining: Option<u64>,
+    max: u64,
+) -> ZoneResult<()> {
+    if report.added == 0 {
+        return Ok(());
+    }
+    let mut held = 0u64;
+    let mut after: Option<Vec<u8>> = None;
+    loop {
+        let mut range = rrset_range(zone.id, None, None);
+        if let Some(after) = &after {
+            range = range.after(after.clone());
+        }
+        let rows = view.scan(RRSETS.name(), range, 4096, false)?;
+        let exhausted = rows.len() < 4096;
+        for (key, versioned) in rows {
+            after = Some(key.to_vec());
+            if remaining.is_some() {
+                let rrset: RrSet = RRSETS.decode(&versioned.value)?;
+                if rrset.scope == *scope {
+                    continue;
+                }
+            }
+            held += 1;
+        }
+        if exhausted {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let total = held + remaining.unwrap_or(0) + report.added;
+    if total > max {
+        return Err(ZoneError::zone_file(
+            1,
+            format!("the zone would hold {total} RRsets after the import, more than {max}"),
+        ));
+    }
+    Ok(())
+}
+
 impl ZoneService {
     /// Reads a zone file against the store without writing: counts, losses, and the
     /// RRsets an import would add, replace and remove. Also gives the RRsets the apply
@@ -582,6 +681,7 @@ impl ZoneService {
         let mut groups = GroupReader::of(request, &zone.name, self.config.max_generate)?;
         let mut seen: HashSet<u64> = HashSet::new();
         let mut writes = 0u64;
+        let mut groups_read = 0u64;
         // The preview cannot know whether the file has an apex NS set before it ends, so
         // it merges as if it had; the finish step knows.
         let merge = Merge {
@@ -594,14 +694,22 @@ impl ZoneService {
             dialect: request.dialect,
         };
         while let Some(group) = groups.next_group(&mut report)? {
+            // The preview runs on the API's runtime: a large file gives the other requests
+            // their turn.
+            groups_read += 1;
+            if groups_read.is_multiple_of(YIELD_EVERY) {
+                tokio::task::yield_now().await;
+            }
             let group = merge_group(view.as_ref(), &merge, group, &mut report)?;
             if request.replace {
                 seen.extend(group.keys);
             }
             writes += group.writes.len() as u64;
         }
+        let mut remaining = None;
         if request.replace {
             let file_apex_ns = groups.apex_ns;
+            let mut kept = 0u64;
             let mut after: Option<Vec<u8>> = None;
             loop {
                 let mut range = rrset_range(zone.id, Some(&request.scope), None);
@@ -617,13 +725,26 @@ impl ZoneService {
                         && !seen.contains(&key_hash(&rrset.name, rrset.rtype))
                     {
                         report.removed += 1;
+                    } else {
+                        kept += 1;
                     }
                 }
                 if exhausted {
                     break;
                 }
+                tokio::task::yield_now().await;
             }
+            remaining = Some(kept);
         }
+        check_zone_bound(
+            view.as_ref(),
+            &zone,
+            &request.scope,
+            &report,
+            remaining,
+            MAX_ZONE_RRSETS,
+        )
+        .await?;
         Ok((report, writes))
     }
 
@@ -638,7 +759,9 @@ impl ZoneService {
         cx: &RequestCtx,
         request: ImportRequest,
     ) -> ZoneResult<(JobId, ImportReport)> {
+        self.check_staging(request.zone).await?;
         let (preview, writes) = self.preview(cx, &request).await?;
+        self.check_staging(request.zone).await?;
         let chunk = self.config.import_chunk.max(1) as u64;
         let chunks = u32::try_from(writes.div_ceil(chunk).max(1)).unwrap_or(u32::MAX);
         let id = Uuid::now_v7();
@@ -691,7 +814,10 @@ impl ZoneService {
             node: None,
         };
         match self.jobs.submit(spec, cx).await {
-            Ok(job) => Ok((job, preview)),
+            Ok(job) => {
+                self.staging.set_job(id, job);
+                Ok((job, preview))
+            }
             Err(error) => {
                 self.staging.take(id);
                 Err(error.into())
@@ -700,12 +826,30 @@ impl ZoneService {
     }
 }
 
+/// RRsets a zone may hold after an import, every scope together: as many as one zone
+/// transfer may carry.
+pub const MAX_ZONE_RRSETS: u64 = 10_000_000;
+
+/// Imports staged (checked and waiting for or running their job) at once on a controller;
+/// each holds its zone file in memory until its job ends.
+pub const MAX_STAGED: usize = 2;
+
+/// The groups the preview reads between two yields to the runtime.
+const YIELD_EVERY: u64 = 256;
+
 // ----- staging and steps ----------------------------------------------------------------
 
 /// The zone files of running imports, by import, in memory on this controller.
 #[derive(Default)]
 pub struct ImportStaging {
-    runs: Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<ImportRun>>>>,
+    runs: Mutex<HashMap<Uuid, Staged>>,
+}
+
+/// One staged import: its run, its zone and, once submitted, its job.
+struct Staged {
+    run: Arc<tokio::sync::Mutex<ImportRun>>,
+    zone: ZoneId,
+    job: Option<JobId>,
 }
 
 impl std::fmt::Debug for ImportStaging {
@@ -723,10 +867,18 @@ impl std::fmt::Debug for ImportStaging {
 
 impl ImportStaging {
     fn put(&self, id: Uuid, run: ImportRun) {
+        let zone = run.request.zone;
         self.runs
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(id, Arc::new(tokio::sync::Mutex::new(run)));
+            .insert(
+                id,
+                Staged {
+                    run: Arc::new(tokio::sync::Mutex::new(run)),
+                    zone,
+                    job: None,
+                },
+            );
     }
 
     fn get(&self, id: Uuid) -> Option<Arc<tokio::sync::Mutex<ImportRun>>> {
@@ -734,7 +886,36 @@ impl ImportStaging {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(&id)
-            .cloned()
+            .map(|staged| Arc::clone(&staged.run))
+    }
+
+    fn set_job(&self, id: Uuid, job: JobId) {
+        if let Some(staged) = self
+            .runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(&id)
+        {
+            staged.job = Some(job);
+        }
+    }
+
+    /// The staged imports with their jobs.
+    fn jobs(&self) -> Vec<(Uuid, Option<JobId>)> {
+        self.runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(id, staged)| (*id, staged.job))
+            .collect()
+    }
+
+    fn holds_zone(&self, zone: ZoneId) -> bool {
+        self.runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .any(|staged| staged.zone == zone)
     }
 
     fn take(&self, id: Uuid) {
@@ -742,6 +923,15 @@ impl ImportStaging {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id);
+    }
+
+    /// Lets go of every staged import (tests).
+    #[cfg(test)]
+    fn take_all(&self) {
+        self.runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
     }
 
     /// Imports staged now.
@@ -1191,3 +1381,6 @@ pub fn report_of(job: &tenko_jobs::Job) -> Option<ImportReport> {
         .and_then(|step| step.output.as_ref())
         .and_then(|output| serde_json::from_slice(&output.0).ok())
 }
+
+#[cfg(test)]
+mod tests;

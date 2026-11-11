@@ -8,12 +8,12 @@
 
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{FromRequest as _, Path, Query, State},
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use tenko_core::{
-    Action, ObjectRef,
+    Action, CodedError, ObjectRef,
     dns::{Origin, RrSet, ZoneId},
 };
 use tenko_dns::zone::{
@@ -247,7 +247,10 @@ pub(crate) fn import_report(report: ImportReport) -> ZoneFileImportReport {
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 422, description = "The zone file does not parse or uses `$INCLUDE` (`dns.zonefile.invalid`, parameters `line` and `reason`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 408, description = "The zone file did not arrive within ten minutes (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "The request is larger than 512 MiB (`sys.body_too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "The zone file does not parse, uses `$INCLUDE`, holds more than 10,000,000 records or makes more than 1,000,000 with `$GENERATE`, or would leave the zone with more than 10,000,000 RRsets (`dns.zonefile.invalid`, parameters `line` and `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 429, description = "An import of the zone is running, or two imports are (`dns.import.busy`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn import_dns_zone_file(
@@ -256,11 +259,32 @@ pub(super) async fn import_dns_zone_file(
     zones: Zones,
     Path(id): Path<String>,
     Query(query): Query<DryRunParams>,
-    ApiJson(body): ApiJson<ZoneFileImport>,
+    request: axum::extract::Request,
 ) -> Result<Response, ApiError> {
     let id = parse_id::<ZoneId>(&id)?;
     app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
     let service = zones.get()?;
+    // One import request is read and checked at a time, after its authorization; its body
+    // has a deadline, so a slow sender cannot hold the permit.
+    let Ok(_permit) = super::super::dns::IMPORT_READS.acquire().await else {
+        return Err(ApiError::from_coded_error(CodedError::new(
+            tenko_core::error::codes::INTERNAL,
+            500,
+            "the import is not available",
+        )));
+    };
+    let ApiJson(body) = tokio::time::timeout(
+        std::time::Duration::from_secs(super::super::dns::IMPORT_BODY_SECS),
+        ApiJson::<ZoneFileImport>::from_request(request, &()),
+    )
+    .await
+    .map_err(|_| {
+        ApiError::from_coded_error(CodedError::new(
+            tenko_core::error::codes::INVALID_REQUEST,
+            408,
+            "the zone file did not arrive within ten minutes",
+        ))
+    })??;
     let request = ImportRequest {
         zone: id,
         scope: body.scope.unwrap_or_default(),

@@ -100,6 +100,25 @@
       <unit id="settings.security.pin_days.value">
         <segment><source>{days, plural, one {# day} other {# days}}</source></segment>
       </unit>
+      <unit id="settings.security.transfer_site.heading">
+        <notes><note category="description">Section of the security settings page.</note></notes>
+        <segment><source>Zone transfers</source></segment>
+      </unit>
+      <unit id="settings.security.transfer_site.label">
+        <segment><source>Networks of the site (zone transfers)</source></segment>
+      </unit>
+      <unit id="settings.security.transfer_site.help">
+        <segment><source>Under the Hardened profile, a zone transfer to an address outside these networks needs TLS (XoT). An empty list means every transfer needs XoT. The default is the private, shared, unique-local, loopback and link-local ranges.</source></segment>
+      </unit>
+      <unit id="settings.security.transfer_site.error">
+        <segment><source>"{line}" is not a network in CIDR notation, such as 192.0.2.0/24 or 2001:db8::/32.</source></segment>
+      </unit>
+      <unit id="settings.security.transfer_site.use_default">
+        <segment><source>Use the default networks</source></segment>
+      </unit>
+      <unit id="settings.security.transfer_site.saved">
+        <segment><source>Saved the networks of the site</source></segment>
+      </unit>
       <unit id="auth.signin.retry_in_minutes">
         <segment><source>{minutes, plural, one {Try again in # minute.} other {Try again in # minutes.}}</source></segment>
       </unit>

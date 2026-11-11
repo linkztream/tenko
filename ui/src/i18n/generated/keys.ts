@@ -3942,11 +3942,15 @@ export type MessageKey =
   | "dns.transfer.check.key"
   | "dns.transfer.check.port"
   | "dns.transfer.check.tls_name"
+  | "dns.transfer.deny_wins"
   | "dns.transfer.error.failed"
+  | "dns.transfer.error.older_serial"
   | "dns.transfer.error.refused"
   | "dns.transfer.error.tsig"
   | "dns.transfer.expires"
   | "dns.transfer.from_primary"
+  | "dns.transfer.hardened"
+  | "dns.transfer.hardened_notify"
   | "dns.transfer.key"
   | "dns.transfer.last_error"
   | "dns.transfer.last_success"
@@ -7108,6 +7112,12 @@ export type MessageKey =
   | "settings.security.token.days_help"
   | "settings.security.token.limited"
   | "settings.security.token.unlimited_hint"
+  | "settings.security.transfer_site.error"
+  | "settings.security.transfer_site.heading"
+  | "settings.security.transfer_site.help"
+  | "settings.security.transfer_site.label"
+  | "settings.security.transfer_site.saved"
+  | "settings.security.transfer_site.use_default"
   | "settings.security.unit.days"
   | "settings.security.unit.hours"
   | "settings.security.unit.label"
@@ -9619,6 +9629,7 @@ export interface MessageArgs {
   "settings.security.reset_done": { name: string | number };
   "settings.security.reset_row": { name: string | number };
   "settings.security.saved": { name: string | number };
+  "settings.security.transfer_site.error": { line: string | number };
   "settings.security.unit.label": { field: string | number };
   "settings.users.action.delete_help": { name: string | number };
   "settings.users.action.disable_help": { name: string | number };
@@ -13758,11 +13769,15 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.transfer.check.key",
   "dns.transfer.check.port",
   "dns.transfer.check.tls_name",
+  "dns.transfer.deny_wins",
   "dns.transfer.error.failed",
+  "dns.transfer.error.older_serial",
   "dns.transfer.error.refused",
   "dns.transfer.error.tsig",
   "dns.transfer.expires",
   "dns.transfer.from_primary",
+  "dns.transfer.hardened",
+  "dns.transfer.hardened_notify",
   "dns.transfer.key",
   "dns.transfer.last_error",
   "dns.transfer.last_success",
@@ -16924,6 +16939,12 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.security.token.days_help",
   "settings.security.token.limited",
   "settings.security.token.unlimited_hint",
+  "settings.security.transfer_site.error",
+  "settings.security.transfer_site.heading",
+  "settings.security.transfer_site.help",
+  "settings.security.transfer_site.label",
+  "settings.security.transfer_site.saved",
+  "settings.security.transfer_site.use_default",
   "settings.security.unit.days",
   "settings.security.unit.hours",
   "settings.security.unit.label",

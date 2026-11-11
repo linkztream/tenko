@@ -860,7 +860,7 @@ pub(crate) async fn assemble(
     }
     // End of the WP8.2 block.
     // WP6.3: the clock and expiry findings of signed zones (OPS-09), each naming its zone.
-    if let Some(Extension(zones)) = zones
+    if let Some(Extension(zones)) = zones.as_ref()
         && let Ok(view) = zones.view(None).await
         && let Ok(findings) = tenko_dns::dnssec::health::all(view.as_ref(), now)
     {
@@ -871,6 +871,37 @@ pub(crate) async fn assemble(
                 detail: finding.detail,
                 params: finding.params,
             }));
+    }
+    // The transfer and update settings under the profile in force (TGL-10): what Hardened
+    // refuses that a zone would allow, a zone weaker than the profile, and a deny of one
+    // access list that overrides another list's allow; each naming its zone.
+    if let Some(Extension(zones)) = zones.as_ref()
+        && let Ok(view) = zones.view(None).await
+    {
+        use tenko_auth::settings::Profile;
+        use tenko_dns::update::policy::UpdateProfile;
+        use tenko_store::ReadViewExt as _;
+        let settings = view
+            .get_typed(&tenko_auth::model::SETTINGS, &())
+            .ok()
+            .flatten()
+            .map_or_else(|| Profile::Standard.defaults(), |(settings, _)| settings);
+        let site = tenko_dns::xfr::access::Site::of(&settings.transfer_site());
+        let profile = match settings.profile {
+            Profile::Home => UpdateProfile::Home,
+            Profile::Standard => UpdateProfile::Standard,
+            Profile::Hardened => UpdateProfile::Hardened,
+            Profile::Lab => UpdateProfile::Lab,
+        };
+        if let Ok(findings) = tenko_dns::xfr::health::all(view.as_ref(), profile, &site) {
+            status
+                .warnings
+                .extend(findings.into_iter().map(|finding| StatusWarning {
+                    code: finding.code.to_owned(),
+                    detail: finding.detail,
+                    params: finding.params,
+                }));
+        }
     }
     // WP13.3: the findings of the Kerberos account's last self-test (identity plan section
     // 3.10), each with the values its localized text and its fix need.

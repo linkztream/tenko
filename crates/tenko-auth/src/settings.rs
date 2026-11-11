@@ -81,6 +81,7 @@ impl Profile {
                 updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
                 audit_export: Some(AuditExport::Local),
+                transfer_site: None,
             },
             Self::Standard => SecuritySettings {
                 profile: self,
@@ -99,6 +100,7 @@ impl Profile {
                 updates: Some(UpdatePolicy::new(UpdateInstall::UiStepUp)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Fresh, false)),
                 audit_export: Some(AuditExport::Optional),
+                transfer_site: None,
             },
             Self::Hardened => SecuritySettings {
                 profile: self,
@@ -117,6 +119,7 @@ impl Profile {
                 updates: Some(UpdatePolicy::new(UpdateInstall::UploadOnly)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Passkey, true)),
                 audit_export: Some(AuditExport::Required),
+                transfer_site: None,
             },
             Self::Lab => SecuritySettings {
                 profile: self,
@@ -135,6 +138,7 @@ impl Profile {
                 updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
                 audit_export: Some(AuditExport::Local),
+                transfer_site: None,
             },
         }
     }
@@ -319,6 +323,13 @@ pub struct SecuritySettings {
     /// profile's value applies ([`SecuritySettings::audit_export`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audit_export: Option<AuditExport>,
+    /// TGL-10: the networks that count as the site, in CIDR notation. Under Hardened a zone
+    /// transfer to an address outside them needs XoT; an empty list makes every transfer
+    /// need it. Absent in settings stored before the setting existed, and after a change of
+    /// profile: the default ranges apply (private, shared, unique-local, loopback and
+    /// link-local).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer_site: Option<Vec<String>>,
 }
 
 impl Default for SecuritySettings {
@@ -347,6 +358,17 @@ pub struct ToggleState {
 }
 
 impl SecuritySettings {
+    /// The effective site list of TGL-10: the stored one, else the default ranges
+    /// ([`tenko_core::dns::TRANSFER_SITE_DEFAULT`]).
+    pub fn transfer_site(&self) -> Vec<String> {
+        self.transfer_site.clone().unwrap_or_else(|| {
+            tenko_core::dns::TRANSFER_SITE_DEFAULT
+                .iter()
+                .map(|network| (*network).to_owned())
+                .collect()
+        })
+    }
+
     /// The effective TGL-23 value: the stored one, else the profile's.
     pub fn updates(&self) -> UpdatePolicy {
         self.updates
@@ -550,6 +572,14 @@ impl SecuritySettings {
                 "the maximum must be 1 to 36,500 days",
             ));
         }
+        if let Some(site) = &self.transfer_site {
+            tenko_core::dns::parse_transfer_site(site).map_err(|_| {
+                crate::AuthError::invalid(
+                    "transfer_site",
+                    "every entry is a network in CIDR notation, such as 10.0.0.0/8, at most 256",
+                )
+            })?;
+        }
         Ok(())
     }
 }
@@ -608,6 +638,10 @@ pub struct SettingsPatch {
     /// TGL-21.
     #[serde(default)]
     pub audit_export: Option<AuditExport>,
+    /// TGL-10: the networks that count as the site, in CIDR notation; an empty list is
+    /// allowed (every transfer needs XoT under Hardened).
+    #[serde(default)]
+    pub transfer_site: Option<Vec<String>>,
 }
 
 /// The TGL-05 value in a patch.
@@ -665,6 +699,13 @@ impl SettingsPatch {
         if let Some(export) = self.audit_export {
             next.audit_export = Some(export);
         }
+        if let Some(site) = &self.transfer_site {
+            next.transfer_site = Some(
+                site.iter()
+                    .map(|network| network.trim().to_owned())
+                    .collect(),
+            );
+        }
         next
     }
 }
@@ -682,6 +723,14 @@ pub fn changes(
             field: "profile".to_owned(),
             old: Some(old.profile.as_str().to_owned()),
             new: Some(new.profile.as_str().to_owned()),
+        });
+    }
+    if old.transfer_site() != new.transfer_site() {
+        changes.push(tenko_core::audit::FieldChange {
+            object: None,
+            field: "transfer_site".to_owned(),
+            old: Some(old.transfer_site().join(", ")),
+            new: Some(new.transfer_site().join(", ")),
         });
     }
     if old.unconfirmed_pin_days() != new.unconfirmed_pin_days() {
@@ -747,6 +796,55 @@ mod tests {
                 .toggles()
                 .iter()
                 .any(|toggle| toggle.id == "TGL-21" && toggle.deviates)
+        );
+    }
+
+    /// TGL-10: the site of the Hardened XoT rule is a list the administrator sets; settings
+    /// without it, and a new profile, have the default ranges; an empty list is allowed;
+    /// a change is audited with both lists.
+    #[test]
+    fn the_transfer_site_defaults_validates_and_is_audited() {
+        let defaults: Vec<String> = tenko_core::dns::TRANSFER_SITE_DEFAULT
+            .iter()
+            .map(|network| (*network).to_owned())
+            .collect();
+        let hardened = Profile::Hardened.defaults();
+        assert_eq!(hardened.transfer_site, None);
+        assert_eq!(hardened.transfer_site(), defaults);
+        let mut stored = serde_json::to_value(&hardened).expect("json");
+        assert!(stored.get("transfer_site").is_none(), "absent when not set");
+        stored.as_object_mut().expect("an object").insert(
+            "transfer_site".to_owned(),
+            serde_json::json!(["198.51.100.0/24"]),
+        );
+        let set: SecuritySettings = serde_json::from_value(stored).expect("settings");
+        assert_eq!(set.transfer_site(), ["198.51.100.0/24"]);
+        let empty = SettingsPatch {
+            transfer_site: Some(Vec::new()),
+            ..SettingsPatch::default()
+        }
+        .apply(&hardened);
+        empty.validate().expect("an empty site is allowed");
+        assert_eq!(empty.transfer_site(), Vec::<String>::new());
+        let changed = changes(&hardened, &empty);
+        assert!(changed.iter().any(|change| change.field == "transfer_site"
+            && change.old.as_deref() == Some(defaults.join(", ").as_str())
+            && change.new.as_deref() == Some("")));
+        let wrong = SettingsPatch {
+            transfer_site: Some(vec!["10.0.0.0/33".to_owned()]),
+            ..SettingsPatch::default()
+        }
+        .apply(&hardened);
+        assert!(wrong.validate().is_err());
+        let switched = SettingsPatch {
+            profile: Some(Profile::Standard),
+            ..SettingsPatch::default()
+        }
+        .apply(&set);
+        assert_eq!(
+            switched.transfer_site(),
+            defaults,
+            "a new profile resets the site"
         );
     }
 

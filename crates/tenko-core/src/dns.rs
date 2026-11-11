@@ -901,7 +901,7 @@ pub enum Denial {
     Nsec,
     /// NSEC3 without opt-out (RFC 5155, RFC 9276).
     Nsec3 {
-        /// Extra hash iterations; RFC 9276 recommends 0.
+        /// Extra hash iterations; RFC 9276 recommends 0, at most 150.
         #[serde(default)]
         iterations: u16,
         /// The salt; RFC 9276 recommends none.
@@ -909,6 +909,57 @@ pub enum Denial {
         salt: HexBytes,
     },
 }
+
+/// The networks that count as the site for the Hardened rule of zone transfers (TGL-10):
+/// private (RFC 1918), shared (RFC 6598), loopback, link-local and unique-local (RFC 4193).
+/// The default of the security setting `transfer_site`; a transfer to an address outside
+/// the site needs XoT under Hardened.
+pub const TRANSFER_SITE_DEFAULT: [&str; 9] = [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "100.64.0.0/10",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "fc00::/7",
+    "::1/128",
+    "fe80::/10",
+];
+
+/// Networks the site list holds at most.
+pub const TRANSFER_SITE_MAX: usize = 256;
+
+/// Reads a site list (`transfer_site`): each entry a network in CIDR notation, at most
+/// [`TRANSFER_SITE_MAX`]. An empty list is a site with no network, so that under Hardened
+/// every transfer needs XoT.
+///
+/// # Errors
+///
+/// What is wrong with the first entry that does not read, or the count.
+pub fn parse_transfer_site(entries: &[String]) -> Result<Vec<IpNet>, String> {
+    if entries.len() > TRANSFER_SITE_MAX {
+        return Err(format!(
+            "the site list holds at most {TRANSFER_SITE_MAX} networks"
+        ));
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            entry
+                .trim()
+                .parse::<IpNet>()
+                .map(|network| network.trunc())
+                .map_err(|_| {
+                    format!("{entry} is not a network in CIDR notation, such as 10.0.0.0/8")
+                })
+        })
+        .collect()
+}
+
+/// The most extra NSEC3 iterations a zone may be signed with, and the most the
+/// authoritative path hashes with for any zone: a validator treats a zone with more as
+/// insecure (RFC 9276 section 3.2), which recommends 0.
+pub const NSEC3_ITERATIONS_MAX: u16 = 150;
 
 /// The signing settings of a zone.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
@@ -1106,6 +1157,17 @@ impl Zone {
                 "catalog",
                 "only a primary or a secondary zone is a catalog zone",
             );
+        }
+        if let Denial::Nsec3 { iterations, salt } = &self.dnssec.denial {
+            if *iterations > NSEC3_ITERATIONS_MAX {
+                return invalid(
+                    "dnssec.denial.iterations",
+                    "at most 150 extra NSEC3 iterations; RFC 9276 recommends 0",
+                );
+            }
+            if salt.0.len() > 255 {
+                return invalid("dnssec.denial.salt", "an NSEC3 salt has at most 255 octets");
+            }
         }
         if self.dnssec.resign_before_days >= self.dnssec.signature_validity_days {
             return invalid(
@@ -1801,6 +1863,62 @@ impl Acl {
         false
     }
     // WP13.0: end.
+
+    /// What the list says of a request from `client`, signed with `key` if any: `Some(true)`
+    /// when its first matching entry allows, `Some(false)` when it is a `deny`, `None` when
+    /// no entry matches. [`Acl::allows`] is `decide(..) == Some(true)`.
+    pub fn decide(&self, client: IpAddr, key: Option<&KeyName>) -> Option<bool> {
+        self.entries.iter().find_map(|entry| match entry {
+            AclEntry::Prefix { prefix, deny } if prefix.contains(&client) => Some(!deny),
+            AclEntry::Key { name, deny } if key == Some(name) => Some(!deny),
+            AclEntry::Any { deny } => Some(!deny),
+            _ => None,
+        })
+    }
+
+    /// What the list says of a request from `client` signed with GSS-TSIG by `principal`,
+    /// as [`Acl::decide`] does for TSIG; [`Acl::allows_principal`] is
+    /// `decide_principal(..) == Some(true)`.
+    pub fn decide_principal(&self, client: IpAddr, principal: &PrincipalName) -> Option<bool> {
+        self.entries.iter().find_map(|entry| match entry {
+            AclEntry::Prefix { prefix, deny } if prefix.contains(&client) => Some(!deny),
+            AclEntry::Kerberos {
+                realm,
+                principal: pattern,
+                from,
+                deny,
+            } if realm == principal.realm()
+                && pattern
+                    .as_deref()
+                    .is_none_or(|pattern| identity::principal_matches(pattern, principal))
+                && from.is_none_or(|from| from.contains(&client)) =>
+            {
+                Some(!deny)
+            }
+            AclEntry::Any { deny } => Some(!deny),
+            _ => None,
+        })
+    }
+}
+
+/// Whether several access lists together allow a request, "deny wins": a list whose first
+/// matching entry is a `deny` refuses whatever the others say; otherwise one list that
+/// allows is enough, and no match anywhere refuses. `decide` is [`Acl::decide`] or
+/// [`Acl::decide_principal`] bound to the request. Zone transfers and dynamic updates
+/// combine their lists this way.
+pub fn lists_allow<'a>(
+    lists: impl IntoIterator<Item = &'a Acl>,
+    decide: impl Fn(&Acl) -> Option<bool>,
+) -> bool {
+    let mut allowed = false;
+    for list in lists {
+        match decide(list) {
+            Some(false) => return false,
+            Some(true) => allowed = true,
+            None => {}
+        }
+    }
+    allowed
 }
 
 /// A TSIG algorithm (RFC 8945). HMAC-SHA256 is the default; HMAC-SHA1 is accepted for

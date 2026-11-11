@@ -319,26 +319,33 @@ impl Resolver for Authoritative {
         let view_id = view.map(CompiledView::id);
         let scopes = ViewScopes::new(view, client);
         let dnssec_ok = request.edns.is_some_and(|edns| edns.dnssec_ok);
-        let (kind, zone) = match walk(catalog.index(), &scopes, qname, qtype, dnssec_ok, answer) {
-            Walk::Done { kind, apex } => (kind, apex),
-            Walk::Outside => {
-                if let Some(resolution) = self.outside(&catalog, query, view_id, answer) {
-                    return resolution;
+        let (kind, zone, wildcard) =
+            match walk(catalog.index(), &scopes, qname, qtype, dnssec_ok, answer) {
+                Walk::Done {
+                    kind,
+                    apex,
+                    wildcard,
+                } => (kind, apex, wildcard),
+                Walk::Outside => {
+                    if let Some(resolution) = self.outside(&catalog, query, view_id, answer) {
+                        return resolution;
+                    }
+                    // A refusal is an error; a policy answer (NXDOMAIN included) counts as
+                    // an answer of the name.
+                    let kind = if answer.rcode == rcode::REFUSED {
+                        ResponseKind::Error
+                    } else {
+                        ResponseKind::Answer
+                    };
+                    (kind, &[0u8][..], None)
                 }
-                // A refusal is an error; a policy answer (NXDOMAIN included) counts as
-                // an answer of the name.
-                let kind = if answer.rcode == rcode::REFUSED {
-                    ResponseKind::Error
-                } else {
-                    ResponseKind::Answer
-                };
-                (kind, &[0u8][..])
-            }
-        };
+            };
         let key = ResponseKey {
             kind,
+            // An answer or NODATA synthesized from a wildcard counts under the wildcard,
+            // so that random labels in front of it share one bucket.
             name: match kind {
-                ResponseKind::Answer | ResponseKind::NoData => qname,
+                ResponseKind::Answer | ResponseKind::NoData => wildcard.unwrap_or(qname),
                 ResponseKind::NxDomain | ResponseKind::Referral => zone,
                 ResponseKind::Error => &[0],
             },
@@ -392,8 +399,13 @@ enum At<'a> {
 enum Walk<'a> {
     /// The question's name is outside the served zones.
     Outside,
-    /// The answer is written.
-    Done { kind: ResponseKind, apex: &'a [u8] },
+    /// The answer is written. `wildcard` is the wildcard owner the question's name
+    /// matched, for an answer or NODATA synthesized from it.
+    Done {
+        kind: ResponseKind,
+        apex: &'a [u8],
+        wildcard: Option<&'a [u8]>,
+    },
 }
 
 fn owner<'b>(at: At<'b>, synth: &'b NameBuf) -> Owner<'b> {
@@ -614,6 +626,9 @@ fn walk<'a>(
     let mut synth = NameBuf::root();
     let mut hops = 0;
     let mut apex: &'a [u8] = &[0];
+    // The wildcard the question's own name matched: the rate limiter counts synthesized
+    // answers under it, not under each random label in front of it.
+    let mut matched: Option<&'a [u8]> = None;
     // WP6.3: the proofs gathered on the way, written once the answer section is complete.
     let mut proofs = Proofs::default();
     loop {
@@ -638,7 +653,7 @@ fn walk<'a>(
                     && matches!(index.enclosing_zone(name), Some((_, ZoneKind::Secondary))) =>
                 {
                     answer.rcode = rcode::SERVFAIL;
-                    return done(ResponseKind::Error, &[0]);
+                    return done(ResponseKind::Error, &[0], None);
                 }
                 _ => return Walk::Outside,
             }
@@ -646,6 +661,9 @@ fn walk<'a>(
         }
         let mut current = at;
         for (zone, cname, wildcard) in chain.steps() {
+            if hops == 0 && matches!(current, At::Qname) {
+                matched = matched.or(wildcard);
+            }
             if !push_set(
                 answer,
                 Section::Answer,
@@ -653,7 +671,7 @@ fn walk<'a>(
                 &cname,
                 cname.ttl,
             ) {
-                return done(ResponseKind::Answer, apex);
+                return done(ResponseKind::Answer, apex, matched);
             }
             if dnssec_ok {
                 if !push_rrsigs(
@@ -665,7 +683,7 @@ fn walk<'a>(
                     &cname,
                     cname.ttl,
                 ) {
-                    return done(ResponseKind::Answer, apex);
+                    return done(ResponseKind::Answer, apex, matched);
                 }
                 if let Some(wildcard) = wildcard {
                     proofs.push(
@@ -677,20 +695,25 @@ fn walk<'a>(
                 }
             }
             let Some(target) = cname.rdata.first() else {
-                return done(ResponseKind::Answer, apex);
+                return done(ResponseKind::Answer, apex, matched);
             };
             current = At::Index(target.as_bytes());
             hops += 1;
         }
         if chain.exhausted || hops > MAX_CHAIN {
             proofs.write(index, answer);
-            return done(ResponseKind::Answer, apex);
+            return done(ResponseKind::Answer, apex, matched);
         }
         let current_name = at_name(current, qname, &synth);
+        if hops == 0
+            && let Lookup::Answer { wildcard, .. } | Lookup::NoData { wildcard, .. } = &lookup
+        {
+            matched = matched.or(*wildcard);
+        }
         match lookup {
             Lookup::NotAuthoritative | Lookup::Cname { .. } => {
                 proofs.write(index, answer);
-                return done(ResponseKind::Answer, apex);
+                return done(ResponseKind::Answer, apex, matched);
             }
             Lookup::Answer {
                 zone,
@@ -721,7 +744,7 @@ fn walk<'a>(
                         push_target_addresses(index, scopes, &rrset, answer);
                     }
                 }
-                return done(ResponseKind::Answer, apex);
+                return done(ResponseKind::Answer, apex, matched);
             }
             Lookup::NoData {
                 zone,
@@ -741,7 +764,7 @@ fn walk<'a>(
                             ttl,
                         )
                     {
-                        return done(ResponseKind::NoData, apex);
+                        return done(ResponseKind::NoData, apex, matched);
                     }
                     match wildcard {
                         Some(wildcard) => {
@@ -751,7 +774,7 @@ fn walk<'a>(
                     }
                     proofs.write(index, answer);
                 }
-                return done(ResponseKind::NoData, apex);
+                return done(ResponseKind::NoData, apex, matched);
             }
             Lookup::NxDomain {
                 zone,
@@ -772,12 +795,12 @@ fn walk<'a>(
                             ttl,
                         )
                     {
-                        return done(ResponseKind::NxDomain, apex);
+                        return done(ResponseKind::NxDomain, apex, matched);
                     }
                     proofs.push(zone, ProofKind::NxDomain, current_name, closest_encloser);
                     proofs.write(index, answer);
                 }
-                return done(ResponseKind::NxDomain, apex);
+                return done(ResponseKind::NxDomain, apex, matched);
             }
             Lookup::Delegation { zone, ns, ds } => {
                 if hops == 0 {
@@ -793,11 +816,16 @@ fn walk<'a>(
                     &mut proofs,
                     answer,
                 );
-                return done(ResponseKind::Referral, apex);
+                return done(ResponseKind::Referral, apex, matched);
             }
             Lookup::Dname { zone, dname } => {
+                // Random labels under a DNAME owner become random names below its
+                // target: they count under the owner.
+                if hops == 0 {
+                    matched = matched.or(Some(dname.owner));
+                }
                 let Some(target) = dname.rdata.first() else {
-                    return done(ResponseKind::Answer, apex);
+                    return done(ResponseKind::Answer, apex, matched);
                 };
                 if !push_set(
                     answer,
@@ -816,12 +844,12 @@ fn walk<'a>(
                         dname.ttl,
                     ))
                 {
-                    return done(ResponseKind::Answer, apex);
+                    return done(ResponseKind::Answer, apex, matched);
                 }
                 let mut next = NameBuf::root();
                 if dname_target(current_name, dname.owner, target.as_bytes(), &mut next).is_none() {
                     answer.rcode = rcode::YXDOMAIN;
-                    return done(ResponseKind::Answer, apex);
+                    return done(ResponseKind::Answer, apex, matched);
                 }
                 // The CNAME synthesized from the DNAME, with the DNAME's TTL.
                 if answer
@@ -835,12 +863,12 @@ fn walk<'a>(
                     .is_err()
                 {
                     answer.truncated = true;
-                    return done(ResponseKind::Answer, apex);
+                    return done(ResponseKind::Answer, apex, matched);
                 }
                 hops += 1;
                 if hops > MAX_CHAIN {
                     proofs.write(index, answer);
-                    return done(ResponseKind::Answer, apex);
+                    return done(ResponseKind::Answer, apex, matched);
                 }
                 synth = next;
                 at = At::Synth;
@@ -858,8 +886,12 @@ fn at_name<'b>(at: At<'b>, qname: &'b [u8], synth: &'b NameBuf) -> &'b [u8] {
     }
 }
 
-fn done(kind: ResponseKind, apex: &[u8]) -> Walk<'_> {
-    Walk::Done { kind, apex }
+fn done<'a>(kind: ResponseKind, apex: &'a [u8], wildcard: Option<&'a [u8]>) -> Walk<'a> {
+    Walk::Done {
+        kind,
+        apex,
+        wildcard,
+    }
 }
 
 fn zone_of<'a>(lookup: &Lookup<'a>) -> Option<ZoneView<'a>> {
@@ -981,13 +1013,55 @@ impl Hashed {
     }
 }
 
+/// The most extra NSEC3 iterations the query path hashes with
+/// ([`tenko_core::dns::NSEC3_ITERATIONS_MAX`]). A validator treats a zone with more as
+/// insecure (RFC 9276 section 3.2), so it needs no proof from it, and each hash of a
+/// negative or wildcard answer costs at most 151 rounds of SHA-1, however the NSEC3PARAM
+/// reached the zone (the signer, a record, an update, a transfer).
+pub const NSEC3_ITERATIONS_MAX: u16 = tenko_core::dns::NSEC3_ITERATIONS_MAX;
+
+/// How the negative answers of a zone are proved.
+enum DenialOf<'a> {
+    /// NSEC: the zone has no NSEC3PARAM.
+    Nsec,
+    /// NSEC3 with these iterations and salt.
+    Nsec3(u16, &'a [u8]),
+    /// NSEC3 with more iterations than [`NSEC3_ITERATIONS_MAX`]: no proof is computed;
+    /// one NSEC3 record of the zone shows the iterations to a validator.
+    Unproved,
+}
+
 /// The NSEC3 parameters of a zone from its NSEC3PARAM: the iterations and the salt.
-fn nsec3_params<'a>(index: &'a ZoneIndex, zone: &ZoneView<'_>) -> Option<(u16, &'a [u8])> {
-    let param = index.rrset_at(zone, zone.apex, Rtype::NSEC3PARAM)?;
-    let data = param.rdata.first()?.as_bytes();
-    let iterations = u16::from_be_bytes([*data.get(2)?, *data.get(3)?]);
-    let salt_len = usize::from(*data.get(4)?);
-    Some((iterations, data.get(5..5 + salt_len)?))
+fn nsec3_params<'a>(index: &'a ZoneIndex, zone: &ZoneView<'_>) -> DenialOf<'a> {
+    let Some(param) = index.rrset_at(zone, zone.apex, Rtype::NSEC3PARAM) else {
+        return DenialOf::Nsec;
+    };
+    let read = || {
+        let data = param.rdata.first()?.as_bytes();
+        let iterations = u16::from_be_bytes([*data.get(2)?, *data.get(3)?]);
+        let salt_len = usize::from(*data.get(4)?);
+        Some((iterations, data.get(5..5 + salt_len)?))
+    };
+    match read() {
+        Some((iterations, _)) if iterations > NSEC3_ITERATIONS_MAX => DenialOf::Unproved,
+        Some((iterations, salt)) => DenialOf::Nsec3(iterations, salt),
+        None => DenialOf::Nsec,
+    }
+}
+
+/// The owner of the lowest hash in the zone at `apex` (32 zeros in base32hex), whose
+/// covering NSEC3 record is found without hashing anything.
+fn unhashed(apex: &[u8]) -> Option<Hashed> {
+    let label = [b'0'; 32];
+    let len = 1 + label.len() + apex.len();
+    if len > MAX_NAME_LEN {
+        return None;
+    }
+    let mut buf = [0u8; MAX_NAME_LEN];
+    buf[0] = u8::try_from(label.len()).ok()?;
+    buf[1..=label.len()].copy_from_slice(&label);
+    buf[1 + label.len()..len].copy_from_slice(apex);
+    Some(Hashed { buf, len })
 }
 
 /// The hashed owner of `name` in the zone at `apex`.
@@ -1031,8 +1105,17 @@ impl<'a> Proofs<'a> {
         for proof in self.items[..self.len].iter().flatten() {
             let mut sets: [Option<RrSetView<'a>>; 3] = [None; 3];
             match nsec3_params(index, &proof.zone) {
-                Some(params) => nsec3_proof(index, proof, params, &mut sets),
-                None => nsec_proof(index, proof, &mut sets),
+                DenialOf::Nsec3(iterations, salt) => {
+                    nsec3_proof(index, proof, (iterations, salt), &mut sets);
+                }
+                DenialOf::Nsec => nsec_proof(index, proof, &mut sets),
+                // No hashing: one NSEC3 record of the zone, so that a validator reads the
+                // iterations from it and treats the zone as insecure (RFC 9276 section
+                // 3.2) instead of finding no proof at all.
+                DenialOf::Unproved => {
+                    sets[0] = unhashed(proof.zone.apex)
+                        .and_then(|lowest| index.covering_nsec3(&proof.zone, lowest.as_wire()));
+                }
             }
             for set in sets.iter().flatten() {
                 if written[..count].contains(&set.owner) {

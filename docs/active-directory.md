@@ -347,7 +347,7 @@ foreach ($z in 'corp.example.test','_msdcs.corp.example.test','2.0.192.in-addr.a
 }
 ```
 
-TCP 53 from the node to the controller must be open. On the Tenko node, one secondary zone per zone, with the controller as primary (the command line creates primary zones only):
+TCP 53 from the node to the controller must be open. Under the Hardened profile Tenko refuses the controllers' NOTIFY messages, which they cannot sign: the zones are then refreshed on their SOA timers, so check the serial with `tenko dns transfer status` and use `tenko dns transfer now` before the export. On the Tenko node, one secondary zone per zone, with the controller as primary (the command line creates primary zones only):
 
 ```
 POST /api/v1/dns/zones

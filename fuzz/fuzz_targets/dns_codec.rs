@@ -6,6 +6,7 @@ use tenko_dns::{
     AnswerBuf, Codec, DomainCodec, NameBuf, Request,
     codec::{Owner, Section},
     wire::{self, MAX_MESSAGE_LEN},
+    xfr::{self, catalog_zone, message as xfr_message},
 };
 
 const SOA: &[u8] = b"\x03ns1\x07example\x04test\x00\x0ahostmaster\x07example\x04test\x00\
@@ -15,8 +16,26 @@ const SOA: &[u8] = b"\x03ns1\x07example\x04test\x00\x0ahostmaster\x07example\x04
 // apex of `example.test` (so names compress against the question), built for UDP and for
 // TCP, and the answer is parsed back as a message. The same input is also read as record
 // data of the type in its first two octets and as names, the stored forms the engine
-// copies into answers.
+// copies into answers. And as a message of the transfer path: classified, read as a
+// request and as an answer of a transfer, whose records are read as the members of a
+// catalog zone (the reader the member bound and the name filter sit behind).
 fuzz_target!(|data: &[u8]| {
+    let _ = xfr::classify(data);
+    if let Some(request) = xfr_message::read_request(data) {
+        assert!(request.question_end <= data.len());
+    }
+    if let Ok(answer) = xfr_message::read_answer(data) {
+        let catalog = DnsName::new("catalog.example.test").expect("name");
+        if let Ok(members) = catalog_zone::members(
+            &catalog,
+            answer
+                .answers
+                .iter()
+                .map(|record| (&record.name, record.rtype, &record.rdata)),
+        ) {
+            assert!(members.windows(2).all(|pair| pair[0] < pair[1]), "sorted, once each");
+        }
+    }
     let codec = DomainCodec::new();
     let mut request = Request::default();
     let mut out = Vec::with_capacity(MAX_MESSAGE_LEN);

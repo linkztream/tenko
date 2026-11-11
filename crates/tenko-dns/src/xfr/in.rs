@@ -10,6 +10,10 @@
 //! 5.3.1) and end on a signed message. With `xot` the connection is TLS to the primary's
 //! port (853 unless set) with ALPN `dot`, the name of `tls_name` (else the address)
 //! checked in its certificate against the system roots or `[dns] upstream_ca`.
+//!
+//! A transfer is bounded by [`Limits`]: the time to connect, the time between two messages,
+//! the time of the whole refresh, the records and the octets. Records outside the zone are
+//! dropped as they arrive.
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -41,15 +45,21 @@ pub struct Primary {
     pub tls: Option<(Arc<ClientConfig>, String)>,
 }
 
-/// The time limits of a transfer.
+/// The limits of a transfer (RFC 5936 section 6: a client bounds what a primary can make
+/// it hold and how long it can hold a transfer slot).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
     /// To connect (and finish the TLS handshake).
     pub connect: Duration,
     /// Between two messages.
     pub idle: Duration,
+    /// The whole refresh, from the first connection to the last message, every primary
+    /// tried and the IXFR and the AXFR after it together.
+    pub deadline: Duration,
     /// Records of one transfer at most.
     pub max_records: usize,
+    /// Octets of the messages of one answer (an IXFR or an AXFR) at most.
+    pub max_bytes: usize,
 }
 
 impl Default for Limits {
@@ -57,10 +67,15 @@ impl Default for Limits {
         Self {
             connect: Duration::from_secs(10),
             idle: Duration::from_secs(30),
+            deadline: Duration::from_secs(15 * 60),
             max_records: 10_000_000,
+            max_bytes: 256 << 20,
         }
     }
 }
+
+/// The stable code of a transfer whose serial is older than the copy's (RFC 1982).
+pub const OLDER_SERIAL: &str = "dns.transfer.older_serial";
 
 /// The copy the client holds: the SOA's TTL and data.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -261,6 +276,12 @@ async fn exchange(
             .map_err(|error| FetchError::failed(format!("the transfer ended early: {error}")))?;
         let message = &buf[..len];
         bytes += len + 2;
+        if bytes > limits.max_bytes {
+            return Err(FetchError::failed(format!(
+                "the transfer is larger than the limit of {} octets",
+                limits.max_bytes
+            )));
+        }
         if let Some(verifier) = &mut verifier {
             verifier
                 .verify(message, unix_now())
@@ -363,7 +384,10 @@ async fn exchange(
                         });
                         Parse::Start
                     } else {
-                        records.push(record);
+                        // Records outside the zone are dropped as they arrive, not held.
+                        if in_zone(&record, apex) {
+                            records.push(record);
+                        }
                         Parse::Full { serial, records }
                     }
                 }
@@ -405,7 +429,9 @@ async fn exchange(
                             }
                         }
                         (false, adding) => {
-                            if let Some(step) = steps.last_mut() {
+                            if let Some(step) = steps.last_mut()
+                                && in_zone(&record, apex)
+                            {
                                 if adding {
                                     step.added.push(record);
                                 } else {
@@ -443,11 +469,16 @@ async fn exchange(
             && qtype == TYPE_IXFR
         {
             let serial = record_serial(first).unwrap_or_default();
-            if held.is_some_and(|held| serial_ge(held.serial, serial)) {
+            if let Some(held) = held
+                && serial_ge(held.serial, serial)
+            {
                 if let Some(verifier) = &verifier
                     && !verifier.complete()
                 {
                     return Err(FetchError::tsig("the answer is not signed"));
+                }
+                if serial != held.serial {
+                    return Err(older(serial, held.serial));
                 }
                 return Ok(Fetched::Current { serial });
             }
@@ -459,6 +490,22 @@ async fn exchange(
     }
 }
 
+/// The failure of a transfer whose serial is older than the copy's.
+pub fn older(serial: u32, held: u32) -> FetchError {
+    FetchError {
+        code: OLDER_SERIAL,
+        detail: format!(
+            "the primary has serial {serial}, older than the serial {held} held; the copy is kept. \
+             Raise the serial on the primary, or ask for the transfer now through the API to accept it"
+        ),
+    }
+}
+
+/// Whether a record of a transfer belongs to the zone: class IN, at or below the apex.
+fn in_zone(record: &Record, apex: &DnsName) -> bool {
+    record.class == 1 && record.name.is_subdomain_of(apex)
+}
+
 fn random_id() -> u16 {
     let mut bytes = [0u8; 2];
     let _ = aws_lc_rs::rand::fill(&mut bytes);
@@ -466,7 +513,7 @@ fn random_id() -> u16 {
 }
 
 /// One transfer of `apex` from `primary`: IXFR from `held` when there is a copy (with the
-/// AXFR fallback), else AXFR.
+/// AXFR fallback), else AXFR; within `limits.deadline` from now.
 ///
 /// # Errors
 ///
@@ -477,8 +524,42 @@ pub async fn fetch(
     held: Option<&Held>,
     limits: Limits,
 ) -> Result<Fetched, FetchError> {
+    fetch_until(
+        primary,
+        apex,
+        held,
+        limits,
+        tokio::time::Instant::now() + limits.deadline,
+    )
+    .await
+}
+
+/// [`fetch`] that ends at `deadline`: a refresh that tries several primaries gives them
+/// one deadline together.
+///
+/// # Errors
+///
+/// [`FetchError`] with the stable code of the failure.
+pub async fn fetch_until(
+    primary: &Primary,
+    apex: &DnsName,
+    held: Option<&Held>,
+    limits: Limits,
+    deadline: tokio::time::Instant,
+) -> Result<Fetched, FetchError> {
+    let in_time = |result: Result<Result<Fetched, FetchError>, tokio::time::error::Elapsed>| {
+        result.unwrap_or_else(|_| {
+            Err(FetchError::failed(format!(
+                "the transfer took longer than the limit of {} seconds",
+                limits.deadline.as_secs()
+            )))
+        })
+    };
     if held.is_some() {
-        match exchange(primary, apex, TYPE_IXFR, held, limits).await {
+        match in_time(
+            tokio::time::timeout_at(deadline, exchange(primary, apex, TYPE_IXFR, held, limits))
+                .await,
+        ) {
             Ok(fetched) => {
                 let outcome = if matches!(fetched, Fetched::Current { .. }) {
                     Outcome::Current
@@ -507,7 +588,9 @@ pub async fn fetch(
             }
         }
     }
-    match exchange(primary, apex, TYPE_AXFR, None, limits).await {
+    match in_time(
+        tokio::time::timeout_at(deadline, exchange(primary, apex, TYPE_AXFR, None, limits)).await,
+    ) {
         Ok(fetched) => {
             count(MetricKind::AxfrIn, Outcome::Ok);
             if let Fetched::Full { bytes, .. } = &fetched {
@@ -532,3 +615,7 @@ pub async fn fetch(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "in_tests.rs"]
+mod tests;

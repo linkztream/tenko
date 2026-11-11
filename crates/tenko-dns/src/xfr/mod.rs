@@ -2,6 +2,8 @@
 //!
 //! | Module | What |
 //! |---|---|
+//! | [`access`] | who may transfer a zone out or NOTIFY it in, under the security profile |
+//! | [`health`] | the findings of the transfer settings: weaker than the profile, deny wins |
 //! | [`message`] | the messages of transfers and NOTIFY: the writer and the reader |
 //! | [`out`] | AXFR and IXFR out on the role's TCP and DoT listeners, IXFR over UDP, NOTIFY in |
 //! | [`notify`] | NOTIFY out from the leader when a serial changes, with retries |
@@ -19,7 +21,9 @@
 //! secondary service through [`NotifyHandler`], which refreshes the zone and writes the
 //! result through the store like every other change (plan section 2.4).
 
+pub mod access;
 pub mod catalog_zone;
+pub mod health;
 #[path = "in.rs"]
 pub mod inbound;
 pub mod message;
@@ -29,7 +33,10 @@ pub mod out;
 use std::{
     collections::HashMap,
     net::IpAddr,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc,
+        atomic::{AtomicU32, AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -108,8 +115,11 @@ pub trait TransferSink: Send + Sync {
 
 /// Where a NOTIFY for a secondary zone goes: the leader's secondary service.
 pub trait NotifyHandler: Send + Sync {
-    /// A primary of `zone` at `from` says its serial is now `serial` (when it said).
-    fn notified(&self, zone: ZoneId, from: IpAddr, serial: Option<u32>);
+    /// A primary of `zone` at `from` says its serial is now `serial` (when it said);
+    /// `signed` when the NOTIFY was signed with that primary's own key, so that its source
+    /// is known. An unsigned NOTIFY may be spoofed: the service backs off from one that brings
+    /// nothing new.
+    fn notified(&self, zone: ZoneId, from: IpAddr, serial: Option<u32>, signed: bool);
 }
 
 /// The audit records of transfers out, written off the transfer path.
@@ -163,11 +173,88 @@ impl JournalSource for StoreJournal {
     }
 }
 
-/// Audit records written to the store of this process as the DNS component, refusals at
-/// most once a minute per client so that a scan cannot fill the audit log.
+/// Slots of [`RefusalLimiter`]: clients are spread over them by a keyed hash.
+pub const REFUSAL_SLOTS: usize = 4096;
+
+/// Refusals [`RefusalLimiter`] lets through in one minute, from all clients together.
+pub const REFUSALS_PER_MINUTE: u32 = 60;
+
+/// Which refusals are recorded: at most one a minute per client and
+/// [`REFUSALS_PER_MINUTE`] a minute in all, so that a flood from spoofed sources neither
+/// fills the audit log nor serializes the workers. Lock-free: one load of a slot for a
+/// client already recorded this minute, and two compare-and-swap operations for one that
+/// is recorded. Two clients whose keyed hashes share a slot share its minute.
+pub struct RefusalLimiter {
+    start: Instant,
+    hasher: std::collections::hash_map::RandomState,
+    /// The minute (counted from `start`, plus one) of each slot's last record.
+    slots: Box<[AtomicU32]>,
+    /// The current minute (high 32 bits) and the records in it (low 32 bits).
+    budget: AtomicU64,
+}
+
+impl Default for RefusalLimiter {
+    fn default() -> Self {
+        Self {
+            start: Instant::now(),
+            hasher: std::collections::hash_map::RandomState::new(),
+            slots: (0..REFUSAL_SLOTS).map(|_| AtomicU32::new(0)).collect(),
+            budget: AtomicU64::new(0),
+        }
+    }
+}
+
+impl RefusalLimiter {
+    /// Whether a refusal of `client` is recorded now.
+    pub fn due(&self, client: IpAddr) -> bool {
+        let minutes = self.start.elapsed().as_secs() / 60;
+        self.due_at(client, u32::try_from(minutes).unwrap_or(u32::MAX - 1) + 1)
+    }
+
+    fn due_at(&self, client: IpAddr, minute: u32) -> bool {
+        use std::hash::BuildHasher as _;
+        let hash = self.hasher.hash_one(crate::xfr::access::canonical(client));
+        let slot = &self.slots[usize::try_from(hash % REFUSAL_SLOTS as u64).unwrap_or(0)];
+        let seen = slot.load(Ordering::Relaxed);
+        if seen >= minute
+            || slot
+                .compare_exchange(seen, minute, Ordering::Relaxed, Ordering::Relaxed)
+                .is_err()
+        {
+            return false;
+        }
+        let mut current = self.budget.load(Ordering::Relaxed);
+        loop {
+            if current >> 32 > u64::from(minute) {
+                // A worker that read the clock before the minute turned.
+                return false;
+            }
+            let next = if current >> 32 == u64::from(minute) {
+                if current & 0xffff_ffff >= u64::from(REFUSALS_PER_MINUTE) {
+                    return false;
+                }
+                current + 1
+            } else {
+                (u64::from(minute) << 32) | 1
+            };
+            match self.budget.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return true,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+}
+
+/// Audit records written to the store of this process as the DNS component, refusals
+/// through a [`RefusalLimiter`] so that a scan cannot fill the audit log.
 pub struct StoreAudit {
     store: Arc<dyn Store>,
-    refusals: Mutex<HashMap<IpAddr, Instant>>,
+    refusals: RefusalLimiter,
 }
 
 impl StoreAudit {
@@ -175,19 +262,12 @@ impl StoreAudit {
     pub fn new(store: Arc<dyn Store>) -> Self {
         Self {
             store,
-            refusals: Mutex::new(HashMap::new()),
+            refusals: RefusalLimiter::default(),
         }
     }
 
     fn due(&self, client: IpAddr) -> bool {
-        let mut seen = self.refusals.lock().unwrap_or_else(PoisonError::into_inner);
-        let now = Instant::now();
-        seen.retain(|_, at| now.duration_since(*at) < Duration::from_secs(60));
-        if seen.len() > 4096 || seen.contains_key(&client) {
-            return false;
-        }
-        seen.insert(client, now);
-        true
+        self.refusals.due(client)
     }
 }
 
@@ -475,6 +555,29 @@ mod tests {
         out[2] |= 0x80;
         assert_eq!(classify(&out), None, "a response is not for the path");
         assert_eq!(classify(&[0; 3]), None);
+    }
+
+    #[test]
+    fn refusals_are_recorded_once_a_minute_per_client_and_a_bounded_number_in_all() {
+        let limiter = RefusalLimiter::default();
+        let client = IpAddr::from([192, 0, 2, 7]);
+        assert!(limiter.due_at(client, 1));
+        assert!(!limiter.due_at(client, 1), "once a minute per client");
+        let mapped = IpAddr::from(std::net::Ipv4Addr::new(192, 0, 2, 7).to_ipv6_mapped());
+        assert!(
+            !limiter.due_at(mapped, 1),
+            "a mapped address is the same client"
+        );
+        assert!(limiter.due_at(client, 2), "the next minute");
+        // A flood of distinct sources: at most the budget a minute.
+        let recorded = (0..10_000u32)
+            .filter(|n| limiter.due_at(IpAddr::from(n.to_be_bytes()), 3))
+            .count();
+        assert_eq!(recorded, REFUSALS_PER_MINUTE as usize);
+        assert!(limiter.due_at(IpAddr::from([203, 0, 113, 9]), 4));
+        // A worker that read the clock before the minute turned never steps it back.
+        assert!(!limiter.due_at(IpAddr::from([203, 0, 113, 10]), 3));
+        assert!(!limiter.due_at(IpAddr::from([203, 0, 113, 9]), 3));
     }
 
     #[test]

@@ -205,7 +205,18 @@ pub struct Reader {
     state: State,
     max_generate: u32,
     done: bool,
+    /// Records read so far, and of them the ones `$GENERATE` made.
+    records: u64,
+    generated: u64,
 }
+
+/// The records one file may hold, its own and the generated ones together: as many as one
+/// zone transfer may carry.
+pub const MAX_RECORDS: u64 = 10_000_000;
+
+/// The records the `$GENERATE` directives of one file may make together, whatever each
+/// directive's own bound: a few lines of text cannot become millions of records.
+pub const MAX_GENERATED: u64 = 1_000_000;
 
 impl std::fmt::Debug for Reader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -257,6 +268,8 @@ impl Reader {
             },
             max_generate,
             done: false,
+            records: 0,
+            generated: 0,
         })
     }
 
@@ -265,12 +278,32 @@ impl Reader {
     /// # Errors
     ///
     /// `dns.zonefile.invalid` with the line and the reason of a syntax error, `$INCLUDE`,
-    /// a malformed `$GENERATE` or one that makes too many records.
+    /// a malformed `$GENERATE` or one that makes too many records, more than
+    /// [`MAX_GENERATED`] generated records in the file, or more than [`MAX_RECORDS`] in all.
     pub fn next_item(&mut self) -> ZoneResult<Option<Item>> {
         if self.done {
             return Ok(None);
         }
-        let next = self.read();
+        let mut next = self.read();
+        if let Ok(Some(Item::Record(record))) = &next {
+            self.records += 1;
+            if self.generate.is_some() {
+                self.generated += 1;
+            }
+            if self.records > MAX_RECORDS {
+                next = Err(ZoneError::zone_file(
+                    record.line,
+                    format!("the file holds more than {MAX_RECORDS} records"),
+                ));
+            } else if self.generated > MAX_GENERATED {
+                next = Err(ZoneError::zone_file(
+                    record.line,
+                    format!(
+                        "$GENERATE: the directives of the file make more than {MAX_GENERATED} records together"
+                    ),
+                ));
+            }
+        }
         if !matches!(next, Ok(Some(_))) {
             self.done = true;
         }

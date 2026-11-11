@@ -24,7 +24,7 @@ A zone's `dnssec` policy says how it is signed:
 |---|---|---|
 | `mode` | `off` | `off`: not signed. `online`: signed by Tenko (primary zones only). `imported`: the zone's own DNSSEC records are served as they are |
 | `algorithm` | `ecdsa_p256_sha256` | The algorithm of new keys: ECDSA P-256 with SHA-256 (13) or `ed25519` (15) |
-| `denial` | `{"kind": "nsec"}` | NSEC, or `{"kind": "nsec3", "iterations": 0, "salt": ""}` (RFC 9276; opt-out is never used) |
+| `denial` | `{"kind": "nsec"}` | NSEC, or `{"kind": "nsec3", "iterations": 0, "salt": ""}` (RFC 9276; opt-out is never used). At most 150 extra iterations (400 `dns.zone.invalid` on `dnssec.denial.iterations` above) and a salt of at most 255 octets. The authoritative path writes NSEC3 proofs for a zone whose NSEC3PARAM has at most 150 iterations, however it got there (the signer, a record, an update, a transfer); a zone with more gets no computed proof: its negative and wildcard answers carry one NSEC3 record of the zone, found without hashing, from which a validator reads the iterations and treats the zone as insecure (RFC 9276 section 3.2) |
 | `csk` | `false` | One combined signing key instead of a KSK and a ZSK |
 | `signature_validity_days` | 14 | How long a new signature is valid |
 | `resign_before_days` | 7 | Signatures with less than this left are renewed |

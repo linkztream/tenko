@@ -210,6 +210,7 @@ const TRANSFER_ERRORS: Readonly<Record<string, MessageKey>> = {
   "dns.transfer.failed": "dns.transfer.error.failed",
   "dns.transfer.tsig": "dns.transfer.error.tsig",
   "dns.transfer.refused": "dns.transfer.error.refused",
+  "dns.transfer.older_serial": "dns.transfer.error.older_serial",
 };
 
 /** One labeled text input of a row (a NOTIFY target, a primary). */
@@ -400,7 +401,22 @@ function TransferSection(props: { zone: Zone; draft: TransferDraft; errors: Reco
       <Show when={props.zone.kind === "secondary"}>
         <TransferState zone={props.zone} />
       </Show>
+      <Show when={profileInForce() === "hardened"}>
+        <p class="muted" data-testid="transfer-hardened">
+          {t("dns.transfer.hardened")}
+        </p>
+        <Show when={props.zone.kind === "secondary"}>
+          <p class="muted" data-testid="transfer-hardened-notify">
+            {t("dns.transfer.hardened_notify")}
+          </p>
+        </Show>
+      </Show>
       <AllowChips draft={props.draft} disabled={props.disabled} />
+      <Show when={props.draft.allow().length >= 2}>
+        <p class="muted" data-testid="transfer-deny-wins">
+          {t("dns.transfer.deny_wins")}
+        </p>
+      </Show>
       <div class="field" role="group" aria-labelledby="dns-notify-label" data-testid="transfer-notify-list">
         <span id="dns-notify-label" class="label">
           {t("dns.transfer.notify")}

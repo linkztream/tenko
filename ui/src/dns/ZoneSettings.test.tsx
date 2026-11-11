@@ -12,7 +12,7 @@ import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
 import { signInWithRoles } from "../auth/scope-testkit";
-import { setSessionForTest } from "../auth/session";
+import { session, setSessionForTest } from "../auth/session";
 import { setLocale } from "../i18n";
 import { cell, recordWrites, row, rowActions, rows } from "./testkit";
 import ZonePage from "./ZonePage";
@@ -287,5 +287,32 @@ describe("the records of a secondary zone", () => {
     fireEvent.dblClick(cell(www(), "data"));
     expect(within(cell(www(), "data")).queryByTestId("cell-editor")).toBeNull();
     expect(await rowActions(www())).toEqual([]);
+  });
+});
+
+describe("the Hardened rule and the deny-wins notice of the transfer section", () => {
+  function withProfile(profile: "standard" | "hardened") {
+    const current = session();
+    if (current) setSessionForTest({ ...current, profile });
+  }
+
+  it("names the Hardened rule under Hardened and hides it under Standard", async () => {
+    withProfile("hardened");
+    const hardened = await settings(PRIMARY);
+    expect(within(hardened.form).getByTestId("transfer-hardened").textContent).toContain("requires a TSIG key for every transfer");
+    expect(within(hardened.form).queryByTestId("transfer-hardened-notify")).toBeNull();
+    hardened.view.unmount();
+    withProfile("standard");
+    const { form } = await settings(PRIMARY);
+    expect(within(form).queryByTestId("transfer-hardened")).toBeNull();
+  });
+
+  it("says that a deny wins once the zone has two access lists", async () => {
+    const { form } = await settings(PRIMARY);
+    expect(within(form).queryByTestId("transfer-deny-wins")).toBeNull();
+    const add = input(form, "field-allow-add");
+    await waitFor(() => expect(Array.from((add as unknown as HTMLSelectElement).options).map((o) => o.textContent)).toContain("internal"));
+    fireEvent.change(add, { target: { value: DNS_IDS.acl.internal } });
+    expect((await within(form).findByTestId("transfer-deny-wins")).textContent).toContain("A deny in any of these lists");
   });
 });

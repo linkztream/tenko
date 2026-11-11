@@ -8311,7 +8311,7 @@ export interface components {
         } | {
             /**
              * Format: int32
-             * @description Extra hash iterations; RFC 9276 recommends 0.
+             * @description Extra hash iterations; RFC 9276 recommends 0, at most 150.
              */
             iterations?: number;
             /** @enum {string} */
@@ -21719,6 +21719,14 @@ export interface components {
              */
             token_max_days?: number | null;
             /**
+             * @description TGL-10: the networks that count as the site, in CIDR notation. Under Hardened a zone
+             *     transfer to an address outside them needs XoT; an empty list makes every transfer
+             *     need it. Absent in settings stored before the setting existed, and after a change of
+             *     profile: the default ranges apply (private, shared, unique-local, loopback and
+             *     link-local).
+             */
+            transfer_site?: string[] | null;
+            /**
              * Format: int32
              * @description Days a PIN stored before the six-digit minimum keeps working without a sign-in that
              *     shows it meets the policy, counted from the upgrade (1 to 365). Afterwards it is
@@ -21869,6 +21877,11 @@ export interface components {
             secret_reveal?: components["schemas"]["RevealPolicy"] | null;
             session?: components["schemas"]["SessionLifetime"] | null;
             token_max_lifetime?: components["schemas"]["TokenMaxLifetime"] | null;
+            /**
+             * @description TGL-10: the networks that count as the site, in CIDR notation; an empty list is
+             *     allowed (every transfer needs XoT under Hardened).
+             */
+            transfer_site?: string[] | null;
             /**
              * Format: int32
              * @description The period of an unconfirmed PIN from before the six-digit minimum, in days.
@@ -38542,8 +38555,35 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The zone file does not parse or uses `$INCLUDE` (`dns.zonefile.invalid`, parameters `line` and `reason`) */
+            /** @description The zone file did not arrive within ten minutes (`sys.invalid_request`) */
+            408: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The request is larger than 512 MiB (`sys.body_too_large`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The zone file does not parse, uses `$INCLUDE`, holds more than 10,000,000 records or makes more than 1,000,000 with `$GENERATE`, or would leave the zone with more than 10,000,000 RRsets (`dns.zonefile.invalid`, parameters `line` and `reason`) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An import of the zone is running, or two imports are (`dns.import.busy`) */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

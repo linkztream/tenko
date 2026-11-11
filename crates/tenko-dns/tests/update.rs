@@ -683,7 +683,7 @@ async fn the_key_and_the_access_lists_decide() {
     assert_eq!(got.rcode, rcode::REFUSED);
     assert_eq!(
         got.text.as_deref(),
-        Some("the client is not in the zone's update access lists")
+        Some("no update access list allows the client, or one denies it")
     );
     // An unknown key: NOTAUTH with BADKEY.
     let stranger = Arc::new(TsigKey::new(

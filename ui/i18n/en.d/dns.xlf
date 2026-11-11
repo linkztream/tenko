@@ -2061,6 +2061,15 @@
       <unit id="dns.transfer.allow_help">
         <segment><source>Hosts and keys that match one of these lists may ask for a transfer of the zone.</source></segment>
       </unit>
+      <unit id="dns.transfer.deny_wins">
+        <segment><source>A deny in any of these lists refuses a secondary that another list allows.</source></segment>
+      </unit>
+      <unit id="dns.transfer.hardened">
+        <segment><source>The Hardened profile requires a TSIG key for every transfer, and TLS (XoT) for every secondary outside the site, whatever these settings say. The networks of the site are a security setting; by default the private, shared, unique-local, loopback and link-local ranges.</source></segment>
+      </unit>
+      <unit id="dns.transfer.hardened_notify">
+        <segment><source>The Hardened profile refuses a NOTIFY from a primary without a TSIG key: give each primary a key, or the zone is refreshed on its SOA timers only.</source></segment>
+      </unit>
       <unit id="dns.transfer.notify">
         <notes><note category="description">Label of the NOTIFY targets (RFC 1996).</note></notes>
         <segment><source>Servers to notify</source></segment>
@@ -2171,6 +2180,9 @@
       </unit>
       <unit id="dns.transfer.error.refused">
         <segment><source>The primary refused the transfer.</source></segment>
+      </unit>
+      <unit id="dns.transfer.error.older_serial">
+        <segment><source>The primary sent an older serial than the one held; the copy is kept.</source></segment>
       </unit>
       <unit id="dns.transfer.now">
         <segment><source>Transfer now</source></segment>

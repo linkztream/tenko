@@ -69,6 +69,9 @@ const INFORMATIONAL: &[&str] = &[
     // check that cannot run.
     tenko_dhcp::ra::OTHER_ONLY,
     tenko_dhcp::ra::UNCHECKED,
+    // A zone transfers without TSIG under a profile that lets it: the zone's setting
+    // applies; under Hardened the same zone raises `dns.transfer.profile_refuses` instead.
+    tenko_dns::xfr::health::WEAKER_THAN_PROFILE,
 ];
 
 /// The findings of a role or a service that does not do its work.

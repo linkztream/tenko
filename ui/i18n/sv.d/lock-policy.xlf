@@ -100,6 +100,25 @@
       <unit id="settings.security.pin_days.value">
         <segment><source>{days, plural, one {# day} other {# days}}</source><target>{days, plural, one {# dag} other {# dagar}}</target></segment>
       </unit>
+      <unit id="settings.security.transfer_site.heading">
+        <notes><note category="description">Section of the security settings page.</note></notes>
+        <segment><source>Zone transfers</source><target>Zonöverföringar</target></segment>
+      </unit>
+      <unit id="settings.security.transfer_site.label">
+        <segment><source>Networks of the site (zone transfers)</source><target>Platsens nätverk (zonöverföringar)</target></segment>
+      </unit>
+      <unit id="settings.security.transfer_site.help">
+        <segment><source>Under the Hardened profile, a zone transfer to an address outside these networks needs TLS (XoT). An empty list means every transfer needs XoT. The default is the private, shared, unique-local, loopback and link-local ranges.</source><target>Under profilen Hardened kräver en zonöverföring till en adress utanför dessa nätverk TLS (XoT). En tom lista betyder att varje överföring kräver XoT. Standard är de privata, delade, unik-lokala, loopback- och länklokala adressintervallen.</target></segment>
+      </unit>
+      <unit id="settings.security.transfer_site.error">
+        <segment><source>"{line}" is not a network in CIDR notation, such as 192.0.2.0/24 or 2001:db8::/32.</source><target>"{line}" är inte ett nätverk i CIDR-notation, till exempel 192.0.2.0/24 eller 2001:db8::/32.</target></segment>
+      </unit>
+      <unit id="settings.security.transfer_site.use_default">
+        <segment><source>Use the default networks</source><target>Använd standardnätverken</target></segment>
+      </unit>
+      <unit id="settings.security.transfer_site.saved">
+        <segment><source>Saved the networks of the site</source><target>Sparade platsens nätverk</target></segment>
+      </unit>
       <unit id="auth.signin.retry_in_minutes">
         <segment><source>{minutes, plural, one {Try again in # minute.} other {Try again in # minutes.}}</source><target>{minutes, plural, one {Försök igen om # minut.} other {Försök igen om # minuter.}}</target></segment>
       </unit>

@@ -1285,3 +1285,53 @@ describe("the period of unconfirmed PINs", () => {
     expect(days.value).toBe("30");
   });
 });
+
+describe("the networks of the site for zone transfers", () => {
+  const DEFAULTS = [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "100.64.0.0/10",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "fc00::/7",
+    "::1/128",
+    "fe80::/10",
+  ];
+
+  it("shows the default list when the settings have none, and refuses a line that is not a network", async () => {
+    await signInAs();
+    await openPage();
+    const section = screen.getByTestId("transfer-site");
+    const field = within(section).getByTestId("field-transfer_site") as HTMLTextAreaElement;
+    expect(field.value.split("\n")).toEqual(DEFAULTS);
+    const save = within(section).getByTestId("transfer-site-save") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.input(field, { target: { value: "192.0.2.0/24\nnot-a-network" } });
+    expect(await within(section).findByText(/"not-a-network" is not a network in CIDR notation/)).toBeTruthy();
+    expect(save.disabled).toBe(true);
+    fireEvent.input(field, { target: { value: "192.0.2.0/33" } });
+    await waitFor(() => expect(within(section).queryByText(/"192.0.2.0\/33" is not a network/)).toBeTruthy());
+  });
+
+  it("sends a changed list as transfer_site and an empty text as an empty list", async () => {
+    await signInAs();
+    await openPage();
+    const section = screen.getByTestId("transfer-site");
+    const field = within(section).getByTestId("field-transfer_site") as HTMLTextAreaElement;
+    const save = within(section).getByTestId("transfer-site-save") as HTMLButtonElement;
+    fireEvent.input(field, { target: { value: "192.0.2.0/24\n\n2001:db8::/32\n" } });
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(save);
+    await waitFor(() => expect(db.settings.transfer_site).toEqual(["192.0.2.0/24", "2001:db8::/32"]));
+    expect(await screen.findByText("Saved the networks of the site")).toBeTruthy();
+
+    fireEvent.input(field, { target: { value: "" } });
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(save);
+    await waitFor(() => expect(db.settings.transfer_site).toEqual([]));
+
+    fireEvent.click(within(section).getByTestId("transfer-site-default"));
+    expect(field.value.split("\n")).toEqual(DEFAULTS);
+  });
+});

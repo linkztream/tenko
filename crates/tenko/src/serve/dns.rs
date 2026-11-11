@@ -177,6 +177,8 @@ fn transfer_path(
     transfers: Option<&Transfers>,
     handle: &catalog::CatalogHandle,
     store: &Arc<dyn Store>,
+    profile: &Arc<tenko_dns::update::policy::ProfileCell>,
+    site: &Arc<tenko_dns::xfr::access::Site>,
     stop: CancellationToken,
 ) -> Option<TransferPath> {
     use tenko_dns::xfr::{self, out::XfrOut};
@@ -194,7 +196,10 @@ fn transfer_path(
         Arc::new(xfr::StoreJournal::new(Arc::clone(store))),
         Arc::new(xfr::StoreAudit::new(Arc::clone(store))),
         Some(Arc::new(secondaries.clone()) as Arc<dyn xfr::NotifyHandler>),
-    );
+    )
+    // The profile's floor of TGL-10, from the cell the update path shares.
+    .with_profile(Arc::clone(profile))
+    .with_site(Arc::clone(site));
     Some((
         Arc::new(path) as Arc<dyn xfr::TransferSink>,
         task,
@@ -507,15 +512,22 @@ fn upstream_ca(section: &DnsSection) -> Result<Option<Vec<u8>>, StartError> {
         .transpose()
 }
 
-/// The profile in force and the prefixes IPAM knows, read from the store.
+/// The profile in force, the prefixes IPAM knows and the networks of the transfer site
+/// (`transfer_site`, TGL-10), read from the store.
 async fn recursion_inputs(
     store: &dyn Store,
     bootstrap: Profile,
-) -> Result<(Profile, Vec<ipnet::IpNet>), tenko_store::StoreError> {
+) -> Result<(Profile, Vec<ipnet::IpNet>, Vec<String>), tenko_store::StoreError> {
     let view = store.read(ReadConsistency::Local).await?;
-    let profile = view
+    let settings = view
         .get_typed(&SETTINGS, &())?
-        .map_or(bootstrap, |(settings, _)| settings.profile);
+        .map(|(settings, _)| settings);
+    let profile = settings
+        .as_ref()
+        .map_or(bootstrap, |settings| settings.profile);
+    let site = settings
+        .unwrap_or_else(|| bootstrap.defaults())
+        .transfer_site();
     let prefixes = view
         .scan_typed(
             &tenko_ipam::tables::PREFIXES,
@@ -526,7 +538,7 @@ async fn recursion_inputs(
         .into_iter()
         .map(|(_, prefix, _)| prefix.cidr)
         .collect();
-    Ok((profile, prefixes))
+    Ok((profile, prefixes, site))
 }
 
 /// Keeps the recursion policy current: the profile (it changes at setup) and the prefixes
@@ -537,6 +549,8 @@ async fn follow_recursion(
     policy: Arc<RecursionPolicy>,
     // WP6.2: the profile of the update policy.
     update_profile: Arc<tenko_dns::update::policy::ProfileCell>,
+    // The site of the Hardened rule of zone transfers (TGL-10).
+    transfer_site: Arc<tenko_dns::xfr::access::Site>,
     stop: CancellationToken,
 ) {
     let filter = || {
@@ -562,9 +576,15 @@ async fn follow_recursion(
             stream = store.watch(None, filter()).ok();
         }
         match recursion_inputs(store.as_ref(), bootstrap).await {
-            Ok((profile, prefixes)) => {
+            Ok((profile, prefixes, site)) => {
                 policy.set_default(recursion_default(profile));
                 update_profile.set(update_profile_of(profile));
+                match tenko_core::dns::parse_transfer_site(&site) {
+                    Ok(networks) => transfer_site.set(networks),
+                    Err(error) => {
+                        tracing::warn!(%error, "the transfer site of the settings does not read; the last one stays");
+                    }
+                }
                 policy.set_prefixes(prefixes);
             }
             Err(error) => {
@@ -834,7 +854,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     let stop = CancellationToken::new();
     let upstream_ca = upstream_ca(section)?;
     let bootstrap = resolved.config.profile.name;
-    let (profile, prefixes) = recursion_inputs(store.as_ref(), bootstrap)
+    let (profile, prefixes, site) = recursion_inputs(store.as_ref(), bootstrap)
         .await
         .map_err(|store| error("start.dns.feed", store.to_string()))?;
     let log = start_log(section, resolved, log_profile)?;
@@ -846,6 +866,8 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     let update_profile = Arc::new(tenko_dns::update::policy::ProfileCell::new(
         update_profile_of(profile),
     ));
+    // The site of the Hardened rule of zone transfers (TGL-10), kept current with it.
+    let transfer_site = Arc::new(tenko_dns::xfr::access::Site::of(&site));
     recursion.set_prefixes(prefixes);
     // WP10.1: the recursive resolver beside the forwarder, its flushes audited.
     let mut settings = forward_settings(section, profile, upstream_ca);
@@ -891,6 +913,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         bootstrap,
         recursion,
         Arc::clone(&update_profile),
+        Arc::clone(&transfer_site),
         stop.child_token(),
     ));
     // The policy decides on every name outside the zones and on every forwarded answer.
@@ -924,7 +947,14 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         watchers = encrypted.watchers;
         encrypted_line = Some(encrypted.describe);
     }
-    let transfer_path = transfer_path(transfers.as_ref(), &handle, &store, stop.child_token());
+    let transfer_path = transfer_path(
+        transfers.as_ref(),
+        &handle,
+        &store,
+        &update_profile,
+        &transfer_site,
+        stop.child_token(),
+    );
     // WP13.2: the TKEY handler and GSS-TSIG contexts of the node, with the bounds of
     // `[dns.gss]` under the profile the role starts with; the account's keys arrive through
     // its handle (`DnsRole::gss_keys`).

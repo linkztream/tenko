@@ -735,3 +735,103 @@ fn addresses_in_tagged_enums_round_trip_in_cbor_and_json() {
         "192.0.2.80"
     );
 }
+
+fn list(entries: Vec<AclEntry>) -> Acl {
+    Acl {
+        id: AclId::generate(),
+        name: "list".to_owned(),
+        entries,
+        description: None,
+    }
+}
+
+fn prefix(text: &str, deny: bool) -> AclEntry {
+    AclEntry::Prefix {
+        prefix: text.parse().expect("prefix"),
+        deny,
+    }
+}
+
+#[test]
+fn a_list_decides_by_its_first_matching_entry() {
+    let acl = list(vec![
+        prefix("192.0.2.66/32", true),
+        prefix("192.0.2.0/24", false),
+    ]);
+    let inside = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7));
+    let denied = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 66));
+    let outside = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1));
+    assert_eq!(acl.decide(inside, None), Some(true));
+    assert_eq!(acl.decide(denied, None), Some(false));
+    assert_eq!(acl.decide(outside, None), None);
+    for client in [inside, denied, outside] {
+        assert_eq!(
+            acl.allows(client, None),
+            acl.decide(client, None) == Some(true)
+        );
+    }
+}
+
+/// Deny wins: a list whose first matching entry is a deny refuses the request, whatever
+/// another list says; a list that does not match has no say.
+#[test]
+fn lists_combine_with_deny_wins() {
+    let deny_one = list(vec![prefix("192.0.2.66/32", true)]);
+    let allow_net = list(vec![prefix("192.0.2.0/24", false)]);
+    let allow_any = list(vec![AclEntry::Any { deny: false }]);
+    let denied = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 66));
+    let other = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7));
+    let outside = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1));
+    let both = [&deny_one, &allow_net];
+    let decide = |client| move |acl: &Acl| acl.decide(client, None);
+    assert!(
+        !lists_allow(both, decide(denied)),
+        "the deny in one list wins"
+    );
+    assert!(
+        !lists_allow([&allow_net, &deny_one], decide(denied)),
+        "in any order"
+    );
+    assert!(
+        lists_allow(both, decide(other)),
+        "the deny list does not match: no say"
+    );
+    assert!(
+        !lists_allow(both, decide(outside)),
+        "no match anywhere refuses"
+    );
+    assert!(lists_allow([&allow_any], decide(outside)));
+    assert!(!lists_allow(std::iter::empty::<&Acl>(), decide(other)));
+}
+
+/// RFC 9276: the signer takes at most 150 extra NSEC3 iterations and a salt that fits the
+/// record.
+#[test]
+fn nsec3_settings_are_bounded() {
+    use crate::serde_util::HexBytes;
+    let mut zone = Zone {
+        dnssec: DnssecPolicy {
+            denial: Denial::Nsec3 {
+                iterations: NSEC3_ITERATIONS_MAX,
+                salt: HexBytes(vec![0xab; 8]),
+            },
+            ..DnssecPolicy::default()
+        },
+        ..zone()
+    };
+    zone.validate().expect("150 iterations");
+    zone.dnssec.denial = Denial::Nsec3 {
+        iterations: NSEC3_ITERATIONS_MAX + 1,
+        salt: HexBytes(Vec::new()),
+    };
+    let error = zone.validate().expect_err("151 iterations");
+    assert!(
+        format!("{error:?}").contains("dnssec.denial.iterations"),
+        "{error:?}"
+    );
+    zone.dnssec.denial = Denial::Nsec3 {
+        iterations: 0,
+        salt: HexBytes(vec![0; 256]),
+    };
+    assert!(zone.validate().is_err(), "a salt of 256 octets");
+}

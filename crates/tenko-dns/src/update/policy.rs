@@ -1,8 +1,10 @@
 //! Who may update a zone (DNS-11, TGL-09, RFC 2136 section 3.3, RFC 3007).
 //!
-//! An update passes when the zone is a primary zone the node serves, an access list of
-//! `update.allowed` allows the client with its address and its TSIG key (none means
-//! nobody; the first matching entry of a list decides), and, where a signature is
+//! An update passes when the zone is a primary zone the node serves, the access lists of
+//! `update.allowed` allow the client with its address and its TSIG key (none means
+//! nobody; the first matching entry of a list decides, and a list whose first match is a
+//! `deny` refuses whatever another list allows: "deny wins", [`dns::lists_allow`]), and,
+//! where a signature is
 //! required, the request is signed with a key that an allowing `key` entry of the lists
 //! names. Whether a signature is required follows the zone's `require_tsig` under the
 //! security profile in force (TGL-09):
@@ -21,7 +23,7 @@
 //!
 //! An update signed with GSS-TSIG (identity plan section 3.5) is checked by its principal:
 //! the zone must have Kerberos settings (`update.kerberos`) naming the principal's realm,
-//! the lists decide by [`Acl::allows_principal`] (a prefix entry by the address, a
+//! the lists decide by [`Acl::decide_principal`], deny wins (a prefix entry by the address, a
 //! `kerberos` entry by the realm, the name pattern and its prefix, `any`; a key entry never
 //! matches it), and where a signature is required an allowing `kerberos` entry must name
 //! the principal, as a `key` entry must name a TSIG key. `require_tsig` thus means "a
@@ -32,7 +34,9 @@ use std::{
     sync::atomic::{AtomicU8, Ordering},
 };
 
-use tenko_core::dns::{Acl, AclEntry, AclId, Ownership, PrincipalName, Zone, ZoneKind, identity};
+use tenko_core::dns::{
+    self, Acl, AclEntry, AclId, Ownership, PrincipalName, Zone, ZoneKind, identity,
+};
 
 use super::Signer;
 
@@ -173,11 +177,10 @@ pub fn check<'a>(
             return Err("the zone takes no GSS-TSIG updates from the principal's realm");
         }
         let principal = &identity.principal;
-        if !lists
-            .iter()
-            .any(|list| list.allows_principal(client, principal))
-        {
-            return Err("the principal is not in the zone's update access lists");
+        if !dns::lists_allow(lists.iter().copied(), |list| {
+            list.decide_principal(client, principal)
+        }) {
+            return Err("no update access list allows the principal, or one denies it");
         }
         if require_tsig(zone, profile) && !principal_named(&lists, client, principal) {
             return Err(
@@ -188,8 +191,8 @@ pub fn check<'a>(
     }
     let key = signer.key();
     // WP13.2: end.
-    if !lists.iter().any(|list| list.allows(client, key)) {
-        return Err("the client is not in the zone's update access lists");
+    if !dns::lists_allow(lists.iter().copied(), |list| list.decide(client, key)) {
+        return Err("no update access list allows the client, or one denies it");
     }
     if require_tsig(zone, profile) {
         let Some(key) = key else {
@@ -269,6 +272,38 @@ mod tests {
             description: None,
         };
         (signed, lan)
+    }
+
+    /// Deny wins (owner decision of 2026-11-06): a list whose first matching entry denies
+    /// the client refuses the update although another list allows it.
+    #[test]
+    fn a_deny_in_any_update_list_wins() {
+        let (_, lan) = lists();
+        let blocked = Acl {
+            id: AclId::generate(),
+            name: "blocked".to_owned(),
+            entries: vec![AclEntry::Prefix {
+                prefix: "192.0.2.66/32".parse().expect("prefix"),
+                deny: true,
+            }],
+            description: None,
+        };
+        let find = |id: AclId| [&blocked, &lan].into_iter().find(|acl| acl.id == id);
+        let zone = zone(UpdatePolicy {
+            allowed: vec![lan.id, blocked.id],
+            require_tsig: false,
+            may_replace_ipam: false,
+            dhcp: None,
+            kerberos: None,
+        });
+        let denied: IpAddr = "192.0.2.66".parse().expect("address");
+        let other: IpAddr = "192.0.2.10".parse().expect("address");
+        let standard = UpdateProfile::Standard;
+        assert_eq!(
+            check(&zone, find, standard, denied, &Signer::None),
+            Err("no update access list allows the client, or one denies it")
+        );
+        assert!(check(&zone, find, standard, other, &Signer::None).is_ok());
     }
 
     /// TGL-09: the profile defaults of the signature.

@@ -15,6 +15,7 @@ import { PinPeriod } from "./PinPeriod";
 import { ProfileDialog } from "./ProfileDialog";
 import { patchFor } from "./toggleEdit";
 import { ToggleDialog } from "./ToggleDialog";
+import { TransferSite } from "./TransferSite";
 import { formatToggle, TOGGLE_TOTAL, TOGGLES, type ToggleDef } from "./toggles";
 import "./settings.css";
 
@@ -184,6 +185,8 @@ export default function SecurityPage() {
             </section>
 
             <PinPeriod view={v()} save={save} />
+
+            <TransferSite view={v()} save={save} />
 
             <Show when={editing()}>
               {(def) => <ToggleDialog view={v()} def={def()} save={save} onClose={() => setEditing(undefined)} />}

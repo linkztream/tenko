@@ -157,7 +157,7 @@ POST /api/v1/dns/zones/{id}/records/batch?dry_run=true
 - `$GENERATE range lhs [ttl] [class] type rhs` (the BIND extension) is expanded one record at a time, with `$`, `${offset,width,base}` (bases `d`, `o`, `x`, `X`, `n`, `N`, a width of at most 255), `\$` and `$$`, at most 65,536 records per directive; the records carry the directive's line;
 - a syntax error stops the import with 422 `dns.zonefile.invalid`, parameters `line` (the line of the token where the error was found, also inside a record that spans lines) and `reason`; a quote or a parenthesis still open at the end of the file is refused with the line that opened it.
 
-The reader indexes the text only within checked bounds, keeps the limits of names (255 octets), labels (63), character strings (255) and record data (65,535), does not recurse on its input and holds the text, one entry and one `$GENERATE` record at a time. The fuzz target `dns_zonefile` runs it, and a differential test reads the test zones, the fuzz seeds and a generated corpus with `domain`'s zone file scanner as well (`crates/tenko-dns/tests/zonefile_differential.rs`, which lists the accepted differences with their reasons).
+The reader indexes the text only within checked bounds, keeps the limits of names (255 octets), labels (63), character strings (255) and record data (65,535), does not recurse on its input and holds the text, one entry and one `$GENERATE` record at a time. Both dialects (RFC 1035 and Windows) have the same bounds (Limits, below), and the preview, which reads the whole file on the API's runtime before an import is accepted, gives the other requests their turn as it reads. The fuzz target `dns_zonefile` runs it, and a differential test reads the test zones, the fuzz seeds and a generated corpus with `domain`'s zone file scanner as well (`crates/tenko-dns/tests/zonefile_differential.rs`, which lists the accepted differences with their reasons).
 
 With `dry_run=true` the answer (200) is the preview: the records per type the file brings (`types`), the RRsets the import would add, replace and, with `replace`, remove, and the losses. Without it the preview runs first (so a file that does not parse is refused at once), then the import starts as the background job `dns.import` and the answer is 202 with `job_id` and `Location: /api/v1/jobs/{id}`. The job has one step `dns.import.chunk` per 5,000 RRsets of the preview and a final step `dns.import.finish`; the steps done show the progress, and the final step's output is the report as JSON (hex in the job record): `added`, `replaced`, `removed`, `types`, the first 1,000 `losses` and `lost` (all of them), the new `serial` and the `revision`.
 
@@ -207,8 +207,13 @@ tenko dns export example.test --file example.test.zone
 
 | Limit | Value |
 |---|---|
-| Zone file size | 1 GiB (the request body) |
+| Zone file size | 512 MiB (the request body); a 6,000,000-record file is about 212 MB |
+| Import requests read at once | one per server, after its authorization; a second waits until the first has been read and checked, and a body that does not arrive within ten minutes answers 408 |
+| Imports staged at once | 2, and one per zone (each holds its file until its job ends); a further one answers 429 `dns.import.busy`, and an import whose job has ended no longer counts |
+| Records per file | 10,000,000, its own and the generated ones together (`dns.zonefile.invalid`) |
 | Records per `$GENERATE` line | 65,536 |
+| Records of all `$GENERATE` lines of a file | 1,000,000 (`dns.zonefile.invalid`) |
+| RRsets of a zone after an import | 10,000,000 over all its scopes (`dns.zonefile.invalid`) |
 | Tokens per entry (record or directive) | 262,144 |
 | One token, or the base64 or hex of one record | 262,140 characters (65,535 octets as `\DDD`) |
 | RRsets per import chunk | 5,000 |
@@ -513,10 +518,21 @@ A request for AXFR or IXFR is checked in this order, and the first failure answe
 1. The message must parse. When it carries a TSIG record, the key must be known and the MAC and the time must verify (section 10.2); a failure answers NOTAUTH (RCODE 9) with the TSIG error.
 2. A class other than IN is REFUSED.
 3. A name that is not the apex of a zone this node serves is NOTAUTH.
-4. The policy decides, and a failure is REFUSED (RCODE 5): the zone has no `allow` list; `xot` is set and the connection is not TLS ended by this node; or no list allows the client. A list allows a client when its first matching entry is not a `deny`; an entry matches by prefix, by the TSIG key of the request, or as `any`. With `require_tsig` the request must also be signed with a key that an allowing `key` entry of the zone's lists names, so a client inside the allowed prefix but without the key is refused.
+4. The policy decides, and a failure is REFUSED (RCODE 5): the zone has no `allow` list; the transport (below); the lists do not allow the client; or the signature (below). Each list decides by its first matching entry; an entry matches by prefix, by the TSIG key of the request, or as `any`. The lists combine with "deny wins": a list whose first matching entry is a `deny` refuses the client whatever another list says, and otherwise one list that allows is enough. With `require_tsig` the request must also be signed with a key that an allowing `key` entry of the zone's lists names, so a client inside the allowed prefix but without the key is refused.
 5. A secondary zone that holds no copy yet, or whose copy has expired, answers SERVFAIL.
 
-A refusal of a signed request is signed. The scope that is transferred is the one the client's view chooses (DNS-20), as for a query. `require_tsig` is on by default and the lists are empty by default, so a new zone transfers to nobody.
+The security profile sets a floor under the zone's own settings (TGL-10, [SECURITY-PROFILES.md](SECURITY-PROFILES.md)). Under Hardened every transfer must be signed with a key the lists name, whatever `require_tsig` says, and a client outside the site must come over TLS (XoT), whatever `xot` says; the zone's own `xot` still applies to every client. Under Home, Standard and Lab the zone's settings apply as stored. The site is the security setting `transfer_site` ([SECURITY-PROFILES.md](SECURITY-PROFILES.md), TGL-10): a list of networks in CIDR notation whose default is the private (RFC 1918), shared (RFC 6598), unique-local (RFC 4193), loopback and link-local ranges. A transfer to an address outside it leaves the site (`tenko_dns::xfr::access::Site`); an empty list makes every transfer leave it. The role follows a change of the list as it follows the profile, without a restart, and the findings of section 10.14 use the same list.
+
+| Order | Rule | Refusal code in the audit record and the log |
+|---|---|---|
+| 1 | The zone names an access list | `no_access_list` |
+| 2 | TLS: the zone's `xot`; under Hardened, a client outside the site | `xot`, `profile_xot` |
+| 3 | The lists allow the client, deny wins | `not_allowed` |
+| 4 | A key the lists name: `require_tsig`; under Hardened always | `unsigned`, `profile_unsigned`, `key_not_named` |
+
+A refusal of a signed request is signed. A refusal is written to the log at warn level with the zone, the client, the key, the code and what to do, and audited (section 10.10). The scope that is transferred is the one the view of the request chooses (DNS-20), as for a query: by the client's address, the local address the request came on and its transport (TCP or DoT). `require_tsig` is on by default and the lists are empty by default, so a new zone transfers to nobody.
+
+The health findings of the status name the zones these rules touch (section 10.14).
 
 ### 10.2 TSIG on the wire
 
@@ -528,7 +544,7 @@ The algorithms are `hmac-sha256` (the default), `hmac-sha384`, `hmac-sha512` and
 | The MAC verifies (a MAC shorter than half the hash or 10 octets is not accepted) | BADSIG (16); FORMERR for a short MAC | NOTAUTH with an empty MAC; FORMERR |
 | The time signed is within the fudge | BADTIME (18) | NOTAUTH, signed, with the server's time in Other Data |
 
-An answer of several messages (AXFR, IXFR) is signed message by message in the MAC chain of RFC 8945 section 5.3.1: the first covers the request's MAC, and each later one covers the previous MAC, the messages since and the timers. Tenko signs every message it sends. When Tenko verifies an answer (the transfer of a secondary zone) it accepts up to 99 unsigned messages between two signed ones, as the RFC lets a server send them, and requires the last message to be signed. A TSIG-signed SOA query, which a secondary sends to check the serial, is answered and signed by the transfer path; the resolver answers every signed query NOTAUTH (section 12.4).
+An answer of several messages (AXFR, IXFR) is signed message by message in the MAC chain of RFC 8945 section 5.3.1: the first covers the request's MAC, and each later one covers the previous MAC, the messages since and the timers. Tenko signs every message it sends. When Tenko verifies an answer (the transfer of a secondary zone) it accepts up to 99 unsigned messages between two signed ones, as the RFC lets a server send them, and requires the last message to be signed. A TSIG-signed SOA query, which a secondary sends to check the serial, is answered and signed by the transfer path after the same checks as a transfer (section 10.1), from the scope of the client's view; one that the checks refuse is answered REFUSED. A secondary of a zone with `xot` (or, under Hardened, outside the site) must therefore check the serial over TLS as well, as BIND does for a primary it reaches with `tls`. The resolver answers every signed query NOTAUTH (section 12.4).
 
 The keys are the TSIG keys of section 6: the row in `dns.keys.meta` and the secret in the vault, read through the zone service. The transfer path holds them in a keyring that it reads without a lock, and verifying or signing allocates nothing once a key is resolved. Both sides of a transfer need the same name, algorithm and secret: create the key on one side and import the secret on the other (`POST /dns/keys` takes `secret`, section 6).
 
@@ -558,7 +574,9 @@ A secondary zone sets `xot` on the primary. The port is 853 when `port` is 53 (t
 
 It applies to primary zones and to secondary zones: a copy that changed notifies its own targets.
 
-**In.** A NOTIFY for a secondary zone is accepted over UDP or TCP when it comes from the address of one of the zone's primaries and, when that primary has a `key`, is signed with it. It is acknowledged (signed when the request was) and refreshes the zone at once; a NOTIFY that names the serial already held is ignored. Any other NOTIFY is answered REFUSED.
+**In.** A NOTIFY for a secondary zone is accepted over UDP or TCP when it comes from the address of one of the zone's primaries and, when that primary has a `key`, is signed with it; under Hardened it must be signed in any case, so a primary without a key is not heard and the zone is refreshed on its SOA timers (section 10.6). It is acknowledged (signed when the request was); a NOTIFY that names the serial already held is ignored. Any other NOTIFY is answered REFUSED; a refusal of a NOTIFY from a primary's own address is logged at warn level with the reason.
+
+A NOTIFY signed with the primary's key refreshes the zone at once. An unsigned one (from a primary without a key; a signature with another key of the node counts as none) may come from anyone who can send packets with the primary's address, so the service backs off from those that bring nothing new (RFC 1996 section 3.10): the first refreshes at once, and a refresh it started that found no new serial leaves a pause of 2 seconds, doubled after each such refresh up to 5 minutes, during which a further unsigned NOTIFY makes the zone due at the end of the pause instead of at once. A refresh that brings a new serial, from any cause, returns the pause to 2 seconds. No NOTIFY is dropped: one that arrives while a transfer runs is kept, and the zone is refreshed again when the transfer ends (at once for a signed one, after the pause for an unsigned one), unless the transfer reached the serial it announced.
 
 ### 10.6 Secondary zones
 
@@ -574,6 +592,8 @@ A zone of kind `secondary` is a copy of a zone on one or more primaries, named i
 | Expire | After the SOA's `expire` seconds without a success: the records of the copy are removed and the zone answers SERVFAIL until the next transfer |
 
 A refresh sends IXFR with the copy's SOA. A primary that answers with the single current SOA leaves the copy as it is. A primary that answers NOTIMP or FORMERR, or with a newer single SOA, is asked for AXFR on a new connection, and a zone without a copy is asked for AXFR at once. With a `key` the request is signed and the answer must verify in the MAC chain; with `xot` the connection is TLS (section 10.4).
+
+A refresh is bounded (RFC 5936 section 6): 10 seconds to connect, 30 seconds between two messages, 15 minutes for the whole refresh (every primary tried, and the IXFR and the AXFR after it, together), 10,000,000 records and 256 MiB of messages per answer. A transfer past a bound fails with `dns.transfer.failed` and the detail names the bound; records outside the zone are dropped as they arrive. A transfer whose serial is older than the copy's (RFC 1982 arithmetic) is not applied, whether it comes as a zone or as the single SOA of an IXFR answer: the copy stays, the primary's state shows `dns.transfer.older_serial`, and the zone is retried on its timer. A primary whose serial really went back is accepted once through "Transfer now" (section 10.9): that refresh asks for AXFR and takes the zone whatever its serial. The same serial as the copy's is applied as usual.
 
 The result is one change set through the store, fenced with the leader's epoch like every write of a leader service:
 
@@ -591,6 +611,7 @@ The state of each zone (the serial held, the last success and the last error of 
 | `dns.transfer.failed` | No answer, a malformed or incomplete answer, or the store refused the result |
 | `dns.transfer.tsig` | The answer did not verify, or the key named in `source` is unknown |
 | `dns.transfer.refused` | The primary answered REFUSED or NOTAUTH |
+| `dns.transfer.older_serial` | The primary sent a serial older than the copy's; the copy was kept |
 
 These are codes in the transfer status, not HTTP answers of a route.
 
@@ -602,7 +623,7 @@ The records of a secondary zone come from the primary, so every other write is r
 
 A catalog zone (RFC 9432, schema version 2) is a zone that lists other zones, so that a secondary learns the zones to serve from one transfer instead of one line of configuration each. The setting is `catalog` on the zone, allowed on primary and secondary zones only (400 `dns.zone.invalid` with the field `catalog` otherwise).
 
-- **A secondary catalog zone** (Tenko reads the catalog of another server). After each transfer the members of the catalog become secondary zones of the installation. A member is a PTR record at `<label>.zones.<catalog>`, and the TXT record `version` at the apex must be `"2"`. The new zones take the catalog's primaries and its SOA defaults and carry the description `Member of the catalog zone <name>`. A zone with that description that has left the catalog is deleted with its records.
+- **A secondary catalog zone** (Tenko reads the catalog of another server). After each transfer the members of the catalog become secondary zones of the installation. A member is a PTR record at `<label>.zones.<catalog>`, and the TXT record `version` at the apex must be `"2"`. The new zones take the catalog's primaries and its SOA defaults and carry the description `Member of the catalog zone <name>`. A zone with that description that has left the catalog is deleted with its records. A catalog restricts what it can add (RFC 9432 section 7): the root, a top-level domain, the catalog zone itself or a name below it, a name at, below or above a zone of another tenant, and a name below a zone of the same tenant that is not one of this catalog's members are not added (each logged at warn level), and a catalog with more than 10,000 members changes nothing until it is back under that bound.
 - **A primary catalog zone** (Tenko writes a catalog for others). Tenko writes the members itself, with the origin `transfer`: one for every primary zone of the same tenant (or without a tenant) whose `transfer.allow` is not empty, catalog zones excepted. The label is the zone's identifier without dashes, and the apex carries the version TXT. When the set of zones changes the catalog gets a serial step and a journal entry, so its secondaries follow by NOTIFY and IXFR. A tenant has at most one primary catalog zone (a second is refused with `dns.zone.invalid` on `catalog`).
 
 The catalog zone transfers like any other zone, so it needs its own `transfer` policy for the secondaries that read it. A member zone transfers only if its own policy allows it: the catalog lists a zone, it does not grant access to it.
@@ -625,7 +646,7 @@ GET /api/v1/dns/zones/{id}/transfer
  "next_refresh": "2026-10-18T11:00:00Z", "expires": "2026-11-01T10:00:00Z", "running": false}
 ```
 
-A zone the service has not seen (a primary zone, or a controller that does not lead) shows the serial in the store and its primaries without results. `POST` queues a refresh of a secondary zone at once, writes the audit record `dns.transfer.trigger` and answers 202 with the state; a zone of another kind is refused with 409 `dns.zone.invalid`.
+A zone the service has not seen (a primary zone, or a controller that does not lead) shows the serial in the store and its primaries without results. `POST` queues a refresh of a secondary zone at once, writes the audit record `dns.transfer.trigger` and answers 202 with the state; a zone of another kind is refused with 409 `dns.zone.invalid`. That refresh is not held back by the pause of unsigned NOTIFY messages, asks for AXFR, and applies a transfer whose serial is older than the copy's (section 10.6).
 
 ```
 tenko dns transfer status ad.example.test
@@ -640,7 +661,7 @@ tenko dns zone update example.test --catalog true
 
 | Audit action | When |
 |---|---|
-| `dns.zone.transfer_out` | A zone was transferred out: the client, the key, the kind (`axfr` or `ixfr`) and the kind requested, the serial, the serial before, the records and the messages. A refusal is recorded as a denied action with its reason, at most once a minute per client |
+| `dns.zone.transfer_out` | A zone was transferred out: the client, the key, the kind (`axfr` or `ixfr`) and the kind requested, the serial, the serial before, the records and the messages. A refusal (of a transfer or a signed SOA query, kind `soa`) is recorded as a denied action with its code and reason (section 10.1), at most once a minute per client and at most 60 a minute in all, so that a flood from spoofed addresses cannot fill the audit log; the counter `tenko_dns_xfr_total{outcome="refused"}` counts every refusal |
 | `dns.zone.transfer_in` | A transfer in was written (section 10.6) |
 | `dns.transfer.trigger` | A transfer was started by hand |
 
@@ -692,7 +713,7 @@ POST /api/v1/dns/zones
 
 The SOA and the name servers of the zone come from the domain controller with the first transfer.
 
-**Without a key.** Windows DNS does not sign zone transfers with TSIG (it secures dynamic updates with GSS-TSIG, which Tenko supports for updates as well, section 13.11, and restricts transfers by address). This zone therefore transfers without a TSIG key, and the access rests on the address restriction on both sides: the domain controller lists only `192.0.2.53`, and Tenko accepts a NOTIFY for the zone only from `192.0.2.10`. `require_tsig` is a setting of zones Tenko serves as primary, not of secondary zones, so it plays no part here. A transfer without a key can be read by anyone who can use the node's address on the path between the two servers, and it carries every record of the zone, including the hosts that registered themselves, so keep that path to the two servers.
+**Without a key.** Windows DNS does not sign zone transfers with TSIG (it secures dynamic updates with GSS-TSIG, which Tenko supports for updates as well, section 13.11, and restricts transfers by address). This zone therefore transfers without a TSIG key, and the access rests on the address restriction on both sides: the domain controller lists only `192.0.2.53`, and Tenko accepts a NOTIFY for the zone only from `192.0.2.10`. Under the Hardened profile Tenko refuses that unsigned NOTIFY and refreshes the zone on its SOA timers (section 10.5); "Transfer now" refreshes it at once. `require_tsig` is a setting of zones Tenko serves as primary, not of secondary zones, so it plays no part here. A transfer without a key can be read by anyone who can use the node's address on the path between the two servers, and it carries every record of the zone, including the hosts that registered themselves, so keep that path to the two servers.
 
 **What to check.**
 
@@ -702,6 +723,16 @@ The SOA and the name servers of the zone come from the domain controller with th
 4. Add a record on the domain controller, for example `Add-DnsServerResourceRecordA -ZoneName ad.example.test -Name xfrtest -IPv4Address 192.0.2.77`. It reaches the node within seconds when the NOTIFY of the domain controller arrives, and within the SOA's `refresh` seconds when it does not (a domain controller with several addresses may send NOTIFY from one that is not `192.0.2.10`, and Tenko ignores it). `tenko dns transfer now ad.example.test` forces the transfer. Remove the test record afterwards.
 
 **To revoke.** On the domain controller remove `192.0.2.53` from the zone's transfer list (the Zone Transfers tab, or `Set-DnsServerPrimaryZone -Name ad.example.test -SecureSecondaries NoTransfer`) and from its notify list (`-Notify NoNotify`). Then delete the secondary zone in Tenko (`DELETE /api/v1/dns/zones/{id}`, or the delete action of the zone in the UI), which removes the copy at once. Without that, the copy keeps answering until the SOA's `expire` seconds have passed and then answers SERVFAIL.
+
+### 10.14 Health findings of transfers and access lists
+
+`GET /system/status` lists these findings, each naming its zone (`tenko_dns::xfr::health`), computed from the zones and access lists under the profile in force:
+
+| Code | Severity | When |
+|---|---|---|
+| `dns.transfer.profile_refuses` | Warning | Hardened: the profile refuses what the zone's settings would allow. `rule` says which: `tsig` (`require_tsig` is off), `xot` (`xot` is off and an access list admits addresses outside the site), `notify` (a primary of a secondary zone has no key, so its NOTIFY is refused; `primary` names it) |
+| `dns.transfer.weaker_than_profile` | Information | Home, Standard and Lab: the zone transfers without TSIG; its setting applies, and Hardened would refuse those transfers |
+| `dns.acl.deny_wins` | Warning | A `deny` entry of one of the zone's transfer or update lists overrides an allowing entry of another of its lists: a client both match was allowed before "deny wins" and is refused now. `field` is `transfer` or `update`; `deny_list`, `deny_entry`, `allow_list` and `allow_entry` name the first overlap, `overlaps` counts them, and the text names up to five. A deny that an earlier entry of its own list shadows never counts. There is no acknowledgment: the finding stands while the overlap exists, and goes when the allow is narrowed or the deny moved into the allowing list ahead of it |
 ## 11. Views, scopes and weights
 
 A **view** (DNS-20) decides, per query, which version of each zone the query sees and whether the client may recurse. It is a row of `dns.views`: a unique name, match rules, a scope map, a position `order` and an optional recursion access list. One model covers the simple internal and external split, BIND views and Windows zone scopes with Query Resolution Policies (the mapping is below). The service is `tenko_dns::zone::views`, the selection is the view table of the catalog (`tenko_dns::catalog`), and the routes are `/dns/views`.
@@ -980,7 +1011,7 @@ An update is checked in this order, and the first failure answers:
 
 1. TSIG, when the message carries a TSIG record: the key must be known and the MAC and the time must verify, in the order of section 10.2; BADKEY, BADSIG and BADTIME answer NOTAUTH with the TSIG error (a BADTIME answer is signed and carries the server's time).
 2. The zone must be a primary zone this node serves; another name is NOTAUTH, a secondary zone REFUSED ("send updates to its primary"; Tenko does not forward updates).
-3. An access list of `allowed` must allow the client by its address and its key (the first matching entry of a list decides). Without one the answer is REFUSED.
+3. The access lists of `allowed` must allow the client by its address and its key: each list decides by its first matching entry, and a list whose first match is a `deny` refuses the client whatever another list allows ("deny wins", as for transfers, section 10.1). Without an allowing list the answer is REFUSED.
 4. Where a signature is required, the key must be one that an allowing `key` entry names; an unsigned update or one with another key is REFUSED.
 
 REFUSED carries the extended error 18 (Prohibited) with the reason, and is audited as `dns.update.refuse` with the code `dns.update.refused` (section 13.7). Whether a signature is required follows the zone's `require_tsig` under the security profile in force (TGL-09):

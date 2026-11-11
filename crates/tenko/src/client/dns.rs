@@ -703,6 +703,7 @@ impl DnsCommand {
             Self::Transfer { action } => match action {
                 TransferCommand::Status(_) => "dns transfer status",
                 TransferCommand::Now(_) => "dns transfer now",
+                TransferCommand::Site(_) => "dns transfer site",
             },
             // cache-browse: `tenko dns cache`.
             Self::Cache { action } => action.name(),

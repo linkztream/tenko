@@ -195,8 +195,19 @@ fn parse_key(raw: &str) -> Result<DnsName, ApiError> {
     DnsName::new(raw).map_err(|_| invalid("key", "the key name is not a DNS name"))
 }
 
-/// The largest import request: a zone file of 1 GiB in JSON.
-const MAX_ZONE_FILE_REQUEST: usize = 1 << 30;
+/// The largest import request: a zone file of 512 MiB in JSON, room for the most records a
+/// file may hold (`tenko_dns::zone::zonefile::MAX_RECORDS`, 10,000,000) at about 50 octets
+/// each; the zone file of 6,000,000 records of the M18 measurement is 212 MB.
+const MAX_ZONE_FILE_REQUEST: usize = 512 << 20;
+
+/// Zone file import requests read and checked at once on this server: each may hold
+/// [`MAX_ZONE_FILE_REQUEST`] in memory, so a second waits until the first has been read
+/// and checked (the import's job then runs on its own). The handler takes the permit
+/// after the request is authorized and before it reads the body.
+pub(crate) static IMPORT_READS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+/// How long the body of an import request may take to arrive once its permit is held.
+pub(crate) const IMPORT_BODY_SECS: u64 = 600;
 
 /// The zone service of the request, from the `Arc<ZoneService>` extension the server adds
 /// while the DNS module runs. Taken after the path and the scope are checked

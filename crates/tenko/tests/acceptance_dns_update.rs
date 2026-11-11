@@ -432,7 +432,7 @@ fn updates_are_applied_through_the_store_and_answered_from_the_index() {
     assert_eq!(u16::from(got.rcode), rcode::REFUSED, "{got:?}");
     assert_eq!(
         got.text.as_deref(),
-        Some("the client is not in the zone's update access lists")
+        Some("no update access list allows the client, or one denies it")
     );
     assert!(!holds(&query_a(lab.dns, new), A_9));
 

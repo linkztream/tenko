@@ -1,11 +1,13 @@
 //! AXFR and IXFR out, NOTIFY in and signed SOA queries on the role's listeners (RFC 5936,
 //! RFC 1995, RFC 1996, RFC 9103).
 //!
-//! A transfer is answered for a zone the node serves when the client passes the zone's
-//! `transfer.allow` access lists (none means nobody) with its address and its TSIG key;
-//! with `require_tsig` the request must also be signed with a key one of the lists names,
-//! and with `xot` it must come over TLS that this node ended itself. The scope is the one
-//! the client's view chooses, as for its queries.
+//! A transfer, and the signed SOA query of a secondary, is answered for a zone the node
+//! serves when [`access::transfer`] admits it: the zone's `transfer.allow` access lists
+//! (none means nobody, a deny in any list wins) with the client's address and its TSIG key,
+//! a key one of the lists names with `require_tsig`, TLS that this node ended itself with
+//! `xot`, and the floor of the security profile on top (TGL-10). The scope is the one the
+//! client's view chooses from its address, the local address and the transport the request
+//! came on, as for its queries.
 //!
 //! - AXFR streams the scope from the index: the SOA, every other RRset in canonical order,
 //!   the SOA again, in messages of at most 16 KiB, each signed in the MAC chain.
@@ -13,15 +15,17 @@
 //!   journal when its serial is in it (only the change, M19), and the zone in AXFR form
 //!   when it is not or the journal was reset. Over UDP an IXFR is answered with the SOA
 //!   only, which tells the client to come back over TCP (RFC 1995 section 2).
-//! - A NOTIFY for a secondary zone from one of its primaries (signed when the primary has
-//!   a key) is acknowledged and handed to the secondary service.
-//! - An SOA query signed with TSIG, a secondary's refresh check, is answered and signed.
+//! - A NOTIFY for a secondary zone from one of its primaries ([`access::notify`]: signed
+//!   when the primary has a key, and always under Hardened) is acknowledged and handed to
+//!   the secondary service.
+//! - An SOA query signed with TSIG, a secondary's refresh check, is answered and signed
+//!   after the same check as a transfer, from the scope of the client's view.
 //!
 //! Every transfer is audited as `dns.zone.transfer_out` with the client, the key and the
-//! serials; refusals are audited at most once a minute per client.
+//! serials; refusals are audited and logged with their reason, at most once a minute per
+//! client and a bounded number a minute in all ([`TransferAudit::refusal_due`]).
 
 use std::{
-    net::IpAddr,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -29,22 +33,25 @@ use std::{
 use tenko_core::{
     ObjectRef,
     audit::AuditDraft,
-    dns::{JournalEntry, KeyName, QueryTransport, Rtype, Zone, ZoneKind, audit},
+    dns::{JournalEntry, KeyName, Rtype, Zone, audit},
 };
 use tokio::sync::mpsc;
 
 use super::{
     Directory, JournalSource, Kind, MetricKind, NotifyHandler, Outcome, TransferAudit,
-    TransferSink, classify, count, count_bytes,
+    TransferSink,
+    access::{self, Refusal},
+    classify, count, count_bytes,
     message::{
         self, MAX_TRANSFER_MESSAGE, MessageWriter, TransferRequest, read_request, short_answer,
     },
 };
 use crate::{
     catalog::{Catalog, CatalogHandle, ViewQuery, ViewScopes},
-    index::{DefaultScopes, Index, Lookup, ScopeOf},
+    index::{Index, Lookup, ScopeOf},
     respond::Conn,
     tsig::{self, Signer, TsigView, Verified},
+    update::policy::{ProfileCell, UpdateProfile},
     wire::MAX_MESSAGE_LEN,
 };
 
@@ -68,6 +75,8 @@ pub struct XfrOut {
     journal: Arc<dyn JournalSource>,
     audit: Arc<dyn TransferAudit>,
     notify: Option<Arc<dyn NotifyHandler>>,
+    profile: Arc<ProfileCell>,
+    site: Arc<access::Site>,
     message_limit: usize,
 }
 
@@ -75,6 +84,7 @@ impl std::fmt::Debug for XfrOut {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("XfrOut")
             .field("notify", &self.notify.is_some())
+            .field("profile", &self.profile.get())
             .field("message_limit", &self.message_limit)
             .finish_non_exhaustive()
     }
@@ -121,48 +131,29 @@ struct Plan {
     message: Vec<u8>,
     zone: Arc<Zone>,
     catalog: Arc<Catalog>,
-    client: IpAddr,
+    conn: Conn,
     signed: Signed,
     kind: Kind,
 }
 
-/// Why a client may not transfer a zone.
+/// Why `conn` may not transfer `zone` under `profile` ([`access::transfer`] over the lists
+/// of `catalog`).
 fn refusal(
     zone: &Zone,
     catalog: &Catalog,
-    client: IpAddr,
+    profile: UpdateProfile,
+    site: &access::Site,
+    conn: &Conn,
     key: Option<&KeyName>,
     tls: bool,
-) -> Option<&'static str> {
-    let policy = &zone.transfer;
-    if policy.allow.is_empty() {
-        return Some("no access list allows transfers of the zone");
-    }
-    if policy.xot && !tls {
-        return Some("the zone transfers over TLS only (XoT)");
-    }
-    let acls: Vec<_> = policy
+) -> Result<(), Refusal> {
+    let lists: Vec<_> = zone
+        .transfer
         .allow
         .iter()
         .filter_map(|id| catalog.acl(*id))
         .collect();
-    if !acls.iter().any(|acl| acl.allows(client, key)) {
-        return Some("the client is not in the zone's transfer access lists");
-    }
-    if policy.require_tsig {
-        let Some(key) = key else {
-            return Some("the zone's transfers need a TSIG key");
-        };
-        let named = acls.iter().any(|acl| {
-            acl.entries.iter().any(|entry| {
-                matches!(entry, tenko_core::dns::AclEntry::Key { name, deny: false } if name == key)
-            })
-        });
-        if !named {
-            return Some("the TSIG key is not named by the zone's transfer access lists");
-        }
-    }
-    None
+    access::transfer(zone, &lists, profile, site, conn.client.ip(), key, tls)
 }
 
 impl XfrOut {
@@ -181,8 +172,28 @@ impl XfrOut {
             journal,
             audit,
             notify,
+            profile: Arc::new(ProfileCell::new(UpdateProfile::default())),
+            site: Arc::new(access::Site::default()),
             message_limit: MAX_TRANSFER_MESSAGE,
         }
+    }
+
+    /// The same path under the security profile `profile` holds (TGL-10): the role shares
+    /// the cell of the update path, which follows the settings. Without it the path
+    /// follows Standard.
+    #[must_use]
+    pub fn with_profile(mut self, profile: Arc<ProfileCell>) -> Self {
+        self.profile = profile;
+        self
+    }
+
+    /// The same path with the site of the Hardened XoT rule that `site` holds (the
+    /// security setting `transfer_site`, kept current by the role). Without it the path
+    /// uses the default ranges.
+    #[must_use]
+    pub fn with_site(mut self, site: Arc<access::Site>) -> Self {
+        self.site = site;
+        self
     }
 
     /// The same path with another message size (tests).
@@ -231,53 +242,79 @@ impl XfrOut {
         if request.question.qclass != message::CLASS_IN {
             return First::Reply(Self::reply(short_answer(message, &request, 5), &signed));
         }
-        match kind {
-            Kind::Notify => self.notify_in(message, &request, conn, &signed),
-            Kind::SignedSoa => self.signed_soa(message, &request, conn, &signed),
-            Kind::Axfr | Kind::Ixfr => {
-                let zones = self.directory.zones();
-                let Some(zone) = zones.by_apex(request.question.name.as_wire()).cloned() else {
-                    return First::Reply(Self::reply(short_answer(message, &request, 9), &signed));
-                };
-                drop(zones);
-                let catalog = self.catalog.load_full();
-                let client = conn.client.ip();
-                let key = signed.key_name();
-                if let Some(reason) = refusal(&zone, &catalog, client, key.as_ref(), tls) {
-                    count(
-                        if kind == Kind::Axfr {
-                            MetricKind::AxfrOut
-                        } else {
-                            MetricKind::IxfrOut
-                        },
-                        Outcome::Refused,
-                    );
-                    if self.audit.refusal_due(client) {
-                        self.audit.record(
-                            AuditDraft::denied(
-                                audit::ZONE_TRANSFER_OUT,
-                                vec![ObjectRef::from(zone.id)],
-                            )
-                            .with_source_ip(Some(client))
-                            .with_context("zone", zone.name.as_str())
-                            .with_context("kind", kind_name(kind))
-                            .with_context("key", key.as_ref().map_or("none", KeyName::as_str))
-                            .with_context("reason", reason),
-                        );
-                    }
-                    return First::Reply(Self::reply(short_answer(message, &request, 5), &signed));
-                }
-                First::Transfer(Box::new(Plan {
-                    request,
-                    message: message.to_vec(),
-                    zone,
-                    catalog,
-                    client,
-                    signed,
-                    kind,
-                }))
-            }
+        if kind == Kind::Notify {
+            return self.notify_in(message, &request, conn, &signed);
         }
+        let zones = self.directory.zones();
+        let Some(zone) = zones.by_apex(request.question.name.as_wire()).cloned() else {
+            return First::Reply(Self::reply(short_answer(message, &request, 9), &signed));
+        };
+        drop(zones);
+        let catalog = self.catalog.load_full();
+        let key = signed.key_name();
+        if let Err(refused) = refusal(
+            &zone,
+            &catalog,
+            self.profile.get(),
+            &self.site,
+            conn,
+            key.as_ref(),
+            tls,
+        ) {
+            match kind {
+                Kind::Ixfr => count(MetricKind::IxfrOut, Outcome::Refused),
+                Kind::Axfr => count(MetricKind::AxfrOut, Outcome::Refused),
+                Kind::SignedSoa | Kind::Notify => {}
+            }
+            self.refused(&zone, conn, kind, key.as_ref(), refused);
+            return First::Reply(Self::reply(short_answer(message, &request, 5), &signed));
+        }
+        if kind == Kind::SignedSoa {
+            return Self::signed_soa(message, &request, &zone, &catalog, conn, &signed);
+        }
+        First::Transfer(Box::new(Plan {
+            request,
+            message: message.to_vec(),
+            zone,
+            catalog,
+            conn: *conn,
+            signed,
+            kind,
+        }))
+    }
+
+    /// Audits and logs a refusal when one of `conn`'s is due (at most once a minute per
+    /// client and a bounded number a minute in all).
+    fn refused(
+        &self,
+        zone: &Zone,
+        conn: &Conn,
+        kind: Kind,
+        key: Option<&KeyName>,
+        refused: Refusal,
+    ) {
+        let client = conn.client.ip();
+        if !self.audit.refusal_due(client) {
+            return;
+        }
+        tracing::warn!(
+            zone = %zone.name,
+            %client,
+            kind = kind_name(kind),
+            key = key.map_or("none", KeyName::as_str),
+            code = refused.code,
+            "a zone transfer was refused: {}",
+            refused.reason
+        );
+        self.audit.record(
+            AuditDraft::denied(audit::ZONE_TRANSFER_OUT, vec![ObjectRef::from(zone.id)])
+                .with_source_ip(Some(client))
+                .with_context("zone", zone.name.as_str())
+                .with_context("kind", kind_name(kind))
+                .with_context("key", key.map_or("none", KeyName::as_str))
+                .with_context("code", refused.code)
+                .with_context("reason", refused.reason),
+        );
     }
 
     /// The NOTAUTH answer of a request whose TSIG did not verify.
@@ -298,8 +335,8 @@ impl XfrOut {
         out
     }
 
-    /// A NOTIFY: acknowledged when it comes from a primary of a secondary zone, signed
-    /// with the primary's key when it has one.
+    /// A NOTIFY: acknowledged when [`access::notify`] accepts it, signed when the request
+    /// was.
     fn notify_in(
         &self,
         message: &[u8],
@@ -307,51 +344,55 @@ impl XfrOut {
         conn: &Conn,
         signed: &Signed,
     ) -> First {
-        let zones = self.directory.zones();
         let from = conn.client.ip();
-        let zone = zones.by_apex(request.question.name.as_wire());
-        let primary = zone
-            .filter(|zone| zone.kind == ZoneKind::Secondary)
-            .and_then(|zone| {
-                zone.source.as_ref().and_then(|source| {
-                    source
-                        .primaries
-                        .iter()
-                        .find(|primary| canonical(primary.address) == canonical(from))
-                })
-            });
-        let accepted = match (zone, primary) {
-            (Some(zone), Some(primary)) => match (&primary.key, signed.key_name()) {
-                (None, _) => Some(zone.id),
-                (Some(wanted), Some(key)) if *wanted == key => Some(zone.id),
-                _ => None,
-            },
-            _ => None,
-        };
-        let Some(id) = accepted else {
+        let key = signed.key_name();
+        let zones = self.directory.zones();
+        let Some(zone) = zones.by_apex(request.question.name.as_wire()) else {
             count(MetricKind::NotifyIn, Outcome::Refused);
-            tracing::debug!(%from, "a NOTIFY was refused: not from a primary of a secondary zone, or not signed with its key");
+            tracing::debug!(%from, "a NOTIFY for a zone this node does not hold was refused");
             return First::Reply(Self::reply(short_answer(message, request, 5), signed));
+        };
+        let (id, authenticated) = match access::notify(zone, self.profile.get(), from, key.as_ref())
+        {
+            Ok(accepted) => accepted,
+            Err(refused) => {
+                count(MetricKind::NotifyIn, Outcome::Refused);
+                // From a primary's own address the refusal is worth an operator's look; from
+                // anywhere else it is noise, and spoofable, so it stays at debug.
+                let from_primary = !matches!(
+                    refused.code,
+                    access::codes::NOT_SECONDARY | access::codes::NOT_A_PRIMARY
+                );
+                if from_primary && self.audit.refusal_due(from) {
+                    tracing::warn!(zone = %zone.name, %from, code = refused.code, "a NOTIFY was refused: {}", refused.reason);
+                } else {
+                    tracing::debug!(zone = %zone.name, %from, code = refused.code, "a NOTIFY was refused: {}", refused.reason);
+                }
+                return First::Reply(Self::reply(short_answer(message, request, 5), signed));
+            }
         };
         drop(zones);
         count(MetricKind::NotifyIn, Outcome::Ok);
         if let Some(handler) = &self.notify {
-            handler.notified(id, from, request.serial);
+            handler.notified(id, from, request.serial, authenticated);
         }
         First::Reply(Self::reply(short_answer(message, request, 0), signed))
     }
 
-    /// A signed SOA query: the SOA of the zone, signed.
+    /// A signed SOA query the access checks admitted: the SOA of the zone in the scope of
+    /// the client's view, signed.
     fn signed_soa(
-        &self,
         message: &[u8],
         request: &TransferRequest,
+        zone: &Zone,
+        catalog: &Catalog,
         conn: &Conn,
         signed: &Signed,
     ) -> First {
-        let catalog = self.catalog.load();
-        let Some((ttl, rdata)) = soa_of(&catalog, request.question.name.as_wire(), conn) else {
-            return First::Reply(Self::reply(short_answer(message, request, 9), signed));
+        let scopes = scope_for(catalog, conn, request);
+        let Some((ttl, rdata)) = soa_in(catalog, zone, &scopes) else {
+            // A secondary zone before its first transfer, or expired.
+            return First::Reply(Self::reply(short_answer(message, request, 2), signed));
         };
         let mut writer = MessageWriter::new(message, request, MAX_MESSAGE_LEN);
         writer.push(
@@ -374,11 +415,12 @@ impl XfrOut {
             message,
             zone,
             catalog,
-            client,
+            conn,
             signed,
             kind,
         } = plan;
-        let conn_scope = scope_for(&catalog, client, &request);
+        let client = conn.client.ip();
+        let conn_scope = scope_for(&catalog, &conn, &request);
         let scope = conn_scope.scope_of(zone.id).clone();
         let Some((soa_ttl, soa)) = soa_in(&catalog, &zone, &conn_scope) else {
             // A secondary zone before its first transfer, or expired.
@@ -486,24 +528,14 @@ fn kind_name(kind: Kind) -> &'static str {
     }
 }
 
-/// IPv4-mapped IPv6 addresses compare as IPv4.
-fn canonical(address: IpAddr) -> IpAddr {
-    match address {
-        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(address, IpAddr::V4),
-        IpAddr::V4(_) => address,
-    }
-}
-
-/// The scopes the client's view chooses.
-fn scope_for<'a>(
-    catalog: &'a Catalog,
-    client: IpAddr,
-    request: &TransferRequest,
-) -> ViewScopes<'a> {
+/// The scopes the view of `conn` chooses: its client, the local address and the transport
+/// the request came on, as for a query.
+fn scope_for<'a>(catalog: &'a Catalog, conn: &Conn, request: &TransferRequest) -> ViewScopes<'a> {
+    let client = conn.client.ip();
     let view = catalog.views().select(&ViewQuery {
         client,
-        local: client,
-        transport: QueryTransport::Tcp,
+        local: conn.local.ip(),
+        transport: conn.transport,
         qtype: Rtype(request.question.qtype),
         minute_of_day: u16::try_from((unix_now() % 86_400) / 60).unwrap_or(0),
         qname: request.question.name.as_wire(),
@@ -519,17 +551,6 @@ fn soa_in(catalog: &Catalog, zone: &Zone, scopes: &dyn ScopeOf) -> Option<(u32, 
         Lookup::Answer {
             zone: found, rrset, ..
         } if found.id == zone.id && found.apex == apex.as_slice() => rrset
-            .rdata
-            .first()
-            .map(|rdata| (rrset.ttl, rdata.as_bytes().to_vec())),
-        _ => None,
-    }
-}
-
-/// The SOA at an apex for a signed SOA query, in the default scopes.
-fn soa_of(catalog: &Catalog, apex: &[u8], _conn: &Conn) -> Option<(u32, Vec<u8>)> {
-    match catalog.index().lookup(&DefaultScopes, apex, Rtype::SOA) {
-        Lookup::Answer { zone, rrset, .. } if zone.apex == apex => rrset
             .rdata
             .first()
             .map(|rdata| (rrset.ttl, rdata.as_bytes().to_vec())),
@@ -664,7 +685,7 @@ impl TransferSink for XfrOut {
                     message,
                     zone,
                     catalog,
-                    client,
+                    conn,
                     signed,
                     kind,
                 } = *plan;
@@ -672,7 +693,7 @@ impl TransferSink for XfrOut {
                     *out = Self::reply(short_answer(&message, &request, 5), &signed);
                     return true;
                 }
-                let scopes = scope_for(&catalog, client, &request);
+                let scopes = scope_for(&catalog, &conn, &request);
                 let Some((ttl, soa)) = soa_in(&catalog, &zone, &scopes) else {
                     *out = Self::reply(short_answer(&message, &request, 2), &signed);
                     return true;

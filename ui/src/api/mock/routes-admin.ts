@@ -13,6 +13,7 @@ import type {
   SecuritySettings,
   SessionLifetime,
 } from "../types";
+import { parseCidr } from "../../ipam/ip";
 import { PROFILES } from "../types";
 import { forgetUser, isServiceAccount, problem, userInfoOf } from "./access-store";
 import { clearThrottle, requireAdmin, requireSession, revokeUserSessions } from "./auth";
@@ -404,6 +405,19 @@ const updateSecuritySettings = route("patch", "/api/v1/settings/security", async
       invalid("unconfirmed_pin_days", "a whole number of days from 1 to 365 is required");
     }
     next.unconfirmed_pin_days = days as number;
+  }
+  // TGL-10: the networks of the site; null means "no change", an empty list is allowed.
+  if (body.transfer_site !== undefined && body.transfer_site !== null) {
+    const list = body.transfer_site;
+    if (!Array.isArray(list) || list.length > 256) {
+      invalid("transfer_site", "a list of at most 256 networks is required");
+    }
+    for (const entry of list as unknown[]) {
+      if (typeof entry !== "string" || !entry.includes("/") || parseCidr(entry, { strict: false }) === null) {
+        invalid("transfer_site", "each entry must be a network in CIDR notation");
+      }
+    }
+    next.transfer_site = list as string[];
   }
   // TGL-21; null means "no change", as on the server.
   if (body.audit_export !== undefined && body.audit_export !== null) {

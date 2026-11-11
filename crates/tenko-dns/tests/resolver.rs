@@ -896,3 +896,144 @@ fn a_new_catalog_is_seen_by_the_next_query() {
     let answer = engine.ask(&query("new.example.test", A));
     assert_eq!(answer.answers[0].rdata, [192, 0, 2, 42]);
 }
+
+/// Records the key of every response the limiter is asked about.
+#[derive(Default)]
+struct Recorder(Mutex<Vec<(ResponseKind, Vec<u8>)>>);
+
+impl RateLimiter for Recorder {
+    fn admit_query(&self, _client: IpAddr, _now: Instant) -> bool {
+        true
+    }
+
+    fn admit_response(
+        &self,
+        _client: IpAddr,
+        key: &ResponseKey<'_>,
+        _now: Instant,
+    ) -> RateDecision {
+        self.0
+            .lock()
+            .expect("keys")
+            .push((key.kind, key.name.to_vec()));
+        RateDecision::Send
+    }
+}
+
+/// Answers and NODATA synthesized from a wildcard count under the wildcard, so that random
+/// labels in front of it share one bucket of the response rate limiter; other answers
+/// count under their name.
+#[test]
+fn wildcard_answers_share_the_wildcards_rate_limit_bucket() {
+    let fixture = fixture();
+    let recorder = Arc::new(Recorder::default());
+    let resolver = Authoritative::new(handle(&fixture.image))
+        .with_rate_limiter(Arc::clone(&recorder) as Arc<dyn RateLimiter>);
+    let mut engine = Engine::new(resolver);
+    let first = engine.ask(&query("r1.wild.example.test", A));
+    assert_eq!(first.answers.len(), 1);
+    let _ = engine.ask(&query("r2.wild.example.test", A));
+    let nodata = engine.ask(&query("r3.wild.example.test", AAAA));
+    assert!(nodata.answers.is_empty() && nodata.rcode == rcode::NOERROR);
+    let _ = engine.ask(&query("www.example.test", A));
+    // Random labels under a DNAME owner count under the owner.
+    let _ = engine.ask(&query("r4.wild.here.example.test", A));
+    let wildcard = support::wire("*.wild.example.test");
+    assert_eq!(
+        recorder.0.lock().expect("keys").as_slice(),
+        &[
+            (ResponseKind::Answer, wildcard.clone()),
+            (ResponseKind::Answer, wildcard.clone()),
+            (ResponseKind::NoData, wildcard),
+            (ResponseKind::Answer, support::wire("www.example.test")),
+            (ResponseKind::Answer, support::wire("here.example.test")),
+        ]
+    );
+}
+
+/// A zone `nsec3.test` with an NSEC3PARAM of `iterations` and two NSEC3 records: the
+/// apex's own and the one at the highest hash, which covers the wrap to the lowest.
+fn nsec3_image(iterations: u16) -> DnsData {
+    use tenko_core::dns::Rtype;
+    use tenko_dns::dnssec::chain::{base32hex, nsec3_hash};
+    let zone = zone("nsec3.test");
+    let default = ScopeName::DEFAULT;
+    let hash = nsec3_hash(&support::wire("nsec3.test"), &[], iterations);
+    let label = String::from_utf8(base32hex(&hash).to_vec())
+        .expect("ascii")
+        .to_ascii_lowercase();
+    let mut image = DnsData::at(Revision(3));
+    for rrset in [
+        rrset(&zone, &default, "nsec3.test", &[soa("nsec3.test", 60)]),
+        rrset(&zone, &default, "nsec3.test", &[ns("ns1.nsec3.test")]),
+        rrset(
+            &zone,
+            &default,
+            "nsec3.test",
+            &[RecordData::Nsec3param {
+                hash_algorithm: 1,
+                flags: 0,
+                iterations,
+                salt: HexBytes(Vec::new()),
+            }],
+        ),
+        rrset(
+            &zone,
+            &default,
+            &format!("{label}.nsec3.test"),
+            &[RecordData::Nsec3 {
+                hash_algorithm: 1,
+                flags: 0,
+                iterations,
+                salt: HexBytes(Vec::new()),
+                next_hashed: HexBytes(vec![0xff; 20]),
+                types: vec![Rtype::SOA, Rtype::NS, Rtype::NSEC3PARAM],
+            }],
+        ),
+        // The highest hash, whose record covers the wrap to the lowest.
+        rrset(
+            &zone,
+            &default,
+            &format!("{}.nsec3.test", "v".repeat(32)),
+            &[RecordData::Nsec3 {
+                hash_algorithm: 1,
+                flags: 0,
+                iterations,
+                salt: HexBytes(Vec::new()),
+                next_hashed: HexBytes(hash.to_vec()),
+                types: Vec::new(),
+            }],
+        ),
+    ] {
+        set(&mut image, rrset);
+    }
+    image.zones.insert(zone.id, zone);
+    image
+}
+
+/// RFC 9276: the query path hashes with at most 150 extra NSEC3 iterations. Up to there a
+/// name error carries its closest encloser proof (the apex's own NSEC3). Above, nothing is
+/// hashed: the answer carries the NSEC3 record that covers the lowest hash, found without
+/// hashing, from which a validator reads the iterations and treats the zone as insecure.
+#[test]
+fn nsec3_proofs_are_written_up_to_the_iteration_cap_only() {
+    const NSEC3: u16 = 50;
+    let highest = format!("{}.nsec3.test", "v".repeat(32));
+    for (iterations, proved) in [(1, true), (150, true), (151, false), (u16::MAX, false)] {
+        let mut engine = Engine::new(Authoritative::new(handle(&nsec3_image(iterations))));
+        let answer = engine.ask(&query("nohost.nsec3.test", A).dnssec());
+        assert_eq!(answer.rcode, rcode::NXDOMAIN, "{iterations}");
+        let owners: Vec<String> = answer
+            .authority
+            .iter()
+            .filter(|record| record.rtype == NSEC3)
+            .map(|record| record.owner.to_ascii_lowercase())
+            .collect();
+        assert!(
+            !owners.is_empty(),
+            "{iterations}: an NSEC3 record shows the iterations"
+        );
+        let apex_proof = owners.iter().any(|owner| *owner != highest);
+        assert_eq!(apex_proof, proved, "{iterations} iterations: {owners:?}");
+    }
+}

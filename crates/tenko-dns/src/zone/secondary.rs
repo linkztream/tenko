@@ -80,6 +80,22 @@ pub const CHUNK: usize = 20_000;
 /// The text a member zone of a secondary catalog zone is described with.
 pub const MEMBER_OF: &str = "Member of the catalog zone ";
 
+/// Members a secondary catalog zone may have; a catalog with more changes nothing until it
+/// is back under the bound.
+pub const CATALOG_MEMBERS_MAX: usize = 10_000;
+
+/// The stable code of a transfer whose serial is older than the copy's (RFC 1982): it is
+/// not applied, unless an operator asks for the transfer through the API.
+pub const TRANSFER_OLDER_SERIAL: &str = inbound::OLDER_SERIAL;
+
+/// The first pause after a refresh that an unsigned NOTIFY started, before another unsigned
+/// NOTIFY may start one.
+pub const NOTIFY_QUIET_MIN: Duration = Duration::from_secs(2);
+
+/// The longest pause: it doubles from [`NOTIFY_QUIET_MIN`] while unsigned NOTIFY messages
+/// bring nothing new, and returns to it when a refresh brings a new serial.
+pub const NOTIFY_QUIET_MAX: Duration = Duration::from_secs(300);
+
 /// The 409 of a write to records that come from transfers.
 pub fn read_only(zone: &Zone) -> ZoneError {
     ZoneError::new(
@@ -267,6 +283,36 @@ struct ZoneState {
     running: bool,
     /// A refresh asked for while a transfer ran.
     requested: Option<Requested>,
+    /// The backoff from unsigned NOTIFY messages.
+    backoff: Backoff,
+    /// An operator asked for the refresh through the API: it applies a transfer whose
+    /// serial is older than the copy's.
+    forced: bool,
+}
+
+/// The backoff from unsigned NOTIFY messages (RFC 1996 section 3.10: their source is not
+/// authenticated).
+#[derive(Debug, Clone)]
+struct Backoff {
+    /// Unsigned NOTIFY messages start no refresh before this time.
+    quiet_until: Option<Timestamp>,
+    /// The pause after the next refresh an unsigned NOTIFY starts.
+    quiet: Duration,
+    /// The coming (or running) refresh was asked for by unsigned NOTIFY messages only.
+    by_unsigned: bool,
+    /// The request kept while a transfer ran came from unsigned NOTIFY messages only.
+    requested_unsigned: bool,
+}
+
+impl Default for Backoff {
+    fn default() -> Self {
+        Self {
+            quiet_until: None,
+            quiet: NOTIFY_QUIET_MIN,
+            by_unsigned: false,
+            requested_unsigned: false,
+        }
+    }
 }
 
 /// A refresh asked for while a transfer of the zone ran.
@@ -279,10 +325,58 @@ enum Requested {
 }
 
 impl ZoneState {
-    /// A NOTIFY or a request through the API: the zone is due now. While a transfer runs
-    /// it may already have read the primary's old copy, so the request is kept and the
+    /// The state of a zone the service starts to follow.
+    fn new(serial: Option<u32>, primaries: Vec<PrimaryStatus>, expires: Option<Timestamp>) -> Self {
+        Self {
+            serial,
+            primaries,
+            next_refresh: Timestamp::now(),
+            expires,
+            running: false,
+            requested: None,
+            backoff: Backoff::default(),
+            forced: false,
+        }
+    }
+
+    /// A signed NOTIFY or a request through the API: the zone is due now. While a transfer
+    /// runs it may already have read the primary's old copy, so the request is kept and the
     /// zone refreshed once more when it ends (RFC 1996 section 4.4).
     fn request(&mut self, serial: Option<u32>, now: Timestamp) {
+        self.backoff.by_unsigned = false;
+        self.backoff.requested_unsigned = false;
+        self.keep(serial, now);
+    }
+
+    /// An unsigned NOTIFY: like [`ZoneState::request`], but it starts no refresh before
+    /// the quiet time that the last one it started left. It is never dropped: while a
+    /// transfer runs it is kept, and while the quiet time lasts the zone is due when it
+    /// ends.
+    fn request_unsigned(&mut self, serial: Option<u32>, now: Timestamp) {
+        let at = self.backoff.quiet_until.map_or(now, |quiet| quiet.max(now));
+        if self.running {
+            if self.requested.is_none() {
+                self.backoff.requested_unsigned = true;
+            }
+            let next = self.next_refresh;
+            self.keep(serial, now);
+            self.next_refresh = next;
+        } else {
+            if self.next_refresh > now {
+                self.backoff.by_unsigned = true;
+            }
+            self.next_refresh = self.next_refresh.min(at);
+        }
+    }
+
+    /// An operator's request through the API: due now, and it may apply an older serial.
+    fn force(&mut self, now: Timestamp) {
+        self.forced = true;
+        self.request(None, now);
+    }
+
+    /// Keeps a request while a transfer runs; makes the zone due now otherwise.
+    fn keep(&mut self, serial: Option<u32>, now: Timestamp) {
         self.next_refresh = now;
         if self.running {
             self.requested = Some(match (self.requested, serial) {
@@ -298,9 +392,21 @@ impl ZoneState {
     }
 
     /// The end of a transfer: the next refresh after the SOA's timers, or at once when a
-    /// request came while it ran that the serial reached does not cover.
+    /// request came while it ran that the serial reached does not cover (after the quiet
+    /// time when unsigned NOTIFY messages alone asked for it).
     fn finish(&mut self, outcome: Option<Refreshed>, now: Timestamp, timers: Timers) {
         self.running = false;
+        let moved =
+            matches!(outcome, Some(Refreshed::Serial(serial)) if self.serial != Some(serial));
+        if moved {
+            self.backoff.quiet = NOTIFY_QUIET_MIN;
+        } else if self.backoff.by_unsigned {
+            self.backoff.quiet = (self.backoff.quiet * 2).min(NOTIFY_QUIET_MAX);
+        }
+        if self.backoff.by_unsigned || moved {
+            self.backoff.quiet_until = now.checked_add(self.backoff.quiet);
+        }
+        self.backoff.by_unsigned = false;
         match outcome {
             Some(Refreshed::Serial(serial)) => {
                 self.serial = Some(serial);
@@ -324,9 +430,18 @@ impl ZoneState {
                 Requested::Any => false,
             };
             if !covered {
+                let timer = self.next_refresh;
                 self.next_refresh = now;
+                if self.backoff.requested_unsigned {
+                    self.backoff.by_unsigned = true;
+                    if let Some(quiet) = self.backoff.quiet_until {
+                        // After the pause, or on the timer when that comes sooner.
+                        self.next_refresh = timer.min(quiet.max(now));
+                    }
+                }
             }
         }
+        self.backoff.requested_unsigned = false;
     }
 }
 
@@ -475,7 +590,7 @@ impl SecondaryService {
         );
         self.inner.zones.store().propose(batch).await?;
         if let Some(state) = self.inner.lock().get_mut(&id) {
-            state.request(None, Timestamp::now());
+            state.force(Timestamp::now());
         }
         self.inner.wake.notify_one();
         self.state(view.as_ref(), &zone)
@@ -500,7 +615,7 @@ fn primary_address(primary: &PrimaryServer) -> SocketAddr {
 }
 
 impl NotifyHandler for SecondaryService {
-    fn notified(&self, zone: ZoneId, from: std::net::IpAddr, serial: Option<u32>) {
+    fn notified(&self, zone: ZoneId, from: std::net::IpAddr, serial: Option<u32>, signed: bool) {
         let mut state = self.inner.lock();
         if let Some(entry) = state.get_mut(&zone) {
             if serial.is_some_and(|serial| {
@@ -511,7 +626,11 @@ impl NotifyHandler for SecondaryService {
                 tracing::debug!(%from, ?serial, "NOTIFY for a serial already held");
                 return;
             }
-            entry.request(serial, Timestamp::now());
+            if signed {
+                entry.request(serial, Timestamp::now());
+            } else {
+                entry.request_unsigned(serial, Timestamp::now());
+            }
         }
         drop(state);
         self.inner.wake.notify_one();
@@ -729,25 +848,21 @@ impl Inner {
                     ),
                     None => (None, None),
                 };
-                state.insert(
-                    zone.id,
-                    ZoneState {
-                        serial,
-                        primaries: addresses
-                            .iter()
-                            .map(|address| PrimaryStatus {
-                                address: *address,
-                                last_success: None,
-                                last_error: None,
-                                detail: None,
-                            })
-                            .collect(),
-                        next_refresh: now,
-                        expires,
-                        running: false,
-                        requested: None,
-                    },
+                let mut entry = ZoneState::new(
+                    serial,
+                    addresses
+                        .iter()
+                        .map(|address| PrimaryStatus {
+                            address: *address,
+                            last_success: None,
+                            last_error: None,
+                            detail: None,
+                        })
+                        .collect(),
+                    expires,
                 );
+                entry.next_refresh = now;
+                state.insert(zone.id, entry);
             }
         }
         for row in rows
@@ -998,6 +1113,12 @@ impl Inner {
     async fn try_refresh(&self, id: ZoneId, epoch: u64) -> Option<Refreshed> {
         let view = self.zones.view(None).await.ok()?;
         let zone = ZoneService::zone(view.as_ref(), id).ok()?.zone;
+        let forced = self
+            .lock()
+            .get_mut(&id)
+            .is_some_and(|zone| std::mem::take(&mut zone.forced));
+        // One deadline for the whole refresh, whichever primaries it tries.
+        let deadline = tokio::time::Instant::now() + self.settings.limits.deadline;
         let held = view
             .get_typed(
                 &RRSETS,
@@ -1033,13 +1154,9 @@ impl Inner {
                     continue;
                 }
             };
-            let fetched = match inbound::fetch(
-                &primary,
-                &zone.name,
-                held.as_ref(),
-                self.settings.limits,
-            )
-            .await
+            let fetched = match self
+                .fetch(&primary, &zone.name, held.as_ref(), forced, deadline)
+                .await
             {
                 Ok(fetched) => fetched,
                 Err(error) => {
@@ -1053,6 +1170,11 @@ impl Inner {
                 return Some(Refreshed::Serial(
                     held.as_ref().map_or(serial, |held| held.serial),
                 ));
+            }
+            if let Err(error) = older_serial(held.as_ref(), &fetched, forced) {
+                tracing::warn!(zone = %zone.name, %address, %error, "a zone transfer was not applied");
+                self.set_primary(id, address, Err(&error));
+                continue;
             }
             match self
                 .apply(&zone, held.as_ref(), &fetched, address, epoch)
@@ -1074,6 +1196,25 @@ impl Inner {
             }
         }
         Some(Refreshed::Failed)
+    }
+
+    /// One transfer from `primary` within `deadline`. "Transfer now" (`forced`) takes a
+    /// primary whose serial went back: its IXFR answer is the older SOA alone, so the zone
+    /// is then asked for whole.
+    async fn fetch(
+        &self,
+        primary: &Primary,
+        apex: &DnsName,
+        held: Option<&Held>,
+        forced: bool,
+        deadline: tokio::time::Instant,
+    ) -> Result<Fetched, FetchError> {
+        let limits = self.settings.limits;
+        let result = inbound::fetch_until(primary, apex, held, limits, deadline).await;
+        if forced && matches!(&result, Err(error) if error.code == inbound::OLDER_SERIAL) {
+            return inbound::fetch_until(primary, apex, None, limits, deadline).await;
+        }
+        result
     }
 
     async fn primary(
@@ -1266,6 +1407,8 @@ impl Inner {
         .map_err(|error| ZoneError::new(codes::TRANSFER_FAILED, 422, error.to_string()))?;
         let rows = ZoneService::zones(view.as_ref())?;
         drop(view);
+        let members = admit_members(catalog, members, &rows, CATALOG_MEMBERS_MAX)
+            .map_err(|detail| ZoneError::new(codes::TRANSFER_FAILED, 422, detail))?;
         let marker = format!("{MEMBER_OF}{}", catalog.name);
         let cx = system();
         for member in &members {
@@ -1321,6 +1464,77 @@ impl Inner {
         }
         Ok(())
     }
+}
+
+/// Refuses a transfer that would take the copy back to an older serial (RFC 1982), a
+/// replayed or stale answer, unless an operator asked for it (`forced`). The same serial is
+/// applied: it is the same version, sent again.
+fn older_serial(held: Option<&Held>, fetched: &Fetched, forced: bool) -> Result<(), FetchError> {
+    let (Some(held), Some(serial)) = (held, fetched.serial()) else {
+        return Ok(());
+    };
+    if forced || crate::xfr::out::serial_ge(serial, held.serial) {
+        return Ok(());
+    }
+    Err(inbound::older(serial, held.serial))
+}
+
+/// The members of a catalog that may become zones (RFC 9432 section 7: a consumer
+/// restricts what a catalog may add): not the root or a top-level domain, not the catalog
+/// itself or a name below it, not a name at, below or above a zone of another tenant, not
+/// a name below a zone of the same tenant that is not one of this catalog's members; at
+/// most [`CATALOG_MEMBERS_MAX`].
+///
+/// # Errors
+///
+/// A catalog with more members than the bound: nothing is created or deleted.
+fn admit_members(
+    catalog: &Zone,
+    members: Vec<DnsName>,
+    rows: &[super::ZoneRow],
+    max: usize,
+) -> Result<Vec<DnsName>, String> {
+    let marker = format!("{MEMBER_OF}{}", catalog.name);
+    if members.len() > max {
+        return Err(format!(
+            "the catalog lists {} members, more than the bound of {max}; its member zones are left as they are",
+            members.len()
+        ));
+    }
+    Ok(members
+        .into_iter()
+        .filter(|member| {
+            let refused = if member.is_root() {
+                Some("the root")
+            } else if member.label_count() < 2 {
+                Some("a top-level domain")
+            } else if *member == catalog.name || member.is_subdomain_of(&catalog.name) {
+                Some("the catalog zone itself or a name below it")
+            } else if rows.iter().any(|row| {
+                // A root zone holds every name; it says nothing about a member.
+                !row.zone.name.is_root()
+                    && row.zone.tenant != catalog.tenant
+                    && (member.is_subdomain_of(&row.zone.name)
+                        || row.zone.name.is_subdomain_of(member))
+            }) {
+                Some("a name at, below or above a zone of another tenant")
+            } else if rows.iter().any(|row| {
+                !row.zone.name.is_root()
+                    && row.zone.tenant == catalog.tenant
+                    && row.zone.description.as_deref() != Some(marker.as_str())
+                    && row.zone.name != *member
+                    && member.is_subdomain_of(&row.zone.name)
+            }) {
+                Some("a name below a zone of the tenant that the catalog does not hold")
+            } else {
+                None
+            };
+            if let Some(reason) = refused {
+                tracing::warn!(catalog = %catalog.name, %member, "a catalog member was not added: {reason}");
+            }
+            refused.is_none()
+        })
+        .collect())
 }
 
 fn stage_changes(batch: &mut WriteBatch, changes: &[Change]) -> ZoneResult<()> {

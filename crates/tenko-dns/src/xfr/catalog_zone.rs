@@ -152,4 +152,24 @@ mod tests {
         ];
         assert_eq!(members(&catalog, records), Ok(vec![name("c.example.test")]));
     }
+
+    /// A PTR target of the root decodes and is a member like any other; the secondary
+    /// service refuses it (`secondary::admit_members`), so it never becomes a zone.
+    #[test]
+    fn a_root_target_is_read_as_a_member() {
+        let catalog = name("catalog.example.test");
+        let version = Rdata::from_data(&RecordData::Txt {
+            strings: vec![TextBytes::from_text("2")],
+        });
+        let root = Rdata::from_data(&RecordData::Ptr {
+            target: DnsName::root(),
+        });
+        let owner = name("m1.zones.catalog.example.test");
+        let version_owner = name("version.catalog.example.test");
+        let records = vec![
+            (&version_owner, Rtype::TXT, &version),
+            (&owner, Rtype::PTR, &root),
+        ];
+        assert_eq!(members(&catalog, records), Ok(vec![DnsName::root()]));
+    }
 }
