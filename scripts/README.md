@@ -12,6 +12,7 @@ root.
 | `requirement-trace.mjs` | Generates `docs/plans/phase-1-trace.md` (and with `--phase 2` or `--phase 3` `docs/plans/phase-2-trace.md` or `docs/plans/phase-3-trace.md`), the table of a phase's requirements and exit criteria against the tests, measurements and documents that name them, and checks that the committed file is current. |
 | `root-anchors.mjs` | WP10.0: converts the shipped DNS root trust anchors (`crates/tenko-dns/anchors/root-anchors.xml`, RFC 7958) and root hints (`named.root`) into `crates/tenko-dns/src/recursion/shipped.rs`, and with `--check` (exit 1) verifies that the committed file is current. `crates/tenko-dns/anchors/README.md` says how to refresh the inputs. |
 | `label-catalog.mjs` | Finds the job kinds and audit actions the Rust code can write; `label-catalog.test.mjs` fails, naming each one, when `ui/i18n/<language>.d/labels.xlf` has no `jobs.title.<kind>` or `audit.action.<code>` unit (with a Swedish target) for it. |
+| `test-lint.mjs` | Checks the standing rules for tests (`docs/testing/rules.md`) over the Rust tests, the UI unit and end-to-end tests and the test configuration, against the baseline `test-lint.baseline.json`: `node scripts/test-lint.mjs` (check), `--list` (every finding), `--prune` (drop the entries nothing matches). Exit codes 0, 1 (a finding outside the baseline, a stale entry, a malformed exception), 2 (bad usage or baseline). Runs in CI (job `spelling`) and in the gate. |
 | `*.test.mjs` | Tests with `node:test`. |
 
 ```sh
@@ -148,6 +149,8 @@ and separately those that no test, measurement or document names.
 
 - `.github/workflows/ci.yml`, job `changelog` (pull requests and pushes): `node --test`, then
   `changelog.mjs validate` and `changelog.mjs check --base <base>`.
+- `.github/workflows/ci.yml`, job `spelling` (pull requests and pushes): `spelling.mjs`, then
+  `test-lint.mjs`.
 - `.github/workflows/release.yml` (tags `v*`): `verify` runs `changelog.mjs notes <version>` to
   prove that the section exists; `sbom` runs `sbom-prune.mjs` on the SBOM of each binary;
   `manifest` runs `release-manifest.mjs` over the binaries; `publish` runs

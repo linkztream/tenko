@@ -83,6 +83,17 @@ jobs:
       # and run separately.
       - name: Test
         run: cargo nextest run --workspace --locked
+      # The JUnit report of .config/nextest.toml: every test's result and duration, for
+      # reading timings and failures after the run.
+      - name: Keep the test report
+        # spelling: alias (the GitHub Actions status function)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nextest-junit-linux
+          path: target/nextest/default/junit.xml
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Doctests
         run: cargo test --doc --workspace --locked
 
@@ -121,6 +132,15 @@ jobs:
       # and run separately.
       - name: Test
         run: cargo nextest run --workspace --locked
+      - name: Keep the test report
+        # spelling: alias (the GitHub Actions status function)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nextest-junit-windows
+          path: target/nextest/default/junit.xml
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Doctests
         run: cargo test --doc --workspace --locked
 
@@ -944,6 +964,12 @@ jobs:
         run: node --test "scripts/*.test.mjs"
       - name: Validate CHANGELOG.md
         run: node scripts/changelog.mjs validate
+      # The baseline of the test rules only shrinks (docs/testing/rules.md): no rule may have
+      # more known findings than at the base. Here because this job has the history.
+      - name: The test baseline did not grow
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/test-lint.mjs --grown-since "$BASE"
       - name: Entry for product changes
         if: steps.override.outputs.skip != 'true'
         env:
@@ -969,6 +995,13 @@ jobs:
           node-version: 22
       - name: American English
         run: node scripts/spelling.mjs
+      # The standing rules for tests (docs/testing/rules.md): no sleep as synchronization, no
+      # short wait limit, no duration assertion, no wall clock in an expectation, no port
+      # found by binding and dropping, no retries or .only, no skipped test without a runner,
+      # no return before the first assertion, no bare is_err(). Fails on a finding that is
+      # not in scripts/test-lint.baseline.json and on an entry there that nothing matches.
+      - name: Test rules
+        run: node scripts/test-lint.mjs
 
   # -------------------------------------------------------------------------------------
   # PUBLICATION: the Developer Certificate of Origin check. CONTRIBUTING.md and CLA.md

@@ -60,6 +60,12 @@ where each option stands in this order. The rules below are that order applied.
   old client, configuration or data file still works, marked `spelling: alias` with the
   version in which it goes away; stored key bytes, marked `spelling: stored key`; git
   history and published release texts.
+- Tests follow the standing rules of `docs/testing/rules.md`: no sleep as synchronization, no
+  wait limit under 10 s, no assertion on a duration, no wall clock in an expectation, no port
+  found by binding and dropping, no retries or `.only`, a runner named for every skipped test
+  and early return, a refusal asserted by its code. `node scripts/test-lint.mjs` checks them
+  against the baseline `scripts/test-lint.baseline.json` and runs in CI; whoever fixes a test
+  removes its baseline entry in the same commit (`--prune`).
 - Conventional Commits, with crate short names as scopes: `feat(dns): …`, `fix(ipam): …`,
   `docs: …`, `chore: …`, `bench: …`.
 - Small, focused commits. Never use `--no-verify`. Never amend or force-push a shared
@@ -152,6 +158,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo deny check
 cargo audit
+node scripts/spelling.mjs
+node scripts/test-lint.mjs           # the standing rules for tests (docs/testing/rules.md)
+node --test "scripts/*.test.mjs"
 cargo run -p tenko -- serve --roles controller,dns --data-dir <dir>
 cd ui && npm ci && npm run build
 ```

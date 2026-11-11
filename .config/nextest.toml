@@ -3,6 +3,33 @@
 # A test that measures a latency bound on threads of its own reserves them here, so that
 # nextest does not run other tests on the cores it measures on. Do not add retries: a test
 # that fails under load has a cause, in the product or in the test.
+#
+# The settings below are checked against cargo-nextest 0.9.148. The rules for tests are in
+# docs/testing/rules.md; `node scripts/test-lint.mjs` refuses a `retries` other than 0 here.
+
+[profile.default]
+# No retries: a test that passes only on a second try is a flaky test, and a retry hides it.
+retries = 0
+# A test still running after 60 s is reported SLOW, with its name, once per period. After
+# the tenth period (10 minutes) nextest ends it and reports it as TIMEOUT, so a hung test
+# fails with its name instead of holding the gate or the CI job until their own limits. The
+# whole suite takes about four minutes on the gate's loaded workstation; no test that
+# works comes near ten.
+slow-timeout = { period = "60s", terminate-after = 10 }
+# A test whose process has ended while a process it started still holds its output open
+# leaks that process. nextest waits this long for the output to close (the default is
+# 100 ms, which a process being killed on a loaded machine can miss), then reports the test
+# as LEAK and, with `result = "fail"`, fails it: a leaked server or helper process is
+# visible in the summary and stops the run, instead of passing as a warning.
+leak-timeout = { period = "1s", result = "fail" }
+
+[profile.default.junit]
+# Every run writes a JUnit report (each test's result, duration and, for a failure, its
+# output) to target/nextest/default/junit.xml under the workspace root (nextest's own store
+# directory, which CARGO_TARGET_DIR does not move), so that the timings and the failures of
+# a run can be read after it. The file is replaced by the next run: a caller that keeps the
+# reports copies it away after each run, and CI uploads it as an artifact.
+path = "junit.xml"
 
 [[profile.default.overrides]]
 # The commit stall bound while snapshots are built (ADR 0030) is measured on the test's own
