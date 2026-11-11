@@ -6,9 +6,15 @@ real networks, for the E9 check of WP3.1c and for trying things by hand. It is a
 deployment example: `smoke.sh` generates every key and certificate for one run, and every
 name and address is a documentation value (`198.51.100.0/24`, `example.test`).
 
-It is a Linux Docker host lab. It runs on Docker Desktop too; the maintainer's host is WSL
-Ubuntu 24.04 with Docker as root. It needs Docker with the compose and buildx plugins, and
-`curl`, `openssl` and `python3` on the host.
+The lab drives itself from inside its own network: the service `client` is the lab driver
+([deploy/compose/driver](../driver/Dockerfile): `curl`, `openssl`, `python3`), and every
+step that talks to the lab runs there: the API through HAProxy with `curl`, the lab CA with
+`openssl`, the load generator and its report. The driver asks the host for every container
+operation (start, kill, health, the setup token, `tenko cluster join` and `tenko node
+enroll` in new containers, the command lines inside the controllers and probes, the
+partition) over its standard input and output; it has no Docker socket. The host needs
+Docker with the compose plugin (buildx for the builds) and bash, nothing else, so the lab
+runs from Git Bash on Windows against Docker Desktop as well as on a Linux Docker host.
 
 ## What runs
 
@@ -17,11 +23,15 @@ Ubuntu 24.04 with Docker as root. It needs Docker with the compose and buildx pl
 | `haproxy` | Ends TLS with the lab certificate, checks every controller on `GET /api/v1/health/ready` every 2 s, keeps a client on one controller with the cookie `TENKOSRV`, holds `/api/v1/events` open for an hour (`haproxy.cfg`) | `https://localhost:28443` (`LAB_PORT`), on the loopback only; `https://haproxy:8443` on the lab network |
 | `controller-1` to `-3` | The controller role in TLS mode `reverse_proxy` (HAProxy at `198.51.100.2` and the loopback are the trusted proxies), the cluster port 8444 on the lab network, each advertising its service name | Through HAProxy; the cluster port as `controller-N:8444` |
 | `probe-1`, `probe-2` | Probe nodes (profile `probes`); they dial the controllers' cluster ports directly, because mutual TLS cannot pass a proxy that ends TLS | No port |
-| `fault` | The Docker command line with the Docker socket (profile `fault`), for `docker network disconnect` and `connect`: the lab's partition | No port |
+| `client` | The lab driver (`tenko-lab-driver:local`, `deploy/compose/driver/Dockerfile`), from which `driver.sh` drives the lab; the lab volume at `/work`. It reaches HAProxy as `https://localhost:28443` with `curl --connect-to` to `haproxy:8443`, so the requests carry the same name, port and origin as a browser's on the host | `docker compose exec client ...` |
 
-The lab network is the bridge `tenkolab_lab`, `198.51.100.0/24`. Each controller has its own
-key-encryption key as a Docker secret (`[kek] provider = "file"`), its own data volume, a
-read-only root file system and no capabilities. Breach lookups, update checks and the rate
+The lab network is the bridge `tenkolab_lab`, `198.51.100.0/24`. The files of a run live in
+the compose volume `lab` (`tenkolab_lab`), mounted at `/work` in the driver: `tls/` (the lab
+CA and HAProxy's certificate, HAProxy's `/lab/tls`), `public/ca.pem` (the lab CA alone, `/lab`
+in the controllers and probes), `kek-1/` to `kek-3/` (each controller's key-encryption key,
+its `/run/secrets`; `[kek] provider = "file"`), the cookie jar, and with `KEEP=1` the
+administrator's password. Each controller has its own data volume, a read-only root file
+system and no capabilities. Breach lookups, update checks and the rate
 limiter are off: the lab has no route out, and the load generator is one client.
 
 ## The smoke
@@ -33,9 +43,10 @@ bash deploy/compose/lab-cluster/smoke.sh                     # builds tenko:lab 
 IMAGE=tenko:lab bash deploy/compose/lab-cluster/smoke.sh     # reuses an image
 ```
 
-It builds the image from `deploy/Dockerfile` (a while: the web UI bundle and a release
-binary), generates a lab CA and the HAProxy certificate with `openssl` and three keys into a
-temporary directory, starts `controller-1` and HAProxy, runs first-run setup through HAProxy,
+`smoke.sh` is the host side: it builds the image from `deploy/Dockerfile` (a while: the web
+UI bundle and a release binary) and the driver's image, starts the driver and runs
+`driver.sh` in it. The driver generates a lab CA and the HAProxy certificate with `openssl`
+and three keys into the lab volume, has the host start `controller-1` and HAProxy, runs first-run setup through HAProxy,
 creates two controller tokens and joins `controller-2` and `controller-3` with
 `tenko cluster join` in their own containers before their first start, waits for three
 voters, enrolls and starts the probes, writes 100 addresses per second through HAProxy with
@@ -48,32 +59,34 @@ enrollments with an invalid token leave 10 audit records and one summary, revoke
 and checks that it is cut off, and tears everything down. It prints a summary line per step; on a failure it
 prints the logs of every service first. The weekly CI job `cluster-lab` runs it.
 
-Settings: `IMAGE`, `LAB_PORT` (28443), `RATE` and `SECONDS_UNDER_LOAD` (100 writes per
-second for 30 seconds around the kill), `WAIT_SECS` (300), `KEEP`.
+Settings: `IMAGE`, `DRIVER_IMAGE` (an existing image of the lab driver; default: build
+`tenko-lab-driver:local`), `LAB_PORT` (28443), `RATE` and `SECONDS_UNDER_LOAD` (100 writes
+per second for 30 seconds around the kill), `WAIT_SECS` (300), `KEEP`.
 
 ## Keeping the lab for hand tests
 
-`KEEP=1` leaves the lab running after a successful smoke and prints the work directory and
-the command that tears it down:
+`KEEP=1` leaves the lab running after a successful smoke and prints the command that tears it
+down:
 
 ```sh
 KEEP=1 IMAGE=tenko:lab bash deploy/compose/lab-cluster/smoke.sh
-# open https://localhost:28443 and trust <work>/tls/ca.pem (the lab CA), or:
-curl --cacert <work>/tls/ca.pem https://localhost:28443/api/v1/health/ready
-# the administrator is lab-admin, with the password in <work>/admin-password (KEEP=1 only)
-LAB_DIR=<work> docker compose -f deploy/compose/lab-cluster/compose.yml \
-  --profile probes --profile fault down --volumes
+cd deploy/compose/lab-cluster
+# open https://localhost:28443 and trust the lab CA, which the driver holds:
+docker compose exec client cat /work/tls/ca.pem >lab-ca.pem
+curl --cacert lab-ca.pem https://localhost:28443/api/v1/health/ready
+# the administrator is lab-admin, with the password in /work/admin-password (KEEP=1 only)
+docker compose exec client cat /work/admin-password
+docker compose --profile probes down --volumes
 ```
 
 With the lab up, the faults are one command each:
 
 ```sh
 cd deploy/compose/lab-cluster
-export LAB_DIR=<work>
 docker compose kill controller-2                       # a crash
 docker compose up -d controller-2                      # back
-docker compose run --rm fault network disconnect tenkolab_lab "$(docker compose ps -q controller-3)"
-docker compose run --rm fault network connect --alias controller-3 tenkolab_lab "$(docker compose ps -q controller-3)"
+docker network disconnect tenkolab_lab "$(docker compose ps -q controller-3)"
+docker network connect --alias controller-3 tenkolab_lab "$(docker compose ps -q controller-3)"
 ```
 
 Reconnect with `--alias` and the service name, so the other controllers find it again.
@@ -88,7 +101,7 @@ replace the followers one at a time and the leader last, after a step-down.
 ```sh
 export TENKO_OLD_IMAGE=ghcr.io/linkztream/tenko:<older release>
 KEEP=1 IMAGE="$TENKO_OLD_IMAGE" bash deploy/compose/lab-cluster/smoke.sh
-cd deploy/compose/lab-cluster && export LAB_DIR=<work> TENKO_IMAGE="$TENKO_OLD_IMAGE"
+cd deploy/compose/lab-cluster && export TENKO_IMAGE="$TENKO_OLD_IMAGE"
 docker compose exec controller-1 tenko cluster upgrade-check --url http://127.0.0.1:8443   # after tenko login there
 TENKO_IMAGE_2=tenko:lab docker compose up -d controller-2    # a follower first
 TENKO_IMAGE_3=tenko:lab docker compose up -d controller-3
