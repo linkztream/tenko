@@ -43,6 +43,11 @@
 //!   with [`LeaseFacts::set_retention`]) is not presented at all, as a stored fact whose last
 //!   sighting is older is purged; the build at start leaves such rows out too. Lease rows
 //!   are never deleted, so without the cut a released address would show for ever.
+//! - **Time.** A reader passes the time it reads at, and that time alone decides what it
+//!   sees (the retention cut, whether a binding has ended, the facts presented): no build,
+//!   fact or helper of the view reads the clock. Only the follower, which serves the
+//!   present, reads it, in one place ([`LeaseFacts::spawn`]), and hands it down as a value
+//!   to each of its builds.
 //! - **Sightings.** A sighting counts once per refresh interval ([`ObserveConfig::refresh`]):
 //!   a binding held from its grant to its last transaction counts one sighting plus one per
 //!   interval in between.
@@ -95,6 +100,9 @@ use super::{
     ObserveConfig,
     model::{FactSubject, ObservedFact, observed_ips, observed_macs, observed_name},
 };
+
+/// The follower's clock: the time each of its builds cuts the rows past the retention at.
+pub(crate) type Clock = Arc<dyn Fn() -> Timestamp + Send + Sync>;
 
 /// Rows read per page when the view is built.
 const PAGE: usize = 4_096;
@@ -327,14 +335,14 @@ impl LeaseFacts {
     }
 
     /// Builds the view from the lease tables of `view` and installs it whole, without the
-    /// rows that ended longer ago than the retention by the clock (the follower's start: the
-    /// view then serves the present).
+    /// rows that ended longer ago than the retention at `now` (the follower passes the
+    /// clock: its view serves the present).
     ///
     /// # Errors
     ///
     /// A storage or decoding failure of the scan.
-    pub fn build(&self, view: &dyn ReadView) -> Result<(), StoreError> {
-        self.build_from(view, Some(Timestamp::now()))
+    pub fn build(&self, view: &dyn ReadView, now: Timestamp) -> Result<(), StoreError> {
+        self.build_from(view, Some(now))
     }
 
     /// Builds the view from the lease tables of `view`; with `cut`, the rows past the
@@ -391,19 +399,30 @@ impl LeaseFacts {
         store: Arc<dyn Store>,
         stop: CancellationToken,
     ) -> tokio::task::JoinHandle<()> {
+        // The one read of the clock: the follower serves the present.
+        self.spawn_with_clock(store, stop, Arc::new(Timestamp::now))
+    }
+
+    /// [`LeaseFacts::spawn`] with the clock its builds cut the rows past the retention at.
+    pub(crate) fn spawn_with_clock(
+        self: &Arc<Self>,
+        store: Arc<dyn Store>,
+        stop: CancellationToken,
+        clock: Clock,
+    ) -> tokio::task::JoinHandle<()> {
         self.following.store(true, Ordering::Release);
-        tokio::spawn(Arc::clone(self).follow(store, stop))
+        tokio::spawn(Arc::clone(self).follow(store, stop, clock))
     }
 
     /// The follower (see the module documentation).
-    async fn follow(self: Arc<Self>, store: Arc<dyn Store>, stop: CancellationToken) {
+    async fn follow(self: Arc<Self>, store: Arc<dyn Store>, stop: CancellationToken, clock: Clock) {
         self.following.store(true, Ordering::Release);
         let mut retry = Duration::from_millis(100);
         loop {
             if stop.is_cancelled() {
                 break;
             }
-            match self.follow_once(store.as_ref(), &stop).await {
+            match self.follow_once(store.as_ref(), &stop, clock()).await {
                 Ok(Followed::Stopped) => break,
                 Ok(Followed::Rebuild) => retry = Duration::from_millis(100),
                 Err(error) => {
@@ -419,14 +438,15 @@ impl LeaseFacts {
         self.following.store(false, Ordering::Release);
     }
 
-    /// One build and the following of the journal from it, until the stream ends.
+    /// One build at `now` and the following of the journal from it, until the stream ends.
     async fn follow_once(
         &self,
         store: &dyn Store,
         stop: &CancellationToken,
+        now: Timestamp,
     ) -> Result<Followed, StoreError> {
         let view = store.read(ReadConsistency::Local).await?;
-        self.build(view.as_ref())?;
+        self.build(view.as_ref(), now)?;
         let from = view.revision();
         drop(view);
         let mut stream = store.watch(Some(from), WatchFilter::all())?;
@@ -586,10 +606,15 @@ impl LeaseFacts {
         self.select(now, |fact| naming.names(fact))
     }
 
-    /// The fact of one subject of one source, as the view gives it.
-    pub fn fact(&self, source_key: &str, subject: &FactSubject) -> Option<ObservedFact> {
+    /// The fact of one subject of one source, as the view gives it at `now`.
+    pub fn fact(
+        &self,
+        source_key: &str,
+        subject: &FactSubject,
+        now: Timestamp,
+    ) -> Option<ObservedFact> {
         let subject_key = subject.key();
-        self.facts(Timestamp::now())
+        self.facts(now)
             .into_iter()
             .find(|fact| fact.source_key == source_key && fact.subject_key == subject_key)
     }

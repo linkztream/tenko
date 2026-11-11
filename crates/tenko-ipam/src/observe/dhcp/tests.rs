@@ -3,6 +3,7 @@
 //! rebuild after a stream that ends with `Lagged` or `Compacted`.
 
 use std::{
+    cell::Cell,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::{Arc, Mutex},
     time::Duration,
@@ -23,10 +24,32 @@ use crate::observe::{model::IntentSighting, source::FactSource, tables::LAST_SEE
 const NODE: NodeId = NodeId(7);
 const IP4: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 15);
 
+thread_local! {
+    /// The start of the fixtures when a test moved it ([`Moved`]).
+    static BASE: Cell<Option<Timestamp>> = const { Cell::new(None) };
+}
+
+/// The start of the fixtures moved for the rest of a test, back at 2026-10-22T08:00Z when
+/// dropped.
+struct Moved;
+
+impl Moved {
+    fn to(base: Timestamp) -> Self {
+        BASE.set(Some(base));
+        Self
+    }
+}
+
+impl Drop for Moved {
+    fn drop(&mut self) {
+        BASE.set(None);
+    }
+}
+
+/// `minutes` after the start of the fixtures: 2026-10-22T08:00Z unless a test moved it.
 fn at(minutes: u64) -> Timestamp {
-    "2026-10-22T08:00:00Z"
-        .parse::<Timestamp>()
-        .expect("time")
+    BASE.get()
+        .unwrap_or_else(|| "2026-10-22T08:00:00Z".parse().expect("time"))
         .checked_add(Duration::from_secs(minutes * 60))
         .expect("time")
 }
@@ -214,7 +237,7 @@ fn mac_of(fact: &ObservedFact) -> Option<MacAddr> {
 #[test]
 fn an_empty_view_gives_no_fact() {
     let view = LeaseFacts::new(ObserveConfig::default());
-    assert!(view.facts(Timestamp::now()).is_empty(), "an empty view");
+    assert!(view.facts(at(0)).is_empty(), "an empty view");
     assert!(view.is_empty());
     assert_eq!((view.builds(), view.is_following()), (0, false));
 }
@@ -734,7 +757,7 @@ async fn the_observation_id_is_stable_for_a_binding_and_changes_with_a_new_grant
         .read(ReadConsistency::Local)
         .await
         .expect("view");
-    rebuilt.build(view.as_ref()).expect("build");
+    rebuilt.build(view.as_ref(), at(59)).expect("build");
     let facts = rebuilt.facts(at(59));
     assert_eq!(subject(&facts, &key_of(vrf)).observation, first);
 
@@ -888,6 +911,7 @@ async fn the_facts_are_found_by_mac_address_ip_address_and_name() {
                 vrf,
                 ip: IP4.into(),
             },
+            at(1),
         )
         .expect("the address fact");
     assert_eq!(mac_of(&fact), Some(mac(0x20)));
@@ -899,7 +923,8 @@ async fn the_facts_are_found_by_mac_address_ip_address_and_name() {
                 &FactSubject::Address {
                     vrf,
                     ip: IP4.into()
-                }
+                },
+                at(1),
             )
             .is_none()
     );
@@ -926,7 +951,7 @@ async fn the_view_is_built_from_the_rows_that_exist() {
         .read(ReadConsistency::Local)
         .await
         .expect("view");
-    view.build(read.as_ref()).expect("build");
+    view.build(read.as_ref(), at(1)).expect("build");
     assert_eq!((view.builds(), view.len()), (1, 3));
     assert_eq!(view.revision(), read.revision());
     assert!(view.revision() > revision);
@@ -934,7 +959,7 @@ async fn the_view_is_built_from_the_rows_that_exist() {
     assert_eq!(view.facts(at(1)).len(), 4);
 
     // Building again replaces what the view holds.
-    view.build(read.as_ref()).expect("build");
+    view.build(read.as_ref(), at(1)).expect("build");
     assert_eq!((view.builds(), view.len()), (2, 3));
 
     // An empty store gives an empty view.
@@ -944,7 +969,7 @@ async fn the_view_is_built_from_the_rows_that_exist() {
         .read(ReadConsistency::Local)
         .await
         .expect("view");
-    view.build(read.as_ref()).expect("build");
+    view.build(read.as_ref(), at(1)).expect("build");
     assert_eq!((view.builds(), view.is_empty()), (3, true));
 }
 
@@ -967,7 +992,7 @@ async fn a_build_reads_more_rows_than_one_page() {
         .read(ReadConsistency::Local)
         .await
         .expect("view");
-    world.leases.build(read.as_ref()).expect("build");
+    world.leases.build(read.as_ref(), at(1)).expect("build");
     assert_eq!(world.leases.len(), PAGE + 5);
 }
 
@@ -1061,7 +1086,9 @@ fn started(
 ) {
     let leases = LeaseFacts::new(ObserveConfig::default());
     let stop = CancellationToken::new();
-    let task = leases.spawn(Arc::clone(store), stop.clone());
+    // The follower's present is the fixtures' time, not the day the test runs.
+    let present = at(1);
+    let task = leases.spawn_with_clock(Arc::clone(store), stop.clone(), Arc::new(move || present));
     (leases, stop, task)
 }
 
@@ -1359,19 +1386,57 @@ async fn a_lagging_stream_rebuilds_the_view_from_the_tables() {
     rebuilds_after(|| WatchError::Lagged { last: Revision(1) }).await;
 }
 
+/// The scenarios whose fixtures are pinned to 2026-10-22, run with their fixtures a year
+/// before the clock: what they read is decided by the times they pass, not by the day
+/// they run.
+#[test]
+fn the_scenarios_hold_with_the_clock_a_year_after_their_fixtures() {
+    let year = Duration::from_secs(365 * 24 * 3_600);
+    let _moved = Moved::to(Timestamp::now().checked_sub(year).expect("time"));
+    let scenarios: [(&str, fn()); 8] = [
+        (
+            "the_observation_id_is_stable",
+            the_observation_id_is_stable_for_a_binding_and_changes_with_a_new_grant_or_another_mac,
+        ),
+        (
+            "the_facts_are_found",
+            the_facts_are_found_by_mac_address_ip_address_and_name,
+        ),
+        (
+            "the_view_is_built",
+            the_view_is_built_from_the_rows_that_exist,
+        ),
+        (
+            "a_build_reads_more_rows",
+            a_build_reads_more_rows_than_one_page,
+        ),
+        (
+            "the_follower_builds_at_start",
+            the_follower_builds_at_start_and_follows_a_lease_change,
+        ),
+        ("a_deleted_lease_row", a_deleted_lease_row_leaves_the_view),
+        (
+            "a_compacted_journal",
+            a_compacted_journal_rebuilds_the_view_from_the_tables,
+        ),
+        (
+            "a_lagging_stream",
+            a_lagging_stream_rebuilds_the_view_from_the_tables,
+        ),
+    ];
+    let failed: Vec<&str> = scenarios
+        .into_iter()
+        .filter(|(_, scenario)| std::panic::catch_unwind(*scenario).is_err())
+        .map(|(name, _)| name)
+        .collect();
+    assert!(failed.is_empty(), "failed a year late: {failed:?}");
+}
+
 #[tokio::test]
 async fn a_row_that_ended_longer_ago_than_the_retention_is_not_presented() {
     let world = World::new();
     world.leases.set_retention(Duration::from_secs(3_600));
     let vrf = VrfId::generate();
-    // Times from 50 minutes ago, so that the build (which cuts at the clock) keeps every row.
-    let base = Timestamp::now()
-        .checked_sub(Duration::from_secs(50 * 60))
-        .expect("time");
-    let at = |minutes: u64| {
-        base.checked_add(Duration::from_secs(minutes * 60))
-            .expect("time")
-    };
     // Released at 5 minutes: its facts ended then.
     world
         .put(&lease(vrf, 0x20, at(5), BindingState::Released))
@@ -1419,15 +1484,19 @@ async fn a_row_that_ended_longer_ago_than_the_retention_is_not_presented() {
 async fn the_build_at_start_leaves_out_the_rows_past_the_retention() {
     let store: Arc<dyn Store> = Arc::new(MemStore::default());
     let vrf = VrfId::generate();
-    // Released long ago (the fixture's times are in 2026-10-22) and a binding that holds.
+    // Released at the start and a binding that holds from 100 to 160 minutes.
     put(&store, &lease(vrf, 0x20, at(0), BindingState::Released)).await;
-    let mut bound = lease(vrf, 0x21, Timestamp::now(), BindingState::Active);
+    let mut bound = lease(vrf, 0x21, at(100), BindingState::Active);
     bound.addr = Ipv4Addr::new(198, 51, 100, 16);
     put(&store, &bound).await;
     let leases = LeaseFacts::new(ObserveConfig::default());
     leases.set_retention(Duration::from_secs(3_600));
     let view = store.read(ReadConsistency::Local).await.expect("view");
-    leases.build(view.as_ref()).expect("build");
+    // The time the build is given decides the cut: within the hour after the release, both
+    // rows are kept; two hours after it, the released row is not.
+    leases.build(view.as_ref(), at(50)).expect("build");
+    assert_eq!(leases.len(), 2, "both rows within the retention");
+    leases.build(view.as_ref(), at(120)).expect("build");
     assert_eq!(leases.len(), 1, "the released row is not kept");
 }
 
