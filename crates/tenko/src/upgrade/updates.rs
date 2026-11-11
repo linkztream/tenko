@@ -69,7 +69,7 @@ use tenko_core::{
     audit::{AuditAction, AuditDetails, AuditDraft},
     table::TableDef,
 };
-use tenko_jobs::{JobEngine, JobState};
+use tenko_jobs::{JobEngine, JobState, StepState};
 use tenko_store::{
     ReadConsistency, ReadViewExt as _, Store, StoreError, WriteBatch, raft::RaftStore,
 };
@@ -1069,6 +1069,20 @@ impl Updates {
                     .request(format!("the update to {version} is installed"));
             }
             Some(found) => {
+                let step = found
+                    .steps
+                    .iter()
+                    .find(|step| matches!(step.state, StepState::Failed { .. }))
+                    .map(|step| step.kind.to_string());
+                tracing::warn!(
+                    %version,
+                    job = %job,
+                    state = ?found.state,
+                    step = step.as_deref().unwrap_or("-"),
+                    code = found.error.as_ref().map_or("-", |error| &*error.code),
+                    detail = found.error.as_ref().map_or("-", |error| error.detail.as_str()),
+                    "the install job did not succeed; the running version stays"
+                );
                 let reason = found.error.map_or_else(
                     || "update.job_failed".to_owned(),
                     |error| error.code.to_string(),

@@ -149,10 +149,116 @@ function Find-SmokeEvent([string]$Text, [Nullable[datetime]]$Since = $null) {
     return @(Get-SmokeEvents $Since | Where-Object { Test-EventText $_ $Text })
 }
 
+# The lines of a job detail (the body of GET /jobs/<id>): the job's state and error, then
+# every step with its state, start, finish and error.
+function Format-JobDetail($Json) {
+    $job = Get-Prop $Json 'job'
+    if ($null -eq $job) { return @('(no job in the reply)') }
+    $lines = @("job $(Get-Prop $job 'id'): $(Get-Prop $job 'state'), started $(Get-Prop $job 'started'), finished $(Get-Prop $job 'finished')")
+    $jobError = Get-Prop $job 'error'
+    if ($null -ne $jobError) { $lines += "  error $(Get-Prop $jobError 'code'): $(Get-Prop $jobError 'detail')" }
+    foreach ($step in @(Get-Prop $job 'steps')) {
+        $state = Get-Prop $step 'state'
+        $lines += ('  step {0} {1}: {2}, started {3}, finished {4}' -f (Get-Prop $step 'index'), (Get-Prop $step 'kind'),
+            (Get-Prop $state 'state'), (Get-Prop $step 'started'), (Get-Prop $step 'finished'))
+        $stepError = Get-Prop (Get-Prop $state 'data') 'error'
+        if ($null -ne $stepError) { $lines += "    error $(Get-Prop $stepError 'code'): $(Get-Prop $stepError 'detail')" }
+    }
+    return $lines
+}
+
+function Show-InstallJob {
+    if (-not $script:JobId -or $null -eq $script:Http) { return }
+    Write-Host "---- install job $($script:JobId) (GET /jobs/$($script:JobId)) ----"
+    try {
+        $reply = Invoke-Api 'GET' "/jobs/$($script:JobId)"
+        if ($reply.Status -eq 200) { Format-JobDetail $reply.Json | Out-Host } else { Write-Host "HTTP $($reply.Status): $($reply.Text)" }
+        $updates = Invoke-Api 'GET' '/system/updates'
+        Write-Host "update attempt (GET /system/updates): $((Get-Prop $updates.Json 'attempt') | ConvertTo-Json -Compress -Depth 6)"
+    } catch {
+        Write-Host "cannot read the job: $($_.Exception.Message)"
+    }
+}
+
+# The processes named tenko* and every descendant of the service process, with their start
+# times: a child of the update's check that never ended shows up here.
+function Show-TenkoProcesses {
+    Write-Host '---- processes named tenko* and the descendants of the service process ----'
+    try {
+        $all = @(Get-CimInstance -ClassName Win32_Process)
+        $record = Get-ServiceRecord
+        $tree = [System.Collections.Generic.HashSet[int]]::new()
+        if ($null -ne $record -and [int]$record.ProcessId -gt 0) { [void]$tree.Add([int]$record.ProcessId) }
+        do {
+            $grown = $false
+            foreach ($process in $all) {
+                if ($tree.Contains([int]$process.ParentProcessId) -and $tree.Add([int]$process.ProcessId)) { $grown = $true }
+            }
+        } while ($grown)
+        $shown = @($all | Where-Object { $_.Name -like 'tenko*' -or $tree.Contains([int]$_.ProcessId) } | Sort-Object CreationDate)
+        if ($shown.Count -eq 0) { Write-Host '(none)' }
+        foreach ($process in $shown) {
+            Write-Host ('{0,6} parent {1,6} started {2:u} {3}' -f $process.ProcessId, $process.ParentProcessId, $process.CreationDate, $process.CommandLine)
+        }
+    } catch {
+        Write-Host "cannot list the processes: $($_.Exception.Message)"
+    }
+}
+
+# The tokens the Service Control Manager gives a service: three throwaway services whose image
+# is cmd.exe running `whoami /user /groups /priv /fo csv /nh` into a file. One like the smoke
+# service (a virtual account narrowed to SeChangeNotifyPrivilege, as `tenko service install`
+# and the MSI set it), one virtual account without the narrowing (a service created by hand),
+# one LocalSystem; and the token of this elevated script. cmd.exe does not answer the Service
+# Control Manager, so each start ends in an error after the file is written; it is ignored.
+function Show-ServiceTokens {
+    Write-Host '---- service tokens: whoami /user /groups /priv /fo csv /nh ----'
+    $system32 = Join-Path $env:SystemRoot 'System32'
+    $probes = @(
+        @{ Suffix = 'narrowed'; Account = 'virtual'; Privileges = 'SeChangeNotifyPrivilege' },
+        @{ Suffix = 'default'; Account = 'virtual'; Privileges = $null },
+        @{ Suffix = 'system'; Account = 'LocalSystem'; Privileges = $null }
+    )
+    try {
+        foreach ($probe in $probes) {
+            $service = "$($script:Name)-token-$($probe.Suffix)"
+            $dir = Join-Path $script:Root "token-$($probe.Suffix)"
+            $probe.Service = $service
+            $probe.File = Join-Path $dir 'whoami.csv'
+            [void](New-Item -ItemType Directory -Force -Path $dir)
+            $account = if ($probe.Account -eq 'virtual') { "NT SERVICE\$service" } else { 'LocalSystem' }
+            $image = "$system32\cmd.exe /c $system32\whoami.exe /user /groups /priv /fo csv /nh > $($probe.File) 2>&1"
+            [void](sc.exe create $service binPath= $image obj= $account type= own start= demand)
+            if ($probe.Privileges) { [void](sc.exe privs $service $probe.Privileges) }
+            if ($probe.Account -eq 'virtual') { [void](icacls.exe $dir /grant "NT SERVICE\${service}:(OI)(CI)M") }
+            Start-Process -FilePath (Join-Path $system32 'sc.exe') -ArgumentList 'start', $service -WindowStyle Hidden
+        }
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        foreach ($probe in $probes) {
+            while (-not ((Test-Path -LiteralPath $probe.File) -and (Get-Item -LiteralPath $probe.File).Length -gt 0) -and [DateTime]::UtcNow -lt $deadline) {
+                Start-Sleep -Milliseconds 500
+            }
+            Start-Sleep -Milliseconds 500
+            Write-Host "-- $($probe.Service) ($($probe.Account), required privileges: $(if ($probe.Privileges) { $probe.Privileges } else { 'not set' }))"
+            if (Test-Path -LiteralPath $probe.File) { Get-Content -LiteralPath $probe.File | Out-Host } else { Write-Host '(no output)' }
+        }
+        Write-Host '-- this script (elevated administrator)'
+        & (Join-Path $system32 'whoami.exe') /user /groups /priv /fo csv /nh | Out-Host
+    } catch {
+        Write-Host "cannot read the service tokens: $($_.Exception.Message)"
+    } finally {
+        foreach ($probe in $probes) {
+            if ($probe.Service) { [void](sc.exe stop $probe.Service 2>&1); [void](sc.exe delete $probe.Service 2>&1) }
+        }
+    }
+}
+
 function Show-Diagnostics {
     Write-Host ''
     Write-Host "---- service state ($Name) ----"
     try { sc.exe query $Name | Out-Host } catch { Write-Host "cannot query: $($_.Exception.Message)" }
+    Show-InstallJob
+    Show-TenkoProcesses
     $logPath = Join-Path $DataDir 'logs\tenko.log'
     Write-Host "---- last 200 lines of $logPath ----"
     if (Test-Path -LiteralPath $logPath) {
@@ -173,6 +279,7 @@ function Show-Diagnostics {
     } catch {
         Write-Host "cannot read the Event Log: $($_.Exception.Message)"
     }
+    Show-ServiceTokens
     Write-Host '----'
 }
 
@@ -339,6 +446,7 @@ if ($null -ne $existing) {
 
 $failed = $false
 $releaseJob = $null
+$JobId = $null
 $ApiPort = Get-FreePort
 $ReleasePort = Get-FreePort
 $BaseUrl = "https://127.0.0.1:$ApiPort"
@@ -528,13 +636,16 @@ ready_timeout_secs = 60
         $listener = [System.Net.HttpListener]::new()
         $listener.Prefixes.Add("http://127.0.0.1:$Port/")
         $listener.Start()
-        while ($listener.IsListening) {
+        $serving = $true
+        while ($serving) {
             $context = $listener.GetContext()
             try {
                 $path = $context.Request.Url.AbsolutePath
                 $file = $null
                 $type = 'application/octet-stream'
-                if ($path -eq '/releases.json') { $file = $ManifestPath; $type = 'application/json' }
+                # GetContext blocks, and Stop-Job waits for it: the end of the run asks for /stop.
+                if ($path -eq '/stop') { $serving = $false }
+                elseif ($path -eq '/releases.json') { $file = $ManifestPath; $type = 'application/json' }
                 elseif ($path -eq "/$AssetName") { $file = $AssetPath }
                 if ($null -eq $file) {
                     $context.Response.StatusCode = 404
@@ -575,10 +686,32 @@ ready_timeout_secs = 60
     $started = Invoke-Api 'POST' '/system/updates/install' @{ version = $NewVersion; backup = 'run' } -Keyed
     Assert-Api $started 202 'POST /system/updates/install'
     $jobId = [string]$started.Json.job_id
+    $script:JobId = $jobId
     Write-Host "install job $jobId started with backup ""run"""
 
+    # The job first. The check step may take up to 780 s, the product's own limit
+    # (CHECK_TIMEOUT in crates/tenko/src/upgrade/steps.rs: 60 s for the version, 120 s for
+    # the copy of the running state, 600 s for the dry run); the backup, the download and the
+    # verification take seconds here. The wait is that limit plus 120 s, so a child that never
+    # ends shows up as the step's update.check_timeout below, not as a timeout of this
+    # script. A job that fails ends the wait at once with its steps. After a success the
+    # server restarts within seconds; a new service process also ends the wait.
+    $jobEnd = Wait-Until -TimeoutSec (780 + 120) -What "install job $jobId to finish" -Test {
+        $record = Get-ServiceRecord
+        if ($null -ne $record -and [int]$record.ProcessId -gt 0 -and [int]$record.ProcessId -ne $firstPid) { return 'restarted' }
+        try { $reply = Invoke-Api 'GET' "/jobs/$jobId" } catch { return $false }
+        if ($reply.Status -ne 200) { return $false }
+        $state = [string](Get-Prop (Get-Prop $reply.Json 'job') 'state')
+        if ($state -eq 'succeeded') { return $state }
+        if ($state -in 'failed', 'rolled_back', 'canceled') {
+            throw "install job $jobId ended as `"$state`":`n$((Format-JobDetail $reply.Json) -join "`n")"
+        }
+        return $false
+    }
+    Write-Host "install job $($jobId): $jobEnd"
+
     # The server exits with status 12; the failure actions start it again after 10 s.
-    $runningVersion = Wait-Until -TimeoutSec 240 -What "the service restarted by the SCM and running $NewVersion" -Test {
+    $runningVersion = Wait-Until -TimeoutSec 120 -What "the service restarted by the SCM and running $NewVersion" -Test {
         $record = Get-ServiceRecord
         if ($null -eq $record -or [string]$record.State -ne 'Running') { return $false }
         if ([int]$record.ProcessId -eq $firstPid) { return $false }
@@ -686,6 +819,8 @@ ready_timeout_secs = 60
 } finally {
     if ($null -ne $Http) { $Http.Dispose() }
     if ($null -ne $releaseJob) {
+        try { [void](Invoke-WebRequest -Uri "http://127.0.0.1:$ReleasePort/stop" -UseBasicParsing -NoProxy -TimeoutSec 5) } catch { }
+        [void](Wait-Job -Job $releaseJob -Timeout 10)
         Stop-Job -Job $releaseJob -ErrorAction SilentlyContinue
         Remove-Job -Job $releaseJob -Force -ErrorAction SilentlyContinue
     }

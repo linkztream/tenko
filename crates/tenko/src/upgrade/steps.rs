@@ -60,8 +60,14 @@ pub const CHECK: &str = "sys.update.check";
 /// The switch step.
 pub const SWITCH: &str = "sys.update.switch";
 
-/// How long the new binary may take for its dry run.
-const CHECK_TIMEOUT: Duration = Duration::from_secs(600);
+/// How long the new binary may take to print its version: it starts and exits.
+const VERSION_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long the new binary may take for its dry run on the copy of the running state.
+const DRY_RUN_TIMEOUT: Duration = Duration::from_secs(600);
+/// The limit of the whole check step: the version, the copy of the running state (two
+/// minutes), the dry run. The Windows service smoke waits this long for the step.
+const CHECK_TIMEOUT: Duration =
+    Duration::from_secs(VERSION_TIMEOUT.as_secs() + 120 + DRY_RUN_TIMEOUT.as_secs());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AssetParams {
@@ -206,7 +212,7 @@ pub fn job_spec(
             version: version.clone(),
             deadline_secs,
         })?,
-        timeout: Some(CHECK_TIMEOUT + Duration::from_secs(120)),
+        timeout: Some(CHECK_TIMEOUT),
     });
     steps.push(StepSpec {
         kind: StepKind::from_static(SWITCH),
@@ -495,46 +501,113 @@ fn new_binary_command(binary: &Path, args: &[&std::ffi::OsStr]) -> tokio::proces
     command
 }
 
-/// Runs the new binary with `args` and returns its standard output.
+/// The most of the new binary's standard error that goes into a log line or an error.
+const STDERR_TAIL: usize = 2048;
+
+/// What the new binary printed and how it ended.
+struct NewOutput {
+    status: Option<i32>,
+    stdout: String,
+    /// The end of its standard error, trimmed.
+    stderr: String,
+}
+
+impl NewOutput {
+    /// `; standard error: …`, or nothing when it printed none.
+    fn stderr_note(&self) -> String {
+        if self.stderr.is_empty() {
+            String::new()
+        } else {
+            format!("; standard error: {}", self.stderr)
+        }
+    }
+}
+
+/// The last `max` bytes of `bytes` as text, trimmed, cut at a character boundary.
+fn tail(bytes: &[u8], max: usize) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim();
+    let mut start = text.len().saturating_sub(max);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    text[start..].to_owned()
+}
+
+/// Runs the new binary with `args` for at most `limit` and returns what it printed. `what`
+/// names the run in the two log lines, one when the child starts and one when it ends.
 async fn run_new(
+    what: &'static str,
     binary: &Path,
     args: &[&std::ffi::OsStr],
-) -> Result<(Option<i32>, String), StepError> {
+    limit: Duration,
+) -> Result<NewOutput, StepError> {
     let mut command = new_binary_command(binary, args);
-    let output = tokio::time::timeout(CHECK_TIMEOUT, command.output())
-        .await
-        .map_err(|_| {
-            failed(
+    let started = std::time::Instant::now();
+    tracing::info!(what, binary = %binary.display(), limit_secs = limit.as_secs(), "started the new binary");
+    // `output` reads standard output and standard error while it waits for the exit, so a
+    // child that prints more than a pipe holds cannot block on a full pipe.
+    let output = match tokio::time::timeout(limit, command.output()).await {
+        Err(_) => {
+            tracing::warn!(
+                what,
+                duration_ms = started.elapsed().as_millis(),
+                limit_secs = limit.as_secs(),
+                "the new binary did not end within its limit and was stopped"
+            );
+            return Err(failed(
                 "update.check_timeout",
                 504,
-                "the new binary did not finish its check",
-            )
-        })?
-        .map_err(|error| {
-            failed(
+                format!(
+                    "the new binary did not finish `{what}` within {} s",
+                    limit.as_secs()
+                ),
+            ));
+        }
+        Ok(Err(error)) => {
+            tracing::warn!(what, %error, "the new binary could not be started");
+            return Err(failed(
                 "update.not_executable",
                 400,
                 format!("the new binary does not run on this host: {error}"),
-            )
-        })?;
-    Ok((
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout).into_owned(),
-    ))
+            ));
+        }
+        Ok(Ok(output)) => output,
+    };
+    let result = NewOutput {
+        status: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: tail(&output.stderr, STDERR_TAIL),
+    };
+    let duration_ms = started.elapsed().as_millis();
+    if output.status.success() || result.status == Some(i32::from(crate::exit::MIGRATION_NEEDED)) {
+        tracing::info!(what, duration_ms, status = %output.status, stdout_bytes = output.stdout.len(), "the new binary ended");
+    } else {
+        tracing::warn!(what, duration_ms, status = %output.status, stdout_bytes = output.stdout.len(), stderr = %result.stderr, "the new binary ended");
+    }
+    Ok(result)
 }
 
 async fn check(inner: &Inner, params: &SwitchParams) -> Result<(), StepError> {
     let binary = inner.layout.binary(&params.version);
     tracing::info!(binary = %binary.display(), "asking the new binary for its version");
-    let (status, stdout) = run_new(&binary, &["upgrade".as_ref(), "version".as_ref()]).await?;
-    let reported = stdout.trim();
-    if status != Some(0) || reported != params.version.to_string() {
+    let version = run_new(
+        "upgrade version",
+        &binary,
+        &["upgrade".as_ref(), "version".as_ref()],
+        VERSION_TIMEOUT,
+    )
+    .await?;
+    let reported = version.stdout.trim();
+    if version.status != Some(0) || reported != params.version.to_string() {
         return Err(failed(
             "update.version_mismatch",
             400,
             format!(
-                "the new binary reports version `{reported}`, the manifest says {}",
-                params.version
+                "the new binary reports version `{reported}` (exit status {:?}), the manifest says {}{}",
+                version.status,
+                params.version,
+                version.stderr_note()
             ),
         ));
     }
@@ -563,6 +636,7 @@ async fn check(inner: &Inner, params: &SwitchParams) -> Result<(), StepError> {
     }
     let node = inner.env.node.0.to_string();
     let result = run_new(
+        "upgrade check",
         &binary,
         &[
             "upgrade".as_ref(),
@@ -574,15 +648,20 @@ async fn check(inner: &Inner, params: &SwitchParams) -> Result<(), StepError> {
             node.as_ref(),
             "--json".as_ref(),
         ],
+        DRY_RUN_TIMEOUT,
     )
     .await;
     let _ = std::fs::remove_dir_all(&work);
-    let (status, stdout) = result?;
-    let report: serde_json::Value = serde_json::from_str(&stdout).map_err(|error| {
+    let output = result?;
+    let report: serde_json::Value = serde_json::from_str(&output.stdout).map_err(|error| {
         failed(
             "update.check_failed",
             400,
-            format!("the new binary's check printed no report (status {status:?}): {error}"),
+            format!(
+                "the new binary's check printed no report (exit status {:?}): {error}{}",
+                output.status,
+                output.stderr_note()
+            ),
         )
     })?;
     let verdict = report["verdict"].as_str().unwrap_or_default();
@@ -650,5 +729,82 @@ mod tests {
         };
         assert!(removed("NOTIFY_SOCKET"));
         assert!(removed("TENKO_CONFIG"));
+    }
+
+    #[test]
+    fn the_tail_of_standard_error_is_bounded_and_whole_characters() {
+        assert_eq!(tail(b"  short\n", 2048), "short");
+        let long = format!("{}{}", "x".repeat(3000), "end");
+        let cut = tail(long.as_bytes(), 2048);
+        assert_eq!(cut.len(), 2048);
+        assert!(cut.ends_with("end"));
+        // "å" is two bytes; a cut inside it moves to the next character.
+        let text = "åååå";
+        assert_eq!(tail(text.as_bytes(), 3), "å");
+    }
+
+    /// A child that fills both pipes far beyond their buffer (4 KiB on Windows, 64 KiB on
+    /// Linux) before it exits: `run_new` drains both while it waits, so it ends at once.
+    #[tokio::test]
+    async fn a_child_that_prints_more_than_a_pipe_holds_does_not_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("big.txt");
+        std::fs::write(&file, "0123456789abcdef\n".repeat(64 * 1024)).unwrap();
+        // cmd.exe takes the words one by one: Rust's quoting of one argument is not cmd's.
+        #[cfg(windows)]
+        let (shell, arguments): (std::path::PathBuf, Vec<&std::ffi::OsStr>) = (
+            Path::new(&std::env::var_os("SystemRoot").unwrap())
+                .join("System32")
+                .join("cmd.exe"),
+            vec![
+                "/c".as_ref(),
+                "type".as_ref(),
+                file.as_os_str(),
+                "1>&2".as_ref(),
+                "&".as_ref(),
+                "type".as_ref(),
+                file.as_os_str(),
+            ],
+        );
+        #[cfg(not(windows))]
+        let script = format!("cat '{0}' >&2; cat '{0}'", file.display());
+        #[cfg(not(windows))]
+        let (shell, arguments): (std::path::PathBuf, Vec<&std::ffi::OsStr>) = (
+            std::path::PathBuf::from("/bin/sh"),
+            vec!["-c".as_ref(), script.as_ref()],
+        );
+        let output = run_new("pipe test", &shell, &arguments, Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert_eq!(output.status, Some(0));
+        assert_eq!(output.stdout.len(), 17 * 64 * 1024);
+        assert_eq!(output.stderr.len(), STDERR_TAIL);
+    }
+
+    #[tokio::test]
+    async fn a_child_over_its_limit_is_stopped_and_named() {
+        #[cfg(windows)]
+        let (shell, arguments): (std::path::PathBuf, Vec<&std::ffi::OsStr>) = (
+            Path::new(&std::env::var_os("SystemRoot").unwrap())
+                .join("System32")
+                .join("ping.exe"),
+            vec!["-n".as_ref(), "30".as_ref(), "127.0.0.1".as_ref()],
+        );
+        #[cfg(not(windows))]
+        let (shell, arguments): (std::path::PathBuf, Vec<&std::ffi::OsStr>) =
+            (std::path::PathBuf::from("/bin/sleep"), vec!["30".as_ref()]);
+        let started = std::time::Instant::now();
+        let Err(StepError::Coded(error)) =
+            run_new("slow test", &shell, &arguments, Duration::from_secs(1)).await
+        else {
+            panic!("the slow child was not stopped");
+        };
+        assert!(started.elapsed() < Duration::from_secs(20));
+        assert_eq!(error.code, "update.check_timeout");
+        assert!(
+            error.detail.contains("`slow test` within 1 s"),
+            "{}",
+            error.detail
+        );
     }
 }
