@@ -1,6 +1,6 @@
 # Dashboard history plan: the tiles remember the last days
 
-- Status: Draft. DH-Q1 (the axis) decided by the owner on 2026-11-11; waiting for the owner's decisions on DH-Q2 to DH-Q7 of section 8. No package starts before the owner has answered them
+- Status: Accepted on 2026-11-11: the owner decided DH-Q1 in their own words (one continuous axis without zones whose grid moves) and took DH-Q2 to DH-Q7 of section 8 as recommended. The owner wants the history in the next release, so the packages start as soon as builder slots are free, the contracts package (WP18.0) first
 - Date: 2026-11-11
 - Scope: OPS-20 (the built-in dashboard) within the cost budget of OPS-21. Each metric tile keeps a history of its figure on one continuous time axis that compresses toward the past: the newest seconds at an even pace at the right end, the hours and days packed ever tighter toward the left, with a grid of moments that glides left and closes up as it goes and so makes the scale visible. Written against `main` at `af974ca4`. Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md). Exit criteria, measurements and risks continue the project's series from E114, M81 and R191 (the discovery plan ends at E113, M80 and R190); the slice number is the lead's, and this plan calls it Slice 18 with packages WP18.0 to WP18.4
 - Mockup: [`design/mockups/metric-tile-history.html`](../../design/mockups/metric-tile-history.html), opened from the file system or through any static server of the `design/` folder
@@ -9,7 +9,7 @@ Terms used below, explained once. A **tier** is a ring of fixed size holding the
 
 ## 1. What is built
 
-1. **Tiers in the sampler.** Each controller keeps, for every figure its tiles show, the tiers of DH-Q2 (recommended: two days in five tiers of 1 s, 10 s, 1 min, 10 min and 1 h, section 2). The one-second sampler that builds today's sample folds each new value into the open bucket of every tier; nothing in the DNS or DHCP paths changes.
+1. **Tiers in the sampler.** Each controller keeps, for every figure its tiles show, the tiers of DH-Q2 (decided: two days in five tiers of 1 s, 10 s, 1 min, 10 min and 1 h, section 2). The one-second sampler that builds today's sample folds each new value into the open bucket of every tier; nothing in the DNS or DHCP paths changes.
 2. **History over the existing stream.** A client that subscribes to the topic `metrics` first receives one event `metrics.history` with every tier of every figure, already combined for the cluster, then the per-second `metrics.snapshot` as today, which now also carries the newest closed buckets.
 3. **The tile.** The sparkline becomes the history chart of the mockup: band and mean on the continuous axis of DH-Q1, gliding left in real time, with its grid of moments and its age labels, hatching where there is no data, a mark where a controller restarted, a readout under the pointer and the keyboard, a text alternative. The tile grows by 50 px (the chart area goes from 28 px to a 64 px plot and a 14 px row of labels, with the list under it), so that a tile with a list (the controllers, the response codes, the busiest lists) keeps a readable chart. The two ratio tiles (cache hit ratio, answers) lose their bar chart of 5-second buckets to the same history chart; their number stays the share of the last 30 seconds.
 
@@ -34,7 +34,7 @@ What stays: the figures, the sample's fields, the cluster merge rule of `docs/ob
 | Reach (DH-Q2) | Tiers (ring sizes) | Buckets per figure | Per figure | Each controller, 25 figures | The serving controller of a cluster of 3 |
 |---|---|---|---|---|---|
 | 1 h | 71 × 1 s, 61 × 10 s, 52 × 1 min | 184 | 5.8 KiB | 144 KiB | 144 KiB + 2 × 144 KiB of the peers + the combined history and its encoded frame (about 290 KiB) ≈ 0.7 MiB |
-| 2 d (recommended) | 71 × 1 s, 61 × 10 s, 61 × 1 min, 37 × 10 min, 44 × 1 h | 274 | 8.6 KiB | 214 KiB | ≈ 1.0 MiB |
+| 2 d (decided, DH-Q2) | 71 × 1 s, 61 × 10 s, 61 × 1 min, 37 × 10 min, 44 × 1 h | 274 | 8.6 KiB | 214 KiB | ≈ 1.0 MiB |
 | 7 d | as 2 d with 49 × 1 h, and 22 × 6 h | 301 | 9.4 KiB | 235 KiB | ≈ 1.2 MiB |
 
 **Who fills them.** The `Sampler` of `crates/tenko-api/src/sse/metrics.rs` gets a `History` beside it (a new module `sse/metrics/history.rs`): after building the sample of the tick, `History::fold` adds each figure's value to the open bucket of each tier, and when a tier's step ends it closes that tier's bucket and moves the ring's head. The rings are allocated once, so the fold allocates nothing. Today the publisher sleeps while nobody listens; the history needs the sampler's tick to run always. What runs always is the local part: the registry snapshot, the sample and the fold. That part allocates as it does today (the snapshot, the sample's lists and its encoding build small vectors once a second), which OPS-21 allows off the hot path. The calls to the other controllers and the publishing still run only while a stream listens. While the tick runs always, the answer to a peer's `Metrics.Snapshot` is the last tick's sample and never a sample taken on demand, so a peer's call does not reset the baseline of the local rates.
@@ -47,7 +47,7 @@ What stays: the figures, the sample's fields, the cluster merge rule of `docs/ob
 
 ## 3. Restart, leader change, an unreachable controller, and gaps
 
-**Restart (DH-Q3).** With history in memory only, a restarted controller starts with empty tiers. On one controller the tile shows hatching before the restart, a mark at the restart, and says in the readout and the text alternative "No history before 07:21, when this controller restarted". In a cluster the buckets before the restart lack that controller: they are drawn with a lighter band and a bar under the baseline and say "2 of 3 controllers reported". Whatever happened before the restart on that controller is gone from the tile, a burst included (the mockup's "Cluster of 3" with "Memory only" shows it); the logs and Prometheus keep it. With the small file of DH-Q3 (b), only the downtime is missing after a clean stop; after a crash, the time since the last write (up to an hour) is missing too.
+**Restart (DH-Q3: memory only in the first release).** With history in memory only, a restarted controller starts with empty tiers. On one controller the tile shows hatching before the restart, a mark at the restart, and says in the readout and the text alternative "No history before 07:21, when this controller restarted". In a cluster the buckets before the restart lack that controller: they are drawn with a lighter band and a bar under the baseline and say "2 of 3 controllers reported". Whatever happened before the restart on that controller is gone from the tile, a burst included (the mockup's "Cluster of 3" with "Memory only" shows it); the logs and Prometheus keep it. With the small file of DH-Q3 (b), the follow-up package WP18.4 that the owner orders only if the restarts of updates wipe what they want to see, only the downtime is missing after a clean stop; after a crash, the time since the last write (up to an hour) is missing too.
 
 **Leader change.** Nothing happens to the history: the tiers belong to each controller, not to the leader, and any controller can combine them. The Raft tile shows the new term.
 
@@ -70,7 +70,7 @@ A sum of maxima is not the maximum of the sum: the busiest second of controller 
 | Least available (the host's memory and disk) | The controller with the smallest share available in that bucket: its own mean | That controller's own lowest and highest | "The controller with the smallest share available" |
 | Ratio (hit ratio, NOERROR share) | Recomputed from the summed counts: exact | Lowest of the lowests, highest of the highests: an envelope | "Recomputed from the counts" |
 
-The host's memory and disk follow the controller with the smallest share available today (`sample/host.rs`). The history keeps each controller's available bytes and its total, and the combined bucket takes the controller whose mean share available is the smallest in that bucket, so it follows the same rule as the live figure; the Disk tile draws that controller's available GiB. The one-second tier of a cluster combines one sample per controller per second and is exact up to the clocks' difference (R192). DH-Q5 asks whether the envelope is good enough or whether the cluster should keep exact tiers of its own.
+The host's memory and disk follow the controller with the smallest share available today (`sample/host.rs`). The history keeps each controller's available bytes and its total, and the combined bucket takes the controller whose mean share available is the smallest in that bucket, so it follows the same rule as the live figure; the Disk tile draws that controller's available GiB. The one-second tier of a cluster combines one sample per controller per second and is exact up to the clocks' difference (R192). The owner took the envelope (DH-Q5 (a)), so the cluster keeps no exact tiers of its own.
 
 ## 5. Performance budget and how it is measured (OPS-21)
 
@@ -108,6 +108,8 @@ Memory is the table of section 2, allocated once and reported by the controller'
 
 Each question gives the options, where they stand in the owner's order (security, performance, usability, features) and one recommendation.
 
+**Decided by the owner (2026-11-11): DH-Q1 in their own words (below), DH-Q2 to DH-Q7 as recommended.** That is: two days of history (DH-Q2 (b)); memory only in the first release, with the file as a follow-up package if the restarts of updates wipe what the owner wants to see (DH-Q3 (a)); all 25 tiles at once (DH-Q4 (a)); the cluster's band combined from each controller's own tiers (DH-Q5 (a)); a lone needle may stand above the scale with its caret (DH-Q6 (b)); every tile on screen glides at 10 frames a second, falling back to a step a second on a slow device (DH-Q7 (a)).
+
 **DH-Q1. The axis.** (a) Three zones, each linear in time, set off by a stronger line and a quiet fill; (b) one continuous logarithmic axis with a knee at 10 s and the first draft's three tiers. Security and performance: equal. Usability: (a) keeps time even inside a zone, so slopes compare there and the eye learns where "an hour ago" is; (b) has no boundary and looks closer to the memory graph, but its buckets get narrower inside a tier, so slopes and widths deceive. Features: equal. **Recommendation: (a). Decided by the owner on 2026-11-11: neither; one continuous axis without zones whose grid moves, in their words as translated from Swedish: "I do not really like the hard blocks or zones in the mockup, even with the logarithmic resolution. In the one I looked at, the grid scrolls to the left, and the further left it gets, the more the cells are compressed on the x axis (logarithmically), which gives a very organic and satisfying graph."** The design of section 1 follows: the asinh axis, the grid of moments, the glide, and the five tiers of section 2. The two earlier designs stay in the mockup's comparison.
 
 **DH-Q2. How far back.** (a) 1 hour (184 buckets, 144 KiB per controller); (b) 2 days (274 buckets, 214 KiB); (c) 7 days (301 buckets with a 6-hour tier, 235 KiB). Security: (c) keeps an attack in view longest, (a) loses a night's events by morning. Performance: equal within 90 KiB a controller. Usability: (b) shows today's rhythm against yesterday's at hour resolution; (c) squeezes the days into the left eighth of a tile. **Recommendation: (b).**
@@ -124,17 +126,54 @@ Each question gives the options, where they stand in the owner's order (security
 
 ## 9. Work packages
 
-Sizes in builder-days. WP18.0 comes first because the event stream's shape changes; WP18.1 and WP18.2 can then run in parallel.
+Sizes in builder-days. Order: WP18.0 first, because the event stream's shape changes; then WP18.1 and WP18.2 in parallel, since they share no file and the tile is built and tested on the UI's mock stream; WP18.3 last, so the documents describe what was built. WP18.4 is not part of this release (DH-Q3 (a)) and starts only when the owner asks for it. The owner wants the history in the next release (2026-11-11), so each package takes a builder slot as soon as one is free.
 
-| Package | Content and owned files | Size | Exit check |
-|---|---|---|---|
-| WP18.0 Contracts | `MetricsHistory`, the bucket arrays and `MetricsSnapshot.closed` in `crates/tenko-api/src/dto/events.rs`; `metrics.history_bytes` in `dto/system.rs`; the kind `metrics.history`; `Metrics.History` and `closed` in `crates/tenko-cluster/proto/tenko/cluster/v1/metrics.proto` and its client in `crates/tenko-cluster/src/metrics.rs`; the regenerated `docs/api/openapi.json` and `ui/src/api` types | 1.5 | E114 |
-| WP18.1 The sampler | `crates/tenko-api/src/sse/metrics/history.rs` (new), the always-on tick in `sse/metrics.rs` (the test `the_publisher_ticks_only_while_someone_listens` changes to "publishes only while someone listens"), the per-topic first frame in `sse/hub.rs` and `sse/mod.rs`, the wiring in `crates/tenko/src/serve/metrics.rs`, the combination of section 4, the peer fetch, M81 to M83 | 4 | E115, E116 |
-| WP18.2 The tile | `ui/src/components/HistoryChart.tsx` (new, beside `Sparkline.tsx`: the canvas, the axis, the grid, the frame loop with its visibility and fallback rules, in a chunk loaded with the tiles), `ui/src/dashboard/MetricsTiles.tsx`, `metrics.ts`, `liveMetrics.ts`, `metrics.css`, the mock stream in `ui/src/api/mock/sse.ts` and `ui/src/api/mock/metrics-model.ts` (the end-to-end tests run on it), the strings in `ui/i18n/en.d` and `sv.d`; unit tests of the axis, the grid, the scale and the text alternative; the end-to-end test and M85 | 4 | E117, E118 |
-| WP18.3 Documents | `docs/observability.md`, `docs/ARCHITECTURE.md`, `design/README.md`, `docs/plans/ui-plan.md`, `docs/REQUIREMENTS.md` (OPS-20, OPS-21), `CHANGELOG.md` | 0.5 | E119 |
-| WP18.4 The file (only with DH-Q3 (b)) | `history.rs` persistence, its reader's fuzz target in `fuzz/`, the installer's data-directory list | 1.5 | E120 |
+Every brief carries the gate's whole check suite, not a selection: `cargo fmt --all -- --check`; `cargo clippy` with `-D warnings` with `--all-features` and without; `cargo nextest run --workspace --all-features --locked`; `cd fuzz && cargo check --locked` (`fuzz/` has its own `Cargo.lock`: a package that adds a dependency edge to a crate the fuzz package uses runs it once without `--locked` and commits the lock); in `ui/`: `npm run typecheck`, `lint`, `test`, `build` and `size`, and `npm run e2e` when the UI changed; the regenerated OpenAPI document, UI types and translations; `node scripts/spelling.mjs`; `node scripts/changelog.mjs validate`; `node scripts/requirement-trace.mjs --check` for phases 1 to 4; `node --test "scripts/*.test.mjs"`. The slice adds an event kind but no job kind and no audit action, so the label catalog does not change. A commit that changes `crates/` changes the OpenAPI document, so it carries a `CHANGELOG.md` line or "Changelog: none": WP18.0 and WP18.1 change nothing an operator sees and carry "Changelog: none"; WP18.2 writes the line under `### Added`. Measurements run on the released musl binary, never on another build of the same source, and each claim has a result file.
 
-Total 10 days, 11.5 with WP18.4.
+#### WP18.0 The contracts (1.5 builder-days)
+
+- **Requirements:** OPS-20, OPS-21.
+- **Owns:** `crates/tenko-api/src/dto/events.rs` (`MetricsHistory` with the bucket arrays of section 2, `MetricsSnapshot.closed`, the event kind `metrics.history`); `crates/tenko-api/src/dto/system.rs` (`metrics.history_bytes`); `crates/tenko-cluster/proto/tenko/cluster/v1/metrics.proto` (`Metrics.History` and `closed`) and its client in `crates/tenko-cluster/src/metrics.rs`, with the server side answering `UNIMPLEMENTED` until WP18.1; the regenerated `docs/api/openapi.json` and `ui/src/api` types.
+- **Depends on:** nothing; the owner's decisions are in.
+- **Content:** the wire of section 2 (four significant digits, one history frame, the open bucket marked), so WP18.1 and WP18.2 build against fixed types.
+- **Done means:** E114; the workspace builds; the regenerated files are committed; the trace is current.
+- **Gated by:** no measurement; E114's compatibility tests (a client and a peer of the previous release).
+
+#### WP18.1 The sampler and the cluster (4 builder-days)
+
+- **Requirements:** OPS-20, OPS-21.
+- **Owns:** `crates/tenko-api/src/sse/metrics/history.rs` (new: the five tiers at two days' reach, 274 buckets a figure, allocated at start; the fold; the open bucket); the always-on tick in `crates/tenko-api/src/sse/metrics.rs` (the test `the_publisher_ticks_only_while_someone_listens` becomes "publishes only while someone listens"); the per-topic first frame in `sse/hub.rs` and `sse/mod.rs`; the wiring in `crates/tenko/src/serve/metrics.rs`; the combination of section 4 from each controller's tiers (DH-Q5 (a)) and the peer fetch over `Metrics.History`; the one cached history frame per controller; the result files in `bench/phase1-metrics/`.
+- **Depends on:** WP18.0.
+- **Content:** memory only (DH-Q3 (a)): a restarted controller starts empty and says so (section 3). Nothing enters the query, DORA or renew paths.
+- **Done means:** E115 and E116; the encoder's unit test shows the frame of 25 figures and 3 controllers under 300 KB (M84's size).
+- **Gated by:** M81 (p99 under 200 µs a tick), M82 (zero allocations in the fold), M83 (the responder's throughput and p99 unchanged within M8's noise), M84's size.
+
+#### WP18.2 The tile (4 builder-days)
+
+- **Requirements:** OPS-20.
+- **Owns:** `ui/src/components/HistoryChart.tsx` (new, beside `Sparkline.tsx`: the canvas, the axis, the grid of moments, the slide between tiers, the frame loop with its visibility, pause and fallback rules, in a chunk loaded with the tiles) and its unit tests; `ui/src/dashboard/MetricsTiles.tsx`, `metrics.ts`, `liveMetrics.ts` and `metrics.css`; the mock stream in `ui/src/api/mock/sse.ts` and `ui/src/api/mock/metrics-model.ts` (the end-to-end tests run on it); the end-to-end test in `ui/e2e/dashboard.spec.ts`; the strings in `ui/i18n/en.d` and `sv.d`; the line in `CHANGELOG.md`.
+- **Depends on:** WP18.0 (the types); not on WP18.1.
+- **Content:** the mockup is the reference for the drawing (`drawCont`), the axis, the grid, the slide, the scale with its caret (DH-Q6 (b)), the colors and forced colors, the keyboard and the text alternative. Every tile on screen glides at 10 frames a second (DH-Q7 (a)), falls back to a step a second after five frames over 8 ms, draws nothing while hidden or off screen, redraws every 10 s under reduced motion, and stops on "Pause motion", kept per person beside the theme and the density. The mockup's stepping hook becomes a function the unit tests call, not a global of the product.
+- **Done means:** E117 and E118.
+- **Gated by:** M85 (p99 of a frame under 12 ms; under 10 % of one core at 10 frames a second) and M84's time from subscription to the first drawn tile (under 1 s on the runner).
+
+#### WP18.3 Documents (0.5 builder-days)
+
+- **Requirements:** OPS-20, OPS-21.
+- **Owns:** the texts of section 7: `docs/REQUIREMENTS.md` (OPS-20, OPS-21), `docs/observability.md`, `docs/ARCHITECTURE.md`, `design/README.md` (decision 21 and the Motion rule), `docs/plans/ui-plan.md`; the regenerated trace files.
+- **Depends on:** WP18.1 and WP18.2 merged.
+- **Done means:** E119.
+- **Gated by:** no measurement.
+
+#### WP18.4 The file (1.5 builder-days; a follow-up, not in this release)
+
+- **Requirements:** OPS-20.
+- **Owns:** persistence in `history.rs`, the reader's fuzz target in `fuzz/fuzz_targets/`, the installer's data-directory list.
+- **Depends on:** WP18.1, and the owner's word (DH-Q3).
+- **Done means:** E120 and a privilege review: the file is written and read only by the service account.
+- **Gated by:** the fuzz target running in the weekly smoke.
+
+Total 10 builder-days for this release (WP18.0 to WP18.3); 11.5 if the owner orders WP18.4.
 
 | # | Exit check | Requirements |
 |---|---|---|

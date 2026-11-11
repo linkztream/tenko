@@ -163,6 +163,7 @@ Replaces the existing IPAM spreadsheet.
 - **VLAN objects, topology map and move job** with preview and rollback (IPAM-03, IPAM-19, IPAM-20).
 - **Releases and upgrades**: a data-directory format version with migrations and `tenko upgrade check`, release builds with checksums per tag, a compatibility test against the previous release, and in-app update notices with release notes and single-node installation from the UI (OPS-23, OPS-24).
 - **Partition behavior**: isolated controllers refuse writes visibly, serve reads with a staleness indicator, queue changes as proposals and catch up without merging (OPS-26).
+- **History of the metric tiles** (added by the owner on 2026-11-11, after the phase closed): the dashboard's metric tiles get a history of the last two days on one continuous time axis that compresses toward the past and glides in real time, within the cost budget of OPS-21 (OPS-20), planned in [dashboard-history-plan.md](plans/dashboard-history-plan.md) as Slice 18. The owner wants it in the next release, so its packages take builder slots as they free up, the contracts first.
 
 In Phase 1 the move job performs the IPAM intent change, the UniFi L2 move and the observation. The reservation and DNS steps are manual tasks until Tenko's own engines exist (Phase 2 to 3), at which point the same job becomes fully automatic.
 
