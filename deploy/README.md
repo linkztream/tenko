@@ -515,22 +515,30 @@ install -m 0644 deploy/systemd/tenko.service /etc/systemd/system/tenko.service
 systemctl daemon-reload && systemctl enable --now tenko
 ```
 
-**What the service may execute.** The unit sets `NoExecPaths=/` and names the only paths
-whose files the service may execute (`ExecPaths=`). Nothing else the `tenko` account can
-write (the store, the logs, `/tmp`, the rest of the data directory) can be executed by the
-service, even by an attacker who controls the account:
+**What the service may execute.** Every path the service can write is mounted noexec for it
+(`NoExecPaths=`), so nothing the `tenko` account writes there (the store, the logs, `/tmp`,
+the rest of the data directory) can be executed by the service, even by an attacker who
+controls the account. The rest of the system is read-only for the service
+(`ProtectSystem=strict`) and stays executable: `/usr/local/bin/tenko` in `ExecStartPre=`, and
+the system programs the service starts (`ip` and `ping` for the probe role, `systemd-creds`
+for the key providers that seal, the interpreter of an installed plugin). Two directories of
+the data directory are the exceptions (`ExecPaths=`):
 
-| Path | Written by | Run by the service, and why |
+| Path | Written by | Executable, and why |
 |---|---|---|
-| `/usr` | root (read-only for the service, `ProtectSystem=strict`) | `/usr/local/bin/tenko` in `ExecStartPre=`; the system programs the service starts: `ip` and `ping` for the probe role, `systemd-creds` for the key providers that seal, the interpreter or libraries of an installed plugin |
-| `/var/lib/tenko/updates` | the service (the update layout, [../docs/upgrades.md](../docs/upgrades.md) section 9) | `current`, which `ExecStart=` runs; the new version that an update's dry run starts from `updates/<version>/` |
-| `/var/lib/tenko/plugins` | an administrator ([../docs/plugins.md](../docs/plugins.md) section 10) | installed plugins. This row goes when plugins run in a unit of their own ([../docs/adr/0032-plugins-as-processes.md](../docs/adr/0032-plugins-as-processes.md)) |
+| `/var/lib/tenko` (the data directory) | the service | no |
+| `/var/log/tenko`, `/tmp`, `/var/tmp` (private to the service) | the service | no (`/dev/shm`, `/run` and `/proc` are noexec already) |
+| `/var/lib/tenko/updates` | the service (the update layout, [../docs/upgrades.md](../docs/upgrades.md) section 9) | yes: `current`, which `ExecStart=` runs, and the new version that an update's dry run starts from `updates/<version>/` |
+| `/var/lib/tenko/plugins` | an administrator ([../docs/plugins.md](../docs/plugins.md) section 10) | yes: installed plugins. This row goes when plugins run in a unit of their own ([../docs/adr/0032-plugins-as-processes.md](../docs/adr/0032-plugins-as-processes.md)) |
 
-The two entries under `/var/lib/tenko` start with `-`, because the layout and the plugin
-directory may not exist yet. With `--data-dir`, the installer's drop-in `data-dir.conf` adds
-the same two entries under that directory. `systemd/check-hardening.sh` asserts this exact
-list, and the unit's other settings that keep the account in its place (`User=tenko`, no `+`
-or `!` command prefix, `ReadWritePaths=`, `PrivateIPC=yes`), besides the exposure score.
+The two exceptions start with `-`, because the layout and the plugin directory may not exist
+yet. With `--data-dir`, the installer's drop-in `data-dir.conf` adds that directory to
+`NoExecPaths=` and its `updates` and `plugins` to `ExecPaths=`. (`NoExecPaths=/` with a list of
+exceptions would not do the same: the mounts systemd makes for the service's state, log and
+temporary directories keep exec, and an exception for `/usr` makes `/usr` writable again.)
+`systemd/check-hardening.sh` asserts both lists, that every path a drop-in makes writable is
+noexec, and the unit's other settings that keep the account in its place (`User=tenko`, no
+`+` or `!` command prefix, `ReadWritePaths=`, `PrivateIPC=yes`), besides the exposure score.
 
 **The memory cap.** `install.sh` writes the drop-in `tenko.service.d/memory.conf` with
 `MemoryMax=` and `MemoryHigh=` for the roles the machine is prepared for, so that a process

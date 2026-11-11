@@ -2219,25 +2219,28 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
-# Execution: nothing is executable for the service but the paths below, so a file the
-# account writes anywhere else (the store, the logs, /tmp, the rest of the data directory)
-# never runs, even when the account was taken over. Each path, who writes it and why:
-#   /usr                       root (read-only here, ProtectSystem=strict): /usr/local/bin/tenko
-#                              of ExecStartPre=, and the system programs the service starts
-#                              (ip and ping for the probe role, systemd-creds for the
-#                              KEK providers that seal, the interpreter or libraries of an
-#                              installed plugin)
-#   /var/lib/tenko/updates     the service (the update layout, docs/upgrades.md section 9):
-#                              the versions it installed, `current` that ExecStart= runs, and
-#                              the new version that an update's dry run starts
-#   /var/lib/tenko/plugins     an administrator (docs/plugins.md section 10): installed
-#                              plugins, which the service starts. This entry goes when
-#                              plugins run in a unit of their own (ADR 0032)
+# Execution: every path the service can write is mounted noexec for it, so a file the
+# account writes there (the store, the logs, /tmp, the rest of the data directory) never
+# runs, even when the account was taken over. Everything else is read-only for the service
+# (ProtectSystem=strict) and stays executable: /usr/local/bin/tenko of ExecStartPre= and the
+# system programs the service starts (ip and ping for the probe role, systemd-creds for the
+# KEK providers that seal, the interpreter of an installed plugin). The writable paths are
+# the state and log directories and the private /tmp and /var/tmp; /dev/shm, /run and
+# /proc are noexec already. Two directories of the state directory stay executable:
+#   /var/lib/tenko/updates     written by the service (the update layout, docs/upgrades.md
+#                              section 9): the versions it installed, `current` that
+#                              ExecStart= runs, and the new version an update's dry run starts
+#   /var/lib/tenko/plugins     written by an administrator (docs/plugins.md section 10):
+#                              installed plugins, which the service starts. This entry goes
+#                              when plugins run in a unit of their own (ADR 0032)
 # A leading "-": the path may not exist yet (the layout is made by ExecStartPre=). A data
-# directory elsewhere adds its own two entries in the installer's drop-in data-dir.conf.
-# deploy/systemd/check-hardening.sh asserts this exact list.
-NoExecPaths=/
-ExecPaths=/usr -/var/lib/tenko/updates -/var/lib/tenko/plugins
+# directory elsewhere is added to both lists by the installer's drop-in data-dir.conf.
+# NoExecPaths=/ with ExecPaths= would not do the same: the mounts systemd makes for the
+# service (StateDirectory=, LogsDirectory=, PrivateTmp=) are mounts of their own that keep
+# exec, and an ExecPaths= of /usr makes it writable again. deploy/systemd/check-hardening.sh
+# asserts both lists.
+NoExecPaths=/var/lib/tenko /var/log/tenko /tmp /var/tmp
+ExecPaths=-/var/lib/tenko/updates -/var/lib/tenko/plugins
 
 # Kernel and process isolation
 ProtectHostname=yes
@@ -2495,6 +2498,7 @@ step_unit() {
       echo "[Service]"
       echo "Environment=TENKO_DATA_DIR=${DATA_DIR}"
       echo "ReadWritePaths=${DATA_DIR}"
+      echo "NoExecPaths=${DATA_DIR}"
       echo "ExecPaths=-${DATA_DIR}/updates -${DATA_DIR}/plugins"
       echo "ExecStart="
       echo "ExecStart=${DATA_DIR}/updates/current/tenko serve --config ${CONFIG}"

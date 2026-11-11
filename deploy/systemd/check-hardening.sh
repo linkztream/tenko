@@ -43,10 +43,12 @@
 #   User=tenko and Group=tenko, no DynamicUser= and no PermissionsStartOnly=;
 #   no Exec*= command with a "+" or "!" prefix (one that would run with root's privileges or
 #   without the sandbox);
-#   NoNewPrivileges=yes and PrivateIPC=yes;
-#   NoExecPaths=/ and ExecPaths= exactly the list below, plus the data directory's two
-#   entries where the drop-in data-dir.conf is staged;
-#   ReadWritePaths= exactly none, or the data directory where data-dir.conf is staged.
+#   NoNewPrivileges=yes, PrivateIPC=yes, PrivateTmp=yes, ProtectSystem=strict, and the state
+#   and log directories named tenko (the writable paths the noexec list is made for);
+#   NoExecPaths= and ExecPaths= exactly the lists below, plus the data directory's entries
+#   where the drop-in data-dir.conf is staged;
+#   ReadWritePaths= exactly none, or the data directory where data-dir.conf is staged, and
+#   every path it names also in NoExecPaths=.
 # Widening any of them is a deliberate change of this file in the same commit.
 #
 # Exit status: 0 every score is below its gate and every setting holds, 1 a score reached its
@@ -65,9 +67,10 @@ declare -A GATE=(
   [memory.conf]=1.5
   [all]=1.7
 )
-# What the service may execute (tenko.service, "Execution"), and the data directory of the
-# example data-dir.conf.
-readonly EXEC_PATHS="/usr -/var/lib/tenko/updates -/var/lib/tenko/plugins"
+# What the service may not and may execute (tenko.service, "Execution"), and the data
+# directory of the example data-dir.conf.
+readonly NOEXEC_PATHS="/var/lib/tenko /var/log/tenko /tmp /var/tmp"
+readonly EXEC_PATHS="-/var/lib/tenko/updates -/var/lib/tenko/plugins"
 readonly EXAMPLE_DATA_DIR=/srv/tenko
 # The ceiling of the weekly smoke for the unit alone (deploy/systemd/smoke.sh, MAX_EXPOSURE).
 readonly UNIT_CEILING=2.5
@@ -102,6 +105,7 @@ installer_dropin() {
       echo "[Service]"
       echo "Environment=TENKO_DATA_DIR=/srv/tenko"
       echo "ReadWritePaths=/srv/tenko"
+      echo "NoExecPaths=/srv/tenko"
       echo "ExecPaths=-/srv/tenko/updates -/srv/tenko/plugins"
       echo "ExecStart="
       echo "ExecStart=/srv/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml"
@@ -214,7 +218,21 @@ settings_problems() {
   done < <(grep -E '^Exec(Start|StartPre|StartPost|Condition|Reload|Stop|StopPost)=' <<< "$lines")
   [[ "$(last_value "$lines" NoNewPrivileges)" == yes ]] || echo "NoNewPrivileges= is not yes"
   [[ "$(last_value "$lines" PrivateIPC)" == yes ]] || echo "PrivateIPC= is not yes"
-  [[ "$(list_value "$lines" NoExecPaths)" == / ]] || echo "NoExecPaths= is '$(list_value "$lines" NoExecPaths)', not /"
+  # The writable paths the noexec list is made for: the state and log directories named
+  # tenko and the private /tmp and /var/tmp.
+  [[ "$(last_value "$lines" StateDirectory)" == tenko ]] || echo "StateDirectory= is '$(last_value "$lines" StateDirectory)', not tenko"
+  [[ "$(last_value "$lines" LogsDirectory)" == tenko ]] || echo "LogsDirectory= is '$(last_value "$lines" LogsDirectory)', not tenko"
+  [[ "$(last_value "$lines" PrivateTmp)" == yes ]] || echo "PrivateTmp= is not yes"
+  [[ "$(last_value "$lines" ProtectSystem)" == strict ]] || echo "ProtectSystem= is not strict"
+  want="$NOEXEC_PATHS"
+  ((data_dir)) && want+=" ${EXAMPLE_DATA_DIR}"
+  want="$(sorted_words "$want")"
+  got="$(list_value "$lines" NoExecPaths)"
+  [[ "$got" == "$want" ]] || echo "NoExecPaths= is '$got', not '$want'"
+  # Every path a drop-in makes writable is noexec as well.
+  for line in $(list_value "$lines" ReadWritePaths); do
+    [[ " $got " == *" ${line#-} "* ]] || echo "ReadWritePaths= names ${line}, which NoExecPaths= does not"
+  done
   want="$EXEC_PATHS"
   ((data_dir)) && want+=" -${EXAMPLE_DATA_DIR}/updates -${EXAMPLE_DATA_DIR}/plugins"
   want="$(sorted_words "$want")"
@@ -252,9 +270,15 @@ self_test() {
     's|^Group=tenko|Group=root|'
     's|^NoNewPrivileges=yes|NoNewPrivileges=yes\nPermissionsStartOnly=yes|'
     's|^PrivateIPC=yes|PrivateIPC=no|'
-    's|^NoExecPaths=/|NoExecPaths=|'
+    's|^NoExecPaths=.*|NoExecPaths=|'
+    's|^NoExecPaths=.*|NoExecPaths=/var/lib/tenko /var/log/tenko|'
+    's|^NoExecPaths=.*|NoExecPaths=/|'
     's|^ExecPaths=.*|&\nExecPaths=/var/lib/tenko|'
+    's|^ExecPaths=.*|&\nExecPaths=/usr|'
     's|^ProtectHome=yes|&\nReadWritePaths=/etc|'
+    's|^StateDirectory=tenko|StateDirectory=tenko tenko-extra|'
+    's|^PrivateTmp=yes|PrivateTmp=no|'
+    's|^ProtectSystem=strict|ProtectSystem=full|'
     's|^NoNewPrivileges=yes|&\nDynamicUser=yes|'
   )
   root="$(stage self-test)"
