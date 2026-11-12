@@ -1,0 +1,6 @@
+A/api/v1/auth/login
+host: ddi.example.test
+x-forwarded-for: 192.0.2.5
+x-forwarded-host: attacker.example
+origin: null
+cookie: tenko_session=x

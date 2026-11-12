@@ -1,0 +1,4 @@
+PROXY TCP6 2001:db8::9 2001:db8::1 50000 8443
+GET / HTTP/1.1
+Host: ddi.example.test
+

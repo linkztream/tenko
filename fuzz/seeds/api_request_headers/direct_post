@@ -1,0 +1,5 @@
+C/api/v1/sessions
+host: DDI.Example.test:443
+origin: https://ddi.example.test
+cookie: theme=dark; __Host-tenko_session=c2Vzc2lvbg; tenko_device=a.b
+content-type: application/json

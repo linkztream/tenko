@@ -13,6 +13,8 @@ cargo-fuzz = true
 
 [dependencies]
 bytes = "1"
+# The request headers of `api_request_headers`.
+http = "1"
 # The networks of the configuration image of `dhcp4_engine`.
 ipnet = "2"
 libfuzzer-sys = "0.4"
@@ -37,6 +39,8 @@ tenko-scan = { path = "../crates/tenko-scan" }
 # The read view of the `dns_zonefile` target.
 tenko-store = { path = "../crates/tenko-store" }
 tenko-vault = { path = "../crates/tenko-vault" }
+# The runtime of the reader of `api_proxy_protocol`.
+tokio = { version = "1", features = ["io-util", "rt", "time"] }
 
 [[bin]]
 name = "scan_dns_message"
@@ -438,6 +442,20 @@ bench = false
 [[bin]]
 name = "dns_xfr_message"
 path = "fuzz_targets/dns_xfr_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "api_proxy_protocol"
+path = "fuzz_targets/api_proxy_protocol.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "api_request_headers"
+path = "fuzz_targets/api_request_headers.rs"
 test = false
 doc = false
 bench = false

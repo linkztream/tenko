@@ -107,13 +107,13 @@ with the fix.
 
 | Job | When | Targets | Budget |
 |---|---|---|---|
-| `Fuzz smoke` in `.github/workflows/ci.yml` | weekly (Sunday 03:17 UTC) and by hand (`workflow_dispatch`) | every target of `cargo fuzz list`, dealt round-robin over 5 parallel shards (target *i* of the sorted list to shard *i* mod 5) | 60 s per target after its build, one at a time per shard, within the job's 60 minutes |
+| `Fuzz smoke` in `.github/workflows/ci.yml` | weekly (Sunday 03:17 UTC) and by hand (`workflow_dispatch`) | every target of `cargo fuzz list`, dealt round-robin over 6 parallel shards (target *i* of the sorted list to shard *i* mod 6) | 60 s per target after its build, one at a time per shard, within the job's 60 minutes |
 | Row `fuzz.targets` of the security round (`deploy/security/fuzz.sh`, `.github/workflows/security-round.yml`) | every release, on the release commit | every target of `cargo fuzz list` | 120 s per target (`FUZZ_RELEASE_SECS`), four at a time |
 | Row `fuzz.dns_wire` of the security round (`deploy/security/dnswire.py`) | every release | the running node: mutations of `seeds/dns_codec` over UDP and TCP | 10 minutes |
 
 Both target jobs start from `seeds/<target>/` and carry the limits above. Keep a shard at about
 11 targets: add a shard to the matrix and raise `FUZZ_SHARDS` in the job when the list passes
-55 targets. A target that crashes does not stop the others of its shard or the other shards.
+66 targets. A target that crashes does not stop the others of its shard or the other shards.
 The weekly smoke is the regular pass on `main`; the release budget is the deeper pass on the
 exact commit being shipped.
 
@@ -151,6 +151,8 @@ The table grows as targets land.
 | `audit_export_cef` | The CEF parser and the render-parse round trip of attacker-chosen text in extension values (`tenko_auth::audit_export::format::cef`) |
 | `backup_archive` | Backup files: the TKBK1 header and key slots, the chunk stream, the manifest and the key generation part (`tenko::backup::archive`) |
 | `api_multipart` | The `multipart/form-data` body of `POST /imports`: the boundary of the content type and the file parts (`tenko_api::routes::import::{boundary_from_content_type, parse_multipart}`) |
+| `api_proxy_protocol` | The PROXY protocol reader of the API and UI listener, version 1 and version 2 with its TLVs, over a connection whose reads split the header anywhere: a header that parses is self-delimiting and within its version's limit, and the reader decides as the parser does on the whole input and hands on exactly the octets after the header (`tenko_api::server::proxy_protocol::{detect, parse, read_header}`) |
+| `api_request_headers` | What the API reads from a request before it authenticates anyone: the client address, scheme and host under the trusted proxy rules (`X-Forwarded-For`, `-Proto`, `-Host`, the PROXY header of a trusted peer), `Host` and the URI authority, the CSRF guard and its `Origin` normalization, the session cookie and `Authorization`, and `Idempotency-Key`; a host or origin that validates validates again to itself, an untrusted peer's forwarded headers are never read, a trusted peer's client address is reached from the right through trusted hops only, and an unsafe method passes the CSRF guard only for its own or an allowed origin (`tenko_api::fuzzing`) |
 | `import_files` | The readers of uploaded import files, as `POST /imports` hands them the file parts: the first octet picks the file name, the rest is the file; CSV in its encodings and delimiters, xlsx through the zip central directory reader and `calamine`, xls and ods refused; whatever reads stays within the sheet, row, column, cell and text limits of a real installation. Run it with an allocation limit (`-rss_limit_mb=2048 -malloc_limit_mb=1024`) so that an allocation sized by the input rather than by the limits is reported (`tenko_ipam::import::read::read_file`) |
 | `upgrade_manifest` | The release manifest of the update check: the parser and validator, the release lookups and the asset URLs resolved against the manifest's URL (`tenko_api::dto::release::ReleaseManifest::parse`) |
 | `cluster_messages` | The requests of the cluster port beyond `raft_payloads` and `node_config_payloads`: `Hello` and the version negotiation, heartbeats, the CSR of a renewal, joins, ingest batches, command subscriptions, the small `Cluster`, `Config` and `Metrics` requests and the identity in a caller's certificate (`tenko_cluster::server::fuzz_request`) |

@@ -60,6 +60,9 @@ pub mod extract;
 #[cfg(feature = "server")]
 pub mod findings;
 #[cfg(feature = "server")]
+#[doc(hidden)]
+pub mod fuzzing;
+#[cfg(feature = "server")]
 pub mod host;
 #[cfg(feature = "server")]
 pub mod list;

@@ -11,6 +11,8 @@
 #
 # target                 max_len  where the number comes from
 api_multipart            65536    POST /imports takes max_upload (20 MiB) plus MULTIPART_OVERHEAD (crates/tenko-api/src/routes/import.rs); 64 KiB reaches MAX_BOUNDARY, MAX_PART_HEADER_BYTES (16 KiB) and MAX_PARTS (512 minimal parts are about 30 KiB)
+api_proxy_protocol       4098     1 control octet and the start of a connection: a version 2 header is at most V2_MAX_LEN (4,096 octets, crates/tenko-api/src/server/proxy_protocol.rs), version 1 at most 107; one octet more reaches the refusal of a longer one
+api_request_headers      65538    2 control octets and the URI and headers of a request: the API takes headers up to hyper's limit (hundreds of KiB); 64 KiB reaches the limits of the parsers (261 octets of host, 255 of idempotency key)
 audit_export_cef         65536    MAX_LINE is 4 MiB (crates/tenko-auth/src/audit_export/format/cef.rs); a line's escaping and fields are reached in 64 KiB
 audit_export_jsonl       65536    MAX_LINE is 4 MiB per line (crates/tenko-auth/src/audit_export/format/json.rs); 64 KiB holds several records
 audit_export_syslog      65536    the target's own MAX_FRAME is 64 KiB; the sinks send datagrams of at most 65,000 octets (audit_export/sink/mod.rs MAX_DATAGRAM) and TCP frames without a cap
