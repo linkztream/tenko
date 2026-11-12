@@ -284,23 +284,20 @@ pub fn switch_back_before_start(
         .then_some(from)
 }
 
-/// The data directory `sources` name without the configuration's own checks: `--data-dir`,
-/// the `TENKO_*` environment, or the top-level `data_dir` of the file read as plain TOML.
-/// For the steps that need only the data directory when the configuration does not load.
+/// The data directory when the configuration file does not load: the configuration
+/// without the file (the `TENKO_*` environment and `--data-dir`), else `--data-dir` as
+/// given. The same resolution as the privilege guard's ([`crate::exec::guarded_paths`]), so
+/// the guard has checked every directory these steps write into.
 pub fn data_dir_of(sources: &crate::config::Sources) -> Option<PathBuf> {
     let without_file = crate::config::Sources {
         file: None,
         ..sources.clone()
     };
-    let named = crate::config::load(&without_file, std::env::vars())
+    crate::config::load(&without_file, std::env::vars())
+        .and_then(|loaded| loaded.config.resolve())
         .ok()
-        .and_then(|loaded| loaded.config.data_dir);
-    let dir = named.or_else(|| {
-        let text = fs::read_to_string(sources.file.as_ref()?).ok()?;
-        let table: toml::Table = toml::from_str(&text).ok()?;
-        table.get("data_dir")?.as_str().map(PathBuf::from)
-    })?;
-    std::path::absolute(dir).ok()
+        .map(|resolved| resolved.data_dir)
+        .or_else(|| sources.data_dir.clone())
 }
 
 /// Puts the store copy `backup` (a directory with `store/`) back in place of the store; the
@@ -667,7 +664,7 @@ mod tests {
     }
 
     /// A new version that refuses the configuration on its first start switches back; the
-    /// data directory is found in the file even though the file does not load.
+    /// data directory is found without the file, which does not load.
     #[test]
     fn a_refused_configuration_switches_back_to_the_version_that_read_it() {
         let data = temp_dir("config");
@@ -683,7 +680,8 @@ mod tests {
         .expect("file");
         let sources = crate::config::Sources {
             file: Some(file),
-            ..crate::config::Sources::default()
+            data_dir: Some(data.clone()),
+            roles: None,
         };
         // No record: nothing to switch back to.
         assert_eq!(
