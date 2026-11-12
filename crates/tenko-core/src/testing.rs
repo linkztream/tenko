@@ -17,8 +17,12 @@
 //!
 //! The wait returns only after a check said ready: when the limit is reached it panics with
 //! the condition's name, the caller's place, the time waited, the number of checks and the
-//! last observed state. The limit is measured in real time, also under a paused Tokio clock,
-//! where the pauses between checks advance the clock instead.
+//! last observed state. The limit is measured in real time from the first check. A check is
+//! never cut short: one that hangs hangs the test until the test runner's own limit.
+//!
+//! Not for a test under a paused Tokio clock (`start_paused`): there each pause between checks
+//! moves the virtual clock forward and can fire the product's own timers; advance that clock
+//! by hand instead.
 
 use std::{
     fmt::Debug,
@@ -70,11 +74,21 @@ impl<T> Ready for Option<T> {
     }
 }
 
-impl<T, E: Debug> Ready for Result<T, E> {
+impl<T, E: Debug + 'static> Ready for Result<T, E> {
     type Value = T;
 
+    /// A state that is text (diagnostics with several lines, a server's output) is printed as
+    /// it is; any other state with `Debug`.
     fn ready(self) -> Result<T, Option<String>> {
-        self.map_err(|state| Some(format!("{state:?}")))
+        self.map_err(|state| {
+            let any: &dyn std::any::Any = &state;
+            Some(
+                any.downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| any.downcast_ref::<&str>().map(|text| (*text).to_owned()))
+                    .unwrap_or_else(|| format!("{state:?}")),
+            )
+        })
     }
 }
 
@@ -153,17 +167,23 @@ pub fn wait_until_within<R: Ready>(
     }
 }
 
-/// [`wait_until`] for async tests: `check` is an async closure (`async || ...`), and the pauses
-/// between checks are Tokio sleeps, so the runtime keeps driving the tasks the test waits for.
+/// [`wait_until`] for async tests: `check` returns a future (an async closure, `async || ...`,
+/// or `|| async { ... }`), and the pauses between checks are Tokio sleeps, so the runtime keeps
+/// driving the tasks the test waits for.
+///
+/// `check` is an `FnMut` that returns a future rather than an `AsyncFnMut`: the future of an
+/// `AsyncFnMut` borrows the closure, and the compiler cannot then prove the wait `Send`, which
+/// `tokio::spawn` and `async_trait` need. An async closure that mutates what it captures is
+/// not an `FnMut`; hold such state in a `Cell` or an atomic.
 ///
 /// # Panics
 ///
 /// As [`wait_until`]. The failure message names the caller's place, since an async function
 /// cannot carry it in its panic location.
 #[track_caller]
-pub fn wait_until_async<R: Ready>(
+pub fn wait_until_async<R: Ready, Fut: Future<Output = R>>(
     what: &str,
-    check: impl AsyncFnMut() -> R,
+    check: impl FnMut() -> Fut,
 ) -> impl Future<Output = R::Value> {
     wait_until_async_within(what, WAIT_LIMIT, check)
 }
@@ -174,13 +194,16 @@ pub fn wait_until_async<R: Ready>(
 ///
 /// As [`wait_until`].
 #[track_caller]
-pub fn wait_until_async_within<R: Ready>(
+pub fn wait_until_async_within<R: Ready, Fut: Future<Output = R>>(
     what: &str,
     limit: Duration,
-    mut check: impl AsyncFnMut() -> R,
+    mut check: impl FnMut() -> Fut,
 ) -> impl Future<Output = R::Value> {
-    let mut pace = Pace::new(what, Location::caller(), limit);
+    let what = what.to_owned();
+    let at = Location::caller();
     async move {
+        // The limit counts from the first check, not from when the future was made.
+        let mut pace = Pace::new(&what, at, limit);
         loop {
             match check().await.ready() {
                 Ok(value) => return value,
@@ -202,8 +225,11 @@ const PORT_PICKS: u32 = 500;
 
 /// A loopback port for TCP and UDP alike, held by a bound TCP listener and a bound UDP socket
 /// on `127.0.0.1` until [`release`](Self::release) or the drop, so that no other test, of this
-/// process or another, can take it in the meantime. Release it right before the server under
-/// test binds it.
+/// process or another, binding `127.0.0.1` the ordinary way can take it in the meantime.
+/// Release it right before the server under test binds it, or let the test's own socket take
+/// it over with [`into_udp`](Self::into_udp), which leaves no gap at all. The hold covers
+/// `127.0.0.1` only (`::1` was free when picked); on Windows a socket that binds the same
+/// port with `SO_REUSEADDR` can still share it.
 #[derive(Debug)]
 pub struct FreePort {
     port: u16,
@@ -220,6 +246,17 @@ impl FreePort {
     pub fn release(mut self) -> u16 {
         self.held = None;
         self.port
+    }
+
+    /// The held UDP socket on `127.0.0.1`, for a test that sends and receives on the port
+    /// itself; the TCP side is released.
+    ///
+    /// # Panics
+    ///
+    /// Never: a `FreePort` holds its sockets until it is consumed.
+    pub fn into_udp(mut self) -> UdpSocket {
+        let (_, udp) = self.held.take().expect("a FreePort holds its sockets");
+        udp
     }
 }
 
@@ -275,9 +312,11 @@ fn hold(port: u16) -> Option<(TcpListener, UdpSocket)> {
 ///
 /// A removal that fails (on Windows, a file another process still holds open) is retried
 /// until [`WAIT_LIMIT`], then fails the test with the path and the error: a test that leaves
-/// a handle behind has a fault worth seeing. When the test is failing already the directory is
-/// kept for inspection and its path printed, so the guard never replaces the test's own
-/// failure with its own.
+/// a handle behind has a fault worth seeing. Inside a current-thread Tokio runtime (a plain
+/// `#[tokio::test]`) the guard tries once and prints the path and the error instead: blocking
+/// that thread would stop the very tasks that still have to close their files. When the test
+/// is failing already the directory is kept for inspection and its path printed, so the guard
+/// never replaces the test's own failure with its own.
 #[derive(Debug)]
 pub struct TempDir {
     path: PathBuf,
@@ -331,6 +370,20 @@ impl Drop for TempDir {
             return;
         }
         let path = &self.path;
+        let current_thread = tokio::runtime::Handle::try_current().is_ok_and(|runtime| {
+            runtime.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread
+        });
+        if current_thread {
+            match std::fs::remove_dir_all(path) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => eprintln!(
+                    "the temporary directory {} was not removed: {error}; a task of the test \
+                     still holds a file in it",
+                    path.display()
+                ),
+                _ => {}
+            }
+            return;
+        }
         wait_until(
             &format!("the removal of {}", path.display()),
             || match std::fs::remove_dir_all(path) {
@@ -383,7 +436,10 @@ mod tests {
         let text = panic_text(failure.as_ref());
         assert!(text.contains("a door that stays shut"), "{text}");
         assert!(
-            text.contains(&format!("\"shut after {} looks\"", calls.get())),
+            text.contains(&format!(
+                "last observed state: shut after {} looks",
+                calls.get()
+            )),
             "{text}"
         );
         assert!(text.contains(file!()), "names the caller: {text}");
@@ -400,6 +456,11 @@ mod tests {
 
     #[tokio::test]
     async fn an_async_wait_lets_the_runtime_drive_what_it_waits_for() {
+        // A wait over a borrowing async closure is `Send`, as `tokio::spawn` and
+        // `async_trait` need.
+        fn send<T: Send>(future: T) -> T {
+            future
+        }
         let (sender, receiver) = tokio::sync::watch::channel(0_u32);
         tokio::spawn(async move {
             for n in 1..=3 {
@@ -407,12 +468,11 @@ mod tests {
                 sender.send(n).expect("the receiver lives");
             }
         });
-        let seen = wait_until_async("the third value", async || {
+        let wait = wait_until_async("the third value", async || {
             let now = *receiver.borrow();
             (now == 3).then_some(now)
-        })
-        .await;
-        assert_eq!(seen, 3);
+        });
+        assert_eq!(send(wait).await, 3);
     }
 
     #[test]
@@ -427,6 +487,11 @@ mod tests {
         assert_ne!(free_port().port(), port, "never handed out twice");
         assert_eq!(held.release(), port);
         UdpSocket::bind((Ipv4Addr::LOCALHOST, port)).expect("free after the release");
+        let taken = free_port();
+        let port = taken.port();
+        let socket = taken.into_udp();
+        assert_eq!(socket.local_addr().expect("address").port(), port);
+        TcpListener::bind((Ipv4Addr::LOCALHOST, port)).expect("TCP released");
     }
 
     #[test]
