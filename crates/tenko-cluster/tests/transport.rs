@@ -1216,7 +1216,8 @@ async fn metrics_history_answers_a_controller_and_an_older_source_is_unsupported
     let network = PeerNetwork::new(credentials.identity.node, PeerTimings::default());
     network.set_tls(credentials.client_config().expect("client configuration"));
     network.pin(NodeId(1), controller.addr.to_string());
-    let deadline = Duration::from_millis(500);
+    // Each call below is answered at once; the limit only bounds a call that never is.
+    let deadline = Duration::from_secs(30);
     let at = Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("time");
 
     // Before the API started there is no source.

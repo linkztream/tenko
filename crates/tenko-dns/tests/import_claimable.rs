@@ -656,6 +656,7 @@ fn measure<T>(f: impl FnOnce() -> T) -> (T, usize, Duration) {
             let mut peak = 0usize;
             while !stop.load(Ordering::Relaxed) {
                 peak = peak.max(held().saturating_sub(base));
+                // test-lint: allow sleep the sampling interval of a measurement; no condition waits
                 std::thread::sleep(Duration::from_millis(1));
             }
             peak

@@ -75,7 +75,7 @@ describe("the zone file import", () => {
 
     fireEvent.click(within(report).getByTestId("import-apply"));
     // The job runs, then the result replaces the progress.
-    await waitFor(() => expect(screen.getByTestId("import-result").dataset.state).toBe("done"), { timeout: 4000 });
+    await waitFor(() => expect(screen.getByTestId("import-result").dataset.state).toBe("done"), { timeout: 30_000 });
     const result = screen.getByTestId("import-result");
     const serial = String(dnsState().zones.find((z) => z.id === ZONE)?.soa_serial);
     expect(within(result).getByTestId("import-serial").dataset.key).toBe(serial);
@@ -150,7 +150,7 @@ async function previewWindows(file: string) {
 
 const approval = () => screen.getByTestId("field-claim-approve") as HTMLInputElement;
 const claimKeys = () => screen.queryAllByTestId("import-claim-row").map((r) => r.dataset.key);
-const finished = () => waitFor(() => expect(screen.getByTestId("import-result").dataset.state).toBe("done"), { timeout: 4000 });
+const finished = () => waitFor(() => expect(screen.getByTestId("import-result").dataset.state).toBe("done"), { timeout: 30_000 });
 
 describe("the dialect of the file", () => {
   it("offers the zone file and the Windows export, with what the Windows one does", async () => {

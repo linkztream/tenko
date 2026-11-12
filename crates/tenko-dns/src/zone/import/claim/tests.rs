@@ -62,7 +62,8 @@ fn a_cursor_reads_back() {
         (name("pc01.example.test"), Rtype::AAAA)
     );
     for bad in ["", "pc01.example.test", "pc01.example.test A", "a b 1x"] {
-        assert!(parse_cursor(bad).is_err(), "{bad}");
+        let error = parse_cursor(bad).expect_err(bad);
+        assert!(error.is(CLAIMABLE_INVALID), "{bad}: {error:?}");
     }
 }
 
