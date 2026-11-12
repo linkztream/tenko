@@ -1538,6 +1538,26 @@ async fn dns_28_e46_the_remaining_rows() {
 #[tokio::test]
 #[allow(clippy::too_many_lines, reason = "one sequence over the signers")]
 async fn dns_28_a_service_name_is_created_by_a_privileged_principal_only() {
+    /// Sends `msg` signed with `key` from `from`: the answer, and the code of the refusal
+    /// audited for it.
+    async fn send(
+        path: &UpdatePath,
+        audit: &Audit,
+        key: MacKey,
+        from: &str,
+        msg: &Msg,
+    ) -> (Got, Option<String>) {
+        let before = audit.0.lock().expect("audit").len();
+        let mut message = msg.bytes();
+        let mut signer = Signer::request(key);
+        assert!(signer.sign(&mut message, now(), 0, &[], MAX_MESSAGE_LEN));
+        let answer = path.answer(&message, &conn(from)).await.expect("an answer");
+        let code = audit.0.lock().expect("audit")[before..]
+            .iter()
+            .find(|draft| draft.action.as_str() == "dns.update.refuse")
+            .and_then(|draft| context_of(draft, "code"));
+        (read(&answer), code)
+    }
     let lab = lab().await;
     let alice = lab.who(
         "pc01$@CORP.EXAMPLE.TEST",
@@ -1557,32 +1577,77 @@ async fn dns_28_a_service_name_is_created_by_a_privileged_principal_only() {
         vec![sid(516)],
         "192.0.2.2",
     );
+    // A path of its own, so that its audit sink can be read: each refusal is checked by
+    // the code it is audited with.
+    let audit = Arc::new(Audit::default());
+    let directory = Arc::new(Directory::default());
+    directory
+        .load(&lab.zones, &mut HashMap::new())
+        .await
+        .expect("directory");
+    let path = UpdatePath::with_settings(
+        lab.catalog.clone(),
+        directory,
+        Arc::clone(&lab.zones),
+        Arc::new(ProfileCell::new(UpdateProfile::Standard)),
+        Arc::clone(&audit) as Arc<dyn TransferAudit>,
+        lab.stop.child_token(),
+        UpdateSettings::default(),
+    )
+    .with_gss(Arc::clone(&lab.tkey));
+    let gss = |who: &Who| MacKey::Gss(Arc::clone(&who.client));
+    let service_refusal = (REFUSED, Some("dns.update.service_name".to_owned()));
     let wpad = "wpad.corp.example.test";
     let isatap = "isatap.corp.example.test";
     for service in [wpad, isatap, "wpad.branch.corp.example.test"] {
-        assert_eq!(
-            lab.gss(&alice, &Msg::default().add_a(service, 21)).await,
-            REFUSED,
-            "{service}"
-        );
-        assert_eq!(
-            lab.gss(&alice, &Msg::default().add_srv(service)).await,
-            REFUSED,
-            "{service} SRV"
-        );
-        assert_eq!(
-            lab.gss(&proxy, &Msg::default().add_a(service, 3)).await,
-            REFUSED,
-            "{service} by DnsUpdateProxy"
-        );
-        assert_eq!(
-            lab.tsig(&Msg::default().add_a(service, 4)).await,
-            REFUSED,
-            "{service} by TSIG"
-        );
+        for (what, key, from, msg) in [
+            (
+                "A",
+                gss(&alice),
+                alice.from,
+                Msg::default().add_a(service, 21),
+            ),
+            (
+                "SRV",
+                gss(&alice),
+                alice.from,
+                Msg::default().add_srv(service),
+            ),
+            (
+                "by DnsUpdateProxy",
+                gss(&proxy),
+                proxy.from,
+                Msg::default().add_a(service, 3),
+            ),
+            (
+                "by TSIG",
+                MacKey::from(Arc::clone(&lab.hmac)),
+                "192.0.2.200",
+                Msg::default().add_a(service, 4),
+            ),
+        ] {
+            assert_eq!(
+                send(&path, &audit, key, from, &msg).await,
+                service_refusal,
+                "{service} {what}"
+            );
+        }
         assert_eq!(lab.rrset(service, Rtype::A).await, None, "{service}");
         assert_eq!(lab.owner(service).await, None, "{service}");
     }
+    // The other refusals keep the general code.
+    assert_eq!(
+        send(
+            &path,
+            &audit,
+            gss(&alice),
+            alice.from,
+            &Msg::default().add_a("www.corp.example.test", 21)
+        )
+        .await,
+        (REFUSED, Some("dns.update.refused".to_owned())),
+        "a manual record"
+    );
     // Other new names, and a name below a service label, which no client looks up for the
     // service, stay with the lists.
     for other in [
@@ -1605,50 +1670,29 @@ async fn dns_28_a_service_name_is_created_by_a_privileged_principal_only() {
     assert_eq!(lab.gss(&dc, &Msg::default().add_a(wpad, 2)).await, NOERROR);
     assert_eq!(lab.owner(wpad).await.expect("owned").sid, Some(sid(1000)));
     assert_eq!(
-        lab.gss(&alice, &Msg::default().add_a(wpad, 21)).await,
-        REFUSED
+        send(
+            &path,
+            &audit,
+            gss(&alice),
+            alice.from,
+            &Msg::default().add_a(wpad, 21)
+        )
+        .await,
+        (REFUSED, Some("dns.update.refused".to_owned())),
+        "an owned service name: the owner rule"
     );
-    // The refusal is audited with its own code and the principal; a path of its own here,
-    // so that its audit sink can be read.
-    let audit = Arc::new(Audit::default());
-    let directory = Arc::new(Directory::default());
-    directory
-        .load(&lab.zones, &mut HashMap::new())
-        .await
-        .expect("directory");
-    let path = UpdatePath::with_settings(
-        lab.catalog.clone(),
-        directory,
-        Arc::clone(&lab.zones),
-        Arc::new(ProfileCell::new(UpdateProfile::Standard)),
-        Arc::clone(&audit) as Arc<dyn TransferAudit>,
-        lab.stop.child_token(),
-        UpdateSettings::default(),
-    )
-    .with_gss(Arc::clone(&lab.tkey));
-    let mut message = Msg::default().add_a(isatap, 21).bytes();
-    let mut signer = Signer::request(MacKey::Gss(Arc::clone(&alice.client)));
-    assert!(signer.sign(&mut message, now(), 0, &[], MAX_MESSAGE_LEN));
-    let answer = path
-        .answer(&message, &conn(alice.from))
-        .await
-        .expect("an answer");
-    assert_eq!(read(&answer), REFUSED);
+    // The service-name refusal names the principal and the name.
     let refusals = audit.0.lock().expect("audit");
     let refusal = refusals
         .iter()
-        .find(|draft| draft.action.as_str() == "dns.update.refuse")
+        .find(|draft| context_of(draft, "code").as_deref() == Some("dns.update.service_name"))
         .expect("audited");
-    assert_eq!(
-        context_of(refusal, "code").as_deref(),
-        Some("dns.update.service_name")
-    );
     assert_eq!(
         context_of(refusal, "principal").as_deref(),
         Some("pc01$@CORP.EXAMPLE.TEST")
     );
     assert!(
-        context_of(refusal, "reason").is_some_and(|reason| reason.contains(isatap)),
+        context_of(refusal, "reason").is_some_and(|reason| reason.contains(wpad)),
         "the reason names the name"
     );
 }
@@ -1719,9 +1763,11 @@ async fn dns_28_an_owned_service_name_stays_with_its_owner_until_released() {
         lab.rrset(wpad, Rtype::A).await.expect("kept").origin,
         Origin::Ad
     );
-    for who in [&named, &alice] {
-        assert_eq!(lab.gss(who, &Msg::default().add_a(wpad, 25)).await, REFUSED);
-    }
+    // The computer of that name would claim the released record by the claim rule.
+    assert_eq!(
+        lab.gss(&named, &Msg::default().add_a(wpad, 25)).await,
+        REFUSED
+    );
     assert_eq!(lab.gss(&dc, &Msg::default().add_a(wpad, 2)).await, NOERROR);
     assert_eq!(lab.owner(wpad).await.expect("owned").sid, Some(sid(1000)));
 }

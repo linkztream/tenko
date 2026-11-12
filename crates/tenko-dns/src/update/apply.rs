@@ -47,9 +47,11 @@
 //! of a name does on Windows, so that no other principal can take a controller's or an
 //! administrator's name afterwards. Whoever changes a name without being privileged (its
 //! owner, its claimant, a `DnsUpdateProxy` member) changes no `manual`, `ipam` or `dhcp`
-//! RRset of it: those stay with privileged principals also beside the owner's records. An update signed with TSIG or unsigned takes no ownership and may not change a name
-//! that is owned and held, nor a service name without an owner; it removes an owner whose hold has passed. The owner rows are
-//! written in the same batch as the records, with their revisions expected, and the audit
+//! RRset of it: those stay with privileged principals also beside the owner's records. An
+//! update signed with TSIG or unsigned takes no ownership and may not change a name that is
+//! owned and held, nor a service name without an owner; it removes an owner whose hold has
+//! passed. The owner rows are written in the same batch as the records, with their
+//! revisions expected, and the audit
 //! record carries the decision (`owner`, `privileged`, `claimed`, `proxy`) and the
 //! principal with its SID.
 
