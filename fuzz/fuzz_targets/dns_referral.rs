@@ -5,10 +5,12 @@ use std::time::Instant;
 use libfuzzer_sys::fuzz_target;
 use tenko_dns::{
     cache::{
-        Client, Denials, DenialSettings, Verdict,
+        Client, DenialSettings, Denials, Verdict,
         denial::store::{MAX_DELEGATION_ADDRESSES, MAX_DELEGATION_SERVERS},
     },
-    recurse::message::{Composed, GlueKind, MAX_RECORDS, Rr, Step, classify, compose, parse, within},
+    recurse::message::{
+        Composed, GlueKind, MAX_RECORDS, Rr, Step, classify, compose, parse, within,
+    },
     recursion::denial::{DenialScope, Origin},
     wire,
 };
@@ -72,11 +74,18 @@ fn check_denials(message: &[u8], qname: &[u8], carried: bool) {
         {
             continue;
         }
-        assert!(out.len() <= max_len, "a synthesized answer over the client's length");
+        assert!(
+            out.len() <= max_len,
+            "a synthesized answer over the client's length"
+        );
         let Some(synthesized) = parse(&out) else {
             panic!("a synthesized answer that does not parse: {out:02x?}");
         };
-        let ns = synthesized.authority.iter().filter(|rr| rr.rtype == 2).count();
+        let ns = synthesized
+            .authority
+            .iter()
+            .filter(|rr| rr.rtype == 2)
+            .count();
         assert!(ns <= MAX_DELEGATION_SERVERS, "{ns} name servers written");
         assert!(
             synthesized.additional.len() <= MAX_DELEGATION_ADDRESSES,

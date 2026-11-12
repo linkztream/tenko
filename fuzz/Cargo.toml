@@ -57,7 +57,6 @@ test = false
 doc = false
 bench = false
 
-# WP3.14 raw-socket frame parsers (marked block).
 [[bin]]
 name = "scan_lldp_cdp"
 path = "fuzz_targets/scan_lldp_cdp.rs"
@@ -78,7 +77,6 @@ path = "fuzz_targets/scan_dhcp_snoop.rs"
 test = false
 doc = false
 bench = false
-# End WP3.14 raw-socket frame parsers.
 
 [[bin]]
 name = "connect_hass_ws_frame"
@@ -271,7 +269,7 @@ test = false
 doc = false
 bench = false
 
-# The DHCPv4 wire codec (WP7.1a).
+# The DHCPv4 wire codec.
 [[bin]]
 name = "dhcp_v4"
 path = "fuzz_targets/dhcp_v4.rs"
@@ -279,7 +277,7 @@ test = false
 doc = false
 bench = false
 
-# WP7.6: the DHCPv4 option walk with every typed parser, and option 82 through scope
+# The DHCPv4 option walk with every typed parser, and option 82 through scope
 # selection to the echo in the reply.
 [[bin]]
 name = "dhcp4_options"
@@ -294,9 +292,8 @@ path = "fuzz_targets/dhcp4_relay_info.rs"
 test = false
 doc = false
 bench = false
-# End WP7.6.
 
-# WP9.1: the DHCPv6 wire codec and the relay chain.
+# The DHCPv6 wire codec and the relay chain.
 [[bin]]
 name = "dhcp6_wire"
 path = "fuzz_targets/dhcp6_wire.rs"
@@ -310,9 +307,7 @@ path = "fuzz_targets/dhcp6_relay.rs"
 test = false
 doc = false
 bench = false
-# End WP9.1.
 
-# WP10.1: the recursive resolver's targets (marked block).
 [[bin]]
 name = "dns_referral"
 path = "fuzz_targets/dns_referral.rs"
@@ -326,9 +321,7 @@ path = "fuzz_targets/dns_cookie_client.rs"
 test = false
 doc = false
 bench = false
-# WP10.1: end.
 
-# WP10.2: the validator's targets (marked block).
 [[bin]]
 name = "dns_dnskey_ds"
 path = "fuzz_targets/dns_dnskey_ds.rs"
@@ -363,18 +356,14 @@ path = "fuzz_targets/dns_trust_anchor_text.rs"
 test = false
 doc = false
 bench = false
-# WP10.2: end.
 
-# WP9.2: the router advertisement parser's target (marked block).
 [[bin]]
 name = "scan_ra"
 path = "fuzz_targets/scan_ra.rs"
 test = false
 doc = false
 bench = false
-# WP9.2: end.
 
-# WP13.1: the Kerberos targets (marked block).
 [[bin]]
 name = "krb_der"
 path = "fuzz_targets/krb_der.rs"
@@ -415,22 +404,17 @@ path = "fuzz_targets/gss_mic.rs"
 test = false
 doc = false
 bench = false
-# WP13.1: end.
 
-# WP13.2: TKEY and GSS-TSIG (marked block).
 [[bin]]
 name = "dns_tkey"
 path = "fuzz_targets/dns_tkey.rs"
 test = false
 doc = false
 bench = false
-# WP13.2: end.
 
-# import_files: the readers of uploaded import files (marked block).
 [[bin]]
 name = "import_files"
 path = "fuzz_targets/import_files.rs"
 test = false
 doc = false
 bench = false
-# import_files: end.
