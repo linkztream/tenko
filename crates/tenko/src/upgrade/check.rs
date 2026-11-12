@@ -339,16 +339,15 @@ pub async fn check(data_dir: &Path, options: &Options, registry: Registry<'_>) -
     } else {
         // A directory the operator named is never removed: the copy goes into a new
         // subdirectory of it.
-        let work = match &options.work_dir {
-            Some(parent) => parent.join(format!(
+        let work = if let Some(parent) = &options.work_dir {
+            parent.join(format!(
                 "tenko-upgrade-check-{}",
                 uuid::Uuid::now_v7().simple()
-            )),
-            None => {
-                let work = data_dir.join("upgrade-check");
-                let _ = std::fs::remove_dir_all(&work);
-                work
-            }
+            ))
+        } else {
+            let work = data_dir.join("upgrade-check");
+            let _ = std::fs::remove_dir_all(&work);
+            work
         };
         if let Err(error) = datadir::check_space(&work, &store_dir) {
             return report.problem(Verdict::Failed, error.code(), error.to_string());

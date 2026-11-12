@@ -4645,6 +4645,7 @@ export type MessageKey =
   | "errors.update.check_timeout"
   | "errors.update.check_unavailable"
   | "errors.update.checksum_mismatch"
+  | "errors.update.config_refused"
   | "errors.update.fetch_failed"
   | "errors.update.install_blocked"
   | "errors.update.io"
@@ -14632,6 +14633,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.update.check_timeout",
   "errors.update.check_unavailable",
   "errors.update.checksum_mismatch",
+  "errors.update.config_refused",
   "errors.update.fetch_failed",
   "errors.update.install_blocked",
   "errors.update.io",

@@ -7600,6 +7600,9 @@
       <unit id="errors.update.check_refused">
         <segment><source>The new version refused to run on this data.</source><target>Den nya versionen vägrade köras på de här uppgifterna.</target></segment>
       </unit>
+      <unit id="errors.update.config_refused">
+        <segment><source>The new version does not accept the configuration file of this server. Change the file so that both versions read it, then install again.</source><target>Den nya versionen godtar inte serverns konfigurationsfil. Ändra filen så att båda versionerna kan läsa den och installera sedan igen.</target></segment>
+      </unit>
       <unit id="errors.update.store">
         <segment><source>The update could not be recorded in the store.</source><target>Uppdateringen kunde inte registreras i lagret.</target></segment>
       </unit>

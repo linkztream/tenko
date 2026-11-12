@@ -1192,6 +1192,29 @@ fn hooks(handle: ServiceStatusHandle) -> Hooks {
     }
 }
 
+/// A configuration that cannot be used: the Event Log says why, and a newly installed
+/// version switches back to the previous one (`serve::config_refused`). The log is not open
+/// yet, so the Event Log and the exit status are all there is.
+fn config_failed(args: &RunArgs, error: &ConfigError) -> u8 {
+    let sources = Sources {
+        file: Some(args.config.clone()),
+        data_dir: args.data_dir.clone(),
+        roles: None,
+    };
+    let mut switched = Vec::new();
+    let status = serve::config_refused(&sources, &mut switched);
+    logging::event_log::report_early(
+        &args.name,
+        &format!(
+            "tenko service {}: the configuration {} cannot be used: {error}\n{}",
+            args.name,
+            args.config.display(),
+            String::from_utf8_lossy(&switched).trim_end()
+        ),
+    );
+    status
+}
+
 /// Loads the configuration, opens the log and runs the server until `stop` fires. Returns
 /// the exit status.
 fn serve_until_stopped(
@@ -1201,27 +1224,7 @@ fn serve_until_stopped(
 ) -> u8 {
     let resolved = match load_config(&args.config, args.data_dir.as_deref()) {
         Ok(resolved) => resolved,
-        Err(error) => {
-            // The log is not open yet: the Event Log and the exit status are all there is.
-            let mut switched = Vec::new();
-            let sources = Sources {
-                file: Some(args.config.clone()),
-                data_dir: args.data_dir.clone(),
-                roles: None,
-            };
-            let status = serve::config_refused(&sources, &mut switched);
-            logging::event_log::report_early(
-                &args.name,
-                &format!(
-                    "tenko service {}: the configuration {} cannot be used: {error}
-{}",
-                    args.name,
-                    args.config.display(),
-                    String::from_utf8_lossy(&switched).trim_end()
-                ),
-            );
-            return status;
-        }
+        Err(error) => return config_failed(args, &error),
     };
     // A restart request (exit status 12) relies on the failure actions below.
     crate::upgrade::restart::set_windows_service();

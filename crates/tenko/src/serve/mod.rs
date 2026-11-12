@@ -418,7 +418,8 @@ pub fn config_refused(sources: &config::Sources, err: &mut impl Write) -> u8 {
         Some(previous) => {
             let _ = writeln!(
                 err,
-                "tenko serve: version {own} was just installed and does not accept the                  configuration; switched back to {previous}, which exit status 12 starts"
+                "tenko serve: version {own} was just installed and does not accept the \
+                 configuration; switched back to {previous}, which exit status 12 starts"
             );
             exit::RESTART
         }
@@ -2546,13 +2547,7 @@ mod tests {
         )
         .expect("record");
         let file = data.path().join("tenko.toml");
-        std::fs::write(
-            &file,
-            "[cluster]
-renamed_ttl_secs = 600
-",
-        )
-        .expect("file");
+        std::fs::write(&file, "[cluster]\nrenamed_ttl_secs = 600\n").expect("file");
         let args = ServeArgs {
             config: Some(file),
             data_dir: Some(data.path().to_path_buf()),

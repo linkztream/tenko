@@ -646,10 +646,7 @@ mod tests {
         fs::write(
             &file,
             format!(
-                "data_dir = {:?}
-[cluster]
-renamed_key = 1
-",
+                "data_dir = {:?}\n[cluster]\nrenamed_key = 1\n",
                 data.display().to_string()
             ),
         )
