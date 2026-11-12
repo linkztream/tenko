@@ -142,13 +142,17 @@ fn layout_command(args: &LayoutArgs, out: &mut impl Write, err: &mut impl Write)
     };
     // The layout needs only the data directory. The unit's start-up step runs the installer's
     // binary on the operator's file, which may hold a key that only a newer version knows:
-    // then the data directory is read without the checks, and the server's own start
-    // decides about the file.
+    // under a supervisor (the unit sets `TENKO_SUPERVISED=1`) the data directory is then
+    // read without the file and the server's own start decides about the file, which can
+    // switch back. Run by hand, a file that does not load stays an error (exit 3).
     let data_dir =
         match config::load(&sources, std::env::vars()).and_then(|loaded| loaded.config.resolve()) {
             Ok(resolved) => resolved.data_dir,
             Err(error) => {
-                let Some(data_dir) = probation::data_dir_of(&sources) else {
+                let found = restart::supervised()
+                    .then(|| probation::data_dir_of(&sources))
+                    .flatten();
+                let Some(data_dir) = found else {
                     let _ = writeln!(err, "tenko upgrade layout: {error}");
                     return exit::CONFIG;
                 };

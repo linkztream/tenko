@@ -32,7 +32,8 @@
 //! back to, a version that reads only the old name, and the unit's start-up step may run an
 //! older binary on the same file, so the file with the old name is the one every version
 //! reads. (That step, `tenko upgrade layout`, reads only the data directory from a file
-//! that does not load, from 0.0.12 on; the binaries of 0.0.11 and older refuse the file.)
+//! that does not load under a supervisor, from 0.0.12 on; the binaries of 0.0.11 and older
+//! refuse the file.)
 
 use std::{
     collections::BTreeMap,

@@ -273,21 +273,37 @@ fn ops_24_the_layout_is_created_and_a_second_run_changes_nothing() {
         .assert_stdout_contains("this binary runs from the layout (");
     assert_eq!(snapshot(&updates(&data_dir)), first, "nothing changed");
 
-    // A configuration that does not parse is a configuration error, not a failure.
+    // A configuration that does not parse is a configuration error, not a failure, when an
+    // operator runs the command.
     let broken = node.root().join("broken.toml");
     fs::write(&broken, "roles = 5\n").expect("a broken configuration");
-    let refused = run_tenko(
-        &[
-            "upgrade",
-            "layout",
-            "--config",
-            path_text(&broken),
-            "--data-dir",
-            path_text(&data_dir),
-        ],
-        &[],
+    let layout_with = |data_dir: &Path, env: &[(&str, &str)]| {
+        run_tenko(
+            &[
+                "upgrade",
+                "layout",
+                "--config",
+                path_text(&broken),
+                "--data-dir",
+                path_text(data_dir),
+            ],
+            env,
+        )
+    };
+    layout_with(&data_dir, &[]).assert_code(3);
+
+    // Under a supervisor, as the unit's start-up step, the layout is made in the data
+    // directory found without the file, with a warning, so that a key only a newer version
+    // knows does not stop the start: the server's own start decides about the file.
+    let supervised = node.root().join("supervised");
+    layout_with(&supervised, &[("TENKO_SUPERVISED", "1")])
+        .assert_code(0)
+        .assert_stderr_contains("config.parse")
+        .assert_stderr_contains("is used for the layout");
+    assert!(
+        current_binary(&supervised).is_file(),
+        "the layout is made there"
     );
-    refused.assert_code(3);
 }
 
 /// OPS-24 (E10): a server started from `current/tenko`, as systemd and the Windows service
@@ -433,6 +449,22 @@ fn ops_23_the_check_of_a_current_directory_exits_0_and_a_running_server_makes_it
     );
 }
 
+/// `tenko upgrade check --json` of `data_dir` with the work copy under `work_dir`.
+fn check_with_work_dir(data_dir: &Path, work_dir: &Path) -> Outcome {
+    run_tenko(
+        &[
+            "upgrade",
+            "check",
+            "--data-dir",
+            path_text(data_dir),
+            "--work-dir",
+            path_text(work_dir),
+            "--json",
+        ],
+        &[],
+    )
+}
+
 /// OPS-23: a directory of an older format needs a migration: exit status 10, the verdict
 /// `migration_needed` with the steps of the dry run, and the directory is not touched (the
 /// real start migrates it after copying the store aside).
@@ -502,23 +534,26 @@ fn ops_23_the_check_of_an_older_format_exits_10_and_changes_nothing() {
 
     // A script that gates an upgrade treats 0 and 10 as go: the work directory can be moved.
     let elsewhere = node.root().join("scratch");
-    let moved = run_tenko(
-        &[
-            "upgrade",
-            "check",
-            "--data-dir",
-            path_text(&node.data_dir()),
-            "--work-dir",
-            path_text(&elsewhere),
-            "--json",
-        ],
-        &[],
-    );
+    let moved = check_with_work_dir(&node.data_dir(), &elsewhere);
     moved.assert_code(10);
     assert_eq!(moved.json()["verdict"], "migration_needed");
     assert!(
         !elsewhere.exists(),
-        "the work copy is removed from `--work-dir`, too"
+        "a `--work-dir` that did not exist is created for the work copy and removed with it"
+    );
+    // A `--work-dir` that exists stays, with what it held; only the work copy inside goes.
+    std::fs::create_dir_all(&elsewhere).expect("scratch");
+    std::fs::write(elsewhere.join("keep.txt"), b"the operator's").expect("file");
+    let kept = check_with_work_dir(&node.data_dir(), &elsewhere);
+    kept.assert_code(10);
+    let left: Vec<_> = std::fs::read_dir(&elsewhere)
+        .expect("the named directory stays")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect();
+    assert_eq!(
+        left,
+        vec![std::ffi::OsString::from("keep.txt")],
+        "an existing `--work-dir` holds only what it held before: the work copy is gone"
     );
 }
 

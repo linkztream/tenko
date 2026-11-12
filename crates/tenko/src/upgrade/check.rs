@@ -334,6 +334,9 @@ pub async fn check(data_dir: &Path, options: &Options, registry: Registry<'_>) -
             report.legacy = legacy;
         }
     }
+    // A directory the operator named that does not exist yet is created by the check and
+    // removed again when nothing else is in it; one that existed stays.
+    let created = options.work_dir.clone().filter(|named| !named.exists());
     let (dir, cleanup) = if options.disposable {
         (store_dir.clone(), None)
     } else {
@@ -350,11 +353,12 @@ pub async fn check(data_dir: &Path, options: &Options, registry: Registry<'_>) -
             work
         };
         if let Err(error) = datadir::check_space(&work, &store_dir) {
+            remove_work(&work, created.as_deref());
             return report.problem(Verdict::Failed, error.code(), error.to_string());
         }
         let copy = work.join("store");
         if let Err(error) = format::copy_closed_store(&store_dir, &copy) {
-            let _ = std::fs::remove_dir_all(&work);
+            remove_work(&work, created.as_deref());
             let verdict = match error {
                 FormatError::InvalidMarker { .. } => Verdict::Refused,
                 _ => Verdict::Failed,
@@ -364,10 +368,8 @@ pub async fn check(data_dir: &Path, options: &Options, registry: Registry<'_>) -
         (copy, Some(work))
     };
     let report = dry_run(report, &dir, plan, options.node, registry).await;
-    if let Some(work) = cleanup
-        && let Err(error) = std::fs::remove_dir_all(&work)
-    {
-        tracing::warn!(%error, dir = %work.display(), "cannot remove the work copy");
+    if let Some(work) = cleanup {
+        remove_work(&work, created.as_deref());
     }
     // The start that migrates copies the store first; it needs the room for that copy.
     if report.verdict == Verdict::MigrationNeeded
@@ -376,6 +378,19 @@ pub async fn check(data_dir: &Path, options: &Options, registry: Registry<'_>) -
         return report.problem(Verdict::Failed, error.code(), error.to_string());
     }
     report
+}
+
+/// Removes the work copy, and the named directory `created` that the check made for it.
+fn remove_work(work: &Path, created: Option<&Path>) {
+    if let Err(error) = std::fs::remove_dir_all(work)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(%error, dir = %work.display(), "cannot remove the work copy");
+    }
+    if let Some(created) = created {
+        // Removes only an empty directory: anything put into it meanwhile stays, with it.
+        let _ = std::fs::remove_dir(created);
+    }
 }
 
 /// Opens the store in `dir` and runs the migrations there.
