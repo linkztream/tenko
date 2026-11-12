@@ -1,0 +1,6 @@
+2001:db8::1 dev eth0 lladdr 00:00:5e:00:53:01 router REACHABLE
+2001:db8::20 dev eth0 lladdr 00:00:5e:00:53:20 STALE
+2001:db8::21 dev eth0  FAILED
+2001:db8::22 dev eth0 lladdr 00:00:5e:00:53:22 INCOMPLETE
+fe80::1 dev eth0 lladdr 00:00:5e:00:53:01 router DELAY
+2001:db8::23 dev eth0 lladdr 33:33:00:00:00:01 PERMANENT

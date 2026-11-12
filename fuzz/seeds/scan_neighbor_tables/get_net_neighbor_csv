@@ -1,0 +1,8 @@
+﻿"IPAddress","LinkLayerAddress","State"
+"192.0.2.1","00-00-5E-00-53-01","Reachable"
+"192.0.2.30","00-00-5E-00-53-30","Stale"
+"192.0.2.31","00-00-00-00-00-00","Unreachable"
+"192.0.2.32","","Incomplete"
+"192.0.2.255","FF-FF-FF-FF-FF-FF","Permanent"
+"224.0.0.22","01-00-5E-00-00-16","Permanent"
+"fe80::1%12","00-00-5E-00-53-01","Reachable"
