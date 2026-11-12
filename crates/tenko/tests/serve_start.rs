@@ -11,6 +11,7 @@ use serve_support::{
     Kek, Node, READY_PATH, STEP_COUNT, STEPS, STOP_TIMEOUT, Transport, VERSION, assert_in_order,
     lines_with, step_marker, step_millis,
 };
+use tenko_core::testing::free_port;
 
 /// The log lines that announce the steps `from..=to` (1-based), each with its number.
 fn step_ready_lines(from: usize, to: usize) -> Vec<String> {
@@ -213,7 +214,7 @@ fn internal_ca_mode_serves_https_with_the_published_ca_root() {
 
 #[test]
 fn roles_all_runs_the_controller_dns_dhcp_and_probe_roles() {
-    let port = serve_support::free_port();
+    let port = free_port().release();
     let mut node = Node::new()
         .with_args(&["--roles", "all"])
         .with_config(&format!(

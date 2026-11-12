@@ -20,6 +20,7 @@ use std::{
 
 use cluster_support::{ClusterLab, Echo, Fault, Relay, learners, voters};
 use serde_json::json;
+use tenko_core::testing::wait_until;
 
 /// The whole grow scenario, including the build-up of the lab.
 const GROW_LIMIT: Duration = Duration::from_secs(170);
@@ -145,10 +146,9 @@ fn a_cut_relay_closes_a_streaming_connection_and_refuses_new_ones() {
         thread::spawn(move || write_until_failure(stream, Duration::from_secs(20)))
     };
     // Cut only once echoes have come back, however loaded the machine is.
-    let flowing = Instant::now() + Duration::from_secs(15);
-    while echoed_so_far.load(Ordering::SeqCst) == 0 && Instant::now() < flowing {
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_until("the first echo", || {
+        echoed_so_far.load(Ordering::SeqCst) > 0
+    });
     assert_eq!(relay.open(), 1, "the streaming connection is open");
     let cut = Instant::now();
     relay.set(Fault::Cut);

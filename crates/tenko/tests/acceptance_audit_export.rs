@@ -30,12 +30,13 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use serde_json::{Value, json};
 use serve_support::{Node, Outcome, api::Api, run_tenko, wait_for_setup_token};
 use sha2::{Digest as _, Sha256};
+use tenko_core::testing::wait_until_within;
 
 /// How long a delivery may take before the test gives up and prints the diagnostics.
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -115,28 +116,6 @@ fn live_records(api: &Api) -> BTreeMap<u64, Value> {
             Some(next) => from = next,
             None => return records,
         }
-    }
-}
-
-/// Polls `check` until it returns `Some`, failing with `what` and `diagnostics` after
-/// [`DELIVERY_TIMEOUT`].
-#[track_caller]
-fn wait_for<T>(
-    what: &str,
-    diagnostics: impl Fn() -> String,
-    mut check: impl FnMut() -> Option<T>,
-) -> T {
-    let deadline = Instant::now() + DELIVERY_TIMEOUT;
-    loop {
-        if let Some(found) = check() {
-            return found;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for {what}\n{}",
-            diagnostics()
-        );
-        thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -436,16 +415,16 @@ fn iam_18_a_syslog_tcp_sink_delivers_every_record_with_its_sequence_number_and_c
     assert!(head_seq >= 6, "the changes made records: head {head_seq}");
 
     let diagnostics = || format!("{}\n{}", receiver.diagnostics(), server.diagnostics());
-    wait_for(
+    wait_until_within(
         "the record at the head of the log at the receiver",
-        diagnostics,
+        DELIVERY_TIMEOUT,
         || {
-            receiver
+            let arrived = receiver
                 .messages()
                 .iter()
                 .map(|raw| Syslog::parse(raw))
-                .any(|m| m.msgid == "audit" && m.seq() >= head_seq)
-                .then_some(())
+                .any(|m| m.msgid == "audit" && m.seq() >= head_seq);
+            if arrived { Ok(()) } else { Err(diagnostics()) }
         },
     );
 
@@ -570,12 +549,16 @@ fn iam_18_a_syslog_tcp_sink_delivers_every_record_with_its_sequence_number_and_c
     );
 
     // The status of the sink catches up with the log.
-    wait_for(
+    wait_until_within(
         "the sink status to reach the head",
-        || api.get("/settings/audit-export").text,
+        DELIVERY_TIMEOUT,
         || {
             let status = sink_status(&api);
-            (status["delivered"]["seq"].as_u64() >= Some(head_seq)).then_some(())
+            if status["delivered"]["seq"].as_u64() >= Some(head_seq) {
+                Ok(())
+            } else {
+                Err(api.get("/settings/audit-export").text)
+            }
         },
     );
     let status = sink_status(&api);
@@ -629,11 +612,17 @@ fn iam_18_a_syslog_udp_sink_sends_cef_with_the_sequence_number_and_hash() {
         }
         found
     };
-    wait_for("the last record at the UDP receiver", diagnostics, || {
-        cef_seqs(&receiver.messages())
-            .contains_key(&head_seq)
-            .then_some(())
-    });
+    wait_until_within(
+        "the last record at the UDP receiver",
+        DELIVERY_TIMEOUT,
+        || {
+            if cef_seqs(&receiver.messages()).contains_key(&head_seq) {
+                Ok(())
+            } else {
+                Err(diagnostics())
+            }
+        },
+    );
 
     let live = live_records(&api);
     let arrived = cef_seqs(&receiver.messages());
@@ -688,21 +677,18 @@ fn extension_value(cef: &str, key: &str) -> String {
 #[track_caller]
 fn wait_for_sink_current(api: &Api, server: &serve_support::Proc) {
     let (head_seq, _) = live_head(api);
-    wait_for(
-        "the file sink to be current",
-        || {
-            format!(
+    wait_until_within("the file sink to be current", DELIVERY_TIMEOUT, || {
+        let status = sink_status(api);
+        if status["delivered"]["seq"].as_u64() >= Some(head_seq) && status["lag"] == 0 {
+            Ok(())
+        } else {
+            Err(format!(
                 "{}\n{}",
                 api.get("/settings/audit-export").text,
                 server.diagnostics()
-            )
-        },
-        || {
-            let status = sink_status(api);
-            (status["delivered"]["seq"].as_u64() >= Some(head_seq) && status["lag"] == 0)
-                .then_some(())
-        },
-    );
+            ))
+        }
+    });
 }
 
 /// `tenko audit verify --file` on `path`, as JSON.

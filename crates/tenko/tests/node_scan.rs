@@ -13,12 +13,13 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use serde_json::Value;
-use serve_support::{Node, Outcome, Proc, Transport, api::Api, free_port, run, tenko};
+use serve_support::{Node, Outcome, Proc, Transport, api::Api, run, tenko};
 use tempfile::TempDir;
+use tenko_core::testing::{free_port, wait_until_within};
 
 /// How long a node may take to connect or to deliver.
 const WAIT: Duration = Duration::from_secs(90);
@@ -238,7 +239,7 @@ struct Controller {
 
 impl Controller {
     fn start() -> Self {
-        let cluster_port = free_port();
+        let cluster_port = free_port().release();
         let mut node = Node::new()
             .with_transport(Transport::InternalCa)
             .with_config(&format!(
@@ -285,17 +286,16 @@ impl Controller {
     }
 }
 
+/// Waits until `check` holds; a timeout shows the output of `server`.
 #[track_caller]
-fn wait_until(what: &str, mut check: impl FnMut() -> bool, diagnostics: impl Fn() -> String) {
-    let deadline = Instant::now() + WAIT;
-    while !check() {
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for {what}\n{}",
-            diagnostics()
-        );
-        thread::sleep(Duration::from_millis(200));
-    }
+fn wait_for_state(server: &Proc, what: &str, mut check: impl FnMut() -> bool) {
+    wait_until_within(what, WAIT, || {
+        if check() {
+            Ok(())
+        } else {
+            Err(server.diagnostics())
+        }
+    });
 }
 
 fn exists(path: &Path) -> bool {
@@ -334,11 +334,7 @@ fn the_probe_process_runs_the_scanner_and_an_on_demand_batch_reaches_the_control
     node.wait_stderr_line(WAIT, |line| line.contains("connected to the controller"))
         .unwrap_or_else(|| panic!("the node did not connect\n{}", node.diagnostics()));
     let status_file = site.data_dir().join("scan").join("status.json");
-    wait_until(
-        "the scan status file",
-        || exists(&status_file),
-        || node.diagnostics(),
-    );
+    wait_for_state(&node, "the scan status file", || exists(&status_file));
     let status = site.scan(&["status", "--json"]);
     status.assert_code(0);
     let body = status.json();
@@ -349,17 +345,13 @@ fn the_probe_process_runs_the_scanner_and_an_on_demand_batch_reaches_the_control
         .assert_code(0)
         .assert_stdout_contains("queued for the controller");
     let api = controller.api();
-    wait_until(
-        "the services fact at the controller",
-        || {
-            let reply = api.get("/observations?source=probe:1001:tcp_connect");
-            reply.status == 200
-                && reply.json()["items"]
-                    .as_array()
-                    .is_some_and(|items| !items.is_empty())
-        },
-        || node.diagnostics(),
-    );
+    wait_for_state(&node, "the services fact at the controller", || {
+        let reply = api.get("/observations?source=probe:1001:tcp_connect");
+        reply.status == 200
+            && reply.json()["items"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+    });
     let facts = api
         .get("/observations?source=probe:1001:tcp_connect")
         .expect(200);
@@ -398,11 +390,7 @@ fn a_controller_with_the_probe_role_runs_the_scanner_in_process() {
         })
         .unwrap_or_else(|| panic!("the scanner did not start\n{}", server.diagnostics()));
     let status_file = node.data_dir().join("scan").join("status.json");
-    wait_until(
-        "the scan status file",
-        || exists(&status_file),
-        || server.diagnostics(),
-    );
+    wait_for_state(&server, "the scan status file", || exists(&status_file));
     let status: Value =
         serde_json::from_slice(&std::fs::read(&status_file).expect("read")).expect("status");
     assert_eq!(status["prefixes"], serde_json::json!(["127.0.0.1/32"]));

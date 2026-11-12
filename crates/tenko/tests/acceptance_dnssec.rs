@@ -27,7 +27,8 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use serve_support::{Node, api::Api, free_port};
+use serve_support::{Node, api::Api};
+use tenko_core::testing::{free_port, wait_until};
 use tenko_dns::wire;
 
 const ZONE: &str = "example.test";
@@ -184,18 +185,14 @@ fn answer_types(message: &[u8]) -> Vec<u16> {
 /// `GET /dns/zones/{id}/dnssec` until `wanted` accepts it.
 #[track_caller]
 fn wait_status(api: &Api, zone: &str, wanted: impl Fn(&Value) -> bool) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
+    wait_until("the signer to reach the wanted state", || {
         let status = api.get(&format!("/dns/zones/{zone}/dnssec")).expect(200);
         if wanted(&status) {
-            return status;
+            Ok(status)
+        } else {
+            Err(status)
         }
-        assert!(
-            Instant::now() < deadline,
-            "the signer did not get there: {status}"
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    })
 }
 
 fn zsk_tags(status: &Value, state: &str) -> Vec<u64> {
@@ -244,7 +241,7 @@ fn verify_export(docker: &[String], api: &Api, zone: &str) {
 #[allow(clippy::too_many_lines, reason = "one scenario, read top to bottom")]
 fn a_signed_zone_validates_with_nsec_and_nsec3_and_through_a_zsk_rollover() {
     let docker = docker();
-    let port = free_port();
+    let port = free_port().release();
     let dns: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
     let mut node = Node::new()
         .with_args(&["--roles", "controller,dns"])
@@ -310,18 +307,14 @@ fn a_signed_zone_validates_with_nsec_and_nsec3_and_through_a_zsk_rollover() {
         .assert_stdout_contains("DS records for the parent zone:")
         .assert_stdout_contains("example.test. IN DS ");
     // The answer path: RRSIGs with DO only.
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
+    wait_until("an RRSIG in the answer", || {
         let signed = answer_types(&ask_do(dns, "www.example.test", 1, true));
         if signed == [1, 46] {
-            break;
+            Ok(())
+        } else {
+            Err(signed)
         }
-        assert!(
-            Instant::now() < deadline,
-            "no RRSIG in the answer: {signed:?}"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    });
     assert_eq!(
         answer_types(&ask_do(dns, "www.example.test", 1, false)),
         [1]
@@ -344,19 +337,18 @@ fn a_signed_zone_validates_with_nsec_and_nsec3_and_through_a_zsk_rollover() {
         None,
     )
     .expect(200);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
+    wait_until("the NSEC3PARAM record", || {
         let records = api
             .get(&format!(
                 "/dns/zones/{zone_id}/records?origin=dnssec&type=NSEC3PARAM"
             ))
             .expect(200);
-        if !records["items"].as_array().is_none_or(Vec::is_empty) {
-            break;
+        if records["items"].as_array().is_none_or(Vec::is_empty) {
+            Err(records)
+        } else {
+            Ok(())
         }
-        assert!(Instant::now() < deadline, "no NSEC3PARAM: {records}");
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    });
     if let Some(docker) = &docker {
         eprintln!("NSEC3:");
         validate_all(docker, dns, &anchor);
@@ -426,20 +418,16 @@ fn a_signed_zone_validates_with_nsec_and_nsec3_and_through_a_zsk_rollover() {
     // Signing off removes the signer's rows.
     node.client(&["dns", "dnssec", "disable", ZONE])
         .assert_code(0);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
+    wait_until("the signer's rows to go", || {
         let rows = api
             .get(&format!("/dns/zones/{zone_id}/records?origin=dnssec"))
             .expect(200);
         if rows["items"].as_array().is_some_and(Vec::is_empty) {
-            break;
+            Ok(())
+        } else {
+            Err(rows)
         }
-        assert!(
-            Instant::now() < deadline,
-            "the signer's rows stayed: {rows}"
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    });
     assert_eq!(answer_types(&ask_do(dns, "www.example.test", 1, true)), [1]);
     server.stop().assert_graceful_shutdown();
 }

@@ -6,6 +6,7 @@ use std::sync::{
     atomic::{AtomicU32, AtomicU64, Ordering},
 };
 
+use tenko_core::testing::wait_until_async;
 use tenko_store::{
     MemStore,
     testing::{ClusterFixture, SimulatedCluster},
@@ -103,14 +104,6 @@ impl LeaderService for Panics {
     }
 }
 
-async fn until(what: &str, check: impl Fn() -> bool) {
-    let deadline = Instant::now() + WAIT;
-    while !check() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-}
-
 async fn epoch_of(store: &dyn Store) -> u64 {
     let view = store.read(ReadConsistency::Local).await.expect("a view");
     view.counter(&LEADER_EPOCH).expect("the counter")
@@ -135,7 +128,7 @@ async fn a_single_controller_takes_office_and_runs_every_service() {
     assert_eq!(registry.names(), ["test.first", "test.second"]);
     let view = LeaderView::default();
     let handle = spawn(Arc::clone(&store), &registry, view.clone(), None, quick());
-    until("both services run", || {
+    wait_until_async("both services run", async || {
         first.runs.load(Ordering::SeqCst) == 1 && second.runs.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -177,7 +170,7 @@ async fn a_service_that_gives_up_is_restarted_with_a_backoff() {
     registry.register(Arc::clone(&panics) as Arc<dyn LeaderService>);
     let view = LeaderView::default();
     let handle = spawn(Arc::clone(&store), &registry, view.clone(), None, quick());
-    until("the flaky service runs for good", || {
+    wait_until_async("the flaky service runs for good", async || {
         flaky.runs.load(Ordering::SeqCst) == 4
             && state_of(&view, "test.flaky").state == LeaderServiceState::Running
     })
@@ -185,7 +178,7 @@ async fn a_service_that_gives_up_is_restarted_with_a_backoff() {
     let status = state_of(&view, "test.flaky");
     assert_eq!(status.restarts, 3);
     assert_eq!(status.last_error.as_deref(), Some("failure 2"));
-    until("the panicking service runs again", || {
+    wait_until_async("the panicking service runs again", async || {
         panics.runs.load(Ordering::SeqCst) == 2
     })
     .await;
@@ -207,7 +200,7 @@ async fn a_service_registered_after_the_start_does_not_run() {
     let handle = spawn(Arc::clone(&store), &registry, view.clone(), None, quick());
     let late = Recorder::new("test.late");
     registry.register(Arc::clone(&late) as Arc<dyn LeaderService>);
-    until("the early service runs", || {
+    wait_until_async("the early service runs", async || {
         early.runs.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -249,7 +242,7 @@ async fn leadership_moves_the_services_and_fences_the_old_epoch() {
         quick(),
     );
 
-    until("member 1 runs the service", || {
+    wait_until_async("member 1 runs the service", async || {
         on_one.runs.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -262,11 +255,11 @@ async fn leadership_moves_the_services_and_fences_the_old_epoch() {
     );
 
     cluster.change_leader().await;
-    until("member 2 runs the service", || {
+    wait_until_async("member 2 runs the service", async || {
         on_two.runs.load(Ordering::SeqCst) == 1
     })
     .await;
-    until("member 1 stopped it", || {
+    wait_until_async("member 1 stopped it", async || {
         on_one.stops.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -327,13 +320,16 @@ async fn a_leader_whose_epoch_moved_takes_office_again() {
     registry.register(Arc::clone(&fenced) as Arc<dyn LeaderService>);
     let view = LeaderView::default();
     let handle = spawn(Arc::clone(&store), &registry, view.clone(), None, quick());
-    until("the service runs with epoch 1", || {
+    wait_until_async("the service runs with epoch 1", async || {
         view.status().epoch == Some(1)
     })
     .await;
     // Another writer bumps the epoch, as a forwarded bump of a deposed leader would.
     take_office(store.as_ref()).await.expect("a bump");
-    until("a new term with epoch 3", || view.status().epoch == Some(3)).await;
+    wait_until_async("a new term with epoch 3", async || {
+        view.status().epoch == Some(3)
+    })
+    .await;
     let epochs = fenced
         .epochs
         .lock()

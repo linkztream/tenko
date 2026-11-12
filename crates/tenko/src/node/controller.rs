@@ -879,7 +879,7 @@ mod tests {
         model::{ClusterHealth, EnrollRequest, MismatchRecord, NewEnrollment, NodeMismatch},
         version::VersionMismatch,
     };
-    use tenko_core::Revision;
+    use tenko_core::{Revision, testing::wait_until_async};
 
     use super::*;
 
@@ -1063,11 +1063,7 @@ mod tests {
     }
 
     async fn wait(what: &str, check: impl Fn() -> bool) {
-        let deadline = tokio::time::Instant::now() + PORT_WAIT;
-        while !check() {
-            assert!(tokio::time::Instant::now() < deadline, "timed out: {what}");
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        wait_until_async(what, async || check()).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

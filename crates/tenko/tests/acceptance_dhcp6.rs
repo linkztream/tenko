@@ -32,6 +32,7 @@ use std::{
 
 use serde_json::{Value, json};
 use serve_support::{Node, api::Api, wait_for_setup_token};
+use tenko_core::testing::free_port;
 use tenko_dhcp::{
     v4,
     v6::{Message, MessageBuilder, MessageType, code},
@@ -43,14 +44,6 @@ const LINK: Ipv6Addr = Ipv6Addr::new(0x2001, 0xdb8, 0x180, 0, 0, 0, 0, 1);
 const RESERVED: &str = "2001:db8:180::50";
 /// The documentation MAC (RFC 7042) of the dual-stack client.
 const DUAL_MAC: [u8; 6] = [0x00, 0x00, 0x5e, 0x00, 0x53, 0x42];
-
-fn udp_port() -> u16 {
-    UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .expect("bind")
-        .local_addr()
-        .expect("address")
-        .port()
-}
 
 fn udp6_port() -> u16 {
     UdpSocket::bind("[::1]:0")
@@ -351,8 +344,8 @@ fn lease_of<'a>(items: &'a [Value], addr: &str) -> &'a Value {
 #[test]
 #[allow(clippy::too_many_lines, reason = "one scenario, read top to bottom")]
 fn e29_dhcp_09_ia_na_ia_pd_a_duid_reservation_and_the_rfc_6939_peer_through_the_binary() {
-    let port4 = udp_port();
-    let relay4 = udp_port();
+    let port4 = free_port().release();
+    let relay4 = free_port().release();
     let port6 = udp6_port();
     let relay6_port = udp6_port();
     let relay = Relay6::new(relay6_port, port6);

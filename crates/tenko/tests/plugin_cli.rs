@@ -9,6 +9,7 @@ use std::{process::Command, time::Duration};
 
 use serde_json::json;
 use serve_support::{Node, api::Api, wait_for_setup_token};
+use tenko_core::testing::wait_until;
 
 fn tenko() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tenko"));
@@ -89,19 +90,18 @@ fn a_server_runs_a_sample_connector_created_through_the_api() {
         .expect(201);
     let id = created["id"].as_str().expect("id").to_owned();
 
-    let mut state = String::new();
-    for _ in 0..100 {
+    wait_until("the connector process to run", || {
         let view = api.get(&format!("/connectors/{id}")).ok();
-        state = view["health"]["process"]["state"]
+        let state = view["health"]["process"]["state"]
             .as_str()
             .unwrap_or_default()
             .to_owned();
         if state == "running" {
-            break;
+            Ok(())
+        } else {
+            Err(state)
         }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    assert_eq!(state, "running");
+    });
 
     let run = api
         .post(&format!("/connectors/{id}/run"), &json!({}))

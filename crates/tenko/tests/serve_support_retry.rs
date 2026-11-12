@@ -5,9 +5,9 @@
 
 mod serve_support;
 
-use std::net::{TcpListener, UdpSocket};
+use std::net::TcpListener;
 
-use serve_support::{Outcome, START_ATTEMPTS, free_port, is_port_race, retry_on_bind};
+use serve_support::{Outcome, START_ATTEMPTS, is_port_race, retry_on_bind};
 
 /// What a server that exited during start leaves behind.
 fn failed(stderr: &str) -> Outcome {
@@ -116,21 +116,4 @@ fn a_real_server_whose_port_is_taken_starts_on_another_one() {
     assert_eq!(node.get(serve_support::READY_PATH).expect("ready").0, 200);
     server.stop().assert_graceful_shutdown();
     drop(holder);
-}
-
-#[test]
-fn free_ports_are_distinct_below_the_ephemeral_ranges_and_bindable() {
-    let ports: Vec<u16> = (0..200).map(|_| free_port()).collect();
-    let mut sorted = ports.clone();
-    sorted.sort_unstable();
-    sorted.dedup();
-    assert_eq!(sorted.len(), ports.len(), "a port was handed out twice");
-    for port in ports {
-        assert!(
-            (20_000..32_768).contains(&port),
-            "{port} is in an ephemeral range"
-        );
-        TcpListener::bind(("127.0.0.1", port)).expect("a TCP port that can be bound");
-        UdpSocket::bind(("127.0.0.1", port)).expect("a UDP port that can be bound");
-    }
 }

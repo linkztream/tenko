@@ -203,21 +203,13 @@ async fn rotate_open(
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
-    use tenko_core::secret::SecretClass;
+    use tenko_core::{secret::SecretClass, testing::TempDir};
     use tenko_store::{ReadConsistency, Store, WriteBatch};
     use tenko_vault::{SecretBytes, SecretPurpose, SecretSpec, Vault, VaultStart, tables};
 
     use super::*;
-
-    struct Scratch(PathBuf);
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn resolved(root: &Path) -> config::Resolved {
         std::fs::create_dir_all(root.join("secrets")).expect("dirs");
@@ -257,11 +249,8 @@ path = '{}'
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_file_provider_rotates_into_the_generation_directory() {
-        let scratch = Scratch(std::env::temp_dir().join(format!(
-            "tenko-kek-rotate-{}",
-            tenko_core::SecretId::generate()
-        )));
-        let resolved = resolved(&scratch.0);
+        let scratch = TempDir::new("kek-rotate");
+        let resolved = resolved(scratch.path());
         let policy = options(&resolved);
         let ring = resolved
             .kek

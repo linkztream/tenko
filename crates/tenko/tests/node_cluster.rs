@@ -12,13 +12,13 @@ mod serve_support;
 use std::{
     path::{Path, PathBuf},
     process::Command,
-    thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use serde_json::Value;
-use serve_support::{Node, Outcome, Proc, Transport, api::Api, free_port, run, tenko};
+use serve_support::{Node, Outcome, Proc, Transport, api::Api, run, tenko};
 use tempfile::TempDir;
+use tenko_core::testing::{free_port, wait_until_within};
 
 /// How long a node may take to connect, to deliver or to notice something.
 const WAIT: Duration = Duration::from_secs(90);
@@ -61,7 +61,7 @@ struct Controller {
 impl Controller {
     /// Starts it, completes setup and signs the command-line client in.
     fn start() -> Self {
-        let cluster_port = free_port();
+        let cluster_port = free_port().release();
         let mut node = Node::new()
             .with_transport(Transport::InternalCa)
             .with_config(&format!(
@@ -201,18 +201,16 @@ impl Probe {
     }
 }
 
-/// Polls `check` until it holds.
+/// Waits until `check` holds; a timeout shows the output of `server`.
 #[track_caller]
-fn wait_until(what: &str, mut check: impl FnMut() -> bool, diagnostics: impl Fn() -> String) {
-    let deadline = Instant::now() + WAIT;
-    while !check() {
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for {what}\n{}",
-            diagnostics()
-        );
-        thread::sleep(Duration::from_millis(200));
-    }
+fn wait_for_state(server: &Proc, what: &str, mut check: impl FnMut() -> bool) {
+    wait_until_within(what, WAIT, || {
+        if check() {
+            Ok(())
+        } else {
+            Err(server.diagnostics())
+        }
+    });
 }
 
 /// The facts of a probe source at the controller.
@@ -272,11 +270,9 @@ fn a_probe_enrolls_connects_and_delivers_observations() {
         .unwrap_or_else(|| panic!("the node did not connect\n{}", node.diagnostics()));
 
     let api = controller.api();
-    wait_until(
-        "the controller to see the node connected",
-        || node_view(&api, 1001).1["connected"] == true,
-        || node.diagnostics(),
-    );
+    wait_for_state(&node, "the controller to see the node connected", || {
+        node_view(&api, 1001).1["connected"] == true
+    });
     let (_, view) = node_view(&api, 1001);
     assert_eq!(view["name"], "probe-dmz");
     assert_eq!(view["roles"], serde_json::json!(["probe"]));
@@ -285,13 +281,13 @@ fn a_probe_enrolls_connects_and_delivers_observations() {
     let list = api.get("/nodes").expect(200);
     assert_eq!(list["items"].as_array().map(Vec::len), Some(1));
     // The summary of the status is refreshed every few seconds.
-    wait_until(
+    wait_for_state(
+        &node,
         "the status to count the node and its connection",
         || {
             let status = api.get("/system/status").expect(200);
             status["cluster"]["nodes"] == 1 && status["cluster"]["connected"] == 1
         },
-        || node.diagnostics(),
     );
     let status = api.get("/system/status").expect(200);
     assert_eq!(
@@ -307,11 +303,9 @@ fn a_probe_enrolls_connects_and_delivers_observations() {
         .assert_stdout_contains("node process: connected");
 
     probe.inject().assert_code(0);
-    wait_until(
-        "the batch to reach the reconciler",
-        || facts(&api, 1001).len() == 2,
-        || node.diagnostics(),
-    );
+    wait_for_state(&node, "the batch to reach the reconciler", || {
+        facts(&api, 1001).len() == 2
+    });
     for action in ["cluster.enrollment.create", "cluster.node.enroll"] {
         let audit = api.get(&format!("/audit?action={action}")).expect(200);
         assert!(
@@ -418,30 +412,20 @@ fn the_buffer_replays_after_the_controller_restarts() {
         .unwrap_or_else(|| panic!("the node did not connect\n{}", node.diagnostics()));
 
     controller.stop();
-    wait_until(
-        "the node to notice the outage",
-        || process_state(&probe) != "connected",
-        || node.diagnostics(),
-    );
+    wait_for_state(&node, "the node to notice the outage", || {
+        process_state(&probe) != "connected"
+    });
     probe.inject().assert_code(0);
-    wait_until(
-        "the batch to wait in the buffer",
-        || probe.status()["process"]["buffer"]["batches"] == 1,
-        || node.diagnostics(),
-    );
+    wait_for_state(&node, "the batch to wait in the buffer", || {
+        probe.status()["process"]["buffer"]["batches"] == 1
+    });
 
     controller.restart();
     let api = controller.api();
-    wait_until(
-        "the replay",
-        || facts(&api, 1001).len() == 2,
-        || node.diagnostics(),
-    );
-    wait_until(
-        "the buffer to empty",
-        || probe.status()["process"]["buffer"]["batches"] == 0,
-        || node.diagnostics(),
-    );
+    wait_for_state(&node, "the replay", || facts(&api, 1001).len() == 2);
+    wait_for_state(&node, "the buffer to empty", || {
+        probe.status()["process"]["buffer"]["batches"] == 0
+    });
     node.stop().assert_code(0);
     controller.stop();
 }
@@ -455,11 +439,9 @@ fn revocation_closes_the_connection() {
         .assert_code(0);
     let mut node = probe.serve();
     let api = controller.api();
-    wait_until(
-        "the node to connect",
-        || node_view(&api, 1001).1["connected"] == true,
-        || node.diagnostics(),
-    );
+    wait_for_state(&node, "the node to connect", || {
+        node_view(&api, 1001).1["connected"] == true
+    });
 
     api.delete("/nodes/1001", None).expect(204);
     node.wait_stderr_line(WAIT, |line| line.contains("cluster.node.revoked"))
@@ -469,11 +451,9 @@ fn revocation_closes_the_connection() {
                 node.diagnostics()
             )
         });
-    wait_until(
-        "the node process to report the revocation",
-        || process_state(&probe) == "revoked",
-        || node.diagnostics(),
-    );
+    wait_for_state(&node, "the node process to report the revocation", || {
+        process_state(&probe) == "revoked"
+    });
     assert_eq!(node_view(&api, 1001).0, 404);
     let checked = run(probe.command(&["node", "status", "--check"]), None);
     checked

@@ -32,7 +32,8 @@ use rustls::{
     pki_types::{CertificateDer, ServerName, pem::PemObject},
 };
 use serde_json::{Value, json};
-use serve_support::{Node, Proc, Transport, api::Api, free_port, wait_for_setup_token};
+use serve_support::{Node, Proc, Transport, api::Api, wait_for_setup_token};
+use tenko_core::testing::{free_port, wait_until};
 use tenko_dns::wire;
 
 const ZONE: &str = "example.test";
@@ -52,9 +53,9 @@ impl Ports {
     fn new() -> Self {
         let at = |port| SocketAddr::from((Ipv4Addr::LOCALHOST, port));
         Self {
-            dns: at(free_port()),
-            dot: at(free_port()),
-            doh: at(free_port()),
+            dns: at(free_port().release()),
+            dot: at(free_port().release()),
+            doh: at(free_port().release()),
         }
     }
 
@@ -303,16 +304,16 @@ fn zone(node: &Node, server: &Proc) -> Api {
 
 /// Asks over DoT until the record is served (the feed applies the batch first).
 fn served(dot: &mut Dot) -> Vec<u8> {
-    let deadline = Instant::now() + Duration::from_secs(3);
     let mut id = 100;
-    loop {
+    wait_until("the record to be served over DoT", || {
         id += 1;
         let answer = dot.ask(id, WWW);
-        if holds(&answer, [192, 0, 2, 10]) || Instant::now() > deadline {
-            return answer;
+        if holds(&answer, [192, 0, 2, 10]) {
+            Ok(answer)
+        } else {
+            Err(answer)
         }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    })
 }
 
 fn node_report(api: &Api) -> Value {
@@ -421,20 +422,10 @@ fn dot_and_doh_serve_the_imported_certificate_and_follow_its_reload() {
 
     // New files: within the watch interval (5 s) a new connection gets the new chain.
     let renewed = replace_imported(&node);
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let mut new = loop {
-        match Dot::connect(ports.dot, &renewed) {
-            Ok(dot) => break dot,
-            Err(error) => {
-                assert!(
-                    Instant::now() < deadline,
-                    "the new certificate was not served: {error}\n{}",
-                    server.diagnostics()
-                );
-                std::thread::sleep(Duration::from_millis(200));
-            }
-        }
-    };
+    let mut new = wait_until("the new certificate to be served", || {
+        Dot::connect(ports.dot, &renewed)
+            .map_err(|error| format!("{error}\n{}", server.diagnostics()))
+    });
     let reloaded = Instant::now();
     assert_ne!(new.leaf(), first_leaf);
     assert!(holds(&new.ask(1, WWW), [192, 0, 2, 10]));
@@ -529,14 +520,14 @@ fn behind_the_proxy_plain_dns_and_http_answer_with_the_client_address() {
     let mut server = start(&mut node, &ports);
     let api = zone(&node, &server);
 
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let answer = loop {
+    let answer = wait_until("the record to be served behind the proxy header", || {
         let answer = plain_dot(ports.dot, [192, 0, 2, 7], WWW);
-        if holds(&answer, [192, 0, 2, 10]) || Instant::now() > deadline {
-            break answer;
+        if holds(&answer, [192, 0, 2, 10]) {
+            Ok(answer)
+        } else {
+            Err(answer)
         }
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    });
     assert_eq!(header(&answer).rcode, NOERROR);
     assert!(holds(&answer, [192, 0, 2, 10]));
     let (status, body) = plain_doh(ports.doh, [198, 51, 100, 4], &query(0, WWW, TYPE_A));
@@ -554,8 +545,7 @@ fn behind_the_proxy_plain_dns_and_http_answer_with_the_client_address() {
     // The query log has the clients the proxy named.
     let status = api.get("/system/status").expect(200);
     let node_id = status["node"]["id"].as_u64().expect("a node id");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let clients = loop {
+    let clients = wait_until("both proxied clients in the query log", || {
         let log = api
             .get(&format!("/nodes/{node_id}/dns/log?limit=50&qname={WWW}"))
             .expect(200);
@@ -571,11 +561,8 @@ fn behind_the_proxy_plain_dns_and_http_answer_with_the_client_address() {
         let both = ["192.0.2.7", "198.51.100.4"]
             .iter()
             .all(|client| clients.iter().any(|seen| seen == client));
-        if both || Instant::now() > deadline {
-            break clients;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
+        if both { Ok(clients) } else { Err(clients) }
+    });
     for client in ["192.0.2.7", "198.51.100.4"] {
         assert!(clients.iter().any(|seen| seen == client), "{clients:?}");
     }

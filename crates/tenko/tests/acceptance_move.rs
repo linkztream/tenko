@@ -43,6 +43,7 @@ use std::{
 
 use serde_json::{Value, json};
 use serve_support::{Node, Proc, api::Api, wait_for_setup_token};
+use tenko_core::testing::{FreePort, free_port, wait_until};
 use tenko_dhcp::v4::{Message, MessageType};
 
 const SOURCE: &str = "192.0.2.0/24";
@@ -658,15 +659,6 @@ fn a_canceled_move_rolls_back_and_marks_the_host() {
 const SOURCE_NET: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 0);
 const TARGET_NET: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 0);
 
-/// A UDP port that was free a moment ago.
-fn udp_port() -> u16 {
-    UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .expect("bind")
-        .local_addr()
-        .expect("address")
-        .port()
-}
-
 /// One request the test relays for a device: `client` is the last octet of its MAC address
 /// (`00:00:5e:00:53:xx`), `link` the network of option 118 (RFC 3011) that selects the
 /// scope, as the gateway's relay would.
@@ -749,9 +741,9 @@ struct Relay {
 }
 
 impl Relay {
-    fn new(port: u16, server: u16) -> Self {
-        let socket =
-            UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).expect("bind the relay");
+    fn new(port: FreePort, server: u16) -> Self {
+        // The held socket itself: no other test can take the port in between.
+        let socket = port.into_udp();
         socket
             .set_read_timeout(Some(Duration::from_millis(300)))
             .expect("timeout");
@@ -807,14 +799,14 @@ impl Relay {
         link: Ipv4Addr,
         wanted: impl Fn(Ipv4Addr) -> bool,
     ) -> Ipv4Addr {
-        let start = Instant::now();
-        loop {
+        wait_until("the wanted offer", || {
             let offered = self.offer(client, link);
-            if wanted(offered) || start.elapsed() > Duration::from_secs(20) {
-                return offered;
+            if wanted(offered) {
+                Ok(offered)
+            } else {
+                Err(offered)
             }
-            std::thread::sleep(Duration::from_millis(500));
-        }
+        })
     }
 
     /// A DORA exchange on `link`; the address of the ACK.
@@ -868,9 +860,10 @@ struct DhcpLab {
 
 impl DhcpLab {
     fn new() -> Self {
-        let port = udp_port();
-        let relay_port = udp_port();
-        let relay = Relay::new(relay_port, port);
+        let port = free_port().release();
+        let relay_held = free_port();
+        let relay_port = relay_held.port();
+        let relay = Relay::new(relay_held, port);
         let mut node = Node::new()
             .with_args(&["--roles", "controller,dhcp"])
             .with_config(&format!(

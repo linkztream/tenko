@@ -20,9 +20,6 @@ use serve_support::{
 /// The rule that frames the first-run block on standard output.
 const RULE: &str = "========================================================================";
 
-/// How long the server may take to remove the token file once setup completed.
-const REMOVAL_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// Starts a server on the node, reads the token, stops the server and returns the token
 /// together with the complete output.
 fn start_read_and_stop(node: &mut Node) -> (String, serve_support::Outcome) {
@@ -259,10 +256,7 @@ fn the_file_goes_when_setup_completes_and_a_restart_writes_none() {
     node.setup(&token).assert_code(0).assert_stdout_contains(
         "setup complete: profile home, administrator admin, host name localhost",
     );
-    assert!(
-        node.wait_for_setup_token_removal(REMOVAL_TIMEOUT),
-        "the token file is still there after setup completed"
-    );
+    node.wait_for_setup_token_removal();
     // With the file gone the command says why there is no token.
     let gone = node.print_setup_token();
     gone.assert_code(1);
@@ -307,7 +301,7 @@ fn a_start_with_setup_closed_removes_a_leftover_file() {
     let mut server = node.start();
     let token = wait_for_setup_token(&server);
     node.setup(&token).assert_code(0);
-    assert!(node.wait_for_setup_token_removal(REMOVAL_TIMEOUT));
+    node.wait_for_setup_token_removal();
     server.stop().assert_graceful_shutdown();
 
     // A file from before setup completed (a crash between the two) must not survive.

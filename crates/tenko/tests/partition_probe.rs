@@ -25,6 +25,7 @@ use tenko_cluster::{
 };
 use tenko_core::{
     NodeId, RequestCtx, Revision, SystemComponent, Timestamp, VrfId, observe::ProbeMethod,
+    testing::wait_until_async,
 };
 use tenko_jobs::{EngineConfig, JobEngine};
 use tenko_store::{
@@ -251,17 +252,6 @@ fn agent(dir: &Path) -> Arc<Agent> {
     Agent::new(config).expect("agent")
 }
 
-async fn wait_for(what: &str, mut check: impl FnMut() -> bool) {
-    let deadline = tokio::time::Instant::now() + WAIT;
-    while !check() {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timed out waiting for {what}"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
 fn batch(n: u8) -> ProbeBatch {
     ProbeBatch {
         method: ProbeMethod::Arp,
@@ -307,17 +297,17 @@ async fn a_probe_whose_controller_lost_quorum_delivers_to_another_controller() {
     let agent = agent(dir.path());
     let (stop, stopped) = watch::channel(false);
     let task = tokio::spawn(Arc::clone(&agent).run(stopped));
-    wait_for("the node to connect", || {
+    wait_until_async("the node to connect", async || {
         agent.status().state == AgentState::Connected
     })
     .await;
 
     agent.push(&batch(10)).expect("push");
-    wait_for("the batch to reach the majority", || {
+    wait_until_async("the batch to reach the majority", async || {
         y.sink.batches().len() == 1
     })
     .await;
-    wait_for("the buffer to drain", || {
+    wait_until_async("the buffer to drain", async || {
         agent.outbox().stats().batches == 0
     })
     .await;
@@ -332,11 +322,11 @@ async fn a_probe_whose_controller_lost_quorum_delivers_to_another_controller() {
     for n in 11..=14 {
         agent.push(&batch(n)).expect("push");
     }
-    wait_for("the second batches to arrive", || {
+    wait_until_async("the second batches to arrive", async || {
         x.sink.batches().len() + y.sink.batches().len() == 5
     })
     .await;
-    wait_for("the buffer to drain again", || {
+    wait_until_async("the buffer to drain again", async || {
         agent.outbox().stats().batches == 0
     })
     .await;

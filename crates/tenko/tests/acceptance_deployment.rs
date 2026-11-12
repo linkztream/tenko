@@ -48,6 +48,7 @@ use serve_support::{
     CLIENT_TIMEOUT, Node, Outcome, Proc, READY_TIMEOUT, SHUTDOWN_LINES, VERSION, api::Api, run,
     run_tenko, wait_for_setup_token,
 };
+use tenko_core::testing::wait_until_within;
 
 /// The name of the binary inside the layout.
 fn binary_name() -> &'static str {
@@ -813,14 +814,12 @@ fn e10_the_upgrade_procedure_runs_stop_check_switch_start_verify() {
 
 /// The status of the readiness probe, polled for at most the ready timeout.
 fn loop_until_ready(node: &Node) -> u16 {
-    let deadline = std::time::Instant::now() + READY_TIMEOUT;
-    loop {
-        match node.get(serve_support::READY_PATH) {
-            Ok((200, _)) => return 200,
-            other if std::time::Instant::now() > deadline => {
-                panic!("the readiness probe never answered 200: {other:?}")
-            }
-            _ => std::thread::sleep(std::time::Duration::from_millis(100)),
-        }
-    }
+    wait_until_within(
+        "the readiness probe to answer 200",
+        READY_TIMEOUT,
+        || match node.get(serve_support::READY_PATH) {
+            Ok((200, _)) => Ok(200),
+            other => Err(other),
+        },
+    )
 }

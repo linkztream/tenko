@@ -30,6 +30,7 @@ use std::{
 
 use serde_json::{Value, json};
 use serve_support::{Node, api::Api, wait_for_setup_token};
+use tenko_core::testing::{FreePort, free_port, wait_until};
 use tenko_dhcp::v4::{Message, MessageType};
 
 const NET_A: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 0);
@@ -41,14 +42,6 @@ const REVERSE: &str = "2.0.192.in-addr.arpa";
 const WINDOWS: &[u8] = &[1, 3, 6, 15, 31, 33, 43, 44, 46, 47, 119, 121, 249, 252];
 /// Android 13's.
 const ANDROID: &[u8] = &[1, 3, 6, 15, 26, 28, 51, 58, 59, 43, 114, 108];
-
-fn udp_port() -> u16 {
-    UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .expect("bind")
-        .local_addr()
-        .expect("address")
-        .port()
-}
 
 /// One request the test relays for a device `00:00:5e:00:53:<client>` on `link`.
 #[derive(Debug, Clone, Copy)]
@@ -115,9 +108,9 @@ struct Relay {
 }
 
 impl Relay {
-    fn new(port: u16, server: u16) -> Self {
-        let socket =
-            UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).expect("bind the relay");
+    fn new(port: FreePort, server: u16) -> Self {
+        // The held socket itself: no other test can take the port in between.
+        let socket = port.into_udp();
         socket
             .set_read_timeout(Some(Duration::from_millis(300)))
             .expect("timeout");
@@ -259,9 +252,10 @@ fn row<'a>(page: &'a Value, kind: &str) -> &'a Value {
 #[test]
 #[allow(clippy::too_many_lines)] // One acceptance scenario: seed the four truths, read the view.
 fn e28_the_view_lists_every_seeded_case_and_a_lease_sets_the_os_of_an_unmanaged_host() {
-    let port = udp_port();
-    let relay_port = udp_port();
-    let relay = Relay::new(relay_port, port);
+    let port = free_port().release();
+    let relay_held = free_port();
+    let relay_port = relay_held.port();
+    let relay = Relay::new(relay_held, port);
     let mut node = Node::new()
         .with_args(&["--roles", "controller,dhcp"])
         .with_config(&format!(
@@ -358,16 +352,14 @@ fn e28_the_view_lists_every_seeded_case_and_a_lease_sets_the_os_of_an_unmanaged_
 
     // Leases through the role: the camera's reservation, the TV's and a stranger's pool
     // leases with the options of Android and Windows.
-    let camera = {
-        let start = Instant::now();
-        loop {
-            let got = relay.dora(0x61, NET_A, &[1, 3, 6, 15], None);
-            if got == Ipv4Addr::new(192, 0, 2, 10) || start.elapsed() > Duration::from_secs(20) {
-                break got;
-            }
-            std::thread::sleep(Duration::from_millis(500));
+    let camera = wait_until("the camera to get its reservation", || {
+        let got = relay.dora(0x61, NET_A, &[1, 3, 6, 15], None);
+        if got == Ipv4Addr::new(192, 0, 2, 10) {
+            Ok(got)
+        } else {
+            Err(got)
         }
-    };
+    });
     assert_eq!(
         camera,
         Ipv4Addr::new(192, 0, 2, 10),
@@ -386,16 +378,15 @@ fn e28_the_view_lists_every_seeded_case_and_a_lease_sets_the_os_of_an_unmanaged_
         )
         .expect(201),
     );
-    let start = Instant::now();
-    while api.get(&format!("/connectors/{connector}")).ok()["health"]["process"]["state"]
-        != "running"
-    {
-        assert!(
-            start.elapsed() < Duration::from_secs(30),
-            "the connector does not run"
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    wait_until("the connector to run", || {
+        let view = api.get(&format!("/connectors/{connector}")).ok();
+        let state = view["health"]["process"]["state"].clone();
+        if state == "running" {
+            Ok(())
+        } else {
+            Err(state)
+        }
+    });
     let run = api
         .post(&format!("/connectors/{connector}/run"), &json!({}))
         .expect(202);

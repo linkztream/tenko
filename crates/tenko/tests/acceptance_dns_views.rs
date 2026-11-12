@@ -25,16 +25,19 @@ use std::{
         Arc,
         atomic::{AtomicU8, AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use serde_json::{Value, json};
-use serve_support::{Node, api::Api, free_port, wait_for_setup_token};
+use serve_support::{Node, api::Api, wait_for_setup_token};
+use tenko_core::testing::{free_port, wait_until};
 use tenko_dns::wire;
 
 const ZONE: &str = "example.test";
 const WWW: &str = "www.example.test";
 const OUTSIDE: &str = "www.example.net";
+/// The ID of every query; the answer must carry it back.
+const QUERY_ID: u16 = 0x7e57;
 const TYPE_A: u16 = 1;
 const REFUSED: u8 = 5;
 
@@ -80,7 +83,7 @@ fn udp_from(local: Ipv4Addr, server: SocketAddr, name: &str) -> Vec<u8> {
     socket
         .set_read_timeout(Some(Duration::from_secs(3)))
         .expect("timeout");
-    let id = free_port();
+    let id = QUERY_ID;
     for _ in 0..3 {
         socket.send_to(&query(id, name), server).expect("send");
         let mut buf = vec![0u8; 65_535];
@@ -125,16 +128,21 @@ fn last_octet(answer: &[u8]) -> u8 {
     }
 }
 
-/// Asks until `done` holds for the answer or three seconds pass; returns the last answer.
-fn until(mut ask: impl FnMut() -> Vec<u8>, done: impl Fn(&[u8]) -> bool) -> Vec<u8> {
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
+/// Asks until `done` holds for the answer; returns that answer.
+#[track_caller]
+fn ask_until(
+    what: &str,
+    mut ask: impl FnMut() -> Vec<u8>,
+    done: impl Fn(&[u8]) -> bool,
+) -> Vec<u8> {
+    wait_until(what, || {
         let answer = ask();
-        if done(&answer) || Instant::now() > deadline {
-            return answer;
+        if done(&answer) {
+            Ok(answer)
+        } else {
+            Err(answer)
         }
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    })
 }
 
 fn set_a(scope: &str, address: &str) -> Value {
@@ -175,7 +183,7 @@ fn views_split_one_zone_by_client_transport_interface_and_weight_without_a_cache
         return;
     }
     let (upstream, asked) = counting_upstream();
-    let port = free_port();
+    let port = free_port().release();
     let first: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
     let second: SocketAddr = (Ipv4Addr::new(127, 0, 0, 3), port).into();
     let mut node = Node::new()
@@ -221,7 +229,11 @@ fn views_split_one_zone_by_client_transport_interface_and_weight_without_a_cache
     .expect(200);
     let lan = Ipv4Addr::LOCALHOST;
     let office = Ipv4Addr::new(127, 0, 0, 2);
-    let default_answer = until(|| udp_from(lan, first, WWW), |a| last_octet(a) == 1);
+    let default_answer = ask_until(
+        "the default view to answer",
+        || udp_from(lan, first, WWW),
+        |a| last_octet(a) == 1,
+    );
     assert_eq!(last_octet(&default_answer), 1, "no view: the default scope");
 
     // Access lists for recursion: one that refuses, one for loopback.
@@ -320,9 +332,17 @@ fn views_split_one_zone_by_client_transport_interface_and_weight_without_a_cache
     .assert_stderr_contains("error[dns.view.invalid]");
 
     // Client subnets on one zone: the office sees inside, everyone else outside.
-    let inside = until(|| udp_from(office, first, WWW), |a| last_octet(a) == 10);
+    let inside = ask_until(
+        "the office view to answer",
+        || udp_from(office, first, WWW),
+        |a| last_octet(a) == 10,
+    );
     assert_eq!(last_octet(&inside), 10, "the office view");
-    let outside = until(|| udp_from(lan, first, WWW), |a| last_octet(a) == 20);
+    let outside = ask_until(
+        "the outside view to answer",
+        || udp_from(lan, first, WWW),
+        |a| last_octet(a) == 20,
+    );
     assert_eq!(last_octet(&outside), 20, "the view of everyone");
     // Transport and interface.
     assert_eq!(last_octet(&tcp(first, WWW)), 10, "TCP: the tcp view");
@@ -335,11 +355,19 @@ fn views_split_one_zone_by_client_transport_interface_and_weight_without_a_cache
     node.client(&["dns", "view", "update", "everyone", "--order", "1"])
         .assert_code(0)
         .assert_stdout_contains("updated view everyone at order 1");
-    let moved = until(|| udp_from(office, first, WWW), |a| last_octet(a) == 20);
+    let moved = ask_until(
+        "the moved office to see the outside view",
+        || udp_from(office, first, WWW),
+        |a| last_octet(a) == 20,
+    );
     assert_eq!(last_octet(&moved), 20, "the first view in order wins");
     node.client(&["dns", "view", "update", "everyone", "--order", "5"])
         .assert_code(0);
-    let back = until(|| udp_from(office, first, WWW), |a| last_octet(a) == 10);
+    let back = ask_until(
+        "the office to see its own view again",
+        || udp_from(office, first, WWW),
+        |a| last_octet(a) == 10,
+    );
     assert_eq!(last_octet(&back), 10);
 
     // A 700/300 pair over 500 clients; each client keeps its scope.
@@ -377,7 +405,11 @@ fn views_split_one_zone_by_client_transport_interface_and_weight_without_a_cache
         .assert_code(0);
     // The cache is per view: the office's answer is .1, the view of everyone asks again and
     // gets .2, and each keeps its own entry.
-    let office_first = until(|| udp_from(office, first, OUTSIDE), |a| rcode(a) == 0);
+    let office_first = ask_until(
+        "the office view to answer the outside name",
+        || udp_from(office, first, OUTSIDE),
+        |a| rcode(a) == 0,
+    );
     assert_eq!(
         rcode(&office_first),
         0,

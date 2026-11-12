@@ -6,16 +6,17 @@ use std::{
     collections::BTreeMap,
     fmt::Write as _,
     net::{SocketAddr, TcpListener},
+    panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
     process::Command,
     sync::{Mutex, MutexGuard, PoisonError},
-    thread,
     time::{Duration, Instant},
 };
 
 use reqwest::Method;
 use serde_json::{Value, json};
 use tempfile::TempDir;
+use tenko_core::testing::{WAIT_LIMIT, wait_until_within};
 
 use super::{
     http::Http,
@@ -557,8 +558,9 @@ impl ClusterLab {
         )
     }
 
-    /// Polls `check` every 200 ms until it returns `Some`; after `limit` the test fails
-    /// with the diagnostics of every process.
+    /// Waits until `check` returns `Some`, for `limit` but never less than the shared wait
+    /// limit; after that the test fails with the failure of the wait and the diagnostics of
+    /// every process (taken once, not at every check).
     #[track_caller]
     pub fn wait_until<T>(
         &self,
@@ -566,18 +568,17 @@ impl ClusterLab {
         limit: Duration,
         mut check: impl FnMut() -> Option<T>,
     ) -> T {
-        let deadline = Instant::now() + limit;
-        loop {
-            if let Some(found) = check() {
-                return found;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "timed out after {limit:?} waiting for {what}\n{}",
-                self.diagnostics()
-            );
-            thread::sleep(Duration::from_millis(200));
-        }
+        catch_unwind(AssertUnwindSafe(|| {
+            wait_until_within(what, limit.max(WAIT_LIMIT), &mut check)
+        }))
+        .unwrap_or_else(|failure| {
+            let text = failure
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| failure.downcast_ref::<&str>().copied())
+                .unwrap_or("the wait failed");
+            panic!("{text}\n{}", self.diagnostics())
+        })
     }
 
     /// [`ClusterLab::wait_until`] for a condition.

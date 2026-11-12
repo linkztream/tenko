@@ -115,6 +115,8 @@ socket2 = { workspace = true }
 tempfile = { workspace = true }
 # The software authenticator of the passkey acceptance tests.
 tenko-auth = { workspace = true, features = ["online", "testing"] }
+# The shared waits, free ports and temporary directories of the tests.
+tenko-core = { workspace = true, features = ["testing"] }
 # The in-process cluster fixtures and the memory vault of the leader supervisor tests.
 tenko-store = { workspace = true, features = ["raft", "testing"] }
 tenko-vault = { workspace = true, features = ["testing"] }

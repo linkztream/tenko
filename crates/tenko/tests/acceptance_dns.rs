@@ -31,11 +31,14 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use serve_support::{Node, api::Api, free_port, wait_for_setup_token};
+use serve_support::{Node, api::Api, wait_for_setup_token};
+use tenko_core::testing::{free_port, wait_until};
 use tenko_dns::wire;
 
 const ZONE: &str = "example.test";
 const OUTSIDE: &str = "outside.example.org";
+/// The ID of every query; the answer must carry it back.
+const QUERY_ID: u16 = 0x7e57;
 const TYPE_A: u16 = 1;
 const TYPE_SOA: u16 = 6;
 const NOERROR: u8 = 0;
@@ -90,7 +93,7 @@ fn udp_from(local: Ipv4Addr, server: SocketAddr, name: &str, qtype: u16) -> Vec<
     socket
         .set_read_timeout(Some(Duration::from_secs(3)))
         .expect("timeout");
-    let id = free_port();
+    let id = QUERY_ID;
     for _ in 0..3 {
         socket
             .send_to(&query(id, name, qtype), server)
@@ -151,7 +154,7 @@ fn batch(api: &Api, zone: &str, changes: &[Value]) {
 fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
     let began = Instant::now();
     let (upstream, asked) = upstream();
-    let port = free_port();
+    let port = free_port().release();
     let dns: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
     let mut node = Node::new()
         .with_args(&["--roles", "controller,dns"])
@@ -196,14 +199,11 @@ fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
     );
 
     // Answers over UDP and TCP.
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let answer = loop {
-        let answer = udp(dns, "www.example.test", TYPE_A);
-        if holds(&answer, [192, 0, 2, 10]) || Instant::now() > deadline {
-            break answer;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    let answer = ask_until(
+        "the zone's A record to be served",
+        || udp(dns, "www.example.test", TYPE_A),
+        |answer| holds(answer, [192, 0, 2, 10]),
+    );
     let head = header(&answer);
     assert!(head.qr && head.aa, "{head:?}");
     assert_eq!((head.rcode, head.ancount), (NOERROR, 1));
@@ -275,19 +275,15 @@ fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
     assert!(flushed["command_id"].is_string(), "{flushed}");
     let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
     assert_eq!(report["cache_entries"], 0, "{report}");
-    let log_deadline = Instant::now() + Duration::from_secs(3);
-    let log = loop {
+    let log = wait_until("two lines of the query log", || {
         let log = api
             .get(&format!(
                 "/nodes/{node_id}/dns/log?limit=50&qname=www.example.test"
             ))
             .expect(200);
         let lines = log["items"].as_array().map_or(0, Vec::len);
-        if lines >= 2 || Instant::now() > log_deadline {
-            break log;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
+        if lines >= 2 { Ok(log) } else { Err(log) }
+    });
     let lines = log["items"].as_array().expect("log lines");
     assert!(lines.len() >= 2, "{log}");
     assert_eq!(lines[0]["qname"], "www.example.test", "{log}");
@@ -387,20 +383,21 @@ fn host_address() -> Option<Ipv4Addr> {
     }
 }
 
-/// Asks until `done` holds for the answer or `within` passes; returns the last answer.
-fn until(
-    within: Duration,
+/// Asks until `done` holds for the answer; returns that answer.
+#[track_caller]
+fn ask_until(
+    what: &str,
     mut ask: impl FnMut() -> Vec<u8>,
     done: impl Fn(&[u8]) -> bool,
 ) -> Vec<u8> {
-    let deadline = Instant::now() + within;
-    loop {
+    wait_until(what, || {
         let answer = ask();
-        if done(&answer) || Instant::now() > deadline {
-            return answer;
+        if done(&answer) {
+            Ok(answer)
+        } else {
+            Err(answer)
         }
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    })
 }
 
 #[test]
@@ -408,7 +405,7 @@ fn until(
 fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
     let (default_upstream, _) = upstream();
     let (rule_upstream, asked) = upstream_answering([203, 0, 113, 20]);
-    let port = free_port();
+    let port = free_port().release();
     let dns: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
     let host = host_address();
     let mut listen = vec![format!("\"{dns}\"")];
@@ -446,8 +443,8 @@ fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
     assert_eq!(rule["transport"], "plain", "{rule}");
     let rules = api.get("/dns/forwarders").expect(200);
     assert_eq!(rules["items"].as_array().map_or(0, Vec::len), 1, "{rules}");
-    let first = until(
-        Duration::from_secs(3),
+    let first = ask_until(
+        "the rule's upstream to answer",
         || udp(dns, "www.example.net", TYPE_A),
         |answer| holds(answer, [203, 0, 113, 20]),
     );
@@ -505,8 +502,8 @@ fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
     let id = rule["id"].as_str().expect("a rule id");
     api.delete(&format!("/dns/forwarders/{id}"), None)
         .expect(204);
-    let fresh = until(
-        Duration::from_secs(3),
+    let fresh = ask_until(
+        "the default forwarder to answer",
         || udp(dns, "new.example.net", TYPE_A),
         |answer| holds(answer, [203, 0, 113, 9]),
     );
@@ -523,8 +520,8 @@ fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
             &json!({ "cidr": format!("{}/24", Ipv4Addr::from(network)) }),
         )
         .expect(201);
-        let allowed = until(
-            Duration::from_secs(3),
+        let allowed = ask_until(
+            "the recursion of the known prefix",
             || udp_from(host, at, "www.example.org", TYPE_A),
             |answer| header(answer).rcode == NOERROR,
         );
@@ -606,7 +603,7 @@ fn a_fetched_block_list_blocks_its_names_with_the_extended_error() {
         "# a hosts file\n127.0.0.1 localhost\n0.0.0.0 ads.example.org\n\
          0.0.0.0 tracker.example.org metrics.example.org\n",
     );
-    let port = free_port();
+    let port = free_port().release();
     let dns: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
     // The list server of the test listens on loopback, which the egress policy of
     // server-side fetches refuses unless `[dns] egress_allow` lists it.
@@ -652,8 +649,8 @@ fn a_fetched_block_list_blocks_its_names_with_the_extended_error() {
     assert_eq!(read["version"]["etag"], "\"v1\"", "{read}");
 
     // A listed name and a name under it answer NXDOMAIN with "Blocked"; others are forwarded.
-    let blocked = until(
-        Duration::from_secs(3),
+    let blocked = ask_until(
+        "the list to block the name",
         || udp(dns, "ads.example.org", TYPE_A),
         |answer| header(answer).rcode == NXDOMAIN,
     );
@@ -699,8 +696,8 @@ fn a_fetched_block_list_blocks_its_names_with_the_extended_error() {
         revision,
     )
     .expect(200);
-    let open = until(
-        Duration::from_secs(3),
+    let open = ask_until(
+        "the disabled list to forward the name",
         || udp(dns, "ads.example.org", TYPE_A),
         |answer| header(answer).rcode == NOERROR,
     );

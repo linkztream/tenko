@@ -21,6 +21,7 @@ use std::{
 use reqwest::{Method, header::HeaderMap};
 use serde_json::{Value, json};
 use tenko_auth::totp::{TotpParams, code_at, step_at};
+use tenko_core::testing::{WAIT_LIMIT, wait_until_within};
 
 use super::{ADMIN, Node, PASSWORD};
 
@@ -423,28 +424,20 @@ impl Api {
         }
     }
 
-    /// `GET /jobs/{id}` until the job is final or `timeout` passed; the last detail.
+    /// `GET /jobs/{id}` until the job is final (at most `timeout`, never less than the shared
+    /// wait limit); the final detail.
     #[track_caller]
     pub fn wait_for_job(&self, id: &str, timeout: Duration) -> Value {
-        let deadline = Instant::now() + timeout;
-        loop {
-            let detail = self.get(&format!("/jobs/{id}")).expect(200);
-            let state = detail["job"]["state"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned();
-            let done = matches!(
-                state.as_str(),
+        self.wait_for_job_until(id, timeout, |detail| {
+            matches!(
+                detail["job"]["state"].as_str().unwrap_or_default(),
                 "succeeded" | "failed" | "rolled_back" | "canceled"
-            );
-            if done || Instant::now() > deadline {
-                return detail;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
+            )
+        })
     }
 
-    /// `GET /jobs/{id}` until `wanted` accepts the detail or `timeout` passed.
+    /// `GET /jobs/{id}` until `wanted` accepts the detail (at most `timeout`, never less than
+    /// the shared wait limit).
     #[track_caller]
     pub fn wait_for_job_until(
         &self,
@@ -452,18 +445,18 @@ impl Api {
         timeout: Duration,
         wanted: impl Fn(&Value) -> bool,
     ) -> Value {
-        let deadline = Instant::now() + timeout;
-        loop {
-            let detail = self.get(&format!("/jobs/{id}")).expect(200);
-            if wanted(&detail) {
-                return detail;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "job {id} did not reach the wanted state: {detail}"
-            );
-            std::thread::sleep(Duration::from_millis(100));
-        }
+        wait_until_within(
+            &format!("job {id} to reach the wanted state"),
+            timeout.max(WAIT_LIMIT),
+            || {
+                let detail = self.get(&format!("/jobs/{id}")).expect(200);
+                if wanted(&detail) {
+                    Ok(detail)
+                } else {
+                    Err(detail)
+                }
+            },
+        )
     }
 
     /// Opens the event stream (`GET /events?<query>`).

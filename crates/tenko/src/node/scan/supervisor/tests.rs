@@ -17,7 +17,7 @@ use tenko_cluster::{
     },
     probe::SightingSubject,
 };
-use tenko_core::{NodeId, RequestCtx, SystemComponent};
+use tenko_core::{NodeId, RequestCtx, SystemComponent, testing::wait_until_async};
 use tenko_jobs::{EngineConfig, JobEngine};
 use tenko_scan::{
     capability::{Capabilities, IcmpSupport},
@@ -248,17 +248,11 @@ impl Probe {
         command: Uuid,
         done: impl Fn(&CommandRecord) -> bool,
     ) -> CommandRecord {
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let record = self.state(command).await;
-                if done(&record) {
-                    return record;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
+        wait_until_async("the command to move on", async || {
+            let record = self.state(command).await;
+            done(&record).then_some(record)
         })
         .await
-        .expect("the command moves on")
     }
 
     async fn run_arp(&self) -> Uuid {

@@ -23,13 +23,14 @@ use std::{
     process::Command,
     sync::{Arc, LazyLock},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use serde_json::{Value, json};
 use serve_support::{Node, Proc, api::Api, run, wait_for_setup_token};
 use sha2::{Digest as _, Sha256};
 use tenko_api::dto::release::current_platform;
+use tenko_core::testing::wait_until;
 
 /// The version of this build, which the node runs before the install.
 const OLD: &str = env!("CARGO_PKG_VERSION");
@@ -259,15 +260,13 @@ fn install(api: &Api) -> String {
 
 #[track_caller]
 fn wait_for_audit(api: &Api, action: &str) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
+    wait_until(&format!("an audit record {action}"), || {
         let audit = api.get(&format!("/audit?action={action}")).ok();
-        if let Some(item) = audit["items"].as_array().and_then(|items| items.first()) {
-            return item.clone();
-        }
-        assert!(Instant::now() < deadline, "no audit record {action}");
-        thread::sleep(Duration::from_millis(200));
-    }
+        audit["items"]
+            .as_array()
+            .and_then(|items| items.first())
+            .cloned()
+    })
 }
 
 fn exits_for_restart(server: &mut Proc) {
@@ -404,14 +403,14 @@ fn a_release_with_the_wrong_checksum_is_not_switched_to() {
     );
     assert_eq!(current_version(&node), OLD);
     assert!(server.is_running(), "a failed install does not restart");
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let status = loop {
+    let status = wait_until("the update attempt to fail", || {
         let status = api.get("/system/updates").ok();
-        if status["attempt"]["state"] == "failed" || Instant::now() > deadline {
-            break status;
+        if status["attempt"]["state"] == "failed" {
+            Ok(status)
+        } else {
+            Err(status)
         }
-        thread::sleep(Duration::from_millis(200));
-    };
+    });
     assert_eq!(status["attempt"]["state"], "failed", "{status}");
     assert_eq!(
         status["attempt"]["reason"], "update.checksum_mismatch",

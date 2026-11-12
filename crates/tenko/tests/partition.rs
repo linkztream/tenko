@@ -10,7 +10,6 @@
 //! stores hold equal state.
 
 use std::{
-    future::Future,
     net::{IpAddr, SocketAddr},
     sync::Arc,
     time::Duration,
@@ -24,7 +23,7 @@ use tenko_cluster::ca::{TlsMode, TlsPolicy, TlsService, TrustedProxies};
 use tenko_core::auth::AuthFuture;
 use tenko_core::{
     AuthFailure, AuthStrength, Authenticated, Authenticator, Credentials, NodeId, Principal,
-    SessionId, Timestamp, UserId,
+    SessionId, Timestamp, UserId, testing::wait_until_async_within,
 };
 use tenko_ipam::{IpamService, queue::LocalQueue};
 use tenko_store::{
@@ -42,30 +41,6 @@ const TOTAL: Duration = Duration::from_secs(240);
 
 /// The bearer token of the person who makes every change.
 const TOKEN: &str = "alice";
-
-/// Runs a future for at most [`LIMIT`].
-async fn within<T>(what: &str, future: impl Future<Output = T>) -> T {
-    tokio::time::timeout(LIMIT, future)
-        .await
-        .unwrap_or_else(|_| panic!("{what} did not happen within {LIMIT:?}"))
-}
-
-/// Polls `check` until it returns `Some`, or fails after [`LIMIT`].
-async fn until<T, F, Fut>(what: &str, mut check: F) -> T
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Option<T>>,
-{
-    within(what, async {
-        loop {
-            if let Some(found) = check().await {
-                return found;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await
-}
 
 /// Knows one person: the bearer token [`TOKEN`] is always the same user.
 struct Alice {
@@ -221,7 +196,7 @@ impl Controller {
 
 /// Waits until `check` holds on the member's status.
 async fn applied(member: &RaftStore, revision: u64) {
-    until("the member applies the revision", || async {
+    wait_until_async_within("the member applies the revision", LIMIT, async || {
         (member.status().revision.0 >= revision).then_some(())
     })
     .await;
@@ -277,9 +252,10 @@ async fn scenario() {
         cluster.hand_over().await;
     }
     cluster.network().set_isolated(3, true);
-    until(
+    wait_until_async_within(
         "member 3 loses its quorum and the majority keeps it",
-        || async {
+        LIMIT,
+        async || {
             let majority_leads = [&one.store, &two.store].iter().any(|member| {
                 member
                     .leadership()
@@ -351,11 +327,11 @@ async fn scenario() {
 
     // 6. Heal: member 3 accepts writes and drains its queue.
     cluster.network().set_isolated(3, false);
-    until("member 3 accepts writes again", || async {
+    wait_until_async_within("member 3 accepts writes again", LIMIT, async || {
         three.accepts_writes().then_some(())
     })
     .await;
-    until("the queue of member 3 is drained", || async {
+    wait_until_async_within("the queue of member 3 is drained", LIMIT, async || {
         three
             .queue
             .is_empty()
@@ -366,7 +342,7 @@ async fn scenario() {
     .await;
 
     // 7. The author finds both outcomes, from any controller.
-    let list = until("both records are listed on member 1", || async {
+    let list = wait_until_async_within("both records are listed on member 1", LIMIT, async || {
         let reply = one.get("/queue/conflicts").await;
         let body = reply.json();
         (reply.status == 200
@@ -401,12 +377,13 @@ async fn scenario() {
     let settled = list["revision"].as_u64().expect("the revision of the list");
     let at_least = settled.max(majority_revision);
     for controller in [one, two, three] {
-        let description = until("A carries the queued description", || async {
-            controller.description(&a_id, at_least).await
-        })
-        .await;
+        let description =
+            wait_until_async_within("A carries the queued description", LIMIT, async || {
+                controller.description(&a_id, at_least).await
+            })
+            .await;
         assert_eq!(description, "queued on the minority");
-        let description = until("B is readable", || async {
+        let description = wait_until_async_within("B is readable", LIMIT, async || {
             controller.description(&b_id, at_least).await
         })
         .await;
@@ -417,24 +394,28 @@ async fn scenario() {
     }
 
     // 8. Equal state on all three members at one revision.
-    let digests = until("the three members hold the same revision", || async {
-        let revisions: Vec<_> = [one, two, three]
-            .iter()
-            .map(|controller| controller.store.status().revision)
-            .collect();
-        let target = revisions[0];
-        if !revisions.iter().all(|revision| *revision == target) || target.0 < at_least {
-            return None;
-        }
-        let mut digests = Vec::new();
-        for controller in [one, two, three] {
-            digests.push(controller.store.digest(Some(target)).await.ok()?);
-        }
-        digests
-            .iter()
-            .all(|digest| *digest == digests[0])
-            .then_some(digests)
-    })
+    let digests = wait_until_async_within(
+        "the three members hold the same revision",
+        LIMIT,
+        async || {
+            let revisions: Vec<_> = [one, two, three]
+                .iter()
+                .map(|controller| controller.store.status().revision)
+                .collect();
+            let target = revisions[0];
+            if !revisions.iter().all(|revision| *revision == target) || target.0 < at_least {
+                return None;
+            }
+            let mut digests = Vec::new();
+            for controller in [one, two, three] {
+                digests.push(controller.store.digest(Some(target)).await.ok()?);
+            }
+            digests
+                .iter()
+                .all(|digest| *digest == digests[0])
+                .then_some(digests)
+        },
+    )
     .await;
     assert_eq!(digests[0], digests[1], "members 1 and 2 hold equal state");
     assert_eq!(digests[1], digests[2], "members 2 and 3 hold equal state");

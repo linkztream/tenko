@@ -30,19 +30,11 @@ use std::{
 
 use serde_json::{Value, json};
 use serve_support::{Node, api::Api, wait_for_setup_token};
+use tenko_core::testing::{FreePort, free_port, wait_until};
 use tenko_dhcp::v4::{Message, MessageType};
 
 const LOOPBACK: Ipv4Addr = Ipv4Addr::LOCALHOST;
 const CLIENTS: u8 = 60;
-
-/// A UDP port that was free a moment ago.
-fn udp_port() -> u16 {
-    UdpSocket::bind(SocketAddrV4::new(LOOPBACK, 0))
-        .expect("bind")
-        .local_addr()
-        .expect("address")
-        .port()
-}
 
 /// What the test relays for one client.
 #[derive(Debug, Clone, Copy)]
@@ -114,8 +106,9 @@ struct Relay {
 }
 
 impl Relay {
-    fn new(port: u16, server: u16) -> Self {
-        let socket = UdpSocket::bind(SocketAddrV4::new(LOOPBACK, port)).expect("bind the relay");
+    fn new(port: FreePort, server: u16) -> Self {
+        // The held socket itself: no other test can take the port in between.
+        let socket = port.into_udp();
         socket
             .set_read_timeout(Some(Duration::from_millis(300)))
             .expect("timeout");
@@ -199,10 +192,11 @@ fn active(report: &Value) -> u64 {
 #[test]
 #[allow(clippy::too_many_lines, reason = "one scenario, read top to bottom")]
 fn the_dhcp_role_answers_dora_and_serves_the_same_leases_after_a_restart() {
-    let port = udp_port();
-    let relay_port = udp_port();
-    let proxy_port = udp_port();
-    let relay = Relay::new(relay_port, port);
+    let port = free_port().release();
+    let relay_held = free_port();
+    let relay_port = relay_held.port();
+    let proxy_port = free_port().release();
+    let relay = Relay::new(relay_held, port);
     let mut node = Node::new()
         .with_args(&["--roles", "controller,dhcp"])
         .with_config(&format!(
@@ -296,15 +290,14 @@ fn the_dhcp_role_answers_dora_and_serves_the_same_leases_after_a_restart() {
     assert_eq!(one["addr"], first.to_string());
     api.get("/dhcp/leases/192.0.2.250").expect(404);
     // ADR 0030: the history row follows the lease within the writer's interval (250 ms).
-    let mut history = api.get("/dhcp/history").expect(200);
-    for _ in 0..40 {
+    let history = wait_until("the history row of the lease", || {
+        let history = api.get("/dhcp/history").expect(200);
         if history["items"][0]["kind"] == "granted" {
-            break;
+            Ok(history)
+        } else {
+            Err(history)
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        history = api.get("/dhcp/history").expect(200);
-    }
-    assert_eq!(history["items"][0]["kind"], "granted", "{history}");
+    });
     assert_eq!(history["items"][0]["addr"], first.to_string());
     let node_leases = api
         .get(&format!("/nodes/{node_id}/dhcp/leases?limit=1"))

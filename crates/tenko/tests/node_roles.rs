@@ -11,10 +11,11 @@
 
 mod serve_support;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use serve_support::{Node, Proc, api::Api, wait_for_setup_token};
+use tenko_core::testing::wait_until;
 
 /// How long a supervised server may take to stop by itself after a role change.
 const RESTART_TIMEOUT: Duration = Duration::from_secs(60);
@@ -50,15 +51,14 @@ fn own_id(api: &Api) -> u64 {
 
 /// The roles of the node once its stored set is seeded.
 fn seeded(api: &Api, id: u64) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
+    wait_until("the stored roles to be seeded", || {
         let roles = api.get(&format!("/nodes/{id}/roles")).ok();
         if roles["stored"] == true {
-            return roles;
+            Ok(roles)
+        } else {
+            Err(roles)
         }
-        assert!(Instant::now() < deadline, "never seeded: {roles}");
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    })
 }
 
 fn warning_codes(api: &Api) -> Vec<String> {
@@ -146,11 +146,9 @@ fn an_unsupervised_server_waits_and_roles_on_the_command_line_pin() {
         )
         .ok();
     assert_eq!(changed["restart"], "required");
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !warning_codes(&api).contains(&"node.roles.restart_required".to_owned()) {
-        assert!(Instant::now() < deadline, "no restart notice");
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    wait_until("the restart notice", || {
+        warning_codes(&api).contains(&"node.roles.restart_required".to_owned())
+    });
     let cookie = api.cookie().map(str::to_owned);
     server.stop().assert_code(0);
 

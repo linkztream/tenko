@@ -22,7 +22,8 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use serve_support::{Node, Proc, api::Api, free_port, wait_for_setup_token};
+use serve_support::{Node, Proc, api::Api, wait_for_setup_token};
+use tenko_core::testing::{free_port, wait_until};
 use tenko_dns::wire;
 
 const TYPE_A: u16 = 1;
@@ -50,18 +51,6 @@ fn holds(answer: &[u8], address: [u8; 4]) -> bool {
 
 fn rcode(answer: &[u8]) -> u8 {
     wire::parse_header(answer).expect("header").rcode
-}
-
-/// Waits until `check` holds, up to `limit`; returns the time it took.
-fn wait_until(limit: Duration, what: &str, mut check: impl FnMut() -> bool) -> Duration {
-    let began = Instant::now();
-    while began.elapsed() < limit {
-        if check() {
-            return began.elapsed();
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    panic!("{what} did not happen within {limit:?}");
 }
 
 /// The first message of a TCP AXFR answer, unsigned.
@@ -125,7 +114,7 @@ struct Side {
 }
 
 fn start() -> Side {
-    let dns: SocketAddr = (Ipv4Addr::LOCALHOST, free_port()).into();
+    let dns: SocketAddr = (Ipv4Addr::LOCALHOST, free_port().release()).into();
     // The primaries of the test's secondary zones are on loopback, which the egress
     // policy of server-side fetches refuses unless `[dns] egress_allow` lists it.
     let mut node = Node::new()
@@ -286,7 +275,7 @@ fn zones_transfer_between_two_nodes_with_tsig_notify_ixfr_and_catalogs() {
         "the same signed request for a zone with the list is answered"
     );
     let mut refusal = Value::Null;
-    wait_until(Duration::from_secs(15), "the audited refusal", || {
+    wait_until("the audited refusal", || {
         let audited = primary
             .api
             .get("/audit?action=dns.zone.transfer_out&limit=100")
@@ -320,10 +309,12 @@ fn zones_transfer_between_two_nodes_with_tsig_notify_ixfr_and_catalogs() {
     // The secondary: its first transfer is an AXFR.
     let copy = secondary_zone(&secondary.api, "example.test", primary.dns, false);
     let copy_id = copy["id"].as_str().expect("copy id").to_owned();
-    let first = wait_until(Duration::from_secs(15), "the first transfer", || {
+    let transferring = Instant::now();
+    wait_until("the first transfer", || {
         udp(secondary.dns, "www.example.test", TYPE_A)
             .is_some_and(|answer| holds(&answer, [192, 0, 2, 10]))
     });
+    let first = transferring.elapsed();
     let served = primary
         .api
         .get(&format!("/dns/zones/{zone_id}"))
@@ -331,7 +322,7 @@ fn zones_transfer_between_two_nodes_with_tsig_notify_ixfr_and_catalogs() {
     // The copy answers queries before the transfer's status row is written, so the row is
     // waited for like the answer was.
     let mut status = Value::Null;
-    wait_until(Duration::from_secs(15), "the transfer status", || {
+    wait_until("the transfer status", || {
         status = secondary
             .api
             .get(&format!("/dns/zones/{copy_id}/transfer"))
@@ -344,10 +335,11 @@ fn zones_transfer_between_two_nodes_with_tsig_notify_ixfr_and_catalogs() {
     // A change on the primary: NOTIFY, then IXFR with the change only.
     let changed = Instant::now();
     add_a(&primary.api, &zone_id, "new.example.test", "192.0.2.77");
-    let latency = wait_until(Duration::from_secs(5), "the IXFR after NOTIFY", || {
+    wait_until("the IXFR after NOTIFY", || {
         udp(secondary.dns, "new.example.test", TYPE_A)
             .is_some_and(|answer| holds(&answer, [192, 0, 2, 77]))
     });
+    let latency = changed.elapsed();
     let journal = secondary
         .api
         .get(&format!("/dns/zones/{copy_id}/journal"))
@@ -358,7 +350,6 @@ fn zones_transfer_between_two_nodes_with_tsig_notify_ixfr_and_catalogs() {
         (steps[0]["added"].as_u64(), steps[0]["removed"].as_u64()),
         (Some(1), Some(0))
     );
-    let _ = changed;
 
     // Read-only on the secondary; a refresh now.
     let refused = secondary.api.post(
@@ -395,14 +386,10 @@ fn zones_transfer_between_two_nodes_with_tsig_notify_ixfr_and_catalogs() {
     let member = primary_zone(&primary.api, "member.test", &acl, None, false);
     let member_id = member["id"].as_str().expect("member id").to_owned();
     add_a(&primary.api, &member_id, "www.member.test", "192.0.2.20");
-    wait_until(
-        Duration::from_secs(20),
-        "the catalog member on the secondary",
-        || {
-            udp(secondary.dns, "www.member.test", TYPE_A)
-                .is_some_and(|answer| holds(&answer, [192, 0, 2, 20]))
-        },
-    );
+    wait_until("the catalog member on the secondary", || {
+        udp(secondary.dns, "www.member.test", TYPE_A)
+            .is_some_and(|answer| holds(&answer, [192, 0, 2, 20]))
+    });
     let created = zone_named(&secondary.api, "member.test").expect("the member zone");
     assert_eq!(created["kind"], "secondary");
     assert_eq!(
@@ -418,11 +405,9 @@ fn zones_transfer_between_two_nodes_with_tsig_notify_ixfr_and_catalogs() {
             None,
         )
         .expect(200);
-    wait_until(
-        Duration::from_secs(20),
-        "the member to leave the secondary",
-        || zone_named(&secondary.api, "member.test").is_none(),
-    );
+    wait_until("the member to leave the secondary", || {
+        zone_named(&secondary.api, "member.test").is_none()
+    });
 
     // Expiry: a zone whose primary forgets it expires on the secondary.
     let short = primary
@@ -451,14 +436,14 @@ fn zones_transfer_between_two_nodes_with_tsig_notify_ixfr_and_catalogs() {
             }),
         )
         .expect(201);
-    wait_until(Duration::from_secs(15), "the short zone's transfer", || {
+    wait_until("the short zone's transfer", || {
         udp(secondary.dns, "short.test", TYPE_SOA).is_some_and(|answer| rcode(&answer) == 0)
     });
     primary
         .api
         .delete(&format!("/dns/zones/{short_id}"), None)
         .expect(204);
-    wait_until(Duration::from_secs(20), "the copy to expire", || {
+    wait_until("the copy to expire", || {
         udp(secondary.dns, "short.test", TYPE_SOA).is_some_and(|answer| rcode(&answer) == 2)
     });
 

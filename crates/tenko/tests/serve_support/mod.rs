@@ -32,22 +32,17 @@
 )]
 
 use std::{
-    collections::HashSet,
     fmt::Write as _,
-    hash::BuildHasher as _,
     io::{BufRead as _, BufReader, Read, Write as _},
-    net::{TcpListener, UdpSocket},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::{
-        Arc, Condvar, Mutex, MutexGuard, PoisonError,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
 use tempfile::TempDir;
+use tenko_core::testing::{free_port, wait_until, wait_until_within};
 
 pub mod api;
 pub mod otlp;
@@ -110,48 +105,6 @@ pub const CLIENT_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// The path of the readiness probe.
 pub const READY_PATH: &str = "/api/v1/health/ready";
-
-/// The ports [`free_port`] hands out: below the ephemeral range of Linux (32768 and up, the
-/// ports the kernel gives to `bind(0)` and to the outgoing connections of every other
-/// test), of Windows and of macOS (49152 and up), so that no test, client or server of the
-/// suite takes a picked port in the window between the pick and the bind of the server.
-const PORT_POOL: std::ops::Range<u16> = 20_000..32_000;
-
-/// How often a pick is tried before the harness gives up (a pool full of ports in use is a
-/// broken machine, not a race).
-const PORT_PICKS: u32 = 500;
-
-/// A free port on the loopback interface, for TCP and UDP alike, that no other call of this
-/// process handed out and that is not in an ephemeral range.
-///
-/// The port is drawn at random from [`PORT_POOL`] and checked by binding it for both
-/// protocols, so ports the machine uses for something else (and the ranges Windows
-/// reserves) are skipped. The check cannot hold the port for a server that binds it later,
-/// which is why [`Node::start_by`] starts again on a new port when the server reports that
-/// its API listener could not bind.
-pub fn free_port() -> u16 {
-    static PICKS: AtomicU64 = AtomicU64::new(0);
-    static HANDED_OUT: Mutex<Option<HashSet<u16>>> = Mutex::new(None);
-    let span = u64::from(PORT_POOL.end - PORT_POOL.start);
-    for _ in 0..PORT_PICKS {
-        // Random per process (the hasher's keys) and different on every call.
-        let draw = std::hash::RandomState::new().hash_one(PICKS.fetch_add(1, Ordering::Relaxed));
-        let port = PORT_POOL.start + u16::try_from(draw % span).expect("below the pool's end");
-        let mut handed_out = HANDED_OUT.lock().unwrap_or_else(PoisonError::into_inner);
-        let handed_out = handed_out.get_or_insert_with(HashSet::new);
-        if handed_out.contains(&port) || !is_free(port) {
-            continue;
-        }
-        handed_out.insert(port);
-        return port;
-    }
-    panic!("no free loopback port in {PORT_POOL:?} after {PORT_PICKS} picks");
-}
-
-/// Whether `port` can be bound on the loopback for TCP and for UDP right now.
-fn is_free(port: u16) -> bool {
-    TcpListener::bind(("127.0.0.1", port)).is_ok() && UdpSocket::bind(("127.0.0.1", port)).is_ok()
-}
 
 /// How often [`retry_on_bind`] starts a server before the test fails.
 pub const START_ATTEMPTS: u32 = 3;
@@ -728,7 +681,7 @@ impl Node {
                 .prefix("tenko-it-")
                 .tempdir()
                 .expect("temporary directory"),
-            port: free_port(),
+            port: free_port().release(),
             transport: Transport::Plain,
             kek: Kek::File,
             args: Vec::new(),
@@ -850,17 +803,12 @@ impl Node {
         read_setup_token_file(&self.setup_token_path())
     }
 
-    /// Waits until the setup token file is gone; false when it is still there after
-    /// `timeout`.
-    pub fn wait_for_setup_token_removal(&self, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
-        while self.setup_token_path().exists() {
-            if Instant::now() >= deadline {
-                return false;
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        true
+    /// Waits until the setup token file is gone.
+    #[track_caller]
+    pub fn wait_for_setup_token_removal(&self) {
+        wait_until("the setup token file to be removed", || {
+            !self.setup_token_path().exists()
+        });
     }
 
     /// `tenko setup token --data-dir <data_dir>`.
@@ -989,7 +937,8 @@ impl Node {
     /// another port, with a configuration file of its own.
     pub fn spawn_second(&self) -> Proc {
         let path = self.root().join("second.toml");
-        std::fs::write(&path, self.config_text_on(free_port())).expect("write second.toml");
+        std::fs::write(&path, self.config_text_on(free_port().release()))
+            .expect("write second.toml");
         let mut command = tenko();
         command.arg("serve").arg("--config").arg(path);
         if self.stop_on_eof {
@@ -1010,7 +959,7 @@ impl Node {
     /// configuration (for example with other text) and adds arguments or environment
     /// variables to [`Node::serve_command`]; it runs again on every attempt.
     ///
-    /// The API port was picked by [`free_port`] and is bound later by the server, so
+    /// The API port was picked by `free_port` and is bound later by the server, so
     /// another process may take it in between. When the server exits during start with the
     /// code `start.api.bind`, the node picks a new port and `launch` runs again, at most
     /// [`START_ATTEMPTS`] times in all; every attempt that lost the race is logged to
@@ -1039,31 +988,25 @@ impl Node {
                 );
                 Err(server.finish(STOP_TIMEOUT))
             },
-            |node| node.port = free_port(),
+            |node| node.port = free_port().release(),
         )
     }
 
     #[track_caller]
     fn wait_for_ready_probe(&self, server: &mut Proc) {
-        let deadline = Instant::now() + READY_TIMEOUT;
-        let mut last = String::new();
-        while Instant::now() < deadline {
+        wait_until_within("the readiness probe to answer 200", READY_TIMEOUT, || {
             assert!(
                 server.is_running(),
                 "the server stopped while becoming ready\n{}",
                 server.diagnostics()
             );
-            match self.get(READY_PATH) {
-                Ok((200, _)) => return,
-                Ok((status, body)) => last = format!("HTTP {status}: {body}"),
-                Err(error) => last = error,
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        panic!(
-            "the readiness probe never answered 200 ({last})\n{}",
-            server.diagnostics()
-        );
+            let seen = match self.get(READY_PATH) {
+                Ok((200, _)) => return Ok(()),
+                Ok((status, body)) => format!("HTTP {status}: {body}"),
+                Err(error) => error,
+            };
+            Err(format!("{seen}\n{}", server.diagnostics()))
+        });
     }
 
     /// `GET` of a path of this node, trusting the node's CA file when it has one.
@@ -1172,19 +1115,15 @@ pub fn wait_for_setup_token(server: &Proc) -> String {
         .unwrap_or_else(|| panic!("no setup token line was printed\n{}", server.diagnostics()));
     let file = setup_token_file_in(&line)
         .unwrap_or_else(|| panic!("`{line}` does not name the setup token file"));
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let token = loop {
-        if let Some(token) = read_setup_token_file(&file) {
-            break token;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "{} was not written\n{}",
-            file.display(),
-            server.diagnostics()
-        );
-        thread::sleep(Duration::from_millis(20));
-    };
+    let token = wait_until("the setup token file to be written", || {
+        read_setup_token_file(&file).ok_or_else(|| {
+            format!(
+                "{} was not written\n{}",
+                file.display(),
+                server.diagnostics()
+            )
+        })
+    });
     assert!(is_setup_token(&token), "`{token}` is not a setup token");
     token
 }

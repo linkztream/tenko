@@ -23,8 +23,11 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use serve_support::{Node, Proc, READY_TIMEOUT, api::Api, free_port, wait_for_setup_token};
-use tenko_core::dns::{DnsName, TsigAlgorithm};
+use serve_support::{Node, Proc, READY_TIMEOUT, api::Api, wait_for_setup_token};
+use tenko_core::{
+    dns::{DnsName, TsigAlgorithm},
+    testing::{free_port, wait_until},
+};
 use tenko_dns::{
     tsig::{self, Signer, TsigKey, Verifier},
     update::message::{
@@ -251,7 +254,7 @@ fn zone_body(name: &str, allowed: &[&str], may_replace_ipam: bool) -> Value {
 }
 
 fn start() -> Lab {
-    let dns: SocketAddr = (Ipv4Addr::LOCALHOST, free_port()).into();
+    let dns: SocketAddr = (Ipv4Addr::LOCALHOST, free_port().release()).into();
     let node = Node::new()
         .with_args(&["--roles", "controller,dns"])
         .with_config(&format!("[dns]\nlisten = [\"{dns}\"]\nworkers = 1\n"));
@@ -474,15 +477,10 @@ fn updates_are_applied_through_the_store_and_answered_from_the_index() {
         )
         .expect(200);
     // The update path reads the zone row from its directory, which follows the store.
-    let mut got = lab.signed(&replace);
-    for _ in 0..50 {
-        if got.rcode == 0 {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-        got = lab.signed(&replace);
-    }
-    assert_eq!(got.rcode, 0, "{got:?}");
+    wait_until("the update to be accepted", || {
+        let got = lab.signed(&replace);
+        if got.rcode == 0 { Ok(()) } else { Err(got) }
+    });
     assert!(holds(&query_a(lab.dns, "cam.example.test"), A_9));
 
     // A write the store refuses: SERVFAIL, nothing written; then the retry goes through.

@@ -382,7 +382,10 @@ impl Follower {
 
 #[cfg(test)]
 mod tests {
-    use tenko_core::{Principal, SystemComponent, TableName, Timestamp, cluster::LEADER_EPOCH};
+    use tenko_core::{
+        Principal, SystemComponent, TableName, Timestamp, cluster::LEADER_EPOCH,
+        testing::wait_until_async,
+    };
     use tenko_store::{
         Mutation, ReadView, WriteBatch, format::StoredFormat, raft::fixture::InProcessCluster,
         testing::ConformanceConfig,
@@ -640,19 +643,12 @@ mod tests {
         drop(view);
 
         // The follower's marker follows once it has applied the migration.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        loop {
+        wait_until_async("the marker to follow", async || {
             watcher.refresh().await.expect("refresh");
             let marker = format::read_marker(dir.path()).expect("marker");
-            if marker.map(|marker| marker.version) == Some(3) {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the marker did not follow"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+            marker.map(|marker| marker.version) == Some(3)
+        })
+        .await;
         assert_eq!(watcher.status().expect("status").pending, None);
         cluster.shutdown().await;
     }
