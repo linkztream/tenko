@@ -530,22 +530,49 @@ states = sorted({((e.get('draft') or {}).get('details') or {}).get('context', {}
 print(states)
 sys.exit(0 if all(s in states for s in ['add_pend', 'valid', 'revoked', 'removed']) else 1)"
 }
+# exact_seconds: a Python expression for the unix time of an RFC 3339 time with its
+# fraction (a key learned in the second the backup was taken is still before it).
+exact_seconds="lambda text: calendar.timegm(time.strptime(text[:19], '%Y-%m-%dT%H:%M:%S')) + float('0' + (re.match(r'\.\d+', text[19:]) or [''])[0])"
 # learned_before <tag> <unix seconds>: the root row (GET /dns/trust-anchors) holds the key
-# <tag> as RFC 5011 learned it before <unix seconds>, pending or already Valid.
+# <tag> as RFC 5011 learned it before <unix seconds> (with a fraction), pending or already
+# Valid.
 learned_before() {
   on tenko && api GET /dns/trust-anchors >/dev/null &&
     python3 -c "
-import calendar, json, sys, time
+import calendar, json, re, sys, time
 d = json.load(open('$work/api.out'))
-seconds = lambda text: calendar.timegm(time.strptime(text[:19], '%Y-%m-%dT%H:%M:%S'))
+seconds = $exact_seconds
 for row in d.get('items', []):
     for key in row['keys'] if row['zone'] == '.' else []:
         if key['key_tag'] == $1:
-            print(key['state'], key['source'], key['added_at'])
+            print(key['state'], key['source'], key['added_at'], 'backup at', $2)
             sys.exit(0 if key['state'] in ('add_pend', 'valid') and seconds(key['added_at']) < $2 else 1)
 print('absent')
 sys.exit(1)"
 }
+# revoked_since <tag> <unix seconds>: the node audited the root key <tag> as Revoked at or
+# after <unix seconds> (with a fraction), and the key is Revoked now or already left the row
+# after its remove hold-down.
+revoked_since() {
+  local state
+  state="$(anchor_state "$1")" || return 1
+  [[ "$state" == revoked || "$state" == removed || "$state" == absent ]] || return 1
+  on tenko && api GET "/audit?action=dns.trust_anchor.state&limit=100" >/dev/null &&
+    python3 -c "
+import calendar, json, re, sys, time
+d = json.load(open('$work/api.out'))
+seconds = $exact_seconds
+for e in d.get('items', []):
+    c = ((e.get('draft') or {}).get('details') or {}).get('context', {})
+    if str(c.get('key_tag')) == '$1' and c.get('state') == 'revoked' and seconds(e['at']) >= $2:
+        print('key $1 revoked at', e['at'], 'now $state'); sys.exit(0)
+print('key $1 is $state; no Revoked audited since', $2)
+sys.exit(1)"
+}
+# restore_followed <valid tag> <revoked tag> <unix seconds>: the restored node holds
+# <valid tag> as Valid and revoked <revoked tag> on its own since it started at <unix
+# seconds>.
+restore_followed() { anchor_is "$1" valid && revoked_since "$2" "$3"; }
 # audit_timeline <unix seconds>: the audited state changes of the root's keys, in lab
 # seconds after <unix seconds>.
 audit_timeline() {
@@ -565,7 +592,7 @@ copy_volume() { ctl copy-volume "$1" "$2" >/dev/null; }
 fresh_service() { ctl fresh "$1" "$2" >/dev/null 2>&1 || true; }
 
 rfc5011() {
-  local name file signing id parent ds_a tag_a tag_b t0 t1 t2 t3 t4 backup_at timeline
+  local name file signing id parent ds_a tag_a tag_b t0 t1 t2 t3 t4 backup_at restored_at timeline
   declare -A zone_ids=()
   timeline=()
   step "round rfc5011: a roll of the lab root's KSK followed by RFC 5011 (hold-down 20 s)"
@@ -624,7 +651,7 @@ rfc5011() {
   row r11.pending.warning "the pending key shows as dns.trust_anchor.pending" system_warns dns.trust_anchor.pending
   # A backup of the node before the roll: a copy of its data volume while it is stopped.
   ctl stop tenko >/dev/null 2>&1
-  backup_at="$(date +%s)"
+  backup_at="$(date +%s.%3N)"
   copy_volume tenko-data tenko-backup
   ctl start tenko >/dev/null 2>&1
   retry "$wait_secs" "tenko to be healthy again" healthy tenko
@@ -651,14 +678,17 @@ rfc5011() {
   mapfile -t -O "${#timeline[@]}" timeline < <(audit_timeline "$t0")
   row r11.never.failed "validation never failed during the roll (the bogus counter is 0 for the root)" never_bogus
 
-  # A node started from the backup follows the roll on start.
+  # A node started from the backup follows the roll on start. The old key is Revoked only
+  # for the remove hold-down (20 s), so the row reads the audited change since the start
+  # beside the current state, which may already be Removed.
   ctl stop tenko >/dev/null 2>&1
   copy_volume tenko-backup tenko-data
+  restored_at="$(date +%s.%3N)"
   ctl start tenko >/dev/null 2>&1
   retry "$wait_secs" "the restored node to be healthy" healthy tenko
   node_cookie="$(curl -sS -o /dev/null -w '' "http://$tenko_ip:8443/api/v1/system/status" >/dev/null; printf '%s' "$node_cookie")"
   row r11.restore.old "the restored node starts from the backup: $tag_b is the key it had learned before" within 30 learned_before "$tag_b" "$backup_at"
-  row r11.restore.follow "the restored node makes $tag_b Valid and $tag_a Revoked without an operator" within 90 anchors_are "$tag_b" valid "$tag_a" revoked
+  row r11.restore.follow "the restored node makes $tag_b Valid and $tag_a Revoked without an operator" within 90 restore_followed "$tag_b" "$tag_a" "$restored_at"
   row r11.restore.secure "www.example.test is secure on the restored node" within 30 secure_now
   ctl volume-rm tenko-backup >/dev/null 2>&1 || true
   printf '\n==> E34: the roll\n'
