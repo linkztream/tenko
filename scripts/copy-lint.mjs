@@ -27,40 +27,52 @@
 // type-checked. A rule names a copy only by what marks it precisely (a function name, a
 // literal, a pattern); a copy under another name is not seen. Each rule says what it cannot see.
 //
+// Function names are matched by their words, not by a fixed list, so a new copy under a new
+// name of the same words is seen too; a copy under a name without those words is not, and
+// every rule's "Blind" says so.
+//
 // Rust
-//   hex           A function named as a hexadecimal encoder or decoder (`hex`, `to_hex`,
-//                 `from_hex`, `hex_encode`, `decode_hex`, `push_hex`, `hex_value`, ...) outside
-//                 `tenko_core::codec`. Blind: hexadecimal written inline with `{:02x}` or
-//                 `from_str_radix` inside a function of another name (`digest`, `fmt`, ...).
-//   base64        A function named as a base64 or base64url encoder or decoder outside
-//                 `tenko_core::codec`. Blind: generic names (`encode`, `decode` in a module
+//   hex           A function with `hex` as a word of its name (`hex`, `to_hex`, `hex_encode`,
+//                 `bytes_to_hex`, `unhex`, ...) outside `tenko_core::codec`. Not reported:
+//                 serde adapters (`serialize_bytes_or_hex`), `base32hex`. Blind: a function of
+//                 any other name, and hexadecimal written inline with `{:02x}` or
+//                 `from_str_radix` (`digest`, `fmt`, `parse_key`, ...).
+//   base64        A function whose name holds `base64` or the word `b64` outside
+//                 `tenko_core::codec`. Blind: any other name (`encode`, `decode` in a module
 //                 named `base64`), an encoder inline in a larger function.
-//   pem           A function that reads or writes PEM blocks (`pem`, `pem_certificates`)
-//                 outside `tenko_core::codec`. Blind: a `-----BEGIN` check inline in a validator.
-//   der-length    A DER or BER definite-length writer (`push_len`, `push_length`) outside
-//                 `tenko_core::codec`. Blind: the readers, which sit inside methods named `read`.
-//   civil-date    A function that converts days since 1970 to a civil date or back, by name
-//                 (`days_from_civil`, `civil_from_days`) or by the constant of that arithmetic
-//                 (`719_468`, once per function), outside `tenko_core::codec`. Blind: the same
-//                 arithmetic with other constants.
-//   key-tag       A DNSSEC key tag function (RFC 4034 appendix B) outside the one in
+//   pem           A function that reads or writes PEM blocks (`pem`, `pem_certificates`,
+//                 `parse_pem`, ...) outside `tenko_core::codec`. Not reported: getters that
+//                 hand stored PEM text on (`chain_pem`, `root_pem`) and wrappers of the TLS
+//                 library (`from_pem`). Blind: any other name, a `-----BEGIN` check inline.
+//   der-length    A DER or BER definite-length writer or reader by name (`push_len`,
+//                 `push_length`, `read_length`, `der_len`) outside `tenko_core::codec`. Blind:
+//                 the readers that sit inside methods named `read`.
+//   civil-date    A function with `civil` in its name, or holding the constant of that
+//                 arithmetic (`719_468`, once per function), outside `tenko_core::codec`.
+//                 Blind: the same arithmetic with other constants under another name.
+//   key-tag       A function whose name ends in `key_tag` or `keytag` outside the one in
 //                 `tenko_core`. Blind: the sum written inline.
-//   private-file  A function that writes a file or creates a directory only its owner may
-//                 read, or replaces a file atomically (`write_private`, `create_private_dir`,
-//                 `write_atomic`, ...), outside `tenko_store::fs`. Blind: writers named `write`,
-//                 `write_file`, `write_new`, `write_marker`; the `mode(0o600)` call itself,
-//                 which the home's clippy ban covers once every writer has moved.
+//   private-file  A function named as a private-file or private-directory writer
+//                 (`write_private`, `create_private_dir`, `private_file`, `file_private`), or
+//                 as an atomic replace (`write_atomic`, `atomic_write`, `*_atomically`,
+//                 `write_then_rename`), or holding the owner-only permission bits `0o600` or
+//                 `0o700` (once per function), outside `tenko_store::fs`. Blind: a writer of
+//                 another name that takes its mode from a constant, and a write-then-rename
+//                 without a mode (`write_marker`, `write_pointer`); the home's clippy ban covers
+//                 `mode()` once every writer has moved.
 //   reverse-name  A function that builds the reverse name of an address or reads the address
-//                 of a reverse name (`reverse_name`, `reverse_address`, `ptr_name`,
-//                 `ptr_address`) outside `tenko_net::reverse`. Blind: a reverse name built
-//                 inline with `in-addr.arpa` in a larger function.
-//   link-local    A hand-written link-local test, by name (`is_link_local`) or by the IPv6
-//                 mask `0xffc0` (once per function), outside `tenko_net::addr`. Blind: calls
-//                 of the standard library's `is_link_local`, which are not copies.
+//                 of a reverse name (`reverse_name`, `reverse_address`, `reverse_ptr`,
+//                 `ptr_name`, `ptr_address`, `arpa_name`) outside `tenko_net::reverse`. Blind:
+//                 any other name, a reverse name built inline with `in-addr.arpa`.
+//   link-local    A hand-written link-local test, by name (`is_link_local`,
+//                 `is_unicast_link_local`) or by the IPv6 mask `0xffc0` (once per function),
+//                 outside `tenko_net::addr`. Not reported: calls of the standard library's
+//                 test. Blind: a test of another name that compares the first segment with
+//                 `0xfe80` by other means.
 //   proxy-client  A parser of the client address behind a proxy (`parse_v1`, `parse_v2`,
 //                 `read_v2` of a PROXY protocol header; `forwarded_for`, `walk_forwarded_for`,
 //                 `parse_forwarded_address` of a forwarded-for chain) outside
-//                 `tenko_net::proxy`. Blind: the same under a generic name (`parse`).
+//                 `tenko_net::proxy`. Blind: any other name (`parse`, `resolve`, `detect`).
 //   dns-number    A local `u8` or `u16` constant that names a DNS RCODE, record type or class
 //                 (`TYPE_SOA`, `RCODE_NOTAUTH`, `CLASS_IN`, a bare RCODE name such as
 //                 `NXDOMAIN`, and in `tenko-dns` and `tenko-scan` a bare type name such as
@@ -82,23 +94,28 @@
 //                 run time. Job kinds and plugin names have the same shape and are reported
 //                 alike: they are facts too.
 //   name-ladder   In `tenko-core`, a hand-written ladder `fn as_str(self) -> &'static str`
-//                 (or `fn name`) whose body is one `match self` with a string literal in every
+//                 (or `fn name`, or `-> &str`) whose body is one `match self` with a string literal in every
 //                 arm, which the code-list macro replaces. Blind: ladders outside `tenko-core`,
 //                 ladders with an arm that is not a literal.
 //
 // UI
-//   clipboard     `navigator.clipboard` outside `ui/src/app/clipboard.ts`. Blind: the
-//                 clipboard reached through a variable that holds `navigator`.
-//   byte-format   A function `format...Bytes`, `...Size`, `...Memory` or `...Megabytes` outside
-//                 `ui/src/app/format/`. Blind: `/ 1024` inline.
+//   clipboard     `navigator.clipboard` and `navigator?.clipboard` outside
+//                 `ui/src/app/clipboard.ts`. Blind: `navigator["clipboard"]`, the clipboard
+//                 reached through a variable that holds `navigator`.
+//   byte-format   A function `format...` or `human...` ending in `Bytes`, `ByteSize`,
+//                 `FileSize`, `DiskSize`, `Memory` or `Megabytes` outside `ui/src/app/format/`.
+//                 Blind: any other name, `/ 1024` inline.
 //   read-guard    A second `function latest` outside `ui/src/api/live.ts`, and the guard written
 //                 inline (`x.error ? undefined : x.latest`). Blind: a guard spelled otherwise.
 //   paging        A cursor taken from a page to fetch the next one (`cursor = page.next_cursor`,
 //                 `setNext(page.next_cursor ...)`, `next: page.next_cursor`) outside
 //                 `ui/src/api/paginate.ts`. Not reported: reading `next_cursor` only to say that
-//                 more exists. Blind: a cursor under another field name.
-//   object-cache  A module-level `new Map<..., Promise<...>>` outside `ui/src/api/cache.ts`.
-//                 Blind: a cache of another shape (an object, a `Map` of values).
+//                 more exists. Blind: a loop that passes `page.next_cursor` straight to a
+//                 call (`while (p.next_cursor) p = await get(p.next_cursor)`), a cursor under
+//                 another field name.
+//   object-cache  A module-level `const` or `let` that is a `Map` of promises (in its type
+//                 argument or its annotation) outside `ui/src/api/cache.ts`. Blind: a cache of
+//                 another shape (an object, a `Map` of values), a cache inside a function.
 //   field-kit     A form field component (`Field`, `TextField`, `SelectField`, `SelectInput`,
 //                 `FieldRow`, `FieldNote`, `FieldHelp`) defined outside
 //                 `ui/src/components/form/`. Blind: a field component of another name.
@@ -107,17 +124,19 @@
 //                 `ui/src/components/form/`. Blind: the same under another name.
 //   list-type     A list item type written by hand as the type argument of `fetchAll`,
 //                 `fetchPage` or `createListSource` outside `ui/src/api/`, instead of the item
-//                 type the generated path types give. Not reported: the definitions, and a
-//                 generic helper that passes its own type parameter on (`fetchAll<T>`). Blind:
-//                 a hand-written type passed another way (a cast, an annotation on the result).
+//                 type the generated path types give. Not reported: the definitions, a type
+//                 from the generated types (`components["schemas"]["Zone"]`), and a generic
+//                 helper that passes its own type parameter on (`fetchAll<TItem>`). Blind: a
+//                 hand-written type passed another way (a cast, an annotation on the result).
 //
 // Facts of docs/plans/shared-code-plan.md, section 3, that no rule here can see are listed in
 // that plan's packages with their own measure (behavior, configuration read from several
 // sources, tables read across crates): a lexical rule would only guess at them.
 //
 // An exception is a comment `copy-lint: allow <rule> <reason>` on the line of the finding or
-// the line above; the reason is required, and an exception that suppresses nothing is an
-// error. The baseline (scripts/copy-lint.baseline.json) lists today's copies by rule, file,
+// the line above; the reason is required and ends with its comment, and an exception that
+// suppresses nothing is an error. `--grown-since` also fails when a new entry takes the
+// place of a removed one of the same rule; a renamed file passes. The baseline (scripts/copy-lint.baseline.json) lists today's copies by rule, file,
 // scope (the function or constant) and the matched text, never by line. Whoever moves a copy
 // to its home removes its entry in the same commit (`--prune`). Node's standard library only.
 
@@ -164,16 +183,17 @@ const inHome = (rule, file) => HOMES[rule][1].some((home) => file === home || fi
 
 /** Rust function names that mark a copy, by rule. */
 const FUNCTIONS = {
-  hex: /^(?:hex|to_hex|from_hex|unhex|hex_encode|hex_decode|encode_hex|decode_hex|hex_upper|hex_into|push_hex|hex_value|hex_bytes|hex_literal|colon_hex|hex_with_colons|random_hex|sha1_hex_upper)$/,
-  base64: /^(?:base64|base64_encode|base64_decode|base64_value|base64url_encode|base64url_decode|base64url_value|decode_base64url|decode_base64url_32|push_base64url)$/,
-  pem: /^(?:pem|pem_certificates|parse_pem|decode_pem|encode_pem|to_pem)$/,
-  "der-length": /^(?:push_len|push_length|der_length|read_length)$/,
-  "civil-date": /^(?:civil_from_days|days_from_civil)$/,
-  "key-tag": /^key_tag$/,
-  "private-file": /^(?:write_private|write_atomic|write_atomically|write_then_rename|private_file|create_private|create_private_dir|create_private_file|create_file_private|create_dir_private)$/,
-  "reverse-name": /^(?:reverse_name|reverse_name6|reverse_address|ptr_name|ptr_address)$/,
+  // A name with `hex` as a word, except serde adapters and a function that takes a prefix.
+  hex: /^(?!(?:de)?serialize_|hex_prefix$)(?:\w+_)?(?:un)?hex(?:_\w+)?$/,
+  base64: /base64|(?:^|_)b64(?:_|$)/,
+  pem: /^(?:pem|pem_certificates?|(?:parse|decode|encode|read|write|to|from)_pem_(?:block|blocks|text)|(?:parse|decode|encode)_pem)$/,
+  "der-length": /^(?:push|write|encode|read|decode)_(?:der_)?len(?:gth)?$|^der_len(?:gth)?$/,
+  "civil-date": /civil/,
+  "key-tag": /key_?tag$/,
+  "private-file": /(?:^|_)private_(?:file|dir)|(?:file|dir)_private|^(?:write|create|save|open)_private$|^(?:write|replace|rename|save)_atomic|atomic_(?:write|replace|rename|save)|_atomically$|^write_then_rename$/,
+  "reverse-name": /^(?:reverse_(?:name|address|ptr)\d?|ptr_(?:name|address)\d?|arpa_name|address_of_reverse)$/,
   "proxy-client": /^(?:parse_v1|parse_v2|read_v2|forwarded_for|walk_forwarded_for|parse_forwarded_address)$/,
-  "link-local": /^is_link_local$/,
+  "link-local": /^is_(?:unicast_)?link_local$/,
 };
 
 /**
@@ -183,6 +203,8 @@ const FUNCTIONS = {
 const MARKERS = {
   "civil-date": /\b719_?468\b/g,
   "link-local": /\b0x[fF]{2}[cC]0\b/g,
+  // The owner-only permission bits of a file or a directory.
+  "private-file": /\b0o(?:600|700)\b/g,
 };
 
 /** DNS mnemonics: record types and RCODEs. */
@@ -291,7 +313,7 @@ export function scanRust(src, file) {
 
 /** Whether the function is one `match self` whose every arm is a string literal. */
 function isLadder(src, masked, f) {
-  if (!/\bself\b[^)]*\)\s*->\s*&\s*'static\s+str\s*$/.test(masked.slice(f.start, f.body))) return false;
+  if (!/\bself\b[^)]*\)\s*->\s*&\s*(?:'static\s+)?str\s*$/.test(masked.slice(f.start, f.body))) return false;
   const body = src.slice(f.body + 1, f.end).replace(/\/\/[^\n]*/g, "").trim();
   const m = /^match\s+\*?self\s*\{([\s\S]*)\}$/.exec(body);
   if (!m) return false;
@@ -302,16 +324,48 @@ function isLadder(src, masked, f) {
 // ---------------------------------------------------------------------------------------
 // TypeScript
 
+/** The type argument that starts after `<` at `open` in masked text, up to its matching `>`. */
+function typeArgument(masked, open) {
+  let depth = 1;
+  for (let i = open; i < masked.length; i++) {
+    if (masked[i] === "<") depth++;
+    else if (masked[i] === ">" && masked[i - 1] !== "=" && --depth === 0) return masked.slice(open, i).trim();
+  }
+  return "";
+}
+
+/** The type parameters a file declares on its functions (`function f<T, U extends X>(`). */
+function typeParameters(masked) {
+  const names = new Set();
+  for (const m of masked.matchAll(/(?:\bfunction\s*\*?\s*[\w$]*|[\w$]+\s*=\s*(?:async\s*)?)\s*<([^<>()]*(?:<[^<>()]*>[^<>()]*)*)>\s*\(/g)) {
+    for (const part of m[1].split(",")) {
+      const name = /^\s*([A-Za-z_$][\w$]*)/.exec(part)?.[1];
+      if (name) names.add(name);
+    }
+  }
+  return names;
+}
+
 const TS_RULES = [
-  { rule: "clipboard", re: /\bnavigator\s*\.\s*clipboard\b/g },
-  { rule: "byte-format", re: /\b(?:function\s+|const\s+)(format\w*(?:Bytes|Size|Memory|Megabytes))\b/g },
-  { rule: "read-guard", re: /\bfunction\s+(latest)\b|\.error\s*\?\s*undefined\s*:\s*[\w$.()]+\.latest\b/g },
-  { rule: "paging", re: /(?:\w*[cC]ursor\w*\s*[:=]|\bset\w*\s*\(|\bnext\s*[:=])\s*[\w$.]*\.next_cursor\b/g },
-  { rule: "object-cache", re: /^(?:export\s+)?const\s+([\w$]+)\s*=\s*new\s+Map\s*<[^;\n]*\bPromise\s*</gm },
+  { rule: "clipboard", re: /\bnavigator\s*\??\.\s*clipboard\b/g },
+  { rule: "byte-format", re: /\b(?:function\s+|const\s+)((?:format|human)\w*(?:Bytes|ByteSize|FileSize|DiskSize|Memory|Megabytes))\b/g },
+  { rule: "read-guard", re: /\bfunction\s+(latest)\b|\.error\s*\?\s*undefined\s*:\s*[\w$.()?]+\.latest\b/g },
+  { rule: "paging", re: /(?:\w*[cC]ursor\w*\s*[:=]|\bset\w*\s*\(|\bnext\s*[:=])\s*[\w$.?]*\??\.next_cursor\b/g },
+  {
+    rule: "object-cache",
+    re: /^(?:export\s+)?(?:const|let)\s+([\w$]+)\s*(?:=\s*new\s+Map\s*<[^;\n]*\bPromise\s*<|:\s*Map\s*<[^;\n=]*\bPromise\s*<[^;\n]*=\s*new\s+Map\b)/gm,
+  },
   { rule: "field-kit", re: /\b(?:function\s+|const\s+)(Field|TextField|SelectField|SelectInput|FieldRow|FieldNote|FieldHelp)\b/g },
   { rule: "field-error", re: /\b(?:function\s+|const\s+)(fieldErrors|fieldMessages?|messageArgs)\b/g },
-  // Not the definitions, and not a generic helper that passes its own type parameter on.
-  { rule: "list-type", re: /(?<!\bfunction\s+)\b(fetchAll|fetchPage|createListSource)\s*<(?![A-Z]\s*>)/g },
+  {
+    rule: "list-type",
+    re: /(?<!\bfunction\s+)\b(fetchAll|fetchPage|createListSource)\s*</g,
+    // Compliant: a generated type, and a generic helper passing its own type parameter on.
+    keep: (m, masked, params) => {
+      const arg = typeArgument(masked, m.index + m[0].length);
+      return !/\b(?:components|paths|operations)\s*\[/.test(arg) && !params.has(arg);
+    },
+  },
 ];
 
 /** One UI product file: its findings. */
@@ -319,9 +373,11 @@ export function scanTs(src, file) {
   const masked = maskTs(src);
   const starts = lineStarts(src);
   const findings = [];
-  for (const { rule, re } of TS_RULES) {
+  const params = typeParameters(masked);
+  for (const { rule, re, keep } of TS_RULES) {
     if (inHome(rule, file)) continue;
     for (const m of masked.matchAll(re)) {
+      if (keep && !keep(m, masked, params)) continue;
       const text = m[0].replace(/\s+/g, " ").trim();
       findings.push({ rule, line: lineOf(starts, m.index), scope: m[1] ?? "", text, message: RULES[rule] });
     }
@@ -338,6 +394,7 @@ const kit = lintKit({
   docs: 'CONTRIBUTING.md, "Where shared code lives"',
   about: "Known copies of scripts/copy-lint.mjs (CONTRIBUTING.md, \"Where shared code lives\"). This list only shrinks: a copy not listed fails the check, and so does an entry nothing matches. Whoever moves a copy to its home removes its entry in the same commit (node scripts/copy-lint.mjs --prune).",
   fix: "use the home",
+  noSwaps: true,
 });
 export const { applyAllows, parseBaseline, compare, growth } = kit;
 

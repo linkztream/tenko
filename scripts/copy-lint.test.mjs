@@ -98,6 +98,34 @@ describe("Rust rules", () => {
   test("test code is not product code: cfg(test) modules and test functions are skipped", () => {
     const src = "#[cfg(test)]\nmod tests {\n    fn to_hex(b: &[u8]) -> String { String::new() }\n    const C: &str = \"sys.store.timeout\";\n}\n";
     assert.deepEqual(scanRust(src, "crates/tenko-other/src/lib.rs").findings, []);
+    const testFn = '#[test]\nfn hex_round_trips() {\n    assert_eq!(code(), "sys.store.timeout");\n}\n';
+    assert.deepEqual(scanRust(testFn, "crates/tenko-other/src/lib.rs").findings, []);
+  });
+
+  test("names are matched by their words, not only today's names", () => {
+    const src = [
+      "fn bytes_to_hex() {}", "fn hex_string() {}", "fn encode_base64() {}", "fn b64() {}",
+      "fn write_private_file() {}", "fn dnskey_tag() {}", "fn reverse_ptr() {}", "fn ymd_from_civil() {}",
+    ].join("\n");
+    assert.deepEqual(rules(scanRust(src, "crates/tenko-other/src/lib.rs").findings), ["hex", "hex", "base64", "base64", "private-file", "key-tag", "reverse-name", "civil-date"]);
+  });
+
+  test("words that only look alike are not copies", () => {
+    const src = [
+      "fn is_atomic() {}", "fn private_bytes() {}", "fn chain_pem() {}", "fn root_pem() {}",
+      "fn serialize_bytes_or_hex() {}", "fn base32hex() {}", "fn ptr_names() {}",
+    ].join("\n");
+    assert.deepEqual(scanRust(src, "crates/tenko-other/src/lib.rs").findings, []);
+  });
+
+  test("private-file: owner-only permission bits mark a writer of any name, once per function", () => {
+    const src = "fn save(p: &Path) { o.mode(0o600); d.mode(0o700); }\nfn write_private() { o.mode(0o600); }\n";
+    assert.deepEqual(scanRust(src, "crates/tenko-other/src/lib.rs").findings.map((f) => [f.rule, f.scope]), [["private-file", "write_private"], ["private-file", "save"]]);
+  });
+
+  test("name-ladder: the elided lifetime counts too", () => {
+    const ladder = 'impl Kind {\n    pub fn name(&self) -> &str {\n        match self {\n            Self::A => "a",\n            Self::B => "b",\n        }\n    }\n}\n';
+    assert.deepEqual(rules(scanRust(ladder, "crates/tenko-core/src/kind.rs").findings), ["name-ladder"]);
   });
 
   test("comments are not code", () => {
@@ -124,9 +152,25 @@ describe("UI rules", () => {
     });
   }
 
-  test("list-type: a definition and a generic helper passing its parameter on are not hand-typed", () => {
+  test("list-type: a definition, a generic helper passing its parameter on and a generated type are compliant", () => {
     const src = "export function createListSource<T>(o: Options<T>) {}\nconst page = fetchPage<T>(path);\n";
     assert.deepEqual(scanTs(src, "ui/src/grid/source.ts"), []);
+    const helper = "export async function load<TItem extends object>(p: string) {\n  return fetchAll<TItem>(p);\n}\n";
+    assert.deepEqual(scanTs(helper, "ui/src/feature/data.ts"), []);
+    const generated = 'const zones = await fetchAll<components["schemas"]["Zone"]>("/api/v1/dns/zones");\n';
+    assert.deepEqual(scanTs(generated, "ui/src/dns/api.ts"), []);
+  });
+
+  test("the optional-chaining and annotated forms are seen; look-alike names are not", () => {
+    const src = [
+      "await navigator?.clipboard?.writeText(t);",
+      "setNext(page?.next_cursor ?? null);",
+      "let cache = new Map<string, Promise<Host>>();",
+      "const names: Map<string, Promise<string>> = new Map();",
+      "export function humanBytes(n: number) { return ''; }",
+      "export function formatPageSize(n: number) { return ''; }",
+    ].join("\n");
+    assert.deepEqual(rules(scanTs(src, "ui/src/feature/Page.tsx")), ["clipboard", "byte-format", "paging", "object-cache", "object-cache"]);
   });
 
   test("paging: reading next_cursor only to say that more exists is not a loop", () => {
@@ -215,6 +259,22 @@ describe("exceptions and the baseline", () => {
     assert.match(out, /copy-lint: allow reverse-name has no reason/);
   });
 
+  test("a reason ends with its comment, and an exception lives only in a comment", () => {
+    put("crates/demo/src/lib.rs", `${COPY}/* copy-lint: allow reverse-name */ fn reverse_name() {}\n`);
+    const closed = run();
+    assert.equal(closed.code, 1);
+    assert.match(closed.out, /allow reverse-name has no reason/);
+    put("ui/src/feature/Page.tsx", "const v = (\n  <p>\n    {/* copy-lint: allow clipboard */}\n    {navigator.clipboard.writeText(t)}\n  </p>\n);\n");
+    const tsx = run();
+    assert.equal(tsx.code, 1);
+    assert.match(tsx.out, /ui\/src\/feature\/Page\.tsx:3: copy-lint: allow clipboard has no reason/);
+    rmSync(path.join(dir, "ui"), { recursive: true, force: true });
+    put("crates/demo/src/lib.rs", `${COPY}const NOTE: &str = "copy-lint: allow reverse-name in a string";\nfn reverse_name() {}\n`);
+    const literal = run();
+    assert.equal(literal.code, 1);
+    assert.match(literal.out, /reverse-name: a reverse name/);
+  });
+
   test("an exception for a rule that does not exist, or that suppresses nothing, fails", () => {
     put("crates/demo/src/lib.rs", `// copy-lint: allow hexx because\n${COPY}// copy-lint: allow pem nothing here\nfn other() {}\n`);
     const { code, out } = run();
@@ -249,5 +309,22 @@ describe("exceptions and the baseline", () => {
     const grown = run("--grown-since", "HEAD");
     assert.equal(grown.code, 1, grown.out);
     assert.match(grown.out, /pem grew from 0 to 1/);
+  });
+
+  test("--grown-since fails when a new copy takes a removed one's place, and passes a renamed file", () => {
+    const git = (...args) => spawnSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.test", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8" });
+    const file = path.join(dir, "scripts/copy-lint.baseline.json");
+    const write = (entries) => writeFileSync(file, JSON.stringify({ findings: entries }));
+    write([{ rule: "hex", file: "crates/a/src/lib.rs", scope: "to_hex", text: "fn to_hex" }]);
+    assert.equal(git("add", "scripts/copy-lint.baseline.json").status, 0);
+    assert.equal(git("commit", "-q", "-m", "one copy").status, 0);
+    write([{ rule: "hex", file: "crates/b/src/lib.rs", scope: "hex_encode", text: "fn hex_encode" }]);
+    const swapped = run("--grown-since", "HEAD");
+    assert.equal(swapped.code, 1, swapped.out);
+    assert.match(swapped.out, /never traded for a new one/);
+    assert.match(swapped.out, /added: hex crates\/b\/src\/lib\.rs \[hex_encode\]/);
+    write([{ rule: "hex", file: "crates/a/src/moved.rs", scope: "to_hex", text: "fn to_hex" }]);
+    const renamed = run("--grown-since", "HEAD");
+    assert.equal(renamed.code, 0, renamed.out);
   });
 });

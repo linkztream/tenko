@@ -10,8 +10,10 @@
 //! - **In:** contracts between crates: identifiers, principals and authorization, the stored
 //!   models, the error trait and code lists, the codecs (CBOR, keys, byte text forms), the
 //!   metrics registry, secret references, roles, test support.
-//! - **Never:** code that only one or two crates use (it goes to the lowest crate those
-//!   callers share), input or output, policy (a default or a limit an operator can set).
+//! - **Never:** a helper that no type of this crate needs (it goes to the lowest crate that
+//!   every caller already depends on), input or output outside test support, policy in a free
+//!   helper (a setting's bound or default lives on the setting's own type, which may be a
+//!   stored model here).
 //! - **Who depends on it:** any crate. Every crate rebuilds when it changes, so an addition
 //!   inside this charter needs no permission but is announced in the first line of its pull
 //!   request and merged ahead of other open changes; a change to what an existing item does

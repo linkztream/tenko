@@ -1,4 +1,5 @@
-//! Network rules that a published standard defines, over `std::net` and `ipnet` types.
+//! Rules about IP addresses and prefixes that a published standard defines, over `std::net`
+//! and `ipnet` types.
 //!
 //! This crate is a home of shared code (`CONTRIBUTING.md`, "Where shared code lives"). Before
 //! writing an address rule anywhere else, look here; if the rule belongs here and is missing,
@@ -6,8 +7,8 @@
 //!
 //! # What goes in
 //!
-//! Functions whose rule an RFC or an IEEE standard defines, and that take and return
-//! `std::net`, `ipnet` or plain byte and string types: address classes (link-local,
+//! Functions whose rule an RFC or an IEEE standard defines and that take or return an IP
+//! address or prefix (`std::net` or `ipnet` types): address classes (link-local,
 //! special-purpose, IPv4-mapped, the reserved addresses of a subnet), the reverse name of an
 //! address and the address of a reverse name, the client address from a PROXY protocol header
 //! or a forwarded-for chain with a list of trusted hops. Each function's doc comment names the
@@ -20,10 +21,13 @@
 //!   `utoipa` derives.
 //! - A setting or a default that Tenko chooses: the caller passes those in.
 //! - Input or output, `async`, logging.
-//! - A domain type (zone, scope, prefix, host). The stored types of network identifiers
-//!   (MAC address, DUID, host and domain names) and their parsing live in `tenko_core::net`:
-//!   a type a stored record holds lives there, a rule over addresses that no stored type
-//!   needs lives here.
+//! - A protocol's message format: DNS wire data lives in `tenko_dns::wire`, DHCP options in
+//!   `tenko-dhcp`.
+//! - Byte text encodings (hexadecimal, base64, PEM) and dates: `tenko_core::codec`.
+//! - A domain type (zone, scope, prefix record, host), and the syntax of a stored identifier.
+//!   The stored types of network identifiers (MAC address, DUID, host and domain names) and
+//!   their parsing live in `tenko_core::net`: a type a stored record holds lives there, a rule
+//!   over addresses that no stored type needs lives here.
 //!
 //! # Who may depend on it
 //!
@@ -39,33 +43,57 @@
 
 #[cfg(test)]
 mod tests {
+    /// The value of `package = "..."` in a line, if it has one.
+    fn package_of(text: &str) -> Option<String> {
+        let rest = &text[text.find("package")? + "package".len()..];
+        let value = rest
+            .trim_start()
+            .strip_prefix('=')?
+            .trim_start()
+            .strip_prefix('"')?;
+        Some(value[..value.find('"')?].to_owned())
+    }
+
     /// The names of the dependencies a manifest declares, in every dependency table
     /// (`[dependencies]`, `[dev-dependencies]`, `[build-dependencies]`, and their
-    /// `[target.'...'.*]` forms), from both the `name = ...` and the `[dependencies.name]`
-    /// spellings.
+    /// `[target.'...'.*]` forms), from the `name = ...`, `name.workspace = true` and
+    /// `[dependencies.name]` spellings; a renamed dependency adds its `package` name too.
     fn dependencies(manifest: &str) -> Vec<String> {
+        let is_dependency_table =
+            |t: &str| t.rsplit('.').next().unwrap_or(t).ends_with("dependencies");
         let mut names = Vec::new();
-        let mut in_table = false;
+        let (mut in_table, mut in_entry) = (false, false);
         for line in manifest.lines().map(str::trim) {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
             if let Some(header) = line.strip_prefix('[') {
                 let header = header.trim_end_matches(']');
-                let table = header.rsplit('.').next().unwrap_or(header);
-                let is_dependency_table = |t: &str| t.ends_with("dependencies");
-                if is_dependency_table(table) {
-                    in_table = true;
-                } else if let Some((parent, name)) = header.rsplit_once('.')
-                    && is_dependency_table(parent.rsplit('.').next().unwrap_or(parent))
+                in_table = is_dependency_table(header);
+                in_entry = false;
+                if let Some((parent, name)) = header.rsplit_once('.')
+                    && !in_table
+                    && is_dependency_table(parent)
                 {
                     names.push(name.trim_matches('"').to_owned());
-                    in_table = false;
-                } else {
-                    in_table = false;
+                    in_entry = true;
                 }
-            } else if in_table
-                && let Some((name, _)) = line.split_once('=')
-                && !line.starts_with('#')
-            {
-                names.push(name.trim().trim_matches('"').to_owned());
+            } else if let Some((key, _)) = line.split_once('=') {
+                if in_table {
+                    let key = key.trim();
+                    names.push(
+                        key.split('.')
+                            .next()
+                            .unwrap_or(key)
+                            .trim_matches('"')
+                            .to_owned(),
+                    );
+                }
+                if (in_table || in_entry)
+                    && let Some(package) = package_of(line)
+                {
+                    names.push(package);
+                }
             }
         }
         names
@@ -110,18 +138,30 @@ mod tests {
     #[test]
     fn the_reader_sees_every_spelling_of_a_dependency() {
         let manifest = "[package]\nname = \"x\"\n\n[dependencies]\n# tenko-commented = 1\nipnet = \"2\"\n\
-                        tenko-core = { workspace = true }\n\n[dev-dependencies.tenko-store]\nworkspace = true\n\n\
+                        tenko-core = { workspace = true }\nserde.workspace = true\n\
+                        net = { package = \"tenko-net\", path = \"..\" }\n\n\
+                        [dev-dependencies.tenko-store]\nworkspace = true\n\n[dev-dependencies.store]\npackage = \"tenko-vault\"\n\n\
                         [target.'cfg(unix)'.build-dependencies]\n\"tenko\" = { path = \"..\" }\n\n[lints]\nworkspace = true\n";
         assert_eq!(
             dependencies(manifest),
-            ["ipnet", "tenko-core", "tenko-store", "tenko"]
+            [
+                "ipnet",
+                "tenko-core",
+                "serde",
+                "net",
+                "tenko-net",
+                "tenko-store",
+                "store",
+                "tenko-vault",
+                "tenko"
+            ]
         );
         assert_eq!(
             dependencies(manifest)
                 .iter()
                 .filter(|n| is_workspace_crate(n))
                 .count(),
-            3
+            5
         );
     }
 }

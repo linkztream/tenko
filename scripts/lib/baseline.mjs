@@ -18,10 +18,13 @@ import { rel } from "./lex.mjs";
  * The functions of one lint. `tool` is the script's name (`test-lint`), which its messages
  * and its exception comments (`<tool>: allow <rule> <reason>`) carry; `rules` maps a rule
  * to its message; `docs` names the document of the rules; `about` is the baseline's
- * description; `fix` says what to do about a new finding.
+ * description; `fix` says what to do about a new finding. With `noSwaps`, `--grown-since` also
+ * fails when an entry was added in place of a removed one of the same rule (the per-rule total
+ * alone would let a fixed copy pay for a new one); a renamed file still passes.
  */
-export function lintKit({ tool, rules, docs, about, fix }) {
-  const ALLOW = new RegExp(String.raw`${tool}:\s*allow\b\s*([\w-]*)\s*(.*)$`);
+export function lintKit({ tool, rules, docs, about, fix, noSwaps = false }) {
+  // An exception lives in a comment: a comment opener comes before it on its line.
+  const ALLOW = new RegExp(String.raw`(?:\/\/|\/\*|<!--|#).*?\b${tool}:\s*allow\b\s*([\w-]*)\s*(.*)$`);
 
   /** Applies the exception comments of one file: `{ kept, errors }`. */
   function applyAllows(findings, text, file) {
@@ -32,12 +35,16 @@ export function lintKit({ tool, rules, docs, about, fix }) {
       const m = ALLOW.exec(line);
       if (!m) return;
       const rule = m[1];
-      const reason = m[2].replace(/\*\/\s*$|-->\s*$|["'`]\s*[,)]*\s*$/, "").trim();
+      // The reason ends where its comment does; code after the comment is not a reason.
+      const reason = m[2]
+        .replace(/\*\/[\s\S]*$|-->[\s\S]*$/, "")
+        .replace(/["'`]\s*[,)]*\s*$/, "")
+        .trim();
       if (!(rule in rules)) {
         errors.push({ file, line: i + 1, message: `${tool}: allow names no known rule (${rule || "none"}); rules: ${Object.keys(rules).join(", ")}` });
         return;
       }
-      if (!reason) {
+      if (!/\w/.test(reason)) {
         errors.push({ file, line: i + 1, message: `${tool}: allow ${rule} has no reason` });
         return;
       }
@@ -194,12 +201,18 @@ export function lintKit({ tool, rules, docs, about, fix }) {
       return 2;
     }
     const grown = growth(before, after);
-    if (grown.length === 0) {
+    const expand = (entries) => entries.flatMap((e) => Array.from({ length: e.count }, () => e));
+    const added = compare(expand(after), before).fresh;
+    // With `noSwaps`, an entry new against the ref fails even when another of its rule went
+    // away, unless it is that entry under a new file name (a renamed file).
+    const removed = new Set(compare(expand(before), after).fresh.map((e) => JSON.stringify([e.rule, e.scope, e.text])));
+    const swapped = noSwaps ? added.filter((e) => !removed.has(JSON.stringify([e.rule, e.scope, e.text]))) : [];
+    if (grown.length === 0 && swapped.length === 0) {
       console.log(`${tool}: the baseline did not grow since ${ref} (${perRule(before) || "empty"} -> ${perRule(after) || "empty"})`);
       return 0;
     }
     for (const g of grown) console.log(`${relPath}: ${g.rule} grew from ${g.before} to ${g.after} finding(s) since ${ref}`);
-    const added = compare(after.flatMap((e) => Array.from({ length: e.count }, () => e)), before).fresh;
+    if (grown.length === 0) console.log(`${relPath}: entries were added since ${ref} in place of others; a baseline entry is never traded for a new one`);
     for (const e of toEntries(added)) console.log(`  added: ${e.rule} ${e.file} [${e.scope}] \`${e.text}\`${e.count > 1 ? ` (${e.count})` : ""}`);
     console.log(`${tool}: the baseline only shrinks: fix the new finding, or give it an exception with a reason (${docs})`);
     return 1;
