@@ -66,7 +66,9 @@ use tokio::sync::watch;
 use super::{
     apply::{Applier, TxnTables},
     index::{Capture, Registered, Registry, replay},
-    snapshot::{FORMAT, Record, SnapshotHeader, SnapshotReader, read_header, write_snapshot},
+    snapshot::{
+        FORMAT, Record, SnapshotHeader, SnapshotReader, read_header, records_bound, write_snapshot,
+    },
     stored::{
         META, META_STATE, SmMeta, data_table, is_store_table, sm_write, snapshot_write, storage,
     },
@@ -509,7 +511,9 @@ impl StateMachine {
                                         proposal.journal_retention,
                                         proposal.journal_max_bytes,
                                     )
-                                    .map_err(|error| self.stopped_at(&entry.log_id, &error))?,
+                                    .map_err(|error| {
+                                        self.stopped_at(Some(&entry.log_id), error.to_string())
+                                    })?,
                             );
                         }
                         responses.push(ApplyResponse { outcomes });
@@ -636,6 +640,17 @@ impl StateMachine {
             }
         };
         drop(view);
+        if written.records > records_bound(written.bytes) {
+            tracing::warn!(
+                snapshot = %snapshot_id,
+                bytes = written.bytes,
+                records = written.records,
+                bound = records_bound(written.bytes),
+                "no member can install this snapshot: its records expand beyond the bound of \
+                 its file's size; the log keeps the entries it covers until a snapshot can be \
+                 installed"
+            );
+        }
         fs::rename(&part, &path).map_err(storage)?;
         self.set_current(meta.clone(), path.clone());
         let counters = &shared.stats;
@@ -877,23 +892,24 @@ impl StateMachine {
         lock(&self.shared.stopped).clone()
     }
 
-    /// The error that stops the state machine at a committed entry it cannot apply: logged
+    /// The error that stops the state machine at a committed entry it cannot apply, or at a
+    /// snapshot it cannot install (`log_id` is the last entry the snapshot covers): logged
     /// with [`APPLY_STOPPED`], the entry and the reason, kept for the status, and carried
     /// into openraft's fatal error, which stops the node (its role becomes `Shutdown`, so
-    /// readiness fails). Nothing of the entry's transaction commits, so after a restart the
-    /// entry applies again.
-    fn stopped_at(&self, log_id: &LogId, error: &StoreError) -> StoreError {
+    /// readiness fails). Nothing of the entry's transaction commits and a refused snapshot
+    /// leaves the old state, so after a restart the entry applies again.
+    fn stopped_at(&self, log_id: Option<&LogId>, reason: String) -> StoreError {
         let stop = ApplyStopped {
-            index: log_id.index,
-            term: log_id.leader_id.term,
-            reason: error.to_string(),
+            index: log_id.map_or(0, |log_id| log_id.index),
+            term: log_id.map_or(0, |log_id| log_id.leader_id.term),
+            reason,
         };
         tracing::error!(
             code = APPLY_STOPPED,
             index = stop.index,
             term = stop.term,
             reason = %stop.reason,
-            "the state machine stopped at a committed entry it cannot apply"
+            "the state machine stopped at an entry it cannot apply"
         );
         let stopped = StoreError::Storage(format!(
             "{APPLY_STOPPED}: the state machine stopped at log entry {} of term {}: {}",
@@ -1113,10 +1129,18 @@ impl RaftStateMachine<TypeConfig> for StateMachine {
     ) -> Result<(), StorageError> {
         let sm = self.clone();
         let meta = meta.clone();
-        tokio::task::spawn_blocking(move || sm.install(&meta, &snapshot.path))
-            .await
-            .map_err(snapshot_write)?
-            .map_err(snapshot_write)
+        tokio::task::spawn_blocking(move || {
+            sm.install(&meta, &snapshot.path).map_err(|error| {
+                let reason = format!(
+                    "the snapshot {} cannot be installed: {error}",
+                    meta.snapshot_id
+                );
+                sm.stopped_at(meta.last_log_id.as_ref(), reason)
+            })
+        })
+        .await
+        .map_err(snapshot_write)?
+        .map_err(snapshot_write)
     }
 
     async fn get_current_snapshot(&mut self) -> Result<Option<Snapshot>, StorageError> {
@@ -1311,7 +1335,7 @@ mod tests {
             .expect("apply");
             go.send(()).expect("go");
         }
-        // The last build holds the lock: nothing applies until it is done.
+        // The last build runs while it holds the lock the apply path takes.
         build_starts("build under the lock");
         go.send(()).expect("go");
         assert!(!builds.recv().expect("the end"), "no further build");
@@ -1326,6 +1350,244 @@ mod tests {
         drop((source, sm));
         fs::remove_dir_all(&source_dir).expect("clean up");
         fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// A batch with every map a batch can hold: the batch, a precondition, a mutation, an
+    /// audit draft, its details and a field change.
+    fn full_batch(principal: Principal) -> WriteBatch {
+        use tenko_core::{
+            CounterKey, IdempotencyKey, NodeId, ObjectRef, RequestId,
+            audit::{AuditDetails, AuditOutcome, FieldChange},
+        };
+        let at = Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("timestamp");
+        let rows = TableName::from_static("ipam.sm_test_rows");
+        let counter = CounterKey::new("ipam.sm_test_counter");
+        let mut batch = WriteBatch::new(principal, at);
+        batch.request = Some(RequestId::generate());
+        batch.idempotency = Some(IdempotencyKey::new("exact-1").expect("key"));
+        let mut failed =
+            AuditDraft::success(AuditAction::from_static("ipam.sm_test.refuse"), Vec::new());
+        failed.outcome = AuditOutcome::failed(&StoreError::Timeout);
+        failed.source_ip = Some("2001:db8::7".parse().expect("address"));
+        let mut changed = AuditDraft::success(
+            AuditAction::from_static("ipam.sm_test.write"),
+            vec![ObjectRef::node(NodeId(7))],
+        );
+        changed.source_ip = Some("192.0.2.7".parse().expect("address"));
+        changed.details = AuditDetails {
+            changes: vec![
+                FieldChange {
+                    object: Some(ObjectRef::node(NodeId(7))),
+                    field: "status".to_owned(),
+                    old: None,
+                    new: Some("active".to_owned()),
+                },
+                FieldChange {
+                    object: None,
+                    field: "TGL-02".to_owned(),
+                    old: Some("off".to_owned()),
+                    new: None,
+                },
+            ],
+            context: [("attempted".to_owned(), "admin".to_owned())].into(),
+        };
+        batch
+            .expect_version(rows.clone(), Bytes::from_static(b"r"), Some(Revision(1)))
+            .expect_counter(counter.clone(), 0)
+            .put(
+                rows.clone(),
+                Bytes::from_static(b"r"),
+                Bytes::from_static(b"v"),
+            )
+            .delete(rows, Bytes::from_static(b"gone"))
+            .bump(counter)
+            .audit(changed)
+            .audit(failed);
+        batch
+    }
+
+    // The exact decode accepts every batch this version writes, whatever its encoder leaves
+    // out (empty lists, absent options, defaults) and in whatever order its maps arrive: a
+    // false refusal would stop a healthy cluster.
+    #[test]
+    fn every_batch_this_version_writes_decodes_exactly() {
+        use tenko_core::{
+            ApiTokenId, AuthStrength, SessionId, UserId,
+            codec::{from_cbor_exact, to_canonical_cbor},
+        };
+        let at = Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("timestamp");
+        let principals = [
+            Principal::system(SystemComponent::Store),
+            Principal::System {
+                component: SystemComponent::Ipam,
+                on_behalf_of: Some(UserId::generate()),
+            },
+            Principal::User {
+                id: UserId::generate(),
+                session: SessionId::generate(),
+                strength: AuthStrength::Passkey,
+            },
+            Principal::Token {
+                id: ApiTokenId::generate(),
+                owner: UserId::generate(),
+            },
+        ];
+        let mut batches = vec![WriteBatch::new(
+            Principal::system(SystemComponent::Store),
+            at,
+        )];
+        batches.extend(principals.into_iter().map(full_batch));
+        if let EntryPayload::Normal(proposal) = audited_entry(1, 1).payload {
+            batches.push(from_cbor_exact(&proposal.batches[0].batch).expect("the entry's batch"));
+        }
+        assert_eq!(batches.len(), 6);
+        for batch in batches {
+            for encoded in [
+                to_cbor(&batch).expect("encode").to_vec(),
+                to_canonical_cbor(&batch).expect("canonical"),
+            ] {
+                assert_eq!(
+                    from_cbor_exact::<WriteBatch>(&encoded).expect("decodes exactly"),
+                    batch
+                );
+            }
+        }
+    }
+
+    /// `bytes` with the entry `"future": 1` (a field of a newer release) added to the map
+    /// at `at`, or to the first map after the first occurrence of `after` (past one array
+    /// header).
+    fn with_unknown_field(bytes: &[u8], after: &[u8]) -> Vec<u8> {
+        let mut at = if after.is_empty() {
+            0
+        } else {
+            bytes
+                .windows(after.len())
+                .position(|window| window == after)
+                .expect("the place is encoded")
+                + after.len()
+        };
+        if (0x80..0x98).contains(&bytes[at]) {
+            at += 1;
+        }
+        assert!(
+            (0xA0..0xB7).contains(&bytes[at]),
+            "a short map header at {at}"
+        );
+        let mut out = bytes.to_vec();
+        out[at] += 1;
+        let field = [0x66, b'f', b'u', b't', b'u', b'r', b'e', 0x01];
+        out.splice(at + 1..=at, field);
+        out
+    }
+
+    /// The CBOR text string `text`.
+    fn cbor_text(text: &str) -> Vec<u8> {
+        let mut out = vec![0x60 + u8::try_from(text.len()).expect("short")];
+        out.extend_from_slice(text.as_bytes());
+        out
+    }
+
+    // A field this binary does not know, in any part of a replicated batch, stops the state
+    // machine at the entry instead of being ignored; the same bytes without it apply. The
+    // two parts of the entry around the batches refuse it already when the entry is read.
+    // Stored records keep their tolerant reads: a job's batch or an audit record with a
+    // field of a newer release still reads.
+    #[test]
+    fn a_batch_with_an_unknown_field_stops_the_member_and_stored_records_still_read() {
+        use tenko_core::codec::from_cbor;
+        let batch = full_batch(Principal::system(SystemComponent::Store));
+        let plain = to_cbor(&batch).expect("encode").to_vec();
+        let entry = |bytes: Vec<u8>| Entry {
+            log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), 1),
+            payload: EntryPayload::Normal(Proposal {
+                journal_retention: 100,
+                journal_max_bytes: 0,
+                batches: vec![ProposedBatch {
+                    batch: Bytes::from(bytes),
+                    fingerprint: None,
+                }],
+            }),
+        };
+        for (place, after) in [
+            ("batch", Vec::new()),
+            ("precondition", cbor_text("Version")),
+            ("mutation", cbor_text("Put")),
+            ("audit draft", cbor_text("audit")),
+            ("audit details", cbor_text("details")),
+            ("field change", cbor_text("changes")),
+        ] {
+            let unknown = with_unknown_field(&plain, &after);
+            assert_eq!(
+                from_cbor::<WriteBatch>(&unknown).expect("a job's batch reads tolerantly"),
+                batch,
+                "{place}"
+            );
+            let dir = temp_dir("unknown-field");
+            let sm = StateMachine::open(&dir, OPTIONS).expect("open");
+            let error = sm
+                .apply_entries(vec![entry(unknown)])
+                .expect_err("an unknown field stops the member");
+            assert!(
+                error.to_string().contains(APPLY_STOPPED)
+                    && error.to_string().contains("log entry 1 ")
+                    && error.to_string().contains("unknown field `"),
+                "{place}: {error}"
+            );
+            assert_eq!(sm.stopped().map(|stop| stop.index), Some(1), "{place}");
+            assert_eq!(sm.meta().revision, Revision::ZERO, "{place}");
+            let responses = sm
+                .apply_entries(vec![entry(plain.clone())])
+                .expect("the batch without the field applies");
+            assert!(
+                matches!(
+                    responses[0].outcomes[..],
+                    [crate::raft::types::BatchOutcome::PreconditionFailed(_)]
+                ),
+                "{place}: {responses:?}"
+            );
+            drop(sm);
+            fs::remove_dir_all(&dir).expect("clean up");
+        }
+
+        let encoded = to_cbor(&entry(plain.clone())).expect("entry").to_vec();
+        assert_eq!(
+            from_cbor::<Entry>(&encoded).expect("the entry"),
+            entry(plain.clone())
+        );
+        for after in [cbor_text("Normal"), cbor_text("batches")] {
+            let unknown = with_unknown_field(&encoded, &after);
+            let Err(error) = from_cbor::<Entry>(&unknown) else {
+                panic!("an entry with an unknown field after {after:?} must not read");
+            };
+            assert!(error.to_string().contains("future"), "{error}");
+        }
+
+        let at = Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("timestamp");
+        let record = AuditRecord::seal(
+            AuditSeq(1),
+            Revision(1),
+            at,
+            Principal::system(SystemComponent::Store),
+            None,
+            batch.audit[0].clone(),
+            tenko_core::audit::ChainHead::default().hash,
+        )
+        .expect("seal");
+        let stored = tables::AUDIT.encode(&record).expect("encode").to_vec();
+        for after in [
+            cbor_text("draft"),
+            cbor_text("details"),
+            cbor_text("changes"),
+        ] {
+            let newer = with_unknown_field(&stored, &after);
+            assert_eq!(
+                tables::AUDIT
+                    .decode(&newer)
+                    .expect("a stored audit record reads tolerantly"),
+                record
+            );
+        }
     }
 
     // A snapshot whose header names an audit head its records do not end at is refused at
@@ -1355,15 +1617,29 @@ mod tests {
         let target_dir = temp_dir("audit-target");
         let target = StateMachine::open(&target_dir, OPTIONS).expect("open");
         let file = target.file_path();
-        let error = target
-            .install(&honest.meta, &forged)
-            .expect_err("a head the records do not end at");
-        assert!(
-            error.to_string().contains(
-                "does not verify in the snapshot to install: a record follows the head 1"
-            ),
-            "{error}"
-        );
+        // Through openraft's entry, which stops the member and records why.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        let refused = runtime.block_on(RaftStateMachine::install_snapshot(
+            &mut target.clone(),
+            &honest.meta,
+            Box::new(SnapshotFile { path: forged }),
+        ));
+        let Err(error) = refused else {
+            panic!("a head the records do not end at must not install");
+        };
+        let stop = target.stopped().expect("the stop is recorded");
+        assert_eq!(Some(stop.index), honest.meta.last_log_id.map(|id| id.index));
+        for text in [error.to_string(), stop.reason] {
+            assert!(
+                text.contains("cannot be installed")
+                    && text.contains(
+                        "does not verify in the snapshot to install: a record follows the head 1"
+                    ),
+                "{text}"
+            );
+        }
         assert_eq!(target.meta().revision, Revision::ZERO);
         assert_eq!(target.file_path(), file, "the store did not switch");
         target

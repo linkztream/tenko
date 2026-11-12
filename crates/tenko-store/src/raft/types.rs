@@ -54,8 +54,11 @@ pub struct SnapshotFile {
     pub path: PathBuf,
 }
 
-/// The application payload of one Raft entry: write batches in queue order.
+/// The application payload of one Raft entry: write batches in queue order. A replicated
+/// command: a field this binary does not know fails the decode (of the entry on the wire or
+/// in the log) instead of being ignored, like the batches in it (`apply`).
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Proposal {
     /// Change sets the journal keeps (from the leader's configuration, so every replica
     /// trims its journal identically).
@@ -70,6 +73,7 @@ pub struct Proposal {
 
 /// One write batch inside a [`Proposal`].
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProposedBatch {
     /// The batch as CBOR (`tenko_core::codec::to_cbor` of a `WriteBatch`).
     pub batch: Bytes,

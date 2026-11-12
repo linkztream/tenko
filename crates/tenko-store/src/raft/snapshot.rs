@@ -100,6 +100,8 @@ pub(crate) struct WrittenSnapshot {
     pub(crate) bytes: u64,
     pub(crate) tables: u64,
     pub(crate) rows: u64,
+    /// Bytes of records, as a reader counts them against [`records_bound`].
+    pub(crate) records: u64,
 }
 
 /// Where the bytes of a snapshot go: the file, or a DEFLATE stream into it.
@@ -139,11 +141,14 @@ impl Sink {
 struct HashingWriter {
     out: Sink,
     hasher: Sha256,
+    /// Bytes hashed so far.
+    hashed: u64,
 }
 
 impl HashingWriter {
     fn write(&mut self, data: &[u8]) -> io::Result<()> {
         self.hasher.update(data);
+        self.hashed += u64::try_from(data.len()).unwrap_or(u64::MAX);
         self.out.write_all(data)
     }
 }
@@ -164,12 +169,14 @@ pub(crate) fn write_snapshot(
     let mut out = HashingWriter {
         out: Sink::Plain(BufWriter::with_capacity(BUFFER, file)),
         hasher: Sha256::new(),
+        hashed: 0,
     };
     let encoded = to_cbor(header)?;
     out.write(MAGIC).map_err(storage)?;
     out.write(&length_u32(encoded.len(), "header").map_err(storage)?)
         .map_err(storage)?;
     out.write(&encoded).map_err(storage)?;
+    let header_bytes = out.hashed;
     if header.format != FORMAT_PLAIN {
         out.out.compress();
     }
@@ -205,6 +212,7 @@ pub(crate) fn write_snapshot(
         }
     }
     out.write(&[TAG_END]).map_err(storage)?;
+    let records = out.hashed - header_bytes;
     let digest: [u8; 32] = out.hasher.clone().finalize().into();
     out.out.write_all(&digest).map_err(storage)?;
     let file = out
@@ -217,6 +225,7 @@ pub(crate) fn write_snapshot(
         bytes,
         tables,
         rows,
+        records,
     })
 }
 

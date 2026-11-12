@@ -317,9 +317,10 @@ parameters `stored`, `target` and `nodes`.
 A joining controller whose binary does not know the format the cluster stores is refused
 with `cluster.join.format_newer`. The procedure for the whole cluster is section 7.7.
 
-A member never skips a committed entry of the replicated log. If its binary cannot read one
-(a write of a newer release reached a member that still runs an older one), its store stops
-applying the log at that entry and the member serves nothing newer:
+A member never skips a committed entry of the replicated log, and never applies one it can
+read only in part. If its binary cannot read one (a write of a newer release, with a value or
+a field the older release does not know, reached a member that still runs it), its store
+stops applying the log at that entry and the member serves nothing newer:
 
 - the server log has an error line with the code `sys.store.apply_stopped`, the index and
   term of the entry and the reason;
@@ -331,6 +332,14 @@ applying the log at that entry and the member serves nothing newer:
 Upgrade that member's binary to the release the leader runs and start it again: it applies
 the entry and catches up. Nothing of the entry was applied, so nothing has to be repaired.
 
+A field in the envelope of the entries themselves is refused one step earlier: the older
+member refuses to append such entries (`cluster.wire.payload`), so it falls behind and the
+leader shows its lag (`tenko cluster members`, the metric `tenko_raft_lag_entries`), while its
+own readiness and status show nothing yet. When a majority of the voters refuse or stop at an
+entry, the cluster commits nothing more and accepts no writes until enough of them run a
+release that reads it. This is what the rolling order prevents: a release writes nothing that
+an older member cannot read before every member runs a binary that can read it.
+
 ## 4 The migration convention
 
 This section is for developers. It answers three questions: when does a change to stored
@@ -339,6 +348,12 @@ The same rules are stated in the module comments of `crates/tenko/src/upgrade/mi
 and in `crates/tenko-core/src/codec/mod.rs` (rules for stored types).
 
 ### 4.1 When a change needs a new format
+
+Stored records are read tolerantly: a binary ignores a field it does not know, so that an
+older release reads what a newer one wrote. A replicated batch is read exactly: a member
+whose binary does not know one of its fields or values stops until its binary is upgraded
+(section 3.7). For the same reason a field of the write batch, its audit drafts or the Raft
+entry is never removed while a log entry that holds it may still be applied.
 
 The format number answers one question: can a binary that does not know a change open the
 data safely? The question has two halves, and both must be asked.

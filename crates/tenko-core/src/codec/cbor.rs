@@ -62,6 +62,62 @@ pub fn from_cbor<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, CodecError> {
     ciborium::from_reader(bytes).map_err(|e| CodecError::Decode(e.to_string()))
 }
 
+/// Decodes a CBOR value exactly: a map key of the input that the decoded value does not
+/// keep (a field `T` does not know, which serde ignores) is an error. Stored records are
+/// read with [`from_cbor`], which ignores unknown fields so that an older binary reads what
+/// a newer one wrote; a replicated command is read with this, because every member must
+/// apply the same command or none.
+///
+/// The check decodes, encodes the value again and looks for every key of the input in the
+/// result, at the same place: keys the result adds (defaults) are fine, keys it lost are
+/// not. A key the input carries with a value the type leaves out when encoding (an empty
+/// list of a field that skips empty lists) counts as lost, which only makes the check
+/// stricter.
+///
+/// # Errors
+///
+/// Returns [`CodecError::Decode`] if the bytes do not decode as `T`, or naming the first
+/// key `T` does not keep.
+pub fn from_cbor_exact<T: Serialize + DeserializeOwned>(bytes: &[u8]) -> Result<T, CodecError> {
+    let input: Value = from_cbor(bytes)?;
+    let value: T = input
+        .deserialized()
+        .map_err(|e| CodecError::Decode(e.to_string()))?;
+    let kept = Value::serialized(&value).map_err(|e| CodecError::Encode(e.to_string()))?;
+    match lost_key(&input, &kept) {
+        Some(path) => Err(CodecError::Decode(format!("unknown field `{path}`"))),
+        None => Ok(value),
+    }
+}
+
+/// The path of the first map key of `input` that `kept` lacks.
+fn lost_key(input: &Value, kept: &Value) -> Option<String> {
+    match (input, kept) {
+        (Value::Map(input), Value::Map(kept)) => input.iter().find_map(|(key, value)| {
+            let name = match key {
+                Value::Text(text) => text.clone(),
+                other => format!("{other:?}"),
+            };
+            match kept.iter().find(|(kept_key, _)| kept_key == key) {
+                None => Some(name),
+                Some((_, kept_value)) => {
+                    lost_key(value, kept_value).map(|inner| format!("{name}.{inner}"))
+                }
+            }
+        }),
+        (Value::Array(input), Value::Array(kept)) if input.len() == kept.len() => input
+            .iter()
+            .zip(kept)
+            .enumerate()
+            .find_map(|(n, (input, kept))| {
+                lost_key(input, kept).map(|inner| format!("{n}.{inner}"))
+            }),
+        (Value::Array(_), Value::Array(_)) => Some("[]".to_owned()),
+        (Value::Tag(_, input), Value::Tag(_, kept)) => lost_key(input, kept),
+        _ => None,
+    }
+}
+
 /// Encodes a value in canonical CBOR (RFC 8949 section 4.2.1, core deterministic
 /// encoding).
 ///
@@ -132,6 +188,91 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    enum Step {
+        Put { key: String },
+        Stop,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct Command {
+        name: String,
+        #[serde(default)]
+        steps: Vec<Step>,
+        #[serde(default)]
+        context: BTreeMap<String, String>,
+    }
+
+    fn command() -> Command {
+        Command {
+            name: "c".to_owned(),
+            steps: vec![
+                Step::Stop,
+                Step::Put {
+                    key: "k".to_owned(),
+                },
+            ],
+            context: [("free".to_owned(), "form".to_owned())].into(),
+        }
+    }
+
+    /// `command()` as a CBOR value with an extra entry in the map at `path` (field names
+    /// and list positions).
+    fn with_extra(path: &[&str]) -> Vec<u8> {
+        fn visit(value: &mut Value, path: &[&str]) {
+            match (value, path.split_first()) {
+                (Value::Map(entries), None) => {
+                    entries.push((
+                        Value::Text("future".to_owned()),
+                        Value::Text("later".to_owned()),
+                    ));
+                }
+                (Value::Map(entries), Some((name, rest))) => {
+                    let (_, inner) = entries
+                        .iter_mut()
+                        .find(|(key, _)| *key == Value::Text((*name).to_owned()))
+                        .expect("the path names a field");
+                    visit(inner, rest);
+                }
+                (Value::Array(items), Some((n, rest))) => {
+                    visit(&mut items[n.parse::<usize>().expect("a position")], rest);
+                }
+                (other, _) => panic!("no map at the path: {other:?}"),
+            }
+        }
+        let mut value = Value::serialized(&command()).expect("value");
+        visit(&mut value, path);
+        let mut out = Vec::new();
+        write_value(&value, &mut out).expect("encode");
+        out
+    }
+
+    // An unknown field anywhere in a command fails the exact decode and names its place,
+    // while the tolerant decode of the same bytes ignores it; the command without it
+    // decodes exactly, and so do keys a map of free-form entries holds.
+    #[test]
+    fn an_exact_decode_refuses_a_field_the_type_does_not_know() {
+        let plain = to_cbor(&command()).expect("encode");
+        assert_eq!(
+            from_cbor_exact::<Command>(&plain).expect("exact"),
+            command()
+        );
+        for (path, named) in [
+            (&[][..], "future"),
+            (&["steps", "1", "Put"][..], "steps.1.Put.future"),
+        ] {
+            let extra = with_extra(path);
+            let Err(CodecError::Decode(error)) = from_cbor_exact::<Command>(&extra) else {
+                panic!("the extra field at {path:?} must not decode exactly");
+            };
+            assert_eq!(error, format!("unknown field `{named}`"));
+            assert_eq!(from_cbor::<Command>(&extra).expect("tolerant"), command());
+        }
+        let free = with_extra(&["context"]);
+        let decoded = from_cbor_exact::<Command>(&free).expect("a free-form key is kept");
+        assert_eq!(decoded.context["future"], "later");
+    }
 
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     struct Record {

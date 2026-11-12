@@ -22,5 +22,7 @@
 pub mod cbor;
 pub mod key;
 
-pub use cbor::{CodecError, canonical_sha256, from_cbor, to_canonical_cbor, to_cbor};
+pub use cbor::{
+    CodecError, canonical_sha256, from_cbor, from_cbor_exact, to_canonical_cbor, to_cbor,
+};
 pub use key::{KeyCodec, KeyError, decode_key, encode_key, prefix_successor};

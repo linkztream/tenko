@@ -127,7 +127,7 @@ use openraft::{BasicNode, ServerState, error::Fatal};
 use tenko_core::{
     NodeId, Revision,
     audit::Digest,
-    codec::{from_cbor, to_cbor},
+    codec::{from_cbor_exact, to_cbor},
 };
 use tokio::{
     io::AsyncWriteExt as _,
@@ -1174,7 +1174,7 @@ impl RaftStore {
             return Err(ForwardError::NotLeader { leader });
         }
         let decoded: WriteBatch =
-            from_cbor(&batch).map_err(|error| ForwardError::Store(error.into()))?;
+            from_cbor_exact(&batch).map_err(|error| ForwardError::Store(error.into()))?;
         decoded
             .validate(inner.config.coalescer.max_batch_bytes)
             .map_err(ForwardError::Store)?;

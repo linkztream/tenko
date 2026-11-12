@@ -293,7 +293,8 @@ pub struct CopyReport {
 /// `sm.redb`) with its pointer, the snapshots and the marker. Every copied file is synced.
 /// Never copy the files of an open store: redb files are only consistent when closed. The
 /// log and the state file stay locked from the check to the end of the copy, so a server
-/// that starts meanwhile waits until the copy is done instead of changing the store under it.
+/// that starts meanwhile cannot open the store until the copy is done: redb waits for the
+/// lock on Windows and refuses the open as in use on Linux.
 ///
 /// # Errors
 ///
@@ -436,10 +437,18 @@ fn copy_file(from: &Path, to: &Path) -> Result<u64, FormatError> {
     copy_from(&file, from, to)
 }
 
-/// Copies the open file `source` (named `from`) to `to` and syncs the copy; returns its
-/// size.
+/// Copies the open file `source` (named `from`) to `to` with its permissions, before any
+/// byte is written (the state file holds the vault's envelopes), and syncs the copy;
+/// returns its size.
 fn copy_from(mut source: &File, from: &Path, to: &Path) -> Result<u64, FormatError> {
+    let permissions = source
+        .metadata()
+        .map_err(|error| FormatError::io(from, error))?
+        .permissions();
     let mut target = File::create(to).map_err(|error| FormatError::io(to, error))?;
+    target
+        .set_permissions(permissions)
+        .map_err(|error| FormatError::io(to, error))?;
     let bytes = io::copy(&mut source, &mut target).map_err(|error| FormatError::io(from, error))?;
     target
         .sync_all()
@@ -639,11 +648,12 @@ mod tests {
     }
 
     // The check that the store is closed and the copy are one step: while the copy holds the
-    // store, a server that starts waits for it instead of opening the store under the copy,
-    // and opens it once the copy is done.
+    // store, a server that starts cannot open it (redb waits for the lock on Windows and
+    // refuses the open on Linux), and once the copy is done it opens. A copy keeps the
+    // permissions of the files it copies.
     #[cfg(feature = "raft")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_server_waits_while_a_copy_holds_the_store() {
+    async fn no_server_opens_the_store_while_a_copy_holds_it() {
         let dir = temp_dir("held");
         let open = || {
             let mut config = crate::raft::RaftStoreConfig::new(dir.join("store"));
@@ -660,16 +670,48 @@ mod tests {
         let mut starting = tokio::spawn(open());
         // test-lint: allow deadline a start that is held back passes on any machine; only one that opens the held store in time fails
         let early = tokio::time::timeout(std::time::Duration::from_secs(2), &mut starting).await;
-        let Err(_still_waiting) = early else {
-            panic!("a server opened the store while the copy held it");
+        let waiting = match early {
+            Err(_still_waiting) => true,
+            Ok(started) => match started.expect("the start task") {
+                Ok(_) => panic!("a server opened the store while the copy held it"),
+                Err(StoreError::Storage(refused)) => {
+                    assert!(refused.contains("already open"), "{refused}");
+                    false
+                }
+                Err(other) => panic!("the start failed for another reason: {other}"),
+            },
         };
         drop(held);
-        let store = starting
-            .await
-            .expect("the start task")
-            .expect("the store opens once the copy is done");
+        let store = if waiting {
+            starting.await.expect("the start task")
+        } else {
+            open().await
+        }
+        .expect("the store opens once the copy is done");
         store.shutdown().await.expect("shutdown");
         drop(store);
+
+        let source = dir.join("store/sm.redb");
+        let mut permissions = fs::metadata(&source).expect("metadata").permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&source, permissions).expect("read-only source");
+        copy_closed_store(&dir.join("store"), &dir.join("copy")).expect("copy");
+        assert!(
+            fs::metadata(dir.join("copy/sm.redb"))
+                .expect("copied")
+                .permissions()
+                .readonly(),
+            "the copy keeps the permissions of its source"
+        );
+        for path in [source, dir.join("copy/sm.redb")] {
+            let mut permissions = fs::metadata(&path).expect("metadata").permissions();
+            #[allow(
+                clippy::permissions_set_readonly_false,
+                reason = "the test removes its files"
+            )]
+            permissions.set_readonly(false);
+            fs::set_permissions(&path, permissions).expect("writable again");
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -21,7 +21,9 @@
 //! decoded every batch before it reached the log, so on a member of the same release the
 //! decode cannot fail; where it fails, the member runs another release (a rolling upgrade,
 //! a learner left behind), and an outcome would let it skip a batch the others applied and
-//! go on at revisions they do not share. The state machine stops instead
+//! go on at revisions they do not share. A batch is decoded exactly
+//! (`tenko_core::codec::from_cbor_exact`): a field this binary does not know fails the
+//! decode instead of being ignored, because ignoring it would apply another batch. The state machine stops instead
 //! ([`crate::api::APPLY_STOPPED`]), at the entry, until its binary can read it.
 
 use std::{
@@ -35,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use tenko_core::{
     AuditSeq, CounterKey, Revision, TableName,
     audit::{AuditRecord, ChainHead, Digest},
-    codec::{CodecError, encode_key, from_cbor, to_cbor},
+    codec::{CodecError, encode_key, from_cbor, from_cbor_exact, to_cbor},
 };
 
 use super::{
@@ -208,8 +210,10 @@ impl<'a, 'txn> Applier<'a, 'txn> {
         journal_retention: u64,
         journal_max_bytes: u64,
     ) -> Result<BatchOutcome, StoreError> {
+        // Exactly: a field this binary does not know would make it apply another batch than
+        // the members that know it.
         let batch: WriteBatch =
-            from_cbor(&proposed.batch).map_err(|error| unreadable("write batch", &error))?;
+            from_cbor_exact(&proposed.batch).map_err(|error| unreadable("write batch", &error))?;
         if let Some(table) = reserved_write(&batch) {
             return Ok(BatchOutcome::ReservedTable(table));
         }
