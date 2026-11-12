@@ -324,6 +324,21 @@ impl Api {
         body
     }
 
+    /// Trusts loopback as the relay agent of the DHCP tests (docs/dhcp.md section 9.8), as
+    /// an operator lists the relays under the Home profile, bound to the test networks:
+    /// `192.0.2.0/24` and `198.51.100.0/24` for DHCPv4, `2001:db8:180::/48` for DHCPv6.
+    #[track_caller]
+    pub fn trust_loopback_relays(&self) {
+        self.put(
+            "/dhcp/settings",
+            &json!({ "trusted_relays": [
+                {"relay": "127.0.0.1/32", "links": ["192.0.2.0/24", "198.51.100.0/24"]},
+                {"relay": "::1/128", "links": ["2001:db8:180::/48"]},
+            ] }),
+        )
+        .expect(200);
+    }
+
     /// The password step of a login as the administrator; keeps the cookie when the login
     /// is complete. Returns the answer (`authenticated` or `second_factor`).
     #[track_caller]

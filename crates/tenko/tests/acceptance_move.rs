@@ -103,16 +103,7 @@ impl World {
         let token = wait_for_setup_token(&server);
         let mut api = Api::new(&node);
         api.setup(&token);
-        // The relay of the test sends from loopback: a trusted relay agent (docs/dhcp.md
-        // section 9.8), as an operator lists the relays under the Home profile.
-        api.put(
-            "/dhcp/settings",
-            &json!({ "trusted_relays": [
-                {"relay": "127.0.0.1/32", "links": ["192.0.2.0/24", "198.51.100.0/24"]},
-                {"relay": "::1/128", "links": ["2001:db8:180::/48"]},
-            ] }),
-        )
-        .expect(200);
+        api.trust_loopback_relays();
         // The leader's own runs come rarely, so the runs the tests ask for do the work.
         api.put("/settings/reconciler", &quiet_settings())
             .expect(200);
@@ -881,16 +872,7 @@ impl DhcpLab {
         let token = wait_for_setup_token(&server);
         let mut api = Api::new(&node);
         api.setup(&token);
-        // The relay of the test sends from loopback: a trusted relay agent (docs/dhcp.md
-        // section 9.8), as an operator lists the relays under the Home profile.
-        api.put(
-            "/dhcp/settings",
-            &json!({ "trusted_relays": [
-                {"relay": "127.0.0.1/32", "links": ["192.0.2.0/24", "198.51.100.0/24"]},
-                {"relay": "::1/128", "links": ["2001:db8:180::/48"]},
-            ] }),
-        )
-        .expect(200);
+        api.trust_loopback_relays();
         // Runs on demand do the DNS work; a new fact (a lease) starts a run a second
         // later, which is how the observation step learns of a lease without polling.
         let mut settings = quiet_settings();

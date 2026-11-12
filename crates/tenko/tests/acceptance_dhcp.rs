@@ -213,16 +213,7 @@ fn the_dhcp_role_answers_dora_and_serves_the_same_leases_after_a_restart() {
     let token = wait_for_setup_token(&server);
     let mut api = Api::new(&node);
     api.setup(&token);
-    // The relay of the test sends from loopback: a trusted relay agent (docs/dhcp.md
-    // section 9.8), as an operator lists the relays under the Home profile.
-    api.put(
-        "/dhcp/settings",
-        &json!({ "trusted_relays": [
-            {"relay": "127.0.0.1/32", "links": ["192.0.2.0/24", "198.51.100.0/24"]},
-            {"relay": "::1/128", "links": ["2001:db8:180::/48"]},
-        ] }),
-    )
-    .expect(200);
+    api.trust_loopback_relays();
 
     // The network, its pool and the scope.
     let prefix = api

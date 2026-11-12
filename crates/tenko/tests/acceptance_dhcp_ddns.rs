@@ -298,16 +298,7 @@ fn ddns_writes_names_on_ack_refuses_a_stolen_name_and_removes_names_on_release_a
     let token = wait_for_setup_token(&server);
     let mut api = Api::new(&node);
     api.setup(&token);
-    // The relay of the test sends from loopback: a trusted relay agent (docs/dhcp.md
-    // section 9.8), as an operator lists the relays under the Home profile.
-    api.put(
-        "/dhcp/settings",
-        &json!({ "trusted_relays": [
-            {"relay": "127.0.0.1/32", "links": ["192.0.2.0/24", "198.51.100.0/24"]},
-            {"relay": "::1/128", "links": ["2001:db8:180::/48"]},
-        ] }),
-    )
-    .expect(200);
+    api.trust_loopback_relays();
 
     // The zones, the network, its pool and the scope with DDNS on.
     let zone = |name: &str| -> String {
