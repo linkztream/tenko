@@ -8,8 +8,9 @@ license.workspace = true
 publish = false
 
 [features]
-# Test helpers for other crates (an allow-all authorizer). Never enabled in release builds.
-testing = []
+# Test support for other crates (an allow-all authorizer, the shared wait, free ports and
+# temporary directories of `testing`). Never enabled in release builds.
+testing = ["dep:tokio"]
 
 [dependencies]
 # The leader-only service contract (`cluster::LeaderService`).
@@ -22,6 +23,9 @@ serde = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
+# The pauses of the shared async wait (feature `testing` only); already in the graph through
+# tokio-util.
+tokio = { workspace = true, optional = true }
 tokio-util = { workspace = true }
 utoipa = { workspace = true }
 uuid = { workspace = true }
@@ -30,6 +34,7 @@ uuid = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true, features = ["macros"] }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

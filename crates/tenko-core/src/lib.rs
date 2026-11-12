@@ -36,6 +36,7 @@
 //! | [`audit`] | audit drafts, records, the hash chain and its verifier |
 //! | [`secret`] | [`SecretRef`](secret::SecretRef) and the vault envelope marker |
 //! | [`role`] | node roles |
+//! | `testing` | test support (feature `testing`): the shared wait, free ports, temporary directories |
 
 /// Re-exports used by the exported macros (`id_type!`, `namespaced_name!`). Not part of
 /// the contract.
@@ -71,6 +72,8 @@ pub mod role;
 pub mod secret;
 pub mod serde_util;
 pub mod table;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 pub mod timestamp;
 
 pub use auth::{AuthFailure, AuthFlags, Authenticated, Authenticator, Credentials};
