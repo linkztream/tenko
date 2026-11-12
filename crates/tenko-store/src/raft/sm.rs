@@ -1128,6 +1128,9 @@ impl RaftStateMachine<TypeConfig> for StateMachine {
 }
 
 #[cfg(test)]
+mod golden;
+
+#[cfg(test)]
 mod tests {
     use bytes::Bytes;
     use tenko_core::{

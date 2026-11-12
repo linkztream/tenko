@@ -46,3 +46,6 @@ crates/tenko/tests/fixtures/datadir/** -text
 
 # Fuzz seeds are inputs byte for byte (a byte-order mark, CRLF line ends).
 fuzz/seeds/** -text
+
+# Saved bytes of the store's stored formats, byte for byte.
+crates/tenko-store/tests/fixtures/golden/** binary
