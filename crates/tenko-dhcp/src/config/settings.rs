@@ -6,7 +6,10 @@
 use tenko_core::{
     RequestCtx, Revision,
     audit::AuditDraft,
-    dhcp::{DdnsPolicy, DhcpSettings, LeaseTimes, audit, server_object, tables::SETTINGS},
+    dhcp::{
+        DdnsPolicy, DhcpError, DhcpSettings, LeaseTimes, TrustedRelay, audit, codes, server_object,
+        tables::SETTINGS,
+    },
 };
 use tenko_store::{ReadView, ReadViewExt, WriteBatch};
 
@@ -50,8 +53,11 @@ pub struct SettingsChange {
     pub conflict_detection: Option<bool>,
     /// History retention in days; none follows the profile.
     pub history_days: Option<u32>,
-    /// The trusted relays; none keeps the stored list. Stored sorted, without duplicates.
-    pub trusted_relays: Option<Vec<ipnet::IpNet>>,
+    /// The trusted relays, each with its links; none keeps the stored list. Stored sorted by
+    /// relay prefix without repeated entries, each relay's links sorted and without
+    /// duplicates. Under Hardened a relay that may name every link is refused unless the
+    /// stored list holds it so already.
+    pub trusted_relays: Option<Vec<tenko_core::dhcp::TrustedRelay>>,
     /// Unsets the trusted relays, so that the profile decides again (every sender under
     /// Lab, none otherwise); refused together with `trusted_relays`.
     pub clear_trusted_relays: bool,
@@ -61,6 +67,45 @@ pub struct SettingsChange {
 }
 
 impl ConfigService {
+    /// Refuses, under the Hardened profile, a relay of `list` that may name every link
+    /// (a link of prefix length 0) unless `stored` holds that relay so already: an entry
+    /// stored before relays had links, or before the switch to Hardened, keeps working (the
+    /// health row `dhcp.relay.any_link` says so) and can be saved again unchanged, but no new
+    /// one is written. A link-local relay prefix for lightweight relays
+    /// ([`crate::relay::exempt_from_links`]) is not refused.
+    fn refuse_any_link(
+        &self,
+        view: &dyn ReadView,
+        stored: Option<&[TrustedRelay]>,
+        list: &[TrustedRelay],
+    ) -> ConfigResult<()> {
+        let new_any = list.iter().find(|relay| {
+            relay.is_any_link()
+                && !crate::relay::exempt_from_links(relay.relay)
+                && !stored.is_some_and(|stored| {
+                    stored
+                        .iter()
+                        .any(|old| old.relay == relay.relay && old.is_any_link())
+                })
+        });
+        let Some(relay) = new_any else {
+            return Ok(());
+        };
+        if !self.hardened(view) {
+            return Ok(());
+        }
+        Err(DhcpError::invalid(
+            codes::RELAY_ANY_LINK,
+            "trusted_relays",
+            &format!(
+                "the Hardened profile needs the links relay {} serves: 0.0.0.0/0 or ::/0 is \
+                 not allowed",
+                relay.relay
+            ),
+        )
+        .into())
+    }
+
     /// The settings, the defaults before the first write.
     ///
     /// # Errors
@@ -121,8 +166,15 @@ impl ConfigService {
                 }
                 (Some(list), false) => {
                     let mut list = list.clone();
-                    list.sort_unstable();
+                    for relay in &mut list {
+                        relay.links.sort_unstable();
+                        relay.links.dedup();
+                    }
+                    // An entry given twice is kept once; one relay with two sets of links
+                    // is refused by the check below.
+                    list.sort();
                     list.dedup();
+                    self.refuse_any_link(view, before.trusted_relays.as_deref(), &list)?;
                     after.trusted_relays = Some(list);
                 }
                 (None, true) => after.trusted_relays = None,

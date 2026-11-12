@@ -141,19 +141,19 @@ use tenko_dhcp::config::ConfigService;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 pub use model::{
-    DhcpClassCreate, DhcpClassItem, DhcpClassPatch, DhcpCommandAccepted, DhcpEffectiveLimits,
-    DhcpExportParams, DhcpFamily, DhcpFilterCreate, DhcpFilterItem, DhcpFilterPatch,
-    DhcpHistoryFilters, DhcpHistoryItem, DhcpLeaseCount, DhcpLeaseFilters, DhcpLeaseItem,
-    DhcpLeaseParams, DhcpLeasePeer, DhcpLeaseRelease, DhcpLimitRefusal, DhcpLimitReport,
-    DhcpListenMode, DhcpListenerItem, DhcpNodeStatus, DhcpPdUtilization, DhcpPolicyCreate,
-    DhcpPolicyFilter, DhcpPolicyItem, DhcpPolicyPatch, DhcpPoolItem, DhcpPoolSet, DhcpRaCheck,
-    DhcpRaFinding, DhcpRaLink, DhcpRaReport, DhcpRefusedRelay, DhcpRelayReport, DhcpRelayedNetwork,
-    DhcpReservationItem, DhcpScopeCreate, DhcpScopeFilter, DhcpScopeItem, DhcpScopePatch,
-    DhcpScopeUtilization, DhcpSettingsItem, DhcpSettingsUpdate, EffectiveOption, EffectiveOptions,
-    EffectiveOptionsParams, ExclusionCreate, ExclusionItem, OptionCatalogItem, OptionCatalogParams,
-    OptionDefCreate, OptionDefItem, OptionDefPatch, OptionSetFilter, OptionSetItem, OptionSetPut,
-    OptionValueInput, OptionValueItem, ReconcileFilters, ReconcileKind, ReconcileRow,
-    SharedNetworkCreate, SharedNetworkItem, SharedNetworkPatch, Truth,
+    DhcpAnyLinkRelay, DhcpClassCreate, DhcpClassItem, DhcpClassPatch, DhcpCommandAccepted,
+    DhcpEffectiveLimits, DhcpExportParams, DhcpFamily, DhcpFilterCreate, DhcpFilterItem,
+    DhcpFilterPatch, DhcpHistoryFilters, DhcpHistoryItem, DhcpLeaseCount, DhcpLeaseFilters,
+    DhcpLeaseItem, DhcpLeaseParams, DhcpLeasePeer, DhcpLeaseRelease, DhcpLimitRefusal,
+    DhcpLimitReport, DhcpListenMode, DhcpListenerItem, DhcpNodeStatus, DhcpPdUtilization,
+    DhcpPolicyCreate, DhcpPolicyFilter, DhcpPolicyItem, DhcpPolicyPatch, DhcpPoolItem, DhcpPoolSet,
+    DhcpRaCheck, DhcpRaFinding, DhcpRaLink, DhcpRaReport, DhcpRefusedRelay, DhcpRelayReport,
+    DhcpRelayedNetwork, DhcpReservationItem, DhcpScopeCreate, DhcpScopeFilter, DhcpScopeItem,
+    DhcpScopePatch, DhcpScopeUtilization, DhcpSettingsItem, DhcpSettingsUpdate, EffectiveOption,
+    EffectiveOptions, EffectiveOptionsParams, ExclusionCreate, ExclusionItem, OptionCatalogItem,
+    OptionCatalogParams, OptionDefCreate, OptionDefItem, OptionDefPatch, OptionSetFilter,
+    OptionSetItem, OptionSetPut, OptionValueInput, OptionValueItem, ReconcileFilters,
+    ReconcileKind, ReconcileRow, SharedNetworkCreate, SharedNetworkItem, SharedNetworkPatch, Truth,
 };
 
 use super::not_implemented;

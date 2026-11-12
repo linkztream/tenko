@@ -812,7 +812,10 @@ async fn an_upgraded_node_names_its_relays_before_it_refuses_and_serves_them_onc
         .update_settings(
             &cx(),
             tenko_dhcp::config::settings::SettingsChange {
-                trusted_relays: Some(vec!["127.0.0.1/32".parse().expect("prefix")]),
+                trusted_relays: Some(vec![tenko_core::dhcp::TrustedRelay {
+                    relay: "127.0.0.1/32".parse().expect("prefix"),
+                    links: vec!["192.0.2.0/24".parse().expect("prefix")],
+                }]),
                 ..tenko_dhcp::config::settings::SettingsChange::default()
             },
             None,

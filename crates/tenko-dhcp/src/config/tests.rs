@@ -937,7 +937,7 @@ async fn hardened_refuses_replace_at_the_write() {
         .expect("replace under Home");
 }
 
-async fn trusted_relays(world: &World) -> Option<Vec<ipnet::IpNet>> {
+async fn trusted_relays(world: &World) -> Option<Vec<tenko_core::dhcp::TrustedRelay>> {
     let view = world.service.view(None).await.expect("view");
     ConfigService::settings(view.as_ref())
         .expect("settings")
@@ -945,25 +945,32 @@ async fn trusted_relays(world: &World) -> Option<Vec<ipnet::IpNet>> {
         .trusted_relays
 }
 
+/// `relay=link+link`, or `relay` with every link of its family.
+fn relay(text: &str) -> tenko_core::dhcp::TrustedRelay {
+    if text.contains('=') {
+        text.parse().expect("a trusted relay")
+    } else {
+        tenko_core::dhcp::TrustedRelay::any_link(text.parse().expect("a relay prefix"))
+    }
+}
+
+fn relays(list: &[&str]) -> Vec<tenko_core::dhcp::TrustedRelay> {
+    list.iter().map(|text| relay(text)).collect()
+}
+
 #[tokio::test]
 async fn the_trusted_relays_are_kept_sorted_cleared_on_request_and_checked() {
     use super::settings::SettingsChange;
     let world = self::world().await;
-    let prefixes = |list: &[&str]| -> Vec<ipnet::IpNet> {
-        list.iter()
-            .map(|text| text.parse().expect("a prefix"))
-            .collect()
-    };
     assert_eq!(trusted_relays(&world).await, None);
     world
         .service
         .update_settings(
             &cx(),
             SettingsChange {
-                trusted_relays: Some(prefixes(&[
-                    "198.51.100.1/32",
-                    "192.0.2.1/32",
-                    "198.51.100.1/32",
+                trusted_relays: Some(relays(&[
+                    "198.51.100.1/32=203.0.113.0/24+198.51.100.0/24+203.0.113.0/24",
+                    "192.0.2.1/32=192.0.2.0/24",
                 ])),
                 ..SettingsChange::default()
             },
@@ -973,7 +980,10 @@ async fn the_trusted_relays_are_kept_sorted_cleared_on_request_and_checked() {
         .expect("a list");
     assert_eq!(
         trusted_relays(&world).await,
-        Some(prefixes(&["192.0.2.1/32", "198.51.100.1/32"]))
+        Some(relays(&[
+            "192.0.2.1/32=192.0.2.0/24",
+            "198.51.100.1/32=198.51.100.0/24+203.0.113.0/24",
+        ]))
     );
     // A change that does not name the list keeps it (an older client cannot cut relays off).
     world
@@ -992,10 +1002,30 @@ async fn the_trusted_relays_are_kept_sorted_cleared_on_request_and_checked() {
     for (change, field) in [
         (
             SettingsChange {
-                trusted_relays: Some(prefixes(&["192.0.2.1/24"])),
+                trusted_relays: Some(relays(&["192.0.2.1/24=192.0.2.0/24"])),
                 ..SettingsChange::default()
             },
             "trusted_relays",
+        ),
+        (
+            SettingsChange {
+                trusted_relays: Some(vec![tenko_core::dhcp::TrustedRelay {
+                    relay: "192.0.2.1/32".parse().expect("a prefix"),
+                    links: Vec::new(),
+                }]),
+                ..SettingsChange::default()
+            },
+            "needs 1 to 64 links",
+        ),
+        (
+            SettingsChange {
+                trusted_relays: Some(relays(&[
+                    "192.0.2.1/32=10.0.0.0/8",
+                    "192.0.2.1/32=172.16.0.0/12",
+                ])),
+                ..SettingsChange::default()
+            },
+            "listed twice",
         ),
         (
             SettingsChange {
@@ -1027,4 +1057,100 @@ async fn the_trusted_relays_are_kept_sorted_cleared_on_request_and_checked() {
         .await
         .expect("cleared");
     assert_eq!(trusted_relays(&world).await, None);
+}
+
+#[tokio::test]
+async fn a_new_relay_for_every_link_is_written_only_explicitly_and_never_under_hardened() {
+    use super::settings::SettingsChange;
+    let set = |list: &[&str]| SettingsChange {
+        trusted_relays: Some(relays(list)),
+        ..SettingsChange::default()
+    };
+    // Outside Hardened, every link is a choice the operator writes out. The service reads
+    // the profile at each write; `switched` is the switch to Hardened later on.
+    let home = self::world().await;
+    let switched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let profile = Arc::clone(&switched);
+    home.service
+        .set_profile(Arc::new(move |_: &dyn tenko_store::ReadView| {
+            if profile.load(std::sync::atomic::Ordering::Relaxed) {
+                crate::ddns::DdnsProfile::HARDENED
+            } else {
+                crate::ddns::DdnsProfile::HOME
+            }
+        }));
+    home.service
+        .update_settings(&cx(), set(&["192.0.2.1/32=0.0.0.0/0"]), None)
+        .await
+        .expect("every link, written out, under Home");
+    assert!(trusted_relays(&home).await.expect("a list")[0].is_any_link());
+    // Under Hardened a new relay for every link is refused with a code of its own; a bound
+    // one, and the link-local prefix of lightweight relays, are not.
+    let hardened = self::world().await;
+    hardened
+        .service
+        .set_profile(Arc::new(|_: &dyn tenko_store::ReadView| {
+            crate::ddns::DdnsProfile::HARDENED
+        }));
+    let lists: [&[&str]; 2] = [
+        &["192.0.2.1/32=0.0.0.0/0"],
+        &["2001:db8::1/128=2001:db8::/32+::/0"],
+    ];
+    for list in lists {
+        let error = hardened
+            .service
+            .update_settings(&cx(), set(list), None)
+            .await
+            .expect_err("refused under Hardened");
+        let text = format!("{error:?}");
+        assert!(text.contains("dhcp.settings.relay_any_link"), "{text}");
+    }
+    assert_eq!(trusted_relays(&hardened).await, None);
+    hardened
+        .service
+        .update_settings(
+            &cx(),
+            set(&["192.0.2.1/32=198.51.100.0/24", "fe80::/10=::/0"]),
+            None,
+        )
+        .await
+        .expect("bound relays, and the link-local prefix of lightweight relays");
+    // A relay the store holds for every link (an entry from before links existed, or from
+    // before the switch to Hardened) can be saved again unchanged beside a change; a second
+    // relay for every link is still refused.
+    switched.store(true, std::sync::atomic::Ordering::Relaxed);
+    home.service
+        .update_settings(
+            &cx(),
+            set(&["192.0.2.1/32=0.0.0.0/0", "192.0.2.2/32=198.51.100.0/24"]),
+            None,
+        )
+        .await
+        .expect("the stored relay for every link is kept");
+    let error = home
+        .service
+        .update_settings(
+            &cx(),
+            set(&["192.0.2.1/32=0.0.0.0/0", "192.0.2.3/32=0.0.0.0/0"]),
+            None,
+        )
+        .await
+        .expect_err("a second one is new");
+    assert!(
+        format!("{error:?}").contains("relay 192.0.2.3/32"),
+        "{error:?}"
+    );
+    home.service
+        .update_settings(&cx(), set(&["192.0.2.1/32=198.51.100.0/24"]), None)
+        .await
+        .expect("bound at last");
+    let error = home
+        .service
+        .update_settings(&cx(), set(&["192.0.2.1/32=0.0.0.0/0"]), None)
+        .await
+        .expect_err("once bound, every link is new again");
+    assert!(
+        format!("{error:?}").contains("dhcp.settings.relay_any_link"),
+        "{error:?}"
+    );
 }

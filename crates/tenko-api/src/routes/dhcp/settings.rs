@@ -131,14 +131,14 @@ pub(super) async fn get_dhcp_settings(
     tag = "dhcp",
     operation_id = "update_dhcp_settings",
     summary = "Change the DHCP server settings",
-    description = "Scope: `dhcp.write`. A field left out keeps its value, except `conflict_detection` and `history_days`, which follow the security profile when left out. `trusted_relays` replaces the list of trusted relay agents; `clear_trusted_relays` unsets it, so that the profile decides again (every sender under Lab, none otherwise). `limits` replaces the limits per client and per scope whole; a field left out of them follows the profile, zero turns a limit off.",
+    description = "Scope: `dhcp.write`. A field left out keeps its value, except `conflict_detection` and `history_days`, which follow the security profile when left out. `trusted_relays` replaces the list of trusted relay agents, each with the links it may name; `clear_trusted_relays` unsets it, so that the profile decides again (every sender for every link under Lab, none otherwise). `limits` replaces the limits per client and per scope whole; a field left out of them follows the profile, zero turns a limit off.",
     params(
         ("If-Match" = Option<String>, Header, description = "The revision the client read (0 before the first change); a stale revision is refused with 412")
     ),
     request_body(content = DhcpSettingsUpdate, content_type = "application/json"),
     responses(
         (status = 200, description = "The changed settings", body = DhcpSettingsItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dhcp.settings.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) or the DDNS settings are invalid (`dhcp.ddns.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dhcp.settings.invalid`), or a new trusted relay names every link under the Hardened profile (`dhcp.settings.relay_any_link`), or the lease times are invalid (`dhcp.lease_times.invalid`) or the DDNS settings are invalid (`dhcp.ddns.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The DHCP module is off (`dhcp.module.disabled`)", body = ProblemDetails, content_type = "application/problem+json"),

@@ -171,7 +171,7 @@ pub fn image(
 
 std::thread_local! {
     /// The relay list the next [`image`] of this thread gets (`World6::trusting`).
-    static RELAYS: std::cell::RefCell<Option<Vec<ipnet::IpNet>>> =
+    static RELAYS: std::cell::RefCell<Option<Vec<tenko_core::dhcp::TrustedRelay>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -220,8 +220,8 @@ impl World6 {
         tune: impl FnOnce(&mut Scope6Image, &mut Scope6Image, &mut Vec<Reservation6Image>),
     ) -> Self {
         RELAYS.with(|cell| {
-            *cell.borrow_mut() = Some(vec![ipnet::IpNet::V6(
-                ipnet::Ipv6Net::new(RELAY, 128).expect("a prefix"),
+            *cell.borrow_mut() = Some(vec![tenko_core::dhcp::TrustedRelay::any_link(
+                ipnet::IpNet::V6(ipnet::Ipv6Net::new(RELAY, 128).expect("a prefix")),
             )]);
         });
         let world = Self::with(tune);
@@ -229,8 +229,8 @@ impl World6 {
         world
     }
 
-    /// The world with `dhcp.settings.trusted_relays` set to `relays` (none: unset) and the
-    /// node under `profile`.
+    /// The world with `dhcp.settings.trusted_relays` set to `relays` (none: unset; each
+    /// entry as [`trusted_relay`] reads it) and the node under `profile`.
     pub fn trusting(profile: DhcpProfile, relays: Option<&[&str]>) -> Self {
         Self::trusting_with(profile, relays, |_, _, _| {})
     }
@@ -242,11 +242,8 @@ impl World6 {
         tune: impl FnOnce(&mut Scope6Image, &mut Scope6Image, &mut Vec<Reservation6Image>),
     ) -> Self {
         RELAYS.with(|cell| {
-            *cell.borrow_mut() = relays.map(|list| {
-                list.iter()
-                    .map(|text| text.parse().expect("a prefix"))
-                    .collect()
-            });
+            *cell.borrow_mut() =
+                relays.map(|list| list.iter().map(|text| trusted_relay(text)).collect());
         });
         let world = Self::with(tune);
         RELAYS.with(|cell| *cell.borrow_mut() = None);
@@ -536,4 +533,14 @@ pub fn delegated(world: &World6, prefix: Ipv6Addr, len: u8, duid: &[u8]) -> bool
                 && lease.prefix_len == len
                 && lease.duid.as_bytes() == duid
         })
+}
+
+/// An entry of the trusted relays from `relay` (every link of its family, as an entry stored
+/// before entries had links) or `relay=link+link`.
+pub fn trusted_relay(text: &str) -> tenko_core::dhcp::TrustedRelay {
+    if text.contains('=') {
+        text.parse().expect("a trusted relay")
+    } else {
+        tenko_core::dhcp::TrustedRelay::any_link(text.parse().expect("a relay prefix"))
+    }
 }

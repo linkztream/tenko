@@ -745,6 +745,144 @@ fn leases_round_trip_and_know_their_client() {
 }
 
 #[test]
+fn trusted_relays_validate() {
+    let settings = DhcpSettings::default();
+    let net = |text: &str| -> ipnet::IpNet { text.parse().expect("a prefix") };
+    let entry = |relay: &str, links: &[&str]| crate::dhcp::TrustedRelay {
+        relay: net(relay),
+        links: links.iter().map(|link| net(link)).collect(),
+    };
+    let relays = |list: Vec<crate::dhcp::TrustedRelay>| DhcpSettings {
+        trusted_relays: Some(list),
+        ..settings.clone()
+    };
+    assert!(relays(Vec::new()).validate().is_ok());
+    assert!(
+        relays(vec![
+            entry("192.0.2.1/32", &["198.51.100.0/24"]),
+            entry("2001:db8::/64", &["2001:db8:10::/48", "::/0"]),
+        ])
+        .validate()
+        .is_ok()
+    );
+    let refused = |list| relays(list).validate().expect_err("refused").to_string();
+    assert!(refused(vec![entry("192.0.2.1/24", &["198.51.100.0/24"])]).contains("host bits"));
+    assert!(refused(vec![entry("192.0.2.1/32", &[])]).contains("needs 1 to 64 links"));
+    assert!(refused(vec![entry("192.0.2.1/32", &["198.51.100.1/24"])]).contains("host bits"));
+    assert!(refused(vec![entry("192.0.2.1/32", &["2001:db8::/48"])]).contains("address family"));
+    assert!(
+        refused(vec![
+            entry("192.0.2.1/32", &["198.51.100.0/24"]),
+            entry("192.0.2.1/32", &["203.0.113.0/24"]),
+        ])
+        .contains("listed twice")
+    );
+    let links: Vec<String> = (0..=64).map(|n| format!("10.{n}.0.0/16")).collect();
+    let links: Vec<&str> = links.iter().map(String::as_str).collect();
+    assert!(
+        relays(vec![entry("192.0.2.1/32", &links[..64])])
+            .validate()
+            .is_ok()
+    );
+    assert!(refused(vec![entry("192.0.2.1/32", &links)]).contains("needs 1 to 64 links"));
+    let many: Vec<crate::dhcp::TrustedRelay> = (0..=256)
+        .map(|n| {
+            entry(
+                &format!("10.0.{}.{}/32", n / 256, n % 256),
+                &["198.51.100.0/24"],
+            )
+        })
+        .collect();
+    assert!(relays(many[..256].to_vec()).validate().is_ok());
+    assert!(refused(many).contains("at most 256 relays"));
+}
+
+#[test]
+fn an_old_row_of_trusted_relays_reads_as_every_link_and_the_text_form_parses() {
+    #[derive(serde::Serialize)]
+    struct OldRow {
+        trusted_relays: Vec<ipnet::IpNet>,
+    }
+    let settings = DhcpSettings::default();
+    let net = |text: &str| -> ipnet::IpNet { text.parse().expect("a prefix") };
+    let entry = |relay: &str, links: &[&str]| crate::dhcp::TrustedRelay {
+        relay: net(relay),
+        links: links.iter().map(|link| net(link)).collect(),
+    };
+    let relays = |list: Vec<crate::dhcp::TrustedRelay>| DhcpSettings {
+        trusted_relays: Some(list),
+        ..settings.clone()
+    };
+    // A row written before relays had links holds plain prefixes: each reads as that relay
+    // with every link of its family, which is what the entry meant then, in JSON and in the
+    // stored CBOR; the row is written back in the new shape only.
+    let plain: DhcpSettings =
+        serde_json::from_str(r#"{"trusted_relays":["192.0.2.1/32","2001:db8::1/128"]}"#)
+            .expect("json");
+    let read = plain.trusted_relays.clone().expect("a list");
+    assert_eq!(
+        read,
+        [
+            entry("192.0.2.1/32", &["0.0.0.0/0"]),
+            entry("2001:db8::1/128", &["::/0"]),
+        ]
+    );
+    assert!(read.iter().all(crate::dhcp::TrustedRelay::is_any_link));
+    assert!(plain.validate().is_ok());
+    let old = to_cbor(&OldRow {
+        trusted_relays: vec![net("192.0.2.1/32")],
+    })
+    .expect("cbor");
+    let from_store: DhcpSettings = from_cbor(&old).expect("an old row reads");
+    assert_eq!(
+        from_store.trusted_relays,
+        Some(vec![entry("192.0.2.1/32", &["0.0.0.0/0"])])
+    );
+    let mixed: DhcpSettings = serde_json::from_str(
+        r#"{"trusted_relays":["192.0.2.9/32",{"relay":"192.0.2.1/32","links":["198.51.100.0/24"]}]}"#,
+    )
+    .expect("json");
+    assert_eq!(
+        mixed.trusted_relays,
+        Some(vec![
+            entry("192.0.2.9/32", &["0.0.0.0/0"]),
+            entry("192.0.2.1/32", &["198.51.100.0/24"]),
+        ])
+    );
+    let written = serde_json::to_value(&plain).expect("json");
+    assert_eq!(
+        written["trusted_relays"],
+        serde_json::json!([
+            {"relay": "192.0.2.1/32", "links": ["0.0.0.0/0"]},
+            {"relay": "2001:db8::1/128", "links": ["::/0"]},
+        ])
+    );
+    // The text form of the command line.
+    assert_eq!(
+        "192.0.2.1/32 = 198.51.100.0/24 + 203.0.113.0/24".parse::<crate::dhcp::TrustedRelay>(),
+        Ok(entry(
+            "192.0.2.1/32",
+            &["198.51.100.0/24", "203.0.113.0/24"]
+        ))
+    );
+    for (text, reason) in [
+        ("192.0.2.1/32", "a relay needs the links it may name"),
+        ("192.0.2.1/32=", "give at least one link after ="),
+        ("192.0.2.1/32=x", "192.0.2.1/32=x: x: "),
+        ("x=0.0.0.0/0", "x=0.0.0.0/0: x: "),
+    ] {
+        let error = text
+            .parse::<crate::dhcp::TrustedRelay>()
+            .expect_err("refused");
+        assert!(error.contains(reason), "{text}: {error}");
+    }
+    let bound = relays(vec![entry("192.0.2.1/32", &["198.51.100.0/24"])]);
+    let back: DhcpSettings = from_cbor(&to_cbor(&bound).expect("cbor")).expect("cbor");
+    assert_eq!(back, bound);
+    assert!(!entry("192.0.2.1/32", &["198.51.100.0/24"]).is_any_link());
+}
+
+#[test]
 fn settings_and_ddns_validate() {
     let settings = DhcpSettings::default();
     assert!(settings.validate().is_ok());
@@ -761,27 +899,6 @@ fn settings_and_ddns_validate() {
     // A row written before the list existed reads as unset: the profile decides.
     let older: DhcpSettings = serde_json::from_str(r#"{"authoritative":true}"#).expect("json");
     assert_eq!(older.trusted_relays, None);
-    let relays = |list: &[&str]| DhcpSettings {
-        trusted_relays: Some(
-            list.iter()
-                .map(|text| text.parse().expect("a prefix"))
-                .collect(),
-        ),
-        ..settings.clone()
-    };
-    assert!(relays(&[]).validate().is_ok());
-    assert!(
-        relays(&["192.0.2.1/32", "2001:db8::/64"])
-            .validate()
-            .is_ok()
-    );
-    assert!(relays(&["192.0.2.1/24"]).validate().is_err());
-    let many: Vec<String> = (0..=256)
-        .map(|n| format!("10.0.{}.{}/32", n / 256, n % 256))
-        .collect();
-    let many: Vec<&str> = many.iter().map(String::as_str).collect();
-    assert!(relays(&many[..256]).validate().is_ok());
-    assert!(relays(&many).validate().is_err());
     // The limits: unset in a row written before them, checked against their bounds.
     assert_eq!(older.limits, crate::dhcp::DhcpLimits::default());
     let limits = |limits: crate::dhcp::DhcpLimits| DhcpSettings {

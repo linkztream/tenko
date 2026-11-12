@@ -234,3 +234,200 @@ fn a_denied_mac_cannot_hide_behind_a_wrong_hardware_length_or_the_ieee_802_type(
     assert!(matches!(answer.action, Action::Reply { .. }), "{answer:?}");
     assert_eq!(mac(0x66)[5], 0x66);
 }
+
+/// The relay's refusals of links outside its own, as the report keeps them.
+fn link_refusals(world: &World) -> Vec<(IpAddr, Option<ipnet::IpNet>, u64)> {
+    world
+        .guard
+        .relay_report(Some(&world.image))
+        .refused
+        .iter()
+        .filter(|refused| refused.link.is_some())
+        .map(|refused| (refused.source, refused.link, refused.count))
+        .collect()
+}
+
+fn net(text: &str) -> ipnet::IpNet {
+    text.parse().expect("a prefix")
+}
+
+#[test]
+fn a_trusted_relay_names_only_its_own_links_by_giaddr_option_82_and_option_118() {
+    // The relay at 192.0.2.1 serves the link of scope A only. Whoever sends from its address
+    // (the relay, or a host that forges it) is served on that link and nowhere else.
+    for profile in [
+        DhcpProfile::Lab,
+        DhcpProfile::Home,
+        DhcpProfile::Standard,
+        DhcpProfile::Hardened,
+    ] {
+        let world = World::trusting(profile, Some(&["192.0.2.1/32=192.0.2.0/24"]));
+        let mut scratch = Scratch::new();
+        // Its own link: served, as before.
+        let answer = world.run(&relayed_discover(0x40), t0(), &mut scratch);
+        assert_eq!(answer.selector, Some(Selector::Giaddr), "{profile:?}");
+        let (offer, _) = reply(&answer, &scratch);
+        assert_eq!(offer.yiaddr().octets()[..3], [192, 0, 2], "{profile:?}");
+        assert!(link_refusals(&world).is_empty(), "{profile:?}");
+        // Another link by giaddr, by the link selection sub-option and by option 118.
+        let mut by_giaddr = Ask::new(MessageType::Discover, 0x41);
+        by_giaddr.giaddr = Some(ip("203.0.113.1"));
+        let mut by_link = Ask::new(MessageType::Discover, 0x42);
+        by_link.relay = Some(link_selection("203.0.113.0"));
+        let mut by_subnet = Ask::new(MessageType::Discover, 0x43);
+        by_subnet.subnet = Some(ip("203.0.113.0"));
+        let mut by_listener = Ask::new(MessageType::Request, 0x44);
+        by_listener.giaddr = Some(ip("198.51.100.1"));
+        by_listener.requested = Some(ip("198.51.100.150"));
+        for (ask, selector) in [
+            (&by_giaddr, Selector::Giaddr),
+            (&by_link, Selector::LinkSelection),
+            (&by_subnet, Selector::SubnetSelection),
+            (&by_listener, Selector::Giaddr),
+        ] {
+            let answer = world.run_from(
+                &ask.bytes(),
+                SocketAddrV4::new(RELAY, 67),
+                t0(),
+                &mut scratch,
+            );
+            assert_eq!(
+                answer.action,
+                Action::Drop(DropReason::UntrustedRelay),
+                "{profile:?} {selector:?}"
+            );
+            assert_eq!(answer.selector, Some(selector), "{profile:?}");
+        }
+        // Each refusal is logged with the link it named (one entry per sender, the last
+        // link named), and the health row says what to do.
+        assert_eq!(
+            link_refusals(&world),
+            [(IpAddr::V4(RELAY), Some(net("198.51.100.0/24")), 4)],
+            "{profile:?}"
+        );
+        let report = world.guard.relay_report(Some(&world.image));
+        let refused: u64 = report.refused.iter().map(|refused| refused.count).sum();
+        assert_eq!(refused, 4, "{profile:?}");
+        let rows = report.warnings();
+        let row = rows
+            .iter()
+            .find(|row| row.code == tenko_dhcp::relay::LINK_REFUSED)
+            .expect("a link row");
+        assert_eq!(row.params["senders"], "192.0.2.1", "{profile:?}");
+        assert!(
+            row.detail
+                .contains("add the link to the relay under the DHCP settings"),
+            "{row:?}"
+        );
+        assert!(
+            rows.iter()
+                .all(|row| row.code != tenko_dhcp::relay::UNTRUSTED),
+            "{rows:?}"
+        );
+    }
+}
+
+#[test]
+fn a_relay_bound_to_more_links_serves_each_of_them_and_a_client_without_a_relay_is_unchanged() {
+    let world = World::trusting(
+        DhcpProfile::Standard,
+        Some(&["192.0.2.1/32=192.0.2.0/24+203.0.113.0/24"]),
+    );
+    let mut scratch = Scratch::new();
+    let mut ask = Ask::new(MessageType::Discover, 0x50);
+    ask.relay = Some(link_selection("203.0.113.0"));
+    let answer = world.run(&ask.bytes(), t0(), &mut scratch);
+    assert_eq!(answer.selector, Some(Selector::LinkSelection));
+    let (offer, _) = reply(&answer, &scratch);
+    assert_eq!(offer.yiaddr().octets()[..3], [203, 0, 113]);
+    // A link given as the relay's own giaddr (/32) names the scope around it.
+    let world = World::trusting(DhcpProfile::Standard, Some(&["192.0.2.1/32=192.0.2.1/32"]));
+    let answer = world.run(&relayed_discover(0x51), t0(), &mut scratch);
+    assert!(matches!(answer.action, Action::Reply { .. }), "{answer:?}");
+    // A client of the listener's link, not relayed, is not a relay's word at all.
+    let mut ask = Ask::new(MessageType::Discover, 0x52);
+    ask.giaddr = None;
+    ask.broadcast = true;
+    let answer = world.run_from(
+        &ask.bytes(),
+        SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 68),
+        t0(),
+        &mut scratch,
+    );
+    assert_eq!(answer.selector, Some(Selector::Interface));
+    assert!(matches!(answer.action, Action::Reply { .. }), "{answer:?}");
+}
+
+#[test]
+fn the_most_specific_relay_entry_decides_the_links_of_a_sender() {
+    // The routers of 192.0.2.0/24 may name scope C; the one at 192.0.2.1 only scope A.
+    let world = World::trusting(
+        DhcpProfile::Home,
+        Some(&["192.0.2.0/24=203.0.113.0/24", "192.0.2.1/32=192.0.2.0/24"]),
+    );
+    let mut scratch = Scratch::new();
+    let mut to_c = Ask::new(MessageType::Discover, 0x60);
+    to_c.giaddr = Some(ip("203.0.113.1"));
+    let from = |host: Ipv4Addr| SocketAddrV4::new(host, 67);
+    let answer = world.run_from(&to_c.bytes(), from(RELAY), t0(), &mut scratch);
+    assert_eq!(answer.action, Action::Drop(DropReason::UntrustedRelay));
+    let answer = world.run_from(&to_c.bytes(), from(ip("192.0.2.7")), t0(), &mut scratch);
+    assert!(matches!(answer.action, Action::Reply { .. }), "{answer:?}");
+    let answer = world.run(&relayed_discover(0x61), t0(), &mut scratch);
+    assert!(matches!(answer.action, Action::Reply { .. }), "{answer:?}");
+    let mut to_a = Ask::new(MessageType::Discover, 0x62);
+    to_a.giaddr = Some(RELAY);
+    let answer = world.run_from(&to_a.bytes(), from(ip("192.0.2.7")), t0(), &mut scratch);
+    assert_eq!(answer.action, Action::Drop(DropReason::UntrustedRelay));
+}
+
+#[test]
+fn a_relay_list_stored_before_relays_had_links_works_as_before_and_raises_its_health_row() {
+    // The row of the old shape, as the store holds it: plain prefixes.
+    #[derive(serde::Serialize)]
+    struct OldRow {
+        trusted_relays: Vec<ipnet::IpNet>,
+    }
+    let old = tenko_core::codec::to_cbor(&OldRow {
+        trusted_relays: vec![net("192.0.2.1/32")],
+    })
+    .expect("cbor");
+    let settings: tenko_core::dhcp::DhcpSettings =
+        tenko_core::codec::from_cbor(&old).expect("the old row reads");
+    for profile in [DhcpProfile::Standard, DhcpProfile::Hardened] {
+        let world = World::with_relays(profile, settings.trusted_relays.as_deref());
+        let mut scratch = Scratch::new();
+        // Unchanged: the relay is served on every link, as the plain prefix meant.
+        let answer = world.run(&relayed_discover(0x70), t0(), &mut scratch);
+        assert!(matches!(answer.action, Action::Reply { .. }), "{answer:?}");
+        let mut to_c = Ask::new(MessageType::Discover, 0x71);
+        to_c.giaddr = Some(ip("203.0.113.1"));
+        let answer = world.run(&to_c.bytes(), t0(), &mut scratch);
+        assert!(matches!(answer.action, Action::Reply { .. }), "{answer:?}");
+        // Another sender is still refused.
+        let answer = world.run_from(
+            &to_c.bytes(),
+            SocketAddrV4::new(ip("192.0.2.2"), 67),
+            t0(),
+            &mut scratch,
+        );
+        assert_eq!(answer.action, Action::Drop(DropReason::UntrustedRelay));
+        // The health row names the relay and what to do.
+        let rows = world.guard.relay_report(Some(&world.image)).warnings();
+        let row = rows
+            .iter()
+            .find(|row| row.code == tenko_dhcp::relay::ANY_LINK)
+            .expect("the any-link row");
+        assert_eq!(row.params["relays"], "192.0.2.1/32");
+        assert!(
+            row.detail.contains("give each relay the links it serves"),
+            "{row:?}"
+        );
+        assert_eq!(
+            row.detail
+                .contains("the Hardened profile refuses such an entry"),
+            profile == DhcpProfile::Hardened,
+            "{row:?}"
+        );
+    }
+}

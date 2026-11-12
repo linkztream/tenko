@@ -384,8 +384,10 @@ configure() {
     must "option 3 of $net" api PUT "/dhcp/option-sets/scope:$id" \
       "{\"values\": [{\"code\": 3, \"typed\": {\"ipv4\": {\"values\": [\"${gateway[$net]}\"]}}}]}"
   done
-  # The gateway is the one trusted relay agent; the tester joins it in the rows below.
-  must "the trusted relays" api PUT /dhcp/settings "{\"trusted_relays\": [\"${gateway[servers]}/32\"]}"
+  # The gateway is the one trusted relay agent, bound to the lab's networks (all four in
+  # 192.0.2.0/24); the tester joins it in the rows below.
+  must "the trusted relays" api PUT /dhcp/settings \
+    "{\"trusted_relays\": [{\"relay\": \"${gateway[servers]}/32\", \"links\": [\"192.0.2.0/24\"]}]}"
   ok "configuration" "four prefixes with a pool and a scope each, options 3, 6, 15 and 42, the gateway as the trusted relay"
 }
 
@@ -917,7 +919,7 @@ if [[ "$node" == tenko ]]; then
   row "relay.untrusted" "the tester, not a trusted relay, is refused and named in dhcp.relay.untrusted" \
     untrusted_refused
   must "the tester as a trusted relay" api PUT /dhcp/settings \
-    "{\"trusted_relays\": [\"${gateway[servers]}/32\", \"$tester_ip/32\"]}"
+    "{\"trusted_relays\": [{\"relay\": \"${gateway[servers]}/32\", \"links\": [\"192.0.2.0/24\"]}, {\"relay\": \"$tester_ip/32\", \"links\": [\"192.0.2.0/24\"]}]}"
   row "link-selection" "option 82 link selection from servers picks the iot scope, echoed" \
     relay_test "${prefix[iot]}" --link "${prefix[iot]%/*}" --mac 00:00:5e:00:53:21 --circuit tester --release
   row "perfdhcp" "perfdhcp as a relay: 10 4-way exchanges, no drops" perfdhcp_ok 10

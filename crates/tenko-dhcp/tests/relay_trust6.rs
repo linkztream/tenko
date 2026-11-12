@@ -157,3 +157,193 @@ fn a_lightweight_relay_s_data_counts_only_when_the_operator_trusts_lightweight_r
     );
     assert_eq!(answer.action, Action6::Drop(DropReason::UntrustedRelay));
 }
+
+fn net(text: &str) -> ipnet::IpNet {
+    text.parse().expect("a prefix")
+}
+
+/// The refusals of links outside a relay's own: sender, link, count.
+fn link_refusals(world: &World6) -> Vec<(IpAddr, Option<ipnet::IpNet>, u64)> {
+    world
+        .guard
+        .relay_report(Some(&world.image))
+        .refused
+        .iter()
+        .filter(|refused| refused.link.is_some())
+        .map(|refused| (refused.source, refused.link, refused.count))
+        .collect()
+}
+
+#[test]
+fn a_trusted_relay_names_only_its_own_links_by_link_address_and_interface_id() {
+    let duid = duid_ll(mac(6));
+    let tune = |_: &mut _, second: &mut tenko_dhcp::v6::image::Scope6Image, _: &mut _| {
+        second.interface_id = Some(b"vlan-20".to_vec());
+    };
+    for profile in [
+        DhcpProfile::Lab,
+        DhcpProfile::Home,
+        DhcpProfile::Standard,
+        DhcpProfile::Hardened,
+    ] {
+        // The relay serves the first link only.
+        let mut world =
+            World6::trusting_with(profile, Some(&["2001:db8:ff::1/128=2001:db8:1::/64"]), tune);
+        // Its own link: served, as before.
+        let (answer, _) = world.exchange(&relay1(&solicit(&duid)));
+        assert!(matches!(answer.action, Action6::Reply { .. }), "{answer:?}");
+        assert_eq!(answer.selector, Some(Selector6::LinkAddress));
+        // The second link by link address, and by the Interface-Id of the second scope.
+        let by_link = relayed(
+            &solicit(&duid),
+            &[(LINK2, addr("fe80::200:5eff:fe00:5306"), None)],
+            None,
+        );
+        let by_interface = relayed(
+            &solicit(&duid),
+            &[(LINK1, addr("fe80::200:5eff:fe00:5306"), Some(b"vlan-20"))],
+            None,
+        );
+        for (bytes, selector) in [
+            (&by_link, Selector6::LinkAddress),
+            (&by_interface, Selector6::InterfaceId),
+        ] {
+            let (answer, _) = world.exchange(bytes);
+            assert_eq!(
+                answer.action,
+                Action6::Drop(DropReason::UntrustedRelay),
+                "{profile:?} {selector:?}"
+            );
+            assert_eq!(answer.selector, Some(selector), "{profile:?}");
+        }
+        assert_eq!(
+            link_refusals(&world),
+            [(IpAddr::V6(RELAY), Some(net("2001:db8:2::/64")), 2)],
+            "{profile:?}"
+        );
+        let rows = world.guard.relay_report(Some(&world.image)).warnings();
+        let row = rows
+            .iter()
+            .find(|row| row.code == tenko_dhcp::relay::LINK_REFUSED)
+            .expect("a link row");
+        assert_eq!(row.params["links"], "2001:db8:2::/64");
+        assert!(
+            row.detail
+                .contains("add the link to the relay under the DHCP settings"),
+            "{row:?}"
+        );
+    }
+}
+
+#[test]
+fn every_trusted_relay_of_a_chain_must_be_bound_to_the_client_s_link() {
+    let duid = duid_ll(mac(7));
+    let inner: Ipv6Addr = addr("2001:db8:1::2");
+    // The inner relay names the second link; the outer relay received the message from it.
+    let chain = relayed(
+        &solicit(&duid),
+        &[(LINK2, addr("fe80::1"), None), (LINK1, inner, None)],
+        None,
+    );
+    let serve = |relays: &[&str]| {
+        let mut world = World6::trusting(DhcpProfile::Home, Some(relays));
+        let answer = world.exchange(&chain).0;
+        (answer, link_refusals(&world))
+    };
+    // Both relays bound to the second link: served.
+    let (answer, refused) = serve(&[
+        "2001:db8:ff::1/128=2001:db8:1::/64+2001:db8:2::/64",
+        "2001:db8:1::2/128=2001:db8:2::/64",
+    ]);
+    assert!(matches!(answer.action, Action6::Reply { .. }), "{answer:?}");
+    assert_eq!(refused, Vec::new());
+    // The outer relay is not: a host that forges its address cannot reach the second link
+    // through an inner relay it makes up, even one that is trusted for that link.
+    let (answer, refused) = serve(&[
+        "2001:db8:ff::1/128=2001:db8:1::/64",
+        "2001:db8:1::2/128=2001:db8:2::/64",
+    ]);
+    assert_eq!(answer.action, Action6::Drop(DropReason::UntrustedRelay));
+    assert_eq!(
+        refused,
+        [(IpAddr::V6(RELAY), Some(net("2001:db8:2::/64")), 1)]
+    );
+    // The inner relay is not: refused by the peer address the outer relay recorded.
+    let (answer, refused) = serve(&[
+        "2001:db8:ff::1/128=2001:db8::/32",
+        "2001:db8:1::2/128=2001:db8:1::/64",
+    ]);
+    assert_eq!(answer.action, Action6::Drop(DropReason::UntrustedRelay));
+    assert_eq!(
+        refused,
+        [(IpAddr::V6(inner), Some(net("2001:db8:2::/64")), 1)]
+    );
+}
+
+#[test]
+fn lightweight_relays_below_a_bound_relay_stay_within_its_links() {
+    let duid = duid_ll(mac(8));
+    let wrapped = relayed(
+        &solicit(&duid),
+        &[
+            (Ipv6Addr::UNSPECIFIED, addr("fe80::1"), Some(b"vlan-20")),
+            (LINK1, addr("fe80::200:5eff:fe00:5308"), None),
+        ],
+        Some(mac(0x98)),
+    );
+    let tune = |_: &mut _, second: &mut tenko_dhcp::v6::image::Scope6Image, _: &mut _| {
+        second.interface_id = Some(b"vlan-20".to_vec());
+    };
+    // `fe80::/10` for every link trusts the lightweight relays; the relay above them is
+    // bound to the first link, so their Interface-Id cannot select the second.
+    let mut world = World6::trusting_with(
+        DhcpProfile::Hardened,
+        Some(&["2001:db8:ff::1/128=2001:db8:1::/64", "fe80::/10=::/0"]),
+        tune,
+    );
+    let (answer, _) = world.exchange(&wrapped);
+    assert_eq!(answer.action, Action6::Drop(DropReason::UntrustedRelay));
+    assert_eq!(answer.selector, Some(Selector6::InterfaceId));
+    // Bound to both links, the relay's lightweight relays select the second.
+    let mut world = World6::trusting_with(
+        DhcpProfile::Hardened,
+        Some(&[
+            "2001:db8:ff::1/128=2001:db8:1::/64+2001:db8:2::/64",
+            "fe80::/10=::/0",
+        ]),
+        tune,
+    );
+    let (answer, _) = world.exchange(&wrapped);
+    assert!(matches!(answer.action, Action6::Reply { .. }), "{answer:?}");
+    assert_eq!(answer.selector, Some(Selector6::InterfaceId));
+    // The link-local prefix for every link is no any-link finding.
+    let report = world.guard.relay_report(Some(&world.image));
+    assert!(report.any_link.is_empty(), "{report:?}");
+}
+
+#[test]
+fn a_v6_relay_stored_before_relays_had_links_names_every_link_and_raises_its_row() {
+    let duid = duid_ll(mac(9));
+    let settings: tenko_core::dhcp::DhcpSettings =
+        serde_json::from_str(r#"{"trusted_relays":["2001:db8:ff::1/128"]}"#).expect("json");
+    // The old row reads as the relay with every link of its family: the world's entry
+    // without links is that entry.
+    assert_eq!(
+        settings.trusted_relays,
+        Some(vec![engine6_world::trusted_relay("2001:db8:ff::1/128")])
+    );
+    let mut world = World6::trusting(DhcpProfile::Standard, Some(&["2001:db8:ff::1/128"]));
+    let by_link = relayed(
+        &solicit(&duid),
+        &[(LINK2, addr("fe80::200:5eff:fe00:5309"), None)],
+        None,
+    );
+    let (answer, _) = world.exchange(&by_link);
+    assert!(matches!(answer.action, Action6::Reply { .. }), "{answer:?}");
+    let rows = world.guard.relay_report(Some(&world.image)).warnings();
+    let row = rows
+        .iter()
+        .find(|row| row.code == tenko_dhcp::relay::ANY_LINK)
+        .expect("the any-link row");
+    assert_eq!(row.params["relays"], "2001:db8:ff::1/128");
+}

@@ -1154,6 +1154,16 @@ fn option_set() -> impl Strategy<Value = OptionSet> {
         })
 }
 
+fn v4_prefix() -> impl Strategy<Value = ipnet::IpNet> {
+    (any::<[u8; 4]>(), 0u8..=32).prop_map(|(octets, len)| {
+        ipnet::IpNet::V4(
+            ipnet::Ipv4Net::new(std::net::Ipv4Addr::from(octets), len)
+                .expect("a prefix length")
+                .trunc(),
+        )
+    })
+}
+
 fn settings() -> impl Strategy<Value = DhcpSettings> {
     (
         any_lease_times(),
@@ -1162,13 +1172,8 @@ fn settings() -> impl Strategy<Value = DhcpSettings> {
         maybe(any::<bool>()),
         maybe(any::<u32>()),
         maybe(prop::collection::vec(
-            (any::<[u8; 4]>(), 0u8..=32).prop_map(|(octets, len)| {
-                ipnet::IpNet::V4(
-                    ipnet::Ipv4Net::new(std::net::Ipv4Addr::from(octets), len)
-                        .expect("a prefix length")
-                        .trunc(),
-                )
-            }),
+            (v4_prefix(), prop::collection::vec(v4_prefix(), 1..=3))
+                .prop_map(|(relay, links)| tenko_core::dhcp::TrustedRelay { relay, links }),
             0..=4,
         )),
         (

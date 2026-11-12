@@ -347,6 +347,44 @@ pub fn relays_trusted(
     Ok(trusted)
 }
 
+/// Whether every relay whose data counts (the trusted relays of `chain`, from the
+/// outermost) may name `scope`: each relay's address (the datagram's source for the
+/// outermost, the peer address its enclosing relay recorded for an inner one) must have an
+/// entry in the trusted relays with a link that overlaps the scope's network
+/// ([`crate::relay::RelayTrust::may_name`]). A forged outermost relay can write any inner
+/// chain, so its own links bound what the chain may select. A refusal goes to the relay log
+/// with the scope's network and is dropped as `untrusted_relay`; a message that is not
+/// relayed is not checked.
+///
+/// # Errors
+///
+/// [`DropReason::UntrustedRelay`].
+pub fn relays_may_name(
+    ctx: &Context6<'_>,
+    chain: &RelayChain<'_>,
+    source: Ipv6Addr,
+    scope: &Scope6Image,
+) -> Result<(), DropReason> {
+    let network = ipnet::IpNet::V6(scope.network);
+    let mut addr = source;
+    for relay in chain.trusted_relays() {
+        if !ctx
+            .guard
+            .relay_may_name(ctx.image, IpAddr::V6(addr), network)
+        {
+            ctx.guard.refuse_relay_link(
+                IpAddr::V6(addr),
+                IpAddr::V6(relay.link_address()),
+                network,
+                ctx.now,
+            );
+            return Err(DropReason::UntrustedRelay);
+        }
+        addr = relay.peer_address();
+    }
+    Ok(())
+}
+
 /// The client's link-layer address: the RFC 6939 option of the relay on its link, else the
 /// one of its DUID.
 fn link_layer_of<'a>(
@@ -436,6 +474,14 @@ pub fn handle(ctx: &Context6<'_>, received: &Received6<'_>, scratch: &mut Scratc
     let Some((scope, selector)) = select(ctx.image, &chain, received.local) else {
         return answer(request, Action6::Drop(DropReason::NoScope));
     };
+    // A trusted relay's word counts only for the links it is bound to.
+    if let Err(reason) = relays_may_name(ctx, &chain, *received.source.ip(), scope) {
+        return Answer6 {
+            request,
+            action: Action6::Drop(reason),
+            selector: Some(selector),
+        };
+    }
     let inbound = Inbound {
         chain: &chain,
         message: client,

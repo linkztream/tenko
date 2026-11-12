@@ -671,8 +671,8 @@ max_upload = 64
 #     unprivileged LXC, in containers with a published UDP port, and on Windows. This is
 #     the mode of the reference topology: the gateway relays every network, the node's own
 #     included, to one node. The relay agents' addresses go in the trusted relays of the
-#     DHCP settings (docs/dhcp.md section 9.8): outside the Lab profile no relay is trusted
-#     until it is listed.
+#     DHCP settings, each with the links it serves (docs/dhcp.md section 9.8): outside the
+#     Lab profile no relay is trusted until it is listed.
 #   * "direct" also hears the broadcasts of clients on the link. On Linux it binds
 #     0.0.0.0:67 with SO_BINDTODEVICE to `interface` and answers a client that has no
 #     address yet by a link-layer unicast through an AF_PACKET socket; that needs

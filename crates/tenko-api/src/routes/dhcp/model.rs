@@ -63,11 +63,13 @@ pub struct DhcpSettingsUpdate {
     /// History retention in days; none follows the profile.
     #[serde(default)]
     pub history_days: Option<u32>,
-    /// The trusted relay agents, as prefixes of the addresses they send from (at most 256,
-    /// without host bits); left out keeps the stored list.
+    /// The trusted relay agents, each the prefix of the addresses it sends from and the
+    /// links it may name (at most 256 relays of 1 to 64 links, without host bits; a link of
+    /// `0.0.0.0/0` or `::/0` names every link, which the Hardened profile refuses for a
+    /// relay the stored list does not hold so already: `dhcp.settings.relay_any_link`); left
+    /// out keeps the stored list.
     #[serde(default)]
-    #[schema(value_type = Option<Vec<String>>, example = json!(["192.0.2.1/32"]))]
-    pub trusted_relays: Option<Vec<ipnet::IpNet>>,
+    pub trusted_relays: Option<Vec<tenko_core::dhcp::TrustedRelay>>,
     /// Unsets the trusted relays, so that the profile decides again (every sender under
     /// Lab, none otherwise); refused together with `trusted_relays`.
     #[serde(default)]
@@ -1226,6 +1228,22 @@ pub struct DhcpRelayReport {
     /// with the relay addresses they name. Information only: nothing is trusted from it.
     #[serde(default)]
     pub relayed: Vec<DhcpRelayedNetwork>,
+    /// The listed relays that may name every link (a link of `0.0.0.0/0` or `::/0`, such as
+    /// an entry stored before relays had links), each with the networks the lease rows say
+    /// it served: the links to give it.
+    #[serde(default)]
+    pub any_link: Vec<DhcpAnyLinkRelay>,
+}
+
+/// A trusted relay that may name every link.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DhcpAnyLinkRelay {
+    /// The relay prefix of the entry.
+    #[schema(value_type = String, example = "192.0.2.1/32")]
+    pub relay: ipnet::IpNet,
+    /// The networks whose lease rows name a relay address in the prefix.
+    #[schema(value_type = Vec<String>, example = json!(["198.51.100.0/24"]))]
+    pub seen: Vec<ipnet::IpNet>,
 }
 
 /// A sender the node refused as a relay agent.
@@ -1234,10 +1252,16 @@ pub struct DhcpRefusedRelay {
     /// The address the requests came from: the address to trust.
     #[schema(value_type = String, example = "192.0.2.1")]
     pub source: IpAddr,
-    /// The relay address the requests named (`giaddr`, or the link address of the
-    /// outermost DHCPv6 relay).
+    /// The relay address the requests named (`giaddr`, or the link address of the refused
+    /// DHCPv6 relay).
     #[schema(value_type = String, example = "192.0.2.1")]
     pub relay: IpAddr,
+    /// For a trusted relay refused because its data selected a scope outside the links it
+    /// is bound to: that scope's network (the last one named). Absent for a sender that is
+    /// not trusted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "198.51.100.0/24")]
+    pub link: Option<ipnet::IpNet>,
     /// Refusals.
     pub count: u64,
     /// The first refusal.

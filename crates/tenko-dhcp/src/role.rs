@@ -994,12 +994,30 @@ impl Role {
         let relays = server.guard().relay_report(Some(&server.image()));
         if relays.trust_any {
             tracing::warn!(
-                "the dhcp role trusts every sender as a relay agent: no trusted relays are                  set and the security profile is Lab (dhcp.settings.trusted_relays)"
+                "the dhcp role trusts every sender as a relay agent: no trusted relays are \
+                 set and the security profile is Lab (dhcp.settings.trusted_relays)"
             );
         } else if !relays.listed && !relays.relayed.is_empty() {
             tracing::warn!(
                 networks = relays.relayed.len(),
-                "lease rows show networks served through relay agents, and no relay is                  trusted: list them in dhcp.settings.trusted_relays, or their clients get no                  new address"
+                "lease rows show networks served through relay agents, and no relay is \
+                 trusted: list them in dhcp.settings.trusted_relays, or their clients get no \
+                 new address"
+            );
+        }
+        // A trusted relay that may name every link (an entry stored before relays had
+        // links), said once per start beside its health row.
+        if !relays.any_link.is_empty() {
+            let named = relays
+                .any_link
+                .iter()
+                .map(|entry| entry.relay.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            tracing::warn!(
+                relays = %named,
+                "trusted relays may name every link: give each relay the links it serves in \
+                 dhcp.settings.trusted_relays"
             );
         }
         // WP9.1: the DHCPv6 listeners, over the same image.

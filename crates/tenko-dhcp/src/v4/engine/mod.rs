@@ -337,6 +337,15 @@ fn answer(request: Option<MessageType>, action: Action) -> Answer {
     }
 }
 
+/// A drop of a request whose scope `selector` had selected.
+fn dropped(request: Option<MessageType>, reason: DropReason, selector: Selector) -> Answer {
+    Answer {
+        request,
+        action: Action::Drop(reason),
+        selector: Some(selector),
+    }
+}
+
 /// Handles one received datagram: the reply in `scratch.reply`, the lease change in
 /// `scratch.change`, and what to do with them.
 pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch) -> Answer {
@@ -389,6 +398,10 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
     else {
         return answer(request, Action::Drop(DropReason::NoScope));
     };
+    // A trusted relay's word counts only for the links it is bound to.
+    if let Err(reason) = relay_link_gate(ctx, &message, received, scope, selector) {
+        return dropped(request, reason, selector);
+    }
     // ADR 0027: the activity of a client a move job is moving (two relaxed stores).
     note_moving(ctx, &message, scope);
     // WP8.4: a reservation by client identity or by hardware address.
@@ -411,11 +424,7 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
                 .siblings(scope)
                 .any(|sibling| decision.admits_scope(sibling)))
     {
-        return Answer {
-            request,
-            action: Action::Drop(DropReason::Filtered),
-            selector: Some(selector),
-        };
+        return dropped(request, DropReason::Filtered, selector);
     }
     let server_id = relay
         .and_then(|info| info.server_id_override())
@@ -487,6 +496,34 @@ pub(super) fn relay_gate(
         return Err(DropReason::Malformed);
     }
     Ok(true)
+}
+
+/// Whether the relay data that selected `scope` may name it: when the scope was selected by
+/// the link selection sub-option, option 118 or `giaddr`, its network must overlap a link
+/// of the sender's entry in the trusted relays ([`crate::relay::RelayTrust::may_name`]).
+/// A refusal goes to the relay log with the scope's network and is dropped as
+/// `untrusted_relay`.
+fn relay_link_gate(
+    ctx: &Context<'_>,
+    message: &Message<'_>,
+    received: &Received<'_>,
+    scope: &ScopeImage,
+    selector: Selector,
+) -> Result<(), DropReason> {
+    if !matches!(
+        selector,
+        Selector::LinkSelection | Selector::SubnetSelection | Selector::Giaddr
+    ) {
+        return Ok(());
+    }
+    let sender = IpAddr::V4(*received.source.ip());
+    let network = ipnet::IpNet::V4(scope.network);
+    if ctx.guard.relay_may_name(ctx.image, sender, network) {
+        return Ok(());
+    }
+    ctx.guard
+        .refuse_relay_link(sender, IpAddr::V4(message.giaddr()), network, ctx.now);
+    Err(DropReason::UntrustedRelay)
 }
 
 /// Whether `addr` can be a relay's or a client's own address: not a broadcast, multicast,

@@ -155,6 +155,15 @@ impl ConfigService {
         Ok(())
     }
 
+    /// Whether the profile in force is Hardened: the only profile whose DDNS rules keep name
+    /// protection ([`crate::ddns::DdnsProfile::HARDENED`]), so the profile source the server
+    /// gives the service tells it. False before the server gave one (tests and tools).
+    pub(crate) fn hardened(&self, view: &dyn ReadView) -> bool {
+        self.profile
+            .get()
+            .is_some_and(|source| source(view) == crate::ddns::DdnsProfile::HARDENED)
+    }
+
     /// A service that runs its jobs in place, for tests and tools.
     pub fn with_direct_jobs(store: Arc<dyn Store>) -> Arc<Self> {
         let mut direct = DirectJobs::new(Arc::clone(&store));

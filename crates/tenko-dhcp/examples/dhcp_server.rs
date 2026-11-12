@@ -14,9 +14,10 @@
 //! benchmarking range of RFC 2544) with a pool of about 131,000 addresses, selected by
 //! option 118 (RFC 3011) or `giaddr`, so that perfdhcp as a relay and the load client both
 //! reach it; replies go to the relay's port `--relay-port`. `--trusted-relays` is the list
-//! of trusted relays (`dhcp.settings.trusted_relays`, comma-separated prefixes); the
-//! default `0.0.0.0/0` trusts every sender through the list, so that the trust check runs
-//! as it does on a node with a list. The server runs under the Lab profile, whose limits
+//! of trusted relays (`dhcp.settings.trusted_relays`, comma-separated relay prefixes, each
+//! bound to the scope's network as its one link); the default `0.0.0.0/0` trusts every
+//! sender through the list, so that the trust check and the link check run as they do on a
+//! node with a list. The server runs under the Lab profile, whose limits
 //! per client and per scope are off (the load client sends 100,000 clients from 256 MAC
 //! addresses); `--renew-cache-percent` is the renewal cache (`dhcp.settings.limits`, 0
 //! commits every renewal). The store is the in-memory
@@ -111,7 +112,14 @@ fn network() -> Ipv4Net {
 
 fn image(lease_secs: u32, relays: &[ipnet::IpNet], renew_cache_percent: u8) -> ConfigImage {
     let mut builder = ImageBuilder::new(Revision(1));
-    builder.relays(tenko_dhcp::relay::RelayTrust::new(Some(relays)));
+    let relays: Vec<tenko_core::dhcp::TrustedRelay> = relays
+        .iter()
+        .map(|relay| tenko_core::dhcp::TrustedRelay {
+            relay: *relay,
+            links: vec![ipnet::IpNet::V4(network())],
+        })
+        .collect();
+    builder.relays(tenko_dhcp::relay::RelayTrust::new(Some(&relays)));
     builder.limits(tenko_core::dhcp::DhcpLimits {
         renew_cache_percent: Some(renew_cache_percent),
         ..tenko_core::dhcp::DhcpLimits::default()

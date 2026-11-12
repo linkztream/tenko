@@ -140,9 +140,9 @@ pub fn image(links: &[Ipv4Addr]) -> ConfigImage {
         renew_cache_percent: Some(0),
         ..tenko_core::dhcp::DhcpLimits::default()
     });
-    builder.relays(tenko_dhcp::relay::RelayTrust::new(Some(&["192.0.2.1/32"
-        .parse()
-        .expect("a prefix")])));
+    builder.relays(tenko_dhcp::relay::RelayTrust::new(Some(&[
+        tenko_core::dhcp::TrustedRelay::any_link("192.0.2.1/32".parse().expect("a prefix")),
+    ])));
     builder.build()
 }
 

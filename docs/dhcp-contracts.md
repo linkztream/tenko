@@ -172,6 +172,7 @@ Scopes (ADR 0015, ADR 0019 point 10): `dhcp.read` reads the configuration and th
 | `dhcp.filter.invalid` | 400 | The filter entry is invalid |
 | `dhcp.filter.exists` | 409 | An entry for the pattern exists |
 | `dhcp.settings.invalid` | 400 | A server setting is invalid |
+| `dhcp.settings.relay_any_link` | 400 | A new trusted relay for every link under the Hardened profile |
 | `dhcp.lease_times.invalid` | 400 | Lease times out of order |
 | `dhcp.ddns.invalid` | 400 | DDNS settings are invalid |
 | `dhcp.lease.not_found` | 404 | No lease holds the address |

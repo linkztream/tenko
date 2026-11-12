@@ -195,6 +195,9 @@ pub mod codes {
     pub const FILTER_EXISTS: &str = "dhcp.filter.exists";
     /// The server settings are invalid (400). Params: `field`, `reason`.
     pub const SETTINGS_INVALID: &str = "dhcp.settings.invalid";
+    /// A trusted relay that may name every link (`0.0.0.0/0` or `::/0`) written under the
+    /// Hardened profile, which needs the links each relay serves (400). Params: `field`, `reason`.
+    pub const RELAY_ANY_LINK: &str = "dhcp.settings.relay_any_link";
     /// Lease times are invalid (400): min, default and max out of order, T1 not below T2,
     /// T2 not below the default. Params: `field`, `reason`.
     pub const LEASE_TIMES_INVALID: &str = "dhcp.lease_times.invalid";
@@ -222,7 +225,7 @@ pub mod codes {
     pub const EXPORT_FORMAT: &str = "dhcp.export.format";
 
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 38] = [
+    pub const ALL: [&str; 39] = [
         SCOPE_NOT_FOUND,
         SCOPE_EXISTS,
         SCOPE_NOT_NETWORK,
@@ -251,6 +254,7 @@ pub mod codes {
         FILTER_INVALID,
         FILTER_EXISTS,
         SETTINGS_INVALID,
+        RELAY_ANY_LINK,
         LEASE_TIMES_INVALID,
         DDNS_INVALID,
         LEASE_NOT_FOUND,
@@ -630,15 +634,22 @@ pub struct DhcpSettings {
     /// Lease history retention in days (P3-Q13): none follows the security profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_days: Option<u32>,
-    /// The relay agents the server trusts, as prefixes of the addresses their messages come
-    /// from: `giaddr`, option 82, option 118 and a DHCPv6 RELAY-FORW are honored only from
-    /// a sender in the list, and replies go only to a trusted relay or to the client's own
-    /// link. None follows the security profile (every sender under Lab, none otherwise); a
-    /// list, even an empty one, applies under every profile. At most
-    /// [`MAX_TRUSTED_RELAYS`] prefixes, without host bits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schema(value_type = Option<Vec<String>>, example = json!(["192.0.2.1/32", "2001:db8::1/128"]))]
-    pub trusted_relays: Option<Vec<IpNet>>,
+    /// The relay agents the server trusts, each with the links it may name: `giaddr`, option
+    /// 82, option 118 and a DHCPv6 RELAY-FORW are honored only from a sender in the list,
+    /// only for a scope whose network overlaps one of that relay's links, and replies go
+    /// only to a trusted relay or to the client's own link. None follows the security
+    /// profile (every sender for every link under Lab, none otherwise); a list, even an
+    /// empty one, applies under every profile. At most [`MAX_TRUSTED_RELAYS`] entries.
+    ///
+    /// A row written before relays had links holds plain prefixes; each reads as that relay
+    /// with every link of its address family ([`TrustedRelay::any_link`]), which is what it
+    /// meant then.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "stored_relays"
+    )]
+    pub trusted_relays: Option<Vec<TrustedRelay>>,
     /// The limits per client and per scope that keep one client or one link from taking a
     /// pool, and the renewal cache; each field left unset follows the security profile.
     #[serde(default, skip_serializing_if = "DhcpLimits::is_unset")]
@@ -743,8 +754,191 @@ impl Default for DhcpSettings {
     }
 }
 
-/// The most prefixes [`DhcpSettings::trusted_relays`] holds.
+/// The most entries [`DhcpSettings::trusted_relays`] holds.
 pub const MAX_TRUSTED_RELAYS: usize = 256;
+
+/// The most links one [`TrustedRelay`] names.
+pub const MAX_RELAY_LINKS: usize = 64;
+
+/// A trusted relay agent and the links it may name (`docs/dhcp.md` section 9.8).
+///
+/// The relay's word (its `giaddr`, option 82, option 118, or the link address, Interface-Id
+/// and other data of a DHCPv6 relay) counts only for a scope whose network overlaps one of
+/// `links`: a scope inside a link prefix, or one that holds it (a link given as the relay's
+/// own `giaddr`, `/32`, names the scope around it). A sender that more than one entry
+/// holds is judged by the most specific one. A link of prefix length 0 (`0.0.0.0/0`,
+/// `::/0`) lets the relay name every link of its family.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema)]
+pub struct TrustedRelay {
+    /// The prefix of the addresses the relay's messages come from (the datagram's source,
+    /// or for an inner DHCPv6 relay the peer address its enclosing relay recorded), without
+    /// host bits.
+    #[schema(value_type = String, example = "192.0.2.1/32")]
+    pub relay: IpNet,
+    /// The links the relay may name, of the relay's address family, without host bits: 1 to
+    /// [`MAX_RELAY_LINKS`] prefixes.
+    #[schema(value_type = Vec<String>, example = json!(["198.51.100.0/24"]))]
+    pub links: Vec<IpNet>,
+}
+
+impl TrustedRelay {
+    /// The relay with every link of its address family: the meaning of an entry written
+    /// before relays had links.
+    pub fn any_link(relay: IpNet) -> Self {
+        let any = match relay {
+            IpNet::V4(_) => IpNet::V4(ipnet::Ipv4Net::default()),
+            IpNet::V6(_) => IpNet::V6(ipnet::Ipv6Net::default()),
+        };
+        Self {
+            relay,
+            links: vec![any],
+        }
+    }
+
+    /// Whether the relay may name every link of its family (a link of prefix length 0).
+    pub fn is_any_link(&self) -> bool {
+        self.links.iter().any(|link| link.prefix_len() == 0)
+    }
+
+    /// Checks the entry; `field` names it in the error.
+    fn validate(&self, field: &str) -> Result<(), DhcpError> {
+        let relay = self.relay;
+        if relay.trunc() != relay {
+            return Err(DhcpError::invalid(
+                codes::SETTINGS_INVALID,
+                field,
+                "a relay prefix without host bits, such as 192.0.2.1/32 or 198.51.100.0/24",
+            ));
+        }
+        if self.links.is_empty() || self.links.len() > MAX_RELAY_LINKS {
+            return Err(DhcpError::invalid(
+                codes::SETTINGS_INVALID,
+                field,
+                &format!(
+                    "relay {relay} needs 1 to 64 links: the prefixes of the networks it may \
+                     name, or 0.0.0.0/0 or ::/0 for every link"
+                ),
+            ));
+        }
+        for link in &self.links {
+            if link.trunc() != *link {
+                return Err(DhcpError::invalid(
+                    codes::SETTINGS_INVALID,
+                    field,
+                    &format!("link {link} of relay {relay} has host bits"),
+                ));
+            }
+            if matches!(link, IpNet::V4(_)) != matches!(relay, IpNet::V4(_)) {
+                return Err(DhcpError::invalid(
+                    codes::SETTINGS_INVALID,
+                    field,
+                    &format!("link {link} of relay {relay} is not of the relay's address family"),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The text form of an entry, as the command line takes it: the relay prefix, `=`, and its
+/// links joined by `+` (`192.0.2.1/32=198.51.100.0/24+203.0.113.0/24`). The prefixes are
+/// parsed, not checked: [`DhcpSettings::validate`] checks the entry.
+impl std::str::FromStr for TrustedRelay {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, String> {
+        let Some((relay, links)) = text.split_once('=') else {
+            return Err(format!(
+                "{text}: a relay needs the links it may name, as \
+                 {text}=198.51.100.0/24+203.0.113.0/24 (or {text}=0.0.0.0/0 for every link)"
+            ));
+        };
+        let prefix = |part: &str| {
+            part.trim()
+                .parse::<IpNet>()
+                .map_err(|error| format!("{text}: {}: {error}", part.trim()))
+        };
+        let links = links
+            .split('+')
+            .filter(|link| !link.trim().is_empty())
+            .map(prefix)
+            .collect::<Result<Vec<_>, _>>()?;
+        if links.is_empty() {
+            return Err(format!("{text}: give at least one link after ="));
+        }
+        Ok(Self {
+            relay: prefix(relay)?,
+            links,
+        })
+    }
+}
+
+/// The trusted relays of a stored row: an entry is a [`TrustedRelay`], or a plain prefix
+/// written before relays had links, which reads as [`TrustedRelay::any_link`].
+fn stored_relays<'de, D>(deserializer: D) -> Result<Option<Vec<TrustedRelay>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let list = Option::<Vec<StoredRelay>>::deserialize(deserializer)?;
+    Ok(list.map(|list| list.into_iter().map(|entry| entry.0).collect()))
+}
+
+/// One stored entry of the trusted relays, in either shape. Not an untagged enum: that
+/// buffers the value and reads an [`IpNet`] of the stored CBOR (which is not text) as text.
+/// The visitor tells the shapes apart instead: a plain prefix is a string in a readable
+/// format and a map keyed `V4` or `V6` in CBOR; an entry is a map keyed `relay` and
+/// `links`.
+struct StoredRelay(TrustedRelay);
+
+impl<'de> Deserialize<'de> for StoredRelay {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Entry;
+        impl<'de> serde::de::Visitor<'de> for Entry {
+            type Value = StoredRelay;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a trusted relay or a prefix")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<StoredRelay, E> {
+                text.parse::<IpNet>()
+                    .map(|prefix| StoredRelay(TrustedRelay::any_link(prefix)))
+                    .map_err(E::custom)
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<StoredRelay, A::Error> {
+                use serde::de::Error as _;
+                let mut relay = None;
+                let mut links = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "relay" => relay = Some(map.next_value::<IpNet>()?),
+                        "links" => links = Some(map.next_value::<Vec<IpNet>>()?),
+                        "V4" => {
+                            let prefix = IpNet::V4(map.next_value::<ipnet::Ipv4Net>()?);
+                            return Ok(StoredRelay(TrustedRelay::any_link(prefix)));
+                        }
+                        "V6" => {
+                            let prefix = IpNet::V6(map.next_value::<ipnet::Ipv6Net>()?);
+                            return Ok(StoredRelay(TrustedRelay::any_link(prefix)));
+                        }
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(StoredRelay(TrustedRelay {
+                    relay: relay.ok_or_else(|| A::Error::missing_field("relay"))?,
+                    links: links.ok_or_else(|| A::Error::missing_field("links"))?,
+                }))
+            }
+        }
+        deserializer.deserialize_any(Entry)
+    }
+}
 
 impl DhcpSettings {
     /// Checks the settings.
@@ -752,8 +946,9 @@ impl DhcpSettings {
     /// # Errors
     ///
     /// The codes of the lease and DDNS checks, or `dhcp.settings.invalid` for a history
-    /// retention of 0 or more than ten years, or a list of trusted relays that is too long
-    /// or holds a prefix with host bits.
+    /// retention of 0 or more than ten years, or a list of trusted relays that is too long,
+    /// names a relay twice, or holds an entry with host bits, without links, with more than
+    /// [`MAX_RELAY_LINKS`] links or with a link of the other address family.
     pub fn validate(&self) -> Result<(), DhcpError> {
         self.lease.validate("lease")?;
         self.ddns.validate("ddns")?;
@@ -773,15 +968,18 @@ impl DhcpSettings {
                 return Err(DhcpError::invalid(
                     codes::SETTINGS_INVALID,
                     "trusted_relays",
-                    "at most 256 prefixes",
+                    "at most 256 relays",
                 ));
             }
-            if relays.iter().any(|prefix| prefix.trunc() != *prefix) {
-                return Err(DhcpError::invalid(
-                    codes::SETTINGS_INVALID,
-                    "trusted_relays",
-                    "a prefix without host bits, such as 192.0.2.1/32 or 198.51.100.0/24",
-                ));
+            for (at, relay) in relays.iter().enumerate() {
+                relay.validate("trusted_relays")?;
+                if relays[..at].iter().any(|other| other.relay == relay.relay) {
+                    return Err(DhcpError::invalid(
+                        codes::SETTINGS_INVALID,
+                        "trusted_relays",
+                        &format!("relay {} is listed twice", relay.relay),
+                    ));
+                }
             }
         }
         Ok(())

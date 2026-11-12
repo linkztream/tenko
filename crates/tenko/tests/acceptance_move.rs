@@ -107,7 +107,10 @@ impl World {
         // section 9.8), as an operator lists the relays under the Home profile.
         api.put(
             "/dhcp/settings",
-            &json!({ "trusted_relays": ["127.0.0.1/32", "::1/128"] }),
+            &json!({ "trusted_relays": [
+                {"relay": "127.0.0.1/32", "links": ["192.0.2.0/24", "198.51.100.0/24"]},
+                {"relay": "::1/128", "links": ["2001:db8:180::/48"]},
+            ] }),
         )
         .expect(200);
         // The leader's own runs come rarely, so the runs the tests ask for do the work.
@@ -882,7 +885,10 @@ impl DhcpLab {
         // section 9.8), as an operator lists the relays under the Home profile.
         api.put(
             "/dhcp/settings",
-            &json!({ "trusted_relays": ["127.0.0.1/32", "::1/128"] }),
+            &json!({ "trusted_relays": [
+                {"relay": "127.0.0.1/32", "links": ["192.0.2.0/24", "198.51.100.0/24"]},
+                {"relay": "::1/128", "links": ["2001:db8:180::/48"]},
+            ] }),
         )
         .expect(200);
         // Runs on demand do the DNS work; a new fact (a lease) starts a run a second

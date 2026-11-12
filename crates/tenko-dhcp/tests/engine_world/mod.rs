@@ -172,21 +172,28 @@ impl World {
     }
 
     /// The world of the module comment with `dhcp.settings.trusted_relays` set to `relays`
-    /// (none: unset) and the node under `profile`.
+    /// (none: unset; each entry as [`trusted_relay`] reads it) and the node under `profile`.
     pub fn trusting(profile: DhcpProfile, relays: Option<&[&str]>) -> Self {
-        let relays: Option<Vec<ipnet::IpNet>> = relays.map(|list| {
-            list.iter()
-                .map(|text| text.parse().expect("a prefix"))
-                .collect()
-        });
+        let relays: Option<Vec<tenko_core::dhcp::TrustedRelay>> =
+            relays.map(|list| list.iter().map(|text| trusted_relay(text)).collect());
         let world = Self::build(|_, _| Vec::new(), relays.as_deref(), None);
+        world.guard.set_profile(profile);
+        world
+    }
+
+    /// The world of the module comment with the trusted relays of a stored setting.
+    pub fn with_relays(
+        profile: DhcpProfile,
+        relays: Option<&[tenko_core::dhcp::TrustedRelay]>,
+    ) -> Self {
+        let world = Self::build(|_, _| Vec::new(), relays, None);
         world.guard.set_profile(profile);
         world
     }
 
     /// The world under `profile` with the relay trusted and `limits` stored.
     pub fn limited(profile: DhcpProfile, limits: tenko_core::dhcp::DhcpLimits) -> Self {
-        let relays: Vec<ipnet::IpNet> = vec!["192.0.2.1/32".parse().expect("a prefix")];
+        let relays = vec![trusted_relay("192.0.2.1/32")];
         let world = Self::build(|_, _| Vec::new(), Some(&relays), Some(limits));
         world.guard.set_profile(profile);
         world
@@ -194,7 +201,7 @@ impl World {
 
     fn build(
         moving: impl FnOnce(VrfId, PrefixId) -> Vec<tenko_core::dhcp::MovingClient>,
-        relays: Option<&[ipnet::IpNet]>,
+        relays: Option<&[tenko_core::dhcp::TrustedRelay]>,
         limits: Option<tenko_core::dhcp::DhcpLimits>,
     ) -> Self {
         let vrf = VrfId::generate();
@@ -489,5 +496,15 @@ impl Ask {
         }
         let len = builder.finish().expect("finish");
         buf[..len].to_vec()
+    }
+}
+
+/// An entry of the trusted relays from `relay` (every link of its family, as an entry stored
+/// before entries had links) or `relay=link+link`.
+pub fn trusted_relay(text: &str) -> tenko_core::dhcp::TrustedRelay {
+    if text.contains('=') {
+        text.parse().expect("a trusted relay")
+    } else {
+        tenko_core::dhcp::TrustedRelay::any_link(text.parse().expect("a relay prefix"))
     }
 }

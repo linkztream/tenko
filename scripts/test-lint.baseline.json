@@ -312,8 +312,6 @@
     {"rule":"is-err","file":"crates/tenko-core/src/dhcp/tests.rs","scope":"pool_settings_accept_a_delegation_pool_range_and_refuse_a_reserved_one","text":"assert!(bad.validate(&range, &network).is_err())"},
     {"rule":"is-err","file":"crates/tenko-core/src/dhcp/tests.rs","scope":"settings_and_ddns_validate","text":"assert!(DhcpSettings {history_days: Some(0), ..settings.clone()} .validate() .is_err())"},
     {"rule":"is-err","file":"crates/tenko-core/src/dhcp/tests.rs","scope":"settings_and_ddns_validate","text":"assert!(limits(bad).validate().is_err())"},
-    {"rule":"is-err","file":"crates/tenko-core/src/dhcp/tests.rs","scope":"settings_and_ddns_validate","text":"assert!(relays(&[\"192.0.2.1/24\"]).validate().is_err())"},
-    {"rule":"is-err","file":"crates/tenko-core/src/dhcp/tests.rs","scope":"settings_and_ddns_validate","text":"assert!(relays(&many).validate().is_err())"},
     {"rule":"is-err","file":"crates/tenko-core/src/dns/identity.rs","scope":"dns_28_findings_are_bounded_and_cleaned","text":"assert!(account.validate().is_err())","count":2},
     {"rule":"is-err","file":"crates/tenko-core/src/dns/identity.rs","scope":"principal_names_parse_and_print_their_string_form","text":"assert!(PrincipalName::parse(&format!(\"{}@R\", \"a\".repeat(1100))).is_err())"},
     {"rule":"is-err","file":"crates/tenko-core/src/dns/identity.rs","scope":"principal_names_parse_and_print_their_string_form","text":"assert!(PrincipalName::parse(bad).is_err())"},

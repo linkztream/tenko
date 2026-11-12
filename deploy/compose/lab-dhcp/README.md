@@ -61,7 +61,7 @@ With the binary, the smoke sets the node up through the API under the Lab profil
 configures it: the four networks as IPAM prefixes, a `dhcp_pool` range in each (`.30` to
 `.59` of each /26), a scope on each with a 60-second lease (T1 after 30 seconds), option 3
 per scope (the gateway's address on the network) and options 6, 15 and 42 for the server,
-and the gateway (`192.0.2.2`) as the one trusted relay agent (`dhcp.settings.trusted_relays`).
+and the gateway (`192.0.2.2`) as the one trusted relay agent (`dhcp.settings.trusted_relays`), bound to the lab's networks (`192.0.2.0/24`).
 Then the rows, one `PASS`, `FAIL` or `SKIP` line each:
 
 | Row | Checks |

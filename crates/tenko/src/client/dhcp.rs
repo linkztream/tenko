@@ -409,10 +409,13 @@ pub struct SettingsSetArgs {
     /// Whether the server probes an address before it offers it.
     #[arg(long, value_name = "BOOL")]
     pub conflict_detection: Option<bool>,
-    /// The trusted relay agents, replacing the list: prefixes of the addresses they send
-    /// from, comma-separated (`192.0.2.1/32,2001:db8::1/128`); `none` trusts no relay.
-    /// Relayed requests from any other sender are dropped.
-    #[arg(long, value_name = "PREFIXES", conflicts_with = "clear_trusted_relays")]
+    /// The trusted relay agents, replacing the list, comma-separated: each the prefix of the
+    /// addresses a relay sends from, `=`, and the links it may name joined by `+`
+    /// (`192.0.2.1/32=198.51.100.0/24+203.0.113.0/24,2001:db8::1/128=2001:db8:10::/48`); a
+    /// link of `0.0.0.0/0` or `::/0` names every link, which the Hardened profile refuses
+    /// for a new relay. `none` trusts no relay. Relayed requests from any other sender, and
+    /// relay data that names a link outside the relay's own, are dropped.
+    #[arg(long, value_name = "RELAYS", conflicts_with = "clear_trusted_relays")]
     pub trusted_relays: Option<String>,
     /// Unsets the trusted relays, so that the security profile decides again (every
     /// sender under Lab, none otherwise).
@@ -1331,6 +1334,19 @@ impl DhcpCommand {
     }
 }
 
+/// The entries of `--trusted-relays`, comma-separated, each in the text form of
+/// [`tenko_core::dhcp::TrustedRelay`]; `none` is the empty list.
+fn trusted_relays(list: &str) -> Result<Vec<tenko_core::dhcp::TrustedRelay>, Failure> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty() && *item != "none")
+        .map(|item| {
+            item.parse()
+                .map_err(|error| usage(format!("--trusted-relays {error}")))
+        })
+        .collect()
+}
+
 fn settings(action: &SettingsCommand) -> Result<Request, Failure> {
     match action {
         SettingsCommand::Show(_) => Ok(Request::get("/dhcp/settings", Present::Item)),
@@ -1343,13 +1359,11 @@ fn settings(action: &SettingsCommand) -> Result<Request, Failure> {
             insert(
                 &mut body,
                 "trusted_relays",
-                args.trusted_relays.as_deref().map(|list| {
-                    list.split(',')
-                        .map(str::trim)
-                        .filter(|item| !item.is_empty() && *item != "none")
-                        .map(|item| Value::String(item.to_owned()))
-                        .collect::<Vec<_>>()
-                }),
+                args.trusted_relays
+                    .as_deref()
+                    .map(trusted_relays)
+                    .transpose()?
+                    .map(|list| json!(list)),
             );
             if args.clear_trusted_relays {
                 body.insert("clear_trusted_relays".to_owned(), Value::Bool(true));
@@ -2500,12 +2514,20 @@ mod tests {
                 "settings",
                 "set",
                 "--trusted-relays",
-                "192.0.2.1/32, 2001:db8::1/128",
+                "192.0.2.1/32=198.51.100.0/24+203.0.113.0/24, 2001:db8::1/128=::/0",
             ],
             Method::Put,
             "/dhcp/settings",
-            Some(json!({"trusted_relays": ["192.0.2.1/32", "2001:db8::1/128"]})),
+            Some(json!({"trusted_relays": [
+                {"relay": "192.0.2.1/32", "links": ["198.51.100.0/24", "203.0.113.0/24"]},
+                {"relay": "2001:db8::1/128", "links": ["::/0"]},
+            ]})),
         );
+        // A relay without links is refused before the request: every link is written out.
+        for list in ["192.0.2.1/32", "192.0.2.1/32="] {
+            let error = refused(&["settings", "set", "--trusted-relays", list]);
+            assert!(error.message.contains("link"), "{}", error.message);
+        }
         check(
             &["settings", "set", "--trusted-relays", "none"],
             Method::Put,

@@ -1,21 +1,31 @@
-//! Which relay agents the server trusts (`dhcp.settings.trusted_relays`), and what it tells
-//! the operator about the relays it refused or that reached it before the list existed.
+//! Which relay agents the server trusts (`dhcp.settings.trusted_relays`), for which links,
+//! and what it tells the operator about the relays it refused or that reached it before the
+//! list existed.
 //!
 //! - **The rule.** Relay data is honored only from a trusted sender: `giaddr`, option 82
 //!   (link selection, the server identifier override, circuit-id and remote-id for the
 //!   classes), option 118 and a DHCPv6 RELAY-FORW. A sender is trusted when its address
-//!   (the datagram's source) is in a prefix of the list. Unset, the list follows the
-//!   security profile: every sender under Lab (the behavior before the list existed, said
-//!   as the warning [`TRUST_ANY`]), none under Home, Standard and Hardened. A list that is
-//!   set, even an empty one, applies under every profile.
+//!   (the datagram's source) is in the relay prefix of an entry of the list. Unset, the list
+//!   follows the security profile: every sender under Lab (the behavior before the list
+//!   existed, said as the warning [`TRUST_ANY`]), none under Home, Standard and Hardened. A
+//!   list that is set, even an empty one, applies under every profile.
+//! - **The links.** Each entry names the links its relay may name
+//!   ([`tenko_core::dhcp::TrustedRelay`]): a scope selected by relay data must have a
+//!   network that overlaps one of them ([`RelayTrust::may_name`]), judged by the most
+//!   specific entry that holds the relay's address. A forged source address of a trusted
+//!   relay therefore reaches only the scopes that relay serves. A link of prefix length 0
+//!   names every link of its family: the meaning of an entry stored before entries had
+//!   links, said as the warning [`ANY_LINK`].
 //! - **What is refused.** A relayed request (a `giaddr`, or a RELAY-FORW) from an untrusted
-//!   sender is dropped (`tenko_dhcp_dropped_total{reason="untrusted_relay"}`); option 82 and
-//!   option 118 of a request that is not relayed are not used to select a scope, a class or
-//!   a server identifier (option 82 is still echoed, RFC 3046 section 2.2).
-//! - **What the operator is told** ([`UNTRUSTED`]). [`RelayLog`] keeps the senders it
-//!   refused ([`MAX_REFUSED`], the ones refused most often stay), with the relay address
-//!   they named and how often, and the networks whose lease rows say that they came through
-//!   a relay, with the relay addresses seen, so that an installation that relied on relays
+//!   sender, or one whose relay data selects a scope outside the relay's links, is dropped
+//!   (`tenko_dhcp_dropped_total{reason="untrusted_relay"}`); option 82 and option 118 of a
+//!   request that is not relayed are not used to select a scope, a class or a server
+//!   identifier (option 82 is still echoed, RFC 3046 section 2.2).
+//! - **What the operator is told** ([`UNTRUSTED`], [`LINK_REFUSED`], [`ANY_LINK`]).
+//!   [`RelayLog`] keeps the senders it refused ([`MAX_REFUSED`], the ones refused most often
+//!   stay), with the relay address they named, the link a trusted relay named outside its
+//!   links, and how often, and the networks whose lease rows say that they came through a
+//!   relay, with the relay addresses seen, so that an installation that relied on relays
 //!   before the list existed sees them at the first start, before any client is refused.
 //!   The list of seen relays trusts nothing: only the operator's list does.
 //!
@@ -24,6 +34,7 @@
 //! is counted, not logged); the log's room is made once, at its first entry.
 
 use std::{
+    collections::BTreeMap,
     net::IpAddr,
     sync::{
         Mutex, PoisonError,
@@ -32,7 +43,7 @@ use std::{
 };
 
 use ipnet::IpNet;
-use tenko_core::{PrefixId, Timestamp};
+use tenko_core::{PrefixId, Timestamp, dhcp::TrustedRelay};
 
 /// The warning while no list is set under Lab and every sender is trusted as a relay.
 pub const TRUST_ANY: &str = "dhcp.relay.trust_any";
@@ -40,6 +51,12 @@ pub const TRUST_ANY: &str = "dhcp.relay.trust_any";
 /// The warning while relays reach the node that are not trusted, or lease rows say that a
 /// network was served through a relay while no list is set.
 pub const UNTRUSTED: &str = "dhcp.relay.untrusted";
+
+/// The warning while trusted relays name links they are not bound to.
+pub const LINK_REFUSED: &str = "dhcp.relay.link_refused";
+
+/// The warning while the list holds relays that may name every link.
+pub const ANY_LINK: &str = "dhcp.relay.any_link";
 
 /// The refused senders the log keeps.
 pub const MAX_REFUSED: usize = 32;
@@ -50,17 +67,31 @@ pub const MAX_RELAYED: usize = 32;
 /// The relay addresses kept per relayed network.
 pub const MAX_RELAYS_PER_NETWORK: usize = 8;
 
+/// One entry of the list: the relay prefix and the links it may name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Bound {
+    relay: IpNet,
+    links: Box<[IpNet]>,
+}
+
 /// The trusted relays of a configuration image: the stored list, or none when it is unset.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RelayTrust {
-    list: Option<Box<[IpNet]>>,
+    list: Option<Box<[Bound]>>,
 }
 
 impl RelayTrust {
     /// The trust of a stored setting.
-    pub fn new(list: Option<&[IpNet]>) -> Self {
+    pub fn new(list: Option<&[TrustedRelay]>) -> Self {
         Self {
-            list: list.map(|list| list.iter().map(IpNet::trunc).collect()),
+            list: list.map(|list| {
+                list.iter()
+                    .map(|entry| Bound {
+                        relay: entry.relay.trunc(),
+                        links: entry.links.iter().map(IpNet::trunc).collect(),
+                    })
+                    .collect()
+            }),
         }
     }
 
@@ -69,9 +100,26 @@ impl RelayTrust {
         self.list.is_some()
     }
 
-    /// The list, when set.
-    pub fn list(&self) -> Option<&[IpNet]> {
-        self.list.as_deref()
+    /// The relay prefixes of the entries that may name every link of their family, except
+    /// link-local prefixes shorter than `/128` ([`exempt_from_links`]).
+    pub fn any_link(&self) -> impl Iterator<Item = IpNet> + '_ {
+        self.list
+            .iter()
+            .flatten()
+            .filter(|entry| {
+                !exempt_from_links(entry.relay) && entry.links.iter().any(|l| l.prefix_len() == 0)
+            })
+            .map(|entry| entry.relay)
+    }
+
+    /// The most specific entry whose relay prefix holds `addr`.
+    fn holder(&self, addr: IpAddr) -> Option<&Bound> {
+        let addr = canonical(addr);
+        self.list
+            .iter()
+            .flatten()
+            .filter(|entry| entry.relay.contains(&addr))
+            .max_by_key(|entry| entry.relay.prefix_len())
     }
 
     /// Whether the sender of a datagram is a trusted relay: as [`RelayTrust::trusts`], except
@@ -84,7 +132,7 @@ impl RelayTrust {
             (None, _) => any_when_unset,
             (Some(list), IpAddr::V6(v6)) if v6.is_unicast_link_local() => list
                 .iter()
-                .any(|prefix| prefix.prefix_len() == 128 && prefix.contains(&sender)),
+                .any(|entry| entry.relay.prefix_len() == 128 && entry.relay.contains(&sender)),
             (Some(_), _) => self.trusts(sender, any_when_unset),
         }
     }
@@ -92,11 +140,40 @@ impl RelayTrust {
     /// Whether `addr` is in the list; `any_when_unset` is what an unset list means (the
     /// profile: true under Lab).
     pub fn trusts(&self, sender: IpAddr, any_when_unset: bool) -> bool {
-        let sender = canonical(sender);
         match &self.list {
             None => any_when_unset,
-            Some(list) => list.iter().any(|prefix| prefix.contains(&sender)),
+            Some(_) => self.holder(sender).is_some(),
         }
+    }
+
+    /// Whether the relay at `relay` may name a scope of `network`: the most specific entry
+    /// that holds the relay has a link that overlaps the network (the network lies in the
+    /// link, or holds it). `any_when_unset` is what an unset list means. An address no entry
+    /// holds may name nothing.
+    pub fn may_name(&self, relay: IpAddr, network: IpNet, any_when_unset: bool) -> bool {
+        match &self.list {
+            None => any_when_unset,
+            Some(_) => self
+                .holder(relay)
+                .is_some_and(|entry| entry.links.iter().any(|link| overlaps(*link, network))),
+        }
+    }
+}
+
+/// Whether two prefixes share an address: one holds the other's first address.
+fn overlaps(a: IpNet, b: IpNet) -> bool {
+    a.contains(&b.network()) || b.contains(&a.network())
+}
+
+/// Whether an entry needs no links of its own to be safe: a link-local relay prefix shorter
+/// than `/128` (such as `fe80::/10`) only ever trusts inner DHCPv6 relays below a trusted
+/// relay (never a sender of its own, [`RelayTrust::trusts_sender`]), and the relay above
+/// it must be bound to the client's link as well. Such an entry may name every link without
+/// a warning and without the Hardened refusal.
+pub fn exempt_from_links(relay: IpNet) -> bool {
+    match relay {
+        IpNet::V6(v6) => v6.addr().is_unicast_link_local() && v6.prefix_len() < 128,
+        IpNet::V4(_) => false,
     }
 }
 
@@ -111,11 +188,15 @@ fn canonical(addr: IpAddr) -> IpAddr {
 /// A sender the server refused as a relay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefusedRelay {
-    /// The datagram's source: the address to trust.
+    /// The datagram's source: the address to trust (or, for an inner DHCPv6 relay, the
+    /// peer address its enclosing relay recorded).
     pub source: IpAddr,
-    /// The relay address the request named: `giaddr`, or the link address of the outermost
-    /// RELAY-FORW.
+    /// The relay address the request named: `giaddr`, or the link address of the refused
+    /// DHCPv6 relay.
     pub relay: IpAddr,
+    /// For a trusted relay refused because its data selected a scope outside its links:
+    /// that scope's network. None for a sender that is not trusted.
+    pub link: Option<IpNet>,
     /// Refusals since the first.
     pub count: u64,
     /// The first refusal.
@@ -136,6 +217,16 @@ pub struct RelayedNetwork {
     pub relays: Vec<IpAddr>,
 }
 
+/// A trusted relay that may name every link, and the networks the lease rows say it
+/// served (a hint for the links to give it; empty when the rows say nothing).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnyLinkRelay {
+    /// The relay prefix of the entry.
+    pub relay: IpNet,
+    /// The networks whose lease rows name a relay address in the prefix.
+    pub seen: Vec<IpNet>,
+}
+
 /// What the node reports about relays.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RelayReport {
@@ -150,12 +241,17 @@ pub struct RelayReport {
     /// The networks served through a relay according to the lease rows, while no list is
     /// set.
     pub relayed: Vec<RelayedNetwork>,
+    /// The listed relays that may name every link.
+    pub any_link: Vec<AnyLinkRelay>,
+    /// Whether the profile is Hardened (which refuses such an entry when it is written).
+    pub hardened: bool,
 }
 
 impl RelayReport {
     /// Whether the warning [`UNTRUSTED`] is raised.
     pub fn untrusted(&self) -> bool {
-        !self.refused.is_empty() || (!self.listed && !self.trust_any && !self.relayed.is_empty())
+        self.refused.iter().any(|refused| refused.link.is_none())
+            || (!self.listed && !self.trust_any && !self.relayed.is_empty())
     }
 
     /// Whether a refused sender's address is a relay address of the lease rows: the relay
@@ -170,17 +266,26 @@ impl RelayReport {
 /// A health row of the report: its code, the English text and its parameters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelayWarning {
-    /// [`TRUST_ANY`] or [`UNTRUSTED`].
+    /// [`TRUST_ANY`], [`UNTRUSTED`], [`LINK_REFUSED`] or [`ANY_LINK`].
     pub code: &'static str,
     /// What it means and what to do, in English.
     pub detail: String,
     /// `senders` (the refused senders, comma-separated), `refused` (refusals in all),
-    /// `networks` (the relayed networks and their relays).
-    pub params: std::collections::BTreeMap<String, String>,
+    /// `networks` (the relayed networks and their relays), `links` (the links refused),
+    /// `relays` (the relays that may name every link).
+    pub params: BTreeMap<String, String>,
 }
 
 /// The refused senders a health row names; the rest are counted.
 const NAMED: usize = 5;
+
+/// " and N more" for the entries a row does not name.
+fn more(total: usize) -> String {
+    match total.saturating_sub(NAMED) {
+        0 => String::new(),
+        more => format!(" and {more} more"),
+    }
+}
 
 impl RelayReport {
     /// The health rows of the report.
@@ -189,15 +294,143 @@ impl RelayReport {
         if self.trust_any {
             out.push(RelayWarning {
                 code: TRUST_ANY,
-                detail: "no trusted relays are set and the security profile is Lab, so every                          sender is trusted as a relay agent: any host that reaches this node                          can be served from any scope; list the relay agents under the DHCP                          settings"
+                detail: "no trusted relays are set and the security profile is Lab, so every \
+                         sender is trusted as a relay agent: any host that reaches this node \
+                         can be served from any scope; list the relay agents and their links \
+                         under the DHCP settings"
                     .to_owned(),
-                params: std::collections::BTreeMap::new(),
+                params: BTreeMap::new(),
             });
         }
-        if !self.untrusted() {
-            return out;
+        if let Some(row) = self.any_link_warning() {
+            out.push(row);
         }
-        let mut params = std::collections::BTreeMap::new();
+        if let Some(row) = self.link_warning() {
+            out.push(row);
+        }
+        if self.untrusted() {
+            out.push(self.untrusted_warning());
+        }
+        out
+    }
+
+    fn any_link_warning(&self) -> Option<RelayWarning> {
+        if self.any_link.is_empty() {
+            return None;
+        }
+        let relays = self
+            .any_link
+            .iter()
+            .take(NAMED)
+            .map(|entry| {
+                if entry.seen.is_empty() {
+                    entry.relay.to_string()
+                } else {
+                    let seen = entry
+                        .seen
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" and ");
+                    format!("{} (lease rows show it on {seen})", entry.relay)
+                }
+            })
+            .collect::<Vec<_>>();
+        let hardened = if self.hardened {
+            "; the Hardened profile refuses such an entry when it is written, and these were \
+             stored before"
+        } else {
+            ""
+        };
+        let mut params = BTreeMap::new();
+        params.insert(
+            "relays".to_owned(),
+            self.any_link
+                .iter()
+                .take(NAMED)
+                .map(|entry| entry.relay.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        Some(RelayWarning {
+            code: ANY_LINK,
+            detail: format!(
+                "trusted relays may name every link: {}{}, so a host that sends with such a \
+                 relay's address can take leases in any scope; under the DHCP settings, give \
+                 each relay the links it serves{hardened}",
+                relays.join(", "),
+                more(self.any_link.len()),
+            ),
+            params,
+        })
+    }
+
+    fn link_warning(&self) -> Option<RelayWarning> {
+        let refused = self
+            .refused
+            .iter()
+            .filter(|refused| refused.link.is_some())
+            .collect::<Vec<_>>();
+        if refused.is_empty() {
+            return None;
+        }
+        let named = refused
+            .iter()
+            .take(NAMED)
+            .map(|refused| {
+                format!(
+                    "{} (link {}, {} time(s))",
+                    refused.source,
+                    refused
+                        .link
+                        .map(|link| link.to_string())
+                        .unwrap_or_default(),
+                    refused.count
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut params = BTreeMap::new();
+        params.insert(
+            "senders".to_owned(),
+            refused
+                .iter()
+                .take(NAMED)
+                .map(|refused| refused.source.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        params.insert(
+            "links".to_owned(),
+            refused
+                .iter()
+                .take(NAMED)
+                .filter_map(|refused| refused.link.map(|link| link.to_string()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        params.insert(
+            "refused".to_owned(),
+            refused
+                .iter()
+                .map(|refused| refused.count)
+                .sum::<u64>()
+                .to_string(),
+        );
+        Some(RelayWarning {
+            code: LINK_REFUSED,
+            detail: format!(
+                "trusted relays named links they are not bound to, and the requests were \
+                 dropped: {}{}; if a relay serves that link, add the link to the relay under \
+                 the DHCP settings; if it does not, the requests did not come from that relay",
+                named.join(", "),
+                more(refused.len()),
+            ),
+            params,
+        })
+    }
+
+    fn untrusted_warning(&self) -> RelayWarning {
+        let mut params = BTreeMap::new();
         let networks = self
             .relayed
             .iter()
@@ -211,21 +444,27 @@ impl RelayReport {
                 format!("{} through {relays}", network.network)
             })
             .collect::<Vec<_>>();
-        let detail = if self.refused.is_empty() {
+        let refused = self
+            .refused
+            .iter()
+            .filter(|refused| refused.link.is_none())
+            .collect::<Vec<_>>();
+        let detail = if refused.is_empty() {
             params.insert("networks".to_owned(), networks.join(", "));
             format!(
-                "lease rows show networks served through relay agents ({}), and no relay is                  trusted yet: add the addresses your relay agents send from to the trusted                  relays of the DHCP settings, or their clients get no new address",
+                "lease rows show networks served through relay agents ({}), and no relay is \
+                 trusted yet: add the addresses your relay agents send from, with the links \
+                 they serve, to the trusted relays of the DHCP settings, or their clients get \
+                 no new address",
                 networks.join(", ")
             )
         } else {
-            let total: u64 = self
-                .refused
+            let total: u64 = refused
                 .iter()
                 .map(|refused| refused.count)
                 .sum::<u64>()
                 .saturating_add(self.unlogged);
-            let senders = self
-                .refused
+            let senders = refused
                 .iter()
                 .take(NAMED)
                 .map(|refused| {
@@ -240,10 +479,9 @@ impl RelayReport {
                     )
                 })
                 .collect::<Vec<_>>();
-            let more = self.refused.len().saturating_sub(NAMED);
             params.insert(
                 "senders".to_owned(),
-                self.refused
+                refused
                     .iter()
                     .take(NAMED)
                     .map(|refused| refused.source.to_string())
@@ -254,22 +492,19 @@ impl RelayReport {
             if !networks.is_empty() {
                 params.insert("networks".to_owned(), networks.join(", "));
             }
-            let more = if more > 0 {
-                format!(" and {more} more")
-            } else {
-                String::new()
-            };
             format!(
-                "requests from relay agents that are not trusted were dropped: {}{more}; add                  the ones you run to the trusted relays of the DHCP settings",
-                senders.join(", ")
+                "requests from relay agents that are not trusted were dropped: {}{}; add the \
+                 ones you run, with the links they serve, to the trusted relays of the DHCP \
+                 settings",
+                senders.join(", "),
+                more(refused.len()),
             )
         };
-        out.push(RelayWarning {
+        RelayWarning {
             code: UNTRUSTED,
             detail,
             params,
-        });
-        out
+        }
     }
 }
 
@@ -291,22 +526,37 @@ impl RelayLog {
         }
     }
 
-    /// Notes a refusal of `source`, which named `relay`.
+    /// Notes a refusal of `source`, which named `relay`, as a relay that is not trusted.
     pub fn refuse(&self, source: IpAddr, relay: IpAddr, now: Timestamp) {
+        self.note(source, relay, None, now);
+    }
+
+    /// Notes a refusal of the trusted relay `source`, which named `relay` and selected a
+    /// scope of `link`, outside its links.
+    pub fn refuse_link(&self, source: IpAddr, relay: IpAddr, link: IpNet, now: Timestamp) {
+        self.note(source, relay, Some(link), now);
+    }
+
+    fn note(&self, source: IpAddr, relay: IpAddr, link: Option<IpNet>, now: Timestamp) {
         let source = canonical(source);
         let Ok(mut refused) = self.refused.try_lock() else {
             self.unlogged.fetch_add(1, Ordering::Relaxed);
             return;
         };
-        if let Some(entry) = refused.iter_mut().find(|entry| entry.source == source) {
+        if let Some(entry) = refused
+            .iter_mut()
+            .find(|entry| entry.source == source && entry.link.is_some() == link.is_some())
+        {
             entry.count = entry.count.saturating_add(1);
             entry.relay = relay;
+            entry.link = link;
             entry.last = now;
             return;
         }
         let entry = RefusedRelay {
             source,
             relay,
+            link,
             count: 1,
             first: now,
             last: now,
@@ -362,7 +612,30 @@ impl RelayLog {
                     .unwrap_or_else(PoisonError::into_inner)
                     .clone()
             },
+            any_link: Vec::new(),
+            hardened: false,
         }
+    }
+
+    /// The relays of `relays` (prefixes that may name every link), each with the networks
+    /// whose lease rows name a relay address in it.
+    pub fn any_link(&self, relays: impl Iterator<Item = IpNet>) -> Vec<AnyLinkRelay> {
+        let relayed = self.relayed.lock().unwrap_or_else(PoisonError::into_inner);
+        relays
+            .map(|relay| AnyLinkRelay {
+                relay,
+                seen: relayed
+                    .iter()
+                    .filter(|network| {
+                        network
+                            .relays
+                            .iter()
+                            .any(|addr| relay.contains(&canonical(*addr)))
+                    })
+                    .map(|network| network.network)
+                    .collect(),
+            })
+            .collect()
     }
 }
 
@@ -406,9 +679,20 @@ mod tests {
 
     use super::*;
 
-    fn prefixes(list: &[&str]) -> Vec<IpNet> {
+    fn net(text: &str) -> IpNet {
+        text.parse().expect("a prefix")
+    }
+
+    fn entry(relay: &str, links: &[&str]) -> TrustedRelay {
+        TrustedRelay {
+            relay: net(relay),
+            links: links.iter().map(|link| net(link)).collect(),
+        }
+    }
+
+    fn any(list: &[&str]) -> Vec<TrustedRelay> {
         list.iter()
-            .map(|text| text.parse().expect("a prefix"))
+            .map(|relay| TrustedRelay::any_link(net(relay)))
             .collect()
     }
 
@@ -418,14 +702,87 @@ mod tests {
         let unset = RelayTrust::new(None);
         assert!(unset.trusts(sender, true));
         assert!(!unset.trusts(sender, false));
+        assert!(unset.may_name(sender, net("198.51.100.0/24"), true));
+        assert!(!unset.may_name(sender, net("198.51.100.0/24"), false));
         let empty = RelayTrust::new(Some(&[]));
         assert!(!empty.trusts(sender, true));
-        let listed = RelayTrust::new(Some(&prefixes(&["192.0.2.0/30", "2001:db8::/64"])));
+        assert!(!empty.may_name(sender, net("198.51.100.0/24"), true));
+        let listed = RelayTrust::new(Some(&any(&["192.0.2.0/30", "2001:db8::/64"])));
         assert!(listed.trusts(sender, false));
         assert!(!listed.trusts(Ipv4Addr::new(192, 0, 2, 4).into(), true));
         assert!(listed.trusts("2001:db8::7".parse::<Ipv6Addr>().expect("v6").into(), false));
         // An IPv4 sender seen on a dual-stack socket is the IPv4 address.
         assert!(listed.trusts(Ipv4Addr::new(192, 0, 2, 2).to_ipv6_mapped().into(), false));
+    }
+
+    #[test]
+    fn a_relay_names_only_scopes_that_overlap_its_links() {
+        let trust = RelayTrust::new(Some(&[
+            entry("192.0.2.1/32", &["198.51.100.0/24", "203.0.113.65/32"]),
+            entry("2001:db8::1/128", &["2001:db8:10::/48"]),
+        ]));
+        let v4: IpAddr = Ipv4Addr::new(192, 0, 2, 1).into();
+        let v6: IpAddr = "2001:db8::1".parse().expect("v6");
+        // A scope inside a link, and a scope that holds a link given as a giaddr.
+        assert!(trust.may_name(v4, net("198.51.100.0/24"), false));
+        assert!(trust.may_name(v4, net("198.51.100.128/25"), false));
+        assert!(trust.may_name(v4, net("203.0.113.64/26"), false));
+        // Any other scope, and a scope of the other family, is not the relay's.
+        assert!(!trust.may_name(v4, net("198.51.101.0/24"), false));
+        assert!(!trust.may_name(v4, net("203.0.113.0/26"), false));
+        assert!(!trust.may_name(v4, net("2001:db8:10::/64"), false));
+        assert!(trust.may_name(v6, net("2001:db8:10:5::/64"), false));
+        assert!(!trust.may_name(v6, net("2001:db8:11::/64"), false));
+        // An address no entry holds names nothing, whatever the profile.
+        assert!(!trust.may_name(
+            Ipv4Addr::new(192, 0, 2, 2).into(),
+            net("198.51.100.0/24"),
+            true
+        ));
+        // An entry stored before entries had links names every link of its family.
+        let old = RelayTrust::new(Some(&any(&["192.0.2.1/32"])));
+        assert!(old.may_name(v4, net("198.51.101.0/24"), false));
+        assert_eq!(old.any_link().collect::<Vec<_>>(), [net("192.0.2.1/32")]);
+        assert_eq!(trust.any_link().count(), 0);
+    }
+
+    #[test]
+    fn the_most_specific_relay_prefix_decides() {
+        // The routers of 192.0.2.0/24 serve the access networks; the one at 192.0.2.9 is
+        // the lab's router and serves only the lab link, although the wider entry would
+        // allow more.
+        let trust = RelayTrust::new(Some(&[
+            entry("192.0.2.0/24", &["198.51.100.0/24", "203.0.113.0/24"]),
+            entry("192.0.2.9/32", &["203.0.113.128/25"]),
+        ]));
+        let router: IpAddr = Ipv4Addr::new(192, 0, 2, 5).into();
+        let lab: IpAddr = Ipv4Addr::new(192, 0, 2, 9).into();
+        assert!(trust.may_name(router, net("198.51.100.0/24"), false));
+        assert!(trust.may_name(router, net("203.0.113.0/25"), false));
+        assert!(trust.may_name(lab, net("203.0.113.128/25"), false));
+        assert!(!trust.may_name(lab, net("198.51.100.0/24"), false));
+        assert!(!trust.may_name(lab, net("203.0.113.0/25"), false));
+        // The order of the list does not matter.
+        let reversed = RelayTrust::new(Some(&[
+            entry("192.0.2.9/32", &["203.0.113.128/25"]),
+            entry("192.0.2.0/24", &["198.51.100.0/24", "203.0.113.0/24"]),
+        ]));
+        assert!(!reversed.may_name(lab, net("198.51.100.0/24"), false));
+        assert!(reversed.may_name(router, net("198.51.100.0/24"), false));
+    }
+
+    #[test]
+    fn a_link_local_prefix_for_lightweight_relays_is_no_any_link_finding() {
+        let trust = RelayTrust::new(Some(&any(&["fe80::/10", "fe80::1/128", "2001:db8::1/128"])));
+        assert_eq!(
+            trust.any_link().collect::<Vec<_>>(),
+            [net("fe80::1/128"), net("2001:db8::1/128")]
+        );
+        assert!(exempt_from_links(net("fe80::/10")));
+        assert!(exempt_from_links(net("fe80::/64")));
+        assert!(!exempt_from_links(net("fe80::1/128")));
+        assert!(!exempt_from_links(net("2001:db8::/32")));
+        assert!(!exempt_from_links(net("192.0.2.0/24")));
     }
 
     #[test]
@@ -455,13 +812,9 @@ mod tests {
         let mut collect = RelayedCollector::default();
         let giaddr: IpAddr = Ipv4Addr::new(192, 0, 2, 1).into();
         for _ in 0..3 {
-            collect.note(scope, "192.0.2.0/24".parse().expect("net"), giaddr);
+            collect.note(scope, net("192.0.2.0/24"), giaddr);
         }
-        collect.note(
-            scope,
-            "192.0.2.0/24".parse().expect("net"),
-            Ipv4Addr::UNSPECIFIED.into(),
-        );
+        collect.note(scope, net("192.0.2.0/24"), Ipv4Addr::UNSPECIFIED.into());
         log.set_relayed(collect.finish());
         let report = log.report(false, false);
         assert_eq!(report.relayed.len(), 1);
@@ -474,8 +827,22 @@ mod tests {
         let lab = RelayLog::default();
         lab.set_relayed(report.relayed.clone());
         assert!(!lab.report(false, true).untrusted());
-        // Once the operator set a list, the networks are no longer shown.
+        // Once the operator set a list, the networks are no longer shown, but they still
+        // tell which links a relay that may name every link served.
         assert_eq!(log.report(true, false).relayed, Vec::new());
+        assert_eq!(
+            log.any_link([net("192.0.2.0/30"), net("10.0.0.0/8")].into_iter()),
+            [
+                AnyLinkRelay {
+                    relay: net("192.0.2.0/30"),
+                    seen: vec![net("192.0.2.0/24")],
+                },
+                AnyLinkRelay {
+                    relay: net("10.0.0.0/8"),
+                    seen: Vec::new(),
+                },
+            ]
+        );
     }
 
     #[test]
@@ -483,7 +850,7 @@ mod tests {
         let scope = PrefixId::generate();
         let giaddr: IpAddr = Ipv4Addr::new(192, 0, 2, 1).into();
         let mut collect = RelayedCollector::default();
-        collect.note(scope, "192.0.2.0/24".parse().expect("net"), giaddr);
+        collect.note(scope, net("192.0.2.0/24"), giaddr);
         let log = RelayLog::new();
         log.set_relayed(collect.finish());
         let rows = log.report(false, false).warnings();
@@ -493,6 +860,7 @@ mod tests {
             rows[0].detail.contains("192.0.2.0/24 through 192.0.2.1"),
             "{rows:?}"
         );
+        assert!(!rows[0].detail.contains("  "), "{rows:?}");
         log.refuse(giaddr, giaddr, Timestamp::now());
         let rows = log.report(false, false).warnings();
         assert!(
@@ -504,6 +872,80 @@ mod tests {
         let lab = RelayLog::new().report(false, true).warnings();
         assert_eq!(lab.len(), 1);
         assert_eq!(lab[0].code, TRUST_ANY);
+        assert!(!lab[0].detail.contains("  "), "{lab:?}");
         assert_eq!(RelayLog::new().report(true, false).warnings(), Vec::new());
+    }
+
+    #[test]
+    fn a_link_refusal_is_its_own_row_and_says_what_to_do() {
+        let log = RelayLog::new();
+        let relay: IpAddr = Ipv4Addr::new(192, 0, 2, 1).into();
+        let giaddr: IpAddr = Ipv4Addr::new(198, 51, 101, 1).into();
+        log.refuse_link(relay, giaddr, net("198.51.101.0/24"), Timestamp::now());
+        log.refuse_link(relay, giaddr, net("198.51.101.0/24"), Timestamp::now());
+        let report = log.report(true, false);
+        assert!(!report.untrusted());
+        assert_eq!(report.refused.len(), 1);
+        assert_eq!(report.refused[0].link, Some(net("198.51.101.0/24")));
+        assert_eq!(report.refused[0].count, 2);
+        let rows = report.warnings();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].code, LINK_REFUSED);
+        assert_eq!(rows[0].params["senders"], "192.0.2.1");
+        assert_eq!(rows[0].params["links"], "198.51.101.0/24");
+        assert_eq!(rows[0].params["refused"], "2");
+        assert!(
+            rows[0]
+                .detail
+                .contains("add the link to the relay under the DHCP settings"),
+            "{rows:?}"
+        );
+        // The same sender refused as untrusted is a second entry with its own row.
+        log.refuse(relay, giaddr, Timestamp::now());
+        let codes: Vec<_> = log
+            .report(true, false)
+            .warnings()
+            .into_iter()
+            .map(|row| row.code)
+            .collect();
+        assert_eq!(codes, [LINK_REFUSED, UNTRUSTED]);
+    }
+
+    #[test]
+    fn a_relay_with_every_link_is_a_finding_that_names_what_to_do() {
+        let report = RelayReport {
+            listed: true,
+            any_link: vec![AnyLinkRelay {
+                relay: net("192.0.2.1/32"),
+                seen: vec![net("198.51.100.0/24")],
+            }],
+            ..RelayReport::default()
+        };
+        let rows = report.warnings();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].code, ANY_LINK);
+        assert_eq!(rows[0].params["relays"], "192.0.2.1/32");
+        assert!(
+            rows[0]
+                .detail
+                .contains("192.0.2.1/32 (lease rows show it on 198.51.100.0/24)"),
+            "{rows:?}"
+        );
+        assert!(
+            rows[0]
+                .detail
+                .contains("give each relay the links it serves"),
+            "{rows:?}"
+        );
+        assert!(!rows[0].detail.contains("Hardened"), "{rows:?}");
+        let hardened = RelayReport {
+            hardened: true,
+            ..report
+        };
+        assert!(
+            hardened.warnings()[0]
+                .detail
+                .contains("the Hardened profile refuses such an entry when it is written"),
+        );
     }
 }

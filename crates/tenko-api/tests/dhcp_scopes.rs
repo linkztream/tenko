@@ -78,7 +78,11 @@ async fn the_trusted_relays_and_the_limits_follow_the_profile_until_set() {
             "PUT",
             "/dhcp/settings",
             Some(json!({
-                "trusted_relays": ["198.51.100.1/32", "192.0.2.1/32", "192.0.2.1/32"],
+                "trusted_relays": [
+                    {"relay": "198.51.100.1/32", "links": ["203.0.113.0/24", "198.51.100.0/24"]},
+                    {"relay": "192.0.2.1/32", "links": ["192.0.2.0/24"]},
+                    {"relay": "192.0.2.1/32", "links": ["192.0.2.0/24"]},
+                ],
                 "limits": {"leases_per_mac": 4, "renew_cache_percent": 0},
             })),
         )
@@ -86,7 +90,10 @@ async fn the_trusted_relays_and_the_limits_follow_the_profile_until_set() {
     changed.assert_status(200);
     assert_eq!(
         changed.body["trusted_relays"],
-        json!(["192.0.2.1/32", "198.51.100.1/32"])
+        json!([
+            {"relay": "192.0.2.1/32", "links": ["192.0.2.0/24"]},
+            {"relay": "198.51.100.1/32", "links": ["198.51.100.0/24", "203.0.113.0/24"]},
+        ])
     );
     assert_eq!(
         changed.body["limits"],
@@ -111,7 +118,13 @@ async fn the_trusted_relays_and_the_limits_follow_the_profile_until_set() {
     assert_eq!(kept.body["limits"]["leases_per_mac"], 4);
     // Checked, then cleared.
     for body in [
-        json!({ "trusted_relays": ["192.0.2.1/24"] }),
+        json!({ "trusted_relays": [{"relay": "192.0.2.1/24", "links": ["192.0.2.0/24"]}] }),
+        json!({ "trusted_relays": [{"relay": "192.0.2.1/32", "links": []}] }),
+        json!({ "trusted_relays": [{"relay": "192.0.2.1/32", "links": ["2001:db8::/32"]}] }),
+        json!({ "trusted_relays": [
+            {"relay": "192.0.2.1/32", "links": ["192.0.2.0/24"]},
+            {"relay": "192.0.2.1/32", "links": ["198.51.100.0/24"]},
+        ] }),
         json!({ "trusted_relays": [], "clear_trusted_relays": true }),
         json!({ "limits": {"renew_cache_percent": 60} }),
     ] {
@@ -130,6 +143,65 @@ async fn the_trusted_relays_and_the_limits_follow_the_profile_until_set() {
     assert_eq!(cleared.body.get("trusted_relays"), None);
     assert_eq!(cleared.body.get("limits"), None);
     assert_eq!(cleared.body["effective_limits"]["leases_per_mac"], 16);
+}
+
+#[tokio::test]
+async fn a_trusted_relay_names_its_links_and_every_link_only_explicitly_and_not_under_hardened() {
+    let app = App::new();
+    // A plain prefix, the shape before relays had links, is no longer accepted as input: a
+    // new relay for every link must be written out.
+    app.send(
+        "PUT",
+        "/dhcp/settings",
+        Some(json!({ "trusted_relays": ["192.0.2.1/32"] })),
+    )
+    .await
+    .assert_status(400);
+    let explicit = app
+        .send(
+            "PUT",
+            "/dhcp/settings",
+            Some(json!({ "trusted_relays": [{"relay": "192.0.2.1/32", "links": ["0.0.0.0/0"]}] })),
+        )
+        .await;
+    explicit.assert_status(200);
+    assert_eq!(
+        explicit.body["trusted_relays"],
+        json!([{"relay": "192.0.2.1/32", "links": ["0.0.0.0/0"]}])
+    );
+    // Under Hardened a new relay for every link is refused with its own code; the stored
+    // one is kept when it is sent back unchanged.
+    let hardened = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = std::sync::Arc::clone(&hardened);
+    app.config
+        .set_profile(std::sync::Arc::new(move |_: &dyn tenko_store::ReadView| {
+            if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                tenko_dhcp::ddns::DdnsProfile::HARDENED
+            } else {
+                tenko_dhcp::ddns::DdnsProfile::HOME
+            }
+        }));
+    hardened.store(true, std::sync::atomic::Ordering::Relaxed);
+    app.send(
+        "PUT",
+        "/dhcp/settings",
+        Some(json!({ "trusted_relays": [
+            {"relay": "192.0.2.1/32", "links": ["0.0.0.0/0"]},
+            {"relay": "2001:db8::1/128", "links": ["::/0"]},
+        ] })),
+    )
+    .await
+    .assert_problem(400, "dhcp.settings.relay_any_link");
+    app.send(
+        "PUT",
+        "/dhcp/settings",
+        Some(json!({ "trusted_relays": [
+            {"relay": "192.0.2.1/32", "links": ["0.0.0.0/0"]},
+            {"relay": "2001:db8::1/128", "links": ["2001:db8:10::/48"]},
+        ] })),
+    )
+    .await
+    .assert_status(200);
 }
 
 #[tokio::test]

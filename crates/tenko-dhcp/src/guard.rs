@@ -155,9 +155,34 @@ impl Guard {
             .trusts_sender(sender, self.profile().trusts_any_relay())
     }
 
+    /// Whether the trusted relay at `relay` may name a scope of `network` under `image`'s
+    /// list and the profile ([`crate::relay::RelayTrust::may_name`]).
+    pub fn relay_may_name(
+        &self,
+        image: &ConfigImage,
+        relay: IpAddr,
+        network: ipnet::IpNet,
+    ) -> bool {
+        image
+            .relay_trust()
+            .may_name(relay, network, self.profile().trusts_any_relay())
+    }
+
     /// Notes that `sender`, which named `relay`, was refused as a relay.
     pub fn refuse_relay(&self, sender: IpAddr, relay: IpAddr, now: Timestamp) {
         self.relays.refuse(sender, relay, now);
+    }
+
+    /// Notes that the trusted relay `sender`, which named `relay`, selected a scope of
+    /// `link` outside its links and was refused.
+    pub fn refuse_relay_link(
+        &self,
+        sender: IpAddr,
+        relay: IpAddr,
+        link: ipnet::IpNet,
+        now: Timestamp,
+    ) {
+        self.relays.refuse_link(sender, relay, link, now);
     }
 
     /// The relay log.
@@ -232,7 +257,13 @@ impl Guard {
     /// What the node reports about relays under `image`.
     pub fn relay_report(&self, image: Option<&ConfigImage>) -> RelayReport {
         let listed = image.is_some_and(|image| image.relay_trust().is_set());
-        self.relays
-            .report(listed, !listed && self.profile().trusts_any_relay())
+        let mut report = self
+            .relays
+            .report(listed, !listed && self.profile().trusts_any_relay());
+        if let Some(image) = image {
+            report.any_link = self.relays.any_link(image.relay_trust().any_link());
+        }
+        report.hardened = self.profile() == DhcpProfile::Hardened;
+        report
     }
 }

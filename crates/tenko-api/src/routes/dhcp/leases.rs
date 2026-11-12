@@ -1042,6 +1042,7 @@ fn relays_dto(report: &tenko_dhcp::relay::RelayReport) -> super::model::DhcpRela
             .map(|refused| super::model::DhcpRefusedRelay {
                 source: refused.source,
                 relay: refused.relay,
+                link: refused.link,
                 count: refused.count,
                 first: refused.first,
                 last: refused.last,
@@ -1056,6 +1057,14 @@ fn relays_dto(report: &tenko_dhcp::relay::RelayReport) -> super::model::DhcpRela
                 scope: network.scope,
                 network: network.network,
                 relays: network.relays.clone(),
+            })
+            .collect(),
+        any_link: report
+            .any_link
+            .iter()
+            .map(|entry| super::model::DhcpAnyLinkRelay {
+                relay: entry.relay,
+                seen: entry.seen.clone(),
             })
             .collect(),
     }
