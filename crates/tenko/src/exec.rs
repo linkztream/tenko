@@ -61,6 +61,10 @@ pub struct Owner {
     /// Whether the account is one that may own what a privileged process uses: root on
     /// Unix; `SYSTEM`, Administrators or the trusted installer on Windows.
     pub privileged: bool,
+    /// The other accounts its access list lets write it (Windows; empty on Unix, where the
+    /// owner alone decides): `service install` makes Administrators the owner of the data
+    /// directory and gives the service account full control through an entry.
+    pub writers: Vec<String>,
 }
 
 impl Owner {
@@ -185,7 +189,14 @@ impl fmt::Display for Refusal {
                 self.command
             )?;
         }
+        let written_by_others = matches!(&self.owner, Ok(owner) if owner.privileged);
         match &self.owner {
+            Ok(owner) if written_by_others => write!(
+                f,
+                "{what} {} belongs to {owner}, and its access list lets {} write it; ",
+                self.path.display(),
+                owner.writers.join(", ")
+            )?,
             Ok(owner) => write!(f, "{what} {} belongs to {owner}; ", self.path.display())?,
             Err(error) => write!(
                 f,
@@ -195,6 +206,12 @@ impl fmt::Display for Refusal {
         }
         if let Some(advice) = &self.advice {
             f.write_str(advice)
+        } else if written_by_others {
+            f.write_str(
+                "an elevated process does not work in a directory the service account can \
+                 write, and on an installed Windows node there is no way yet to run this \
+                 command as that account by hand",
+            )
         } else if cfg!(windows) && self.command == "serve" {
             f.write_str(
                 "start the server as its service instead (`tenko service start`), which runs \
@@ -458,11 +475,19 @@ fn check_with(
     // Another account's file, or one whose owner cannot be read, refuses (fail closed). A
     // path that does not exist yet would be created in its nearest existing ancestor, which
     // decides in its place.
+    // `setup token` only reads one file, which it takes in the token's shape alone; an
+    // installed Windows node has no other way to show the token before setup.
+    let reads_only = matches!(
+        &cli.command,
+        Command::Setup(args) if matches!(args.action, Some(SetupCommand::Token(_)))
+    );
     let unsafe_owner = |path: &Path| {
         for candidate in path.ancestors() {
             match facts.owner(candidate) {
                 Ok(None) => {}
-                Ok(Some(owner)) if owner.privileged => return None,
+                Ok(Some(owner)) if owner.privileged && (owner.writers.is_empty() || reads_only) => {
+                    return None;
+                }
                 Ok(Some(owner)) => return Some((candidate.to_path_buf(), Ok(owner))),
                 Err(error) => return Some((candidate.to_path_buf(), Err(error))),
             }
@@ -530,6 +555,7 @@ mod host {
             id: uid.to_string(),
             name: account_name(&passwd, uid),
             privileged: uid == 0,
+            writers: Vec::new(),
         }))
     }
 
@@ -553,16 +579,8 @@ mod host {
         time::{Duration, Instant},
     };
 
-    use super::{Owner, Privilege, token};
+    use super::{Owner, Privilege, acl, token};
     use crate::platform::service_policy;
-
-    /// The well-known SIDs that may own what a privileged process uses: `SYSTEM`, the
-    /// Administrators group and the trusted installer.
-    const PRIVILEGED_SIDS: [&str; 3] = [
-        "S-1-5-18",
-        "S-1-5-32-544",
-        "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
-    ];
 
     /// How long a system tool may take before the check gives up on it.
     const TOOL_LIMIT: Duration = Duration::from_secs(30);
@@ -720,17 +738,8 @@ mod host {
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty());
-        let id = lines
-            .next()
-            .and_then(service_policy::parse_sddl)
-            .map(|descriptor| descriptor.owner)
-            .ok_or_else(|| "powershell.exe printed no security descriptor".to_owned())?;
-        let name = lines.next().map(str::to_owned);
-        Ok(Some(Owner {
-            privileged: PRIVILEGED_SIDS.contains(&id.as_str()),
-            id,
-            name,
-        }))
+        let sddl = lines.next();
+        acl::owner(sddl, lines.next()).map(Some)
     }
 }
 
@@ -839,6 +848,111 @@ mod linux {
                 advice: None,
             }
         }
+    }
+}
+
+/// Who besides the privileged accounts may write a Windows file or directory, read from its
+/// security descriptor: every entry that allows a right to write, delete, or change the
+/// list or the owner counts, also one that applies to what the directory holds only.
+#[cfg(any(windows, test))]
+mod acl {
+    use super::Owner;
+    use crate::platform::service_policy::{Descriptor, parse_sddl};
+
+    /// The well-known SIDs that may own and write what a privileged process uses: `SYSTEM`,
+    /// the Administrators group and the trusted installer.
+    const PRIVILEGED: [&str; 3] = [
+        "S-1-5-18",
+        "S-1-5-32-544",
+        "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+    ];
+
+    /// `CREATOR OWNER`, as a SID and as SDDL abbreviates it: its entry gives rights to
+    /// whoever creates something inside, so to no one who could not create there already.
+    const CREATOR_OWNER: [&str; 2] = ["S-1-3-0", "CO"];
+
+    /// The owner and the other writers of a path, from the SDDL line and the owner's name
+    /// that `Get-Acl` printed; a line that is missing or cannot be parsed is an error, which
+    /// refuses a privileged process (fail closed).
+    pub(super) fn owner(sddl: Option<&str>, name: Option<&str>) -> Result<Owner, String> {
+        let descriptor = sddl
+            .and_then(parse_sddl)
+            .ok_or_else(|| "its security descriptor could not be read".to_owned())?;
+        Ok(Owner {
+            privileged: PRIVILEGED.contains(&descriptor.owner.as_str()),
+            writers: writers(&descriptor),
+            id: descriptor.owner,
+            name: name.map(str::to_owned),
+        })
+    }
+
+    /// The access bits that write: write data or add a file, append or add a directory,
+    /// delete a child, delete, write the list, write the owner, generic all and generic
+    /// write.
+    const WRITE: u32 =
+        0x2 | 0x4 | 0x40 | 0x1_0000 | 0x4_0000 | 0x8_0000 | 0x1000_0000 | 0x4000_0000;
+
+    /// The access mask of an SDDL rights field: hexadecimal, or two-letter codes; `None`
+    /// for a code it does not know.
+    fn mask(rights: &str) -> Option<u32> {
+        if let Some(hex) = rights
+            .strip_prefix("0x")
+            .or_else(|| rights.strip_prefix("0X"))
+        {
+            return u32::from_str_radix(hex, 16).ok();
+        }
+        if !rights.len().is_multiple_of(2) {
+            return None;
+        }
+        rights
+            .as_bytes()
+            .chunks(2)
+            .map(|code| {
+                Some(match code {
+                    b"GA" => 0x1000_0000,
+                    b"GR" => 0x8000_0000,
+                    b"GW" => 0x4000_0000,
+                    b"GX" => 0x2000_0000,
+                    b"FA" => 0x001f_01ff,
+                    b"FR" => 0x0012_0089,
+                    b"FW" => 0x0012_0116,
+                    b"FX" => 0x0012_00a0,
+                    b"RC" => 0x2_0000,
+                    b"SD" => 0x1_0000,
+                    b"WD" => 0x4_0000,
+                    b"WO" => 0x8_0000,
+                    b"CC" => 0x1,
+                    b"DC" => 0x2,
+                    b"LC" => 0x4,
+                    b"SW" => 0x8,
+                    b"RP" => 0x10,
+                    b"WP" => 0x20,
+                    b"DT" => 0x40,
+                    b"LO" => 0x80,
+                    b"CR" => 0x100,
+                    _ => return None,
+                })
+            })
+            .try_fold(0, |all, bits| bits.map(|bits| all | bits))
+    }
+
+    /// The SIDs other than the privileged ones that an allowing entry lets write; a rights
+    /// field that cannot be read counts as writing (fail closed).
+    pub(super) fn writers(descriptor: &Descriptor) -> Vec<String> {
+        let mut writers: Vec<String> = descriptor
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.kind == "A"
+                    && !CREATOR_OWNER.contains(&entry.sid.as_str())
+                    && !PRIVILEGED.contains(&entry.sid.as_str())
+            })
+            .filter(|entry| mask(&entry.rights).is_none_or(|bits| bits & WRITE != 0))
+            .map(|entry| entry.sid.clone())
+            .collect();
+        writers.sort_unstable();
+        writers.dedup();
+        writers
     }
 }
 
@@ -1047,6 +1161,7 @@ mod tests {
             id: "0".to_owned(),
             name: Some("root".to_owned()),
             privileged: true,
+            writers: Vec::new(),
         }
     }
 
@@ -1055,6 +1170,7 @@ mod tests {
             id: "998".to_owned(),
             name: Some("tenko".to_owned()),
             privileged: false,
+            writers: Vec::new(),
         }
     }
 
@@ -1869,7 +1985,108 @@ mod tests {
             id: "S-1-5-80-1111111111-2222222222-3333333333-4444444444-555555555".to_owned(),
             name: Some("NT SERVICE\\tenko-smoke".to_owned()),
             privileged: false,
+            writers: Vec::new(),
         }
+    }
+
+    /// The descriptor `service install` gives the data directory of an installed node:
+    /// owned by Administrators, full control for the service account, SYSTEM and
+    /// Administrators, nothing inherited.
+    const INSTALLED_DATA_DIR: &str = "O:BAG:SYD:PAI(A;OICI;FA;;;S-1-5-80-1111111111-2222222222-3333333333-4444444444-555555555)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+
+    /// The SDDL of the descriptors read below, as `Get-Acl` prints them.
+    #[test]
+    fn the_writers_of_a_windows_path_are_read_from_its_descriptor() {
+        let installed = acl::owner(Some(INSTALLED_DATA_DIR), Some("BUILTIN\\Administrators"))
+            .expect("readable");
+        assert!(installed.privileged);
+        assert_eq!(installed.writers, [service_account().id]);
+        // Owned and written by the privileged accounts alone, users reading and executing,
+        // CREATOR OWNER on what is created inside: a payload directory or a container's.
+        let program_files = "O:S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464\
+             G:SYD:PAI(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)\
+             (A;OICIIO;GA;;;SY)(A;;0x1301bf;;;SY)(A;OICIIO;GA;;;BA)(A;;0x1301bf;;;BA)\
+             (A;OICIIO;GXGR;;;BU)(A;;0x1200a9;;;BU)(A;OICIIO;GA;;;CO)(A;;FA;;;S-1-3-0)";
+        let payload = acl::owner(Some(program_files), None).expect("readable");
+        assert!(payload.privileged);
+        assert_eq!(payload.writers, Vec::<String>::new());
+        // Users may add files: they write.
+        let shared = "O:BAG:SYD:(A;OICI;FA;;;SY)(A;CI;0x100004;;;S-1-5-32-545)";
+        assert_eq!(
+            acl::owner(Some(shared), None).expect("readable").writers,
+            ["S-1-5-32-545"]
+        );
+        // A right that is not understood counts as writing.
+        let unknown = "O:BAG:SYD:(A;;ZZ;;;S-1-5-21-1-2-3-1001)";
+        assert_eq!(
+            acl::owner(Some(unknown), None).expect("readable").writers,
+            ["S-1-5-21-1-2-3-1001"]
+        );
+        for malformed in [
+            None,
+            Some(""),
+            Some("not a descriptor"),
+            Some("O:BAD:(A;OICI"),
+        ] {
+            assert_eq!(
+                acl::owner(malformed, None),
+                Err("its security descriptor could not be read".to_owned()),
+                "{malformed:?}"
+            );
+        }
+    }
+
+    /// An elevated administrator is refused over the installed node's data directory,
+    /// which Administrators own and the service account may write, for every command but
+    /// `setup token`, which only reads the token; a directory that only the privileged
+    /// accounts may write passes.
+    #[test]
+    fn an_elevated_administrator_does_not_work_in_a_directory_the_account_may_write() {
+        let (_dir, data) = data_dir();
+        let data_arg = data.to_str().expect("UTF-8");
+        let installed = acl::owner(Some(INSTALLED_DATA_DIR), Some("BUILTIN\\Administrators"))
+            .expect("readable");
+        let exe = PathBuf::from("C:/Program Files/Tenko/tenko.exe");
+        let administrators = Owner {
+            id: "S-1-5-32-544".to_owned(),
+            name: Some("BUILTIN\\Administrators".to_owned()),
+            privileged: true,
+            writers: Vec::new(),
+        };
+        let facts = |data_owner: Owner| Fixed {
+            privileged: token::classify(ELEVATED_ADMINISTRATOR),
+            owners: BTreeMap::from([
+                (exe.clone(), administrators.clone()),
+                (data.clone(), data_owner),
+            ]),
+            unreadable: Vec::new(),
+            exe: exe.clone(),
+        };
+        let writing: [&[&str]; 5] = [
+            &["node", "renew", "--data-dir", data_arg],
+            &["kek", "rotate", "--data-dir", data_arg],
+            &["backup", "restore", "f.tkbk", "--data-dir", data_arg],
+            &["user", "unlock", "admin", "--data-dir", data_arg],
+            &["serve", "--data-dir", data_arg],
+        ];
+        for args in writing {
+            let cli = parse(args);
+            let refusal = check(&cli, &facts(installed.clone()), &arguments(args))
+                .unwrap_or_else(|| panic!("{args:?} is refused"));
+            assert_eq!(refusal.path, data, "{args:?}");
+            let line = refusal.to_string();
+            assert!(
+                line.contains("its access list lets S-1-5-80-1111111111-2222222222-3333333333-4444444444-555555555 write it")
+                    && line.contains("no way yet to run this command as that account by hand"),
+                "{line}"
+            );
+            assert!(
+                check(&cli, &facts(administrators.clone()), &arguments(args)).is_none(),
+                "{args:?}"
+            );
+        }
+        let args = ["setup", "token", "--data-dir", data_arg];
+        assert!(check(&parse(&args), &facts(installed), &arguments(&args)).is_none());
     }
 
     fn token_facts(output: &str, data: &Path) -> Fixed {
@@ -2114,6 +2331,7 @@ mod tests {
             .expect("readable")
             .expect("whoami.exe exists");
         assert!(owner.privileged, "{owner:?}");
+        assert_eq!(owner.writers, Vec::<String>::new(), "{owner:?}");
         assert_eq!(
             owner.id,
             "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
