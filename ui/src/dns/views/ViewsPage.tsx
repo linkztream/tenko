@@ -37,7 +37,7 @@ export function ruleWords(rule: MatchRule): string {
 
 /** What the page reads beside the views: the zones (names and scopes) and the access lists. */
 async function references(): Promise<{ zones: Zone[]; acls: Acl[] }> {
-  const [zones, acls] = await Promise.all([listZones().catch(() => ({ items: [] as Zone[] })), listAcls().catch(() => ({ items: [] as Acl[] }))]);
+  const [zones, acls] = await Promise.all([listZones(), listAcls()]);
   return { zones: zones.items, acls: acls.items };
 }
 
@@ -64,10 +64,12 @@ export default function ViewsPage() {
     },
   });
   const [refs, { refetch: refetchRefs }] = createResource(references);
+  // A failed read of the names leaves them out; the error is shown beside the views, which stay readable.
+  const refsRead = () => (refs.error ? undefined : refs.latest);
   const blocked = () => unavailable(query.value.error);
   const views = () => latest(query);
-  const zoneName = (id: string) => refs.latest?.zones.find((z) => z.id === id)?.name ?? id;
-  const aclName = (id: string) => refs.latest?.acls.find((a) => a.id === id)?.name;
+  const zoneName = (id: string) => refsRead()?.zones.find((z) => z.id === id)?.name ?? id;
+  const aclName = (id: string) => refsRead()?.acls.find((a) => a.id === id)?.name;
 
   const close = (changed: boolean) => {
     setDialog(null);
@@ -278,6 +280,11 @@ export default function ViewsPage() {
         }
       />
       <Show when={!blocked()} fallback={<div class="page-body"><DnsProblem error={query.value.error} /></div>}>
+        <Show when={refs.error}>
+          <div class="dns-view-notes">
+            <ErrorNotice error={refs.error} />
+          </div>
+        </Show>
         <Show when={moveError()}>
           <div class="dns-view-notes">
             <ErrorNotice error={moveError()} />
@@ -315,8 +322,8 @@ export default function ViewsPage() {
             <ViewDialog
               view={d.view}
               count={(views() ?? []).length}
-              zones={refs.latest?.zones ?? []}
-              acls={refs.latest?.acls ?? []}
+              zones={refsRead()?.zones ?? []}
+              acls={refsRead()?.acls ?? []}
               onClose={() => close(false)}
               onDone={() => close(true)}
             />

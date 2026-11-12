@@ -6782,6 +6782,9 @@
       <unit id="hosts.lock_failed">
         <segment><source>Could not change the lock of {name}</source></segment>
       </unit>
+      <unit id="hosts.export_failed">
+        <segment><source>Could not export the hosts</source></segment>
+      </unit>
       <unit id="hosts.undo">
         <segment><source>Undo</source></segment>
       </unit>

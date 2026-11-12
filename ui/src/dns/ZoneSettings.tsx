@@ -333,7 +333,7 @@ function PrimaryRows(props: { draft: TransferDraft; errors: Record<string, strin
 
 /** The access lists that may transfer the zone, as chips by name, and a select that adds one. */
 function AllowChips(props: { draft: TransferDraft; disabled: boolean }) {
-  const [acls] = createResource(() => listAcls().then((all) => all.items).catch((): Acl[] => []));
+  const [acls] = createResource(() => listAcls().then((all) => all.items));
   const known = (): Acl[] => (acls.state === "ready" ? acls() ?? [] : []);
   const nameOf = (id: string) => known().find((a) => a.id === id)?.name ?? id;
   const free = () => known().filter((a) => !props.draft.allow().includes(a.id));
@@ -370,6 +370,7 @@ function AllowChips(props: { draft: TransferDraft; disabled: boolean }) {
           </For>
         </ul>
       </Show>
+      <ErrorNotice error={acls.error} />
       <select
         class="select"
         aria-label={t("dns.transfer.allow_add")}
@@ -690,7 +691,7 @@ type UpdateDraft = ReturnType<typeof createUpdateDraft>;
 
 /** The update section of a primary zone. */
 function UpdateSection(props: { draft: UpdateDraft; errors: Record<string, string>; disabled: boolean }) {
-  const [acls] = createResource(() => listAcls().then((all) => all.items).catch((): Acl[] => []));
+  const [acls] = createResource(() => listAcls().then((all) => all.items));
   const known = (): Acl[] => (acls.state === "ready" ? acls() ?? [] : []);
   const nameOf = (id: string) => known().find((a) => a.id === id)?.name ?? id;
   const free = () => known().filter((a) => !props.draft.allowed().includes(a.id));
@@ -738,6 +739,7 @@ function UpdateSection(props: { draft: UpdateDraft; errors: Record<string, strin
             </For>
           </ul>
         </Show>
+        <ErrorNotice error={acls.error} />
         <select
           class="select"
           aria-label={t("dns.update.allow_add")}

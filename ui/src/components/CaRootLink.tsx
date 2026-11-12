@@ -13,6 +13,7 @@ export const CA_ROOT_PATH = "/api/v1/system/ca-root";
 export function CaRootLink(props: { mode?: TlsMode | null; withHelp?: boolean }) {
   const [status] = createResource(
     () => props.mode === undefined,
+    // The link is a convenience beside text that works without it: a status that cannot be read hides the link.
     () => api.get("/api/v1/system/status").catch(() => null),
   );
   const internal = () => (props.mode !== undefined ? props.mode === "internal_ca" : status()?.tls?.mode === "internal_ca");

@@ -14,6 +14,7 @@ function userName(id: string): Promise<string | null> {
     found = api
       .get("/api/v1/users/{id}", { path: { id } })
       .then((u) => u.display_name || u.name)
+      // A name is a label beside the id: when the account cannot be read the short id stands in.
       .catch(() => null);
     names.set(id, found);
   }

@@ -4876,6 +4876,7 @@ export type MessageKey =
   | "hosts.do.unlock"
   | "hosts.empty"
   | "hosts.empty_decommissioned"
+  | "hosts.export_failed"
   | "hosts.facts.title"
   | "hosts.filter.label"
   | "hosts.filter.locked"
@@ -14801,6 +14802,7 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.do.unlock",
   "hosts.empty",
   "hosts.empty_decommissioned",
+  "hosts.export_failed",
   "hosts.facts.title",
   "hosts.filter.label",
   "hosts.filter.locked",

@@ -22,9 +22,7 @@ export async function hostsCsv(
 ): Promise<string> {
   const rows = await Promise.all(
     hosts.map(async (h) => {
-      const ifaces = await fetchAll<Interface>("/api/v1/hosts/{id}/interfaces", { path: { id: h.id } }).catch(() => ({
-        items: [] as Interface[],
-      }));
+      const ifaces = await fetchAll<Interface>("/api/v1/hosts/{id}/interfaces", { path: { id: h.id } });
       const live = ifaces.items.filter((i) => !i.meta.deleted).sort((a, b) => a.name.localeCompare(b.name));
       return [
         h.name,

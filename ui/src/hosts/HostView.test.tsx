@@ -143,6 +143,16 @@ describe("the host page", () => {
   });
 });
 
+describe("the jobs of the host", () => {
+  it("says that they could not be read instead of saying there are none", async () => {
+    server.use(http.get("/api/v1/jobs", () => HttpResponse.json({ status: 500, code: "sys.internal", title: "Failed", detail: "", params: {} }, { status: 500 })));
+    await openHost("gw");
+    const jobs = (await screen.findByText("Jobs", { selector: "h2" })).closest("section") as HTMLElement;
+    expect(await within(jobs).findByTestId("error-notice")).toBeTruthy();
+    expect(within(jobs).queryByText("No jobs have changed this host yet.")).toBeNull();
+  });
+});
+
 describe("scan now", () => {
   it("offers a scan of the host that names it", async () => {
     await openHost("gw");

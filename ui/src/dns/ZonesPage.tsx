@@ -35,6 +35,7 @@ function useOrigins(zones: () => readonly Zone[] | undefined) {
       const out = new Map<string, Origin[]>();
       await Promise.all(
         missing().map(async (zone) => {
+          // The chips of origins are a decoration of the list: an origin that cannot be probed shows no chip.
           const present = await Promise.all(MIX.map((origin) => hasOrigin(zone.id, origin).catch(() => false)));
           out.set(
             zone.id,

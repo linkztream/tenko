@@ -7,7 +7,10 @@ import type { Host } from "../api/types";
 
 const hosts = new Map<string, Promise<Host | null>>();
 
-/** A host by id, cached for the tab; null when it cannot be read. */
+/**
+ * A host by id, cached for the tab; null when it cannot be read. Callers label or link something
+ * that has a fallback (the id); a caller that must tell "missing" from "unreadable" reads the host itself.
+ */
 export function readHost(id: string): Promise<Host | null> {
   let p = hosts.get(id);
   if (!p) {

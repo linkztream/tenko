@@ -41,6 +41,7 @@ export default function WhatsNew(props: {
     }
   };
 
+  // The mark only stops the notice from showing again; losing it costs one more view of the notice.
   const seen = () => void markWhatsNewSeen().catch(() => undefined);
 
   onMount(() => {

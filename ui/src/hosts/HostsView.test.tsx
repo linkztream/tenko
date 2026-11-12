@@ -1,6 +1,8 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { http, HttpResponse } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { HOST_IDS, ipamState } from "../api/mock/ipam/api";
+import { server } from "../api/mock/node";
 import { paths } from "../app/paths";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
@@ -182,6 +184,15 @@ describe("the hosts list", () => {
 });
 
 describe("bulk actions on the selection", () => {
+  it("says so when the interfaces for the CSV export could not be read, and saves nothing", async () => {
+    server.use(http.get("/api/v1/hosts/:id/interfaces", () => HttpResponse.json({ status: 500, code: "sys.internal", title: "Failed", detail: "", params: {} }, { status: 500 })));
+    renderList();
+    await listed();
+    select("ap-hall");
+    fireEvent.click(await screen.findByTestId("action-export"));
+    await waitFor(() => expect(screen.queryAllByTestId("toast").map((el) => el.querySelector(".t")?.textContent)).toContain("Could not export the hosts"));
+  });
+
   it("shows the action bar with the count while rows are selected", async () => {
     renderList();
     await listed();

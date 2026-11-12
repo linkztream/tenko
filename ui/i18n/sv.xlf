@@ -6782,6 +6782,9 @@
       <unit id="hosts.lock_failed">
         <segment><source>Could not change the lock of {name}</source><target>Kunde inte ändra låset för {name}</target></segment>
       </unit>
+      <unit id="hosts.export_failed">
+        <segment><source>Could not export the hosts</source><target>Kunde inte exportera värdarna</target></segment>
+      </unit>
       <unit id="hosts.undo">
         <segment><source>Undo</source><target>Ångra</target></segment>
       </unit>

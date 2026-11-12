@@ -5,9 +5,11 @@
 // forwarding rule names the view; the in-use rules of zones and lists; what a viewer sees;
 // the states of the service; Swedish.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DNS_IDS } from "../../api/mock/dns-model";
 import { VIEW_IDS } from "../../api/mock/dns-views-model";
+import { server } from "../../api/mock/node";
 import { dnsResolverState, dnsState, dnsViewsState } from "../../api/mock/routes-dns";
 import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
@@ -64,6 +66,13 @@ function ifMatchOfWrites(): (string | undefined)[] {
 }
 
 describe("the views", () => {
+  it("says that the names of zones and access lists could not be read", async () => {
+    server.use(http.get("/api/v1/dns/acls", () => HttpResponse.json({ status: 500, code: "sys.internal", title: "Failed", detail: "", params: {} }, { status: 500 })));
+    open();
+    await loaded();
+    expect(await screen.findByTestId("error-notice")).toBeTruthy();
+  });
+
   it("lists the views in order with their rules, scopes, shares and recursion", async () => {
     const view = open();
     await loaded();

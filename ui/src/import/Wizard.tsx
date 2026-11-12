@@ -141,6 +141,7 @@ export default function Wizard() {
     // eslint-disable-next-line solid/reactivity -- an event handler: reads the state when it runs
     void run(async () => {
       const id = state().view?.id;
+      // Discarding the draft is a cleanup: the wizard starts again either way.
       if (id) await discardImport(id).catch(() => undefined);
       send({ type: "reset" });
       setParams({ id: undefined });

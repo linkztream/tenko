@@ -61,6 +61,8 @@ interface HostData {
   interfaces: Interface[];
   addresses: Address[];
   jobs: JobSummary[];
+  /** Why the jobs could not be read, when they could not; the rest of the page still shows. */
+  jobsError?: unknown;
 }
 
 /** IPAM-18: a reserved host needs a MAC address for its IPv4 and a DUID for its IPv6 addresses. */
@@ -103,9 +105,12 @@ export default function HostView() {
       const [interfaces, addresses, jobs] = await Promise.all([
         fetchAll<Interface>("/api/v1/hosts/{id}/interfaces", { path: { id }, query: { deleted: "include" } }),
         fetchAll<Address>("/api/v1/addresses", { query: { host: id } }),
-        api.get("/api/v1/jobs", { query: { target: `host/${id}`, limit: 10 } }).catch(() => ({ items: [] as JobSummary[] })),
+        api
+          .get("/api/v1/jobs", { query: { target: `host/${id}`, limit: 10 } })
+          .then((page) => ({ items: page.items, error: undefined as unknown }))
+          .catch((error: unknown) => ({ items: [] as JobSummary[], error })),
       ]);
-      return { interfaces: interfaces.items, addresses: addresses.items, jobs: jobs.items };
+      return { interfaces: interfaces.items, addresses: addresses.items, jobs: jobs.items, jobsError: jobs.error };
     },
   );
   const [lists] = createResource(async () => {
@@ -456,7 +461,14 @@ export default function HostView() {
                     {t("hosts.jobs.all")}
                   </A>
                 </h2>
-                <Show when={(data()?.jobs.length ?? 0) > 0} fallback={<p class="muted">{t("hosts.jobs.none")}</p>}>
+                <Show
+                  when={(data()?.jobs.length ?? 0) > 0}
+                  fallback={
+                    <Show when={data()?.jobsError} fallback={<p class="muted">{t("hosts.jobs.none")}</p>}>
+                      <ErrorNotice error={data()?.jobsError} />
+                    </Show>
+                  }
+                >
                   <ul class="plain-list">
                     <For each={data()?.jobs ?? []}>
                       {(j) => (

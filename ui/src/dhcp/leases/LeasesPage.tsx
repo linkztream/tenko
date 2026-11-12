@@ -76,6 +76,7 @@ function hostName(id: string): Promise<string | undefined> {
     found = api
       .get("/api/v1/hosts/{id}", { path: { id } })
       .then((h) => h.name)
+      // The link is a decoration beside the reserved lease: without the name there is no link.
       .catch(() => undefined);
     hostNames.set(id, found);
   }

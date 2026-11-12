@@ -8,6 +8,7 @@
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { api } from "../api/client";
+import { errorMessage } from "../api/problem";
 import type { AssignmentMode, BulkResponse, Host, HostLifecycle, IpamCommand, Site, Tenant } from "../api/types";
 import { ASSIGNMENT_MODES } from "../api/types";
 import { fetchAll } from "../api/paginate";
@@ -15,6 +16,7 @@ import { createLiveQuery } from "../api/live";
 import { paths } from "../app/paths";
 import { may } from "../auth/gate";
 import { Icon } from "../components/Icon";
+import { toast } from "../components/toast";
 import { ActionBar, ActionButton } from "../grid/ActionBar";
 import { DeletedTag, LockFlag, ModeBadge, Tags, TimeAgo } from "../grid/cells";
 import { createGridSelection, DataGrid } from "../grid/DataGrid";
@@ -397,7 +399,8 @@ export default function HostsView() {
             icon="export"
             label={t("ipam.do.export_csv")}
             testid="action-export"
-            onClick={() => void hostsCsv(selected(), tenantName, (id) => siteName(id) ?? "").then((csv) => saveTextFile("hosts.csv", csv, "text/csv;charset=utf-8"))}
+            onClick={() => void hostsCsv(selected(), tenantName, (id) => siteName(id) ?? "").then((csv) => saveTextFile("hosts.csv", csv, "text/csv;charset=utf-8"))
+                .catch((err: unknown) => toast({ kind: "bad", title: t("hosts.export_failed"), body: errorMessage(err) }))}
           />
         </ActionBar>
       </div>

@@ -121,6 +121,13 @@ describe("the transfer section of a primary zone", () => {
     await waitFor(() => expect(within(form).getByTestId("transfer-allow").textContent).toBe("0190d1c2-0000-7000-8000-00000000dead"));
   });
 
+  it("says that the access lists could not be read instead of offering none", async () => {
+    server.use(http.get("/api/v1/dns/acls", () => HttpResponse.json({ status: 500, code: "sys.internal", title: "Failed", detail: "", params: {} }, { status: 500 })));
+    const { form } = await settings(PRIMARY);
+    const section = within(form).getByTestId("zone-transfer");
+    expect(await within(section).findByTestId("error-notice")).toBeTruthy();
+  });
+
   it("checks the NOTIFY rows before it sends anything", async () => {
     const writes = recordWrites();
     const { form } = await settings(PRIMARY);

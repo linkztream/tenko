@@ -2,8 +2,10 @@
 // IPAM rule saved in one PATCH, the profile's rule beside them (TGL-09), Swedish, and what a
 // secondary zone and a viewer see.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DNS_IDS } from "../api/mock/dns-model";
+import { server } from "../api/mock/node";
 import { dnsState } from "../api/mock/routes-dns";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
@@ -123,5 +125,12 @@ describe("where updates do not apply", () => {
     for (const id of ["field-update-allow-add", "field-update.require_tsig", "field-update.may_replace_ipam"]) {
       expect(input(section, id).disabled).toBe(true);
     }
+  });
+
+  it("says that the access lists could not be read instead of offering none", async () => {
+    server.use(http.get("/api/v1/dns/acls", () => HttpResponse.json({ status: 500, code: "sys.internal", title: "Failed", detail: "", params: {} }, { status: 500 })));
+    const { form } = await settings(PRIMARY);
+    const section = within(form).getByTestId("zone-update");
+    expect(await within(section).findByTestId("error-notice")).toBeTruthy();
   });
 });
