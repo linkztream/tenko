@@ -1,6 +1,6 @@
 # UI mock plan: what the web UI's unit tests stand on
 
-- Status: Proposed on 2026-11-12. Waits for the owner's answers to MK-Q1 to MK-Q8 (section 8); nothing is built before them.
+- Status: Accepted on 2026-11-12: the owner took MK-Q1 to MK-Q8 of section 8 as recommended. MK0 and MK1 start after the shared test support package has merged (section 7)
 - Date: 2026-11-12
 - Scope: the mock API under `ui/src/api/mock/`, the UI unit tests that run against it, the end-to-end fakes under `ui/e2e/support/` that reuse its code, and `npm run dev:mock`. Written against `main` at `5a2b5a47`. The facts come from reading both sides, a systematic sample of 39 test files, a comparison of 19 behaviors of the mock and the server, and one probe of a server binary; nothing was built and no suite was run for this plan.
 
@@ -271,7 +271,7 @@ Write the five missing rules and the ten differences of section 4 into the mock,
 - **Replay**: a UI test names a scenario and optionally a state to start in. A `GET` is answered from the current state, as often and in any order (polling works); a `GET` the state lacks fails the test and names the request. A write must equal the scenario's next write (method, path and query, and the JSON body after normalization) or the test fails and names it; it gets the recorded answer, the state advances, and the step's events are emitted on the mock's event stream. That is how the REPLAY cases (write, then read back) are served.
 - **Normalization**: every answer is walked with its operation's schema from `docs/api/openapi.json`. Identifiers (`format: uuid`) become fixed values in order of first appearance; times (`format: date-time`) become fixed times in the same order (`2026-01-01T00:00:00Z` plus one second per new value); secrets (`SecretString`) become placeholders. Revisions and counts come out the same on a fresh server when the steps are the same. The check fails on a scenario whose two runs differ, so a source of difference is found when the scenario is written, not later.
 
-The packages, in order. MK0 stops the mock from growing on its own, but not the other half of drift: a server change that leaves the mock alone. That half is caught from MK1 on, for every behavior a recording holds, which is why MK1 follows at once. From MK1 on, a server change of behavior in an area not yet migrated records its changed answer and converts the UI tests that touch it, instead of editing the mock; that costs the change about what editing the mock costs today. After MK1 the area packages are independent of each other: each owns its area's mock files, tests, testkit and scenarios, and switches its area's `dev:mock` handlers to its recordings in the same package, so `dev:mock` never loses an area. `db.ts` and `handlers.ts` are touched by each (one line per area; the lead merges them).
+The packages, in order. They start after the shared test support package has merged: today it owns `scripts/test-lint.mjs` and `ui/e2e/support/`, which MK0 runs beside and MK1 builds on. MK0 stops the mock from growing on its own, but not the other half of drift: a server change that leaves the mock alone. That half is caught from MK1 on, for every behavior a recording holds, which is why MK1 follows at once. From MK1 on, a server change of behavior in an area not yet migrated records its changed answer and converts the UI tests that touch it, instead of editing the mock; that costs the change about what editing the mock costs today. After MK1 the area packages are independent of each other: each owns its area's mock files, tests, testkit and scenarios, and switches its area's `dev:mock` handlers to its recordings in the same package, so `dev:mock` never loses an area. `db.ts` and `handlers.ts` are touched by each (one line per area; the lead merges them).
 
 | Package | What | Files owned | Done when | Builder-days |
 |---|---|---|---|---|
@@ -296,7 +296,9 @@ The area estimates include the Rust tests for the rule halves that have none yet
 
 **A cheaper first stop.** MK0 to MK3 (9 builder-days) already give most of the security value: the growth stops, the recorder exists for every area, the end-to-end tests are honest, and sign-in and access are proved against the real server. MK-Q5 asks whether to stop there for now.
 
-## 8. Questions for the owner
+## 8. Questions for the owner, and the answers
+
+The owner answered all eight on 2026-11-12; each answer stands under its question, and the options stay for the record.
 
 **MK-Q1. Which direction?**
 - (a) D1a, recordings from a server process; about 34 builder-days, area by area. *Recommended* (section 7).
@@ -305,43 +307,51 @@ The area estimates include the Rust tests for the rule halves that have none yet
 - (d) D3, the UI's behavior tests against a real server; about 45 builder-days and slower UI runs.
 - (e) D4, fix the known differences in place; about 6 builder-days, drift resumes.
 - (f) D0, leave it.
+- **Answer (owner, 2026-11-12):** (a), D1a, recordings from a server process, as recommended.
 
 **MK-Q2. What becomes of `npm run dev:mock`?**
 - (a) It stays, as the THIN stores over recorded scenarios: every page shows real answers, writes are kept and shown, refusals appear where a scenario recorded them, no rules. Each area package switches its pages. *Recommended*: pages can still be designed without a server, and it costs nothing in the tests.
 - (b) It goes; a `npm run dev:lab` starts a local copy of a server binary with a seeded data directory. Exact, but needs a binary.
 - (c) It keeps today's code, outside the tests. It would rot unseen.
+- **Answer (owner, 2026-11-12):** (a), `dev:mock` stays as the THIN stores over recorded scenarios, as recommended.
 
 **MK-Q3. How strict is the ratchet before recordings exist (MK0 to MK1)?**
 - (a) Growth only with a cited server test that proves the same answer. *Recommended*: stops silent growth at once without blocking a server change.
 - (b) No growth at all. A server change that must change the mock waits for MK1.
 - (c) A warning only.
+- **Answer (owner, 2026-11-12):** (a), growth only with a cited server test until MK1, as recommended.
 
 **MK-Q4. The end-to-end fakes (MK2): now, or at the end?**
 - (a) Now, right after MK1: the DNS zone fakes go, the e2e server gets the `dns` role where it can. *Recommended*: 60 tests that count as reaching the server partly run the mock's code, 19 of them for routes the server serves.
 - (b) At the end, after MK9.
+- **Answer (owner, 2026-11-12):** (a), the end-to-end fakes right after MK1, as recommended.
 
 **MK-Q5. At what pace?**
 - (a) MK0 to MK3 now (9 builder-days); then the other areas as builder slots are free, an area early when a server change touches it. *Recommended*.
 - (b) All of it as one slice of about 34 builder-days.
 - (c) MK0 only, the rest later.
+- **Answer (owner, 2026-11-12):** (a), MK0 to MK3 first, then the other areas as builder slots are free, as recommended.
 
 **MK-Q6. Where do the recordings live?**
 - (a) `docs/api/examples/recorded/`, beside the first golden file: public documentation of real answers, and later a source of response examples for the OpenAPI document, which has none. *Recommended*.
 - (b) `ui/src/api/recorded/`, as test data only.
+- **Answer (owner, 2026-11-12):** (a), `docs/api/examples/recorded/`, as recommended.
 
 **MK-Q7. What answers the states one server cannot reach** (a cluster of several controllers, connector processes, network scans, an update installed from a release source, DHCPv6 clients)?
 - (a) Hand-written canned answers typed by the generated types, with no rules; the rules are proved in the crates that own them. *Recommended*: about 5,000 of today's lines shrink to fixtures; drift there is held only by the types and the end-to-end suite, which the plan states.
 - (b) Their mock rules stay as they are, listed as exceptions in the ratchet.
 - (c) Record them from a lab of several processes (the cluster lab). Faithful, but slow and a package of its own.
+- **Answer (owner, 2026-11-12):** (a), hand-written canned answers without rules, as recommended; a later source of real answers for some of these states is in MK-R2.
 
 **MK-Q8. The missing Rust tests for the rule halves of LOGIC cases: in each area package, or apart?**
 - (a) In each area package, so that no rule loses its test when the UI case moves to a recording. *Recommended*; included in the estimates.
 - (b) Apart, as a test-health package after the migration.
+- **Answer (owner, 2026-11-12):** (a), the missing Rust tests in each area package, as recommended.
 
 ## 9. Risks
 
 - **MK-R1. Answers are not repeatable.** Most crates read the wall clock directly, identifiers are random, background services run on their own time. The normalizer replaces times, identifiers and secrets through the OpenAPI schemas; scenarios wait for named conditions; the check runs every new scenario twice and refuses one whose runs differ. MK1's pilot includes a job with events to prove it.
-- **MK-R2. States one server cannot reach** (MK-Q7): their UI tests keep a hand-made view of the server.
+- **MK-R2. States one server cannot reach** (MK-Q7): their UI tests keep a hand-made view of the server. A later option: the owner's lab node, a real installation that has run for a long time, will be upgraded to the rehearsal release and may then serve real answers for some of these states (a long-lived database, real clients); its answers could inform the hand-written ones. It is never the gate's recording source, which stays a fresh server started by the recording runner.
 - **MK-R3. The recordings grow large.** Scenarios stay small (the reads a page makes, per state); MK1 measures the size per scenario, and a size budget goes into the ratchet if needed.
 - **MK-R4. A LOGIC case's rule half is lost** when its UI half moves to a recording. Each area package names, for every removed mock test and every converted LOGIC case, the Rust test that proves the rule, and adds the missing ones (MK-Q8).
 - **MK-R5. Shared files and tests outside the areas** (`db.ts`, `handlers.ts`, the app and shell tests) while areas move in parallel: each package touches only its own lines, runs the files the request log names, and the gate's full run is the final check.
