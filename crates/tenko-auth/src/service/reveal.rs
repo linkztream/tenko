@@ -119,9 +119,7 @@ impl AuthService {
         self.authorized(ctx, Action::Reveal, ObjectRef::from(secret))?;
         let (user_id, session_id, strength) = Self::session_principal(ctx)?;
         let view = self.view().await?;
-        let (user, _) = Self::load_user(view.as_ref(), user_id)?;
-        let (_, session) = Self::load_session(view.as_ref(), user_id, session_id)?
-            .ok_or(AuthError::Unauthenticated)?;
+        let (user, _, _, session) = Self::live_session(view.as_ref(), user_id, session_id)?;
         let policy = self.settings().secret_reveal();
         check_step_up(policy, strength, session.authenticated_at, ctx.now)?;
         Ok(RevealGrant {

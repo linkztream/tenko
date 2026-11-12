@@ -420,8 +420,7 @@ impl AuthService {
             });
         }
         let view = self.view().await?;
-        let (_, session) = Self::load_session(view.as_ref(), caller, session_id)?
-            .ok_or(AuthError::Unauthenticated)?;
+        let (_, _, _, session) = Self::live_session(view.as_ref(), caller, session_id)?;
         Self::require_fresh(&session, ctx.now)
     }
 

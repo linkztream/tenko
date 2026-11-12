@@ -6,11 +6,11 @@
 //!
 //! | Credential | What ends it | What survives on purpose | Proved by |
 //! |---|---|---|---|
-//! | Sessions | every reason, however many the account holds | the session that changes its own password (`POST /auth/password` keeps it signed in) | `account_end.rs`: `every_path_ends_every_credential_issued_before_it`, `a_sign_in_that_races_a_reset_does_not_survive_it` |
+//! | Sessions | every reason, however many the account holds | the session that changes its own password (`POST /auth/password` keeps it signed in) | `account_end.rs`: `every_path_ends_every_credential_issued_before_it`, `a_sign_in_that_races_a_reset_does_not_survive_it`, `a_session_that_authenticated_before_an_end_acts_no_more_after_it` |
 //! | Known-device marks | every reason | nothing | `account_end.rs`: `every_path_ends_every_credential_issued_before_it` |
 //! | A second factor pending after a correct password (TOTP, recovery code, passkey) | every reason | nothing | `account_end.rs`: `a_second_factor_opened_before_a_reset_does_not_finish_after_it` |
 //! | Personal and scoped tokens | every reason but signing out everywhere | every token when an administrator signs the account out everywhere: that ends sign-ins, not API access | `account_end.rs`: `every_path_ends_every_credential_issued_before_it`; `service_flows.rs`: `the_break_glass_designation_ends_every_token_and_its_release_brings_none_back` |
-//! | Known networks (each controller's memory) | every reason, on every controller, by the watch of the user records | nothing | `service::tests::the_watch_forgets_known_networks_at_every_end_and_after_a_lag` |
+//! | Known networks (each controller's memory) | every reason, on every controller, by the watch of the user records; a network noted by a sign-in that raced the end carries the old generation | nothing | `service::tests::the_watch_forgets_known_networks_at_every_end_and_after_a_lag`, `guard::tests::a_network_stays_known_for_thirty_days_and_is_forgotten_on_request` |
 //! | Passkeys, the TOTP seed, recovery codes | deleting; a password change that asks for it | every other reason: they are factors, and the end of a password does not end them | `service_admin.rs`, `service_passwords.rs` |
 //!
 //! A crash between the steps below is proved harmless and finished by
@@ -23,7 +23,8 @@
 //! raises the account's generations in the write that carries the caller's own change,
 //! conditional on the revision of the user record it read. One check,
 //! [`UserRecord::admits`], refuses a credential issued under a lower generation; a session or
-//! token meets it in [`AuthService::holder`], which every authentication passes, a mark in
+//! token meets it in [`AuthService::holder`], which every authentication passes and which a
+//! handler that reads its session again passes too ([`AuthService::live_session`]), a mark in
 //! `devices::holds`, and a pending second factor when it is taken. A sign-in that read the
 //! account before the end and commits after it stamps the old generation, so it is refused
 //! whichever commit comes first.
@@ -31,18 +32,19 @@
 //! # Steps
 //!
 //! The first write raises the generations, carries the caller's audit record with the
-//! count of each kind of credential that still held, and removes up to [`PAGE`] rows of
-//! each kind. When more are left it records the account in [`ACCESS_ENDS`], and
-//! [`AuthService::sweep_account`] removes the rest in steps of at most [`PAGE`] rows of each
-//! kind, the last of which removes the record. A crash between steps leaves rows that
-//! authenticate nothing; the hourly sweep ([`AuthService::resume_account_ends`]) finishes
-//! them. Every step removes only what the generations already refuse, so a step repeated
-//! changes nothing.
+//! count of each kind of credential that still held, removes up to [`PAGE`] rows of each
+//! kind and records the account in [`ACCESS_ENDS`]. When more rows are left,
+//! [`AuthService::sweep_account`] removes them right after, in steps of at most [`PAGE`]
+//! rows of each kind. The hourly sweep ([`AuthService::resume_account_ends`]) looks at every
+//! recorded account once more and then removes its record: it finishes what a crash
+//! interrupted, and removes what a sign-in racing the end wrote after it. Until then such
+//! rows authenticate nothing. Every step removes only what the generations already refuse,
+//! so a step repeated changes nothing.
 
 use serde::{Serialize, de::DeserializeOwned};
 use tenko_core::{
-    Principal, SessionId, SystemComponent, Timestamp, UserId, audit::AuditDraft, codec::KeyCodec,
-    table::TableDef,
+    Principal, SessionId, SystemComponent, TableName, Timestamp, UserId, audit::AuditDraft,
+    codec::KeyCodec, table::TableDef,
 };
 use tenko_store::{KeyRange, ReadConsistency, ReadView, ReadViewExt, WriteBatch};
 
@@ -120,7 +122,9 @@ impl Kind {
 
 /// One step's read of one kind of one account.
 struct Page {
-    /// The ended rows: the encoded index key and the digest.
+    /// The index table and the table of the credentials.
+    tables: (TableName, TableName),
+    /// The ended rows: the encoded index key and the encoded key of the credential.
     ended: Vec<(Vec<u8>, Vec<u8>)>,
     /// How many of the ended rows had not expired.
     held: usize,
@@ -138,9 +142,31 @@ struct Judge<'a> {
     now: Timestamp,
 }
 
+impl Page {
+    /// Adds the removal of the ended rows to `batch`.
+    fn stage_removal(&self, batch: &mut WriteBatch) {
+        let (index, rows) = &self.tables;
+        for (key, credential) in &self.ended {
+            batch.delete(index.clone(), key.clone());
+            batch.delete(rows.clone(), credential.clone());
+        }
+    }
+}
+
 impl Judge<'_> {
     fn ended(&self, issued: Issued) -> bool {
         self.user.is_none_or(|user| !user.admits(issued))
+    }
+
+    /// For a token: `None` while it holds, else whether it had not expired.
+    fn token(
+        &self,
+        generation: u64,
+        created: Timestamp,
+        expires: Option<Timestamp>,
+    ) -> Option<bool> {
+        self.ended(Issued::Token(generation))
+            .then(|| !token_expired(created, expires, self.settings, self.now))
     }
 
     /// Reads up to [`PAGE`] index rows of `kind` after `after`.
@@ -184,16 +210,7 @@ impl Judge<'_> {
                 id,
                 after,
                 |_, hash| hash,
-                |record| {
-                    self.ended(Issued::Token(record.generation)).then(|| {
-                        !token_expired(
-                            record.created_at,
-                            record.expires_at,
-                            self.settings,
-                            self.now,
-                        )
-                    })
-                },
+                |record| self.token(record.generation, record.created_at, record.expires_at),
             ),
             Kind::ScopedTokens => Self::read(
                 view,
@@ -202,16 +219,7 @@ impl Judge<'_> {
                 id,
                 after,
                 |_, hash| hash,
-                |record| {
-                    self.ended(Issued::Token(record.generation)).then(|| {
-                        !token_expired(
-                            record.created_at,
-                            record.expires_at,
-                            self.settings,
-                            self.now,
-                        )
-                    })
-                },
+                |record| self.token(record.generation, record.created_at, record.expires_at),
             ),
         }
     }
@@ -242,12 +250,12 @@ impl Judge<'_> {
             .then(|| found.last().map(|(key, _, _)| index.key(key).to_vec()))
             .flatten();
         let mut page = Page {
+            tables: (index.name().clone(), rows.name().clone()),
             ended: Vec::new(),
             held: 0,
             next,
         };
         for (key, value, _) in found {
-            let encoded = index.key(&key).to_vec();
             let digest = digest(&key, value);
             let verdict = match view.get_typed(rows, &digest)? {
                 Some((record, _)) => ended(&record),
@@ -255,32 +263,11 @@ impl Judge<'_> {
             };
             if let Some(held) = verdict {
                 page.held += usize::from(held);
-                page.ended.push((encoded, digest));
+                page.ended
+                    .push((index.key(&key).to_vec(), rows.key(&digest).to_vec()));
             }
         }
         Ok(page)
-    }
-}
-
-impl Kind {
-    /// Adds the removal of `page`'s ended rows to `batch`.
-    fn stage_removal(self, batch: &mut WriteBatch, page: &Page) {
-        let (index, rows) = match self {
-            Self::Sessions => (USER_SESSIONS.name().clone(), SESSIONS.name().clone()),
-            Self::KnownDevices => (
-                USER_KNOWN_DEVICES.name().clone(),
-                KNOWN_DEVICES.name().clone(),
-            ),
-            Self::Tokens => (USER_TOKENS.name().clone(), TOKENS.name().clone()),
-            Self::ScopedTokens => (
-                USER_SCOPED_TOKENS.name().clone(),
-                SCOPED_TOKENS.name().clone(),
-            ),
-        };
-        for (key, digest) in &page.ended {
-            batch.delete(index.clone(), key.clone());
-            batch.delete(rows.clone(), tenko_core::codec::encode_key(digest).to_vec());
-        }
     }
 }
 
@@ -310,10 +297,14 @@ impl AuthService {
             EndReason::PasswordChange(session) => Some(session),
             _ => None,
         };
+        // The kept session is written back only as it was read: one revoked meanwhile stays
+        // revoked.
         if let Some(session) = keep
-            && let Some((hash, mut record)) = Self::load_session(view, user.id, session)?
+            && let Some((hash, _)) = view.get_typed(&USER_SESSIONS, &(user.id, session))?
+            && let Some((mut record, revision)) = view.get_typed(&SESSIONS, &hash)?
         {
             record.generation = user.sessions_generation;
+            batch.expect_typed(&SESSIONS, &hash, Some(revision));
             batch.put_typed(&SESSIONS, &hash, &record)?;
         }
         let settings = self.settings();
@@ -336,7 +327,7 @@ impl AuthService {
             loop {
                 let page = judge.page(view, kind, user.id, after.as_deref())?;
                 if first {
-                    kind.stage_removal(batch, &page);
+                    page.stage_removal(batch);
                     first = false;
                 } else {
                     end.rest |= !page.ended.is_empty();
@@ -352,15 +343,16 @@ impl AuthService {
                 }
             }
         }
-        if end.rest {
-            let at = batch.proposed_at;
-            batch.put_typed(&ACCESS_ENDS, &user.id, &at)?;
-        }
+        // The hourly sweep looks at every ended account once more: what a sign-in racing the
+        // end wrote after it authenticates nothing, and goes then.
+        let at = batch.proposed_at;
+        batch.put_typed(&ACCESS_ENDS, &user.id, &at)?;
         Ok(end)
     }
 
-    /// Removes what an end left after its first write (`committed` is that write). A failure
-    /// is logged: the rows authenticate nothing, and the hourly sweep goes on with them.
+    /// Removes what an end left after its first write (`committed` is that write), when it
+    /// left more than one step. A failure is logged: the rows authenticate nothing, and the
+    /// hourly sweep goes on with them.
     pub(super) async fn finish_account_end(
         &self,
         end: &AccountEnd,
@@ -368,23 +360,27 @@ impl AuthService {
         now: Timestamp,
     ) {
         if end.rest
-            && let Err(error) = self.sweep_account(end.user, committed, now).await
+            && let Err(error) = self.sweep_account(end.user, committed, now, None).await
         {
             tracing::warn!(%error, user = %end.user, "the credentials of an ended account are removed by the hourly sweep");
         }
     }
 
     /// Removes the credentials of `id` that its generations refuse, in steps of at most
-    /// [`PAGE`] rows of each kind, reading at least revision `from`; the last step removes
-    /// the account's row of [`ACCESS_ENDS`]. Returns how many rows went.
+    /// [`PAGE`] rows of each kind, reading at least revision `from`. With `record` (the
+    /// revision of the account's row of [`ACCESS_ENDS`]) the row goes afterwards, unless a
+    /// later end wrote it again. Returns how many rows went.
     async fn sweep_account(
         &self,
         id: UserId,
         from: tenko_core::Revision,
         now: Timestamp,
+        record: Option<tenko_core::Revision>,
     ) -> Result<usize, AuthError> {
         let settings = self.settings();
-        let mut after: [Option<Vec<u8>>; 4] = Default::default();
+        // The kinds with rows left, each with where its next step starts.
+        let mut open: Vec<(Kind, Option<Vec<u8>>)> =
+            Kind::ALL.into_iter().map(|kind| (kind, None)).collect();
         let mut from = from;
         let mut removed = 0;
         loop {
@@ -397,37 +393,54 @@ impl AuthService {
                 now,
             };
             let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
-            let mut more = false;
-            for (kind, after) in Kind::ALL.into_iter().zip(after.iter_mut()) {
-                let page = judge.page(view.as_ref(), kind, id, after.as_deref())?;
-                kind.stage_removal(&mut batch, &page);
+            for (kind, after) in &mut open {
+                let page = judge.page(view.as_ref(), *kind, id, after.as_deref())?;
+                page.stage_removal(&mut batch);
                 removed += page.ended.len();
-                more |= page.next.is_some();
                 *after = page.next;
             }
-            if !more {
-                batch.delete_typed(&ACCESS_ENDS, &id);
+            open.retain(|(_, after)| after.is_some());
+            // A step that read only credentials that hold writes nothing.
+            if !batch.is_empty() {
+                from = self.commit(batch).await?.revision;
             }
-            from = self.commit(batch).await?.revision;
-            if !more {
-                return Ok(removed);
+            if open.is_empty() {
+                break;
             }
         }
+        if let Some(revision) = record {
+            let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
+            batch.expect_typed(&ACCESS_ENDS, &id, Some(revision));
+            batch.delete_typed(&ACCESS_ENDS, &id);
+            match self.commit(batch).await {
+                Ok(_) | Err(AuthError::Conflict) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(removed)
     }
 
-    /// Finishes the ends that a crash or a failed step left unfinished (the hourly sweep).
-    /// Returns how many rows went.
+    /// Looks at every recorded end once more and removes its record (the hourly sweep): it
+    /// finishes what a crash or a failed step left, and removes what a sign-in racing the
+    /// end wrote after it. Returns how many rows went.
     ///
     /// # Errors
     ///
-    /// A store error.
+    /// A store error reading the records; an account whose rows cannot be removed is
+    /// logged and left for the next sweep.
     pub async fn resume_account_ends(&self, now: Timestamp) -> Result<usize, AuthError> {
         let view = self.store.read(ReadConsistency::Local).await?;
         let mut removed = 0;
         for (id, _, revision) in
             view.scan_typed(&ACCESS_ENDS, KeyRange::all(), LIST_LIMIT, false)?
         {
-            removed += self.sweep_account(id, revision, now).await?;
+            match self.sweep_account(id, revision, now, Some(revision)).await {
+                Ok(rows) => removed += rows,
+                // One account the store refuses does not hold up the others.
+                Err(error) => {
+                    tracing::warn!(%error, user = %id, "the credentials of an ended account could not be removed");
+                }
+            }
         }
         Ok(removed)
     }

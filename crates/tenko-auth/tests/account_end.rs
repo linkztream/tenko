@@ -435,7 +435,20 @@ async fn every_path_ends_every_credential_issued_before_it() {
             [usize::from(keeps_own), tokens_left, tokens_left, 0],
             "{path:?}: what is left of sessions, tokens, scoped tokens and marks"
         );
-        assert_eq!(access_ends(&env).await, 0, "{path:?}: the removal finished");
+        assert_eq!(
+            access_ends(&env).await,
+            1,
+            "{path:?}: the end waits for the hourly sweep"
+        );
+        env.service
+            .resume_account_ends(env.now())
+            .await
+            .expect("the hourly sweep");
+        assert_eq!(
+            access_ends(&env).await,
+            0,
+            "{path:?}: the hourly sweep is done with it"
+        );
         let action = path.action();
         let ended_sessions = sessions - usize::from(keeps_own);
         assert_eq!(
@@ -505,6 +518,67 @@ async fn a_sign_in_that_races_a_reset_does_not_survive_it() {
         !holds(&env, &of_session(&late)).await,
         "the session written after the reset survived it"
     );
+    // The hourly sweep removes what the racing sign-in wrote after the end.
+    env.service
+        .resume_account_ends(env.now())
+        .await
+        .expect("the hourly sweep");
+    assert_eq!(rows(&env, user).await, [0, 0, 0, 0]);
+}
+
+/// A request that authenticated before an end and acts after it: the handler reads the
+/// session again and finds it ended, so the session cannot mint a token or keep itself
+/// through a password change. The session lies beyond the first step and the steps after it
+/// fail, so its row is still there.
+#[tokio::test]
+async fn a_session_that_authenticated_before_an_end_acts_no_more_after_it() {
+    for path in [Path::PasswordReset, Path::SignOutEverywhere] {
+        let (env, gate, setup) = held_installation().await;
+        let admin = env.session_ctx(&setup).await.expect("a request context");
+        let user = account(&env, &admin).await;
+        fill_sessions(&env, user, MANY).await;
+        let newest = env
+            .session_ctx(&login(&env).await)
+            .await
+            .expect("a request context");
+        gate.refuse_system.store(true, Ordering::SeqCst);
+        end(&env, &admin, &admin, user, path).await;
+        assert_eq!(
+            env.service
+                .create_token_with(
+                    &newest,
+                    &TokenRequest {
+                        name: "late".to_owned(),
+                        expires_in_days: Some(30),
+                        grants: None,
+                        scopes: Vec::new(),
+                    },
+                )
+                .await
+                .map(drop),
+            Err(AuthError::Unauthenticated),
+            "{path:?}: an ended session made a token"
+        );
+        assert_eq!(
+            env.service
+                .change_password(
+                    &newest,
+                    &PasswordChange {
+                        current_password: Some(SecretString::new(if path == Path::PasswordReset {
+                            NEW_PIN
+                        } else {
+                            PIN
+                        })),
+                        new_password: SecretString::new("593017"),
+                        remove_factors: false,
+                    },
+                )
+                .await
+                .map(drop),
+            Err(AuthError::Unauthenticated),
+            "{path:?}: an ended session changed the password"
+        );
+    }
 }
 
 #[tokio::test]

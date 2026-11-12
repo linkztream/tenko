@@ -290,11 +290,24 @@ impl DummyTiming {
 }
 
 /// The networks from which each account completed a sign-in lately, in memory: the
-/// account-wide delay does not apply to them.
+/// account-wide delay does not apply to them. An entry holds until its end, for the
+/// account it was noted for (by id, so a new account under the old name has none) and only
+/// while no end of that account's access came after it (a sign-in that raced the end notes
+/// the generation it was proven under).
 #[derive(Debug, Default)]
 pub(super) struct KnownNetworks {
-    entries: std::sync::Mutex<std::collections::HashMap<(String, IpAddr), tenko_core::Timestamp>>,
+    entries: std::sync::Mutex<std::collections::HashMap<(String, IpAddr), KnownNetwork>>,
 }
+
+/// One known network of an account.
+#[derive(Debug, Clone, Copy)]
+struct KnownNetwork {
+    until: tenko_core::Timestamp,
+    account: Account,
+}
+
+/// An account as a sign-in saw it: its id and its sessions generation.
+pub(super) type Account = (tenko_core::UserId, u64);
 
 impl KnownNetworks {
     /// Entries kept at most; at capacity the ended ones go first, then the oldest.
@@ -309,23 +322,35 @@ impl KnownNetworks {
         )
     }
 
-    /// Whether the account `name` completed a sign-in from the network of `source` within
-    /// the last 30 days.
+    /// Whether `user` completed a sign-in from the network of `source` within the last 30
+    /// days, and no end of its access came after it.
     pub(super) fn contains(
         &self,
-        name: &str,
+        user: &UserRecord,
         source: Option<IpAddr>,
         now: tenko_core::Timestamp,
     ) -> bool {
         self.entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&Self::key(name, source))
-            .is_some_and(|until| now < *until)
+            .get(&Self::key(&user.name, source))
+            .is_some_and(|known| {
+                let (id, generation) = known.account;
+                now < known.until
+                    && id == user.id
+                    && user.admits(crate::model::Issued::Session(generation))
+            })
     }
 
-    /// Notes a completed sign-in of `name` from the network of `source`.
-    pub(super) fn note(&self, name: &str, source: Option<IpAddr>, now: tenko_core::Timestamp) {
+    /// Notes a completed sign-in of the account `name` (as `account`) from the network of
+    /// `source`.
+    pub(super) fn note(
+        &self,
+        name: &str,
+        account: Account,
+        source: Option<IpAddr>,
+        now: tenko_core::Timestamp,
+    ) {
         let until = now.checked_add(Self::KEPT).unwrap_or(now);
         let key = Self::key(name, source);
         let mut entries = self
@@ -333,17 +358,17 @@ impl KnownNetworks {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if entries.len() >= Self::CAPACITY && !entries.contains_key(&key) {
-            entries.retain(|_, until| now < *until);
+            entries.retain(|_, known| now < known.until);
             if entries.len() >= Self::CAPACITY
                 && let Some(oldest) = entries
                     .iter()
-                    .min_by_key(|(_, until)| **until)
+                    .min_by_key(|(_, known)| known.until)
                     .map(|(key, _)| key.clone())
             {
                 entries.remove(&oldest);
             }
         }
-        entries.insert(key, until);
+        entries.insert(key, KnownNetwork { until, account });
     }
 
     /// Forgets every network of `name` (the account was deleted or renamed).
@@ -363,6 +388,9 @@ pub(super) struct Attempt {
     pub(super) name: String,
     /// The client address.
     pub(super) source: Option<IpAddr>,
+    /// The account and its sessions generation when the attempt read it; none for a name
+    /// that is no account.
+    pub(super) account: Option<Account>,
     /// The last-administrator guard covers the account.
     pub(super) guarded: bool,
     /// The account completed a sign-in from this network lately.
@@ -414,8 +442,10 @@ impl AuthService {
         Attempt {
             name: truncated(name),
             source: ctx.source_ip,
+            account: user.map(|user| (user.id, user.sessions_generation)),
             guarded: user.is_some_and(|user| image.is_last_admin(user.id)),
-            known: self.known_networks.contains(name, ctx.source_ip, ctx.now),
+            known: user
+                .is_some_and(|user| self.known_networks.contains(user, ctx.source_ip, ctx.now)),
             device: None,
             mode: settings.lockout,
             policy: settings.lockout_policy(),
@@ -581,7 +611,10 @@ impl AuthService {
     /// fresh attempts.
     pub(super) fn attempt_succeeded(&self, attempt: &Attempt, now: tenko_core::Timestamp) {
         self.throttle.record_success(&attempt.per_source_key());
-        self.known_networks.note(&attempt.name, attempt.source, now);
+        if let Some(account) = attempt.account {
+            self.known_networks
+                .note(&attempt.name, account, attempt.source, now);
+        }
     }
 
     /// Records a failed attempt: in memory first, then one audit record, the stored lock
@@ -912,12 +945,21 @@ mod tests {
             tenko_core::Timestamp::from_unix_nanos(secs * 1_000_000_000).expect("in range")
         };
         let home: IpAddr = "192.0.2.10".parse().expect("ip");
-        known.note("Alice", Some(home), at(1_000));
-        assert!(known.contains("alice", Some(home), at(1_000)));
-        assert!(!known.contains("alice", Some("192.0.2.11".parse().expect("ip")), at(1_000)));
-        assert!(!known.contains("alice", Some(home), at(1_000 + 30 * 86_400)));
+        let mut alice = UserRecord::new("alice".to_owned(), "Alice".to_owned(), Vec::new(), at(0));
+        known.note("Alice", (alice.id, 0), Some(home), at(1_000));
+        assert!(known.contains(&alice, Some(home), at(1_000)));
+        assert!(!known.contains(&alice, Some("192.0.2.11".parse().expect("ip")), at(1_000)));
+        assert!(!known.contains(&alice, Some(home), at(1_000 + 30 * 86_400)));
+        // A new account under the name has no known network of the old one.
+        let again = UserRecord::new("alice".to_owned(), "Alice".to_owned(), Vec::new(), at(0));
+        assert!(!known.contains(&again, Some(home), at(1_000)));
         known.forget("ALICE");
-        assert!(!known.contains("alice", Some(home), at(1_001)));
+        assert!(!known.contains(&alice, Some(home), at(1_001)));
+        // A sign-in that raced an end of the account's access notes the generation it was
+        // proven under, and the network is not known to the account after the end.
+        known.note("alice", (alice.id, 0), Some(home), at(1_002));
+        alice.sessions_generation = 1;
+        assert!(!known.contains(&alice, Some(home), at(1_002)));
     }
 
     #[test]

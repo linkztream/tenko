@@ -745,7 +745,7 @@ impl AuthService {
             }
             return Err(AuthError::SessionExpired);
         }
-        let user = Self::holder(
+        let (user, _) = Self::holder(
             view.as_ref(),
             session.user,
             Issued::Session(session.generation),
@@ -816,7 +816,7 @@ impl AuthService {
                 if token_expired(record.created_at, record.expires_at, &settings, now) {
                     return Err(AuthError::SessionExpired);
                 }
-                let user = Self::holder(
+                let (user, _) = Self::holder(
                     view.as_ref(),
                     record.owner,
                     Issued::Token(record.generation),
@@ -855,7 +855,7 @@ impl AuthService {
                 if token_expired(record.created_at, record.expires_at, &settings, now) {
                     return Err(AuthError::SessionExpired);
                 }
-                let user = Self::holder(
+                let (user, _) = Self::holder(
                     view.as_ref(),
                     record.owner,
                     Issued::Token(record.generation),
@@ -905,11 +905,28 @@ impl AuthService {
     /// place every session and token passes on its way to authenticating. A disabled account
     /// and a credential issued before the last end of the account's access
     /// ([`UserRecord::admits`]) are refused.
-    fn holder(view: &dyn ReadView, owner: UserId, issued: Issued) -> Result<UserRecord, AuthError> {
+    fn holder(
+        view: &dyn ReadView,
+        owner: UserId,
+        issued: Issued,
+    ) -> Result<(UserRecord, tenko_core::Revision), AuthError> {
         view.get_typed(&USERS, &owner)?
-            .map(|(user, _)| user)
-            .filter(|user| !user.disabled && user.admits(issued))
+            .filter(|(user, _)| !user.disabled && user.admits(issued))
             .ok_or(AuthError::Unauthenticated)
+    }
+
+    /// The account and the session of a session principal, read again by a handler, with
+    /// the session's hash: only while the session still holds ([`AuthService::holder`]),
+    /// since an end of the account's access may have come after the request authenticated.
+    fn live_session(
+        view: &dyn ReadView,
+        user: UserId,
+        session: SessionId,
+    ) -> Result<(UserRecord, tenko_core::Revision, Vec<u8>, SessionRecord), AuthError> {
+        let (hash, record) =
+            Self::load_session(view, user, session)?.ok_or(AuthError::Unauthenticated)?;
+        let (account, revision) = Self::holder(view, user, Issued::Session(record.generation))?;
+        Ok((account, revision, hash, record))
     }
 
     /// The token stored under `hash` and the view it was found in: this controller's copy,
@@ -1218,7 +1235,7 @@ async fn unlock_watch(
 ) {
     let filter = WatchFilter::tables([USERS.name().clone()]);
     let mut seen: HashMap<UserId, Seen> = HashMap::new();
-    loop {
+    'watch: loop {
         let mut changes = match store.watch(None, filter.clone()) {
             Ok(changes) => changes,
             Err(error) => {
@@ -1275,13 +1292,16 @@ async fn unlock_watch(
                             None => seen.remove(&id),
                         };
                     }
+                    // A change it could not read is read again by the scan.
                     Err(error) => {
                         tracing::warn!(%error, "the watch of user records could not read a user");
+                        continue 'watch;
                     }
                 }
             }
         }
-        if store.read(ReadConsistency::Local).await.is_err() {
+        if let Err(error) = store.read(ReadConsistency::Local).await {
+            tracing::warn!(%error, "the watch of user records ended with the store");
             return;
         }
     }
@@ -1385,8 +1405,11 @@ mod tests {
         let throttle = Arc::new(Throttle::new(64));
         let known = Arc::new(guard::KnownNetworks::default());
         throttle.restore_lock(ThrottleKey::account("ada"), later);
-        known.note("ada", network, now);
-        known.note("bo", network, now);
+        known.note("ada", (ada.id, 0), network, now);
+        known.note("bo", (bo.id, 0), network, now);
+        // Read through the records as they were before: what is asked is that the watch
+        // forgot, not that a later generation refuses the entry.
+        let (ada_before, bo_before) = (ada.clone(), bo.clone());
         let watch = tokio::spawn(unlock_watch(store, throttle.clone(), known.clone()));
 
         // Written while the watch lags: an unlock of one account, a reset of the other.
@@ -1399,11 +1422,11 @@ mod tests {
             throttle
                 .lock_of(&ThrottleKey::account("ada"), now)
                 .is_none()
-                && !known.contains("bo", network, now)
+                && !known.contains(&bo_before, network, now)
         })
         .await;
         assert!(
-            known.contains("ada", network, now),
+            known.contains(&ada_before, network, now),
             "only an end of its access forgets an account's networks"
         );
 
@@ -1411,7 +1434,7 @@ mod tests {
         ada.sessions_generation = 1;
         put(&inner, &ada, now).await;
         wait_until_async("the end forgets the account's networks", || async {
-            !known.contains("ada", network, now)
+            !known.contains(&ada_before, network, now)
         })
         .await;
         watch.abort();
