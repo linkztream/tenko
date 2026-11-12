@@ -795,7 +795,7 @@ mod tests {
         future::Future,
         path::PathBuf,
         sync::atomic::{AtomicU64, Ordering},
-        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+        time::Duration,
     };
 
     use openraft::{
@@ -810,6 +810,7 @@ mod tests {
         testing::{StoreBuilder, Suite, blank_ent, log_id},
     };
     use serde::{Deserialize, Serialize};
+    use tenko_core::testing::{TempDir, wait_until_async};
 
     use super::*;
     use crate::raft::types::{
@@ -819,37 +820,20 @@ mod tests {
 
     const CACHE: usize = 1 << 20;
 
-    static DIRS: AtomicU64 = AtomicU64::new(0);
+    /// The temporary directory of one log test, with the place of its log file.
+    struct LogDir(TempDir);
 
-    /// A unique directory under the system temp directory, removed on drop.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
+    impl LogDir {
         fn new(tag: &str) -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_nanos());
-            let unique = DIRS.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "tenko-log-{tag}-{}-{unique}-{nanos}",
-                std::process::id()
-            ));
-            std::fs::create_dir_all(&path).expect("create the test directory");
-            Self(path)
+            Self(TempDir::new(&format!("log-{tag}")))
         }
 
         fn path(&self) -> &Path {
-            &self.0
+            self.0.path()
         }
 
         fn log_path(&self) -> PathBuf {
             self.0.join("log.redb")
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 
@@ -1036,9 +1020,9 @@ mod tests {
 
     struct SuiteBuilder;
 
-    impl StoreBuilder<TypeConfig, LogStore, TestSm, TempDir> for SuiteBuilder {
-        async fn build(&self) -> Result<(TempDir, LogStore, TestSm), StorageError> {
-            let dir = TempDir::new("suite");
+    impl StoreBuilder<TypeConfig, LogStore, TestSm, LogDir> for SuiteBuilder {
+        async fn build(&self) -> Result<(LogDir, LogStore, TestSm), StorageError> {
+            let dir = LogDir::new("suite");
             let store = LogStore::open(&dir.log_path(), CACHE)
                 .map_err(|error| StorageIOError::write_logs(AnyError::error(error)))?;
             let sm = TestSm::new(dir.path().join("snapshots"));
@@ -1048,7 +1032,7 @@ mod tests {
 
     #[test]
     fn passes_the_openraft_storage_suite() {
-        Suite::<TypeConfig, LogStore, TestSm, SuiteBuilder, TempDir>::test_all(SuiteBuilder)
+        Suite::<TypeConfig, LogStore, TestSm, SuiteBuilder, LogDir>::test_all(SuiteBuilder)
             .expect("openraft's storage suite");
     }
 
@@ -1112,7 +1096,7 @@ mod tests {
 
     /// Runs a fresh single-node cluster that writes `count` entries, then closes everything.
     /// Returns the log ids of the written entries and the final counters.
-    async fn run_cluster(dir: &TempDir, count: u8) -> (Vec<LogId>, LogStats) {
+    async fn run_cluster(dir: &LogDir, count: u8) -> (Vec<LogId>, LogStats) {
         let store = LogStore::open(&dir.log_path(), CACHE).expect("open the log");
         let raft = start_node(store.clone(), dir.path()).await;
         let ids = write_all(&raft, count).await;
@@ -1123,7 +1107,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn log_vote_purge_and_committed_survive_a_reopen() {
-        let dir = TempDir::new("roundtrip");
+        let dir = LogDir::new("roundtrip");
         let (ids, _) = run_cluster(&dir, 5).await;
         let last = *ids.last().expect("written entries");
 
@@ -1170,7 +1154,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_proposals_are_all_written_and_counted() {
-        let dir = TempDir::new("counters");
+        let dir = LogDir::new("counters");
         let (ids, stats) = run_cluster(&dir, 64).await;
         assert_eq!(ids.len(), 64);
 
@@ -1187,7 +1171,7 @@ mod tests {
 
     #[test]
     fn operations_queued_while_a_commit_is_blocked_share_one_commit() {
-        let dir = TempDir::new("group");
+        let dir = LogDir::new("group");
         let store = LogStore::open(&dir.log_path(), CACHE).expect("open");
         let blocker = store
             .inner
@@ -1229,7 +1213,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn appended_entries_are_readable_before_their_flush_and_flush_after_the_commit() {
-        let dir = TempDir::new("pending");
+        let dir = LogDir::new("pending");
         let mut store = LogStore::open(&dir.log_path(), CACHE).expect("open");
         let raft = start_node(store.clone(), dir.path()).await;
         assert_eq!(store.last_index(), Some(1));
@@ -1242,11 +1226,10 @@ mod tests {
 
         let writer = raft.clone();
         let write = tokio::spawn(async move { writer.client_write(proposal(7)).await });
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while store.last_index() != Some(2) {
-            assert!(Instant::now() < deadline, "the entry never became readable");
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
+        wait_until_async("the entry to become readable", async || {
+            store.last_index() == Some(2)
+        })
+        .await;
         assert_eq!(store.inner.shared.persisted_edge(true), Some(1));
         let entries = store.try_get_log_entries(2..).await.expect("read pending");
         assert_eq!(entries.len(), 1);
@@ -1269,7 +1252,7 @@ mod tests {
 
     #[tokio::test]
     async fn save_committed_waits_for_a_commit_that_happens_anyway() {
-        let dir = TempDir::new("committed");
+        let dir = LogDir::new("committed");
         let mut store = LogStore::open(&dir.log_path(), CACHE).expect("open");
         let (first, second) = (log_id(1, 1, 7), log_id(1, 1, 9));
         let before = store.stats().commits;
@@ -1315,7 +1298,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_fails_writes_and_dropping_every_clone_releases_the_file() {
-        let dir = TempDir::new("shutdown");
+        let dir = LogDir::new("shutdown");
         let mut store = LogStore::open(&dir.log_path(), CACHE).expect("open");
         store.save_vote(&Vote::new(3, 1)).await.expect("vote");
         store.shutdown();
@@ -1345,7 +1328,7 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_every_clone_without_shutdown_commits_and_releases_the_file() {
-        let dir = TempDir::new("drop");
+        let dir = LogDir::new("drop");
         let mut store = LogStore::open(&dir.log_path(), CACHE).expect("open");
         let mut reader = store.get_log_reader().await;
         store.save_vote(&Vote::new(5, 1)).await.expect("vote");
@@ -1370,7 +1353,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_append_after_shutdown_fails_instead_of_hanging() {
-        let dir = TempDir::new("append-after-shutdown");
+        let dir = LogDir::new("append-after-shutdown");
         let store = LogStore::open(&dir.log_path(), CACHE).expect("open");
         let raft = start_node(store.clone(), dir.path()).await;
         store.shutdown();
@@ -1383,7 +1366,7 @@ mod tests {
 
     #[tokio::test]
     async fn handles_count_only_live_clones_not_the_writer_thread() {
-        let dir = TempDir::new("handles");
+        let dir = LogDir::new("handles");
         let mut store = LogStore::open(&dir.log_path(), CACHE).expect("open");
         assert_eq!(store.handles(), 1);
         // Let the writer thread run a group, then go idle again.
@@ -1401,7 +1384,7 @@ mod tests {
 
     #[test]
     fn the_writer_thread_is_named() {
-        let dir = TempDir::new("thread");
+        let dir = LogDir::new("thread");
         let store = LogStore::open(&dir.log_path(), CACHE).expect("open");
         let writer = lock(&store.inner.writer);
         let name = writer.as_ref().and_then(|handle| handle.thread().name());
@@ -1412,7 +1395,7 @@ mod tests {
 
     #[test]
     fn poisoned_locks_are_recovered() {
-        let dir = TempDir::new("poison");
+        let dir = LogDir::new("poison");
         let store = LogStore::open(&dir.log_path(), CACHE).expect("open");
         let shared = Arc::clone(&store.inner.shared);
         let poisoner = std::thread::spawn(move || {
@@ -1428,7 +1411,7 @@ mod tests {
 
     #[test]
     fn open_reports_storage_errors() {
-        let dir = TempDir::new("open-error");
+        let dir = LogDir::new("open-error");
         let missing = dir.path().join("missing").join("log.redb");
         assert!(matches!(
             LogStore::open(&missing, CACHE),
@@ -1438,7 +1421,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_disk_holds_head_prefixed_cbor_records() {
-        let dir = TempDir::new("layout");
+        let dir = LogDir::new("layout");
         let (ids, _) = run_cluster(&dir, 3).await;
 
         let db = Database::open(dir.log_path()).expect("open the raw database");

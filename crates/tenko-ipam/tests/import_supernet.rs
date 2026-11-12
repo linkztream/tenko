@@ -7,13 +7,13 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
-    time::Duration,
 };
 
 use tenko_core::{
     AuthStrength, ImportId, JobId, PrefixId, Principal, RequestCtx, SessionId, UserId,
     dhcp::{Scope, tables::SCOPES},
     ipam::{Address, Prefix, PrefixRole, RangeRole, Stamp},
+    testing::wait_until_async,
 };
 use tenko_ipam::{
     IpamCommand, IpamConfig, IpamService, PlanOptions,
@@ -145,14 +145,11 @@ async fn preview_of(env: &Env, cx: &RequestCtx) -> (ImportId, ImportPreview) {
 }
 
 async fn wait(engine: &JobEngine, id: JobId) -> tenko_jobs::Job {
-    for _ in 0..600 {
+    wait_until_async(&format!("job {id:?} to finish"), async || {
         let job = engine.job(id).await.expect("job");
-        if job.state.is_terminal() {
-            return job;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("job {id:?} did not finish");
+        job.state.is_terminal().then_some(job)
+    })
+    .await
 }
 
 async fn view(store: &MemStore) -> Arc<dyn ReadView> {

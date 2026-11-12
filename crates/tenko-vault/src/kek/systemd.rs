@@ -519,6 +519,8 @@ fn tidy(text: &str) -> String {
 mod tests {
     use std::time::Instant;
 
+    use tenko_core::testing::TempDir;
+
     use super::*;
     use crate::kek::KekInit;
 
@@ -584,33 +586,6 @@ esac
     const USER_ONLY: &str = r#"[ "$cmd" = has-tpm2 ] || [ "$user" = yes ] || { echo "Failed to determine local credential host secret: Permission denied" >&2; exit 1; }"#;
     /// `encrypt` works with `--with-key=tpm2` only.
     const TPM2_KEY_ONLY: &str = r#"[ "$cmd" != encrypt ] || [ "$key" = tpm2 ] || { echo "Failed to determine local credential host secret: Permission denied" >&2; exit 1; }"#;
-
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "tenko-vault-creds-{name}-{}",
-                tenko_core::SecretId::generate()
-            ));
-            fs::create_dir_all(&dir).expect("temp dir");
-            Self(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-
-        fn join(&self, name: &str) -> PathBuf {
-            self.0.join(name)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     /// Writes an executable script (`text` starts with its `#!` line) and waits until the
     /// kernel lets it run: a `fork` in a parallel test can briefly keep the write handle

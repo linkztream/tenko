@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -19,6 +19,7 @@ use tenko_core::{
     AuditSeq, CounterKey, NodeId, Principal, Revision, SystemComponent, TableName, Timestamp,
     audit::{AuditAction, AuditDraft, verify_chain},
     codec::{encode_key, to_cbor},
+    testing::{TempDir, wait_until_async, wait_until_async_within},
 };
 use tenko_store::{
     KeyRange, ReadConsistency, ReadView, ReadViewExt as _, Store, StoreError, StoreRole,
@@ -36,40 +37,20 @@ const ROWS: TableName = TableName::from_static("ipam.raft_test_rows");
 const COUNTER: CounterKey = CounterKey::new("ipam.raft_test_counter");
 const WRITE: AuditAction = AuditAction::from_static("ipam.raft_test.write");
 
-/// A data directory under the system temporary directory, removed on drop.
-struct TestDir(PathBuf);
+/// A data directory under the system temporary directory, with a subdirectory per node.
+struct TestDir(TempDir);
 
 impl TestDir {
     fn new(name: &str) -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "tenko-raft-test-{name}-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("create the test directory");
-        Self(dir)
+        Self(TempDir::new(&format!("raft-test-{name}")))
     }
 
     fn path(&self) -> &Path {
-        &self.0
+        self.0.path()
     }
 
     fn node(&self, node: u64) -> PathBuf {
         self.0.join(format!("node-{node}"))
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        // Stores close their files asynchronously after shutdown; retry briefly.
-        for _ in 0..200 {
-            if std::fs::remove_dir_all(&self.0).is_ok() || !self.0.exists() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
     }
 }
 
@@ -543,20 +524,16 @@ async fn snapshot_and_purge_run_by_policy_and_survive_restart() {
     for n in 1..=200 {
         put(&store, n, "v").await;
     }
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
+    wait_until_async("a snapshot and a purge by policy", async || {
         let purged = store
             .raft()
             .metrics()
             .borrow()
             .purged
             .map_or(0, |log_id| log_id.index);
-        if store.engine_stats().snapshots_built >= 1 && purged > 100 {
-            break;
-        }
-        assert!(Instant::now() < deadline, "no snapshot and purge by policy");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+        store.engine_stats().snapshots_built >= 1 && purged > 100
+    })
+    .await;
     let before = rows(
         store
             .read(ReadConsistency::Local)
@@ -593,22 +570,20 @@ fn node_config(dir: &TestDir, node: u64) -> RaftStoreConfig {
 }
 
 async fn wait_for_installs(store: &RaftStore, installs: u64) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while store.engine_stats().snapshots_installed < installs {
-        assert!(
-            Instant::now() < deadline,
-            "the node did not install snapshot {installs}: it caught up from the log instead"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    wait_until_async(
+        &format!("the node to install snapshot {installs} (not catch up from the log)"),
+        async || store.engine_stats().snapshots_installed >= installs,
+    )
+    .await;
 }
 
 async fn wait_for_revision(store: &RaftStore, revision: Revision) {
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while store.status().revision < revision {
-        assert!(Instant::now() < deadline, "node did not catch up");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    wait_until_async_within(
+        "the node to catch up",
+        Duration::from_secs(60),
+        async || store.status().revision >= revision,
+    )
+    .await;
 }
 
 /// A learner catches up by snapshot, and a later snapshot install while readers hammer its
@@ -628,14 +603,10 @@ async fn snapshot_install_swaps_the_index_without_empty_reads() {
     // The purge follows the snapshot; once it is done the learner can only catch up by
     // snapshot.
     let snapshot = leader.raft().metrics().borrow().snapshot;
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while leader.raft().metrics().borrow().purged < snapshot {
-        assert!(
-            Instant::now() < deadline,
-            "the leader did not purge its log"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    wait_until_async("the leader to purge its log", async || {
+        leader.raft().metrics().borrow().purged >= snapshot
+    })
+    .await;
 
     let follower = RaftStore::open_with(node_config(&dir, 2), Arc::new(network.clone()))
         .await
@@ -762,18 +733,13 @@ async fn three_voters_replicate_and_fail_over() {
 
     // Cut the leader off; the other two elect a new leader.
     network.set_isolated(1, true);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let new_leader = loop {
-        let leader = nodes[1..]
+    let new_leader = wait_until_async("a new leader to be elected", async || {
+        nodes[1..]
             .iter()
             .find(|node| node.status().role == StoreRole::Leader)
-            .cloned();
-        if let Some(leader) = leader {
-            break leader;
-        }
-        assert!(Instant::now() < deadline, "no new leader was elected");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    };
+            .cloned()
+    })
+    .await;
     let after = put(&new_leader, 1_000, "after failover").await;
     assert!(after > last);
     network.set_isolated(1, false);

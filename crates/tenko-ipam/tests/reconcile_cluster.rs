@@ -21,6 +21,7 @@ use tenko_core::{
     cluster::{LEADER_EPOCH, LeaderService},
     ipam::AssignmentMode,
     observe::{Observation, ObservationSource, Observed, ProbeMethod},
+    testing::wait_until_async_within,
 };
 use tenko_ipam::{
     IpamCommand, IpamService,
@@ -106,13 +107,8 @@ fn last_run(world: &World) -> Option<Timestamp> {
 
 /// Waits until the member ran after `after` (or at all).
 async fn runs_after(world: &World, after: Option<Timestamp>, what: &str) {
-    within(what, async {
-        loop {
-            if last_run(world).is_some_and(|at| after.is_none_or(|after| at > after)) {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+    wait_until_async_within(what, LIMIT, async || {
+        last_run(world).is_some_and(|at| after.is_none_or(|after| at > after))
     })
     .await;
 }
@@ -253,19 +249,17 @@ async fn the_reconciler_runs_on_the_leader_only_follows_a_hand_over_and_reads_it
     .await
     .expect("update");
     sighting(&worlds[follower], "192.0.2.51").await;
-    within("the orphan proposal under the new setting", async {
-        loop {
-            if worlds[follower]
+    wait_until_async_within(
+        "the orphan proposal under the new setting",
+        LIMIT,
+        async || {
+            worlds[follower]
                 .open(IntentProposalKind::OrphanedIntent)
                 .await
                 .len()
                 == 1
-            {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    })
+        },
+    )
     .await;
     for (index, world) in worlds.iter().enumerate() {
         if index != leader {

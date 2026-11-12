@@ -3,11 +3,11 @@
 //! binding to the new secret, and a replaced credential that a person bound to another host
 //! is kept.
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use tenko_core::{
     AuthStrength, ConnectorId, HostId, ImportId, JobId, Principal, RequestCtx, SessionId, UserId,
-    secret::SecretRef,
+    secret::SecretRef, testing::wait_until_async,
 };
 use tenko_ipam::{
     IpamConfig, IpamService,
@@ -98,14 +98,11 @@ fn csv(text: &str) -> Upload {
 }
 
 async fn wait(engine: &JobEngine, id: JobId) -> tenko_jobs::Job {
-    for _ in 0..600 {
+    wait_until_async(&format!("job {id:?} to finish"), async || {
         let job = engine.job(id).await.expect("job");
-        if job.state.is_terminal() {
-            return job;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("job {id:?} did not finish");
+        job.state.is_terminal().then_some(job)
+    })
+    .await
 }
 
 async fn import(env: &Env, cx: &RequestCtx, text: &str) -> ImportId {

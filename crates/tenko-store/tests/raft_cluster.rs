@@ -3,16 +3,13 @@
 //! membership changes, state digests and the guards of a store directory (node id, join
 //! marker).
 
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf},
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeSet, path::Path, time::Duration};
 
 use bytes::Bytes;
 use tenko_core::{
     CounterKey, NodeId, Principal, Revision, SystemComponent, TableName, Timestamp,
     codec::encode_key,
+    testing::{TempDir, wait_until_async},
 };
 use tenko_store::{
     QuorumState, ReadConsistency, ReadView, Store, StoreError, StoreRole, WriteBatch,
@@ -44,14 +41,6 @@ fn value_of(view: &dyn ReadView, n: u64) -> Option<Bytes> {
     view.get(&ROWS, &key(n))
         .expect("get")
         .map(|versioned| versioned.value)
-}
-
-async fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
-    let deadline = Instant::now() + WAIT;
-    while !check() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
 }
 
 /// Shorter isolation for the quorum tests.
@@ -89,7 +78,7 @@ async fn a_forwarded_write_follows_a_leader_change() {
         .iter()
         .filter(|member| member.node_id() != leader.node_id())
         .collect();
-    wait_until("another member takes office", || {
+    wait_until_async("another member takes office", async || {
         others.iter().any(|member| {
             member
                 .leadership()
@@ -220,7 +209,7 @@ async fn a_deposed_leader_answers_no_linearizable_read() {
     }
     let rounds_before = leader.engine_stats().leadership_rounds;
     let early: Vec<_> = (0..10).map(|_| read(leader.clone())).collect();
-    wait_until("a round in flight", || {
+    wait_until_async("a round in flight", async || {
         leader.engine_stats().leadership_rounds > rounds_before
     })
     .await;
@@ -272,7 +261,7 @@ async fn cut_off_members_report_isolation_and_recover() {
     let leader = cluster.wait_for_leader().await;
     let follower = cluster.a_follower().await;
     let applied = put(&leader, 1, "seen by all").await.expect("write");
-    wait_until("the follower applies the write", || {
+    wait_until_async("the follower applies the write", async || {
         follower.status().revision >= applied
     })
     .await;
@@ -464,32 +453,6 @@ async fn a_dead_voter_is_replaced_in_one_change() {
     cluster.shutdown().await;
 }
 
-/// A directory under the system temporary directory, removed on drop.
-struct TestDir(PathBuf);
-
-impl TestDir {
-    fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "tenko-raft-cluster-{name}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_nanos())
-        ));
-        Self(dir)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 fn config(dir: &Path, node: u64) -> RaftStoreConfig {
     let mut config = RaftStoreConfig::new(dir);
     config.node_id = NodeId(node);
@@ -501,7 +464,7 @@ fn config(dir: &Path, node: u64) -> RaftStoreConfig {
 /// is never initialized as a cluster of its own.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_store_directory_keeps_its_node_id_and_its_join_marker() {
-    let dir = TestDir::new("guards");
+    let dir = TempDir::new("raft-cluster-guards");
     let store = RaftStore::open(config(dir.path(), 1))
         .await
         .expect("open as node 1");
@@ -516,7 +479,7 @@ async fn a_store_directory_keeps_its_node_id_and_its_join_marker() {
         "{refused}"
     );
 
-    let joining = TestDir::new("joining");
+    let joining = TempDir::new("raft-cluster-joining");
     mark_joining(joining.path()).expect("marker");
     assert!(is_joining(joining.path()));
     let refused = RaftStore::open(config(joining.path(), 1001))

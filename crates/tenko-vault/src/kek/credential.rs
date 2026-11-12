@@ -105,41 +105,24 @@ fn open_credential(
 mod tests {
     use std::fs;
 
+    use tenko_core::testing::TempDir;
+
     use super::*;
     use crate::kek::{KekConfig, KekInit};
-
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "tenko-vault-credential-{name}-{}",
-                tenko_core::SecretId::generate()
-            ));
-            fs::create_dir_all(&dir).expect("temp dir");
-            Self(dir)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn config(temp: &TempDir, with_key: CredsKey) -> KekConfig {
         KekConfig::SystemdCredential {
             name: "tenko_kek".to_owned(),
             retired: Vec::new(),
-            dir: temp.0.join("kek"),
+            dir: temp.join("kek"),
             with_key,
-            directory: Some(temp.0.join("creds")),
+            directory: Some(temp.join("creds")),
         }
     }
 
     fn write_credential(temp: &TempDir, name: &str, hex: &str) {
-        fs::create_dir_all(temp.0.join("creds")).expect("creds");
-        fs::write(temp.0.join("creds").join(name), format!("{hex}\n")).expect("credential");
+        fs::create_dir_all(temp.join("creds")).expect("creds");
+        fs::write(temp.join("creds").join(name), format!("{hex}\n")).expect("credential");
     }
 
     #[test]
@@ -155,7 +138,7 @@ mod tests {
             KekProtection::SystemdCreds { tpm2: false }
         );
         // The same key passed to the file provider has the same identifier.
-        let path = temp.0.join("creds").join("tenko_kek");
+        let path = temp.join("creds").join("tenko_kek");
         let file = KekConfig::File {
             path,
             retired: Vec::new(),
@@ -185,9 +168,9 @@ mod tests {
         let bad = KekConfig::SystemdCredential {
             name: "../escape".to_owned(),
             retired: Vec::new(),
-            dir: temp.0.join("kek"),
+            dir: temp.join("kek"),
             with_key: CredsKey::Auto,
-            directory: Some(temp.0.clone()),
+            directory: Some(temp.path().to_path_buf()),
         };
         assert!(bad.load(KekInit::Require).is_err());
     }
@@ -204,7 +187,7 @@ mod tests {
             next.protection(),
             KekProtection::SystemdCreds { tpm2: false }
         );
-        let sealed = fs::read(temp.0.join("kek").join("kek-000001.wrap")).expect("wrapped");
+        let sealed = fs::read(temp.join("kek").join("kek-000001.wrap")).expect("wrapped");
         assert!(!sealed.starts_with(b"TKEK"));
         let ring = config.load(KekInit::Require).expect("load");
         assert_eq!(ring.active().id(), next.id());
@@ -215,7 +198,7 @@ mod tests {
         // The root key cannot be removed, the retired generation can once another is newer.
         assert!(config.remove_retired(first.active().id()).is_err());
         // A plain file dropped beside the wrapped generations is refused (R15).
-        fs::write(temp.0.join("kek").join("kek-000009.plain"), b"anything").expect("drop");
+        fs::write(temp.join("kek").join("kek-000009.plain"), b"anything").expect("drop");
         let ring = config.load(KekInit::Require).expect("load");
         assert_eq!(ring.active().id(), next.id());
         assert_eq!(ring.refused().len(), 1);

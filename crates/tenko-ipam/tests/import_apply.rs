@@ -7,7 +7,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use tenko_core::{
     Action, AuthStrength, Authorizer, Denied, DenyReason, ImportId, JobId, ObjectKind, ObjectRef,
-    Principal, RequestCtx, ScopeFilter, SessionId, UserId,
+    Principal, RequestCtx, ScopeFilter, SessionId, UserId, testing::wait_until_async,
 };
 use tenko_ipam::{
     IpamConfig, IpamService,
@@ -102,14 +102,11 @@ fn fixture(name: &str) -> Upload {
 }
 
 async fn wait(engine: &JobEngine, id: JobId) -> tenko_jobs::Job {
-    for _ in 0..600 {
+    wait_until_async(&format!("job {id:?} to finish"), async || {
         let job = engine.job(id).await.expect("job");
-        if job.state.is_terminal() {
-            return job;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("job {id:?} did not finish");
+        job.state.is_terminal().then_some(job)
+    })
+    .await
 }
 
 async fn view(store: &MemStore) -> Arc<dyn ReadView> {

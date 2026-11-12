@@ -30,10 +30,7 @@ use std::{
     io::{BufRead as _, BufReader, ErrorKind, Write as _},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        mpsc::{self, RecvTimeoutError},
-    },
+    sync::mpsc::{self, RecvTimeoutError},
     thread::JoinHandle,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -43,6 +40,7 @@ use tenko_core::{
     CounterKey, Principal, Revision, SystemComponent, TableName, Timestamp,
     audit::{AuditAction, AuditDraft, ChainVerifier},
     codec::{decode_key, encode_key},
+    testing::TempDir,
 };
 use tenko_store::{
     KeyRange, ReadConsistency, ReadView, ReadViewExt as _, Store as _, StoreError, StoreStatus,
@@ -392,48 +390,6 @@ fn crash_child() {
 // ---------------------------------------------------------------------------------------
 // The parent: spawn, kill, recover, check.
 // ---------------------------------------------------------------------------------------
-
-/// A data directory under the system temporary directory. It is removed when the test
-/// passes and kept (and named) when it fails.
-struct TestDir(PathBuf);
-
-impl TestDir {
-    fn new(label: &str) -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "tenko-crash-{label}-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("create the data directory");
-        Self(dir)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        if std::thread::panicking() {
-            eprintln!(
-                "crash test failed: data directory kept at {}",
-                self.0.display()
-            );
-            return;
-        }
-        // The store closes its files asynchronously after shutdown; retry briefly.
-        for _ in 0..200 {
-            if std::fs::remove_dir_all(&self.0).is_ok() || !self.0.exists() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
-        eprintln!("could not remove {}", self.0.display());
-    }
-}
 
 /// Where a failure happened, for the panic message.
 struct Ctx {
@@ -961,7 +917,7 @@ struct Campaign {
     durability: Durability,
     /// Re-seed in place in a loop while the writers run.
     reseed: bool,
-    dir: TestDir,
+    dir: TempDir,
     iterations: u32,
     /// The store's revision at the end of the previous iteration.
     revision: Revision,
@@ -973,7 +929,7 @@ impl Campaign {
             label,
             durability,
             reseed: false,
-            dir: TestDir::new(label),
+            dir: TempDir::new(&format!("crash-{label}")),
             iterations: 0,
             revision: Revision(0),
         }

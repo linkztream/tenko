@@ -261,32 +261,9 @@ fn millis(duration: Duration) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use tenko_core::testing::TempDir;
+
     use super::*;
-
-    /// A unique directory under the system temp directory, removed on drop.
-    struct TestDir(PathBuf);
-
-    impl TestDir {
-        fn create() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "tenko-fsync-test-{}-{}",
-                std::process::id(),
-                unique_file_name().trim_start_matches(PROBE_FILE_PREFIX),
-            ));
-            std::fs::create_dir_all(&path).expect("create the test directory");
-            Self(path)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn ms(value: u64) -> Duration {
         Duration::from_millis(value)
@@ -303,7 +280,7 @@ mod tests {
 
     #[test]
     fn probe_measures_the_requested_samples_and_leaves_no_file() {
-        let dir = TestDir::create();
+        let dir = TempDir::new("fsync");
         let probe = fsync_probe(dir.path(), 5).expect("probe a temp directory");
         assert_eq!(probe.samples, 5);
         assert!(
@@ -331,14 +308,14 @@ mod tests {
 
     #[test]
     fn probe_with_the_default_sample_count_works() {
-        let dir = TestDir::create();
+        let dir = TempDir::new("fsync");
         let probe = fsync_probe(dir.path(), DEFAULT_PROBE_SAMPLES).expect("probe a temp directory");
         assert_eq!(probe.samples, DEFAULT_PROBE_SAMPLES);
     }
 
     #[test]
     fn zero_samples_is_treated_as_one() {
-        let dir = TestDir::create();
+        let dir = TempDir::new("fsync");
         let probe = fsync_probe(dir.path(), 0).expect("probe a temp directory");
         assert_eq!(probe.samples, 1);
         assert_eq!(probe.p50, probe.p99);
@@ -347,7 +324,7 @@ mod tests {
 
     #[test]
     fn probe_of_a_missing_directory_is_an_error() {
-        let dir = TestDir::create();
+        let dir = TempDir::new("fsync");
         let missing = dir.path().join("does-not-exist");
         assert!(fsync_probe(&missing, 3).is_err());
         assert!(!missing.exists());
@@ -433,14 +410,14 @@ mod tests {
 
     #[test]
     fn probe_and_report_returns_the_probe() {
-        let dir = TestDir::create();
+        let dir = TempDir::new("fsync");
         let probe = probe_and_report(dir.path(), 3).expect("probe a temp directory");
         assert_eq!(probe.samples, 3);
     }
 
     #[test]
     fn probe_and_report_on_a_missing_directory_returns_none() {
-        let dir = TestDir::create();
+        let dir = TempDir::new("fsync");
         let missing = dir.path().join("does-not-exist");
         assert!(probe_and_report(&missing, DEFAULT_PROBE_SAMPLES).is_none());
     }

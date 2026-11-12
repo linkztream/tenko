@@ -6,8 +6,8 @@ mod common;
 
 use std::{path::Path, sync::Arc};
 
-use common::{cleanup, ctx, scratch_dir, spec, value};
-use tenko_core::{NodeId, secret::SecretRef};
+use common::{ctx, spec, value};
+use tenko_core::{NodeId, secret::SecretRef, testing::TempDir};
 use tenko_store::{MemStore, Store};
 use tenko_vault::{
     KekConfig, KekInit, KekOptions, KekProvider, KekRing, MemVault, StoreVault, TransferFailure,
@@ -76,8 +76,10 @@ async fn opens_everything(store: &Arc<MemStore>, ring: KekRing, secrets: &[Secre
 
 #[tokio::test]
 async fn a_joined_controller_opens_every_envelope() {
-    let sender_root = scratch_dir("transfer-sender");
-    let joiner_root = scratch_dir("transfer-joiner");
+    let sender_root_guard = TempDir::new("transfer-sender");
+    let sender_root = sender_root_guard.join("data");
+    let joiner_root_guard = TempDir::new("transfer-joiner");
+    let joiner_root = joiner_root_guard.join("data");
     let (store, ring, secrets) = installation(&sender_root).await;
 
     // The joiner makes a one-time key; the member seals the generations to it.
@@ -113,15 +115,15 @@ async fn a_joined_controller_opens_every_envelope() {
     assert_eq!(again.ids().count(), reloaded.ids().count());
 
     opens_everything(&store, imported, &secrets).await;
-    cleanup(&sender_root);
-    cleanup(&joiner_root);
 }
 
 #[cfg(windows)]
 #[tokio::test]
 async fn a_joined_windows_controller_seals_the_generations_with_dpapi() {
-    let sender_root = scratch_dir("transfer-dpapi-sender");
-    let joiner_root = scratch_dir("transfer-dpapi-joiner");
+    let sender_root_guard = TempDir::new("transfer-dpapi-sender");
+    let sender_root = sender_root_guard.join("data");
+    let joiner_root_guard = TempDir::new("transfer-dpapi-joiner");
+    let joiner_root = joiner_root_guard.join("data");
     let (store, ring, secrets) = installation(&sender_root).await;
     let joiner = TransferKey::generate().expect("transfer key");
     let context = transfer::join_context(NodeId(1002), [1; 16]);
@@ -141,13 +143,12 @@ async fn a_joined_windows_controller_seals_the_generations_with_dpapi() {
     let reloaded = config.load(KekInit::Require).expect("reload");
     assert_eq!(reloaded.active().id(), ring.active().id());
     opens_everything(&store, reloaded, &secrets).await;
-    cleanup(&sender_root);
-    cleanup(&joiner_root);
 }
 
 #[tokio::test]
 async fn a_transfer_opens_once_and_only_for_its_context() {
-    let root = scratch_dir("transfer-once");
+    let root_guard = TempDir::new("transfer-once");
+    let root = root_guard.join("data");
     let (_, ring, _) = installation(&root).await;
     let joiner = TransferKey::generate().expect("transfer key");
     let public = joiner.public_key();
@@ -182,13 +183,14 @@ async fn a_transfer_opens_once_and_only_for_its_context() {
             .open(transfer::FORMAT, &sealed.sealed, &context)
             .is_err()
     );
-    cleanup(&root);
 }
 
 #[tokio::test]
 async fn an_import_never_replaces_a_different_key_under_the_same_id() {
-    let sender_root = scratch_dir("transfer-conflict-sender");
-    let joiner_root = scratch_dir("transfer-conflict-joiner");
+    let sender_root_guard = TempDir::new("transfer-conflict-sender");
+    let sender_root = sender_root_guard.join("data");
+    let joiner_root_guard = TempDir::new("transfer-conflict-joiner");
+    let joiner_root = joiner_root_guard.join("data");
     let (_, ring, _) = installation(&sender_root).await;
     let joiner = TransferKey::generate().expect("transfer key");
     let context = transfer::fetch_context(NodeId(1005));
@@ -226,8 +228,6 @@ async fn an_import_never_replaces_a_different_key_under_the_same_id() {
         config.import_with(&received[1..], &bare),
         Err(VaultError::Unsupported { .. })
     ));
-    cleanup(&sender_root);
-    cleanup(&joiner_root);
 }
 
 #[test]

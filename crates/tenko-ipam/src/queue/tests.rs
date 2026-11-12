@@ -3,7 +3,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -16,6 +15,7 @@ use tenko_core::{
     Timestamp, UserId, VrfId,
     audit::AuditRecord,
     ipam::{Address, PrefixRole},
+    testing::TempDir,
 };
 use tenko_store::{
     ChangeStream, Committed, KeyRange, MemStore, QuorumState, ReadConsistency, ReadView,
@@ -37,27 +37,6 @@ use crate::{
 };
 
 // ----- fixtures -----------------------------------------------------------------------------
-
-/// A directory that is removed when the test ends.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("tenko-queue-test-{}", Uuid::now_v7()));
-        fs::create_dir_all(&path).expect("temporary directory");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
 
 /// A `MemStore` that can be told to report an isolated member.
 struct GateStore {
@@ -189,7 +168,7 @@ impl World {
         });
         let service =
             IpamService::with_direct_jobs(Arc::clone(&gate) as Arc<dyn Store>).expect("service");
-        let dir = TempDir::new();
+        let dir = TempDir::new("queue");
         let queue = Arc::new(LocalQueue::open(dir.path().join("queue"), NODE).expect("queue"));
         let tenant = TenantId::generate();
         let vrf = VrfId::generate();
@@ -445,7 +424,8 @@ async fn the_directory_is_private_and_so_are_the_item_files() {
         .item(1, SummaryAction::Update, vec![describe(world.address, "a")])
         .await;
     world.queue.add(&item).expect("add");
-    let mode = |path: &Path| fs::metadata(path).expect("metadata").permissions().mode() & 0o777;
+    let mode =
+        |path: &std::path::Path| fs::metadata(path).expect("metadata").permissions().mode() & 0o777;
     assert_eq!(mode(world.queue.dir()), 0o700);
     assert_eq!(
         mode(&world.queue.dir().join(format!("{}.json", item.id))),

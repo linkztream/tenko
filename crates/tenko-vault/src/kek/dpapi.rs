@@ -129,42 +129,14 @@ fn unseal_error(scope: DpapiScope, label: &str, cause: &impl fmt::Display) -> Va
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        sync::mpsc,
-        thread,
-        time::Duration,
-    };
+    use std::{fs, sync::mpsc, thread, time::Duration};
+
+    use tenko_core::testing::TempDir;
 
     use super::*;
     use crate::kek::{KekConfig, KekInit, hex};
 
     const SCOPES: [DpapiScope; 2] = [DpapiScope::User, DpapiScope::Machine];
-
-    /// A temporary directory that is removed on drop, also when a test fails.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "tenko-vault-dpapi-{name}-{}",
-                tenko_core::SecretId::generate()
-            ));
-            let _ = fs::remove_dir_all(&dir);
-            Self(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn sample_key() -> Vec<u8> {
         (0u8..32)
@@ -407,7 +379,7 @@ mod tests {
     }
 
     fn generations_through_the_config(scope: DpapiScope) {
-        let temp = TempDir::new("config");
+        let temp = TempDir::new("dpapi-config");
         let dir = temp.path();
         let config = KekConfig::Dpapi {
             dir: dir.to_path_buf(),

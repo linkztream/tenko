@@ -12,8 +12,13 @@ use std::{
     time::Duration,
 };
 
-use common::{audit_of, cleanup, ctx, scratch_dir, spec, value};
-use tenko_core::{NodeId, Revision, cluster::LEADER_EPOCH, secret::SecretRef};
+use common::{audit_of, ctx, spec, value};
+use tenko_core::{
+    NodeId, Revision,
+    cluster::LEADER_EPOCH,
+    secret::SecretRef,
+    testing::{TempDir, wait_until_async},
+};
 use tenko_store::{
     ChangeStream, Committed, DerivedIndex, MemStore, MemberStatus, QuorumState, ReadConsistency,
     ReadView, ReadViewExt, Store, StoreError, StoreStatus, WatchFilter, WriteBatch,
@@ -252,7 +257,8 @@ async fn envelope_ids(store: &Arc<ClusterStore>, secrets: &[SecretRef]) -> Vec<S
 
 #[tokio::test]
 async fn the_vault_records_the_kek_state_and_protection_at_start() {
-    let root = scratch_dir("dist-start");
+    let root_guard = TempDir::new("dist-start");
+    let root = root_guard.join("data");
     let store = ClusterStore::new();
     let one = first(&store, &root.join("c1")).await;
     let state = state(&store).await;
@@ -268,12 +274,12 @@ async fn the_vault_records_the_kek_state_and_protection_at_start() {
     let summary = one.admin.summary().expect("cached");
     assert_eq!(summary.active, status.active);
     assert_eq!(summary.generations, 1);
-    cleanup(&root);
 }
 
 #[tokio::test]
 async fn an_online_rotation_reaches_running_members_and_a_stopped_one_fetches_at_start() {
-    let root = scratch_dir("dist-rotate");
+    let root_guard = TempDir::new("dist-rotate");
+    let root = root_guard.join("data");
     let store = ClusterStore::new();
     let one = first(&store, &root.join("c1")).await;
     let secrets = put_secrets(one.vault(), 5).await;
@@ -361,12 +367,12 @@ async fn an_online_rotation_reaches_running_members_and_a_stopped_one_fetches_at
     assert_eq!(three.vault().ring().active().id(), new);
     assert_reads(three.vault(), &secrets).await;
     assert_reads(three.vault(), &later).await;
-    cleanup(&root);
 }
 
 #[tokio::test]
 async fn a_write_that_races_the_activation_is_redone_under_the_new_generation() {
-    let root = scratch_dir("dist-race");
+    let root_guard = TempDir::new("dist-race");
+    let root = root_guard.join("data");
     let store = ClusterStore::new();
     let one = first(&store, &root.join("c1")).await;
     let two = join(&store, &root.join("c2"), 1001, &one).await;
@@ -384,12 +390,12 @@ async fn a_write_that_races_the_activation_is_redone_under_the_new_generation() 
         std::slice::from_ref(&new)
     );
     assert_eq!(two.vault().ring().active().id(), new);
-    cleanup(&root);
 }
 
 #[tokio::test]
 async fn a_reachable_member_that_does_not_take_the_generation_fails_the_rotation() {
-    let root = scratch_dir("dist-timeout");
+    let root_guard = TempDir::new("dist-timeout");
+    let root = root_guard.join("data");
     let store = ClusterStore::new();
     let one = first(&store, &root.join("c1")).await;
     let secrets = put_secrets(one.vault(), 2).await;
@@ -436,12 +442,12 @@ async fn a_reachable_member_that_does_not_take_the_generation_fails_the_rotation
     );
     // A new request is accepted after a failure.
     one.admin.request_rotation(&ctx()).await.expect("again");
-    cleanup(&root);
 }
 
 #[tokio::test]
 async fn a_deposed_leader_cannot_advance_a_rotation() {
-    let root = scratch_dir("dist-deposed");
+    let root_guard = TempDir::new("dist-deposed");
+    let root = root_guard.join("data");
     let store = ClusterStore::new();
     let one = first(&store, &root.join("c1")).await;
     one.admin.request_rotation(&ctx()).await.expect("request");
@@ -460,12 +466,12 @@ async fn a_deposed_leader_cannot_advance_a_rotation() {
         one.admin.rotation_step(1).await.expect("new term"),
         RotationStep::Advanced
     );
-    cleanup(&root);
 }
 
 #[tokio::test]
 async fn the_services_complete_a_rotation_on_their_own() {
-    let root = scratch_dir("dist-services");
+    let root_guard = TempDir::new("dist-services");
+    let root = root_guard.join("data");
     let store = ClusterStore::new();
     let one = first(&store, &root.join("c1")).await;
     let secrets = put_secrets(one.vault(), 3).await;
@@ -480,20 +486,15 @@ async fn the_services_complete_a_rotation_on_their_own() {
         tokio::spawn(async move { service.run(0, stop).await })
     };
     one.admin.request_rotation(&ctx()).await.expect("request");
-    let mut done = None;
-    for _ in 0..200 {
+    let done = wait_until_async("the rotation to end on its own", async || {
         let state = state(&store).await;
-        if state
+        state
             .rotation
             .as_ref()
             .is_some_and(|rotation| !rotation.phase.is_running())
-        {
-            done = Some(state);
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let done = done.expect("the rotation ends on its own");
+            .then_some(state)
+    })
+    .await;
     assert_eq!(
         done.rotation.as_ref().map(|rotation| rotation.phase),
         Some(RotationPhase::Done)
@@ -502,22 +503,19 @@ async fn the_services_complete_a_rotation_on_their_own() {
         envelope_ids(&store, &secrets).await,
         vec![done.active.clone(); 3]
     );
-    for _ in 0..100 {
-        if two.vault().ring().active().id() == done.active {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert_eq!(two.vault().ring().active().id(), done.active);
+    wait_until_async("the follower to take the new active KEK", async || {
+        two.vault().ring().active().id() == done.active
+    })
+    .await;
     stop.cancel();
     follower.await.expect("follower task");
     assert_eq!(leader.await.expect("leader task"), Ok(()));
-    cleanup(&root);
 }
 
 #[tokio::test]
 async fn fetch_missing_contacts_nobody_when_nothing_is_missing() {
-    let root = scratch_dir("dist-nothing");
+    let root_guard = TempDir::new("dist-nothing");
+    let root = root_guard.join("data");
     let store = ClusterStore::new();
     let one = first(&store, &root.join("c1")).await;
     let ring = one.vault().ring().as_ref().clone();
@@ -532,7 +530,6 @@ async fn fetch_missing_contacts_nobody_when_nothing_is_missing() {
     .await
     .expect("nothing to fetch");
     assert_eq!(ring.active().id(), one.vault().ring().active().id());
-    cleanup(&root);
 }
 
 /// A stand-in for a sealing mechanism (DPAPI, `systemd-creds`) on every platform.
@@ -582,7 +579,8 @@ async fn start_with(store: &Arc<ClusterStore>, ring: KekRing, provider: &str) ->
 
 #[tokio::test]
 async fn a_plain_generation_dropped_beside_a_sealed_one_is_refused_and_alarmed() {
-    let root = scratch_dir("dist-r15");
+    let root_guard = TempDir::new("dist-r15");
+    let root = root_guard.join("data");
     let dir = root.join("kek");
     let sealed = KekDir::new(&dir, Arc::new(Sealed));
     let first = sealed
@@ -629,7 +627,6 @@ async fn a_plain_generation_dropped_beside_a_sealed_one_is_refused_and_alarmed()
         .expect("read")
         .expect("alarm");
     assert_eq!(alarm.count, 2);
-    cleanup(&root);
 }
 
 fn ring_with(protection: KekProtection) -> KekRing {

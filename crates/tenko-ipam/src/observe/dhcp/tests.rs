@@ -15,6 +15,7 @@ use tenko_core::{
     net::Duid,
     observe::NetworkDhcp,
     serde_util::HexBytes,
+    testing::wait_until_async,
 };
 use tenko_store::{MemStore, WatchError, WriteBatch};
 
@@ -1063,20 +1064,6 @@ async fn a_view_without_a_follower_answers_caught_up_from_what_it_holds() {
 
 // The follower.
 
-/// Polls `check` for a quarter of a second.
-async fn within_a_quarter_of_a_second(mut check: impl FnMut() -> bool) -> bool {
-    let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
-    loop {
-        if check() {
-            return true;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(Duration::from_millis(2)).await;
-    }
-}
-
 fn started(
     store: &Arc<dyn Store>,
 ) -> (
@@ -1100,20 +1087,20 @@ async fn the_follower_builds_at_start_and_follows_a_lease_change() {
 
     let (leases, stop, task) = started(&store);
     assert!(leases.is_following());
-    assert!(
-        within_a_quarter_of_a_second(|| leases.builds() == 1 && leases.len() == 1).await,
-        "built at start"
-    );
+    wait_until_async("the view to be built at start", async || {
+        leases.builds() == 1 && leases.len() == 1
+    })
+    .await;
 
     // A commit shows in the view without a read of the reader's.
     let mut second = lease(vrf, 0x21, at(1), BindingState::Active);
     second.addr = Ipv4Addr::new(198, 51, 100, 16);
     let revision = put(&store, &second).await;
     let key = address_key(vrf, second.addr);
-    assert!(
-        within_a_quarter_of_a_second(|| has(&leases.facts(at(2)), &key)).await,
-        "the fact of a new lease"
-    );
+    wait_until_async("the fact of a new lease", async || {
+        has(&leases.facts(at(2)), &key)
+    })
+    .await;
     assert!(leases.caught_up(revision).await);
     assert!(leases.revision() >= revision);
 
@@ -1146,16 +1133,16 @@ async fn a_deleted_lease_row_leaves_the_view() {
     let row6 = lease6(vrf, at(0), BindingState::Active);
     put6(&store, &row6).await;
     let (leases, stop, task) = started(&store);
-    assert!(within_a_quarter_of_a_second(|| leases.len() == 2).await);
+    wait_until_async("both leases to be built", async || leases.len() == 2).await;
 
     commit(&store, |batch| {
         batch.delete_typed(&tables::LEASES, &(vrf, row.addr));
     })
     .await;
-    assert!(
-        within_a_quarter_of_a_second(|| !has(&leases.facts(at(1)), &address_key(vrf, IP4))).await,
-        "the deleted row's facts are gone"
-    );
+    wait_until_async("the deleted row's facts to be gone", async || {
+        !has(&leases.facts(at(1)), &address_key(vrf, IP4))
+    })
+    .await;
     let revision = commit(&store, |batch| {
         batch.delete_typed(&tables::LEASES6, &(vrf, row6.addr6()));
     })
@@ -1167,7 +1154,7 @@ async fn a_deleted_lease_row_leaves_the_view() {
     let mut free = row.clone();
     free.state = BindingState::Free;
     put(&store, &row).await;
-    assert!(within_a_quarter_of_a_second(|| leases.len() == 1).await);
+    wait_until_async("one lease to be built", async || leases.len() == 1).await;
     let revision = put(&store, &free).await;
     assert!(leases.caught_up(revision).await);
     assert!(leases.is_empty());
@@ -1179,7 +1166,7 @@ async fn a_deleted_lease_row_leaves_the_view() {
 async fn changes_wake_after_a_lease_change_and_not_after_a_change_of_another_table() {
     let store: Arc<dyn Store> = Arc::new(MemStore::default());
     let (leases, stop, task) = started(&store);
-    assert!(within_a_quarter_of_a_second(|| leases.builds() == 1).await);
+    wait_until_async("the view to be built", async || leases.builds() == 1).await;
     // The build leaves a wake behind; drain it.
     while tokio::time::timeout(Duration::from_millis(30), leases.changes().notified())
         .await
@@ -1230,7 +1217,7 @@ async fn changes_wake_after_a_lease_change_and_not_after_a_change_of_another_tab
 async fn the_follower_stops_when_told_to() {
     let store: Arc<dyn Store> = Arc::new(MemStore::default());
     let (leases, stop, task) = started(&store);
-    assert!(within_a_quarter_of_a_second(|| leases.builds() == 1).await);
+    wait_until_async("the view to be built", async || leases.builds() == 1).await;
     stop.cancel();
     tokio::time::timeout(Duration::from_secs(1), task)
         .await
@@ -1342,11 +1329,15 @@ async fn rebuilds_after(error: fn() -> WatchError) {
         error,
     });
     let (leases, stop, task) = started(&store);
-    assert!(
-        within_a_quarter_of_a_second(|| leases.builds() >= 2).await,
-        "the view was built again from the tables, builds: {}",
-        leases.builds()
-    );
+    wait_until_async("the view to be built again from the tables", async || {
+        let builds = leases.builds();
+        if builds >= 2 {
+            Ok(())
+        } else {
+            Err(format!("builds: {builds}"))
+        }
+    })
+    .await;
     let facts = leases.facts(at(2));
     assert_eq!(
         mac_of(subject(&facts, &address_key(vrf, kept))),

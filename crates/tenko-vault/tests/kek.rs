@@ -5,12 +5,11 @@ mod common;
 
 use std::{fs, sync::Arc};
 
-use common::{
-    audit_of, cleanup, ctx, envelope_of, mem_store, scan_all, scratch_dir, spec, value, view,
-};
+use common::{audit_of, ctx, envelope_of, mem_store, scan_all, spec, value, view};
 use tenko_core::{
     Coded,
     secret::{SecretClass, SecretRef, VaultEnvelope},
+    testing::TempDir,
 };
 use tenko_store::{MemStore, Store};
 use tenko_vault::{
@@ -541,7 +540,8 @@ async fn opening_checks_every_kek_in_use_not_only_the_first() {
 
 #[test]
 fn a_missing_key_file_is_unavailable() {
-    let dir = scratch_dir("missing-key");
+    let dir_guard = TempDir::new("missing-key");
+    let dir = dir_guard.join("data");
     let config = KekConfig::File {
         path: dir.join("does-not-exist.key"),
         retired: Vec::new(),
@@ -558,7 +558,8 @@ fn a_missing_key_file_is_unavailable() {
 
 #[test]
 fn an_unreadable_key_file_or_retired_file_is_unavailable() {
-    let dir = scratch_dir("bad-key");
+    let dir_guard = TempDir::new("bad-key");
+    let dir = dir_guard.join("data");
     fs::create_dir_all(&dir).expect("dir");
     let bad = dir.join("bad.key");
     fs::write(&bad, b"definitely not a key").expect("write");
@@ -592,12 +593,12 @@ fn an_unreadable_key_file_or_retired_file_is_unavailable() {
             );
         }
     }
-    cleanup(&dir);
 }
 
 #[test]
 fn create_if_missing_creates_the_key_file_once() {
-    let dir = scratch_dir("create-key");
+    let dir_guard = TempDir::new("create-key");
+    let dir = dir_guard.join("data");
     let path = dir.join("nested").join("kek.key");
     let config = KekConfig::File {
         path: path.clone(),
@@ -622,12 +623,12 @@ fn create_if_missing_creates_the_key_file_once() {
     // Require finds it too.
     let third = config.load(KekInit::Require).expect("require");
     assert_eq!(third.active().id(), first.active().id());
-    cleanup(&dir);
 }
 
 #[test]
 fn key_files_in_raw_hex_and_base64_form_load_the_same_kek() {
-    let dir = scratch_dir("key-forms");
+    let dir_guard = TempDir::new("key-forms");
+    let dir = dir_guard.join("data");
     fs::create_dir_all(&dir).expect("dir");
     let raw: Vec<u8> = (0u8..32).collect();
     let forms: [(&str, Vec<u8>); 4] = [
@@ -658,12 +659,12 @@ fn key_files_in_raw_hex_and_base64_form_load_the_same_kek() {
         ids.push(ring.active().id().to_owned());
     }
     assert!(ids.windows(2).all(|pair| pair[0] == pair[1]), "{ids:?}");
-    cleanup(&dir);
 }
 
 #[tokio::test]
 async fn a_file_kek_survives_a_full_restart() {
-    let dir = scratch_dir("restart");
+    let dir_guard = TempDir::new("restart");
+    let dir = dir_guard.join("data");
     let config = KekConfig::File {
         path: dir.join("kek").join("kek.key"),
         retired: Vec::new(),
@@ -717,12 +718,12 @@ async fn a_file_kek_survives_a_full_restart() {
         matches!(error, VaultError::KekUnavailable { .. }),
         "{error:?}"
     );
-    cleanup(&dir);
 }
 
 #[tokio::test]
 async fn a_file_kek_rotates_through_a_new_file_and_the_retired_list() {
-    let dir = scratch_dir("file-rotation");
+    let dir_guard = TempDir::new("file-rotation");
+    let dir = dir_guard.join("data");
     let old_path = dir.join("old.key");
     let new_path = dir.join("new.key");
     let store = mem_store();
@@ -800,7 +801,6 @@ async fn a_file_kek_rotates_through_a_new_file_and_the_retired_list() {
         matches!(error, VaultError::KekUnavailable { .. }),
         "{error:?}"
     );
-    cleanup(&dir);
 }
 
 #[test]

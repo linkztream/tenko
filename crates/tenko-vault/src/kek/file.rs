@@ -201,16 +201,9 @@ fn base64_value(c: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use tenko_core::testing::TempDir;
 
-    fn temp_path(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir()
-            .join(format!(
-                "tenko-vault-{name}-{}",
-                tenko_core::SecretId::generate()
-            ))
-            .join("kek.key")
-    }
+    use super::*;
 
     #[test]
     fn keys_parse_from_raw_hex_and_base64() {
@@ -232,7 +225,8 @@ mod tests {
 
     #[test]
     fn missing_file_is_unavailable_and_create_round_trips() {
-        let path = temp_path("file-kek");
+        let temp = TempDir::new("file-kek");
+        let path = temp.join("kek").join("kek.key");
         assert!(matches!(
             FileKek::open(&path),
             Err(VaultError::KekUnavailable { .. })
@@ -248,18 +242,17 @@ mod tests {
             dek.as_bytes()
         );
         assert_eq!(opened.protection(), KekProtection::PlainFile);
-        let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
 
     #[test]
     fn a_non_key_file_is_unavailable() {
-        let path = temp_path("file-kek-bad");
+        let temp = TempDir::new("file-kek-bad");
+        let path = temp.join("kek").join("kek.key");
         create_private_dir(path.parent().expect("parent")).expect("dir");
         fs::write(&path, b"not a key").expect("write");
         assert!(matches!(
             FileKek::open(&path),
             Err(VaultError::KekUnavailable { .. })
         ));
-        let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
 }

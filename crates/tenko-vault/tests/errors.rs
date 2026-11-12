@@ -6,8 +6,12 @@ mod common;
 use std::collections::BTreeSet;
 
 use bytes::Bytes;
-use common::{ctx, envelope_of, put_envelope, put_raw, scratch_dir, spec, unique_marker, value};
-use tenko_core::{Coded, SecretId, secret::SecretRef, secret::VaultEnvelope};
+use common::{ctx, envelope_of, put_envelope, put_raw, spec, unique_marker, value};
+use tenko_core::{
+    Coded, SecretId,
+    secret::{SecretRef, VaultEnvelope},
+    testing::TempDir,
+};
 use tenko_store::{Store, StoreError, WriteBatch};
 use tenko_vault::{
     KekConfig, KekInit, MAX_SECRET_LEN, MemVault, SecretBytes, Vault, VaultError, tables,
@@ -169,7 +173,8 @@ async fn a_failed_precondition_surfaces_as_a_conflict() {
 
 #[test]
 fn provider_failures_are_coded() {
-    let dir = scratch_dir("coded-errors");
+    let dir_guard = TempDir::new("coded-errors");
+    let dir = dir_guard.join("data");
     let missing = KekConfig::File {
         path: dir.join("absent.key"),
         retired: Vec::new(),

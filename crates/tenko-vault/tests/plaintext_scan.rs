@@ -21,6 +21,7 @@ use tenko_core::{
     CounterKey, IdempotencyKey, ObjectRef, Revision, TableName, UserId,
     audit::AuditDraft,
     secret::{SecretClass, SecretRef},
+    testing::TempDir,
 };
 use tenko_store::{
     ChangeStream, Committed, DerivedIndex, MemStore, ReadConsistency, ReadView, Store, StoreError,
@@ -627,7 +628,8 @@ async fn a_kek_transfer_carries_no_material_in_clear_anywhere() {
             "Debug of a received generation"
         );
     }
-    let root = common::scratch_dir("scan-transfer");
+    let root_guard = TempDir::new("scan-transfer");
+    let root = root_guard.join("data");
     let imported = import_and_scan(&root, &received, &needles);
     drop(received);
 
@@ -651,5 +653,4 @@ async fn a_kek_transfer_carries_no_material_in_clear_anywhere() {
             );
         }
     }
-    common::cleanup(&root);
 }

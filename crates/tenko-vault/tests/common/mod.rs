@@ -2,11 +2,7 @@
 
 #![allow(dead_code)]
 
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 
 use bytes::Bytes;
 use tenko_core::{
@@ -49,16 +45,6 @@ pub fn value(text: &str) -> SecretBytes {
 /// The reference object of a secret, as audit records name it.
 pub fn object(secret: SecretRef) -> ObjectRef {
     ObjectRef::from(secret.secret)
-}
-
-/// A unique scratch directory under the system temp directory (not created).
-pub fn scratch_dir(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("tenko-vault-it-{name}-{}", SecretId::generate()))
-}
-
-/// Removes a scratch directory, ignoring errors.
-pub fn cleanup(dir: &Path) {
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A fresh read view of the store.

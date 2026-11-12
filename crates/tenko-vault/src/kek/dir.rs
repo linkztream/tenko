@@ -548,16 +548,9 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<(), VaultError>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use tenko_core::testing::TempDir;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "tenko-vault-{name}-{}",
-            tenko_core::SecretId::generate()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        dir
-    }
+    use super::*;
 
     #[test]
     fn generation_files_round_trip() {
@@ -612,7 +605,8 @@ mod tests {
 
     #[test]
     fn a_plain_generation_newer_than_a_sealed_one_is_refused() {
-        let dir = temp_dir("dir-r15");
+        let temp = TempDir::new("dir-r15");
+        let dir = temp.join("kek");
         let sealed = KekDir::new(&dir, Arc::new(Sealed));
         let first = sealed.load(KekInit::CreateIfMissing).expect("create");
         assert!(first.active().id().starts_with("sealed-1-"));
@@ -641,12 +635,12 @@ mod tests {
             .expect("load");
         assert!(allowed.active().id().starts_with("plain-2-"));
         assert_eq!(allowed.refused(), []);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn older_plain_generations_still_load_beside_sealed_ones() {
-        let dir = temp_dir("dir-r15-older");
+        let temp = TempDir::new("dir-r15-older");
+        let dir = temp.join("kek");
         // A sealing tool that did not work at first: plain files, sealed ones still read.
         let plain = KekDir::new(&dir, Arc::new(PlainSealer)).also_reading(Arc::new(Sealed));
         let first = plain.load(KekInit::CreateIfMissing).expect("create");
@@ -676,12 +670,12 @@ mod tests {
             .expect("allowed on purpose");
         assert!(allowed.id().starts_with("plain-3-"), "{}", allowed.id());
         assert_eq!(allowed.protection(), KekProtection::PlainFile);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn imports_keep_ids_skip_known_generations_and_refuse_conflicts() {
-        let dir = temp_dir("dir-import");
+        let temp = TempDir::new("dir-import");
+        let dir = temp.join("kek");
         let kek_dir = KekDir::new(&dir, Arc::new(Sealed));
         let incoming = [transferred("dpapi-1-aa", 1), transferred("dpapi-2-bb", 2)];
         let written = kek_dir.import(&incoming).expect("import");
@@ -731,7 +725,6 @@ mod tests {
             kek_dir.load(KekInit::Require).expect("load").ids().count(),
             3
         );
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -744,7 +737,8 @@ mod tests {
 
     #[test]
     fn require_fails_on_an_empty_directory_and_create_makes_generation_one() {
-        let dir = temp_dir("dir-require");
+        let temp = TempDir::new("dir-require");
+        let dir = temp.join("kek");
         let kek_dir = KekDir::new(&dir, Arc::new(PlainSealer));
         assert!(matches!(
             kek_dir.load(KekInit::Require),
@@ -755,12 +749,12 @@ mod tests {
         assert!(dir.join("kek-000001.plain").exists());
         let again = kek_dir.load(KekInit::Require).expect("load");
         assert_eq!(again.active().id(), ring.active().id());
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn rotation_adds_generations_and_retires_old_ones() {
-        let dir = temp_dir("dir-rotate");
+        let temp = TempDir::new("dir-rotate");
+        let dir = temp.join("kek");
         let kek_dir = KekDir::new(&dir, Arc::new(PlainSealer));
         let first = kek_dir.load(KekInit::CreateIfMissing).expect("create");
         let second = kek_dir.create_next().expect("next");
@@ -778,7 +772,6 @@ mod tests {
         kek_dir.remove(first.active().id()).expect("remove");
         let ring = kek_dir.load(KekInit::Require).expect("load");
         assert_eq!(ring.ids().count(), 1);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     /// A generation that cannot be read stops the whole load, also when a newer generation
@@ -786,7 +779,8 @@ mod tests {
     /// sealed.
     #[test]
     fn a_corrupt_generation_stops_the_load() {
-        let dir = temp_dir("dir-corrupt");
+        let temp = TempDir::new("dir-corrupt");
+        let dir = temp.join("kek");
         let kek_dir = KekDir::new(&dir, Arc::new(PlainSealer));
         kek_dir.load(KekInit::CreateIfMissing).expect("create");
         kek_dir.create_next().expect("a second generation");
@@ -805,14 +799,14 @@ mod tests {
             "{:?}",
             kek_dir.load(KekInit::Require).err()
         );
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]
     #[test]
     fn generation_files_are_private() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = temp_dir("dir-mode");
+        let temp = TempDir::new("dir-mode");
+        let dir = temp.join("kek");
         let kek_dir = KekDir::new(&dir, Arc::new(PlainSealer));
         kek_dir.load(KekInit::CreateIfMissing).expect("create");
         let mode = fs::metadata(dir.join("kek-000001.plain"))
@@ -820,6 +814,5 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
-        let _ = fs::remove_dir_all(&dir);
     }
 }
