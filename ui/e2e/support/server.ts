@@ -35,6 +35,7 @@ import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { request } from "@playwright/test";
+import { browserSafePort } from "./ports";
 import { Proc, runTenko, tenkoBinary, type Line } from "./process";
 
 export { resolveBuiltBinary, tenkoBinary } from "./process";
@@ -80,8 +81,13 @@ const READY_TIMEOUT_MS = 60_000;
 const STOP_TIMEOUT_MS = 30_000;
 const READY_PATH = "/api/v1/health/ready";
 
-/** A free TCP port on the loopback interface: bind port 0, read the port, release it. */
-export async function freePort(): Promise<number> {
+/** A free TCP port on the loopback interface that a browser may open (support/ports.ts). */
+export function freePort(): Promise<number> {
+  return browserSafePort(systemPort);
+}
+
+/** A TCP port the system gives the loopback interface: bind port 0, read the port, release it. */
+async function systemPort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((done, fail) => {
     server.once("error", fail);

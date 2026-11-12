@@ -170,7 +170,8 @@ export default defineConfig(({ command, mode }) => {
     },
     test: {
       environment: "jsdom",
-      include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
+      // The end-to-end support has unit tests of its own pure parts (Playwright runs only *.spec.ts).
+      include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs", "e2e/support/**/*.test.ts"],
       // Stylesheets are empty modules under test, except the shared one, which the dialog
       // test reads as text (`?raw`) to check its rules against the rendered panel.
       css: { include: [/app[/]styles[/]app[.]css/] },
