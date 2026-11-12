@@ -26,14 +26,20 @@ A sleep guesses how long another thread, task or process needs, and a loaded mac
 longer.
 
 - Remedy: wait until the named condition holds, with a generous limit (30 s), so a quiet
-  machine pays nothing; when the code under test waits with `tokio::time`, use a paused clock
+  machine pays nothing: `tenko_core::testing::wait_until` (`wait_until_async` in an async
+  test; the crate's dev-dependency on `tenko-core` enables the feature `testing`), whose
+  check answers `bool`, `Option` or `Result` (the last `Err` is printed as the observed state
+  when the wait gives up). When the code under test waits with `tokio::time`, use a paused clock
   (`#[tokio::test(start_paused = true)]` and `tokio::time::advance`, as
   `crates/tenko-scan/src/limit.rs` does). Where the product offers a signal, wait on it (for
   example `hub.subscribers_of` in `crates/tenko-api/src/sse/hub.rs` for "the watcher has
-  subscribed"). In the UI, `waitFor`, `findBy*` or fake timers (`vi.useFakeTimers`,
-  `vi.advanceTimersByTimeAsync`); end to end, `expect.poll` or an `expect(...)` with a limit,
-  and `page.clock` for time itself. A sleep is allowed inside the shared wait helper and in a
-  pacing loop (a load generator), each with an exception that says so.
+  subscribed"). In the UI, `waitFor`, `findBy*` (30 s per wait by default, `WAIT_LIMIT_MS` in
+  `ui/src/app/testing/setup.ts`; the test limit of 60 s lets one failed wait report its last
+  state first, so a test does not lower it, nor a wait's own limit below the default) or fake
+  timers (`vi.useFakeTimers`, `vi.advanceTimersByTimeAsync`); end to
+  end, `expect.poll` or an `expect(...)` with a limit, and `page.clock` for time itself. The
+  shared wait helper sleeps between its checks out of the lint's sight; elsewhere a sleep is
+  allowed only in a pacing loop (a load generator), with an exception that says so.
 - The lint reports: `thread::sleep`, `tokio::time::sleep` and `sleep_until`, a bare
   `sleep(...)` (an imported one); `new Promise((r) => setTimeout(r, ...))`,
   `page.waitForTimeout(...)` and the calls of a helper in the same file whose body is such a
@@ -48,8 +54,8 @@ longer.
 A limit is a bet on the machine's speed; under load an operation of milliseconds can take
 seconds. A limit below 10 s is allowed only when the limit itself is what the test checks.
 
-- Remedy: one wait helper with a 30 s limit that returns as soon as the condition holds.
-  Until the shared helper exists, raise the local limit to 30 s.
+- Remedy: the shared wait (rule 1), whose 30 s limit (`WAIT_LIMIT`) returns as soon as the
+  condition holds; `wait_until_within` only for a wait that legitimately takes longer.
 - The lint reports a literal `Duration::from_*` or `Duration::new` under 10 s that is passed to
   a call whose name holds `timeout`, `deadline`, `wait`, `until`, `eventually` or `within`
   (also through `Some(...)`; not a capitalized constructor or enum variant such as
@@ -115,9 +121,12 @@ A port that was free when the test asked may be taken before the server binds it
 test of the same run.
 
 - Remedy: keep the socket until the server takes it, or let the server bind port 0 and report
-  the address it got; the pooled helpers `free_port` in `crates/tenko/tests/serve_support` and
-  `crates/tenko-dns/tests/support/ports.rs` hand out each port once per process and retry the
-  start on a lost race.
+  the address it got. `tenko_core::testing::free_port` draws a port below the ephemeral ranges,
+  never hands it out twice in a process and holds it (TCP and UDP bound on `127.0.0.1`) until
+  `release()`, which a test calls right before the server binds it, or until the test's own
+  socket takes it over (`into_udp()`); the harnesses
+  (`crates/tenko/tests/serve_support`, `crates/tenko-dns/tests/support/ports.rs`) start again
+  on a new port when the bind still loses a race with another process.
 - The lint reports a bind to port 0 (`"127.0.0.1:0"`, `(addr, 0)`, `SocketAddrV4::new(.., 0)`)
   whose socket is a temporary chained into `.local_addr()`, or bound to a name that is only
   asked for its address or dropped; in TypeScript, `listen(0)` in a function that also closes
@@ -175,6 +184,26 @@ for an unrelated reason.
   Err(_)))` and `toThrow()` or `toThrowError()` without an argument.
 - It cannot see: `.unwrap_err();` with nothing checked afterwards, `assert_eq!(x.is_err(),
   true)`.
+
+### 10. One copy of the test support (`helper`)
+
+A fix in one copy of a helper does not reach the others: the copies of the wait drifted to
+limits from 250 ms to 30 s, and half of them printed nothing on failure.
+
+- Remedy: the shared support. Rust: `tenko_core::testing` (feature `testing`) with the wait
+  (rule 1), `free_port` (rule 6) and `TempDir`, a temporary directory whose removal failure
+  fails the test with the path, and which is kept with its path printed when the test is
+  failing already. UI unit tests: `ui/src/app/testing/` (`renderApp`, `axeViolations`,
+  `preloadPages`, `renderRoute`) and the testkits' `rows` and `loaded(grid)`. End to end:
+  `ui/e2e/support/` (`axeViolations`, `arrangeScope`). A helper that does more than wait
+  takes a name that says what it waits for and calls the shared wait.
+- The lint reports a free function (no `self`) in Rust test code named `wait_until`,
+  `wait_for`, `eventually`, `until`, `udp_port` or `free_port`; a `renderApp` or
+  `axeViolations` defined in a UI unit test or in an end-to-end file outside
+  `ui/e2e/support/`.
+- It cannot see: a copy under another name, a closure of a shared name, a poll loop written
+  out in a test, a method of a test harness (which should call the shared wait), a copy in a
+  UI module that is not a test file.
 
 ## Time zone and locale of the unit tests
 

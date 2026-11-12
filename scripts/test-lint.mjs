@@ -82,6 +82,13 @@
 //                 assertion macros, `panic!`, `unreachable!`, `unwrap_err`, `expect_err` and
 //                 calls of `assert_*` helpers; `expect(` and `assert*(` in TypeScript.
 //                 Blind: an exit through `?`, an assertion inside a helper of another name.
+//   helper        A local copy of a shared test helper: a free function (no `self`) in Rust
+//                 test code named `wait_until`, `wait_for`, `eventually`, `until`, `udp_port` or
+//                 `free_port` (the shared ones are in `tenko_core::testing`); a function or
+//                 constant named `renderApp` or `axeViolations` in a UI unit test or in an
+//                 end-to-end file outside `ui/e2e/support/` (the shared ones are there and in
+//                 `ui/src/app/testing/`). Blind: a copy under another name, a closure of a
+//                 shared name, a method of a test harness, a UI module that is not a test file.
 //   is-err        A refusal asserted by its kind alone: `assert!(x.is_err())`,
 //                 `assert!(!x.is_ok())`, `assert!(matches!(x, Err(_)))`; in TypeScript
 //                 `toThrow()` and `toThrowError()` without an argument. Blind:
@@ -120,7 +127,13 @@ export const RULES = {
   ignore: "a skipped test that names no runner (runner: <workflow>.yml#<job> or runner: <path>)",
   "early-return": "a return before the test's first assertion, without a runner reference",
   "is-err": "a refusal asserted by its kind alone; assert its code or error",
+  helper: "a local copy of a shared test helper; use tenko_core::testing, ui/src/app/testing or ui/e2e/support",
 };
+
+/** Names of the shared Rust test helpers that test code must not define again. */
+const SHARED_RS = /^(?:wait_until|wait_for|eventually|until|udp_port|free_port)$/;
+/** Definitions of the shared TypeScript test helpers, which only the shared modules hold. */
+const SHARED_TS = /(?<![\w$.])(?:(?:async\s+)?function\s*\*?\s*|(?:const|let|var)\s+)(renderApp|axeViolations)\b/g;
 
 const LIMIT_MS = 10_000;
 const DEFAULT_BASELINE = "scripts/test-lint.baseline.json";
@@ -821,6 +834,14 @@ export function scanRust(src, { fileIsTest = false, root = ".", jobs = {} } = {}
     findings.push({ rule: "early-return", line, scope: f.name, text: normalize(text), message: why ? `${RULES["early-return"]} (${why})` : RULES["early-return"] });
   }
 
+  // helper: a free function of a shared helper's name; a method (`self`) belongs to a harness
+  for (const f of fns) {
+    if (!f.test || !SHARED_RS.test(f.name)) continue;
+    const params = masked.slice(masked.indexOf("(", f.start), f.body);
+    if (/^\(\s*(?:&\s*(?:'\w+\s+)?)?(?:mut\s+)?self\b/.test(params)) continue;
+    findings.push({ rule: "helper", line: lineOf(starts, f.start), scope: f.name, text: `fn ${f.name}`, message: RULES.helper });
+  }
+
   return findings;
 }
 
@@ -1071,7 +1092,7 @@ const TIMING_TS = /\b\w*[Ee]lapsed\w*\b|\btook\w*\b|\bperformance\.now\s*\(\s*\)
 const PROMISE_SLEEP = /\bnew\s+Promise\s*(?:<[^>]*>)?\s*\(\s*(?:\(\s*)?[\w$]+(?:\s*\))?\s*=>\s*\{?\s*(?:(?:globalThis|window)\.)?setTimeout\s*\(/g;
 
 /** Findings of one TypeScript file (before exceptions). `config` is true for the configuration files. */
-export function scanTs(src, { config = false, root = ".", jobs = {} } = {}) {
+export function scanTs(src, { config = false, shared = false, root = ".", jobs = {} } = {}) {
   const masked = maskTs(src);
   const { tests, fnBodies, options } = parseTs(src, masked);
   const starts = lineStarts(src);
@@ -1099,6 +1120,9 @@ export function scanTs(src, { config = false, root = ".", jobs = {} } = {}) {
   };
   const call = (at, open) => src.slice(at, closing(masked, open) + 1);
   const fakeClock = FAKE_CLOCK_TS.test(masked);
+
+  // helper: a shared helper defined again outside the shared modules
+  if (!shared) for (const m of masked.matchAll(SHARED_TS)) add("helper", m.index, m[0].trim(), undefined, m[1]);
 
   // sleep
   const sleepers = new Set();
@@ -1359,7 +1383,7 @@ export function lintTree(root) {
   walk(path.join(root, "ui", "e2e"), ts, (f) => /\.tsx?$/.test(f));
   for (const f of ts) {
     const text = readFileSync(f, "utf8");
-    take(f, text, scanTs(text, ctx));
+    take(f, text, scanTs(text, { ...ctx, shared: /^ui\/e2e\/support\//.test(rel(root, f)) }));
   }
   for (const name of ["ui/playwright.config.ts", "ui/vite.config.ts"]) {
     const f = path.join(root, name);

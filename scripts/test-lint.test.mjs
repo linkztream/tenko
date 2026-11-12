@@ -163,7 +163,7 @@ describe("clock", () => {
 
 describe("port", () => {
   test("a port-0 socket that is a temporary, only asked for its address, or dropped", () => {
-    assert.deepEqual(rust('fn udp_port() -> u16 {\n    UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()\n}\n'), ["port"]);
+    assert.deepEqual(rust('fn any_udp_port() -> u16 {\n    UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()\n}\n'), ["port"]);
     assert.deepEqual(rust("fn closed_port() -> u16 {\n    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();\n    listener.local_addr().unwrap().port()\n}\n"), ["port"]);
     assert.deepEqual(rust('#[test]\nfn a() {\n    let l = TcpListener::bind("127.0.0.1:0").unwrap();\n    let port = l.local_addr().unwrap().port();\n    drop(l);\n    assert!(serve(port).is_ok());\n}\n'), ["port"]);
   });
@@ -176,6 +176,30 @@ describe("port", () => {
   test("TypeScript: listen(0) in a function that closes the server", () => {
     assert.deepEqual(ts('export async function freePort() {\n  const server = createServer();\n  await new Promise<void>((done) => server.listen(0, "127.0.0.1", () => done()));\n  const { port } = server.address();\n  await new Promise<void>((done) => server.close(() => done()));\n  return port;\n}\n'), ["port"]);
     assert.deepEqual(ts('export async function serve() {\n  const server = createServer();\n  await new Promise<void>((done) => server.listen(0, "127.0.0.1", () => done()));\n  return server;\n}\n'), []);
+  });
+});
+
+describe("helper", () => {
+  test("a local free function with a shared helper's name in Rust test code", () => {
+    for (const name of ["wait_until", "wait_for", "eventually", "until", "udp_port", "free_port"]) {
+      assert.deepEqual(rust(`fn ${name}(what: &str) {\n    let _ = what;\n}\n`), ["helper"], name);
+    }
+    assert.deepEqual(rust("async fn until<F>(what: &str, check: F) {\n    let _ = (what, check);\n}\n"), ["helper"]);
+    // In src, only under cfg(test).
+    assert.deepEqual(rust("#[cfg(test)]\nmod tests {\n    fn wait_for() {}\n}\n", { fileIsTest: false }), ["helper"]);
+  });
+
+  test("a method, another name, and product code are not reported", () => {
+    assert.deepEqual(rust("impl Lab {\n    fn wait_for(&self, what: &str) {}\n    fn until(&mut self) {}\n    fn wait_until(self: &Self) {}\n}\n"), []);
+    assert.deepEqual(rust("fn wait_for_leader(what: &str) {}\n"), []);
+    assert.deepEqual(rust("pub fn wait_for(state: u32) {}\n", { fileIsTest: false }), []);
+  });
+
+  test("TypeScript: renderApp and axeViolations outside the shared modules", () => {
+    assert.deepEqual(ts("async function renderApp(url: string) {\n  return url;\n}\n"), ["helper"]);
+    assert.deepEqual(ts("const axeViolations = async (page: Page) => [];\n"), ["helper"]);
+    assert.deepEqual(ts("export async function axeViolations(page: Page) {\n  return [];\n}\n", { shared: true }), []);
+    assert.deepEqual(ts('import { renderApp } from "../app/testing/app";\nit("a", async () => {\n  await renderApp("/");\n  expect(1).toBe(1);\n});\n'), []);
   });
 });
 
