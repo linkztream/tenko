@@ -1271,10 +1271,10 @@
         <segment><source>No relay agent is trusted: only clients on this server's own links are served.</source><target>Ingen reläagent är betrodd: bara klienter på serverns egna länkar får svar.</target></segment>
       </unit>
       <unit id="dhcp.settings.relays_list">
-        <segment><source>Relay agent addresses</source><target>Reläagenternas adresser</target></segment>
+        <segment><source>Relay agents and their links</source><target>Reläagenter och deras länkar</target></segment>
       </unit>
       <unit id="dhcp.settings.relays_list_help">
-        <segment><source>One address or prefix per line, such as 192.0.2.1 or 2001:db8::1. Use the addresses the relay agents send their requests from; routers often send from the interface toward this server, not from the giaddr. Relayed requests from any other sender are dropped. An empty list trusts no relay agent.</source><target>En adress eller ett prefix per rad, till exempel 192.0.2.1 eller 2001:db8::1. Ange adresserna som reläagenterna skickar sina förfrågningar från; routrar skickar ofta från gränssnittet mot servern, inte från giaddr. Vidarebefordrade förfrågningar från andra avsändare kastas. En tom lista litar inte på någon reläagent.</target></segment>
+        <segment><source>One relay agent per line: the addresses it sends from, an equals sign, then the links (networks) it may name, such as 192.0.2.1 = 198.51.100.0/24, 203.0.113.0/24. A bare address means that one host. Use the addresses the relay agents send their requests from; routers often send from the interface toward this server, not from the giaddr. A relay agent may only name scopes whose network overlaps one of its links. A link of 0.0.0.0/0 or ::/0 names every link; the Hardened profile refuses that for a new relay agent. Relayed requests from any other sender are dropped. An empty list trusts no relay agent.</source><target>En reläagent per rad: adresserna den skickar från, ett likhetstecken och sedan de länkar (nät) den får nämna, till exempel 192.0.2.1 = 198.51.100.0/24, 203.0.113.0/24. En ensam adress betyder just den värden. Ange adresserna som reläagenterna skickar sina förfrågningar från; routrar skickar ofta från gränssnittet mot servern, inte från giaddr. En reläagent får bara nämna omfång vars nät överlappar någon av dess länkar. Länken 0.0.0.0/0 eller ::/0 nämner alla länkar; säkerhetsprofilen Hardened vägrar det för en ny reläagent. Vidarebefordrade förfrågningar från andra avsändare kastas. En tom lista litar inte på någon reläagent.</target></segment>
       </unit>
       <unit id="dhcp.settings.relays_seen">
         <segment><source>Relay agents this server has seen</source><target>Reläagenter som servern har sett</target></segment>
@@ -1310,7 +1310,31 @@
         <segment><source>Trust {source} as a relay agent</source><target>Lita på {source} som reläagent</target></segment>
       </unit>
       <unit id="dhcp.settings.relays_trusted">
-        <segment><source>{source} is now a trusted relay agent</source><target>{source} är nu en betrodd reläagent</target></segment>
+        <segment><source>{source} is now a trusted relay agent with its links</source><target>{source} är nu en betrodd reläagent med sina länkar</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_col_link">
+        <segment><source>Network outside its links</source><target>Nät utanför länkarna</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_add_link">
+        <segment><source>Add link</source><target>Lägg till länk</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_add_link_label">
+        <segment><source>Add {link} to the links of {source}</source><target>Lägg till {link} bland länkarna för {source}</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_any_link">
+        <segment><source>These relay agents may name every link, so a host that can send as one of them can be served from any scope. Give each relay agent the links it serves:</source><target>Dessa reläagenter får nämna alla länkar, så en värd som kan skicka som någon av dem kan få svar från vilket omfång som helst. Ge varje reläagent de länkar den betjänar:</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_any_link_item">
+        <segment><source>{relay} served {networks}</source><target>{relay} betjänade {networks}</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_any_link_none">
+        <segment><source>{relay} (no served network shows in the lease rows yet)</source><target>{relay} (inget betjänat nät syns ännu i lease-raderna)</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_bind">
+        <segment><source>Bind to these links</source><target>Bind till dessa länkar</target></segment>
+      </unit>
+      <unit id="dhcp.settings.relays_bind_label">
+        <segment><source>Bind {relay} to the networks it served</source><target>Bind {relay} till de nät den betjänade</target></segment>
       </unit>
       <unit id="dhcp.settings.relays_unlogged">
         <segment><source>{count, plural, one {# more refusal was not kept.} other {# more refusals were not kept.}}</source><target>{count, plural, one {# nekande till sparades inte.} other {# nekanden till sparades inte.}}</target></segment>
@@ -1319,10 +1343,22 @@
         <segment><source>Line {line}: {text} is not an IPv4 or IPv6 address or prefix.</source><target>Rad {line}: {text} är ingen IPv4- eller IPv6-adress eller något prefix.</target></segment>
       </unit>
       <unit id="dhcp.check.relays_host_bits">
-        <segment><source>Line {line}: {text} has host bits set. Write {suggest} for one relay agent, or give the network address of the prefix.</source><target>Rad {line}: {text} har värdbitar satta. Skriv {suggest} för en enskild reläagent, eller ange prefixets nätadress.</target></segment>
+        <segment><source>Line {line}: {text} has host bits set. Write {suggest} for a single address, or give the network address of the prefix.</source><target>Rad {line}: {text} har värdbitar satta. Skriv {suggest} för en enskild adress, eller ange prefixets nätadress.</target></segment>
       </unit>
       <unit id="dhcp.check.relays_count">
-        <segment><source>At most {max} prefixes.</source><target>Högst {max} prefix.</target></segment>
+        <segment><source>At most {max} relay agents.</source><target>Högst {max} reläagenter.</target></segment>
+      </unit>
+      <unit id="dhcp.check.relays_twice">
+        <segment><source>Line {line}: {text} is listed twice with different links. Put all of its links on one line.</source><target>Rad {line}: {text} står två gånger med olika länkar. Samla alla dess länkar på en rad.</target></segment>
+      </unit>
+      <unit id="dhcp.check.relays_links_count">
+        <segment><source>Line {line}: a relay agent has at most {max} links.</source><target>Rad {line}: en reläagent har högst {max} länkar.</target></segment>
+      </unit>
+      <unit id="dhcp.check.relays_family">
+        <segment><source>Line {line}: {text} has a link of the other address family than the relay agent.</source><target>Rad {line}: {text} har en länk av en annan adressfamilj än reläagenten.</target></segment>
+      </unit>
+      <unit id="dhcp.check.relays_no_links">
+        <segment><source>Line {line}: {text} names no links. Write the relay agent, an equals sign and the links it may name, such as 192.0.2.1 = 198.51.100.0/24.</source><target>Rad {line}: {text} anger inga länkar. Skriv reläagenten, ett likhetstecken och de länkar den får nämna, till exempel 192.0.2.1 = 198.51.100.0/24.</target></segment>
       </unit>
       <unit id="dhcp.settings.limits">
         <segment><source>Limits per client and per scope</source><target>Gränser per klient och per omfång</target></segment>
@@ -1497,6 +1533,9 @@
       </unit>
       <unit id="errors.dhcp.settings.invalid">
         <segment><source>The setting is not valid ({field}).</source><target>Inställningen är inte giltig ({field}).</target></segment>
+      </unit>
+      <unit id="errors.dhcp.settings.relay_any_link">
+        <segment><source>A new relay agent may not name every link under the Hardened profile. Give it the links it serves.</source><target>Under säkerhetsprofilen Hardened får en ny reläagent inte nämna alla länkar. Ange de länkar den betjänar.</target></segment>
       </unit>
       <unit id="errors.dhcp.lease_times.invalid">
         <segment><source>The lease times are not valid ({field}): the shortest must not exceed the default, the default must not exceed the longest, and none may exceed one year.</source><target>Lånetiderna är inte giltiga ({field}): den kortaste får inte överstiga standardtiden, standardtiden får inte överstiga den längsta, och ingen får överstiga ett år.</target></segment>

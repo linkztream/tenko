@@ -433,15 +433,22 @@ function limitReport(): NonNullable<NodeStatus["limits"]> {
   };
 }
 
-/** The relay agents of the node: one sender refused that the lease rows know, and one relayed network. */
+/**
+ * The relay agents of the node: one sender refused that the lease rows know, one trusted relay refused
+ * for a link outside its links, one relayed network, and one relay that may name every link.
+ */
 function relayReport(): NonNullable<NodeStatus["relays"]> {
   const at = new Date().toISOString();
   return {
     listed: false,
     trust_any: false,
-    refused: [{ source: "192.0.2.1", relay: "192.0.2.1", count: 12, first: at, last: at, seen_before: true }],
+    refused: [
+      { source: "192.0.2.1", relay: "192.0.2.1", count: 12, first: at, last: at, seen_before: true },
+      { source: "203.0.113.1", relay: "203.0.113.1", count: 3, first: at, last: at, seen_before: true, link: "203.0.113.0/24" },
+    ],
     unlogged: 0,
     relayed: [{ scope: "0190d1c2-0000-7000-8000-0000000a0001", network: "198.51.100.0/24", relays: ["198.51.100.1"] }],
+    any_link: [{ relay: "198.51.100.1/32", seen: ["198.51.100.0/24"] }],
   };
 }
 

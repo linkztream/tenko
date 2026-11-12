@@ -1,7 +1,7 @@
 // The DHCP server settings (/settings/dhcp): the lease times in human units, authoritative, conflict
 // detection and the history retention with "follow the security profile" and the value in force,
 // saved with the revision; the local checks; the server's refusal; the page for administrators
-// only; the module-off state; the trusted relay agents (follow, list, checks, the Trust button and
+// only; the module-off state; the trusted relay agents (follow, list with links, checks, the Trust and Add link buttons, the any-link notice and
 // the panel of the senders refused); the limits per client and per scope (follow, the five fields,
 // the checks, the panel of the requests refused); Swedish.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
@@ -16,6 +16,7 @@ import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
 import { dhcpSwitchedOff, recordIfMatch } from "../testkit";
 import DhcpSettingsPage from "./DhcpSettingsPage";
+import { entryFor, holdsLink, MAX_RELAY_LINKS, MAX_TRUSTED_RELAYS, relayList, relayText, withLink } from "./relays";
 
 beforeEach(async () => {
   await signInAlex();
@@ -160,37 +161,64 @@ describe("the trusted relay agents", () => {
     open();
     await loaded();
     fireEvent.click(field("field-relays-follow"));
-    fireEvent.input(await screen.findByTestId("field-trusted_relays"), { target: { value: "192.0.2.9\n\n198.51.100.0/24\n2001:db8::1\n192.0.2.9" } });
+    const text = "192.0.2.9 = 203.0.113.0/24,198.51.100.0/24\n\n198.51.100.0/24 = 198.51.100.0/24\n2001:db8::1 = 2001:db8::/32\n192.0.2.9 = 198.51.100.0/24, 203.0.113.0/24";
+    fireEvent.input(await screen.findByTestId("field-trusted_relays"), { target: { value: text } });
     fireEvent.click(screen.getByTestId("dhcp-settings-save"));
     await waitFor(() => expect(dhcpState().settings.trusted_relays).toBeDefined());
-    expect(writes().find((w) => w.method === "PUT")?.body?.trusted_relays).toEqual(["192.0.2.9/32", "198.51.100.0/24", "2001:db8::1/128"]);
-    expect(dhcpState().settings.trusted_relays).toEqual(["192.0.2.9/32", "198.51.100.0/24", "2001:db8::1/128"]);
+    const stored = [
+      { relay: "192.0.2.9/32", links: ["198.51.100.0/24", "203.0.113.0/24"] },
+      { relay: "198.51.100.0/24", links: ["198.51.100.0/24"] },
+      { relay: "2001:db8::1/128", links: ["2001:db8::/32"] },
+    ];
+    expect(writes().find((w) => w.method === "PUT")?.body?.trusted_relays).toEqual(stored);
+    expect(dhcpState().settings.trusted_relays).toEqual(stored);
   });
 
-  it("refuses a line that is no address and a prefix with host bits before it sends", async () => {
+  it("refuses a line the parser refuses, with its line number, before it sends", async () => {
     const writes = recordIfMatch();
     open();
     await loaded();
     fireEvent.click(field("field-relays-follow"));
     const area = await screen.findByTestId("field-trusted_relays");
-    fireEvent.input(area, { target: { value: "192.0.2.1\n192.0.2.1/24" } });
-    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
-    const error = await screen.findByTestId("field-error");
-    expect(error.dataset.field).toBe("trusted_relays");
-    expect(error.textContent).toBe("Line 2: 192.0.2.1/24 has host bits set. Write 192.0.2.1/32 for one relay agent, or give the network address of the prefix.");
-    fireEvent.input(area, { target: { value: "relay.example" } });
-    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
-    await waitFor(() => expect(screen.getByTestId("field-error").textContent).toBe("Line 1: relay.example is not an IPv4 or IPv6 address or prefix."));
+    const refused = async (value: string, message: string) => {
+      fireEvent.input(area, { target: { value } });
+      fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+      await waitFor(() => expect(screen.getByTestId("field-error").textContent).toBe(message));
+      expect(screen.getByTestId("field-error").dataset.field).toBe("trusted_relays");
+    };
+    await refused("192.0.2.1 = 198.51.100.0/24\n192.0.2.1/24 = 198.51.100.0/24", "Line 2: 192.0.2.1/24 = 198.51.100.0/24 has host bits set. Write 192.0.2.1/32 for a single address, or give the network address of the prefix.");
+    await refused("relay.example = 198.51.100.0/24", "Line 1: relay.example = 198.51.100.0/24 is not an IPv4 or IPv6 address or prefix.");
+    await refused("192.0.2.1", "Line 1: 192.0.2.1 names no links. Write the relay agent, an equals sign and the links it may name, such as 192.0.2.1 = 198.51.100.0/24.");
+    await refused("192.0.2.1 = 2001:db8::/32", "Line 1: 192.0.2.1 = 2001:db8::/32 has a link of the other address family than the relay agent.");
+    await refused("192.0.2.1 = 198.51.100.0/24\n192.0.2.1 = 203.0.113.0/24", "Line 2: 192.0.2.1 = 203.0.113.0/24 is listed twice with different links. Put all of its links on one line.");
     expect(writes()).toHaveLength(0);
   });
 
+  it("shows the server's refusal of a new relay for every link on the field", async () => {
+    server.use(
+      http.put("/api/v1/dhcp/settings", () =>
+        HttpResponse.json(
+          { type: "about:blank", status: 400, code: "dhcp.settings.relay_any_link", title: "Bad request", detail: "no", params: { field: "trusted_relays" }, errors: [{ field: "trusted_relays", code: "dhcp.settings.relay_any_link" }] },
+          { status: 400, headers: { "content-type": "application/problem+json" } },
+        ),
+      ),
+    );
+    open();
+    await loaded();
+    fireEvent.click(field("field-relays-follow"));
+    fireEvent.input(await screen.findByTestId("field-trusted_relays"), { target: { value: "192.0.2.1 = 0.0.0.0/0" } });
+    fireEvent.click(screen.getByTestId("dhcp-settings-save"));
+    const error = await screen.findByTestId("field-error");
+    expect([error.dataset.field, error.textContent]).toEqual(["trusted_relays", "A new relay agent may not name every link under the Hardened profile. Give it the links it serves."]);
+  });
+
   it("clears a stored list when the settings follow the profile again", async () => {
-    dhcpState().settings.trusted_relays = ["192.0.2.1/32"];
+    dhcpState().settings.trusted_relays = [{ relay: "192.0.2.1/32", links: ["198.51.100.0/24"] }];
     const writes = recordIfMatch();
     open();
     await loaded();
     expect(field("field-relays-follow").checked).toBe(false);
-    expect((screen.getByTestId("field-trusted_relays") as HTMLTextAreaElement).value).toBe("192.0.2.1/32");
+    expect((screen.getByTestId("field-trusted_relays") as HTMLTextAreaElement).value).toBe("192.0.2.1/32 = 198.51.100.0/24");
     fireEvent.click(field("field-relays-follow"));
     fireEvent.click(screen.getByTestId("dhcp-settings-save"));
     await waitFor(() => expect(dhcpState().settings.trusted_relays).toBeUndefined());
@@ -210,23 +238,68 @@ describe("the trusted relay agents", () => {
     expect(body).not.toHaveProperty("clear_trusted_relays");
   });
 
-  it("lists the senders refused and the networks relayed, and trusts a sender with one button", async () => {
+  it("lists the senders refused and the networks relayed, and trusts a sender for the link around the relay address it named", async () => {
     const writes = recordIfMatch();
     open();
     await loaded();
     const panel = await screen.findByTestId("settings-relays-seen");
     expect(within(panel).getByTestId("settings-relays-relayed").textContent).toContain("198.51.100.0/24 through 198.51.100.1");
-    const row = within(panel).getByTestId("relay-refused");
-    expect(row.dataset.source).toBe("192.0.2.1");
+    const row = within(panel).getAllByTestId("relay-refused").find((r) => r.dataset.source === "192.0.2.1")!;
     expect(within(row).getByTestId("relay-known").textContent).toBe("Known relay");
     fireEvent.click(within(row).getByTestId("relay-trust"));
-    await waitFor(() => expect(dhcpState().settings.trusted_relays).toEqual(["192.0.2.1/32"]));
+    const entry = { relay: "192.0.2.1/32", links: ["192.0.2.1/32"] };
+    await waitFor(() => expect(dhcpState().settings.trusted_relays).toEqual([entry]));
     const sent = writes().find((w) => w.method === "PUT");
-    expect(sent?.body?.trusted_relays).toEqual(["192.0.2.1/32"]);
+    expect(sent?.body?.trusted_relays).toEqual([entry]);
     expect(sent?.ifMatch).not.toBeNull();
-    expect(await screen.findByText("192.0.2.1 is now a trusted relay agent")).toBeTruthy();
-    await waitFor(() => expect((screen.getByTestId("field-trusted_relays") as HTMLTextAreaElement).value).toBe("192.0.2.1/32"));
-    await waitFor(() => expect(screen.queryByTestId("settings-relays-seen")).toBeNull());
+    expect(await screen.findByText("192.0.2.1 is now a trusted relay agent with its links")).toBeTruthy();
+    await waitFor(() => expect((screen.getByTestId("field-trusted_relays") as HTMLTextAreaElement).value).toBe("192.0.2.1/32 = 192.0.2.1/32"));
+    await waitFor(() => expect(screen.getAllByTestId("relay-refused").map((r) => r.dataset.source)).toEqual(["203.0.113.1"]));
+  });
+
+  it("shows the link a trusted relay was refused for, and its Add link button adds it to the relay's entry", async () => {
+    dhcpState().settings.trusted_relays = [{ relay: "203.0.113.1/32", links: ["198.51.100.0/24"] }];
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    const panel = await screen.findByTestId("settings-relays-seen");
+    expect(within(panel).getByRole("columnheader", { name: "Network outside its links" })).toBeTruthy();
+    // The sender 192.0.2.1 is not listed and is still offered for trust; the listed relay shows the link.
+    const row = within(panel).getAllByTestId("relay-refused").find((r) => r.dataset.source === "203.0.113.1")!;
+    expect(within(row).getByText("203.0.113.0/24")).toBeTruthy();
+    expect(within(row).queryByTestId("relay-trust")).toBeNull();
+    fireEvent.click(within(row).getByTestId("relay-add-link"));
+    const entry = { relay: "203.0.113.1/32", links: ["198.51.100.0/24", "203.0.113.0/24"] };
+    await waitFor(() => expect(dhcpState().settings.trusted_relays).toEqual([entry]));
+    expect(writes().find((w) => w.method === "PUT")?.body?.trusted_relays).toEqual([entry]);
+    await waitFor(() => expect(screen.getAllByTestId("relay-refused").map((r) => r.dataset.source)).toEqual(["192.0.2.1"]));
+  });
+
+  it("hides a refusal the list handles already", async () => {
+    dhcpState().settings.trusted_relays = [
+      { relay: "192.0.2.0/24", links: ["198.51.100.0/24"] },
+      { relay: "203.0.113.1/32", links: ["203.0.113.0/24"] },
+    ];
+    open();
+    await loaded();
+    await screen.findByTestId("settings-relays-any-link");
+    await waitFor(() => expect(screen.queryAllByTestId("relay-refused")).toHaveLength(0));
+  });
+
+  it("warns about a relay that may name every link, and binds it to the networks the lease rows show", async () => {
+    dhcpState().settings.trusted_relays = [{ relay: "198.51.100.1/32", links: ["0.0.0.0/0"] }];
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    const notice = await screen.findByTestId("settings-relays-any-link");
+    expect(notice.className).toContain("warn");
+    expect(notice.textContent).toContain("Give each relay agent the links it serves");
+    const item = within(notice).getByTestId("relay-any-link");
+    expect(item.textContent).toContain("198.51.100.1/32 served 198.51.100.0/24");
+    fireEvent.click(within(item).getByTestId("relay-bind"));
+    const entry = { relay: "198.51.100.1/32", links: ["198.51.100.0/24"] };
+    await waitFor(() => expect(dhcpState().settings.trusted_relays).toEqual([entry]));
+    expect(writes().find((w) => w.method === "PUT")?.body?.trusted_relays).toEqual([entry]);
   });
 
   it("hides the panel when the node cannot be read", async () => {
@@ -343,5 +416,71 @@ describe("the limits per client and per scope", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.queryByTestId("settings-limits-refused")).toBeNull();
     expect(screen.getByTestId("field-limits-follow")).toBeTruthy();
+  });
+});
+
+describe("the list of trusted relay agents as text", () => {
+  const parsed = (text: string) => {
+    const check = relayList(text);
+    if (!check.ok) throw new Error(`refused: ${check.problem}`);
+    return check.list;
+  };
+  const problem = (text: string) => {
+    const check = relayList(text);
+    return check.ok ? "ok" : `${check.problem}@${check.line ?? 0}`;
+  };
+
+  it("writes the same text back that it read, with bare addresses as host prefixes", () => {
+    const text = "192.0.2.1/32 = 198.51.100.0/24, 203.0.113.0/24\n2001:db8::1/128 = 2001:db8::/32";
+    expect(relayText(parsed(text))).toBe(text);
+    expect(parsed("192.0.2.1=198.51.100.0/24,203.0.113.0/24\n2001:db8::1 = 2001:db8::2")).toEqual([
+      { relay: "192.0.2.1/32", links: ["198.51.100.0/24", "203.0.113.0/24"] },
+      { relay: "2001:db8::1/128", links: ["2001:db8::2/128"] },
+    ]);
+    expect(relayText([])).toBe("");
+  });
+
+  it("keeps identical lines once and sorts the links of a relay", () => {
+    expect(parsed("192.0.2.1 = 203.0.113.0/24, 198.51.100.0/24, 203.0.113.0/24\n\n192.0.2.1 = 198.51.100.0/24, 203.0.113.0/24")).toEqual([
+      { relay: "192.0.2.1/32", links: ["198.51.100.0/24", "203.0.113.0/24"] },
+    ]);
+  });
+
+  it("names each problem with the line it is on", () => {
+    expect(problem("192.0.2.1")).toBe("no_links@1");
+    expect(problem("192.0.2.1 =")).toBe("no_links@1");
+    expect(problem("192.0.2.1 = 198.51.100.0/24,")).toBe("format@1");
+    expect(problem("nonsense = 198.51.100.0/24")).toBe("format@1");
+    expect(problem("192.0.2.1/24 = 198.51.100.0/24")).toBe("host_bits@1");
+    expect(problem("192.0.2.1 = 198.51.100.1/24")).toBe("host_bits@1");
+    expect(problem("192.0.2.1 = 2001:db8::/32")).toBe("family@1");
+    expect(problem("2001:db8::1 = 0.0.0.0/0")).toBe("family@1");
+    expect(problem("192.0.2.1 = 198.51.100.0/24\n192.0.2.1 = 203.0.113.0/24")).toBe("twice@2");
+    const links = Array.from({ length: MAX_RELAY_LINKS + 1 }, (_, i) => `10.${i}.0.0/16`).join(", ");
+    expect(problem(`192.0.2.1 = ${links}`)).toBe("links_count@1");
+    expect(problem("192.0.2.1 = 0.0.0.0/0")).toBe("ok");
+    const many = Array.from({ length: MAX_TRUSTED_RELAYS + 1 }, (_, i) => `10.0.${Math.floor(i / 256)}.${i % 256} = 198.51.100.0/24`).join("\n");
+    expect(problem(many)).toBe("count@0");
+  });
+
+  it("finds the entry that holds a sender, and whether its links reach a network", () => {
+    const list = [{ relay: "192.0.2.0/24", links: ["198.51.100.0/24"] }];
+    expect(entryFor(list, "192.0.2.77")).toBe(list[0]);
+    expect(entryFor(list, "203.0.113.1")).toBeUndefined();
+    // The most specific relay prefix decides, as on the server, whatever the order.
+    const nested = [list[0]!, { relay: "192.0.2.9/32", links: ["203.0.113.128/25"] }];
+    expect(entryFor(nested, "192.0.2.9")).toBe(nested[1]);
+    expect(entryFor([...nested].reverse(), "192.0.2.9")).toBe(nested[1]);
+    expect(entryFor(nested, "192.0.2.8")).toBe(nested[0]);
+    expect(holdsLink(list[0]!, "198.51.100.0/25")).toBe(true);
+    expect(holdsLink(list[0]!, "198.51.0.0/16")).toBe(true);
+    expect(holdsLink(list[0]!, "203.0.113.0/24")).toBe(false);
+  });
+
+  it("adds a link to the entry of a listed sender and lists a new sender with that link", () => {
+    const list = [{ relay: "192.0.2.1/32", links: ["198.51.100.0/24"] }];
+    expect(withLink(list, "192.0.2.1", "203.0.113.0/24")).toEqual([{ relay: "192.0.2.1/32", links: ["198.51.100.0/24", "203.0.113.0/24"] }]);
+    expect(withLink(list, "192.0.2.1", "198.51.100.0/24")).toEqual(list);
+    expect(withLink(list, "192.0.2.9", "192.0.2.9/32")).toEqual([...list, { relay: "192.0.2.9/32", links: ["192.0.2.9/32"] }]);
   });
 });

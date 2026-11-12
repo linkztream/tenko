@@ -371,11 +371,15 @@ describe("the limits of the node", () => {
 });
 
 describe("the relay agents of the node", () => {
-  it("reports one refused sender the lease rows know and one relayed network while no list is set", async () => {
+  it("reports a refused sender and a relay refused for its link, one relayed network and a relay that may name every link", async () => {
     const { relays } = await api.get("/api/v1/nodes/{id}/dhcp", { path: { id: 1 } });
     expect([relays?.listed, relays?.trust_any, relays?.unlogged]).toEqual([false, false, 0]);
-    expect(relays?.refused?.map((r) => [r.source, r.relay, r.seen_before])).toEqual([["192.0.2.1", "192.0.2.1", true]]);
+    expect(relays?.refused?.map((r) => [r.source, r.relay, r.seen_before, r.link ?? null])).toEqual([
+      ["192.0.2.1", "192.0.2.1", true, null],
+      ["203.0.113.1", "203.0.113.1", true, "203.0.113.0/24"],
+    ]);
     expect(relays?.relayed?.map((r) => [r.network, r.relays])).toEqual([["198.51.100.0/24", ["198.51.100.1"]]]);
+    expect(relays?.any_link).toEqual([{ relay: "198.51.100.1/32", seen: ["198.51.100.0/24"] }]);
   });
 });
 

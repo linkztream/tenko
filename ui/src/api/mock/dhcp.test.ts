@@ -148,19 +148,51 @@ describe("settings", () => {
     expect(failure(() => putSettings(state, ctx, { lease: LEASE }, before)).status).toBe(412);
   });
 
-  it("keeps the trusted relay agents sorted and without duplicates, and lets the profile decide again", () => {
-    const set = putSettings(state, ctx, { lease: LEASE, trusted_relays: ["198.51.100.0/24", "192.0.2.9/32", "192.0.2.9/32", "2001:db8::1/128"] }, "*");
-    expect([set.trusted_relays, set.effective_trust_any_relay]).toEqual([["192.0.2.9/32", "198.51.100.0/24", "2001:db8::1/128"], false]);
+  it("keeps the trusted relay agents sorted by relay, each with its links sorted, and lets the profile decide again", () => {
+    const set = putSettings(
+      state,
+      ctx,
+      {
+        lease: LEASE,
+        trusted_relays: [
+          { relay: "198.51.100.0/24", links: ["198.51.100.0/24"] },
+          { relay: "192.0.2.9/32", links: ["203.0.113.0/24", "198.51.100.0/24", "203.0.113.0/24"] },
+          { relay: "192.0.2.9/32", links: ["198.51.100.0/24", "203.0.113.0/24"] },
+          { relay: "2001:db8::1/128", links: ["::/0"] },
+        ],
+      },
+      "*",
+    );
+    expect([set.trusted_relays, set.effective_trust_any_relay]).toEqual([
+      [
+        { relay: "192.0.2.9/32", links: ["198.51.100.0/24", "203.0.113.0/24"] },
+        { relay: "198.51.100.0/24", links: ["198.51.100.0/24"] },
+        { relay: "2001:db8::1/128", links: ["::/0"] },
+      ],
+      false,
+    ]);
     expect(putSettings(state, ctx, { lease: LEASE, authoritative: true, ddns: {}, history_days: 7 }, "*").trusted_relays).toEqual(set.trusted_relays);
     const cleared = putSettings(state, ctx, { lease: LEASE, clear_trusted_relays: true }, "*");
     expect(cleared.trusted_relays).toBeUndefined();
   });
 
-  it("refuses host bits, more than 256 prefixes and both fields together", () => {
-    const bits = failure(() => putSettings(state, ctx, { lease: LEASE, trusted_relays: ["192.0.2.1/24"] }, "*"));
-    expect([bits.code, bits.params.field]).toEqual(["dhcp.settings.invalid", "trusted_relays"]);
-    const many = Array.from({ length: 257 }, (_, i) => `198.51.100.${i % 256}/32`);
-    expect(failure(() => putSettings(state, ctx, { lease: LEASE, trusted_relays: many }, "*")).params.field).toBe("trusted_relays");
+  it("refuses what the server refuses in the trusted relays, on the field trusted_relays", () => {
+    const refused = (trusted_relays: unknown) => {
+      const f = failure(() => putSettings(state, ctx, { lease: LEASE, trusted_relays } as never, "*"));
+      return [f.status, f.code, f.params.field];
+    };
+    const invalid = [400, "dhcp.settings.invalid", "trusted_relays"];
+    const link = ["198.51.100.0/24"];
+    expect(refused(["192.0.2.1/32"])).toEqual(invalid);
+    expect(refused([{ relay: "192.0.2.1/24", links: link }])).toEqual(invalid);
+    expect(refused([{ relay: "192.0.2.1/32", links: [] }])).toEqual(invalid);
+    expect(refused([{ relay: "192.0.2.1/32" }])).toEqual(invalid);
+    expect(refused([{ relay: "192.0.2.1/32", links: Array.from({ length: 65 }, (_, i) => `10.${i}.0.0/16`) }])).toEqual(invalid);
+    expect(refused([{ relay: "192.0.2.1/32", links: ["198.51.100.1/24"] }])).toEqual(invalid);
+    expect(refused([{ relay: "192.0.2.1/32", links: ["2001:db8::/32"] }])).toEqual(invalid);
+    expect(refused([{ relay: "192.0.2.1/32", links: link }, { relay: "192.0.2.1/32", links: ["203.0.113.0/24"] }])).toEqual(invalid);
+    const many = Array.from({ length: 257 }, (_, i) => ({ relay: `10.0.${Math.floor(i / 256)}.${i % 256}/32`, links: link }));
+    expect(refused(many)).toEqual(invalid);
     const both = failure(() => putSettings(state, ctx, { lease: LEASE, trusted_relays: [], clear_trusted_relays: true }, "*"));
     expect([both.code, both.params.field]).toEqual(["dhcp.settings.invalid", "clear_trusted_relays"]);
   });

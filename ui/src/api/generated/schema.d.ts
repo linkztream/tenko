@@ -1849,7 +1849,7 @@ export interface paths {
         get: operations["get_dhcp_settings"];
         /**
          * Change the DHCP server settings
-         * @description Scope: `dhcp.write`. A field left out keeps its value, except `conflict_detection` and `history_days`, which follow the security profile when left out. `trusted_relays` replaces the list of trusted relay agents; `clear_trusted_relays` unsets it, so that the profile decides again (every sender under Lab, none otherwise). `limits` replaces the limits per client and per scope whole; a field left out of them follows the profile, zero turns a limit off.
+         * @description Scope: `dhcp.write`. A field left out keeps its value, except `conflict_detection` and `history_days`, which follow the security profile when left out. `trusted_relays` replaces the list of trusted relay agents, each with the links it may name; `clear_trusted_relays` unsets it, so that the profile decides again (every sender for every link under Lab, none otherwise). `limits` replaces the limits per client and per scope whole; a field left out of them follows the profile, zero turns a limit off.
          */
         put: operations["update_dhcp_settings"];
         post?: never;
@@ -8431,6 +8431,21 @@ export interface components {
         };
         /** @description A device as the controller identifies it (for UniFi the device MAC or `_id`). */
         DeviceRef: string;
+        /** @description A trusted relay that may name every link. */
+        DhcpAnyLinkRelay: {
+            /**
+             * @description The relay prefix of the entry.
+             * @example 192.0.2.1/32
+             */
+            relay: string;
+            /**
+             * @description The networks whose lease rows name a relay address in the prefix.
+             * @example [
+             *       "198.51.100.0/24"
+             *     ]
+             */
+            seen: string[];
+        };
         /** @description `POST /dhcp/classes`. */
         DhcpClassCreate: {
             /** @description Free text. */
@@ -9106,8 +9121,15 @@ export interface components {
             /** @description The last refusal. */
             last: components["schemas"]["Timestamp"];
             /**
-             * @description The relay address the requests named (`giaddr`, or the link address of the
-             *     outermost DHCPv6 relay).
+             * @description For a trusted relay refused because its data selected a scope outside the links it
+             *     is bound to: that scope's network (the last one named). Absent for a sender that is
+             *     not trusted.
+             * @example 198.51.100.0/24
+             */
+            link?: string | null;
+            /**
+             * @description The relay address the requests named (`giaddr`, or the link address of the refused
+             *     DHCPv6 relay).
              * @example 192.0.2.1
              */
             relay: string;
@@ -9124,6 +9146,12 @@ export interface components {
         };
         /** @description What a node reports about relay agents (`dhcp.settings.trusted_relays`). */
         DhcpRelayReport: {
+            /**
+             * @description The listed relays that may name every link (a link of `0.0.0.0/0` or `::/0`, such as
+             *     an entry stored before relays had links), each with the networks the lease rows say
+             *     it served: the links to give it.
+             */
+            any_link?: components["schemas"]["DhcpAnyLinkRelay"][];
             /** @description Whether a list is set. */
             listed: boolean;
             /**
@@ -9336,18 +9364,18 @@ export interface components {
              */
             limits?: components["schemas"]["DhcpLimits"];
             /**
-             * @description The relay agents the server trusts, as prefixes of the addresses their messages come
-             *     from: `giaddr`, option 82, option 118 and a DHCPv6 RELAY-FORW are honored only from
-             *     a sender in the list, and replies go only to a trusted relay or to the client's own
-             *     link. None follows the security profile (every sender under Lab, none otherwise); a
-             *     list, even an empty one, applies under every profile. At most
-             *     [`MAX_TRUSTED_RELAYS`] prefixes, without host bits.
-             * @example [
-             *       "192.0.2.1/32",
-             *       "2001:db8::1/128"
-             *     ]
+             * @description The relay agents the server trusts, each with the links it may name: `giaddr`, option
+             *     82, option 118 and a DHCPv6 RELAY-FORW are honored only from a sender in the list,
+             *     only for a scope whose network overlaps one of that relay's links, and replies go
+             *     only to a trusted relay or to the client's own link. None follows the security
+             *     profile (every sender for every link under Lab, none otherwise); a list, even an
+             *     empty one, applies under every profile. At most [`MAX_TRUSTED_RELAYS`] entries.
+             *
+             *     A row written before relays had links holds plain prefixes; each reads as that relay
+             *     with every link of its address family ([`TrustedRelay::any_link`]), which is what it
+             *     meant then.
              */
-            trusted_relays?: string[] | null;
+            trusted_relays?: components["schemas"]["TrustedRelay"][] | null;
             updated?: components["schemas"]["Stamp"] | null;
         };
         /** @description The server settings as the API reads them. */
@@ -9389,13 +9417,13 @@ export interface components {
             lease?: components["schemas"]["LeaseTimes"] | null;
             limits?: components["schemas"]["DhcpLimits"] | null;
             /**
-             * @description The trusted relay agents, as prefixes of the addresses they send from (at most 256,
-             *     without host bits); left out keeps the stored list.
-             * @example [
-             *       "192.0.2.1/32"
-             *     ]
+             * @description The trusted relay agents, each the prefix of the addresses it sends from and the
+             *     links it may name (at most 256 relays of 1 to 64 links, without host bits; a link of
+             *     `0.0.0.0/0` or `::/0` names every link, which the Hardened profile refuses for a
+             *     relay the stored list does not hold so already: `dhcp.settings.relay_any_link`); left
+             *     out keeps the stored list.
              */
-            trusted_relays?: string[] | null;
+            trusted_relays?: components["schemas"]["TrustedRelay"][] | null;
         };
         /**
          * @description One active health finding of `GET /system/status`, reduced to what a bug report may
@@ -24208,6 +24236,33 @@ export interface components {
             revision: components["schemas"]["Revision"];
         };
         /**
+         * @description A trusted relay agent and the links it may name (`docs/dhcp.md` section 9.8).
+         *
+         *     The relay's word (its `giaddr`, option 82, option 118, or the link address, Interface-Id
+         *     and other data of a DHCPv6 relay) counts only for a scope whose network overlaps one of
+         *     `links`: a scope inside a link prefix, or one that holds it (a link given as the relay's
+         *     own `giaddr`, `/32`, names the scope around it). A sender that more than one entry
+         *     holds is judged by the most specific one. A link of prefix length 0 (`0.0.0.0/0`,
+         *     `::/0`) lets the relay name every link of its family.
+         */
+        TrustedRelay: {
+            /**
+             * @description The links the relay may name, of the relay's address family, without host bits: 1 to
+             *     [`MAX_RELAY_LINKS`] prefixes.
+             * @example [
+             *       "198.51.100.0/24"
+             *     ]
+             */
+            links: string[];
+            /**
+             * @description The prefix of the addresses the relay's messages come from (the datagram's source,
+             *     or for an inner DHCPv6 relay the peer address its enclosing relay recorded), without
+             *     host bits.
+             * @example 192.0.2.1/32
+             */
+            relay: string;
+        };
+        /**
          * @description The four truths (IPAM-21).
          * @enum {string}
          */
@@ -34854,7 +34909,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpSettingsItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dhcp.settings.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) or the DDNS settings are invalid (`dhcp.ddns.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dhcp.settings.invalid`), or a new trusted relay names every link under the Hardened profile (`dhcp.settings.relay_any_link`), or the lease times are invalid (`dhcp.lease_times.invalid`) or the DDNS settings are invalid (`dhcp.ddns.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;

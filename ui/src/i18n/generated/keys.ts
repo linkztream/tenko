@@ -1729,8 +1729,12 @@ export type MessageKey =
   | "dhcp.check.range_order"
   | "dhcp.check.range_outside"
   | "dhcp.check.relays_count"
+  | "dhcp.check.relays_family"
   | "dhcp.check.relays_format"
   | "dhcp.check.relays_host_bits"
+  | "dhcp.check.relays_links_count"
+  | "dhcp.check.relays_no_links"
+  | "dhcp.check.relays_twice"
   | "dhcp.check.server_id"
   | "dhcp.check.server_id_clear"
   | "dhcp.check.space"
@@ -2438,8 +2442,16 @@ export type MessageKey =
   | "dhcp.settings.off"
   | "dhcp.settings.on"
   | "dhcp.settings.relays"
+  | "dhcp.settings.relays_add_link"
+  | "dhcp.settings.relays_add_link_label"
+  | "dhcp.settings.relays_any_link"
+  | "dhcp.settings.relays_any_link_item"
+  | "dhcp.settings.relays_any_link_none"
+  | "dhcp.settings.relays_bind"
+  | "dhcp.settings.relays_bind_label"
   | "dhcp.settings.relays_col_count"
   | "dhcp.settings.relays_col_last"
+  | "dhcp.settings.relays_col_link"
   | "dhcp.settings.relays_col_relay"
   | "dhcp.settings.relays_col_source"
   | "dhcp.settings.relays_follow"
@@ -4405,6 +4417,7 @@ export type MessageKey =
   | "errors.dhcp.scope.not_found"
   | "errors.dhcp.scope.not_network"
   | "errors.dhcp.settings.invalid"
+  | "errors.dhcp.settings.relay_any_link"
   | "errors.dhcp.shared_network.in_use"
   | "errors.dhcp.shared_network.invalid"
   | "errors.dhcp.shared_network.not_found"
@@ -8590,8 +8603,12 @@ export interface MessageArgs {
   "dhcp.check.exclusion_outside": { network: string | number };
   "dhcp.check.limits_range": { max: string | number };
   "dhcp.check.relays_count": { max: string | number };
+  "dhcp.check.relays_family": { line: string | number; text: string | number };
   "dhcp.check.relays_format": { line: string | number; text: string | number };
   "dhcp.check.relays_host_bits": { line: string | number; suggest: string | number; text: string | number };
+  "dhcp.check.relays_links_count": { line: string | number; max: string | number };
+  "dhcp.check.relays_no_links": { line: string | number; text: string | number };
+  "dhcp.check.relays_twice": { line: string | number; text: string | number };
   "dhcp.class.created": { name: string | number };
   "dhcp.class.delete_title": { name: string | number };
   "dhcp.class.deleted": { name: string | number };
@@ -8740,6 +8757,10 @@ export interface MessageArgs {
   "dhcp.settings.limits_effective": { addresses: string | number; cache: string | number; mac: string | number; offers: string | number; prefixes: string | number };
   "dhcp.settings.limits_held": { cap: string | number; held: string | number };
   "dhcp.settings.limits_unlogged": { count: number };
+  "dhcp.settings.relays_add_link_label": { link: string | number; source: string | number };
+  "dhcp.settings.relays_any_link_item": { networks: string | number; relay: string | number };
+  "dhcp.settings.relays_any_link_none": { relay: string | number };
+  "dhcp.settings.relays_bind_label": { relay: string | number };
   "dhcp.settings.relays_seen_relayed_item": { network: string | number; relays: string | number };
   "dhcp.settings.relays_trust_label": { source: string | number };
   "dhcp.settings.relays_trusted": { source: string | number };
@@ -11655,8 +11676,12 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.check.range_order",
   "dhcp.check.range_outside",
   "dhcp.check.relays_count",
+  "dhcp.check.relays_family",
   "dhcp.check.relays_format",
   "dhcp.check.relays_host_bits",
+  "dhcp.check.relays_links_count",
+  "dhcp.check.relays_no_links",
+  "dhcp.check.relays_twice",
   "dhcp.check.server_id",
   "dhcp.check.server_id_clear",
   "dhcp.check.space",
@@ -12364,8 +12389,16 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.settings.off",
   "dhcp.settings.on",
   "dhcp.settings.relays",
+  "dhcp.settings.relays_add_link",
+  "dhcp.settings.relays_add_link_label",
+  "dhcp.settings.relays_any_link",
+  "dhcp.settings.relays_any_link_item",
+  "dhcp.settings.relays_any_link_none",
+  "dhcp.settings.relays_bind",
+  "dhcp.settings.relays_bind_label",
   "dhcp.settings.relays_col_count",
   "dhcp.settings.relays_col_last",
+  "dhcp.settings.relays_col_link",
   "dhcp.settings.relays_col_relay",
   "dhcp.settings.relays_col_source",
   "dhcp.settings.relays_follow",
@@ -14331,6 +14364,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.dhcp.scope.not_found",
   "errors.dhcp.scope.not_network",
   "errors.dhcp.settings.invalid",
+  "errors.dhcp.settings.relay_any_link",
   "errors.dhcp.shared_network.in_use",
   "errors.dhcp.shared_network.invalid",
   "errors.dhcp.shared_network.not_found",

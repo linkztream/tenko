@@ -10,7 +10,8 @@
 // history, reservation, export, node and reconcile routes stay with the 501 stubs. Documentation
 // values only: names under example.test, addresses of RFC 5737.
 import type { components } from "../generated/schema";
-import { compareCidr, compareIp, containsIp, formatCidr, formatIp, parseCidr, parseIp } from "../../ipam/ip";
+import { compareCidr, compareIp, containsIp, formatCidr, formatIp, parseCidr, parseIp, type Cidr } from "../../ipam/ip";
+import type { TrustedRelay } from "../../dhcp/settings/relays";
 import { canonical, validName } from "../../dns/model";
 import { bitsOfSize, checkMacPattern, parseHex, validDhcpName } from "../../dhcp/model";
 import { MAX_LEASE_SECS, NIL_ID } from "../../dhcp/types";
@@ -211,16 +212,37 @@ function checkDdns(value: unknown, field: string): DdnsPolicy {
 // ---------------------------------------------------------------------------------
 // Settings
 
-/** The trusted relay prefixes as the server stores them: sorted, without duplicates, no host bits, at most 256. */
-function checkTrustedRelays(value: unknown): string[] {
-  if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) return invalid("dhcp.settings.invalid", "trusted_relays", "a list of prefixes");
-  if (value.length > 256) return invalid("dhcp.settings.invalid", "trusted_relays", "at most 256 prefixes");
-  const cidrs = value.map((v) => {
-    const c = parseCidr(v as string);
-    return c === null ? invalid("dhcp.settings.invalid", "trusted_relays", `${String(v)} is not a prefix without host bits`) : c;
-  });
-  cidrs.sort(compareCidr);
-  return cidrs.map(formatCidr).filter((p, i, all) => all.indexOf(p) === i);
+/**
+ * The trusted relays as the server stores them: sorted by relay, an entry given twice identically
+ * kept once, the links of each sorted and without duplicates. A relay or link with host bits, an
+ * entry without links or with more than 64, a link of the other family and one relay with two
+ * different link lists are refused.
+ */
+function checkTrustedRelays(value: unknown): TrustedRelay[] {
+  const refuse = (reason: string): never => invalid("dhcp.settings.invalid", "trusted_relays", reason);
+  if (!Array.isArray(value)) return refuse("a list of relays with their links");
+  if (value.length > 256) return refuse("at most 256 relays");
+  const out = new Map<string, { relay: Cidr; links: Cidr[] }>();
+  for (const item of value) {
+    const entry = item as Partial<TrustedRelay> | null;
+    if (entry === null || typeof entry !== "object" || typeof entry.relay !== "string" || !Array.isArray(entry.links)) return refuse("an object with relay and links");
+    const relay = parseCidr(entry.relay);
+    if (relay === null) return refuse(`${entry.relay} is not a prefix without host bits`);
+    if (entry.links.length < 1 || entry.links.length > 64) return refuse(`${entry.relay} needs 1 to 64 links`);
+    const links: Cidr[] = [];
+    for (const text of entry.links) {
+      const link = typeof text === "string" ? parseCidr(text) : null;
+      if (link === null) return refuse(`${String(text)} is not a prefix without host bits`);
+      if (link.version !== relay.version) return refuse(`${text} is not of the family of ${entry.relay}`);
+      if (!links.some((l) => compareCidr(l, link) === 0)) links.push(link);
+    }
+    links.sort(compareCidr);
+    const key = formatCidr(relay);
+    const same = out.get(key);
+    if (same === undefined) out.set(key, { relay, links });
+    else if (same.links.map(formatCidr).join() !== links.map(formatCidr).join()) return refuse(`${key} is listed twice with different links`);
+  }
+  return [...out.values()].sort((x, y) => compareCidr(x.relay, y.relay)).map((e) => ({ relay: formatCidr(e.relay), links: e.links.map(formatCidr) }));
 }
 
 const LIMIT_BOUNDS = { leases_per_mac: 65_535, addresses_per_duid: 65_535, prefixes_per_duid: 65_535, offers_per_second: 100_000, renew_cache_percent: 50 } as const;
