@@ -377,7 +377,7 @@ mod tests {
     //! directory. Nothing leaves the machine: network sinks are never connected, except a
     //! TCP sink to a loopback port with no listener.
 
-    use std::{path::PathBuf, sync::Arc};
+    use std::sync::Arc;
 
     use axum::Extension;
     use serde_json::{Value, json};
@@ -390,7 +390,7 @@ mod tests {
         settings::Profile,
         testing::TestEnv,
     };
-    use tenko_core::{Timestamp, audit::AuditDraft};
+    use tenko_core::{Timestamp, audit::AuditDraft, testing::TempDir};
     use tenko_store::{ReadConsistency, ReadViewExt, Store};
     use uuid::Uuid;
 
@@ -403,24 +403,17 @@ mod tests {
     struct Lab {
         h: Harness,
         admin: String,
-        dir: PathBuf,
-    }
-
-    impl Drop for Lab {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
-        }
+        dir: TempDir,
     }
 
     impl Lab {
         async fn new(with_service: bool) -> Self {
-            let dir = std::env::temp_dir().join(format!("tenko-audit-export-{}", Uuid::now_v7()));
-            std::fs::create_dir_all(&dir).expect("a temporary directory");
+            let dir = TempDir::new("audit-export");
             let env = TestEnv::new().await;
             env.clock.set(Timestamp::now());
             let store: Arc<dyn Store> = env.store.clone();
             let opener = Opener {
-                file_dir: Some(dir.clone()),
+                file_dir: Some(dir.path().to_path_buf()),
                 vault: None,
                 timeouts: Timeouts::default(),
             };

@@ -1,9 +1,4 @@
-use std::{
-    fs,
-    path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
-};
+use std::{fs, time::Duration};
 
 use axum::Router;
 use rcgen::{CertificateParams, DnType, KeyPair};
@@ -12,6 +7,7 @@ use tenko_auth::{settings::Profile, testing::TestEnv};
 use tenko_cluster::ca::{
     CertSource, TlsMaterial, TlsMode as ServiceMode, TlsPolicy, TlsService, TrustedProxies,
 };
+use tenko_core::testing::TempDir;
 
 use super::*;
 use crate::routes::auth::testkit::{Credential::*, Harness};
@@ -53,19 +49,12 @@ impl Identity {
     }
 }
 
-/// A directory below the system temp directory, removed on drop.
-struct Dir(PathBuf);
+/// The certificate and key files of one imported-mode test, in a temporary directory.
+struct Dir(TempDir);
 
 impl Dir {
     fn new() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "tenko-api-tls-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&path).expect("directory");
-        Self(path)
+        Self(TempDir::new("api-tls"))
     }
 
     fn mode(&self) -> ServiceMode {
@@ -78,12 +67,6 @@ impl Dir {
     fn write(&self, identity: &Identity) {
         fs::write(self.0.join("fullchain.pem"), &identity.cert_pem).expect("certificate");
         fs::write(self.0.join("privkey.pem"), &identity.key_pem).expect("key");
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
     }
 }
 

@@ -8,7 +8,6 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
-    time::Duration,
 };
 
 use axum::{
@@ -22,6 +21,7 @@ use tenko_auth::settings::Profile;
 use tenko_core::{
     Principal, RequestCtx, SystemComponent,
     i18n::{PACKS, PackState},
+    testing::{TempDir, wait_until_async},
 };
 use tenko_store::{ReadConsistency, ReadViewExt, Store};
 use tower::ServiceExt as _;
@@ -266,7 +266,7 @@ async fn assert_served(h: &Harness, tag: &str, name: &str, translated: usize) {
 /// Asserts that a new user may have `tag` as language (the authorization index reads the
 /// active packs from `i18n.packs`, which it follows from the store).
 async fn assert_choosable(h: &Harness, tag: &str) {
-    for _ in 0..50 {
+    let reply = wait_until_async(&format!("a user to choose the active pack {tag}"), async || {
         let reply = h
             .call(
                 "POST",
@@ -275,13 +275,10 @@ async fn assert_choosable(h: &Harness, tag: &str) {
                 Some(&json!({ "name": "amelie", "roles": ["viewer"], "password": USER_PIN, "language": tag })),
             )
             .await;
-        if reply.status.as_u16() == 201 {
-            assert_eq!(reply.body["language"], tag);
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("a user cannot choose the active pack {tag}");
+        (reply.status.as_u16() == 201).then_some(reply)
+    })
+    .await;
+    assert_eq!(reply.body["language"], tag);
 }
 
 #[test]
@@ -792,44 +789,26 @@ async fn the_default_language_cannot_be_removed() {
     );
 }
 
-/// A directory under the system's temporary directory, removed on drop.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(name: &str) -> Self {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
-        let dir =
-            std::env::temp_dir().join(format!("tenko-i18n-{name}-{}-{nanos}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("a temporary directory");
-        Self(dir)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 #[tokio::test]
 async fn files_in_the_data_directory_are_imported_once_as_uploads_by_the_system() {
     let h = harness().await;
     let store: &dyn Store = h.env.store.as_ref();
     let languages = ui_languages();
-    let dir = TempDir::new("import");
-    std::fs::write(dir.0.join("fr.xlf"), pack("fr", "Français", 40)).expect("write");
-    std::fs::write(dir.0.join("broken.xlf"), "<xliff").expect("write");
-    std::fs::write(dir.0.join("notes.txt"), "not a pack").expect("write");
+    let dir = TempDir::new("i18n-import");
+    std::fs::write(dir.join("fr.xlf"), pack("fr", "Français", 40)).expect("write");
+    std::fs::write(dir.join("broken.xlf"), "<xliff").expect("write");
+    std::fs::write(dir.join("notes.txt"), "not a pack").expect("write");
 
     let missing = languages
-        .import_dir(store, &dir.0.join("absent"))
+        .import_dir(store, &dir.join("absent"))
         .await
         .expect("a missing directory is no error");
     assert_eq!(missing.imported + missing.skipped + missing.refused, 0);
 
-    let first = languages.import_dir(store, &dir.0).await.expect("imported");
+    let first = languages
+        .import_dir(store, dir.path())
+        .await
+        .expect("imported");
     assert_eq!((first.imported, first.skipped, first.refused), (1, 0, 1));
     let list = h.call("GET", "/i18n/packs", admin(&h), None).await;
     let fr = &list.body["packs"][2];
@@ -841,12 +820,18 @@ async fn files_in_the_data_directory_are_imported_once_as_uploads_by_the_system(
     assert_eq!(imports.len(), 1);
 
     // The next start skips the file, also once a newer version replaced it.
-    let second = languages.import_dir(store, &dir.0).await.expect("imported");
+    let second = languages
+        .import_dir(store, dir.path())
+        .await
+        .expect("imported");
     assert_eq!((second.imported, second.skipped, second.refused), (0, 1, 1));
     upload(&h, admin(&h), pack("fr", "Français", 50).as_bytes())
         .await
         .assert_status(201);
-    let third = languages.import_dir(store, &dir.0).await.expect("imported");
+    let third = languages
+        .import_dir(store, dir.path())
+        .await
+        .expect("imported");
     assert_eq!((third.imported, third.skipped), (0, 1));
     let list = h.call("GET", "/i18n/packs", admin(&h), None).await;
     assert_eq!(list.body["packs"][2]["candidate"]["percent"], 50);

@@ -16,6 +16,7 @@ use tenko_core::{
     ObservationId, Principal, RequestCtx, ScopeFilter, SessionId, SystemComponent, Timestamp,
     UserId,
     observe::{Observation, ObservationSource, Observed, ObservedHost},
+    testing::wait_until_async,
 };
 use tenko_ipam::{
     IpamCommand, IpamService, PlanOptions,
@@ -180,13 +181,11 @@ impl Lab {
     /// Waits until the index has applied the store's newest revision.
     async fn settle(&self) {
         let newest = self.store.status().revision;
-        for _ in 0..500 {
-            if self.findings.index().revision() >= newest {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("the findings index did not reach revision {newest}");
+        wait_until_async(
+            &format!("the findings index to reach revision {newest}"),
+            async || self.findings.index().revision() >= newest,
+        )
+        .await;
     }
 }
 

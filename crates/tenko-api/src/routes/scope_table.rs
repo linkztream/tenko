@@ -33,6 +33,7 @@ use tenko_auth::{settings::Profile, testing::TestEnv};
 use tenko_core::{
     ConnectorId, NodeId, ObservationId, Timestamp,
     observe::{Observation, ObservationSource, Observed, ObservedHost},
+    testing::TempDir,
 };
 use tenko_ipam::{
     IpamConfig, IpamService,
@@ -216,13 +217,7 @@ struct Lab {
     reconciler: Arc<Reconciler>,
     connector: ConnectorId,
     _stop: watch::Sender<bool>,
-    dir: std::path::PathBuf,
-}
-
-impl Drop for Lab {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+    _dir: TempDir,
 }
 
 impl Lab {
@@ -259,7 +254,7 @@ impl Lab {
         ipam.set_scope_guard(guard);
         let reconciler =
             Reconciler::new(Arc::clone(&ipam), ReconcilerConfig::default()).expect("reconciler");
-        let dir = std::env::temp_dir().join(format!("tenko-scope-table-{}", Uuid::now_v7()));
+        let dir = TempDir::new("scope-table");
         let imports = ImportService::new(
             Arc::clone(&ipam),
             engine.clone(),
@@ -319,7 +314,7 @@ impl Lab {
             reconciler,
             connector: ConnectorId::generate(),
             _stop: stop,
-            dir,
+            _dir: dir,
         };
         lab.populate().await;
         lab

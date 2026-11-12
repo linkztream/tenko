@@ -5,7 +5,6 @@
 use std::{
     collections::BTreeSet,
     net::IpAddr,
-    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
@@ -18,7 +17,7 @@ use bytes::Bytes;
 use serde_json::{Value, json};
 use tenko_core::{
     AddressId, AuthFailure, AuthFlags, AuthStrength, Authenticated, Authenticator, Credentials,
-    NodeId, Principal, Revision, SessionId, Timestamp, UserId, auth::AuthFuture,
+    NodeId, Principal, Revision, SessionId, Timestamp, UserId, auth::AuthFuture, testing::TempDir,
 };
 use tenko_ipam::{
     IpamCommand, IpamService, PlanView,
@@ -185,7 +184,8 @@ struct Env {
     app: Router,
     store: Arc<SwitchStore>,
     people: Arc<People>,
-    dir: PathBuf,
+    /// Removed after the queue above it is dropped.
+    _dir: TempDir,
 }
 
 impl Env {
@@ -209,7 +209,7 @@ impl Env {
             ..AppState::new(Arc::clone(&dyn_store))
         };
         let service = IpamService::with_direct_jobs(dyn_store).expect("IPAM service");
-        let dir = std::env::temp_dir().join(format!("tenko-queue-test-{}", Uuid::now_v7()));
+        let dir = TempDir::new("queue");
         let mut app = server::app(state, &HttpConfig::default(), &UiSource::Embedded)
             .expect("application")
             .layer(Extension(service));
@@ -221,7 +221,7 @@ impl Env {
             app,
             store,
             people,
-            dir,
+            _dir: dir,
         }
     }
 
@@ -367,12 +367,6 @@ impl Env {
         batch.put_typed(&QUEUED_CHANGES, &id, &record).expect("put");
         self.store.propose(batch).await.expect("record written");
         id
-    }
-}
-
-impl Drop for Env {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 

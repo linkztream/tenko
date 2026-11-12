@@ -23,6 +23,7 @@ use tenko_api::{
     state::AppState,
 };
 use tenko_cluster::ca::{TlsMode, TlsPolicy, TlsService, TrustedProxies};
+use tenko_core::testing::wait_until_async;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -203,13 +204,10 @@ async fn one_hundred_streams_get_one_snapshot_per_second_from_one_aggregation() 
 
     // 100 streams on the topic: once each has its first snapshot, count over the window.
     let readers = open_all(addr, "metrics").await;
-    timeout(WAIT, async {
-        while counts(&readers).contains(&0) {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+    wait_until_async("every stream to get a first snapshot", async || {
+        !counts(&readers).contains(&0)
     })
-    .await
-    .expect("every stream gets a first snapshot");
+    .await;
     // The counters are read at the two ends of `elapsed`, with the CPU readings outside it.
     let cpu_before = cpu_ms();
     let started = Instant::now();

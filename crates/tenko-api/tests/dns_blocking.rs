@@ -5,7 +5,6 @@
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::PathBuf,
     sync::Arc,
 };
 
@@ -20,6 +19,7 @@ use tenko_core::{
     Action, Authorizer, Denied, DenyReason, NodeId, ObjectKind, ObjectRef, Principal, ScopeFilter,
     Timestamp,
     dns::{BlockListId, DnsName, QueryTransport},
+    testing::TempDir,
 };
 use tenko_dns::{
     catalog::{Catalog, CatalogHandle},
@@ -70,13 +70,8 @@ struct Lab {
     router: Router,
     store: Arc<MemStore>,
     jobs: Arc<DirectJobs>,
-    dir: PathBuf,
-}
-
-impl Drop for Lab {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+    /// Removed after the stores above it are dropped.
+    _dir: TempDir,
 }
 
 async fn server() -> Server {
@@ -112,10 +107,10 @@ const QUERIES: [(&str, [u8; 4], bool); 6] = [
 ];
 
 async fn lab(node_update: bool, log_on: bool) -> Lab {
-    let dir = std::env::temp_dir().join(format!("tenko-api-dns-blocking-{}", uuid::Uuid::now_v7()));
+    let dir = TempDir::new("api-dns-blocking");
     let writer = LogWriter::start(LogSettings {
         client: ClientField::Address,
-        ..LogSettings::new(&dir)
+        ..LogSettings::new(dir.path())
     })
     .expect("log");
     let sink = writer.sink();
@@ -148,7 +143,7 @@ async fn lab(node_update: bool, log_on: bool) -> Lab {
         server().await,
         FeedProgress::default(),
         None,
-        log_on.then(|| (sink, dir.clone())),
+        log_on.then(|| (sink, dir.path().to_path_buf())),
     ));
     let slot = DnsNodeSlot::default();
     slot.set(node as Arc<dyn DnsNode>);
@@ -179,7 +174,7 @@ async fn lab(node_update: bool, log_on: bool) -> Lab {
         router,
         store,
         jobs,
-        dir,
+        _dir: dir,
     }
 }
 

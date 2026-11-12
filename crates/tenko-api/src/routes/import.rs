@@ -1068,7 +1068,7 @@ fn split_parameters(value: &str) -> (&str, Vec<(String, String)>) {
 /// `example.test`).
 #[cfg(test)]
 pub(super) mod testkit {
-    use std::{path::PathBuf, sync::Arc, time::Duration};
+    use std::{path::PathBuf, sync::Arc};
 
     use axum::{
         Extension, Router,
@@ -1077,7 +1077,10 @@ pub(super) mod testkit {
         response::Response,
     };
     use serde_json::{Value, json};
-    use tenko_core::{Authorizer, JobId};
+    use tenko_core::{
+        Authorizer, JobId,
+        testing::{TempDir, wait_until_async},
+    };
     use tenko_ipam::{
         IpamConfig, IpamService,
         import::{ImportConfig, ImportService},
@@ -1115,13 +1118,7 @@ pub(super) mod testkit {
     /// Stops the runner and removes the staged files when the last handle goes.
     struct Keep {
         _runner: RunnerHandle,
-        staging: PathBuf,
-    }
-
-    impl Drop for Keep {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.staging);
-        }
+        _staging: TempDir,
     }
 
     /// A decoded answer.
@@ -1231,9 +1228,9 @@ pub(super) mod testkit {
             )
             .expect("IPAM service");
             ipam.set_scope_guard(crate::routes::common::test_guard());
-            let staging = std::env::temp_dir().join(format!("tenko-api-import-{}", Uuid::now_v7()));
+            let staging = TempDir::new("api-import");
             let mut config = ImportConfig {
-                staging_dir: staging.clone(),
+                staging_dir: staging.path().to_path_buf(),
                 ..ImportConfig::default()
             };
             if let Some(max_upload) = setup.max_upload {
@@ -1250,7 +1247,7 @@ pub(super) mod testkit {
                 imports,
                 keep: Arc::new(Keep {
                     _runner: runner,
-                    staging,
+                    _staging: staging,
                 }),
             };
             api.sibling(setup)
@@ -1376,14 +1373,11 @@ pub(super) mod testkit {
         /// Waits for a job to end and returns its state.
         pub async fn wait_for_job(&self, id: &str) -> JobState {
             let id: JobId = id.parse().expect("job id");
-            for _ in 0..1500 {
+            wait_until_async(&format!("job {id} to finish"), async || {
                 let job = self.engine.job(id).await.expect("job");
-                if job.state.is_terminal() {
-                    return job.state;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            panic!("job {id} did not finish");
+                job.state.is_terminal().then_some(job.state)
+            })
+            .await
         }
 
         /// Uploads the workbook of the fixtures and applies it without its credentials;

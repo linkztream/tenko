@@ -4,7 +4,6 @@
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::PathBuf,
     sync::Arc,
 };
 
@@ -18,6 +17,7 @@ use tenko_api::{routes::dns::DnsNodeSlot, state::AppState};
 use tenko_core::{
     Action, Authorizer, Denied, DenyReason, NodeId, ObjectKind, ObjectRef, Principal, ScopeFilter,
     dns::{DnsName, QueryTransport},
+    testing::TempDir,
 };
 use tenko_dns::{
     catalog::{Catalog, CatalogHandle},
@@ -66,13 +66,7 @@ impl Authorizer for Gate {
 struct Lab {
     router: Router,
     node: Arc<LocalNode>,
-    dir: PathBuf,
-}
-
-impl Drop for Lab {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+    dir: TempDir,
 }
 
 async fn server() -> Server {
@@ -103,10 +97,10 @@ const QUERIES: [(&str, u16, u16, [u8; 4]); 6] = [
 ];
 
 async fn lab(node_update: bool, client: ClientField, log_on: bool) -> Lab {
-    let dir = std::env::temp_dir().join(format!("tenko-api-dns-log-{}", uuid::Uuid::now_v7()));
+    let dir = TempDir::new("api-dns-log");
     let writer = LogWriter::start(LogSettings {
         client,
-        ..LogSettings::new(&dir)
+        ..LogSettings::new(dir.path())
     })
     .expect("log");
     let sink = writer.sink();
@@ -136,7 +130,7 @@ async fn lab(node_update: bool, client: ClientField, log_on: bool) -> Lab {
         server().await,
         FeedProgress::default(),
         None,
-        log_on.then(|| (sink, dir.clone())),
+        log_on.then(|| (sink, dir.path().to_path_buf())),
     ));
     let slot = DnsNodeSlot::default();
     slot.set(Arc::clone(&node) as Arc<dyn DnsNode>);

@@ -20,6 +20,7 @@ use tenko_core::{
     },
     net::Duid,
     serde_util::HexBytes,
+    testing::wait_until_async,
 };
 use tenko_dhcp::{
     lease::CommitSettings,
@@ -357,24 +358,18 @@ async fn a_lease_page_never_states_a_revision_ahead_of_its_rows() {
     let vrf: VrfId = serde_json::from_value(item.body["vrf"].clone()).expect("vrf");
 
     let followed = commit_leases(&app, vrf, (&v4, "192.0.2.103"), (&v6, "2001:db8:1::103")).await;
-    let held = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
+    let held = wait_until_async(
+        &format!("the role's table to take the leases of revision {followed}"),
+        async || {
             let page = send(&router, "GET", "/dhcp/leases", None, &[]).await;
             page.assert_status(200);
             let listed = addrs(&page);
-            if listed.contains(&"192.0.2.103".to_owned())
-                && listed.contains(&"2001:db8:1::103".to_owned())
-            {
-                break page;
-            }
-            // test-lint: allow sleep pacing of a wait on a named condition with a 30 s limit
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| {
-        panic!("the role's table takes the leases of revision {followed} within 30 s")
-    });
+            (listed.contains(&"192.0.2.103".to_owned())
+                && listed.contains(&"2001:db8:1::103".to_owned()))
+            .then_some(page)
+        },
+    )
+    .await;
     let held_revision = held.body["revision"].as_u64().expect("revision");
     assert!(
         held_revision >= followed,

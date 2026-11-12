@@ -106,40 +106,13 @@ pub fn router(source: &UiSource) -> Result<Router, UiError> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::Path;
 
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
+    use tenko_core::testing::TempDir;
     use tower::ServiceExt as _;
 
     use super::*;
-
-    /// A unique directory below the system temp dir, removed on drop (also after a panic).
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(label: &str) -> Self {
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos());
-            let dir = std::env::temp_dir().join(format!(
-                "tenko-ui-test-{label}-{}-{nanos}",
-                std::process::id()
-            ));
-            fs::create_dir_all(&dir).expect("create temp dir");
-            Self(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     struct Reply {
         status: StatusCode,
