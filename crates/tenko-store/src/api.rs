@@ -1084,20 +1084,47 @@ impl From<KeyError> for StoreError {
     }
 }
 
+/// The codes of [`StoreError`]. Code that holds only the code of an error (a cluster or job
+/// error that crossed a crate or the wire) compares it with these, never with a literal.
+impl StoreError {
+    /// [`StoreError::PreconditionFailed`]: a lost race; re-read and retry.
+    pub const PRECONDITION_FAILED: &'static str = "sys.store.precondition_failed";
+    /// [`StoreError::IdempotencyMismatch`].
+    pub const IDEMPOTENCY_MISMATCH: &'static str = "sys.store.idempotency_mismatch";
+    /// [`StoreError::BatchTooLarge`].
+    pub const BATCH_TOO_LARGE: &'static str = "sys.store.batch_too_large";
+    /// [`StoreError::NoQuorum`].
+    pub const NO_QUORUM: &'static str = "sys.store.no_quorum";
+    /// [`StoreError::Timeout`].
+    pub const TIMEOUT: &'static str = "sys.store.timeout";
+    /// [`StoreError::ShuttingDown`].
+    pub const SHUTTING_DOWN: &'static str = "sys.store.shutting_down";
+    /// [`StoreError::Compacted`].
+    pub const COMPACTED: &'static str = "sys.store.compacted";
+    /// [`StoreError::ReservedTable`].
+    pub const RESERVED_TABLE: &'static str = "sys.store.reserved_table";
+    /// [`StoreError::PlaintextSecret`].
+    pub const PLAINTEXT_SECRET: &'static str = "sys.store.plaintext_secret";
+    /// [`StoreError::Storage`].
+    pub const STORAGE: &'static str = "sys.store.storage";
+    /// [`StoreError::Codec`].
+    pub const CODEC: &'static str = "sys.store.codec";
+}
+
 impl Coded for StoreError {
     fn code(&self) -> &'static str {
         match self {
-            StoreError::PreconditionFailed(_) => "sys.store.precondition_failed",
-            StoreError::IdempotencyMismatch => "sys.store.idempotency_mismatch",
-            StoreError::BatchTooLarge { .. } => "sys.store.batch_too_large",
-            StoreError::NoQuorum => "sys.store.no_quorum",
-            StoreError::Timeout => "sys.store.timeout",
-            StoreError::ShuttingDown => "sys.store.shutting_down",
-            StoreError::Compacted { .. } => "sys.store.compacted",
-            StoreError::ReservedTable { .. } => "sys.store.reserved_table",
-            StoreError::PlaintextSecret { .. } => "sys.store.plaintext_secret",
-            StoreError::Storage(_) => "sys.store.storage",
-            StoreError::Codec(_) => "sys.store.codec",
+            StoreError::PreconditionFailed(_) => Self::PRECONDITION_FAILED,
+            StoreError::IdempotencyMismatch => Self::IDEMPOTENCY_MISMATCH,
+            StoreError::BatchTooLarge { .. } => Self::BATCH_TOO_LARGE,
+            StoreError::NoQuorum => Self::NO_QUORUM,
+            StoreError::Timeout => Self::TIMEOUT,
+            StoreError::ShuttingDown => Self::SHUTTING_DOWN,
+            StoreError::Compacted { .. } => Self::COMPACTED,
+            StoreError::ReservedTable { .. } => Self::RESERVED_TABLE,
+            StoreError::PlaintextSecret { .. } => Self::PLAINTEXT_SECRET,
+            StoreError::Storage(_) => Self::STORAGE,
+            StoreError::Codec(_) => Self::CODEC,
         }
     }
 
@@ -1235,6 +1262,66 @@ mod tests {
             Principal::system(SystemComponent::Ipam),
             "2026-10-09T12:00:00Z".parse().expect("time"),
         )
+    }
+
+    /// Every error answers the code of its constant, and the constants are distinct: the
+    /// callers that hold only a code compare it with them.
+    #[test]
+    fn every_store_error_answers_its_code_constant() {
+        let errors = [
+            StoreError::PreconditionFailed(Vec::new()),
+            StoreError::IdempotencyMismatch,
+            StoreError::BatchTooLarge { size: 2, limit: 1 },
+            StoreError::NoQuorum,
+            StoreError::Timeout,
+            StoreError::ShuttingDown,
+            StoreError::Compacted {
+                oldest: Revision(1),
+            },
+            StoreError::ReservedTable { table: HOSTS },
+            StoreError::PlaintextSecret { table: HOSTS },
+            StoreError::Storage(String::new()),
+            StoreError::Codec(String::new()),
+        ];
+        // No wildcard: a new variant does not compile until it is listed above and has a
+        // constant below.
+        for error in &errors {
+            match error {
+                StoreError::PreconditionFailed(_)
+                | StoreError::IdempotencyMismatch
+                | StoreError::BatchTooLarge { .. }
+                | StoreError::NoQuorum
+                | StoreError::Timeout
+                | StoreError::ShuttingDown
+                | StoreError::Compacted { .. }
+                | StoreError::ReservedTable { .. }
+                | StoreError::PlaintextSecret { .. }
+                | StoreError::Storage(_)
+                | StoreError::Codec(_) => {}
+            }
+        }
+        let constants = [
+            StoreError::PRECONDITION_FAILED,
+            StoreError::IDEMPOTENCY_MISMATCH,
+            StoreError::BATCH_TOO_LARGE,
+            StoreError::NO_QUORUM,
+            StoreError::TIMEOUT,
+            StoreError::SHUTTING_DOWN,
+            StoreError::COMPACTED,
+            StoreError::RESERVED_TABLE,
+            StoreError::PLAINTEXT_SECRET,
+            StoreError::STORAGE,
+            StoreError::CODEC,
+        ];
+        let codes: Vec<&str> = errors.iter().map(Coded::code).collect();
+        assert_eq!(codes, constants);
+        let distinct: std::collections::BTreeSet<&str> = constants.into_iter().collect();
+        assert_eq!(distinct.len(), constants.len(), "{constants:?}");
+        assert_eq!(
+            StoreError::PRECONDITION_FAILED,
+            "sys.store.precondition_failed"
+        );
+        assert_eq!(StoreError::NO_QUORUM, "sys.store.no_quorum");
     }
 
     #[test]
