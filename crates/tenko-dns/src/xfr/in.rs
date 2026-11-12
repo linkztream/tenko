@@ -74,6 +74,26 @@ impl Default for Limits {
     }
 }
 
+/// Octets one decoded record may take on average before a transfer counts as too large
+/// ([`Limits::max_decoded`]): the record itself, its owner name as text and its data. The
+/// records of the measured zones (a host's A record, its PTR record) take at most half
+/// of it, so a zone of `max_records` such records passes; records whose names a primary
+/// stretches to fill memory (12 wire octets decode to over 300) do not.
+pub const DECODED_PER_RECORD: usize = 256;
+
+impl Limits {
+    /// Octets the decoded records of one transfer may take: [`DECODED_PER_RECORD`] for
+    /// each record `max_records` admits.
+    pub fn max_decoded(&self) -> usize {
+        self.max_records.saturating_mul(DECODED_PER_RECORD)
+    }
+}
+
+/// What a decoded record takes in memory.
+fn decoded_size(record: &Record) -> usize {
+    std::mem::size_of::<Record>() + record.name.as_str().len() + record.rdata.as_bytes().len()
+}
+
 /// The stable code of a transfer whose serial is older than the copy's (RFC 1982).
 pub const OLDER_SERIAL: &str = "dns.transfer.older_serial";
 
@@ -264,6 +284,7 @@ async fn exchange(
     let mut state = Parse::Start;
     let mut bytes = 0usize;
     let mut total = 0usize;
+    let mut decoded = 0usize;
     loop {
         let len = tokio::time::timeout(limits.idle, stream.read_u16())
             .await
@@ -322,6 +343,13 @@ async fn exchange(
         let mut records = answer.answers.into_iter();
         let mut done = None;
         for record in records.by_ref() {
+            decoded += decoded_size(&record);
+            if decoded > limits.max_decoded() {
+                return Err(FetchError::failed(format!(
+                    "the transfer decodes to more than the limit of {} octets ({decoded} reached)",
+                    limits.max_decoded()
+                )));
+            }
             if record.name != *apex && matches!(state, Parse::Start) {
                 return Err(FetchError::failed(
                     "the answer does not start with the zone's SOA",
@@ -501,6 +529,16 @@ pub fn older(serial: u32, held: u32) -> FetchError {
     }
 }
 
+/// The counter outcome of a failed transfer: refused when the primary refused it or its
+/// signature did not hold, failed otherwise (an older serial included).
+fn failure_outcome(error: &FetchError) -> Outcome {
+    if error.code == codes::TRANSFER_REFUSED || error.code == codes::TRANSFER_TSIG {
+        Outcome::Refused
+    } else {
+        Outcome::Failed
+    }
+}
+
 /// Whether a record of a transfer belongs to the zone: class IN, at or below the apex.
 fn in_zone(record: &Record, apex: &DnsName) -> bool {
     record.class == 1 && record.name.is_subdomain_of(apex)
@@ -576,14 +614,7 @@ pub async fn fetch_until(
                 tracing::debug!(%apex, detail = %error.detail, "IXFR not available; asking for AXFR");
             }
             Err(error) => {
-                count(
-                    MetricKind::IxfrIn,
-                    if error.code == codes::TRANSFER_FAILED {
-                        Outcome::Failed
-                    } else {
-                        Outcome::Refused
-                    },
-                );
+                count(MetricKind::IxfrIn, failure_outcome(&error));
                 return Err(error);
             }
         }
@@ -599,14 +630,7 @@ pub async fn fetch_until(
             Ok(fetched)
         }
         Err(error) => {
-            count(
-                MetricKind::AxfrIn,
-                if error.code == codes::TRANSFER_FAILED {
-                    Outcome::Failed
-                } else {
-                    Outcome::Refused
-                },
-            );
+            count(MetricKind::AxfrIn, failure_outcome(&error));
             Err(if error.code == "ixfr.unsupported" {
                 FetchError::failed(error.detail)
             } else {

@@ -44,6 +44,7 @@ pub mod acl;
 pub mod encoding;
 mod error;
 pub mod export;
+pub mod follow;
 pub mod import;
 pub mod jobs;
 pub mod journal;
@@ -71,12 +72,12 @@ use std::sync::Arc;
 use tenko_core::{
     CounterKey, ObjectRef, PrefixId, RequestCtx, Revision, TenantId,
     audit::{AuditDraft, FieldChange},
-    codec::key::encode_key,
+    codec::key::{encode_key, prefix_successor},
     dns::{
         DnsName, DnssecPolicy, JournalEntry, JournalRecord, Origin, Rdata, RecordData, RrSet,
         Rtype, ScopeName, SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy, UpdatePolicy,
         Zone, ZoneId, ZoneKind, ZoneScope, audit, check_apex,
-        tables::{RRSETS, ZONES},
+        tables::{NAME_OWNERS, RRSETS, TRANSFER_STATE, ZONES},
     },
     ipam::Stamp,
 };
@@ -975,6 +976,7 @@ impl ZoneService {
                 let mut batch = WriteBatch::for_request(cx);
                 batch.expect_typed(&ZONES, &id, Some(row.revision));
                 batch.delete_typed(&ZONES, &id);
+                batch.delete_typed(&TRANSFER_STATE, &id);
                 // WP6.4: a zone a view names is not deleted.
                 views::stage_zone_refs(&mut batch, view, &zone, None)?;
                 batch.expect_counter(zone_names(), view.counter(&zone_names())?);
@@ -1005,10 +1007,57 @@ impl ZoneService {
             })
             .await?;
         let written = written.ok_or_else(internal_nothing_written)?;
-        if rest {
-            self.purge(id).await?;
+        // The zone is gone once its row is: a purge that fails is finished by the leader's
+        // sweep ([`ZoneService::purge_orphans`]), so the delete still succeeded.
+        if rest && let Err(error) = self.purge(id).await {
+            tracing::warn!(zone = %id, %error, "the records of a deleted zone are removed by the next sweep");
         }
         Ok(written)
+    }
+
+    /// Removes the RRsets and owner rows of every zone that no longer exists, and returns
+    /// how many zones had some. It reads one key per zone of each table, not every row.
+    ///
+    /// # Errors
+    ///
+    /// The store's error.
+    pub async fn purge_orphans(&self) -> ZoneResult<usize> {
+        let view = self.view(None).await?;
+        let mut orphans = std::collections::BTreeSet::new();
+        for (table, zone_of) in [
+            (
+                RRSETS.name(),
+                (|key: &[u8]| RRSETS.decode_key(key).ok().map(|key| key.zone))
+                    as fn(&[u8]) -> Option<ZoneId>,
+            ),
+            (NAME_OWNERS.name(), |key: &[u8]| {
+                NAME_OWNERS.decode_key(key).ok().map(|key| key.zone)
+            }),
+        ] {
+            let mut start = std::ops::Bound::Unbounded;
+            loop {
+                let range = KeyRange {
+                    start,
+                    end: std::ops::Bound::Unbounded,
+                };
+                let Some((key, _)) = view.scan(table, range, 1, false)?.into_iter().next() else {
+                    break;
+                };
+                let Some(zone) = zone_of(&key) else { break };
+                if view.get_typed(&ZONES, &zone)?.is_none() {
+                    orphans.insert(zone);
+                }
+                match prefix_successor(&encode_key(&zone)) {
+                    Some(next) => start = std::ops::Bound::Included(next.into()),
+                    None => break,
+                }
+            }
+        }
+        drop(view);
+        for zone in &orphans {
+            self.purge(*zone).await?;
+        }
+        Ok(orphans.len())
     }
 
     /// Deletes the RRsets left of a deleted zone, in batches, as the DNS component.

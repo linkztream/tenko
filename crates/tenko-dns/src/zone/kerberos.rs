@@ -48,7 +48,6 @@ use std::{
     time::Duration,
 };
 
-use futures::StreamExt as _;
 use tenko_core::{
     ObjectRef, RequestCtx, Revision, SystemComponent, Timestamp,
     audit::AuditDraft,
@@ -2514,11 +2513,7 @@ impl LeaderLoop {
     /// # Errors
     ///
     /// The first error of what it tried.
-    pub async fn tick(
-        &self,
-        epoch: Option<u64>,
-        retry_after: &mut Option<Timestamp>,
-    ) -> ZoneResult<Due> {
+    pub async fn tick(&self, epoch: Option<u64>, waits: &mut Waits) -> ZoneResult<Due> {
         let cx = RequestCtx::system(SystemComponent::Dns);
         let service = &self.service;
         let Some(account) = service.status().await? else {
@@ -2526,7 +2521,30 @@ impl LeaderLoop {
         };
         let now = timestamp(service.now());
         if has_pending(&account) {
-            service.recover(&cx, epoch).await?;
+            if waits.recovery.is_some_and(|until| now < until) {
+                return Ok(Due::Nothing);
+            }
+            // The self-test finishes a pending change first, and its findings tell the
+            // operator what the KDC says when the change cannot be finished. Every attempt
+            // costs failed pre-authentications that an AD lockout policy counts, so the
+            // next one waits twice as long, up to the self-test's interval.
+            service.check(&cx, epoch).await?;
+            if service
+                .status()
+                .await?
+                .is_some_and(|account| has_pending(&account))
+            {
+                waits.recovery_wait = (waits.recovery_wait * 2).clamp(
+                    service.config.tick,
+                    service.config.check_every.max(service.config.tick),
+                );
+                waits.recovery = now.checked_add(waits.recovery_wait);
+                return Ok(Due::Checked);
+            }
+            *waits = Waits {
+                rotation: waits.rotation,
+                ..Waits::default()
+            };
             return Ok(Due::Recovered);
         }
         let rotation = account.owned && account.rotation_days > 0;
@@ -2537,10 +2555,10 @@ impl LeaderLoop {
             now.saturating_since(since)
                 >= Duration::from_secs(u64::from(account.rotation_days) * 86_400)
         });
-        let waiting = retry_after.is_some_and(|until| now < until);
+        let waiting = waits.rotation.is_some_and(|until| now < until);
         if rotation && due && !waiting {
             // A job that fails leaves the account due: the next attempt waits.
-            *retry_after = now.checked_add(service.config.retry_after);
+            waits.rotation = now.checked_add(service.config.retry_after);
             return service
                 .start_rotation(self.jobs.as_ref(), &cx)
                 .await
@@ -2555,6 +2573,18 @@ impl LeaderLoop {
         }
         Ok(Due::Nothing)
     }
+}
+
+/// What the leader loop waits for between its ticks.
+#[derive(Debug, Clone, Default)]
+pub struct Waits {
+    /// No rotation is started before this time (one failed).
+    rotation: Option<Timestamp>,
+    /// No recovery of a pending change is tried before this time (the last one could not
+    /// settle it).
+    recovery: Option<Timestamp>,
+    /// The pause after the last recovery that could not settle the change.
+    recovery_wait: Duration,
 }
 
 /// What a tick of the leader loop did.
@@ -2577,9 +2607,9 @@ impl tenko_core::cluster::LeaderService for LeaderLoop {
     }
 
     async fn run(&self, epoch: u64, stop: CancellationToken) -> Result<(), String> {
-        let mut retry_after = None;
+        let mut waits = Waits::default();
         loop {
-            if let Err(error) = self.tick(Some(epoch), &mut retry_after).await {
+            if let Err(error) = self.tick(Some(epoch), &mut waits).await {
                 tracing::warn!(%error, "the Kerberos account's task failed; it tries again later");
             }
             tokio::select! {
@@ -2622,10 +2652,18 @@ pub async fn follow(
     sink: Arc<dyn KeySink>,
     stop: CancellationToken,
 ) {
-    let filter = || WatchFilter::tables([KRB_ACCOUNTS.name().clone()]);
-    let mut stream = service.store.watch(None, filter()).ok();
+    let mut follow = super::follow::Follow::new(
+        Arc::clone(&service.store),
+        WatchFilter::tables([KRB_ACCOUNTS.name().clone()]),
+        "the Kerberos account",
+    );
     let mut last: Option<InstalledForm> = None;
     loop {
+        tokio::select! {
+            () = stop.cancelled() => return,
+            _ = follow.next() => {}
+            () = tokio::time::sleep(Duration::from_secs(30)) => {}
+        }
         match service.status().await {
             Ok(Some(account)) => {
                 let form = installed_form(&account);
@@ -2657,20 +2695,6 @@ pub async fn follow(
             Err(error) => {
                 tracing::warn!(%error, "the Kerberos account could not be read");
             }
-        }
-        let changed = async {
-            match &mut stream {
-                Some(stream) => matches!(stream.next().await, Some(Ok(_))),
-                None => false,
-            }
-        };
-        let alive = tokio::select! {
-            () = stop.cancelled() => return,
-            alive = changed => alive,
-            () = tokio::time::sleep(Duration::from_secs(30)) => true,
-        };
-        if !alive {
-            stream = service.store.watch(None, filter()).ok();
         }
     }
 }

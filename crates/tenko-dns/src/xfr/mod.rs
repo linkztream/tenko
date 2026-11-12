@@ -41,7 +41,6 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
-use futures::StreamExt as _;
 use tenko_core::{
     RequestCtx, SystemComponent,
     audit::AuditDraft,
@@ -59,7 +58,7 @@ use crate::{
     respond::Conn,
     tsig::{Keyring, TsigKey},
     wire::{self, HEADER_LEN},
-    zone::ZoneService,
+    zone::{ZoneService, follow::Follow},
 };
 
 /// What a message on the transfer path asks for.
@@ -251,18 +250,22 @@ impl RefusalLimiter {
 }
 
 /// Audit records written to the store of this process as the DNS component, refusals
-/// through a [`RefusalLimiter`] so that a scan cannot fill the audit log.
+/// through a [`RefusalLimiter`] so that a scan cannot fill the audit log. The writes run on
+/// the runtime the audit was made on: the UDP workers that record refusals are plain
+/// threads without one.
 pub struct StoreAudit {
     store: Arc<dyn Store>,
     refusals: RefusalLimiter,
+    runtime: Option<tokio::runtime::Handle>,
 }
 
 impl StoreAudit {
-    /// Records into `store`.
+    /// Records into `store`, on the runtime of the caller.
     pub fn new(store: Arc<dyn Store>) -> Self {
         Self {
             store,
             refusals: RefusalLimiter::default(),
+            runtime: tokio::runtime::Handle::try_current().ok(),
         }
     }
 
@@ -273,10 +276,14 @@ impl StoreAudit {
 
 impl TransferAudit for StoreAudit {
     fn record(&self, draft: AuditDraft) {
-        let store = Arc::clone(&self.store);
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        let Some(runtime) = tokio::runtime::Handle::try_current()
+            .ok()
+            .or_else(|| self.runtime.clone())
+        else {
+            tracing::warn!(action = %draft.action, "an audit record of the transfer path has no runtime to be written on");
             return;
         };
+        let store = Arc::clone(&self.store);
         runtime.spawn(async move {
             let cx = RequestCtx::system(SystemComponent::Dns);
             let mut batch = WriteBatch::for_request(&cx);
@@ -402,25 +409,19 @@ impl Directory {
     /// change of the zones or keys and at least every 30 seconds.
     pub async fn follow(self: Arc<Self>, zones: Arc<ZoneService>, stop: CancellationToken) {
         let mut cache = HashMap::new();
-        let filter = || WatchFilter::tables([ZONES.name().clone(), KEYS_META.name().clone()]);
-        let mut stream = zones.store().watch(None, filter()).ok();
+        let mut follow = Follow::new(
+            Arc::clone(zones.store()),
+            WatchFilter::tables([ZONES.name().clone(), KEYS_META.name().clone()]),
+            "the transfer path's zones and keys",
+        );
         loop {
+            tokio::select! {
+                () = stop.cancelled() => return,
+                _ = follow.next() => {}
+                () = tokio::time::sleep(Duration::from_secs(30)) => {}
+            }
             if let Err(error) = self.load(&zones, &mut cache).await {
                 tracing::warn!(%error, "the zones and keys of the transfer path could not be read");
-            }
-            let changed = async {
-                match &mut stream {
-                    Some(stream) => matches!(stream.next().await, Some(Ok(_))),
-                    None => false,
-                }
-            };
-            let alive = tokio::select! {
-                () = stop.cancelled() => return,
-                alive = changed => alive,
-                () = tokio::time::sleep(Duration::from_secs(30)) => true,
-            };
-            if !alive {
-                stream = zones.store().watch(None, filter()).ok();
             }
         }
     }
@@ -555,6 +556,29 @@ mod tests {
         out[2] |= 0x80;
         assert_eq!(classify(&out), None, "a response is not for the path");
         assert_eq!(classify(&[0; 3]), None);
+    }
+
+    /// The UDP workers are plain threads: a refusal recorded there is written all the same,
+    /// on the runtime the audit was made on.
+    #[tokio::test]
+    async fn an_audit_recorded_on_a_thread_without_a_runtime_is_written() {
+        use futures::StreamExt as _;
+        let store = Arc::new(tenko_store::MemStore::default());
+        let mut changes = store.watch(None, WatchFilter::all()).expect("watch");
+        let audit = Arc::new(StoreAudit::new(Arc::clone(&store) as Arc<dyn Store>));
+        let worker = Arc::clone(&audit);
+        std::thread::spawn(move || {
+            worker.record(AuditDraft::success(
+                tenko_core::dns::audit::TRANSFER_TRIGGER,
+                Vec::new(),
+            ));
+        })
+        .join()
+        .expect("the worker");
+        let written = tokio::time::timeout(Duration::from_secs(30), changes.next())
+            .await
+            .expect("the record is written");
+        assert!(matches!(written, Some(Ok(_))), "{written:?}");
     }
 
     #[test]

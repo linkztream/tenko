@@ -33,6 +33,7 @@ All in the namespace `dns` of the replicated store; the constants are `tenko_cor
 | `dns.list_versions` | (`BlockListId`, version) | `ListVersion` | the list service (WP5.2) | yes |
 | `dns.journal` | (`ZoneId`, `ScopeName`, `Revision`) | `JournalEntry` | the zone service, bounded by entries and days | yes |
 | `dns.sign_state` | `ZoneId` | `SignState` with `DnssecKeyMeta` (private keys are vault secrets, purpose `dns.dnssec`; the role purpose of node sync is `dnssec`); WP6.3 adds `signed_revision`, `expires` and `rollover_job` | the signer `dns.signer` and the rollover job (WP6.3) | no (controllers only) |
+| `dns.transfer_state` | `ZoneId` | `TransferStamp` (`zone`, `serial`, `refreshed`): the last successful refresh of a secondary zone, read tolerantly (an unknown field is ignored) | the transfer service `dns.transfer` with each transfer and each copy found current; the zone's delete removes it | no (controllers only) |
 
 Keys of owner names sort by labels from the root down with the octet 0x01 between labels, so a name and everything below it are one key range (`DnsName::subtree_prefix`).
 
@@ -210,7 +211,7 @@ The system component of the DNS services' own writes is `dns`.
 
 ## 8. Node sync
 
-Declared for Phase 5 and consumed by no node in Phase 2 (plan section 2.10): `Subset::new(node, &[Role::Dns]).role_tables()` lists every `dns.*` table except `dns.sign_state`, and `purpose_allowed("tsig" | "dnssec", &[Role::Dns])` holds (`tenko_cluster::node_sync`). The configuration stream of `Config.Watch` does not carry the role tables yet. The node commands `dns.cache.flush`, `dns.log.read`, `dns.stats` and the report `dns.status` are WP4.3's, behind the node-command interface, and `dns.cache.list` (a page of the cache, `tenko_dns::status::CacheListArgs`) sits beside `dns.cache.flush`; `Dns.Update` is Phase 5.
+Declared for Phase 5 and consumed by no node in Phase 2 (plan section 2.10): `Subset::new(node, &[Role::Dns]).role_tables()` lists every `dns.*` table except `dns.sign_state` and `dns.transfer_state`, and `purpose_allowed("tsig" | "dnssec", &[Role::Dns])` holds (`tenko_cluster::node_sync`). The configuration stream of `Config.Watch` does not carry the role tables yet. The node commands `dns.cache.flush`, `dns.log.read`, `dns.stats` and the report `dns.status` are WP4.3's, behind the node-command interface, and `dns.cache.list` (a page of the cache, `tenko_dns::status::CacheListArgs`) sits beside `dns.cache.flush`; `Dns.Update` is Phase 5.
 
 ## 9. Engine contracts
 

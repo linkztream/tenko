@@ -439,7 +439,7 @@ The step's log line names the zones and RRsets, the revision, the listeners, the
 
 ### The feed: from the store to the index
 
-The role reads its rows through one `ZoneFeed` (`tenko_dns::store_feed`, ADR 0017): a derived index of the store named `dns.serving` over the tables of the `dns` node role (every `dns.*` table but `dns.sign_state`). The engine never holds a store handle.
+The role reads its rows through one `ZoneFeed` (`tenko_dns::store_feed`, ADR 0017): a derived index of the store named `dns.serving` over the tables of the `dns` node role (every `dns.*` table but `dns.sign_state` and `dns.transfer_state`). The engine never holds a store handle.
 
 - **The first image** is built by the store at registration from a local read view, all tables at one revision, before the role listens.
 - **Changes**: the store hands every change set that touches those tables to the index, in revision order, on its apply path, before the write returns to the API. The index looks the changed rows up at that revision and queues their stored bytes (nothing more happens on the apply path); the feed decodes them, and the catalog's writer applies them as one delta (`Delta { from, to, changes }`) and swaps the new catalog in. Change sets that queue up while the writer is busy reach it as one delta of up to 100,000 rows. A change set that cannot be read or decoded makes the feed read a whole image instead, so no change is skipped. A change set that touches no `dns` table does not reach the role, so a delta runs from the revision of the previous `dns` change to its own.
@@ -618,11 +618,11 @@ A zone of kind `secondary` is a copy of a zone on one or more primaries, named i
 | Retry | After the SOA's `retry` seconds while every primary fails (at most 60 seconds before the first copy exists) |
 | NOTIFY | At once, from a primary (section 10.5) |
 | Transfer now | At once, from the API (section 10.9) |
-| Expire | After the SOA's `expire` seconds without a success: the records of the copy are removed and the zone answers SERVFAIL until the next transfer |
+| Expire | After the SOA's `expire` seconds without a successful refresh (a transfer written, or the copy found current): the records of the copy are removed and the zone answers SERVFAIL until the next transfer. An `expire` shorter than `refresh` plus `retry` is read as their sum (RFC 1912 section 2.2) and logged, so the copy cannot expire before its next refresh |
 
 A refresh sends IXFR with the copy's SOA. A primary that answers with the single current SOA leaves the copy as it is. A primary that answers NOTIMP or FORMERR, or with a newer single SOA, is asked for AXFR on a new connection, and a zone without a copy is asked for AXFR at once. With a `key` the request is signed and the answer must verify in the MAC chain; with `xot` the connection is TLS (section 10.4).
 
-A refresh is bounded (RFC 5936 section 6): 10 seconds to connect, 30 seconds between two messages, 15 minutes for the whole refresh (every primary tried, and the IXFR and the AXFR after it, together), 10,000,000 records and 256 MiB of messages per answer. A transfer past a bound fails with `dns.transfer.failed` and the detail names the bound; records outside the zone are dropped as they arrive. A transfer whose serial is older than the copy's (RFC 1982 arithmetic) is not applied, whether it comes as a zone or as the single SOA of an IXFR answer: the copy stays, the primary's state shows `dns.transfer.older_serial`, and the zone is retried on its timer. A primary whose serial really went back is accepted once through "Transfer now" (section 10.9): that refresh asks for AXFR and takes the zone whatever its serial. The same serial as the copy's is applied as usual.
+A refresh is bounded (RFC 5936 section 6): 10 seconds to connect, 30 seconds between two messages, 15 minutes for the whole refresh (every primary tried, and the IXFR and the AXFR after it, together), 10,000,000 records and 256 MiB of messages per answer, and 256 octets per admitted record once decoded (2,560,000,000 octets: a record, its owner name as text and its data; the records of the measured zones take under half of that). A transfer past a bound fails with `dns.transfer.failed` and the detail names the bound; records outside the zone are dropped as they arrive. A transfer whose serial is older than the copy's (RFC 1982 arithmetic) is not applied, whether it comes as a zone or as the single SOA of an IXFR answer: the copy stays, the primary's state shows `dns.transfer.older_serial`, and the zone is retried on its timer. A primary whose serial really went back is accepted once through "Transfer now" (section 10.9): that refresh asks for AXFR and takes the zone whatever its serial. The same serial as the copy's is applied as usual.
 
 The result is one change set through the store, fenced with the leader's epoch like every write of a leader service:
 
@@ -633,7 +633,7 @@ The result is one change set through the store, fenced with the leader's epoch l
 
 Because the copy is written through the store, the index of the `dns` role follows it like any other change and the zone is served as soon as it is written. The SOA and the name servers of a secondary zone come from the primary and are read-only in the API and the UI.
 
-The state of each zone (the serial held, the last success and the last error of each primary, the next refresh, the expiry, and whether a transfer is running) lives in the memory of the service on the leader. After a restart a copy counts as fresh from the time its SOA was written and is refreshed at once. The state shows in the API (section 10.9); `last_error` is one of these stable codes:
+The time of each zone's last successful refresh is stored with the serial it confirmed (`dns.transfer_state`), written with the transfer or, for a copy found current, on its own in the background class; the expiry counts from it, so a restart or a change of leader neither shortens nor lengthens a copy's life. A copy whose stored time is missing or belongs to another serial (a copy written by a version before this record existed) counts as refreshed when the leader's term starts, once: that time is stored then. The rest of the state of each zone (the serial held, the last success and the last error of each primary, the next refresh, and whether a transfer is running) lives in the memory of the service on the leader and is rebuilt from the store at each term start, when every zone is refreshed at once. A copy whose expiry has passed is let go before a new refresh of it starts; one whose refresh runs when it expires is let go if that refresh fails. At each term start and every hour the service also removes the records of zones that no longer exist (a delete whose last batches failed). The state shows in the API (section 10.9); on a node that does not lead, `expires` is computed from the stored time. The state shows in the API (section 10.9); `last_error` is one of these stable codes:
 
 | Code | Meaning |
 |---|---|
@@ -705,7 +705,7 @@ tenko dns zone update example.test --catalog true
 
 ### 10.12 Limits
 
-- The transfer state is in the memory of the leader's service. Another controller does not see it and a restart loses it (the copy is then refreshed at once). Phase 5 or a status row may keep it.
+- Beyond the time of the last successful refresh, the transfer state is in the memory of the leader's service: another controller does not see each primary's last error, and a restart loses it (the copy is then refreshed at once).
 - NOTIFY out waits for the `dns` role of its own process. In Phase 5 a remote `dns` node reports the revision it serves.
 - The transfer path reads the journal and writes its audit records through the store of its process, which holds while the role runs in the controller's process (Phase 2).
 - A transfer in of more than 20,000 changed RRsets is written in chunks, so it is not one commit and the zone may be served half changed while the write runs. One transfer holds at most 10 million records.

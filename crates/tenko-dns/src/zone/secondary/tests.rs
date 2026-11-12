@@ -217,12 +217,12 @@ fn a_secondary_zone_is_read_only_and_a_primary_is_not() {
 
 #[test]
 fn the_soa_timers_of_a_copy_read_from_its_soa() {
-    let timers = Timers::of(&Rdata::from_data(&soa(1)));
+    let timers = Timers::read(&Rdata::from_data(&soa(1))).0;
     assert_eq!(
         (timers.refresh, timers.retry, timers.expire),
         (60, 10, 3600)
     );
-    let fallback = Timers::of(&Rdata::from_data(&a(1)));
+    let fallback = Timers::read(&Rdata::from_data(&a(1))).0;
     assert_eq!(fallback.refresh, Timers::DEFAULT.refresh);
     let at = Timestamp::now();
     assert_eq!(after(at, 60).saturating_since(at), Duration::from_secs(60));
@@ -264,13 +264,13 @@ fn a_notify_during_a_running_transfer_refreshes_the_zone_again() {
     let mut zone = held(1);
     zone.running = true;
     zone.request(Some(2), now);
-    zone.finish(Some(Refreshed::Serial(1)), now, TIMERS);
+    zone.finish(Some(Refreshed::Serial { serial: 1, at: now }), now, TIMERS);
     assert!(!zone.running);
     assert!(zone.next_refresh <= now, "the NOTIFY for serial 2 was lost");
     assert_eq!(zone.requested, None);
     // That refresh reaches serial 2: the refresh timer applies.
     zone.running = true;
-    zone.finish(Some(Refreshed::Serial(2)), now, TIMERS);
+    zone.finish(Some(Refreshed::Serial { serial: 2, at: now }), now, TIMERS);
     assert_eq!(zone.next_refresh, after(now, TIMERS.refresh));
 }
 
@@ -281,13 +281,13 @@ fn a_notify_the_running_transfer_covers_needs_no_second_refresh() {
     zone.running = true;
     zone.request(Some(2), now);
     zone.request(Some(3), now);
-    zone.finish(Some(Refreshed::Serial(3)), now, TIMERS);
+    zone.finish(Some(Refreshed::Serial { serial: 3, at: now }), now, TIMERS);
     assert_eq!(zone.next_refresh, after(now, TIMERS.refresh));
     // A request without a serial (the API, a NOTIFY without SOA) always refreshes again.
     zone.running = true;
     zone.request(None, now);
     zone.request(Some(3), now);
-    zone.finish(Some(Refreshed::Serial(3)), now, TIMERS);
+    zone.finish(Some(Refreshed::Serial { serial: 3, at: now }), now, TIMERS);
     assert!(zone.next_refresh <= now);
     // A failed transfer retries on its own timer, or at once when a NOTIFY came.
     zone.running = true;
@@ -323,7 +323,7 @@ fn unsigned_notify_messages_that_bring_nothing_back_off() {
     let mut pause = NOTIFY_QUIET_MIN;
     for _ in 0..12 {
         zone.running = true;
-        zone.finish(Some(Refreshed::Serial(1)), now, TIMERS);
+        zone.finish(Some(Refreshed::Serial { serial: 1, at: now }), now, TIMERS);
         pause = (pause * 2).min(NOTIFY_QUIET_MAX);
         assert_eq!(zone.next_refresh, after(now, TIMERS.refresh));
         zone.request_unsigned(None, now);
@@ -333,7 +333,7 @@ fn unsigned_notify_messages_that_bring_nothing_back_off() {
     assert_eq!(pause, NOTIFY_QUIET_MAX, "the pause has its bound");
     // A refresh that brings a new serial ends the backoff.
     zone.running = true;
-    zone.finish(Some(Refreshed::Serial(2)), now, TIMERS);
+    zone.finish(Some(Refreshed::Serial { serial: 2, at: now }), now, TIMERS);
     zone.request_unsigned(Some(3), now);
     assert_eq!(
         zone.next_refresh,
@@ -355,12 +355,12 @@ fn an_unsigned_notify_during_a_transfer_is_kept_for_the_end_of_the_pause() {
     zone.backoff.quiet_until = Some(quiet);
     zone.running = true;
     zone.request_unsigned(Some(2), now);
-    zone.finish(Some(Refreshed::Serial(1)), now, TIMERS);
+    zone.finish(Some(Refreshed::Serial { serial: 1, at: now }), now, TIMERS);
     assert_eq!(zone.next_refresh, quiet, "not lost, not at once");
     zone.running = true;
     zone.request_unsigned(Some(2), now);
     zone.request(Some(2), now);
-    zone.finish(Some(Refreshed::Serial(1)), now, TIMERS);
+    zone.finish(Some(Refreshed::Serial { serial: 1, at: now }), now, TIMERS);
     assert!(zone.next_refresh <= now, "a signed NOTIFY came as well");
 }
 
@@ -490,7 +490,7 @@ fn a_kept_unsigned_notify_keeps_a_sooner_timer() {
         retry: 60,
         expire: 86_400,
     };
-    zone.finish(Some(Refreshed::Serial(1)), now, short);
+    zone.finish(Some(Refreshed::Serial { serial: 1, at: now }), now, short);
     assert_eq!(zone.next_refresh, after(now, 60));
 }
 
@@ -545,7 +545,10 @@ fn no_request_is_lost_under_random_sequences() {
                     let outcome = match next() % 3 {
                         0 => Some(Refreshed::Failed),
                         1 => None,
-                        _ => Some(Refreshed::Serial(reached)),
+                        _ => Some(Refreshed::Serial {
+                            serial: reached,
+                            at: now,
+                        }),
                     };
                     zone.finish(outcome, now, TIMERS);
                     let covered = |asked: Option<u32>| {

@@ -168,6 +168,8 @@ struct KdcState {
     /// A controller that has not replicated the change: service tickets come under this
     /// old key and version.
     stale_tickets: Option<(Key, u32)>,
+    /// AS exchanges refused for a wrong key (what an AD lockout policy counts).
+    preauth_failures: u32,
 }
 
 struct TestKdc {
@@ -191,6 +193,7 @@ impl TestKdc {
                 change: ChangeMode::Normal,
                 changes: 0,
                 stale_tickets: None,
+                preauth_failures: 0,
             }),
             clock,
             other_key: Key::new(EncryptionType::Aes256CtsHmacSha1, &[0x5a; 32]).expect("key"),
@@ -358,6 +361,7 @@ impl Kdc for TestKdc {
             });
         }
         if !self.proves(&secret) {
+            self.with(|s| s.preauth_failures += 1);
             return Err(ClientError::Kdc {
                 code: error_code::PREAUTH_FAILED,
                 text: Some("Preauthentication failed".to_owned()),
@@ -1227,19 +1231,19 @@ async fn dns_28_the_leader_rotates_when_due_and_checks_daily() {
     jobs.register(lab.service.rotate_step());
     let jobs: Arc<dyn ZoneJobs> = Arc::new(jobs);
     let leader = LeaderLoop::new(Arc::clone(&lab.service), Arc::clone(&jobs));
-    let mut retry = None;
+    let mut waits = Waits::default();
     assert_eq!(
-        leader.tick(None, &mut retry).await.expect("tick"),
+        leader.tick(None, &mut waits).await.expect("tick"),
         Due::Nothing
     );
     lab.clock.advance(25 * 3600);
     assert_eq!(
-        leader.tick(None, &mut retry).await.expect("tick"),
+        leader.tick(None, &mut waits).await.expect("tick"),
         Due::Checked
     );
     lab.clock.advance(30 * 86_400);
     assert_eq!(
-        leader.tick(None, &mut retry).await.expect("tick"),
+        leader.tick(None, &mut waits).await.expect("tick"),
         Due::Rotated
     );
     assert_eq!(lab.account().await.current().map(|v| v.kvno), Some(3));
@@ -1251,10 +1255,50 @@ async fn dns_28_the_leader_rotates_when_due_and_checks_daily() {
         s.change = ChangeMode::Normal;
     });
     assert_eq!(
-        leader.tick(None, &mut retry).await.expect("tick"),
+        leader.tick(None, &mut waits).await.expect("tick"),
         Due::Recovered
     );
     assert_eq!(lab.account().await.current().map(|v| v.kvno), Some(4));
+}
+
+/// A pending change the KDC takes with neither key set (an adopt left incomplete, or the
+/// password changed elsewhere) is not asked about every tick: the attempts back off, so a
+/// day costs a few failed pre-authentications, not hundreds that a lockout policy counts,
+/// and the self-test's findings tell the operator.
+#[tokio::test]
+async fn a_change_the_kdc_refuses_both_ways_is_retried_with_a_growing_pause() {
+    let lab = Lab::new();
+    lab.adopt().await;
+    let jobs: Arc<dyn ZoneJobs> =
+        Arc::new(DirectJobs::new(Arc::clone(&lab.store) as Arc<dyn Store>));
+    let leader = LeaderLoop::new(Arc::clone(&lab.service), jobs);
+    lab.kdc.with(|s| s.change = ChangeMode::LostAnswer);
+    lab.service.rotate(&cx(), None).await.expect_err("lost");
+    lab.kdc.with(|s| {
+        s.unreachable = false;
+        s.change = ChangeMode::Normal;
+        s.password = b"set elsewhere".to_vec();
+        s.preauth_failures = 0;
+    });
+    let mut waits = Waits::default();
+    let tick = i64::try_from(lab.service.config.tick.as_secs()).expect("seconds");
+    for _ in 0..(86_400 / tick) {
+        leader.tick(None, &mut waits).await.expect("tick");
+        lab.clock.advance(tick);
+    }
+    let failures = lab.kdc.with(|s| s.preauth_failures);
+    assert!(
+        failures <= 40,
+        "{failures} failed pre-authentications in a day"
+    );
+    let account = lab.account().await;
+    assert!(
+        account
+            .versions
+            .iter()
+            .any(|v| v.state == KeyVersionState::Pending)
+    );
+    assert!(!account.findings.is_empty(), "the self-test reports it");
 }
 
 /// DNS-28: a write of the leader carries its epoch; a deposed leader's write fails.

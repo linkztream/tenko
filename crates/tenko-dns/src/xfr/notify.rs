@@ -13,7 +13,6 @@
 
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
-use futures::StreamExt as _;
 use tenko_core::{
     cluster::LeaderService,
     dns::{NotifyTarget, Rtype, ScopeName, ZoneId, tables::RRSETS},
@@ -30,7 +29,11 @@ use super::{
 use crate::{
     tsig::Signer,
     wire::{self, MAX_MESSAGE_LEN},
-    zone::{ZoneService, secondary::KeyLoader},
+    zone::{
+        ZoneService,
+        follow::{Follow, Followed},
+        secondary::KeyLoader,
+    },
 };
 
 /// The timing of NOTIFY out.
@@ -311,35 +314,53 @@ impl LeaderService for NotifyService {
             served: self.served.clone(),
             settings: self.settings.clone(),
         });
-        let filter = || WatchFilter::tables([RRSETS.name().clone()]);
-        let mut stream = this
-            .zones
-            .store()
-            .watch(None, filter())
-            .map_err(|error| error.to_string())?;
+        let mut follow = Follow::new(
+            Arc::clone(this.zones.store()),
+            WatchFilter::tables([RRSETS.name().clone()]),
+            "NOTIFY out",
+        );
+        // One task per zone whose SOA was written in this term; it ends when the zone's
+        // default SOA is deleted (the zone was deleted or its copy expired).
         let mut tasks: HashMap<ZoneId, watch::Sender<u64>> = HashMap::new();
+        let mut started = false;
         loop {
-            let next = tokio::select! {
+            let followed = tokio::select! {
                 () = stop.cancelled() => return Ok(()),
-                next = stream.next() => next,
+                followed = follow.next() => followed,
             };
-            let Some(Ok(set)) = next else {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                stream = this
-                    .zones
-                    .store()
-                    .watch(None, filter())
-                    .map_err(|error| error.to_string())?;
-                continue;
+            let set = match followed {
+                Followed::Changes(set) => set,
+                Followed::Reset => {
+                    // The first reset is the start: the serials written before it were
+                    // announced by the leader that wrote them. A later one is a gap in the
+                    // stream: every zone with a task reads its serial again, and a task
+                    // sends only a serial it has not sent.
+                    if std::mem::replace(&mut started, true)
+                        && let Ok(view) = this.zones.view(None).await
+                    {
+                        let revision = view.revision().0;
+                        for sender in tasks.values() {
+                            sender.send_modify(|mark| *mark = (*mark).max(revision));
+                        }
+                    }
+                    continue;
+                }
             };
             for change in &set.changes {
-                if change.table != *RRSETS.name() || change.deleted {
+                if change.table != *RRSETS.name() {
                     continue;
                 }
                 let Ok(key) = RRSETS.decode_key(&change.key) else {
                     continue;
                 };
                 if key.rtype != Rtype::SOA {
+                    continue;
+                }
+                if change.deleted {
+                    if key.scope == ScopeName::DEFAULT {
+                        // Dropping the sender ends the zone's task.
+                        tasks.remove(&key.zone);
+                    }
                     continue;
                 }
                 let sender = tasks.entry(key.zone).or_insert_with(|| {
@@ -354,5 +375,41 @@ impl LeaderService for NotifyService {
                 sender.send_modify(|mark| *mark = (*mark).max(set.revision.0));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_store::{MemStore, Store};
+
+    use super::*;
+
+    /// A change stream that cannot be opened does not end the service: it tries again
+    /// after a pause and ends only with its term.
+    #[tokio::test]
+    async fn a_change_stream_that_fails_does_not_end_the_service() {
+        let store = Arc::new(MemStore::default());
+        let zones = ZoneService::with_direct_jobs(
+            Arc::clone(&store) as Arc<dyn Store>,
+            None,
+            crate::zone::ZoneConfig::default(),
+        );
+        let keys = Arc::new(KeyLoader::new(Arc::clone(&zones)));
+        let service = NotifyService::new(
+            zones,
+            keys,
+            ServedRevision::default(),
+            NotifySettings::default(),
+        );
+        store.shutdown();
+        let stop = CancellationToken::new();
+        let run = service.run(1, stop.clone());
+        tokio::pin!(run);
+        assert!(
+            futures::poll!(&mut run).is_pending(),
+            "the service keeps its term"
+        );
+        stop.cancel();
+        assert_eq!(run.await, Ok(()));
     }
 }

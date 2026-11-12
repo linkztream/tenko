@@ -2284,6 +2284,20 @@ pub struct JournalEntry {
     pub added: Vec<JournalRecord>,
 }
 
+/// The last successful refresh of one secondary zone (`dns.transfer_state`), kept by the
+/// leader's transfer service and never sent to nodes. The copy's expiry counts from
+/// `refreshed` (RFC 1035 section 3.3.13), so it survives a restart and a change of leader;
+/// it holds for the copy whose SOA has `serial`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferStamp {
+    /// The zone.
+    pub zone: ZoneId,
+    /// The serial of the copy the refresh confirmed or wrote.
+    pub serial: u32,
+    /// When the refresh succeeded.
+    pub refreshed: Timestamp,
+}
+
 // ---------------------------------------------------------------------------------------
 // Store tables
 
@@ -2306,12 +2320,13 @@ pub struct JournalEntry {
 /// | `dns.ntas.by_zone` | ([`DnsName`], [`NtaId`]) | `()` |
 /// | `dns.name_owners` | [`NameOwnerKey`] (zone, scope, name) | [`NameOwner`] |
 /// | `dns.krb_accounts` | [`Realm`] | [`KrbAccount`] |
+/// | `dns.transfer_state` | [`ZoneId`] | [`TransferStamp`] |
 pub mod tables {
     use super::{
         Acl, AclId, BlockList, BlockListId, DnsName, ForwardRule, ForwardRuleId, JournalEntry,
         KeyMeta, KeyName, KrbAccount, ListVersion, NameOwner, NameOwnerKey, NegativeTrustAnchor,
-        NtaId, Realm, RrSet, RrSetKey, ScopeName, SignState, TrustAnchor, View, ViewId, Zone,
-        ZoneId,
+        NtaId, Realm, RrSet, RrSetKey, ScopeName, SignState, TransferStamp, TrustAnchor, View,
+        ViewId, Zone, ZoneId,
     };
     use crate::{id::Revision, names::TableName, table::TableDef};
 
@@ -2353,10 +2368,13 @@ pub mod tables {
     /// controller's account service (WP13.3).
     pub static KRB_ACCOUNTS: TableDef<Realm, KrbAccount> = TableDef::new("dns.krb_accounts");
     // WP13.0: end.
+    /// The last successful refresh of each secondary zone (controllers only).
+    pub static TRANSFER_STATE: TableDef<ZoneId, TransferStamp> =
+        TableDef::new("dns.transfer_state");
 
     /// The tables a node with the `dns` role receives through node sync: every table of the
-    /// namespace except `dns.sign_state`, which only the signing service on the controllers
-    /// reads (plan section 3.2). Declared now and consumed by no node in Phase 2: the one
+    /// namespace except `dns.sign_state` and `dns.transfer_state`, which only the leader
+    /// services on the controllers read (plan section 3.2). Declared now and consumed by no node in Phase 2: the one
     /// node of Phase 2 runs the role in the controller's process and reads the store
     /// directly (plan section 2.10); the node-file feed is Phase 5. The trust anchors and
     /// the negative trust anchors are in it (recursion plan section 3.2), so a Phase 5 node
@@ -2383,7 +2401,7 @@ pub mod tables {
     ];
 
     /// Every table of the namespace.
-    pub fn all() -> [&'static TableName; 15] {
+    pub fn all() -> [&'static TableName; 16] {
         [
             ZONES.name(),
             RRSETS.name(),
@@ -2402,6 +2420,7 @@ pub mod tables {
             // WP13.0
             NAME_OWNERS.name(),
             KRB_ACCOUNTS.name(),
+            TRANSFER_STATE.name(),
         ]
     }
 }

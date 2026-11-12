@@ -38,6 +38,8 @@ enum Feed {
     Mixed,
     /// Messages of large TXT records without end, as fast as they go.
     Endless,
+    /// Small records with owner names of about 210 octets without end.
+    LongNames,
     /// One record every 100 ms without end: never idle, never done.
     Trickle,
     /// The SOA with this serial alone, as the whole answer.
@@ -84,6 +86,16 @@ async fn primary(feed: Feed) -> Primary {
                 for index in 0u64.. {
                     let owner = name(&format!("h{index}.example.test")).to_wire();
                     if !writer.push(&owner, 16, 60, big.as_bytes()) && !send(&mut writer).await {
+                        return;
+                    }
+                }
+            }
+            Feed::LongNames => {
+                let long = ["a".repeat(63), "b".repeat(63), "c".repeat(63)].join(".");
+                let small = txt("x");
+                for index in 0u64.. {
+                    let owner = name(&format!("{index}.{long}.example.test")).to_wire();
+                    if !writer.push(&owner, 16, 60, small.as_bytes()) && !send(&mut writer).await {
                         return;
                     }
                 }
@@ -189,4 +201,77 @@ async fn an_ixfr_answered_with_an_older_soa_is_not_current() {
     .await
     .expect("current");
     assert_eq!(fetched, Fetched::Current { serial: 5 });
+}
+
+/// A primary cannot make the client hold more decoded records than the budget, whatever
+/// their size on the wire; the refusal names the limit and the size reached.
+#[tokio::test]
+async fn a_transfer_that_decodes_past_the_budget_fails() {
+    let primary = primary(Feed::LongNames).await;
+    let limits = Limits {
+        max_records: 1_000,
+        ..Limits::default()
+    };
+    let error = fetch(&primary, &name("example.test"), None, limits)
+        .await
+        .expect_err("over the budget");
+    assert_eq!(error.code, codes::TRANSFER_FAILED);
+    assert!(
+        error
+            .detail
+            .contains(&format!("{} octets", limits.max_decoded())),
+        "{}",
+        error.detail
+    );
+}
+
+/// The budget lets the largest zone the documented limits admit pass with room to spare:
+/// as many records as `max_records`, shaped like the measured zones (a host's A record and
+/// its PTR record), take at most half of it.
+#[test]
+fn the_decoded_budget_admits_the_largest_documented_zone_twice_over() {
+    let host = Record {
+        name: name("host-9999999.example.test"),
+        rtype: Rtype::A,
+        class: 1,
+        ttl: 300,
+        rdata: Rdata::from_data(&RecordData::A {
+            address: std::net::Ipv4Addr::new(192, 0, 2, 1),
+        }),
+    };
+    let reverse = Record {
+        name: name("254.13123.2.0.192.in-addr.arpa"),
+        rtype: Rtype::PTR,
+        class: 1,
+        ttl: 300,
+        rdata: Rdata::from_data(&RecordData::Ptr {
+            target: name("host-9999999.example.test"),
+        }),
+    };
+    let limits = Limits::default();
+    let largest = decoded_size(&host).max(decoded_size(&reverse));
+    assert!(
+        largest * 2 <= DECODED_PER_RECORD,
+        "{largest} octets a record"
+    );
+    assert!(limits.max_records * largest * 2 <= limits.max_decoded());
+}
+
+/// An older serial is a failure of the transfer, not a refusal; a refusal or a signature
+/// that does not hold is a refusal.
+#[test]
+fn only_a_refusal_counts_as_refused() {
+    assert_eq!(failure_outcome(&older(3, 5)), Outcome::Failed);
+    assert_eq!(
+        failure_outcome(&FetchError::failed("no answer")),
+        Outcome::Failed
+    );
+    assert_eq!(
+        failure_outcome(&FetchError::refused("RCODE 5")),
+        Outcome::Refused
+    );
+    assert_eq!(
+        failure_outcome(&FetchError::tsig("bad signature")),
+        Outcome::Refused
+    );
 }

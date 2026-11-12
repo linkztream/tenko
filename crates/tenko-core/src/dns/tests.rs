@@ -633,13 +633,13 @@ fn tables_codes_and_actions_are_in_the_namespace() {
     assert_eq!(tables::KEYS_META.name().as_str(), "dns.keys.meta");
     let node: Vec<&str> = tables::NODE_TABLES.iter().map(TableName::as_str).collect();
     let all: Vec<&str> = tables::all().iter().map(|table| table.as_str()).collect();
-    let without_sign_state: Vec<&str> = all
+    let controller_only = ["dns.sign_state", "dns.transfer_state"];
+    let without_controller_only: Vec<&str> = all
         .iter()
         .copied()
-        .filter(|table| *table != "dns.sign_state")
+        .filter(|table| !controller_only.contains(table))
         .collect();
-    assert_eq!(node, without_sign_state);
-    assert!(!node.contains(&"dns.sign_state"));
+    assert_eq!(node, without_controller_only);
     // WP10.0: the trust anchors reach a Phase 5 node.
     for table in ["dns.trust_anchors", "dns.ntas", "dns.ntas.by_zone"] {
         assert!(node.contains(&table), "{table}");
@@ -835,3 +835,44 @@ fn nsec3_settings_are_bounded() {
     };
     assert!(zone.validate().is_err(), "a salt of 256 octets");
 }
+
+/// The stored form of a transfer stamp is fixed: these bytes are what format 6 holds, and
+/// a reader ignores a field a later version adds.
+#[test]
+fn a_transfer_stamp_keeps_its_stored_bytes() {
+    #[derive(serde::Serialize)]
+    struct Later<'a> {
+        zone: ZoneId,
+        serial: u32,
+        refreshed: Timestamp,
+        primary: &'a str,
+    }
+    let stamp = TransferStamp {
+        zone: ZoneId::from_uuid(uuid::Uuid::from_u128(
+            0x0190_0000_0000_7000_8000_0000_0000_0001,
+        )),
+        serial: 2_026_111_201,
+        refreshed: "2026-11-12T08:00:00Z".parse().expect("time"),
+    };
+    let bytes = tables::TRANSFER_STATE.encode(&stamp).expect("encode");
+    assert_eq!(crate::serde_util::to_hex(&bytes), GOLDEN_TRANSFER_STAMP);
+    assert_eq!(
+        tables::TRANSFER_STATE.decode(&bytes).expect("decode"),
+        stamp
+    );
+    let later = to_cbor(&Later {
+        zone: stamp.zone,
+        serial: stamp.serial,
+        refreshed: stamp.refreshed,
+        primary: "192.0.2.53:53",
+    })
+    .expect("encode");
+    assert_eq!(
+        tables::TRANSFER_STATE.decode(&later).expect("decode"),
+        stamp,
+        "an unknown field is ignored"
+    );
+}
+
+/// A map of three fields: `zone` (16 octets), `serial` (u32) and `refreshed` (RFC 3339 text).
+const GOLDEN_TRANSFER_STAMP: &str = "a3647a6f6e6550019000000000700080000000000000016673657269616c1a78c400e16972656672657368656474323032362d31312d31325430383a30303a30305a";
