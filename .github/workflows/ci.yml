@@ -47,8 +47,6 @@ env:
 jobs:
   rust-linux:
     name: Rust (Linux)
-    # Format, clippy, the doctests, and the test binaries built once and archived: the tests
-    # themselves run from that archive in rust-linux-tests, half in each job at the same time.
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
@@ -80,92 +78,24 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Build the test binaries into an archive
-        # The build `cargo nextest run --workspace --locked` makes, with the same features
-        # and profile. The archive holds the test binaries, the binaries the integration
-        # tests start and the build output of the packages with tests, not the sources. The
-        # size and the free disk are printed for the record.
-        run: |
-          cargo nextest archive --workspace --locked --archive-file "$RUNNER_TEMP/nextest-archive.tar.zst"
-          ls -l "$RUNNER_TEMP/nextest-archive.tar.zst"
-          df -h /
-      - name: Keep the archive for the test jobs
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: nextest-archive-linux
-          path: ${{ runner.temp }}/nextest-archive.tar.zst
-          if-no-files-found: error
-          # zstd has compressed it already.
-          compression-level: 0
-          retention-days: 1
-      - name: Doctests
-        # Not nextest's: cargo runs them, here where the workspace is built.
-        run: cargo test --doc --workspace --locked
-
-  rust-linux-tests:
-    name: Rust (Linux) tests, half ${{ matrix.half }} of 2
-    # The archive of rust-linux, run with nextest as the lead's gate runs it: one
-    # process per test, so a test that touches a process-wide static cannot see another
-    # test's additions. `slice:` lists every test of every binary and deals them out in
-    # turn, so the two halves are disjoint, together are the whole run, and differ by at
-    # most one test.
-    needs: rust-linux
-    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        half: [1, 2]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Free disk space
-        if: runner.environment == 'github-hosted'
-        # Room for the downloaded and the extracted archive, whose size is not known yet; the
-        # free space is printed so that the step can go once the first runs show it.
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
-      - name: The toolchain of rust-toolchain.toml
-        id: rust-toolchain
-        shell: bash
-        run: |
-          grep -Eq '^channel = "[0-9]+\.[0-9]+\.[0-9]+"$' rust-toolchain.toml
-          sed -n 's/^channel = "\(.*\)"$/toolchain=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
-      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
-        with:
-          tool: cargo-nextest
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: nextest-archive-linux
-          path: ${{ runner.temp }}/nextest-archive
+      # nextest, as the lead's gate: one process per test, so a test that touches a
+      # process-wide static cannot see another test's additions. Doctests are not nextest's
+      # and run separately.
       - name: Test
-        # Extracted into the checkout's target directory, the path the integration tests
-        # were compiled with (env!("CARGO_BIN_EXE_<name>")). A half that selects no test
-        # fails instead of passing.
-        env:
-          HALF: ${{ matrix.half }}
-        run: >-
-          cargo nextest run
-          --archive-file "$RUNNER_TEMP/nextest-archive/nextest-archive.tar.zst"
-          --extract-to "$GITHUB_WORKSPACE"
-          --partition "slice:$HALF/2"
-          --no-tests=fail
+        run: cargo nextest run --workspace --locked
       # The JUnit report of .config/nextest.toml: every test's result and duration, for
-      # reading timings and failures after the run, one artifact per half.
+      # reading timings and failures after the run.
       - name: Keep the test report
         # spelling: alias (the GitHub Actions status function)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: nextest-junit-linux-${{ matrix.half }}
+          name: nextest-junit-linux
           path: target/nextest/default/junit.xml
           if-no-files-found: ignore
           retention-days: 14
+      - name: Doctests
+        run: cargo test --doc --workspace --locked
 
   rust-windows:
     name: Rust (windows-latest, weekly schedule)
@@ -353,31 +283,17 @@ jobs:
           name: ui-dist
           path: ui/dist
       - name: Build the server with the real UI
-        id: build
         run: cargo build -p tenko --locked
-      - name: OpenAPI drift
-        # The committed document must equal the one the server generates (E3). Here, before
-        # the browser tests, so that a failed browser run does not hide it; the browser tests
-        # still run after a drift, so that a drift does not hide them either.
-        run: |
-          ./target/debug/tenko openapi > "$RUNNER_TEMP/openapi.json"
-          diff -u docs/api/openapi.json "$RUNNER_TEMP/openapi.json"
       - name: Install dependencies
-        # spelling: alias (the GitHub Actions status function)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         working-directory: ui
         run: npm ci
       - name: Install Chromium
-        # spelling: alias (the GitHub Actions status function)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         working-directory: ui
         # With the system libraries of Chromium on every runner: the hosted one starts
         # fresh each time, and the self-hosted one needs them once (its runner account has
         # passwordless sudo for this; apt is quick when they are there already).
         run: npx playwright install --with-deps chromium
       - name: End-to-end tests
-        # spelling: alias (the GitHub Actions status function)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         working-directory: ui
         env:
           TENKO_BIN: ${{ github.workspace }}/target/debug/tenko
@@ -391,11 +307,45 @@ jobs:
           path: ui/e2e/.artifacts/
           retention-days: 14
 
+  rust-embedded-ui:
+    name: Rust with the built UI
+    # The UI is built before Rust (ADR 0008); this build embeds the real bundle, without
+    # TENKO_UI_STUB.
+    needs: ui
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The toolchain of rust-toolchain.toml
+        id: rust-toolchain
+        shell: bash
+        run: |
+          grep -Eq '^channel = "[0-9]+\.[0-9]+\.[0-9]+"$' rust-toolchain.toml
+          sed -n 's/^channel = "\(.*\)"$/toolchain=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.toolchain }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ui-dist
+          path: ui/dist
+      - name: Build
+        run: cargo build -p tenko --locked
+      - name: OpenAPI drift
+        # The committed document must equal the generated one (E3); this job already
+        # built the binary.
+        run: |
+          ./target/debug/tenko openapi > "$RUNNER_TEMP/openapi.json"
+          diff -u docs/api/openapi.json "$RUNNER_TEMP/openapi.json"
+
   # Quick cluster signal on every push (WP3.0 deliverable 9). It builds the test binaries
   # first and then runs only the cluster tests under a three-minute limit: the store
   # conformance suites, the cluster transport tests, the two-process node tests and every
   # crates/tenko/tests/cluster_smoke*.rs. WP3.1c adds those files; they are picked up by
-  # name, so this job never needs another edit. The full workspace run stays in rust-linux-tests.
+  # name, so this job never needs another edit. The full workspace run stays in rust-linux.
   cluster-smoke:
     name: Cluster smoke (Linux)
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
