@@ -1102,11 +1102,10 @@ impl Updates {
                         self.inner.section.ready_timeout_secs,
                     )
                 };
-                // A switch that already ran leaves its own record; never overwrite it.
-                if self
-                    .attempt()
-                    .is_none_or(|current| current.state != probation::State::Restarting)
-                    && let Err(error) = probation::write(&self.inner.layout, &attempt)
+                // A switch that is in force leaves its own record; never overwrite it.
+                if self.attempt().is_none_or(|current| {
+                    current.state != probation::State::Restarting || !self.switched_to(&current.to)
+                }) && let Err(error) = probation::write(&self.inner.layout, &attempt)
                 {
                     tracing::warn!(%error, "cannot record the failed install");
                 }
@@ -1124,8 +1123,9 @@ impl Updates {
 
     /// The job engine resumes an install job pinned to this node after a restart, but its
     /// follower lived in the process that ended: without a new one, nothing would restart
-    /// into the new version when the job succeeds. Follows the job of a record in state
-    /// `installing` that this version started.
+    /// into the new version when the job succeeds. Follows the job that this version
+    /// started, of a record in state `installing`, or in state `restarting` whose switch did
+    /// not move `current` before the process ended.
     async fn resume_install(&self) {
         let Some(attempt) = self.attempt() else {
             return;
@@ -1133,7 +1133,12 @@ impl Updates {
         let Some(job) = attempt.job_id else {
             return;
         };
-        if attempt.state != probation::State::Installing || attempt.from != self.inner.env.running {
+        let unfinished = match attempt.state {
+            probation::State::Installing => true,
+            probation::State::Restarting => !self.switched_to(&attempt.to),
+            _ => false,
+        };
+        if !unfinished || attempt.from != self.inner.env.running {
             return;
         }
         *self
@@ -1143,6 +1148,11 @@ impl Updates {
             .unwrap_or_else(PoisonError::into_inner) = Some(job);
         tracing::info!(version = %attempt.to, %job, "following the install job again after a restart");
         self.follow(job, attempt.to).await;
+    }
+
+    /// Whether `current` points at `version`: the switch of an install to it is in force.
+    fn switched_to(&self, version: &ReleaseVersion) -> bool {
+        self.inner.layout.current().as_ref() == Some(version)
     }
 
     /// Writes the audit record of the last attempt's outcome once, from the version that
@@ -1985,6 +1995,27 @@ mod tests {
         let attempt = updates.attempt().expect("record");
         assert_eq!(attempt.state, probation::State::Failed);
         assert_eq!(attempt.job_id, Some(job));
+        assert!(!updates.in_progress());
+
+        // The switch step wrote its record but the process ended before `current` moved.
+        let spec = steps::job_spec(&version("0.2.0"), &asset, true, false, 180).expect("spec");
+        let job = updates.inner.engine.submit(spec, &ctx).await.expect("job");
+        probation::write(
+            &updates.inner.layout,
+            &Attempt::restarting(version("0.1.0"), version("0.2.0"), Some(job), 180),
+        )
+        .expect("record");
+        updates
+            .inner
+            .engine
+            .cancel(job, &ctx)
+            .await
+            .expect("cancel");
+        updates.at_start().await;
+        assert_eq!(
+            updates.attempt().map(|attempt| attempt.state),
+            Some(probation::State::Failed)
+        );
         assert!(!updates.in_progress());
     }
 

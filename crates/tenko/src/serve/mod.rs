@@ -322,11 +322,12 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
         Ok(resolved) => resolved,
         Err(error) => {
             let _ = writeln!(err, "tenko serve: {error}");
-            return config_refused(&args.sources(), err);
+            return stopped_before_probation(&args.sources(), None, exit::CONFIG, err);
         }
     };
+    let data_dir = Some(resolved.data_dir.as_path());
     if let Some(status) = check_roles(resolved.roles, err) {
-        return status;
+        return stopped_before_probation(&args.sources(), data_dir, status, err);
     }
     if !resolved.roles.contains(Role::Controller) {
         return crate::node::agent::command(resolved, args.stop_on_eof, err);
@@ -335,7 +336,7 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
         Ok(runtime) => runtime,
         Err(error) => {
             let _ = writeln!(err, "tenko serve: {error}");
-            return exit::FAILURE;
+            return stopped_before_probation(&args.sources(), data_dir, exit::FAILURE, err);
         }
     };
     // The trace exporter's channel runs on the server's runtime: the layer is built and the
@@ -351,7 +352,7 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
             Ok(None) => (None, None),
             Err(error) => {
                 let _ = writeln!(err, "tenko serve: {error}");
-                return exit::FAILURE;
+                return stopped_before_probation(&args.sources(), data_dir, exit::FAILURE, err);
             }
         };
         let layers = logging::Layers {
@@ -365,7 +366,7 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
             layers,
         ) {
             let _ = writeln!(err, "tenko serve: {error}");
-            return exit::FAILURE;
+            return stopped_before_probation(&args.sources(), data_dir, exit::FAILURE, err);
         }
         telemetry
     };
@@ -409,21 +410,43 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
     }
 }
 
-/// The exit status of a start whose configuration does not load: 12 when this version was
-/// just installed and the previous one takes over
-/// ([`crate::upgrade::probation::switch_back_unconfigured`]), else 3.
-pub fn config_refused(sources: &config::Sources, err: &mut impl Write) -> u8 {
+/// The exit status of a start that ends with `status` before it reads the update attempt
+/// record: 12 when this version was just installed and the previous one takes over
+/// ([`crate::upgrade::probation::switch_back_before_start`]), else `status`. `data_dir` is
+/// the resolved one; without it (the configuration did not load) it is read leniently from
+/// `sources`.
+pub fn stopped_before_probation(
+    sources: &config::Sources,
+    data_dir: Option<&std::path::Path>,
+    status: u8,
+    err: &mut impl Write,
+) -> u8 {
+    use crate::upgrade::probation;
     let own = crate::upgrade::running_version();
-    match crate::upgrade::probation::switch_back_unconfigured(sources, &own) {
+    let reason = if status == exit::CONFIG {
+        "upgrade.config_refused"
+    } else {
+        "upgrade.start_failed"
+    };
+    let found = data_dir.map_or_else(
+        || probation::data_dir_of(sources),
+        |dir| Some(dir.to_path_buf()),
+    );
+    match found.and_then(|dir| probation::switch_back_before_start(&dir, &own, reason)) {
         Some(previous) => {
+            let what = if status == exit::CONFIG {
+                "does not accept the configuration"
+            } else {
+                "cannot start"
+            };
             let _ = writeln!(
                 err,
-                "tenko serve: version {own} was just installed and does not accept the \
-                 configuration; switched back to {previous}, which exit status 12 starts"
+                "tenko serve: version {own} was just installed and {what}; switched back to \
+                 {previous}, which exit status 12 starts"
             );
             exit::RESTART
         }
-        None => exit::CONFIG,
+        None => status,
     }
 }
 
@@ -1021,6 +1044,11 @@ async fn start(
                 .await
                 .map_err(|error| StartError::new("store", "start.store.panic", error.to_string()))?
                 .map_err(|error| upgrade_error("store", &error))?;
+                // Recorded before the store opens, so a start that fails while opening it
+                // still restores the copy when it switches back.
+                if let Some(probation) = probation {
+                    probation.set_backup(&copy, false);
+                }
                 Some(copy)
             } else {
                 None
@@ -1036,7 +1064,7 @@ async fn start(
             // runs it once every voter's binary knows the format (OPS-08).
             let membership = store.membership();
             let member = membership.voters.len() + membership.learners.len() > 1;
-            if let (Some(probation), Some(copy)) = (probation, &backup) {
+            if let (Some(probation), Some(copy), true) = (probation, &backup, member) {
                 probation.set_backup(copy, member);
             }
             let finished = crate::upgrade::datadir::finish_with(
@@ -2559,11 +2587,28 @@ mod tests {
         let err = String::from_utf8(err).expect("text");
         assert!(err.contains("renamed_ttl_secs"), "{err}");
         assert!(err.contains("switched back to 0.0.4"), "{err}");
-        assert_eq!(layout.current(), Some(previous));
+        assert_eq!(layout.current(), Some(previous.clone()));
         // Without a record of an install, the same file stops the start with exit status 3.
         std::fs::remove_file(data.path().join("updates").join(probation::ATTEMPT_FILE))
             .expect("remove the record");
         assert_eq!(command(&args, &mut Vec::new()), exit::CONFIG);
+
+        // A start that ends after the configuration loaded but before it reads the record
+        // (the runtime, the telemetry, the log) switches back the same way.
+        layout.point(CURRENT, &own).expect("current");
+        probation::write(
+            &layout,
+            &Attempt::restarting(previous.clone(), own.clone(), None, 180),
+        )
+        .expect("record");
+        let mut err = Vec::new();
+        let status =
+            stopped_before_probation(&args.sources(), Some(data.path()), exit::FAILURE, &mut err);
+        assert_eq!(status, exit::RESTART);
+        assert!(String::from_utf8_lossy(&err).contains("cannot start"));
+        let attempt = probation::read(&layout).expect("read").expect("record");
+        assert_eq!(attempt.reason.as_deref(), Some("upgrade.start_failed"));
+        assert_eq!(layout.current(), Some(previous));
     }
 
     /// Every step kind the server's IPAM wiring registers is classified: a kind that

@@ -319,8 +319,8 @@ advertise = []
 heartbeat_secs = 10
 # Controller: lifetime in seconds of an enrollment token whose request names none (at most
 # 604800, seven days).
-# Every version reads this key's name up to 0.0.11: keep it while a node may run 0.0.11
-# or older, or switch back to it: `enrolment_ttl_secs` (spelling: alias).
+# Every version reads this key's name up to 0.0.11: keep it while a node, or its start-up
+# step, may run 0.0.11 or older: `enrolment_ttl_secs` (spelling: alias).
 enrollment_ttl_secs = 3600
 # Data-plane node: mebibytes the observation buffer keeps on disk while no controller is
 # reachable; the oldest batches go first when it is full.
@@ -493,8 +493,8 @@ size_mb = 256
 # Log one query in N (1 to 1000000; 1 logs every query).
 sample = 1
 # Replace client addresses with a keyed hash whose key changes every day (GDPR, TGL-15).
-# Every version reads this key's name up to 0.0.11: keep it while a node may run 0.0.11
-# or older, or switch back to it: `pseudonymise` (spelling: alias).
+# Every version reads this key's name up to 0.0.11: keep it while a node, or its start-up
+# step, may run 0.0.11 or older: `pseudonymise` (spelling: alias).
 pseudonymize = true
 # "logged" or "hidden": with "hidden" no client field is written at all.
 client = "logged"
@@ -615,8 +615,8 @@ max_upload = 64
 # infra_ttl_secs = 900
 # Query name minimization (RFC 9156): "relaxed" (full name when a server breaks on it),
 # "strict" or "off".
-# Every version reads this key's name up to 0.0.11: keep it while a node may run 0.0.11
-# or older, or switch back to it: `qname_minimisation` (spelling: alias).
+# Every version reads this key's name up to 0.0.11: keep it while a node, or its start-up
+# step, may run 0.0.11 or older: `qname_minimisation` (spelling: alias).
 # qname_minimization = "relaxed"
 # Synthesize negative answers from validated NSEC and NSEC3 records (RFC 8198).
 # aggressive_nsec = true
@@ -627,8 +627,8 @@ max_upload = 64
 # failure_cache_max_secs = 300
 # Tell the root servers which trust anchor keys the resolver holds (RFC 8145). Not set: on,
 # except under the Hardened profile.
-# Every version reads this key's name up to 0.0.11: keep it while a node may run 0.0.11
-# or older, or switch back to it: `trust_anchor_signalling` (spelling: alias).
+# Every version reads this key's name up to 0.0.11: keep it while a node, or its start-up
+# step, may run 0.0.11 or older: `trust_anchor_signalling` (spelling: alias).
 # trust_anchor_signaling = true
 # Answer the root key sentinel queries (RFC 8509).
 # key_sentinel = true

@@ -1192,26 +1192,21 @@ fn hooks(handle: ServiceStatusHandle) -> Hooks {
     }
 }
 
-/// A configuration that cannot be used: the Event Log says why, and a newly installed
-/// version switches back to the previous one (`serve::config_refused`). The log is not open
-/// yet, so the Event Log and the exit status are all there is.
-fn config_failed(args: &RunArgs, error: &ConfigError) -> u8 {
+/// A start that ends with `status` before the server reads the update attempt record: the
+/// Event Log says why, and a newly installed version switches back to the previous one
+/// (`serve::stopped_before_probation`). The log is not open yet, so the Event Log and the
+/// exit status are all there is.
+fn stopped_early(args: &RunArgs, data_dir: Option<&Path>, status: u8, message: &str) -> u8 {
     let sources = Sources {
         file: Some(args.config.clone()),
         data_dir: args.data_dir.clone(),
         roles: None,
     };
     let mut switched = Vec::new();
-    let status = serve::config_refused(&sources, &mut switched);
-    logging::event_log::report_early(
-        &args.name,
-        &format!(
-            "tenko service {}: the configuration {} cannot be used: {error}\n{}",
-            args.name,
-            args.config.display(),
-            String::from_utf8_lossy(&switched).trim_end()
-        ),
-    );
+    let status = serve::stopped_before_probation(&sources, data_dir, status, &mut switched);
+    let switched = String::from_utf8_lossy(&switched);
+    let text = format!("tenko service {}: {message}\n{switched}", args.name);
+    logging::event_log::report_early(&args.name, text.trim_end());
     status
 }
 
@@ -1224,7 +1219,13 @@ fn serve_until_stopped(
 ) -> u8 {
     let resolved = match load_config(&args.config, args.data_dir.as_deref()) {
         Ok(resolved) => resolved,
-        Err(error) => return config_failed(args, &error),
+        Err(error) => {
+            let message = format!(
+                "the configuration {} cannot be used: {error}",
+                args.config.display()
+            );
+            return stopped_early(args, None, exit::CONFIG, &message);
+        }
     };
     // A restart request (exit status 12) relies on the failure actions below.
     crate::upgrade::restart::set_windows_service();
@@ -1237,11 +1238,8 @@ fn serve_until_stopped(
         match serve::runtime(&resolved) {
             Ok(runtime) => Some(runtime),
             Err(error) => {
-                logging::event_log::report_early(
-                    &args.name,
-                    &format!("tenko service {}: {error}", args.name),
-                );
-                return exit::FAILURE;
+                let data_dir = Some(resolved.data_dir.as_path());
+                return stopped_early(args, data_dir, exit::FAILURE, &error.to_string());
             }
         }
     } else {
@@ -1257,11 +1255,8 @@ fn serve_until_stopped(
             Ok(Some((layer, telemetry))) => (Some(layer), Some(telemetry)),
             Ok(None) => (None, None),
             Err(error) => {
-                logging::event_log::report_early(
-                    &args.name,
-                    &format!("tenko service {}: {error}", args.name),
-                );
-                return exit::FAILURE;
+                let data_dir = Some(resolved.data_dir.as_path());
+                return stopped_early(args, data_dir, exit::FAILURE, &error.to_string());
             }
         }
     } else {
@@ -1274,11 +1269,8 @@ fn serve_until_stopped(
     if let Err(error) =
         logging::init_server_with(&resolved.config.log, Some(&path), Sink::FileOnly, layers)
     {
-        logging::event_log::report_early(
-            &args.name,
-            &format!("tenko service {}: cannot open the log: {error}", args.name),
-        );
-        return exit::FAILURE;
+        let message = format!("cannot open the log: {error}");
+        return stopped_early(args, Some(&resolved.data_dir), exit::FAILURE, &message);
     }
     tracing::info!(
         target: logging::event_log::SERVICE_TARGET,

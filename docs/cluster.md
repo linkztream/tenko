@@ -364,7 +364,7 @@ The `[cluster]` section of `tenko.toml`, with the example in `deploy/tenko.examp
 An invalid value stops the start with `config.invalid`. A node reads `buffer_mib` from its own configuration, like the data directory.
 
 <!-- spelling: alias -->
-Up to 0.0.11 the key `enrollment_ttl_secs` was spelled `enrolment_ttl_secs`, and its variable `TENKO_CLUSTER__ENROLMENT_TTL_SECS`. The old names are read permanently, because every version up to 0.0.11 reads only them: keep them in `tenko.toml` while any node may run 0.0.11 or older, or may switch back to it after an update. Set only one of the two.
+Up to 0.0.11 the key `enrollment_ttl_secs` was spelled `enrolment_ttl_secs`, and its variable `TENKO_CLUSTER__ENROLMENT_TTL_SECS`. The old names are read permanently, because every version up to 0.0.11 reads only them: keep them in `tenko.toml` while a node may run 0.0.11 or older, or switch back to it after an update, and on a Linux node whose start-up step runs an installer's binary of 0.0.11 or older (`ExecStartPre=` with `/usr/local/bin/tenko`), which reads the file too, until the installer of a newer version has run there. Set only one of the two.
 
 Two keys of the `[node]` section matter to a cluster of controllers. `id` is the node id of the controller, which is also its Raft id: 1 for the first controller (the default), the id of its enrollment for a joined one. `address` is the cluster port as the other controllers reach it (`host:port`); without it the first controller names the first `[cluster] advertise` endpoint, else the address the first join arrived at. `tenko cluster join` writes both (section 12.1).
 

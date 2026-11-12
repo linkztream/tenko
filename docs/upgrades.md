@@ -1786,7 +1786,7 @@ listens; the moment it is, the attempt is confirmed.
 |---|---|---|
 | `restarting` | The new version, first start | Probation. A watchdog switches back unless the version becomes ready within `updates.ready_timeout_secs` (180 by default). The time a migration of the data directory takes is not counted: the dry run of the install job has shown that it passes, and under systemd the start timeout is extended while it runs (section 3.2). |
 | `restarting` | The new version, a start step fails | It switches back at once and exits with status 12. |
-| `restarting` | The new version, its configuration does not load | It switches back at once and exits with status 12 instead of 3, so the previous version, which read the file before, starts. The record is read for this before the configuration's own checks; the data directory comes from `--data-dir`, `TENKO_DATA_DIR` or the file's top-level `data_dir`. |
+| `restarting` | The new version, its configuration does not load | It switches back at once and exits with status 12 instead of 3, so the previous version, which read the file before, starts. The same holds when the roles, the runtime, the telemetry or the log cannot be set up before the record is read (reason `upgrade.start_failed`). When the configuration does not load, the data directory for the record comes from `--data-dir`, `TENKO_DATA_DIR` or the file's top-level `data_dir`. |
 | `restarting` | The new version, a second start | The first start did not confirm (the process crashed or was killed): it switches back at once. |
 | `rolled_back`, with `restore` set | The previous version | It puts the pre-migration copy back before it opens the store (below). |
 | `confirmed`, `failed`, `rolled_back` | Any | Nothing. The outcome is audited once. |
@@ -1823,7 +1823,9 @@ The attempt record is JSON:
 The previous version reads what the new one wrote after a switch back, so the record is a
 format two versions share. Every released version ignores a key it does not know but refuses
 to start on a `state` it does not know; a version therefore writes only the five states
-above into a record an older version may read, and a new state raises `schema`. A version
+above into a record an older version may read, and a new state raises `schema`. The record
+of a switch back is always written at the schema of the version in `from`, with the restore
+keys it knows. A version
 reads a record with a state or a schema it does not know as nothing pending and logs a
 warning; a record that is not JSON of this shape stops the start (exit status 4) and is never
 guessed at.

@@ -140,12 +140,24 @@ fn layout_command(args: &LayoutArgs, out: &mut impl Write, err: &mut impl Write)
         data_dir: args.data_dir.clone(),
         roles: None,
     };
-    let resolved =
+    // The layout needs only the data directory. The unit's start-up step runs the installer's
+    // binary on the operator's file, which may hold a key that only a newer version knows:
+    // then the data directory is read without the checks, and the server's own start
+    // decides about the file.
+    let data_dir =
         match config::load(&sources, std::env::vars()).and_then(|loaded| loaded.config.resolve()) {
-            Ok(resolved) => resolved,
+            Ok(resolved) => resolved.data_dir,
             Err(error) => {
-                let _ = writeln!(err, "tenko upgrade layout: {error}");
-                return exit::CONFIG;
+                let Some(data_dir) = probation::data_dir_of(&sources) else {
+                    let _ = writeln!(err, "tenko upgrade layout: {error}");
+                    return exit::CONFIG;
+                };
+                let _ = writeln!(
+                    err,
+                    "tenko upgrade layout: {error}; the data directory {} is used for the layout",
+                    data_dir.display()
+                );
+                data_dir
             }
         };
     let exe = match std::env::current_exe() {
@@ -158,9 +170,9 @@ fn layout_command(args: &LayoutArgs, out: &mut impl Write, err: &mut impl Write)
             return exit::FAILURE;
         }
     };
-    match ensure_layout(&resolved.data_dir, &exe, &running_version()) {
+    match ensure_layout(&data_dir, &exe, &running_version()) {
         Ok(note) => {
-            let layout = layout::Layout::new(&resolved.data_dir);
+            let layout = layout::Layout::new(&data_dir);
             let _ = writeln!(out, "{note}");
             let _ = writeln!(out, "run: {}", layout.current_binary().display());
             exit::OK
@@ -287,7 +299,7 @@ pub fn adopt_payload(data_dir: &Path, running: &ReleaseVersion, payload: &Payloa
             return Adoption::Failed(format!("cannot read {}: {error}", payload.path.display()));
         }
     }
-    match probation::read(&layout) {
+    let last = match probation::read(&layout) {
         Ok(Some(attempt))
             if matches!(
                 attempt.state,
@@ -296,15 +308,26 @@ pub fn adopt_payload(data_dir: &Path, running: &ReleaseVersion, payload: &Payloa
         {
             return Adoption::Busy;
         }
-        Ok(_) => {}
+        Ok(last) => last,
         Err(error) => {
             return Adoption::Failed(format!("the attempt record cannot be read: {error}"));
         }
-    }
+    };
     let version = match payload_version(payload.path) {
         Ok(version) => version,
         Err(error) => return Adoption::Failed(error),
     };
+    // A version that was just switched back is not adopted again from the same file: that
+    // would switch back and forth until the service's failure actions give up.
+    if let Some(last) =
+        last.filter(|last| last.state == probation::State::RolledBack && last.to == version)
+    {
+        return Adoption::Failed(format!(
+            "version {version} was switched back ({}); it is adopted again only from a newer \
+             installer file",
+            last.reason.as_deref().unwrap_or("no reason recorded")
+        ));
+    }
     if &version <= running {
         return Adoption::NotNewer {
             payload: version,
@@ -685,7 +708,7 @@ mod tests {
         );
         let attempt = probation::read(&layout).expect("read").expect("record");
         assert_eq!(attempt.state, probation::State::Restarting);
-        assert_eq!((attempt.from, attempt.to), (v1, v2));
+        assert_eq!((attempt.from, attempt.to), (v1.clone(), v2.clone()));
         assert_eq!(attempt.deadline_secs, 90);
         assert_eq!(attempt.job_id, None);
 
@@ -698,6 +721,23 @@ mod tests {
             ),
             Adoption::Busy
         ));
+
+        // Switched back: the same file is not adopted again by the previous version, which
+        // would switch back and forth until the service's failure actions give up.
+        let probation = match probation::on_start(&data, &v2).expect("start") {
+            probation::StartAction::Probation(probation) => probation,
+            other => panic!("expected probation, got {other:?}"),
+        };
+        assert!(probation.switch_back("upgrade.not_ready"));
+        let outcome = adopt_payload(&data, &v1, &payload_of(&payload));
+        let Adoption::Failed(message) = outcome else {
+            panic!("expected no adoption, got {outcome:?}");
+        };
+        assert!(
+            message.contains("0.2.0 was switched back (upgrade.not_ready)"),
+            "{message}"
+        );
+        assert_eq!(layout.current(), Some(v1));
         std::fs::remove_dir_all(&data).expect("clean up");
     }
 

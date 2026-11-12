@@ -24,8 +24,10 @@
 //! on a `state` it does not know. So a version writes only the five states below and the
 //! keys of schema 1 into a record that an older version may read (the golden files in
 //! `tests/fixtures/upgrade/` hold those bytes); a new key may be added, a new state
-//! or a changed meaning raises `schema`. This version reads a record with a state it does
-//! not know, or a schema above its own, as nothing pending, with a warning.
+//! or a changed meaning raises `schema`. The record of a switch back is read by the version
+//! in `from`, so it is always written at that version's schema, with the restore keys it
+//! knows. This version reads a record with a state it does not know, or a schema above its
+//! own, as nothing pending, with a warning.
 
 use std::{
     fs, io,
@@ -260,31 +262,32 @@ pub fn on_start(data_dir: &Path, own: &ReleaseVersion) -> io::Result<StartAction
     })
 }
 
-/// When the configuration does not load at the start of this version: if the record says
-/// this version was just installed and is on probation, switches back to the previous
-/// version and returns it, so that the caller stops with exit status 12 and the service
-/// manager starts that version, which read the file before. A version that renamed or
-/// removed a key the file still uses thus never strands the node. The data directory comes
-/// from `--data-dir`, the `TENKO_*` environment, or the top-level `data_dir` of the file,
-/// read without the checks that failed.
-pub fn switch_back_unconfigured(
-    sources: &crate::config::Sources,
+/// When a start of this version ends before it reads the record (its configuration does not
+/// load, or the roles, the runtime, the telemetry or the log cannot be set up): if the record
+/// says this version was just installed, switches back to the previous version with
+/// `reason` and returns it, so that the caller stops with exit status 12 and the service
+/// manager starts that version, which started with the same file before. A version that
+/// renamed or removed a key the file still uses thus never strands the node.
+pub fn switch_back_before_start(
+    data_dir: &Path,
     own: &ReleaseVersion,
+    reason: &str,
 ) -> Option<ReleaseVersion> {
-    let data_dir = data_dir_of(sources)?;
-    let layout = Layout::new(&data_dir);
+    let layout = Layout::new(data_dir);
     let attempt = read(&layout).ok()??;
     if attempt.state != State::Restarting || &attempt.to != own {
         return None;
     }
     let from = attempt.from.clone();
-    Probation::new(layout, attempt, &data_dir)
-        .switch_back("upgrade.config_refused")
+    Probation::new(layout, attempt, data_dir)
+        .switch_back(reason)
         .then_some(from)
 }
 
-/// The data directory `sources` name, without the configuration's own checks.
-fn data_dir_of(sources: &crate::config::Sources) -> Option<PathBuf> {
+/// The data directory `sources` name without the configuration's own checks: `--data-dir`,
+/// the `TENKO_*` environment, or the top-level `data_dir` of the file read as plain TOML.
+/// For the steps that need only the data directory when the configuration does not load.
+pub fn data_dir_of(sources: &crate::config::Sources) -> Option<PathBuf> {
     let without_file = crate::config::Sources {
         file: None,
         ..sources.clone()
@@ -370,14 +373,12 @@ impl Probation {
     }
 
     /// Records the store copy taken before this version migrated, so that a switch back
-    /// restores it. A member of a controller cluster records none: its store also holds
-    /// what the other controllers wrote since, which a restore would roll back.
+    /// restores it; the start records it before it opens the store. A member of a
+    /// controller cluster clears it again once the store tells it is one: its store also
+    /// holds what the other controllers wrote since, which a restore would roll back.
     pub fn set_backup(&self, backup: &Path, member: bool) {
-        if member {
-            return;
-        }
         let mut attempt = self.attempt();
-        attempt.backup = Some(backup.to_path_buf());
+        attempt.backup = (!member).then(|| backup.to_path_buf());
         if let Err(error) = write(&self.inner.layout, &attempt) {
             tracing::error!(%error, "cannot record the store copy in the attempt record");
         }
@@ -531,15 +532,26 @@ mod tests {
         assert_eq!(written, SCHEMA_ONE.trim_end());
     }
 
-    /// The reader every released version has: the API's state with no unknown arm and the
-    /// keys of schema 1, unknown keys ignored. What this version writes must stay readable
-    /// by it, because a switch back starts the previous version on this record.
+    /// The state as every released version reads it: these five, and no other.
+    #[derive(Debug, PartialEq, Eq, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum ReleasedState {
+        Installing,
+        Restarting,
+        Confirmed,
+        RolledBack,
+        Failed,
+    }
+
+    /// The reader every released version (0.0.3 to 0.0.11) has: these keys, unknown keys
+    /// ignored. What this version writes must stay readable by it, because a switch back
+    /// starts the previous version on this record.
     #[derive(Deserialize)]
     #[allow(dead_code, reason = "the fields are read to show that they parse")]
     struct ReleasedReader {
         from: ReleaseVersion,
         to: ReleaseVersion,
-        state: DtoState,
+        state: ReleasedState,
         at: Timestamp,
         #[serde(default)]
         job_id: Option<JobId>,
@@ -559,18 +571,36 @@ mod tests {
     #[test]
     fn released_versions_read_every_record_this_version_writes() {
         let mut attempt = golden_attempt();
+        attempt.backup = Some(PathBuf::from("upgrade-backups/copy"));
         for state in [
             State::Installing,
             State::Restarting,
             State::Confirmed,
             State::RolledBack,
             State::Failed,
+            State::Unknown,
         ] {
+            // A new state must be added here, and a state a released version does not know
+            // raises the schema instead.
+            let written = match state {
+                State::Installing
+                | State::Restarting
+                | State::Confirmed
+                | State::RolledBack
+                | State::Failed => true,
+                State::Unknown => false,
+            };
+            if !written {
+                continue;
+            }
             attempt.state = state;
-            attempt.backup = Some(PathBuf::from("upgrade-backups/copy"));
             let bytes = serde_json::to_vec_pretty(&attempt).expect("json");
             let read: ReleasedReader = serde_json::from_slice(&bytes).expect("released reader");
-            assert_eq!(read.state, state.to_dto());
+            let name = serde_json::to_value(state).expect("state");
+            assert_eq!(
+                serde_json::from_value::<ReleasedState>(name).expect("a released state"),
+                read.state
+            );
         }
     }
 
@@ -656,16 +686,34 @@ mod tests {
             ..crate::config::Sources::default()
         };
         // No record: nothing to switch back to.
-        assert_eq!(switch_back_unconfigured(&sources, &version("0.2.0")), None);
+        assert_eq!(
+            data_dir_of(&sources).and_then(|dir| switch_back_before_start(
+                &dir,
+                &version("0.2.0"),
+                "upgrade.config_refused"
+            )),
+            None
+        );
         write(
             &layout,
             &Attempt::restarting(version("0.1.0"), version("0.2.0"), None, 180),
         )
         .expect("record");
         // The previous version is not the one on probation.
-        assert_eq!(switch_back_unconfigured(&sources, &version("0.1.0")), None);
         assert_eq!(
-            switch_back_unconfigured(&sources, &version("0.2.0")),
+            data_dir_of(&sources).and_then(|dir| switch_back_before_start(
+                &dir,
+                &version("0.1.0"),
+                "upgrade.config_refused"
+            )),
+            None
+        );
+        assert_eq!(
+            data_dir_of(&sources).and_then(|dir| switch_back_before_start(
+                &dir,
+                &version("0.2.0"),
+                "upgrade.config_refused"
+            )),
             Some(version("0.1.0"))
         );
         assert_eq!(layout.current(), Some(version("0.1.0")));

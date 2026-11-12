@@ -696,9 +696,9 @@ fn config_refused(version: &ReleaseVersion, config: &Path, stderr: &str) -> Step
         "update.config_refused",
         409,
         format!(
-            "version {version} does not accept the configuration file {}: {}; change the \
-             file so that both versions read it (the release notes name renamed or removed \
-             settings), then install again",
+            "version {version} does not accept the configuration (the file {} or a TENKO_* \
+             variable): {}; change it so that both versions read it (the release notes name \
+             renamed or removed settings), then install again",
             config.display(),
             if stderr.is_empty() {
                 "no message"

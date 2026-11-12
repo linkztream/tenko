@@ -186,7 +186,6 @@ fn default_name(host: &str, port: u16) -> String {
     }
 }
 
-/// The lines `tenko serve` needs to start as a member.
 /// The listen address when `--listen` is not given: every address of the family of the
 /// host of `--address`.
 fn default_listen(host: &str, port: u16) -> String {
@@ -197,6 +196,7 @@ fn default_listen(host: &str, port: u16) -> String {
     }
 }
 
+/// The lines `tenko serve` needs to start as a member.
 fn fragment(node: NodeId, address: &str, listen: &str) -> String {
     let quote = |text: &str| toml::Value::String(text.to_owned()).to_string();
     format!(
