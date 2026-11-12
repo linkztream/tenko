@@ -12,14 +12,6 @@
       <unit id="metrics.waiting">
         <segment><source>Waiting for the first sample from the server.</source><target>Väntar på den första mätningen från servern.</target></segment>
       </unit>
-      <unit id="metrics.sparkline">
-        <notes><note category="description">Tooltip of the small line chart of a tile: the tile title and its values of the last minute, oldest first.</note></notes>
-        <segment><source>{name} over the last minute: {values}</source><target>{name} den senaste minuten: {values}</target></segment>
-      </unit>
-      <unit id="metrics.bars">
-        <notes><note category="description">Tooltip of the small bar chart of a tile: the tile title, the length of a bucket in seconds and the share of each bucket (buckets without queries left out), oldest first; the newest bar is a bucket that is still filling.</note></notes>
-        <segment><source>{name} per {seconds} s bucket, the newest still filling: {values}</source><target>{name} per {seconds}-sekundersfönster, det senaste fylls ännu: {values}</target></segment>
-      </unit>
       <unit id="metrics.unit.per_second">
         <notes><note category="description">Unit after a rate, such as requests per second.</note></notes>
         <segment><source>/s</source><target>/s</target></segment>
@@ -140,16 +132,16 @@
         <segment><source>{entries} entries, {stale} stale/s</source><target>{entries} poster, {stale} föråldrade/s</target></segment>
       </unit>
       <unit id="metrics.dns.cache_window">
-        <notes><note category="description">The line under the figure of the cache tile: the number is the hit ratio over the last 30 seconds (hits over hits and misses, not an average of per-second ratios) and each bar of the chart is the same ratio over a bucket of 5 seconds with fixed edges (six completed buckets and the one in progress, drawn lighter); the number is the ratio over the six completed buckets and changes when a bucket completes. The cache hint line gives the stale answers per second as the mean over the same 30 seconds.</note></notes>
-        <segment><source>Last 30 s; bars per 5 s</source><target>Senaste 30 s; staplar per 5 s</target></segment>
+        <notes><note category="description">The line under the figure of the cache tile: the number is the hit ratio over the last 30 seconds (hits over hits and misses, not an average of per-second ratios): the six completed buckets of 5 seconds with fixed edges, so it changes when a bucket completes; the chart is the ratio's history. The cache hint line gives the stale answers per second as the mean over the same 30 seconds.</note></notes>
+        <segment><source>Last 30 s</source><target>Senaste 30 s</target></segment>
       </unit>
       <unit id="metrics.dns.answers">
         <notes><note category="description">Tile title: the DNS answers by response code.</note></notes>
         <segment><source>Answers</source><target>Svar</target></segment>
       </unit>
       <unit id="metrics.dns.answers_hint">
-        <notes><note category="description">The line under the figure of the answers tile: the number is the share of the answers with the response code NOERROR over the last 30 seconds and each bar of the chart is the same share over a bucket of 5 seconds with fixed edges (six completed buckets and the one in progress, drawn lighter). The rows list each response code per second as the mean over those 30 seconds.</note></notes>
-        <segment><source>NOERROR share and rates, last 30 s; bars per 5 s</source><target>Andel NOERROR och frekvens, senaste 30 s; staplar per 5 s</target></segment>
+        <notes><note category="description">The line under the figure of the answers tile: the number is the share of the answers with the response code NOERROR over the last 30 seconds; the chart is the share's history. The rows list each response code per second as the mean over those 30 seconds.</note></notes>
+        <segment><source>NOERROR share and rates, last 30 s</source><target>Andel NOERROR och frekvens, senaste 30 s</target></segment>
       </unit>
       <unit id="metrics.dns.rcode_other">
         <notes><note category="description">Every other DNS response code than NOERROR, NXDOMAIN, SERVFAIL and REFUSED.</note></notes>

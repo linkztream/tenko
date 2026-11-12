@@ -10,6 +10,8 @@
 // the test environment has none. A plain GET answering a `ReadableStream` works in the
 // browser (service worker) and in Node alike.
 import type { HttpHandler } from "msw";
+// The golden example of the `metrics` topic, which the server's tests write and its contract test reads.
+import goldenMetrics from "../../../../docs/api/examples/metrics-stream.jsonl?raw";
 import type { Topic } from "../events";
 import { requireSession } from "./auth";
 import {
@@ -220,9 +222,25 @@ function metricsOptions() {
   return { dns: db.installation.roles.includes("dns"), dhcp: db.installation.roles.includes("dhcp"), host: hostMetrics };
 }
 
+/** The keys of the golden example that hold a moment. */
+const TIMES = new Set(["at", "started", "start"]);
+
+/**
+ * The first event of a `metrics` stream: the golden example's `metrics.history` as it stands,
+ * every moment in it moved by the same whole seconds so that it ends now. The mock computes no
+ * history of its own: the tiles show the golden figures (three of them, a few buckets each).
+ */
+export function cannedMetricsHistory(now = Date.now()): string {
+  const line = goldenMetrics.split("\n")[0] ?? "{}";
+  const at = Date.parse((JSON.parse(line) as { history?: { at?: string } }).history?.at ?? "");
+  const shift = Number.isFinite(at) ? Math.round((now - at) / 1000) * 1000 : 0;
+  const moved: unknown = JSON.parse(line, (key, value: unknown) => (TIMES.has(key) && typeof value === "string" ? new Date(Date.parse(value) + shift).toISOString() : value));
+  return frame("metrics", moved);
+}
+
 function metricsHistoryFrames(): string {
   if (samplerStart === null) return "";
-  return mockMetricsHistory(METRICS_HISTORY, samplerSecond() - 1, metricsOptions()).map(metricsFrame).join("");
+  return cannedMetricsHistory() + mockMetricsHistory(METRICS_HISTORY, samplerSecond() - 1, metricsOptions()).map(metricsFrame).join("");
 }
 
 /**

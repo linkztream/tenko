@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { axeViolations } from "../app/testing/axe";
 import { setLocale } from "../i18n";
 import { mockMetricsSnapshot } from "../api/mock/metrics-model";
-import { emptyHistory, GIB, HISTORY, LONG_HISTORY, pushSnapshot, type MetricsDhcp, type MetricsDns, type MetricsHost, type MetricsSample, type MetricsSnapshot } from "./metrics";
+import { emptyHistory, GIB, pushSnapshot, type MetricsDhcp, type MetricsDns, type MetricsHost, type MetricsSample, type MetricsSnapshot } from "./metrics";
+import goldenMetrics from "../../../docs/api/examples/metrics-stream.jsonl?raw";
 import MetricsTiles from "./MetricsTiles";
 
 /** A stand-in for EventSource that the tests feed. */
@@ -99,8 +100,8 @@ describe("metrics tiles", () => {
     expect(screen.getAllByTestId(/^metrics-tile-/)).toHaveLength(8);
     for (const el of screen.getAllByTestId(/^metrics-tile-/)) {
       expect(parts(el)).toEqual(SHAPE);
-      expect(el.querySelector(".metrics-plot > svg")).not.toBeNull();
-      expect(el.querySelector(".metrics-plot polyline, .metrics-plot rect")).toBeNull();
+      expect(within(el).getByRole("slider").querySelector("canvas")).not.toBeNull();
+      expect(within(el).getByRole("slider").dataset.buckets).toBe("0");
     }
     expect(screen.getByTestId("metrics-group-controller").textContent).toBe("Controller");
     expect(screen.queryByTestId("metrics-group-dns")).toBeNull();
@@ -108,7 +109,7 @@ describe("metrics tiles", () => {
     expect(source.closed).toBe(true);
   });
 
-  it("show the numbers of the newest sample and a sparkline of every sample", async () => {
+  it("show the numbers of the newest sample", async () => {
     mount();
     await waitFor(() => expect(FakeSource.all).toHaveLength(1));
     const source = FakeSource.last();
@@ -120,10 +121,6 @@ describe("metrics tiles", () => {
     await waitFor(() => expect(tile("requests").dataset.value).toBe("30"));
     expect(screen.queryByTestId("metrics-waiting")).toBeNull();
     expect(screen.getByTestId("metrics-tiles").dataset.controllers).toBe("1");
-    expect(screen.getByTestId("metrics-sparkline-requests").dataset.points).toBe("3");
-    expect(screen.getByTestId("metrics-sparkline-requests").querySelector("title")?.textContent).toBe(
-      "API requests over the last minute: 10, 20, 30",
-    );
     expect(tile("requests").textContent).toContain("p50 0.8 ms, p99 24 ms");
     expect(tile("commit").dataset.value).toBe("3.2");
     expect(tile("store").dataset.value).toBe("1500000");
@@ -141,18 +138,6 @@ describe("metrics tiles", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.dataset).toMatchObject({ node: "1", role: "leader", lag: "0", state: "current" });
     expect(await axeViolations(screen.getByTestId("metrics-tiles"))).toEqual([]);
-  });
-
-  it("show a minute: the sixty newest samples", async () => {
-    mount();
-    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
-    const source = FakeSource.last();
-    for (let i = 1; i <= 65; i++) {
-      const own = sample(1, { sse: { subscribers: i } });
-      send(source, snapshot([own], own));
-    }
-    await waitFor(() => expect(tile("sse").dataset.value).toBe("65"));
-    expect(screen.getByTestId("metrics-sparkline-sse").dataset.points).toBe("60");
   });
 
   it("show the cluster's sum and one Raft row per controller, marking silent and older ones", async () => {
@@ -278,20 +263,14 @@ describe("DNS tiles", () => {
     );
     expect(tile("dns-queries").textContent).toContain("1.3K");
     expect(tile("dns-queries").textContent).toContain("p50 0.3 ms, p99 18 ms");
-    expect(screen.getByTestId("metrics-sparkline-dns-queries").dataset.points).toBe("3");
     expect(screen.getByTestId("metrics-dns-log-dropped").dataset.state).toBe("idle");
     expect(screen.getByTestId("metrics-dns-log-dropped").textContent).toBe("");
     expect(tile("dns-cache").dataset.value).toBe("82");
     expect(tile("dns-cache").textContent).toContain("8.4K entries, 1.5 stale/s");
-    expect(tile("dns-cache").textContent).toContain("Last 30 s; bars per 5 s");
-    expect(within(tile("dns-cache")).queryByTestId("metrics-sparkline-dns-cache")).toBeNull();
-    const bars = within(tile("dns-cache")).getByTestId("metrics-bars");
-    expect(bars.getAttribute("data-buckets")).toBe("7");
-    expect(bars.getAttribute("aria-hidden")).toBe("true");
-    expect(bars.querySelectorAll("rect")).toHaveLength(1);
-    expect(tile("dns-answers").textContent).toContain("NOERROR share and rates, last 30 s; bars per 5 s");
-    expect(within(tile("dns-answers")).getByTestId("metrics-bars").getAttribute("data-buckets")).toBe("7");
-    expect(within(tile("dns-queries")).queryByTestId("metrics-bars")).toBeNull();
+    expect(within(tile("dns-cache")).getByTestId("metrics-window").textContent).toBe("Last 30 s");
+    expect(tile("dns-answers").textContent).toContain("NOERROR share and rates, last 30 s");
+    // Every tile draws the same history chart, the ratio tiles included.
+    for (const name of DNS_TILES) expect(within(tile(name)).getByTestId(`metrics-history-${name}`).getAttribute("role")).toBe("slider");
     expect(tile("dns-answers").dataset.value).toBe("80");
     const rcodes = within(tile("dns-answers")).getAllByTestId("metrics-dns-rcode");
     expect(rcodes.map((row) => [row.dataset.rcode, row.dataset.rate])).toEqual([
@@ -328,7 +307,7 @@ describe("DNS tiles", () => {
     const chart = (name: string) => tile(name).querySelector<HTMLElement>(".metrics-chart")!;
     expect(within(chart("raft")).getAllByTestId("metrics-raft-node")).toHaveLength(1);
     expect(within(chart("dns-answers")).getAllByTestId("metrics-dns-rcode")).toHaveLength(5);
-    expect(within(chart("dns-answers")).getByTestId("metrics-bars")).toBeTruthy();
+    expect(within(chart("dns-answers")).getByRole("slider")).toBeTruthy();
     expect(chart("dns-answers").querySelector(".metrics-rows-pairs")).not.toBeNull();
     expect(within(chart("dns-blocked")).getAllByTestId("metrics-dns-list")).toHaveLength(3);
     // The warning is the second line of the footer, the window the first line of the ratio tiles.
@@ -401,48 +380,9 @@ describe("DNS tiles", () => {
     // The newest second is quiet, so its own ratio is absent, yet the window has queries: 1 hit of 4.
     await waitFor(() => expect(tile("dns-cache").dataset.value).toBe("25"));
     expect(tile("dns-answers").dataset.value).toBe("50");
-    // The newest bucket holds all three samples: a bar of a quarter of the height.
-    const [bar] = within(tile("dns-cache")).getByTestId("metrics-bars").querySelectorAll("rect");
-    expect(bar?.getAttribute("height")).toBe("5");
   });
 
-  it("keep their bars in place inside a bucket, shift them one step at a boundary and draw the bucket in progress lighter", async () => {
-    mount();
-    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
-    const source = FakeSource.last();
-    const t0 = Date.parse("2026-10-14T12:00:00Z");
-    const cache = (hits: number, misses: number) => ({ hit_ratio: null, hits_per_second: hits, misses_per_second: misses, stale_per_second: 0, entries: 10 });
-    const feed = (seconds: number, hits: number, misses: number) => {
-      const own = sample(1, { at: new Date(t0 + seconds * 1000).toISOString(), dns: dnsPart({ cache: cache(hits, misses) }) });
-      send(source, snapshot([own], own));
-    };
-    const rects = () => [...within(tile("dns-cache")).getByTestId("metrics-bars").querySelectorAll("rect")].map((r) => [r.getAttribute("x"), r.getAttribute("height"), r.classList.contains("partial")]);
-    // Bucket 0 all hits (seconds 0 to 4), bucket 1 half hits (5 to 9): one second of the next bucket opens a bar in progress.
-    for (let s = 0; s < 5; s++) feed(s, 2, 0);
-    for (let s = 5; s < 10; s++) feed(s, 1, 1);
-    feed(10, 0, 4);
-    await waitFor(() => expect(rects()).toHaveLength(3));
-    const settled = rects();
-    // Slots 4, 5 and 6 of seven: the two completed bars are solid, the newest is the lighter bar in progress.
-    expect(settled.map((r) => r[2])).toEqual([false, false, true]);
-    expect(settled.map((r) => r[1])).toEqual(["20", "10", "1"]);
-    // The headline is the share of the two completed buckets: 15 hits of 20 answers.
-    expect(tile("dns-cache").dataset.value).toBe("75");
-    // A tick inside the bucket in progress changes that bar only, and not the headline.
-    feed(11, 4, 0);
-    await waitFor(() => expect(rects()[2]?.[1]).not.toBe(settled[2]?.[1]));
-    expect(rects().slice(0, 2)).toEqual(settled.slice(0, 2));
-    expect(tile("dns-cache").dataset.value).toBe("75");
-    // The next bucket shifts every bar by exactly one slot (10 units).
-    feed(15, 1, 0);
-    await waitFor(() => expect(rects()).toHaveLength(4));
-    const shifted = rects();
-    expect(shifted.slice(0, 2).map((r) => r[1])).toEqual(settled.slice(0, 2).map((r) => r[1]));
-    for (const i of [0, 1, 2]) expect(Number(shifted[i]![0])).toBe(Number(settled[i]![0]) - 10);
-    expect(shifted.map((r) => r[2])).toEqual([false, false, false, true]);
-  });
-
-  it("show the answer rates over the 30 seconds of the bars, so a quiet tile does not read zero beside bars of answers", async () => {
+  it("show the answer rates over the 30 seconds of the headline, so a quiet tile does not read zero beside its share", async () => {
     mount();
     await waitFor(() => expect(FakeSource.all).toHaveLength(1));
     const source = FakeSource.last();
@@ -470,8 +410,8 @@ describe("DNS tiles", () => {
     expect(tile("dns-queries").textContent).toContain("DNS-frågor");
     expect(screen.getByTestId("metrics-dns-log-dropped").textContent).toContain("poster i frågeloggen kastade per sekund");
     expect(tile("dns-cache").textContent).toContain("Träffandel i cachen");
-    expect(tile("dns-cache").textContent).toContain("Senaste 30 s; staplar per 5 s");
-    expect(tile("dns-answers").textContent).toContain("Andel NOERROR och frekvens, senaste 30 s; staplar per 5 s");
+    expect(tile("dns-cache").textContent).toContain("Senaste 30 s");
+    expect(tile("dns-answers").textContent).toContain("Andel NOERROR och frekvens, senaste 30 s");
     expect(tile("dns-answers").textContent).toContain("Övriga");
     expect(tile("dns-blocked").textContent).toContain("5 listor har blockerat frågor");
     expect(tile("dns-upstreams").textContent).toContain("Svarstid p99 42 ms");
@@ -529,8 +469,6 @@ describe("recursion tiles", () => {
     expect(tile("dns-subqueries").textContent).toContain("320");
     expect(tile("dns-subqueries").textContent).toContain("/s");
     expect(tile("dns-subqueries").textContent).toContain("Queries to authorities, validation included");
-    expect(screen.getByTestId("metrics-sparkline-dns-subqueries").dataset.points).toBe("3");
-    expect(screen.getByTestId("metrics-sparkline-dns-subqueries").querySelector("title")?.textContent).toContain("Sub-queries over the last minute");
   });
 
   it("show the outcomes validated per second in total, a row each for secure, insecure and bogus, and the indeterminate rate in the footer", async () => {
@@ -655,7 +593,6 @@ describe("DHCP tiles", () => {
     expect([...screen.getByTestId("metrics-tiles").querySelectorAll("[data-testid^='metrics-tile-']")].map((el) => el.getAttribute("data-testid"))).toEqual(
       ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes", ...DNS_TILES, ...DHCP_TILES].map((name) => `metrics-tile-${name}`),
     );
-    expect(screen.getByTestId("metrics-sparkline-dhcp-leases").dataset.points).toBe("3");
     expect(tile("dhcp-ack").dataset.value).toBe("8.5");
     expect(tile("dhcp-ack").textContent).toContain("Includes the commit");
     expect(tile("dhcp-active").dataset.value).toBe("1200");
@@ -751,7 +688,6 @@ describe("host tiles", () => {
       ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes", ...HOST_TILES, ...DNS_TILES].map((name) => `metrics-tile-${name}`),
     );
     expect(screen.getByTestId("metrics-group-host").textContent).toBe("Host");
-    expect(screen.getByTestId("metrics-sparkline-host-cpu").dataset.points).toBe("3");
     expect(tile("host-memory").dataset.value).toBe("75");
     expect(tile("host-memory").textContent).toContain("12 of 16 GiB in use");
     expect(tile("host-disk").dataset.value).toBe("62.5");
@@ -803,27 +739,96 @@ describe("host tiles", () => {
 
 // U3: the start page shares its one stream with the tiles; the cluster page draws the controller's alone.
 describe("the tiles' stream and groups", () => {
-  it("draw a stream they are given without opening one of their own, and the newest minute of a longer history", async () => {
-    let history = emptyHistory();
-    const start = Date.parse("2026-10-14T12:00:00Z");
-    for (let i = 0; i < LONG_HISTORY; i++) {
-      history = pushSnapshot(history, mockMetricsSnapshot(i, { dns: true }, new Date(start + i * 1000)), LONG_HISTORY);
-    }
-    const shared = history;
-    render(() => <MetricsTiles live={{ history: () => shared, state: () => "live" }} />);
+  it("draw a stream they are given without opening one of their own", async () => {
+    const shared = pushSnapshot(emptyHistory(), mockMetricsSnapshot(1, { dns: true }));
+    render(() => <MetricsTiles live={{ history: () => shared, state: () => "live", tiers: () => null, clock: () => null }} />);
     await screen.findByTestId("metrics-tile-dns-queries");
     expect(FakeSource.all).toHaveLength(0);
     expect(screen.getByTestId("metrics-tiles").dataset.state).toBe("live");
-    expect(Number(screen.getByTestId("metrics-sparkline-requests").getAttribute("data-points"))).toBe(HISTORY);
   });
 
   it("draw the controller's tiles alone with only=controller, whatever roles the sample has", async () => {
     const shared = pushSnapshot(emptyHistory(), mockMetricsSnapshot(1, { dns: true, dhcp: true, host: true }));
-    render(() => <MetricsTiles only="controller" live={{ history: () => shared, state: () => "live" }} />);
+    render(() => <MetricsTiles only="controller" live={{ history: () => shared, state: () => "live", tiers: () => null, clock: () => null }} />);
     await screen.findByTestId("metrics-group-controller");
     expect(screen.getAllByTestId(/^metrics-tile-/)).toHaveLength(8);
     expect(screen.queryByTestId("metrics-group-dns")).toBeNull();
     expect(screen.queryByTestId("metrics-group-dhcp")).toBeNull();
     expect(screen.queryByTestId("metrics-group-host")).toBeNull();
+  });
+});
+
+// OPS-20: the tiles' two days of history, from the stream's first event and the snapshots' `closed`
+// (the golden example of the stream, docs/api/examples/metrics-stream.jsonl).
+describe("the tiles' history", () => {
+  const [historyEvent, snapshotEvent] = goldenMetrics
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as { metrics?: MetricsSnapshot });
+  const closedAfter = (seconds: number): MetricsSnapshot => {
+    const metrics = structuredClone(snapshotEvent!.metrics!);
+    for (const tier of metrics.closed![0]!.tiers) tier.start = new Date(Date.parse(tier.start) + seconds * 1000).toISOString();
+    return metrics;
+  };
+
+  async function streamWithHistory() {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    source.open();
+    source.emit("metrics", historyEvent);
+    source.emit("metrics", snapshotEvent);
+    await waitFor(() => expect(tile("dns-queries").dataset.value).toBe("750"));
+    return source;
+  }
+
+  it("take the first history, append the closed buckets, and open the stream again on a hole or a reset", async () => {
+    const source = await streamWithHistory();
+    expect(FakeSource.all).toHaveLength(1);
+    // The next closed buckets follow on: still the same stream.
+    send(source, closedAfter(2));
+    expect(FakeSource.all).toHaveLength(1);
+    // Closed buckets ten seconds on leave a hole: the stream is opened again for a fresh history.
+    send(source, closedAfter(12));
+    await waitFor(() => expect(FakeSource.all).toHaveLength(2));
+    expect(source.closed).toBe(true);
+    // The stream's reset does the same.
+    FakeSource.last().emit("reset", { reason: "lagged", revision: 1 });
+    await waitFor(() => expect(FakeSource.all).toHaveLength(3));
+  });
+
+  it("read each bucket by keyboard as the slider's value text, and name the keys and the text alternative", async () => {
+    await streamWithHistory();
+    const chart = screen.getByTestId("metrics-history-dns-queries");
+    expect(chart.getAttribute("aria-label")).toBe(
+      "DNS queries history. Left and Right step one bucket, with Shift ten; Page Up and Page Down change the resolution; Home and End go to the oldest and the newest; Escape closes the readout.",
+    );
+    expect(document.getElementById(chart.getAttribute("aria-describedby")!)?.dataset.testid).toBe("metrics-history-alt");
+    chart.focus();
+    // The newest bucket first: a second of the golden figures, at most a few seconds old.
+    await waitFor(() => expect(chart.getAttribute("aria-valuetext")).toMatch(/^DNS queries, 12:00:0[23] PM · 1 sec · (now|\d+ seconds? ago): 75\d\/s\. 2 of 3 controllers reported\. Sum of the controllers/));
+    expect(screen.getByTestId("metrics-history-readout").textContent).toContain("/s");
+    // The oldest bucket, two days back, is before either controller started: no data, and why.
+    chart.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+    await waitFor(() => expect(chart.getAttribute("aria-valuenow")).toBe("0"));
+    expect(chart.getAttribute("aria-valuetext")).toContain(": No data.");
+    expect(chart.getAttribute("aria-valuetext")).toContain("Controller 1 started at 05:00 AM; its history before that is missing.");
+    // Escape closes the readout and keeps the focus.
+    chart.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await waitFor(() => expect(screen.queryByTestId("metrics-history-readout")).toBeNull());
+    expect(document.activeElement).toBe(chart);
+  });
+
+  it("pause and resume the motion of every chart for this browser, the numbers going on", async () => {
+    await streamWithHistory();
+    const button = screen.getByTestId("metrics-pause-motion");
+    expect([button.textContent, button.getAttribute("aria-pressed")]).toEqual(["Pause motion", "false"]);
+    button.click();
+    await waitFor(() => expect(button.getAttribute("aria-pressed")).toBe("true"));
+    expect(button.textContent).toBe("Resume motion");
+    expect(localStorage.getItem("tenko-motion")).toBe("paused");
+    button.click();
+    await waitFor(() => expect(button.getAttribute("aria-pressed")).toBe("false"));
+    expect(localStorage.getItem("tenko-motion")).toBeNull();
   });
 });

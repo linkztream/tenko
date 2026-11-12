@@ -146,6 +146,9 @@ export default defineConfig(({ command, mode }) => {
           ],
     },
     server: {
+      // The mock's canned answers read the API's golden examples (docs/api/examples), which lie
+      // outside this directory; nothing else outside it is served.
+      fs: { allow: [".", "../docs/api/examples"] },
       // Deep links contain FQDNs and IP addresses; Vite's HTML fallback serves
       // index.html for them because it does not treat a dot as a file marker.
       proxy: mock

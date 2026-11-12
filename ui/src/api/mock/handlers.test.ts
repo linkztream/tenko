@@ -1918,7 +1918,7 @@ describe("events", () => {
     await stream.close();
   });
 
-  it("samples the metrics topic while the sampler runs: half a minute of history, then a snapshot per tick", async () => {
+  it("samples the metrics topic while the sampler runs: the canned history, half a minute of samples, then a snapshot per tick", async () => {
     resetMockDb("signed-in");
     // Without the sampler (the unit tests) the topic carries nothing.
     const quiet = await openStream("?topics=metrics");
@@ -1928,6 +1928,8 @@ describe("events", () => {
     const stop = startMetricsSampler(20);
     try {
       const stream = await openStream("?topics=metrics");
+      // The golden example's history comes first (sse.ts, `cannedMetricsHistory`).
+      expect((await stream.next()).data.kind).toBe("metrics.history");
       const history = [];
       for (let i = 0; i < 30; i++) history.push(await stream.next());
       for (const message of history) {
@@ -1948,6 +1950,7 @@ describe("events", () => {
       // Without the dns role the samples have no DNS part.
       db.installation.roles = ["controller"];
       const plain = await openStream("?topics=metrics");
+      expect((await plain.next()).data.kind).toBe("metrics.history");
       expect(((await plain.next()).data.metrics as MockMetricsSnapshot).cluster.dns).toBeNull();
       await plain.close();
     } finally {

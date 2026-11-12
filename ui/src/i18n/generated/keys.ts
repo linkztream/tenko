@@ -6108,7 +6108,6 @@ export type MessageKey =
   | "languages.version.not_previewed"
   | "languages.version.percent"
   | "languages.version.previewed"
-  | "metrics.bars"
   | "metrics.dhcp.ack"
   | "metrics.dhcp.ack_hint"
   | "metrics.dhcp.ack_idle"
@@ -6160,6 +6159,36 @@ export type MessageKey =
   | "metrics.group.dhcp"
   | "metrics.group.dns"
   | "metrics.group.host"
+  | "metrics.history.above"
+  | "metrics.history.alt_days"
+  | "metrics.history.alt_days_zero"
+  | "metrics.history.alt_empty"
+  | "metrics.history.alt_hour"
+  | "metrics.history.alt_hour_zero"
+  | "metrics.history.alt_minute"
+  | "metrics.history.alt_minute_zero"
+  | "metrics.history.alt_none_now"
+  | "metrics.history.alt_now"
+  | "metrics.history.band"
+  | "metrics.history.band_above"
+  | "metrics.history.clipped"
+  | "metrics.history.held"
+  | "metrics.history.label"
+  | "metrics.history.mean"
+  | "metrics.history.merge.highest"
+  | "metrics.history.merge.least_available"
+  | "metrics.history.merge.ratio"
+  | "metrics.history.merge.sum"
+  | "metrics.history.no_data"
+  | "metrics.history.now"
+  | "metrics.history.partial_controllers"
+  | "metrics.history.partial_time"
+  | "metrics.history.pause"
+  | "metrics.history.resume"
+  | "metrics.history.started_of"
+  | "metrics.history.started_one"
+  | "metrics.history.when_one"
+  | "metrics.history.when_span"
   | "metrics.host.cpu"
   | "metrics.host.cpu_hint"
   | "metrics.host.cpu_none"
@@ -6175,7 +6204,6 @@ export type MessageKey =
   | "metrics.raft.node"
   | "metrics.raft.stale"
   | "metrics.raft.unsupported"
-  | "metrics.sparkline"
   | "metrics.sub"
   | "metrics.tile.commit"
   | "metrics.tile.commit_hint"
@@ -9515,7 +9543,6 @@ export interface MessageArgs {
   "languages.version.by": { when: string | number; who: string | number };
   "languages.version.label": { version: string | number };
   "languages.version.percent": { percent: string | number };
-  "metrics.bars": { name: string | number; seconds: string | number; values: string | number };
   "metrics.dhcp.active_hint": { abandoned: number };
   "metrics.dhcp.ddns_hint": { dropped: string | number; queue: number; skipped: string | number };
   "metrics.dhcp.pools_hint": { scopes: number };
@@ -9527,11 +9554,26 @@ export interface MessageArgs {
   "metrics.dns.rate": { rate: string | number };
   "metrics.dns.upstreams_hint": { p99: string | number };
   "metrics.dns.validation_hint": { rate: string | number };
+  "metrics.history.above": { top: string | number };
+  "metrics.history.alt_days": { end: string | number; highest: string | number; lowest: string | number; start: string | number };
+  "metrics.history.alt_hour": { highest: string | number; mean: string | number; time: string | number };
+  "metrics.history.alt_minute": { highest: string | number; lowest: string | number };
+  "metrics.history.alt_none_now": { name: string | number };
+  "metrics.history.alt_now": { name: string | number; value: string | number };
+  "metrics.history.band": { highest: string | number; lowest: string | number };
+  "metrics.history.band_above": { highest: string | number; lowest: string | number };
+  "metrics.history.label": { name: string | number };
+  "metrics.history.mean": { value: string | number };
+  "metrics.history.partial_controllers": { covered: string | number; total: string | number };
+  "metrics.history.partial_time": { covered: string | number; step: string | number };
+  "metrics.history.started_of": { node: string | number; time: string | number };
+  "metrics.history.started_one": { time: string | number };
+  "metrics.history.when_one": { ago: string | number; start: string | number; step: string | number };
+  "metrics.history.when_span": { ago: string | number; end: string | number; start: string | number; step: string | number };
   "metrics.host.disk_hint": { total: string | number };
   "metrics.host.memory_hint": { total: string | number; used: string | number };
   "metrics.raft.lag": { entries: number };
   "metrics.raft.node": { node: string | number };
-  "metrics.sparkline": { name: string | number; values: string | number };
   "metrics.tile.ingest_hint": { batches: string | number };
   "metrics.tile.jobs_hint": { waiting: number };
   "metrics.tile.nodes_hint": { drops: number; nodes: number };
@@ -16054,7 +16096,6 @@ export const messageKeys: readonly MessageKey[] = [
   "languages.version.not_previewed",
   "languages.version.percent",
   "languages.version.previewed",
-  "metrics.bars",
   "metrics.dhcp.ack",
   "metrics.dhcp.ack_hint",
   "metrics.dhcp.ack_idle",
@@ -16106,6 +16147,36 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.group.dhcp",
   "metrics.group.dns",
   "metrics.group.host",
+  "metrics.history.above",
+  "metrics.history.alt_days",
+  "metrics.history.alt_days_zero",
+  "metrics.history.alt_empty",
+  "metrics.history.alt_hour",
+  "metrics.history.alt_hour_zero",
+  "metrics.history.alt_minute",
+  "metrics.history.alt_minute_zero",
+  "metrics.history.alt_none_now",
+  "metrics.history.alt_now",
+  "metrics.history.band",
+  "metrics.history.band_above",
+  "metrics.history.clipped",
+  "metrics.history.held",
+  "metrics.history.label",
+  "metrics.history.mean",
+  "metrics.history.merge.highest",
+  "metrics.history.merge.least_available",
+  "metrics.history.merge.ratio",
+  "metrics.history.merge.sum",
+  "metrics.history.no_data",
+  "metrics.history.now",
+  "metrics.history.partial_controllers",
+  "metrics.history.partial_time",
+  "metrics.history.pause",
+  "metrics.history.resume",
+  "metrics.history.started_of",
+  "metrics.history.started_one",
+  "metrics.history.when_one",
+  "metrics.history.when_span",
   "metrics.host.cpu",
   "metrics.host.cpu_hint",
   "metrics.host.cpu_none",
@@ -16121,7 +16192,6 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.raft.node",
   "metrics.raft.stale",
   "metrics.raft.unsupported",
-  "metrics.sparkline",
   "metrics.sub",
   "metrics.tile.commit",
   "metrics.tile.commit_hint",

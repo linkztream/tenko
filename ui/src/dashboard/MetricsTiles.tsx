@@ -3,12 +3,13 @@
 // tiles alone (`only="controller"`) on a stream the tiles open themselves. The tiles keep their
 // shape: a stream on the `metrics` topic while the page is open (the server samples only while
 // someone listens), the last minute of samples per controller and for the cluster, and one tile per
-// figure: a number with an SI suffix and a sparkline of the minute, never a dial. A cluster
+// figure: a number with an SI suffix and the figure's two days of history (HistoryChart.tsx, the
+// same component on every tile), never a dial. A cluster
 // shows the cluster's sum on every tile and one row per controller on the Raft tile; a single
 // controller shows itself.
 //
 // Every tile has the same shape and height whatever it holds: the title, the value line, a chart
-// area of fixed height (the sparkline or the bars, with a list under them where the tile has
+// area of fixed height (the history chart, with a list under it where the tile has
 // one: the controllers, the RCODEs, the busiest lists) and a footer of two lines. A tile without
 // data draws the empty baseline of its chart, so it looks like a full one. The tiles come in two
 // groups, the controller's eight and, with the `dns` role, the DNS six (eight with the resolver's
@@ -17,53 +18,48 @@
 //
 // Test ids: `metrics-tiles` (`data-state` the stream's connection state, `data-controllers`
 // once a sample arrived), `metrics-waiting` until then, `metrics-tile-<name>` with `data-value`
-// (the raw number, absent while unknown), `metrics-sparkline-<name>` (the ratio tiles draw `metrics-bars` instead,
-// with `metrics-window` for the line that says the window), and on the Raft tile
+// (the raw number, absent while unknown), `metrics-history-<name>` (the chart; the ratio tiles have
+// `metrics-window` for the line that says the window of their number), and on the Raft tile
 // `metrics-raft-node` per controller (`data-node`, `data-role`, `data-lag`, `data-state`
 // current, stale or unsupported).
 //
 // The group headings are `metrics-group-controller` and `metrics-group-dns`.
 // While the cluster's sample has `dns` (a controller runs the `dns` role) the DNS tiles follow:
 // `metrics-tile-dns-queries` (with `metrics-dns-log-dropped`, always present: `data-state` dropping
-// or idle, hidden while idle; the second line of the footer), `-dns-cache` (the hit ratio over the six completed buckets of 5 seconds in percent, and a `metrics-bars` chart of those six and the bucket in progress, drawn lighter; the buckets have fixed edges on the controller's clock and the chart shifts one step when a bucket completes),
-// `-dns-answers` (the NOERROR share of the same 30 seconds, with the same `metrics-bars`, and `metrics-dns-rcode` per RCODE with `data-rcode` and `data-rate`, the mean per second over those 30 seconds), `-dns-blocked` (the top
+// or idle, hidden while idle; the second line of the footer), `-dns-cache` (the hit ratio over the six completed buckets of 5 seconds in percent),
+// `-dns-answers` (the NOERROR share of the same 30 seconds, and `metrics-dns-rcode` per RCODE with `data-rcode` and `data-rate`, the mean per second over those 30 seconds), `-dns-blocked` (the top
 // three lists as `metrics-dns-list` with `data-list` and `data-rate`), `-dns-upstreams`, and
 // `-dns-encrypted` (without a number while the role serves neither DoT nor DoH).
 //
 // OPS-20: while the cluster's sample has `host` (the node read its CPU, memory or disk) the three host
 // tiles follow the controller's under `metrics-group-host`: `metrics-tile-host-cpu` (the busy share
-// of the CPU since the last reading, the 60 s sparkline), `-host-memory` (the share in use, the GiB
+// of the CPU since the last reading), `-host-memory` (the share in use, the GiB
 // in the hint) and `-host-disk` (the GiB available on the data directory's file system, the total in
 // the hint). A figure the node did not read shows no number. While the status warns `node.disk.low`
 // the disk tile has `data-state="low"` and the line `metrics-host-disk-low`.
 //
 // WP8.7: while the cluster's sample has `dhcp` (a controller runs the `dhcp` role) the six DHCP
-// tiles follow under `metrics-group-dhcp`: `metrics-tile-dhcp-leases` (leases granted per second,
-// the 60 s sparkline), `-dhcp-ack` (the REQUEST to ACK p99), `-dhcp-active` (active leases, the
+// tiles follow under `metrics-group-dhcp`: `metrics-tile-dhcp-leases` (leases granted per second),
+// `-dhcp-ack` (the REQUEST to ACK p99), `-dhcp-active` (active leases, the
 // abandoned ones in the hint), `-dhcp-pools` (the fullest pool in percent, the three fullest as
 // `metrics-dhcp-pool` with `data-scope` and `data-value` and a bar each), `-dhcp-naks` (NAKs and
 // DECLINEs per second, `metrics-dhcp-nak` and `metrics-dhcp-decline`), `-dhcp-ddns` (names written
 // per second, `metrics-dhcp-ddns` per outcome with `data-outcome`, the queue in the hint).
-import { createMemo, For, Show, type JSX } from "solid-js";
+import { createContext, createMemo, For, Show, useContext, type JSX } from "solid-js";
 import type { EventStreamOptions } from "../api/events";
 import { si } from "../app/format/si";
+import { motionPaused, setMotionPaused } from "../app/prefs";
 import { Si } from "../components/Si";
-import { Bars } from "../components/Bars";
-import { Sparkline } from "../components/Sparkline";
-import { formatList, formatNumber, locale, t } from "../i18n";
+import { formatNumber, locale, t } from "../i18n";
 import { storeRoleLabel } from "../shell/TopBar";
 import {
-  BUCKET_SECONDS,
-  BUCKETS,
   // WP8.7: the outcomes of the DDNS tile.
   DDNS_OUTCOMES,
   droppedBatches,
   // OPS-20: the host tiles' figures.
   GIB,
-  HISTORY,
   lagOf,
   memoryUsed,
-  ratioBuckets,
   RCODES,
   sampleState,
   tileValue,
@@ -77,8 +73,12 @@ import {
   type MetricsSample,
   type TileName,
 } from "./metrics";
+import { HistoryChart, redrawCharts } from "./HistoryChart";
 import { createLiveMetrics, type LiveMetrics } from "./liveMetrics";
 import "./metrics.css";
+
+/** The stream the tiles of one page draw from. */
+const Live = createContext<LiveMetrics>();
 
 /** A quantile or rate in milliseconds or per second, with one decimal below ten. */
 function decimal(value: number): string {
@@ -101,9 +101,7 @@ function Tile(props: {
   title: string;
   value: number | null | undefined;
   unit?: string;
-  series?: readonly (number | null)[];
-  /** The bars of a ratio tile (fractions, oldest first) instead of the sparkline; then `windowHint` says the window. */
-  bars?: readonly (number | null)[];
+  /** The window of a ratio tile's number, which is a share over the last 30 seconds. */
   windowHint?: string;
   /** The line under the chart; with a `windowHint` or a `note` both are short and get one line each, alone it may take two. */
   hint: string;
@@ -114,16 +112,7 @@ function Tile(props: {
   /** The tile shows a condition the status warns about (the disk tile while `node.disk.low` is active): the warning style. */
   low?: boolean;
 }) {
-  const values = () =>
-    formatList(
-      (props.series ?? []).filter((v): v is number => v !== null).map((v) => si(v, locale())),
-      "unit",
-    );
-  const shares = () =>
-    formatList(
-      (props.bars ?? []).filter((v): v is number => v !== null).map((v) => formatNumber(v, { style: "percent", maximumFractionDigits: 0 })),
-      "unit",
-    );
+  const live = useContext(Live)!;
   return (
     <section
       class="card tile metrics-tile"
@@ -140,14 +129,7 @@ function Tile(props: {
         </Show>
       </div>
       <div class="metrics-chart">
-        <div class="metrics-plot">
-          <Show
-            when={props.bars}
-            fallback={<Sparkline values={props.series ?? []} title={t("metrics.sparkline", { name: props.title, values: values() })} testId={`metrics-sparkline-${props.name}`} />}
-          >
-            {(bars) => <Bars values={bars()} buckets={BUCKETS} partialLast title={t("metrics.bars", { name: props.title, seconds: BUCKET_SECONDS, values: shares() })} testId="metrics-bars" />}
-          </Show>
-        </div>
+        <HistoryChart name={props.name} title={props.title} unit={props.unit ?? ""} value={props.value ?? null} live={live} />
         {props.children}
       </div>
       <div class="metrics-foot">
@@ -180,17 +162,24 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
   // The stream is chosen once, when the tiles mount.
   // eslint-disable-next-line solid/reactivity
   const live = props.live ?? createLiveMetrics(props.streamOptions);
+  return (
+    <Live.Provider value={live}>
+      <Tiles diskLow={props.diskLow} live={live} only={props.only} />
+    </Live.Provider>
+  );
+}
+
+function Tiles(props: { diskLow?: boolean; live: LiveMetrics; only?: "controller" }) {
+  // eslint-disable-next-line solid/reactivity
+  const live = props.live;
   const history = live.history;
   const all = () => props.only !== "controller";
 
   const latest = () => history().latest;
   const cluster = (): MetricsSample | undefined => latest()?.cluster;
-  // The newest minute: the start page keeps five minutes for its queries chart.
-  const series = (name: TileName) => history().cluster.slice(-HISTORY).map((sample) => tileValue(name, sample));
   const ratioValue = (name: RatioTile) => (cluster()?.dns ? windowRatio(history(), name) : null);
-  const ratioBars = (name: RatioTile) => ratioBuckets(history(), BUCKET_SECONDS, BUCKETS, name);
   // The rates beside the ratio tiles are means over the window of the headline (the completed buckets
-  // of the last 30 seconds), so the numbers and the bars are made of the same samples.
+  // of the last 30 seconds), so the numbers are made of the same samples.
   const meanRate = (pick: (dns: MetricsDns) => number) => windowRate(history(), pick) ?? 0;
   const value = (name: TileName) => {
     const sample = cluster();
@@ -206,10 +195,25 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
 
   return (
     <section class="dash-metrics" aria-labelledby="dash-metrics" data-testid="metrics-tiles" data-state={live.state()} data-controllers={latest() ? rows().length : undefined}>
-      <h2 id="dash-metrics">
-        {t("metrics.title")}
-        <span class="aside">{t("metrics.sub")}</span>
-      </h2>
+      <div class="metrics-head">
+        <h2 id="dash-metrics">
+          {t("metrics.title")}
+          <span class="aside">{t("metrics.sub")}</span>
+        </h2>
+        {/* WCAG 2.2.2: moving content can be paused as a whole; the numbers keep updating. */}
+        <button
+          type="button"
+          class="btn sm"
+          aria-pressed={motionPaused()}
+          data-testid="metrics-pause-motion"
+          onClick={() => {
+            setMotionPaused(!motionPaused());
+            redrawCharts();
+          }}
+        >
+          {t(motionPaused() ? "metrics.history.resume" : "metrics.history.pause")}
+        </button>
+      </div>
       <Show when={!latest()}>
         <p class="muted" data-testid="metrics-waiting">
           {t("metrics.waiting")}
@@ -224,7 +228,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
           title={t("metrics.tile.requests")}
           value={value("requests")}
           unit={t("metrics.unit.per_second")}
-          series={series("requests")}
           hint={
             p("p50_ms") != null && p("p99_ms") != null
               ? t("metrics.tile.requests_hint", { p50: decimal(p("p50_ms")!), p99: decimal(p("p99_ms")!) })
@@ -236,7 +239,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
           title={t("metrics.tile.commit")}
           value={value("commit")}
           unit={t("metrics.unit.ms")}
-          series={series("commit")}
           hint={cluster()?.store.commit_p99_ms != null ? t("metrics.tile.commit_hint") : t("metrics.tile.commit_idle")}
         />
         <Tile
@@ -244,7 +246,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
           title={t("metrics.tile.store")}
           value={value("store")}
           unit={t("metrics.unit.bytes")}
-          series={series("store")}
           hint={
             cluster()?.store.file_bytes != null
               ? t("metrics.tile.store_hint", { data: si(cluster()?.store.data_bytes ?? 0, locale()) })
@@ -255,7 +256,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
           name="raft"
           title={t("metrics.tile.raft")}
           value={value("raft")}
-          series={series("raft")}
           hint={t("metrics.tile.raft_hint", { term: cluster()?.raft.term ?? 0 })}
         >
           <ul class="metrics-raft">
@@ -293,7 +293,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
           name="jobs"
           title={t("metrics.tile.jobs")}
           value={value("jobs")}
-          series={series("jobs")}
           hint={t("metrics.tile.jobs_hint", { waiting: cluster()?.jobs.waiting ?? 0 })}
         />
         <Tile
@@ -301,15 +300,13 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
           title={t("metrics.tile.ingest")}
           value={value("ingest")}
           unit={t("metrics.unit.per_second")}
-          series={series("ingest")}
           hint={t("metrics.tile.ingest_hint", { batches: decimal(cluster()?.ingest.batches_per_second ?? 0) })}
         />
-        <Tile name="sse" title={t("metrics.tile.sse")} value={value("sse")} series={series("sse")} hint={t("metrics.tile.sse_hint")} />
+        <Tile name="sse" title={t("metrics.tile.sse")} value={value("sse")} hint={t("metrics.tile.sse_hint")} />
         <Tile
           name="nodes"
           title={t("metrics.tile.nodes")}
           value={value("nodes")}
-          series={series("nodes")}
           hint={(() => {
             const sample = cluster();
             const nodes = sample?.nodes.length ?? 0;
@@ -329,7 +326,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.host.cpu")}
                 value={value("host-cpu")}
                 unit={t("metrics.unit.percent")}
-                series={series("host-cpu")}
                 hint={h().cpu_percent != null ? t("metrics.host.cpu_hint") : t("metrics.host.cpu_none")}
               />
               <Tile
@@ -337,7 +333,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.host.memory")}
                 value={value("host-memory")}
                 unit={t("metrics.unit.percent")}
-                series={series("host-memory")}
                 hint={
                   memoryUsed(h()) != null
                     ? t("metrics.host.memory_hint", { used: gib(memoryUsed(h())), total: gib(h().memory_total) })
@@ -349,7 +344,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.host.disk")}
                 value={value("host-disk")}
                 unit={t("metrics.host.unit_gib")}
-                series={series("host-disk")}
                 low={props.diskLow}
                 hint={h().disk_total != null ? t("metrics.host.disk_hint", { total: gib(h().disk_total) }) : t("metrics.host.disk_none")}
                 note={
@@ -375,7 +369,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.dns.queries")}
                 value={value("dns-queries")}
                 unit={t("metrics.unit.per_second")}
-                series={series("dns-queries")}
                 hint={
                   d().p50_ms != null && d().p99_ms != null
                     ? t("metrics.dns.queries_hint", { p50: decimal(d().p50_ms!), p99: decimal(d().p99_ms!) })
@@ -392,7 +385,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.dns.cache")}
                 value={ratioValue("dns-cache")}
                 unit={t("metrics.unit.percent")}
-                bars={ratioBars("dns-cache")}
                 windowHint={t("metrics.dns.cache_window")}
                 hint={t("metrics.dns.cache_hint", { entries: si(d().cache.entries, locale()), stale: rate(meanRate((x) => x.cache.stale_per_second)) })}
               />
@@ -401,7 +393,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.dns.answers")}
                 value={ratioValue("dns-answers")}
                 unit={t("metrics.unit.percent")}
-                bars={ratioBars("dns-answers")}
                 windowHint={t("metrics.dns.answers_hint")}
                 hint=""
               >
@@ -421,7 +412,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.dns.blocked")}
                 value={value("dns-blocked")}
                 unit={t("metrics.unit.per_second")}
-                series={series("dns-blocked")}
                 hint={d().blocked.length > 0 ? t("metrics.dns.blocked_hint", { lists: d().blocked.length }) : t("metrics.dns.blocked_none")}
               >
                 <ul class="metrics-rows">
@@ -440,7 +430,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.dns.upstreams")}
                 value={value("dns-upstreams")}
                 unit={t("metrics.unit.per_second")}
-                series={series("dns-upstreams")}
                 hint={d().upstreams.p99_ms != null ? t("metrics.dns.upstreams_hint", { p99: decimal(d().upstreams.p99_ms!) }) : t("metrics.dns.upstreams_idle")}
               />
               {/* WP10.4: the resolver's sub-queries and validation outcomes, while it runs. */}
@@ -452,7 +441,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                       title={t("metrics.dns.subqueries")}
                       value={value("dns-subqueries")}
                       unit={t("metrics.unit.per_second")}
-                      series={series("dns-subqueries")}
                       hint={t("metrics.dns.subqueries_hint")}
                     />
                     <Tile
@@ -460,7 +448,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                       title={t("metrics.dns.validation")}
                       value={value("dns-validation")}
                       unit={t("metrics.unit.per_second")}
-                      series={series("dns-validation")}
                       hint={t("metrics.dns.validation_hint", { rate: decimal(r().validation.indeterminate) })}
                     >
                       <ul class="metrics-rows">
@@ -482,7 +469,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 name="dns-encrypted"
                 title={t("metrics.dns.encrypted")}
                 value={value("dns-encrypted")}
-                series={series("dns-encrypted")}
                 hint={(() => {
                   const c = d().connections;
                   return c ? t("metrics.dns.encrypted_hint", { dot: c.dot, doh: c.doh }) : t("metrics.dns.encrypted_none");
@@ -503,7 +489,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.dhcp.leases")}
                 value={value("dhcp-leases")}
                 unit={t("metrics.unit.per_second")}
-                series={series("dhcp-leases")}
                 hint={t("metrics.dhcp.leases_hint")}
               />
               <Tile
@@ -511,14 +496,12 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.dhcp.ack")}
                 value={value("dhcp-ack")}
                 unit={t("metrics.unit.ms")}
-                series={series("dhcp-ack")}
                 hint={d().ack_p99_ms != null ? t("metrics.dhcp.ack_hint") : t("metrics.dhcp.ack_idle")}
               />
               <Tile
                 name="dhcp-active"
                 title={t("metrics.dhcp.active")}
                 value={value("dhcp-active")}
-                series={series("dhcp-active")}
                 hint={t("metrics.dhcp.active_hint", { abandoned: d().abandoned_leases })}
               />
               <Tile
@@ -526,7 +509,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.dhcp.pools")}
                 value={value("dhcp-pools")}
                 unit={t("metrics.unit.percent")}
-                series={series("dhcp-pools")}
                 hint={d().scopes > 0 ? t("metrics.dhcp.pools_hint", { scopes: d().scopes }) : t("metrics.dhcp.pools_none")}
               >
                 <ul class="metrics-rows">
@@ -548,7 +530,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.dhcp.naks")}
                 value={value("dhcp-naks")}
                 unit={t("metrics.unit.per_second")}
-                series={series("dhcp-naks")}
                 hint={t("metrics.dhcp.naks_hint")}
               >
                 <ul class="metrics-rows">
@@ -567,7 +548,6 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 title={t("metrics.dhcp.ddns")}
                 value={value("dhcp-ddns")}
                 unit={t("metrics.unit.per_second")}
-                series={series("dhcp-ddns")}
                 hint={t("metrics.dhcp.ddns_hint", { queue: d().ddns.queue, skipped: decimal(d().ddns.skipped), dropped: decimal(d().ddns.dropped) })}
               >
                 <ul class="metrics-rows metrics-rows-pairs">

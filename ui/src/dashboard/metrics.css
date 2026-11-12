@@ -1,7 +1,8 @@
 /* The live metrics of the start page (MetricsTiles.tsx). Token colors only. */
 .dash-metrics { display: grid; gap: var(--sp-4); container-type: inline-size; }
-.dash-metrics > h2 { font-size: var(--fs-14); display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; }
-.dash-metrics > h2 .aside { font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
+.metrics-head { display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; }
+.metrics-head > h2 { font-size: var(--fs-14); display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; flex: 1 1 auto; }
+.metrics-head > h2 .aside { font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
 /* Full rows at every width: twelve tracks, the controller's eight tiles four to a row and the
    DNS six three to a row (both two to a row on a narrow page, one on a phone), so no row of a
    group is left half empty and the tiles of a group are equally wide. */
@@ -22,11 +23,12 @@
 .metrics-group:not(:first-child) { margin-block-start: var(--sp-3); }
 /* One shape for every tile: the title, the value line, a chart area of fixed height and a footer
    of two lines, each row of fixed height, so every tile is as tall as the others and no sample
-   changes it. The chart area fits the sparkline or the bars and a list of four rows under them
-   (the controllers; the RCODEs two to a row; the busiest lists); without a list the chart fills it. */
+   changes it. The chart area fits the history chart (a plot of at least 64px over a 14px row of
+   age labels) and a list of four rows under it (the controllers; the RCODEs two to a row; the
+   busiest lists); without a list the chart fills it. */
 .metrics-tile {
   --m-line: calc(var(--fs-12) * var(--lh-ui));
-  --m-chart: calc(28px + var(--sp-3) + 4 * var(--m-line) + 3 * var(--sp-1));
+  --m-chart: calc(64px + 14px + var(--sp-3) + 4 * var(--m-line) + 3 * var(--sp-1));
   grid-template-rows: calc(var(--fs-12) * var(--lh-tight)) calc(var(--fs-24) * var(--lh-tight)) var(--m-chart) calc(2 * var(--m-line));
   grid-template-columns: minmax(0, 1fr);
   min-inline-size: 0;
@@ -36,10 +38,21 @@
 .metrics-tile .tile-value { font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
 .metrics-unit { margin-inline-start: var(--sp-2); font-size: var(--fs-14); font-weight: var(--fw-regular); color: var(--ink-3); }
 .metrics-chart { display: flex; flex-direction: column; gap: var(--sp-3); min-block-size: 0; }
-/* The drawing takes what the list leaves, at least the 28px of a sparkline, over a baseline that
-   shows even before the first sample. */
-.metrics-plot { position: relative; flex: 1 1 auto; min-block-size: 28px; border-block-end: 1px solid var(--line); }
-.metrics-plot > svg { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; }
+/* The history chart (HistoryChart.tsx) takes what the list leaves: a canvas that fills the plot,
+   which is the chart's one tab stop. "Held" shows while the pointer or the focus holds it still. */
+.metrics-history { display: flex; flex: 1 1 auto; min-block-size: calc(64px + 14px); }
+.metrics-history-plot { position: relative; flex: 1 1 auto; border-radius: var(--r-1); outline: none; cursor: crosshair; touch-action: pan-y; }
+.metrics-history-plot:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.metrics-history-plot > canvas { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; display: block; }
+.metrics-history-held { position: absolute; inset-block-start: 0; inset-inline-end: 0; font-size: var(--fs-11); color: var(--ink-3); background: var(--surface); padding: 0 var(--sp-2); border-radius: var(--r-1); display: none; }
+.metrics-history-plot.is-held .metrics-history-held { display: block; }
+/* The readout of a bucket, above the chart (under it near the top of the window), in the page's layer. */
+.metrics-history-readout { position: fixed; z-index: var(--z-toast); pointer-events: none; transform: translate(-50%, calc(-100% - var(--sp-3))); min-inline-size: 180px; max-inline-size: 300px; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line-strong); border-radius: var(--r-3); background: var(--surface); box-shadow: var(--shadow-float); font-size: var(--fs-12); line-height: var(--lh-ui); color: var(--ink-2); }
+.metrics-history-readout.below { transform: translate(-50%, var(--sp-3)); }
+.metrics-history-readout .when, .metrics-history-readout .note { color: var(--ink-3); }
+.metrics-history-readout .value { font-size: var(--fs-14); color: var(--ink); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.metrics-history-readout .row { font-variant-numeric: tabular-nums; }
+.metrics-history-readout .note { margin-block-start: var(--sp-2); }
 .metrics-foot { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; font-size: var(--fs-12); line-height: var(--lh-ui); overflow: hidden; }
 .metrics-foot > p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A hint alone may take both lines. */

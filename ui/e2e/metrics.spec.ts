@@ -20,8 +20,9 @@
 //   snapshots shaped like the server's (`MetricsSnapshot` of docs/api/openapi.json: the cluster's
 //   sample and one sample per controller), and the later reconnects are refused. What they prove
 //   is how the tiles show what they are given: the cluster's figures on every tile, one row per
-//   controller with its role, its lag and its state (current, stale, unsupported), a sparkline
-//   that grows with each sample, and the waiting state while nothing arrives. The samples of the
+//   controller with its role, its lag and its state (current, stale, unsupported), a history
+//   chart on every tile, and the waiting state while nothing arrives (the charts' history is
+//   dashboard-history.spec.ts). The samples of the
 //   peers themselves come through `Metrics.Snapshot`, which the Rust tests cover.
 // - WP5.6, the DNS tiles: the e2e server does not run the `dns` role, so its samples have no
 //   `dns` part and the DNS tiles stay away; the faked stream carries one (the leader answers
@@ -76,6 +77,19 @@ async function openWithSample(page: Page): Promise<void> {
 
 test("an administrator sees the live metrics, and new samples keep coming", async ({ page, signedIn }) => {
   void signedIn;
+  // Counts the `metrics` events of every stream of the page, before the page's own script runs.
+  await page.addInitScript(() => {
+    const add = EventSource.prototype.addEventListener;
+    EventSource.prototype.addEventListener = function (this: EventSource, type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) {
+      if (type === "metrics") {
+        add.call(this, type, () => {
+          const w = window as unknown as { metricsEvents?: number };
+          w.metricsEvents = (w.metricsEvents ?? 0) + 1;
+        });
+      }
+      add.call(this, type, listener, options);
+    } as typeof EventSource.prototype.addEventListener;
+  });
   await openWithSample(page);
   await expect(page.getByTestId("metrics-waiting")).toHaveCount(0);
   for (const name of TILES) {
@@ -84,11 +98,11 @@ test("an administrator sees the live metrics, and new samples keep coming", asyn
     if (name === "commit" && value === null) continue;
     expect(value, name).not.toBeNull();
     expect(Number.isFinite(Number(value)), `${name}: ${value}`).toBe(true);
-    await expect(page.getByTestId(`metrics-sparkline-${name}`)).toBeAttached();
+    await expect(page.getByTestId(`metrics-history-${name}`)).toBeAttached();
   }
   // The host tiles follow the controller's. The disk figure is read on every platform; the CPU and
   // the memory only on Linux (the CPU from the second reading), so they may show no number.
-  for (const name of HOST_TILES) await expect(page.getByTestId(`metrics-sparkline-${name}`)).toBeAttached();
+  for (const name of HOST_TILES) await expect(page.getByTestId(`metrics-history-${name}`)).toBeAttached();
   const disk = await page.getByTestId("metrics-tile-host-disk").getAttribute("data-value");
   expect(Number.isFinite(Number(disk)) && Number(disk) > 0, `disk: ${disk}`).toBe(true);
   const row = page.getByTestId("metrics-raft-node");
@@ -99,10 +113,10 @@ test("an administrator sees the live metrics, and new samples keep coming", asyn
   for (const name of DNS_TILES) await expect(page.getByTestId(`metrics-tile-${name}`)).toHaveCount(0);
   // The page's own requests and the open stream show up in the figures.
   expect(Number(await page.getByTestId("metrics-tile-sse").getAttribute("data-value"))).toBeGreaterThanOrEqual(1);
-  // More samples follow: the sparkline grows.
-  const points = async () => Number(await page.getByTestId("metrics-sparkline-requests").getAttribute("data-points"));
-  const before = await points();
-  await expect.poll(points).toBeGreaterThanOrEqual(before + 2);
+  // More samples follow: the `metrics` events the page's streams received keep counting up.
+  const received = () => page.evaluate(() => (window as unknown as { metricsEvents?: number }).metricsEvents ?? 0);
+  const before = await received();
+  await expect.poll(received).toBeGreaterThanOrEqual(before + 2);
 });
 
 test("a viewer does not see the live metrics", async ({ page, api, signedIn }) => {
@@ -182,7 +196,7 @@ function fourControllers(): MetricsSnapshot {
 test("OPS-20: with several controllers the tiles show the cluster's figures and one row per controller (faked stream)", async ({ page, signedIn }) => {
   void signedIn;
   const base = fourControllers();
-  // Three samples, the requests per second rising, so that the sparkline has three points.
+  // Three samples, the requests per second rising: the tiles show the last.
   const rising = (rps: number): MetricsSnapshot => ({ ...base, cluster: { ...base.cluster, api: { ...base.cluster.api, requests_per_second: rps } } });
   await fakeMetricsStream(page, [rising(10), rising(20), base]);
   await page.goto("/");
@@ -201,7 +215,6 @@ test("OPS-20: with several controllers the tiles show the cluster's figures and 
   expect(await value("sse")).toBe("7");
   // The nodes tile is the batches buffered by the connected nodes of every controller.
   expect(await value("nodes")).toBe("8");
-  await expect(page.getByTestId("metrics-sparkline-requests")).toHaveAttribute("data-points", "3");
 
   // One row per controller, with its role, its lag as the cluster reports it and its state.
   const rows = page.getByTestId("metrics-raft-node");
@@ -239,7 +252,6 @@ test("OPS-20: a controller with the dns role adds the DNS tiles after the others
   const tile = (name: string) => page.getByTestId(`metrics-tile-${name}`);
   await expect(tile("dns-queries")).toHaveAttribute("data-value", "1250");
   await expect(tile("dns-queries")).toContainText("p50 0.3 ms, p99 18 ms");
-  await expect(page.getByTestId("metrics-sparkline-dns-queries")).toHaveAttribute("data-points", "3");
   await expect(tile("dns-cache")).toHaveAttribute("data-value", "82");
   await expect(tile("dns-cache")).toContainText("8.4K entries");
   // The answers: the NOERROR share and one row per RCODE.
@@ -276,7 +288,6 @@ test("OPS-20: a controller with the dhcp role adds the DHCP tiles after the DNS 
 
   const tile = (name: string) => page.getByTestId(`metrics-tile-${name}`);
   await expect(tile("dhcp-leases")).toHaveAttribute("data-value", "40");
-  await expect(page.getByTestId("metrics-sparkline-dhcp-leases")).toHaveAttribute("data-points", "3");
   await expect(tile("dhcp-ack")).toHaveAttribute("data-value", "8.5");
   await expect(tile("dhcp-active")).toHaveAttribute("data-value", "1200");
   // The fullest pool in percent and the three fullest scopes, fullest first.

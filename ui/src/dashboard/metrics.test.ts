@@ -12,7 +12,6 @@ import {
   pushSnapshot,
   RATE_BUCKETS,
   rateBuckets,
-  ratioBuckets,
   RCODES,
   RECURSION_TILES,
   tileValue,
@@ -111,92 +110,14 @@ describe("windowRatio", () => {
   });
 });
 
-describe("ratioBuckets", () => {
-  const SEVEN = 7;
-  const bars = (h: MetricsHistory, tile: "dns-cache" | "dns-answers" = "dns-cache") => ratioBuckets(h, 5, SEVEN, tile);
-  // The bucket 0 (seconds 0 to 4) only misses, the bucket 2 (10 to 14) half hits, the newest, bucket 6 (30 to 34), 4 of 5.
-  const base = [
-    [0, dns(0, 2)],
-    [12, dns(1, 1)],
-    [31, dns(0.8, 0.2)],
-  ] as const;
-
-  it("is all empty without samples", () => {
-    expect(bars(emptyHistory())).toEqual(Array(SEVEN).fill(null));
-  });
-
-  it("puts samples at known seconds into the bars of their own buckets, the newest last", () => {
-    const out = bars(historyAt(base));
-    expect(out).toHaveLength(SEVEN);
-    expect(out[0]).toBe(0);
-    expect(out.slice(1, 6)).toEqual([null, 0.5, null, null, null]);
-    expect(out[6]).toBeCloseTo(0.8, 10);
-  });
-
-  it("sums a bucket's samples instead of averaging their shares", () => {
-    // 1 of 1 then 0 of 3 in the same bucket is a quarter, not the mean of 1 and 0.
-    const out = bars(historyAt([[30, dns(1, 0)], [31, dns(0, 3)]]));
-    expect(out.slice(0, 6)).toEqual(Array(6).fill(null));
-    expect(out[6]).toBe(0.25);
-  });
-
-  it("changes only the last bar when a sample falls inside the bucket in progress", () => {
-    const before = bars(historyAt(base));
-    const after = bars(historyAt([...base, [33, dns(0, 1)]]));
-    expect(after.slice(0, 6)).toEqual(before.slice(0, 6));
-    expect(after[6]).toBeCloseTo(0.8 / 2, 10);
-    // And a tick every second for the whole bucket never moves the older bars.
-    let h = historyAt(base);
-    for (let s = 32; s < 35; s++) {
-      h = pushSnapshot(h, { nodes: [], cluster: sample(dns(0, 1), s) });
-      expect(bars(h).slice(0, 6)).toEqual(before.slice(0, 6));
-    }
-  });
-
-  it("shifts by exactly one step when a sample of the next bucket arrives", () => {
-    const before = bars(historyAt(base));
-    const after = bars(historyAt([...base, [33, dns(0, 1)], [35, dns(1, 1)]]));
-    // The bar in progress became a completed bar (with the sample of second 33 in it) and a new bar was born.
-    expect(after.slice(0, 5)).toEqual(before.slice(1, 6));
-    expect(after[5]).toBeCloseTo(0.4, 10);
-    expect(after[6]).toBe(0.5);
-  });
-
-  it("puts a sample in the bucket of its own time however the samples are spaced", () => {
-    // 4.999 s and 5.000 s are a bucket apart; 0.4 s and 4.9 s are not.
-    const out = bars(historyAt([[0.4, dns(1, 0)], [4.9, dns(1, 0)], [4.999, dns(1, 0)], [5, dns(0, 1)]]));
-    expect(out.slice(0, 5)).toEqual(Array(5).fill(null));
-    expect(out[5]).toBe(1);
-    expect(out[6]).toBe(0);
-  });
-
-  it("empties the ring after a gap of more than the 30 seconds it holds", () => {
-    const out = bars(historyAt([...base, [75, dns(0, 1)]]));
-    expect(out.slice(0, 6)).toEqual(Array(6).fill(null));
-    expect(out[6]).toBe(0);
-  });
-
-  it("ignores a sample from a later bucket than the newest (the clock stepped back)", () => {
-    const out = bars(historyAt([[100, dns(1, 0)], [50, dns(0, 1)]]));
-    expect(out.slice(0, 6)).toEqual(Array(6).fill(null));
-    expect(out[6]).toBe(0);
-  });
-
-  it("follows the answers tile when asked", () => {
-    const out = bars(historyAt([[0, dns(0, 0, 3, 1)]]), "dns-answers");
-    expect(out[6]).toBe(0.75);
-    expect(out[5]).toBeNull();
-  });
-});
-
-describe("the figures beside the bars", () => {
+describe("the figures beside the ratio", () => {
   // One NOERROR answer in the first bucket and one NXDOMAIN in the second: every sample's own rate is
   // zero but two, and the newest second reads zero.
   const sparse = historyOf(
     Array.from({ length: 12 }, (_, s) => (s === 2 ? dns(0, 0, 1, 0) : s === 7 ? dns(0, 0, 0, 1) : dns(0, 0))),
   );
 
-  it("agree: the mean rates are the counts of the samples behind the headline and the bars", () => {
+  it("agree: the mean rates are the counts of the samples behind the headline", () => {
     expect(sparse.cluster[sparse.cluster.length - 1]?.dns?.rcodes.noerror).toBe(0);
     // The window is seconds 0 to 9 (buckets 0 and 1 completed, bucket 2 in progress).
     expect(windowRate(sparse, (d) => d.rcodes.noerror)).toBeCloseTo(0.1, 10);
@@ -207,9 +128,6 @@ describe("the figures beside the bars", () => {
     const noerror = windowRate(sparse, (d) => d.rcodes.noerror)!;
     const all = RCODES.reduce((sum, code) => sum + windowRate(sparse, (d) => d.rcodes[code])!, 0);
     expect((noerror * 100) / all).toBeCloseTo(windowRatio(sparse, "dns-answers")!, 10);
-    // ... and the bars before the one in progress are the shares of the buckets the rates are made of.
-    expect(ratioBuckets(sparse, 5, 7, "dns-answers").slice(5)).toEqual([0, null]);
-    expect(ratioBuckets(sparse, 5, 7, "dns-answers")[4]).toBe(1);
   });
 
   it("move with the headline, once per bucket, not with every sample", () => {

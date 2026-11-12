@@ -1,7 +1,8 @@
 // Per-browser display preferences: theme, row density and the "Emphasize host part"
 // address treatment (design decisions 1 and 2). They live in localStorage under the same
 // keys as the mockups and are mirrored on <html> as data attributes that tokens.css and
-// design.css read. public/theme-init.js applies them before the first paint.
+// design.css read. public/theme-init.js applies them before the first paint. "Pause motion" of
+// the live metrics' charts (WCAG 2.2.2) is kept here too; it changes no style.
 import { createSignal } from "solid-js";
 
 export type ThemeChoice = "system" | "light" | "dark";
@@ -10,6 +11,7 @@ export type Density = "dense" | "compact" | "comfortable";
 const THEME_KEY = "tenko-theme";
 const DENSITY_KEY = "tenko-density";
 const EMPHASIS_KEY = "tenko-emphasize";
+const MOTION_KEY = "tenko-motion";
 
 export const THEMES: readonly ThemeChoice[] = ["system", "light", "dark"];
 export const DENSITIES: readonly Density[] = ["dense", "compact", "comfortable"];
@@ -44,6 +46,7 @@ function initialDensity(): Density {
 const [theme, setThemeSignal] = createSignal<ThemeChoice>(initialTheme());
 const [density, setDensitySignal] = createSignal<Density>(initialDensity());
 const [emphasizeHost, setEmphasisSignal] = createSignal<boolean>(read(EMPHASIS_KEY) === "host");
+const [motionPaused, setMotionSignal] = createSignal<boolean>(read(MOTION_KEY) === "paused");
 
 const darkQuery =
   typeof window !== "undefined" && typeof window.matchMedia === "function"
@@ -53,7 +56,7 @@ const [systemDark, setSystemDark] = createSignal<boolean>(darkQuery?.matches ?? 
 darkQuery?.addEventListener("change", (e) => setSystemDark(e.matches));
 
 /** The theme the user picked: system, light or dark. */
-export { theme, density, emphasizeHost };
+export { theme, density, emphasizeHost, motionPaused };
 
 /** The theme in effect after resolving "system" against the operating system. */
 export function effectiveTheme(): "light" | "dark" {
@@ -95,6 +98,11 @@ export function setEmphasizeHost(on: boolean): void {
   if (on) root().dataset.emphasize = "host";
   else delete root().dataset.emphasize;
   write(EMPHASIS_KEY, on ? "host" : null);
+}
+
+export function setMotionPaused(on: boolean): void {
+  setMotionSignal(on);
+  write(MOTION_KEY, on ? "paused" : null);
 }
 
 /** Re-applies every preference to <html> (after tests or a document swap). */

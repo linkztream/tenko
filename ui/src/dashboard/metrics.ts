@@ -267,14 +267,12 @@ export function sampleState(sample: MetricsSample): "current" | "stale" | "unsup
 
 /** The tiles whose figure is a share over a window rather than the share of one second. */
 export type RatioTile = "dns-cache" | "dns-answers";
-/** Seconds per bar of a ratio tile's bar chart; the edges of a bar are multiples of it on the controller's clock. */
+/** Seconds per bucket of a ratio tile's window; the edges of a bucket are multiples of it on the controller's clock. */
 export const BUCKET_SECONDS = 5;
 /** Completed buckets behind the headline of a ratio tile and the rates beside it: 30 seconds. */
 export const COMPLETED_BUCKETS = 6;
 /** Seconds behind the headline of a ratio tile. */
 export const RATIO_WINDOW = COMPLETED_BUCKETS * BUCKET_SECONDS;
-/** Bars of a ratio tile's bar chart: the completed buckets and the one in progress, the newest, at the end. */
-export const BUCKETS = COMPLETED_BUCKETS + 1;
 
 /** A sample of the cluster with the bucket its own timestamp falls in: `floor(t / bucketSeconds)`. */
 interface Placed {
@@ -305,7 +303,7 @@ function newestBucket(placed: readonly Placed[]): number | null {
 /**
  * The samples behind the headline and the rates of a ratio tile: those of the last
  * `COMPLETED_BUCKETS` buckets before the one in progress, so the window only moves when a bucket
- * boundary passes and it is the same set of samples as the bars before the lighter one. While no
+ * boundary passes. While no
  * completed bucket holds a sample (the page just opened) it is the samples of the bucket in progress.
  */
 function windowSamples(history: MetricsHistory): MetricsSample[] {
@@ -345,8 +343,8 @@ function sharedRatio(tile: RatioTile, samples: readonly MetricsSample[]): number
 
 /**
  * The share of a ratio tile over its window (the completed buckets of the last 30 seconds, see
- * `windowSamples`) in percent; null without queries. It is the share of the bars before the one in
- * progress taken together, and changes when a bucket completes.
+ * `windowSamples`) in percent; null without queries. It is the share of the completed buckets
+ * taken together, and changes when a bucket completes.
  */
 export function windowRatio(history: MetricsHistory, tile: RatioTile): number | null {
   const ratio = sharedRatio(tile, windowSamples(history));
@@ -357,7 +355,7 @@ export function windowRatio(history: MetricsHistory, tile: RatioTile): number | 
  * The mean per second of a DNS rate over the same window as `windowRatio`: the counts (rate times the
  * sample's interval) over the seconds. The per-second figure of one sample is a count over one
  * second, so under light load it reads zero while the share of a bucket is a share of real queries;
- * the mean over 30 seconds is the rate the bars and the headline are made of. Null without a `dns` sample.
+ * the mean over 30 seconds is the rate the headline is made of. Null without a `dns` sample.
  */
 export function windowRate(history: MetricsHistory, pick: (dns: MetricsDns) => number): number | null {
   return windowMean(history, (sample) => (sample.dns ? pick(sample.dns) : null));
@@ -381,34 +379,6 @@ export function windowMean(history: MetricsHistory, pick: (sample: MetricsSample
   return seconds > 0 ? count / seconds : null;
 }
 
-/**
- * The share per bucket as a fraction (0 to 1), oldest bucket first, always `buckets` long. The buckets
- * have fixed edges (`floor(t / bucketSeconds)` of the samples' own times) and the last one is the bucket
- * of the newest sample, still filling: a sample inside it changes that bar only, and the bars shift one
- * step when a sample of the next bucket arrives. A bucket without queries (or without samples, early in
- * the page's life or after a gap) is null. Defaults to the cache tile.
- */
-export function ratioBuckets(
-  history: MetricsHistory,
-  bucketSeconds: number,
-  buckets: number,
-  tile: RatioTile = "dns-cache",
-): (number | null)[] {
-  const placed = placeSamples(history.cluster, bucketSeconds);
-  const newest = newestBucket(placed);
-  const out: (number | null)[] = Array.from({ length: buckets }, () => null);
-  if (newest === null) return out;
-  const groups = new Map<number, MetricsSample[]>();
-  for (const { bucket, sample } of placed) {
-    if (bucket > newest || bucket <= newest - buckets) continue;
-    const group = groups.get(bucket);
-    if (group) group.push(sample);
-    else groups.set(bucket, [sample]);
-  }
-  for (const [bucket, samples] of groups) out[buckets - 1 - (newest - bucket)] = sharedRatio(tile, samples);
-  return out;
-}
-
 // U3: the queries chart of the DNS panel: the mean rate per 5-second bucket over five minutes,
 // with the same fixed bucket edges as the ratio tiles, so a bar is born on the right and walks
 // left one step per bucket, and the scale of its axis.
@@ -419,7 +389,7 @@ export const RATE_BUCKETS = LONG_HISTORY / BUCKET_SECONDS;
 /**
  * The mean per second of a DNS rate per bucket, oldest first, always `buckets` long: the counts
  * (rate times the sample's interval) of the samples of a bucket over their seconds. The buckets
- * have the fixed edges of `ratioBuckets`; the last is the bucket of the newest sample, still
+ * have the fixed edges of `windowSamples`; the last is the bucket of the newest sample, still
  * filling. A bucket without a `dns` sample is null.
  */
 export function rateBuckets(
