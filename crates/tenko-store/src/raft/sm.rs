@@ -1217,10 +1217,10 @@ mod tests {
         fs::remove_dir_all(&dir).expect("clean up");
     }
 
-    /// The rows of `ipam.sm_test_rows` as a count. Each build tells the test it started and
-    /// waits until the test lets it go on.
+    /// The rows of `ipam.sm_test_rows` as a count. Each build tells the test it started
+    /// (`true`) and waits until the test lets it go on.
     struct GatedRows {
-        started: std::sync::mpsc::Sender<()>,
+        started: std::sync::mpsc::Sender<bool>,
         go: Mutex<std::sync::mpsc::Receiver<()>>,
         rows: Mutex<usize>,
     }
@@ -1243,7 +1243,7 @@ mod tests {
             &self,
             view: &dyn ReadView,
         ) -> Result<Box<dyn crate::api::IndexImage>, StoreError> {
-            self.started.send(()).expect("the test listens");
+            self.started.send(true).expect("the test listens");
             lock(&self.go)
                 .recv()
                 .expect("the test lets the build go on");
@@ -1283,17 +1283,27 @@ mod tests {
             go: Mutex::new(gate),
             rows: Mutex::new(0),
         });
+        // The registration reports its end on the same channel (`false`), so a registration
+        // that ends before the test expects fails here instead of leaving the test waiting.
         let registering = {
-            let (sm, index) = (sm.clone(), Arc::clone(&index));
-            std::thread::spawn(move || sm.register_index(index))
+            let (sm, index, ended) = (sm.clone(), Arc::clone(&index), index.started.clone());
+            std::thread::spawn(move || {
+                let registered = sm.register_index(index);
+                ended.send(false).expect("the test listens");
+                registered
+            })
+        };
+        let build_starts = |attempt: &str| {
+            let started = builds.recv().expect("the registration reports");
+            assert!(started, "the registration ended before the {attempt}");
         };
         // Each attempt is overtaken while it builds.
-        builds.recv().expect("first attempt");
+        build_starts("first attempt");
         sm.install(&snapshot.meta, &snapshot.snapshot.path)
             .expect("install");
         go.send(()).expect("go");
         for entry in [3, 4] {
-            builds.recv().expect("next attempt");
+            build_starts("next attempt");
             sm.apply_entries(vec![audited_entry(
                 entry,
                 u8::try_from(entry).expect("row"),
@@ -1302,8 +1312,9 @@ mod tests {
             go.send(()).expect("go");
         }
         // The last build holds the lock: nothing applies until it is done.
-        builds.recv().expect("the build under the lock");
+        build_starts("build under the lock");
         go.send(()).expect("go");
+        assert!(!builds.recv().expect("the end"), "no further build");
         registering
             .join()
             .expect("the registration returns")
