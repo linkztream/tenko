@@ -19,6 +19,7 @@ use support::{
 use tenko_core::{
     Revision,
     dns::{RrSet, ScopeName, Zone},
+    testing::wait_until_async,
 };
 use tenko_dns::{
     DnsData, MemFeed,
@@ -141,20 +142,17 @@ async fn udp_and_tcp_answer_and_the_server_stops() {
     }
     // A worker counts an answer after it has left, so the client can hold both
     // answers a moment before the counters say so: they are waited for, briefly.
-    let began = std::time::Instant::now();
-    let layout = loop {
+    let layout = wait_until_async("the workers' counters to settle", async || {
         let layout = server.layout();
         let received: u64 = layout.udp.iter().map(|worker| worker.received).sum();
         let sent: u64 = layout.udp.iter().map(|worker| worker.sent).sum();
         if received >= 2 && sent == received {
-            break layout;
+            Ok(layout)
+        } else {
+            Err(layout)
         }
-        assert!(
-            began.elapsed() < std::time::Duration::from_secs(5),
-            "the workers' counters did not settle: {layout:?}"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    };
+    })
+    .await;
     assert_eq!(layout.workers_per_address, 2);
     assert_eq!(layout.udp.len(), 2 * udp.len());
 
@@ -243,10 +241,10 @@ async fn a_delta_from_the_feed_is_answered_by_the_running_server() {
     assert_eq!(before.rcode, rcode::NXDOMAIN);
     let added = rrset(&parent, &ScopeName::DEFAULT, "new.example.test", &[a(42)]);
     let revision = writer.publish(vec![Change::RrSet(added.key(), Some(added))]);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while handle.revision() < revision && Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    wait_until_async("the new revision is served", async || {
+        handle.revision() >= revision
+    })
+    .await;
     assert_eq!(handle.revision(), revision);
     let after = tokio::task::spawn_blocking(move || udp_ask(address, "new.example.test"))
         .await
@@ -255,10 +253,10 @@ async fn a_delta_from_the_feed_is_answered_by_the_running_server() {
     assert_eq!(after.answers[0].rdata, [192, 0, 2, 42]);
     // A reset swaps a whole new catalog.
     writer.reset(DnsData::at(Revision(50)));
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while handle.revision() != Revision(50) && Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    wait_until_async("the reset catalog is served", async || {
+        handle.revision() == Revision(50)
+    })
+    .await;
     let empty = tokio::task::spawn_blocking(move || udp_ask(address, "www.example.test"))
         .await
         .expect("join")

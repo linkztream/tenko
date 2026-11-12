@@ -1,13 +1,11 @@
 //! Tests of the in-process feed over an in-memory store, with the zone service writing.
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Duration};
 
 use tenko_core::{
     RequestCtx, SystemComponent,
     dns::{DnsName, RecordData, Rtype, ScopeName, SerialPolicy, SoaDefaults, ZoneKind},
+    testing::wait_until_async,
 };
 use tenko_store::{MemStore, Store, WriteBatch};
 use tokio_util::sync::CancellationToken;
@@ -216,14 +214,10 @@ async fn a_batch_of_1000_rrsets_is_served_within_one_second() {
         .written
         .expect("a write")
         .revision;
-    let started = Instant::now();
-    while handle.revision() < written {
-        assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "the change is not served after one second"
-        );
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    wait_until_async("the change is served", async || {
+        handle.revision() >= written
+    })
+    .await;
     assert_eq!(progress.lag(handle.revision()), 0);
     let catalog = handle.load();
     let owner = name("host-999.example.test").to_wire();
@@ -267,11 +261,10 @@ async fn an_image_installed_later_resets_the_catalog() {
     index.install(index.build(view.as_ref()).expect("build"));
     let stop = CancellationToken::new();
     let follower = tokio::spawn(catalog::follow(feed, handle.clone(), stop.clone()));
-    let started = Instant::now();
-    while handle.revision() < created.revision {
-        assert!(started.elapsed() < Duration::from_secs(5), "no reset");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    wait_until_async("the reset is served", async || {
+        handle.revision() >= created.revision
+    })
+    .await;
     assert_eq!(handle.load().index().stats().zones, 1);
     stop.cancel();
     follower.await.expect("joins").expect("follows");

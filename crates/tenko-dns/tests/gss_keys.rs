@@ -7,9 +7,9 @@
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
+use tenko_core::testing::wait_until_async;
 use tenko_core::{
     RequestCtx, SystemComponent,
     audit::AuditDraft,
@@ -127,16 +127,6 @@ impl Node {
     }
 }
 
-async fn until(what: &str, check: impl Fn() -> bool) {
-    for _ in 0..500 {
-        if check() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("timed out waiting for {what}");
-}
-
 /// DNS-28: a key set stored in the vault reaches the acceptor through the watcher: after an
 /// import (versions 3 current and 2 previous, both accepted), after a new key set
 /// replaces it (version 300 accepted, the old ones refused), and nothing after the account
@@ -180,7 +170,10 @@ async fn dns_28_the_accounts_keys_reach_the_acceptor_and_are_cleared() {
         .service
         .import(&cx(), import("computer-tenko-dns.keytab"))
         .await;
-    until("the keys of the import", || handle.installed().is_some()).await;
+    wait_until_async("the keys of the import", async || {
+        handle.installed().is_some()
+    })
+    .await;
     assert_eq!(
         handle.installed().map(|(_, spns)| spns),
         Some(vec![SPN.to_owned()])
@@ -190,7 +183,10 @@ async fn dns_28_the_accounts_keys_reach_the_acceptor_and_are_cleared() {
     // A new key set for the account replaces the old one.
     node.service.delete(&cx()).await.expect("delete");
     let _ = node.service.import(&cx(), import("kvno-300.keytab")).await;
-    until("the new keys", || node.negotiate(KVNO_300, 300) == Some(0)).await;
+    wait_until_async("the new keys", async || {
+        node.negotiate(KVNO_300, 300) == Some(0)
+    })
+    .await;
     assert_eq!(
         node.negotiate(KVNO_3, 3),
         Some(17),
@@ -198,7 +194,10 @@ async fn dns_28_the_accounts_keys_reach_the_acceptor_and_are_cleared() {
     );
     // The account goes: the acceptor holds no keys.
     node.service.delete(&cx()).await.expect("delete");
-    until("the keys to be cleared", || handle.installed().is_none()).await;
+    wait_until_async("the keys to be cleared", async || {
+        handle.installed().is_none()
+    })
+    .await;
     assert_eq!(node.negotiate(KVNO_300, 300), None, "REFUSED");
     stop.cancel();
     task.await.expect("the watcher stops");

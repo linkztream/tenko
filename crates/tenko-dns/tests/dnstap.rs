@@ -5,12 +5,15 @@
 use std::{
     fs,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use hickory_proto::op::{Message as DnsMessage, MessageType};
 use prost::Message as _;
-use tenko_core::dns::{DnsName, QueryTransport};
+use tenko_core::{
+    dns::{DnsName, QueryTransport},
+    testing::TempDir,
+};
 use tenko_dns::{
     log::{QueryLogEntry, QueryLogSink},
     querylog::{self, ClientField, LogFilter, LogFormat, LogSettings, LogWriter},
@@ -202,7 +205,7 @@ fn write(dir: &Path, client: ClientField) -> Vec<u8> {
 
 #[test]
 fn the_dnstap_segment_decodes_with_independent_readers() {
-    let dir = TempDir::new();
+    let dir = TempDir::new("dnstap");
     let bytes = write(dir.path(), ClientField::Address);
     let stream = read_stream(&bytes);
     assert_eq!(stream.content_type, b"protobuf:dnstap.Dnstap");
@@ -279,7 +282,7 @@ fn the_dnstap_segment_decodes_with_independent_readers() {
 
 #[test]
 fn pseudonymized_and_hidden_clients_never_reach_the_file() {
-    let dir = TempDir::new();
+    let dir = TempDir::new("dnstap");
     let bytes = write(dir.path(), ClientField::Pseudonym);
     for frame in read_stream(&bytes).frames {
         let tap = Dnstap::decode(frame.as_slice()).expect("protobuf");
@@ -315,34 +318,10 @@ fn pseudonymized_and_hidden_clients_never_reach_the_file() {
     assert_eq!(found.lines.len(), 1);
     assert_eq!(found.lines[0].qname, "missing.example.test");
 
-    let hidden = TempDir::new();
+    let hidden = TempDir::new("dnstap");
     let bytes = write(hidden.path(), ClientField::Hidden);
     for frame in read_stream(&bytes).frames {
         let tap = Dnstap::decode(frame.as_slice()).expect("protobuf");
         assert_eq!(tap.message.expect("message").query_address, None);
-    }
-}
-
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "tenko-dnstap-{}-{}",
-            std::process::id(),
-            uuid::Uuid::now_v7()
-        ));
-        fs::create_dir_all(&path).expect("directory");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
     }
 }

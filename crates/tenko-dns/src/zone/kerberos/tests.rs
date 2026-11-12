@@ -15,6 +15,7 @@ use std::{
 use tenko_core::{
     RequestCtx, SystemComponent,
     dns::{EncryptionType, KeyVersionState, KrbAccount, PrincipalName, Realm, codes, findings},
+    testing::wait_until_async,
 };
 use tenko_krb::{
     acceptor::{Clock, Config as AcceptorConfig, KrbTime, Service, Step},
@@ -1732,16 +1733,15 @@ async fn dns_28_the_watcher_hands_the_keys_to_the_acceptor() {
     let wait_for = |want: Option<Vec<u32>>| {
         let sink = Arc::clone(&sink);
         async move {
-            for _ in 0..200 {
-                if sink.events.lock().expect("lock").last() == Some(&want) {
-                    return;
+            wait_until_async(&format!("the watcher installs {want:?}"), async || {
+                let events = sink.events.lock().expect("lock");
+                if events.last() == Some(&want) {
+                    Ok(())
+                } else {
+                    Err(events.clone())
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-            panic!(
-                "the watcher did not install {want:?}: {:?}",
-                sink.events.lock().expect("lock")
-            );
+            })
+            .await;
         }
     };
     lab.adopt().await;
@@ -1755,17 +1755,14 @@ async fn dns_28_the_watcher_hands_the_keys_to_the_acceptor() {
     sink.refuse.store(true, Ordering::SeqCst);
     lab.kdc.with(|s| s.password = OTP.to_vec());
     lab.adopt().await;
-    let mut found = Vec::new();
-    for _ in 0..200 {
-        found = codes_of(&lab.account().await)
+    let found: Vec<String> = wait_until_async("a finding on the account", async || {
+        let found: Vec<String> = codes_of(&lab.account().await)
             .into_iter()
             .map(str::to_owned)
             .collect();
-        if !found.is_empty() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+        (!found.is_empty()).then_some(found)
+    })
+    .await;
     assert_eq!(found, [findings::GSS_SELF_TEST_FAILED]);
     assert_eq!(
         lab.account().await.findings[0].params["reason"],

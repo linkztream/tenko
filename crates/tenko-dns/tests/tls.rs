@@ -31,6 +31,7 @@ use tenko_cluster::ca::{TlsMode, TlsPolicy, TlsService};
 use tenko_core::{
     Revision,
     dns::{QueryTransport, RrSet, ScopeName},
+    testing::wait_until_async,
 };
 use tenko_dns::{
     DnsData,
@@ -563,12 +564,10 @@ async fn the_limits_and_the_handshake_timeout_hold() {
         dot(&pki.client(&[b"h2"]), address).await.is_err(),
         "no common ALPN"
     );
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while server.layout().tls.expect("tls").dot_handshake_failures < 3 && Instant::now() < deadline
-    {
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(server.layout().tls.expect("tls").dot_handshake_failures >= 3);
+    wait_until_async("three failed DoT handshakes are counted", async || {
+        server.layout().tls.expect("tls").dot_handshake_failures >= 3
+    })
+    .await;
 
     // DoH idles out too.
     let tls = dot(&pki.client(&[b"h2"]), server.doh_addresses()[0])
@@ -584,11 +583,7 @@ async fn the_limits_and_the_handshake_timeout_hold() {
     )
     .await;
     assert_eq!(got.status, StatusCode::OK);
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while !sender.is_closed() && Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(sender.is_closed(), "GOAWAY after the idle time");
+    wait_until_async("GOAWAY after the idle time", async || sender.is_closed()).await;
     server.stop().await;
 }
 

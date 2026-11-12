@@ -1,12 +1,12 @@
 //! Tests of the query log: the drain, the formats, pseudonyms, sampling, pages, filters,
 //! retention, recovery and the kill switch.
 
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    time::{Duration, Instant},
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use tenko_core::dns::{DnsName, QueryTransport, Rtype};
+use tenko_core::{
+    dns::{DnsName, QueryTransport, Rtype},
+    testing::{TempDir, wait_until},
+};
 
 use super::{writer::Writer, *};
 
@@ -74,7 +74,7 @@ fn names(lines: &[LogLine]) -> Vec<&str> {
 
 #[test]
 fn lines_are_written_and_read_back_newest_first_in_pages() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     let names: Vec<String> = (0..25).map(|n| format!("host-{n}.example.test")).collect();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     write_lines(settings(dir.path()), &refs, CLIENT);
@@ -94,7 +94,7 @@ fn lines_are_written_and_read_back_newest_first_in_pages() {
 
 #[test]
 fn clients_are_pseudonymized_by_default_and_stable_across_a_restart() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     write_lines(
         settings(dir.path()),
         &["a.example.test", "b.example.test"],
@@ -123,7 +123,7 @@ fn clients_are_pseudonymized_by_default_and_stable_across_a_restart() {
 
 #[test]
 fn a_pseudonym_changes_with_the_day() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     write_at(settings(dir.path()), &["a.example.test"], CLIENT, NOW);
     write_at(settings(dir.path()), &["b.example.test"], CLIENT, NOW + DAY);
     let lines = all(dir.path());
@@ -138,7 +138,7 @@ fn a_pseudonym_changes_with_the_day() {
 
 #[test]
 fn the_client_can_be_written_as_its_address_or_not_at_all() {
-    let plain = tempdir();
+    let plain = TempDir::new("querylog");
     write_lines(
         LogSettings {
             client: ClientField::Address,
@@ -149,7 +149,7 @@ fn the_client_can_be_written_as_its_address_or_not_at_all() {
     );
     assert_eq!(all(plain.path())[0].client.as_deref(), Some("2001:db8::7"));
 
-    let hidden = tempdir();
+    let hidden = TempDir::new("querylog");
     write_lines(
         LogSettings {
             client: ClientField::Hidden,
@@ -170,7 +170,7 @@ fn the_client_can_be_written_as_its_address_or_not_at_all() {
 
 #[test]
 fn sampling_keeps_one_query_in_n() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     let names: Vec<String> = (0..20).map(|n| format!("h{n}.example.test")).collect();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     write_lines(
@@ -186,7 +186,7 @@ fn sampling_keeps_one_query_in_n() {
 
 #[test]
 fn the_name_filter_matches_a_name_and_the_names_under_it() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     write_lines(
         settings(dir.path()),
         &[
@@ -211,7 +211,7 @@ fn the_name_filter_matches_a_name_and_the_names_under_it() {
 
 #[test]
 fn the_client_filter_takes_a_pseudonym_or_an_address() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     let other = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 9));
     write_lines(settings(dir.path()), &["a.example.test"], CLIENT);
     write_lines(settings(dir.path()), &["b.example.test"], other);
@@ -247,7 +247,7 @@ fn the_client_filter_takes_a_pseudonym_or_an_address() {
 
 #[test]
 fn the_rcode_and_time_filters_apply() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     let writer = LogWriter::start(settings(dir.path())).expect("start");
     let sink = writer.sink();
     for (n, rcode) in [0u16, 3, 3, 2].into_iter().enumerate() {
@@ -285,7 +285,7 @@ fn the_rcode_and_time_filters_apply() {
 
 #[test]
 fn a_bad_cursor_is_refused_and_an_empty_directory_reads_empty() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     let none = LogFilter::default();
     assert_eq!(
         read(dir.path(), Some("x"), 10, &none),
@@ -308,7 +308,7 @@ fn a_bad_cursor_is_refused_and_an_empty_directory_reads_empty() {
 #[test]
 fn a_ring_nobody_drains_takes_every_entry_and_drops_without_waiting() {
     // No writer at all: a sink that waited for room would never return.
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     let log = detached(settings(dir.path()), 2);
     let qname = wire("a.example.test");
     for n in 0..10_000 {
@@ -319,7 +319,7 @@ fn a_ring_nobody_drains_takes_every_entry_and_drops_without_waiting() {
 
 #[test]
 fn a_full_ring_drops_and_counts_without_waiting() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     let log = detached(settings(dir.path()), 2);
     let qname = wire("a.example.test");
     let before = DROPPED.get();
@@ -340,7 +340,7 @@ fn a_full_ring_drops_and_counts_without_waiting() {
 
 #[test]
 fn the_kill_switch_stops_logging_and_survives_a_restart() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     let writer = LogWriter::start(settings(dir.path())).expect("start");
     let sink = writer.sink();
     let qname = wire("before.example.test");
@@ -370,7 +370,7 @@ fn the_kill_switch_stops_logging_and_survives_a_restart() {
 
 #[test]
 fn a_failing_disk_drops_and_counts_and_the_log_recovers() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     let logs = dir.path().join("log");
     let writer = LogWriter::start(settings(&logs)).expect("start");
     let sink = writer.sink();
@@ -381,10 +381,9 @@ fn a_failing_disk_drops_and_counts_and_the_log_recovers() {
     for n in 0..100 {
         sink.record(&entry(&qname, CLIENT, NOW + n));
     }
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while sink.dropped() < 100 && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    wait_until("every entry is dropped and counted", || {
+        sink.dropped() >= 100
+    });
     assert_eq!(sink.dropped(), 100);
     assert!(sink.figures().write_errors >= 1);
     fs::remove_file(&logs).expect("unblock");
@@ -398,7 +397,7 @@ fn a_failing_disk_drops_and_counts_and_the_log_recovers() {
 
 #[test]
 fn retention_removes_the_oldest_segments_beyond_the_size_and_their_keys() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     for n in 0..5u64 {
         let name = format!("{SEGMENT_PREFIX}{:020}.jsonl", NOW + n * DAY);
         fs::write(dir.path().join(name), vec![b'x'; 600 * 1024]).expect("segment");
@@ -424,7 +423,7 @@ fn retention_removes_the_oldest_segments_beyond_the_size_and_their_keys() {
 
 #[test]
 fn an_unfinished_tail_is_cut_off_at_start() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     write_lines(settings(dir.path()), &["a.example.test"], CLIENT);
     let name = segments(dir.path()).expect("segments").remove(0);
     let path = dir.path().join(&name);
@@ -439,7 +438,7 @@ fn an_unfinished_tail_is_cut_off_at_start() {
 
 #[test]
 fn a_dnstap_segment_is_read_back_and_its_tail_recovered() {
-    let dir = tempdir();
+    let dir = TempDir::new("querylog");
     write_lines(
         LogSettings {
             format: LogFormat::Dnstap,
@@ -482,29 +481,4 @@ fn a_dnstap_segment_is_read_back_and_its_tail_recovered() {
         "cut and closed with a STOP frame"
     );
     assert_eq!(all(dir.path()).len(), 2);
-}
-
-/// A temporary directory removed when dropped.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn tempdir() -> TempDir {
-    let path = std::env::temp_dir().join(format!(
-        "tenko-querylog-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    fs::create_dir_all(&path).expect("temporary directory");
-    TempDir(path)
 }

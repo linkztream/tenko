@@ -20,6 +20,7 @@ use tenko_core::{
     },
     ipam::Stamp,
     principal::{Principal, SystemComponent},
+    testing::wait_until_async,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -827,14 +828,10 @@ async fn an_answer_to_a_full_connection_channel_is_dropped_and_counted() {
     let peer = Arc::new(Peer::new());
     let answer = peer.ask(&forwarder, query(9, None)).await;
     assert_eq!(wire::parse_header(&answer).expect("header").id, 9);
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while crate::respond::replies_dropped() < before + 3 && std::time::Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(
-        crate::respond::replies_dropped() >= before + 3,
-        "three answers dropped and counted"
-    );
+    wait_until_async("three answers dropped and counted", async || {
+        crate::respond::replies_dropped() >= before + 3
+    })
+    .await;
     assert_eq!(receiver.try_recv().expect("the filler"), vec![0u8; 12]);
     assert!(receiver.try_recv().is_err(), "nothing waited behind it");
     stop.cancel();
