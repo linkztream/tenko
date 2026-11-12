@@ -895,6 +895,21 @@ pub struct StoreStatus {
     /// (empty on a follower and for `MemStore`).
     #[serde(default)]
     pub members: Vec<MemberStatus>,
+    /// Set once this member's state machine stopped at a committed entry it cannot apply
+    /// ([`APPLY_STOPPED`]): the member serves nothing new until it can.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<ApplyStopped>,
+}
+
+/// Where and why a member's state machine stopped applying the log ([`APPLY_STOPPED`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApplyStopped {
+    /// The index of the log entry it cannot apply.
+    pub index: u64,
+    /// The term of that entry.
+    pub term: u64,
+    /// Why, with what the operator does about it.
+    pub reason: String,
 }
 
 /// Whether a member of the store can reach a quorum (OPS-26, plan section 2.2). The
@@ -996,6 +1011,13 @@ impl StoreStatus {
         (self.data_bytes > 0).then(|| file as f64 / self.data_bytes as f64)
     }
 }
+
+/// The code of the error that stops a member's state machine at a committed entry it
+/// cannot apply: the log line and the stopped node's fatal error carry it with the entry's
+/// index and the reason. Such an entry is never skipped, because a member that skipped it
+/// would hold a state the others do not; it stays stopped until its binary can apply the
+/// entry (for an entry of a newer release: until it runs that release).
+pub const APPLY_STOPPED: &str = "sys.store.apply_stopped";
 
 /// Store errors.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

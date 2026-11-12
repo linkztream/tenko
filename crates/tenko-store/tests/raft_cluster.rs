@@ -6,14 +6,23 @@
 use std::{collections::BTreeSet, path::Path, time::Duration};
 
 use bytes::Bytes;
+use openraft::error::RaftError;
 use tenko_core::{
-    CounterKey, NodeId, Principal, Revision, SystemComponent, TableName, Timestamp,
-    codec::encode_key,
+    CounterKey, NodeId, ObjectKind, ObjectRef, Principal, Revision, SystemComponent, TableName,
+    Timestamp,
+    audit::{AuditAction, AuditDraft},
+    codec::{encode_key, to_cbor},
     testing::{TempDir, wait_until_async},
 };
 use tenko_store::{
     QuorumState, ReadConsistency, ReadView, Store, StoreError, StoreRole, WriteBatch,
-    raft::{RaftStore, RaftStoreConfig, fixture::InProcessCluster, is_joining, mark_joining},
+    api::APPLY_STOPPED,
+    raft::{
+        RaftStore, RaftStoreConfig,
+        fixture::InProcessCluster,
+        is_joining, mark_joining,
+        types::{Proposal, ProposedBatch},
+    },
     testing::ConformanceConfig,
 };
 
@@ -385,6 +394,87 @@ async fn members_agree_on_the_state_digest() {
     let next = put(&leader, 99, "changed").await.expect("write");
     let changed = leader.digest(Some(next)).await.expect("digest");
     assert_ne!(changed.sha256, digests[0].sha256);
+    cluster.shutdown().await;
+}
+
+/// A committed batch that names an object kind this binary does not know, as a batch of a
+/// newer release reaches an older member during a rolling upgrade, stops the state machine
+/// of every member that cannot decode it. It is never skipped: no member goes on at a
+/// revision the others do not share, and the stop names the code, the entry and the reason.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_batch_a_member_cannot_decode_stops_its_state_machine() {
+    let cluster = InProcessCluster::start(3, &ConformanceConfig::default()).await;
+    let leader = cluster.wait_for_leader().await;
+    let before = put(&leader, 1, "before").await.expect("write");
+    for member in cluster.members() {
+        member.digest(Some(before)).await.expect("caught up");
+    }
+
+    let mut newer = batch();
+    newer
+        .put(ROWS, key(2), Bytes::from_static(b"never"))
+        .audit(AuditDraft::success(
+            AuditAction::from_static("ipam.raft_cluster.write"),
+            vec![ObjectRef::singleton(ObjectKind::Vlan)],
+        ));
+    let mut encoded = to_cbor(&newer).expect("encode").to_vec();
+    // The CBOR text "vlan" becomes "vlax", a kind of the same length that no release has.
+    let known = [0x64, b'v', b'l', b'a', b'n'];
+    let at = encoded
+        .windows(known.len())
+        .position(|window| window == known)
+        .expect("the kind is encoded as text");
+    encoded[at + 4] = b'x';
+    let proposal = Proposal {
+        journal_retention: 1_000,
+        journal_max_bytes: 0,
+        batches: vec![ProposedBatch {
+            batch: Bytes::from(encoded),
+            fingerprint: None,
+        }],
+    };
+    let entry = leader
+        .raft()
+        .metrics()
+        .borrow()
+        .last_log_index
+        .expect("the log holds the first write")
+        + 1;
+    let answer = leader.raft().client_write(proposal).await;
+    assert!(
+        matches!(answer, Err(RaftError::Fatal(_))),
+        "the entry must stop the leader's state machine, not answer {answer:?}"
+    );
+
+    wait_until_async("the leader stops at the entry", async || {
+        leader.status().role == StoreRole::Shutdown
+    })
+    .await;
+    let stopped = leader.status().stopped.expect("the status names the stop");
+    assert_eq!(stopped.index, entry);
+    assert!(
+        stopped.reason.contains("unknown variant `vlax`") && stopped.reason.contains("upgrade"),
+        "{}",
+        stopped.reason
+    );
+    let metrics = leader.raft().metrics().borrow().clone();
+    let Err(fatal) = metrics.running_state else {
+        panic!("the stopped leader has no fatal error");
+    };
+    let fatal = fatal.to_string();
+    assert!(
+        fatal.contains(APPLY_STOPPED) && fatal.contains(&format!("log entry {entry}")),
+        "{fatal}"
+    );
+    // The other members either stopped at the same entry or never applied it: none goes on
+    // at a revision the others do not share.
+    for member in cluster.members() {
+        let status = member.status();
+        assert_eq!(status.revision, before, "member {}", member.node_id());
+        if let Some(stop) = status.stopped {
+            assert_eq!(stop.index, entry, "member {}", member.node_id());
+        }
+    }
     cluster.shutdown().await;
 }
 

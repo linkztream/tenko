@@ -41,7 +41,7 @@ use axum::{
 };
 use tenko_cluster::ca::{TlsMode, TlsService};
 use tenko_core::{Action, CodedError, ObjectKind, ObjectRef, Timestamp};
-use tenko_store::{ReadConsistency, StoreRole};
+use tenko_store::{ApplyStopped, ReadConsistency, StoreRole, api::APPLY_STOPPED};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
@@ -571,6 +571,22 @@ pub fn disk_low_warning(
     })
 }
 
+/// The warning of a node whose store stopped applying the replicated log at an entry it
+/// cannot apply: it serves no newer state until it can (the reason says what to do).
+fn apply_stopped_warning(stopped: &ApplyStopped) -> StatusWarning {
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("index".to_owned(), stopped.index.to_string());
+    params.insert("term".to_owned(), stopped.term.to_string());
+    StatusWarning {
+        code: APPLY_STOPPED.to_owned(),
+        detail: format!(
+            "the store stopped applying the replicated log at entry {} of term {}: {}",
+            stopped.index, stopped.term, stopped.reason
+        ),
+        params,
+    }
+}
+
 /// Bytes in GiB with one decimal, for the English text of a finding.
 #[allow(clippy::cast_precision_loss)]
 fn gib(bytes: u64) -> String {
@@ -1032,6 +1048,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         |listener| listener.ui(),
     );
     warnings.extend(state.notices_list());
+    warnings.extend(store.stopped.as_ref().map(apply_stopped_warning));
     let (kek, kek_warnings) = state
         .kek()
         .map_or_else(|| (None, Vec::new()), |kek| super::kek::summary_of(&kek));
@@ -1419,6 +1436,25 @@ mod tests {
         assert_eq!(
             disk_low_warning(&HostSample::blank(Timestamp::now()), None),
             None
+        );
+    }
+
+    #[test]
+    fn a_store_that_stopped_applying_is_a_warning_with_the_entry_and_the_reason() {
+        let warning = apply_stopped_warning(&ApplyStopped {
+            index: 41,
+            term: 3,
+            reason: "upgrade this member".to_owned(),
+        });
+        assert_eq!(warning.code, APPLY_STOPPED);
+        assert_eq!(warning.params["index"], "41");
+        assert_eq!(warning.params["term"], "3");
+        assert!(
+            warning
+                .detail
+                .contains("entry 41 of term 3: upgrade this member"),
+            "{}",
+            warning.detail
         );
     }
 

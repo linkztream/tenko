@@ -317,6 +317,20 @@ parameters `stored`, `target` and `nodes`.
 A joining controller whose binary does not know the format the cluster stores is refused
 with `cluster.join.format_newer`. The procedure for the whole cluster is section 7.7.
 
+A member never skips a committed entry of the replicated log. If its binary cannot read one
+(a write of a newer release reached a member that still runs an older one), its store stops
+applying the log at that entry and the member serves nothing newer:
+
+- the server log has an error line with the code `sys.store.apply_stopped`, the index and
+  term of the entry and the reason;
+- `GET /api/v1/health/ready` answers 503 with the reason `store_stopped`;
+- `GET /api/v1/system/status` carries the warning `sys.store.apply_stopped` with the
+  parameters `index` and `term`;
+- the leader shows the member as lagging.
+
+Upgrade that member's binary to the release the leader runs and start it again: it applies
+the entry and catches up. Nothing of the entry was applied, so nothing has to be repaired.
+
 ## 4 The migration convention
 
 This section is for developers. It answers three questions: when does a change to stored

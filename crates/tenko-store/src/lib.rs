@@ -41,6 +41,7 @@
 
 pub mod api;
 pub mod format;
+mod layout;
 pub mod mem;
 #[cfg(feature = "raft")]
 pub mod raft;
@@ -51,9 +52,9 @@ pub mod testing;
 pub mod test_hooks;
 
 pub use api::{
-    AnchorResolver, Change, ChangeSet, ChangeStream, CoalescerConfig, Committed, DerivedIndex,
-    FailedPrecondition, IndexImage, IndexStatus, KeyRange, Leadership, MemberStatus, Mutation,
-    Precondition, QuorumState, ReadConsistency, ReadView, ReadViewExt, Store, StoreError,
+    AnchorResolver, ApplyStopped, Change, ChangeSet, ChangeStream, CoalescerConfig, Committed,
+    DerivedIndex, FailedPrecondition, IndexImage, IndexStatus, KeyRange, Leadership, MemberStatus,
+    Mutation, Precondition, QuorumState, ReadConsistency, ReadView, ReadViewExt, Store, StoreError,
     StoreRole, StoreStatus, Versioned, WatchError, WatchFilter, WriteBatch, downcast_image, fence,
     tables,
 };

@@ -2242,6 +2242,7 @@ impl Store for RaftStore {
             quorum,
             term,
             members,
+            stopped: inner.sm.stopped(),
         }
     }
 

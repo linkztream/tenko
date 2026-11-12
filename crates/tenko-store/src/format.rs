@@ -33,7 +33,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tenko_core::{Revision, table::TableDef};
 
-use crate::api::{ReadView, ReadViewExt as _, StoreError, WriteBatch};
+use crate::{
+    api::{ReadView, ReadViewExt as _, StoreError, WriteBatch},
+    layout::{self, INITIAL_FILE, LOG_FILE, POINTER, SNAPSHOTS, sync_dir},
+};
 
 /// The marker file in the store directory.
 pub const MARKER_FILE: &str = "format";
@@ -46,18 +49,6 @@ const MARKER_MAGIC: &str = "tenko-data-format";
 
 /// The table that holds the stored format record under the key `()`.
 pub const TABLE: TableDef<(), StoredFormat> = TableDef::new("sys.format");
-
-/// The Raft log file.
-const LOG_FILE: &str = "log.redb";
-
-/// The pointer to the active state file.
-const POINTER: &str = "sm.current";
-
-/// The state file of a store that never installed a snapshot.
-const INITIAL_STATE_FILE: &str = "sm.redb";
-
-/// The snapshot directory of a store.
-const SNAPSHOTS: &str = "snapshots";
 
 /// The format record of the marker file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -221,7 +212,7 @@ impl From<StoreError> for FormatError {
 /// made with `RaftStore::copy_state_to`).
 pub fn store_exists(store_dir: &Path) -> bool {
     store_dir.join(LOG_FILE).is_file()
-        || store_dir.join(INITIAL_STATE_FILE).is_file()
+        || store_dir.join(INITIAL_FILE).is_file()
         || store_dir.join(POINTER).is_file()
 }
 
@@ -300,7 +291,9 @@ pub struct CopyReport {
 /// Copies a store that no process has open from `from` into `to` (created; it must not
 /// exist or must be empty): the Raft log, the state file that `sm.current` names (or
 /// `sm.redb`) with its pointer, the snapshots and the marker. Every copied file is synced.
-/// Never copy the files of an open store: redb files are only consistent when closed.
+/// Never copy the files of an open store: redb files are only consistent when closed. The
+/// log and the state file stay locked from the check to the end of the copy, so a server
+/// that starts meanwhile waits until the copy is done instead of changing the store under it.
 ///
 /// # Errors
 ///
@@ -308,27 +301,23 @@ pub struct CopyReport {
 /// has the store open, [`FormatError::TargetNotEmpty`], [`FormatError::InvalidMarker`] for a
 /// pointer that names no state file, or the I/O error.
 pub fn copy_closed_store(from: &Path, to: &Path) -> Result<CopyReport, FormatError> {
-    ensure_closed(from)?;
+    let held = hold_closed(from)?;
     if fs::read_dir(to).is_ok_and(|mut entries| entries.next().is_some()) {
         return Err(FormatError::TargetNotEmpty(to.to_path_buf()));
     }
     fs::create_dir_all(to).map_err(|error| FormatError::io(to, error))?;
-    let state = active_state_file(from)?;
-    let mut names = Vec::new();
-    if from.join(LOG_FILE).is_file() {
-        names.push(LOG_FILE.to_owned());
-    }
-    names.push(state);
-    if from.join(POINTER).is_file() {
-        names.push(POINTER.to_owned());
-    }
-    if from.join(MARKER_FILE).is_file() {
-        names.push(MARKER_FILE.to_owned());
-    }
     let mut report = CopyReport::default();
-    for name in names {
-        report.bytes += copy_file(&from.join(&name), &to.join(&name))?;
-        report.files.push(name);
+    // Read through the locked handles: on Windows a lock also bars this process's other
+    // handles from the file.
+    for (name, file) in &held.files {
+        report.bytes += copy_from(file, &from.join(name), &to.join(name))?;
+        report.files.push(name.clone());
+    }
+    for name in [POINTER, MARKER_FILE] {
+        if from.join(name).is_file() {
+            report.bytes += copy_file(&from.join(name), &to.join(name))?;
+            report.files.push(name.to_owned());
+        }
     }
     let snapshots = from.join(SNAPSHOTS);
     if snapshots.is_dir() {
@@ -366,25 +355,44 @@ pub fn copy_closed_store(from: &Path, to: &Path) -> Result<CopyReport, FormatErr
 /// [`FormatError::NoStore`] without a store ([`store_exists`]), [`FormatError::InUse`] naming the locked
 /// file, or the I/O error of opening it.
 pub fn ensure_closed(store_dir: &Path) -> Result<(), FormatError> {
+    hold_closed(store_dir).map(drop)
+}
+
+/// The log and the state file of a closed store, each locked until this value drops.
+struct Held {
+    /// File names relative to the store directory, with their locked handles.
+    files: Vec<(String, File)>,
+}
+
+/// Locks the log, then the state file the pointer names: once the log is locked no server
+/// runs on the directory, so the pointer cannot move before the state file is locked too.
+fn hold_closed(store_dir: &Path) -> Result<Held, FormatError> {
     if !store_exists(store_dir) {
         return Err(FormatError::NoStore(store_dir.to_path_buf()));
     }
-    for name in [LOG_FILE.to_owned(), active_state_file(store_dir)?] {
-        let path = store_dir.join(name);
-        let file = match File::open(&path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(FormatError::io(&path, error)),
-        };
-        match file.try_lock() {
-            Ok(()) => {
-                let _ = file.unlock();
-            }
-            Err(fs::TryLockError::WouldBlock) => return Err(FormatError::InUse(path)),
-            Err(fs::TryLockError::Error(error)) => return Err(FormatError::io(&path, error)),
-        }
+    let mut files = Vec::new();
+    if let Some(log) = lock_existing(&store_dir.join(LOG_FILE))? {
+        files.push((LOG_FILE.to_owned(), log));
     }
-    Ok(())
+    let state = active_state_file(store_dir)?;
+    if let Some(file) = lock_existing(&store_dir.join(&state))? {
+        files.push((state, file));
+    }
+    Ok(Held { files })
+}
+
+/// Opens and locks a file exclusively; `None` when it does not exist.
+fn lock_existing(path: &Path) -> Result<Option<File>, FormatError> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(FormatError::io(path, error)),
+    };
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(fs::TryLockError::WouldBlock) => Err(FormatError::InUse(path.to_path_buf())),
+        Err(fs::TryLockError::Error(error)) => Err(FormatError::io(path, error)),
+    }
 }
 
 /// The total size of the files [`copy_closed_store`] would copy, for a free-space check.
@@ -407,59 +415,37 @@ pub fn closed_store_bytes(from: &Path) -> Result<u64, FormatError> {
     Ok(bytes)
 }
 
-/// The active state file of a store directory: the one `sm.current` names, or `sm.redb`.
+/// The active state file of a store directory ([`layout::active_file`]).
 fn active_state_file(dir: &Path) -> Result<String, FormatError> {
-    let pointer = dir.join(POINTER);
-    match fs::read_to_string(&pointer) {
-        Ok(name) => {
-            let name = name.trim().to_owned();
-            if !is_state_file(&name) || !dir.join(&name).is_file() {
-                return Err(FormatError::InvalidMarker {
-                    path: pointer,
-                    reason: format!("names {name:?}, which is not an existing state file"),
-                });
+    layout::active_file(dir).map_err(|error| {
+        let path = layout::pointer(dir);
+        if error.kind() == io::ErrorKind::InvalidData {
+            FormatError::InvalidMarker {
+                path,
+                reason: error.to_string(),
             }
-            Ok(name)
+        } else {
+            FormatError::io(&path, error)
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(INITIAL_STATE_FILE.to_owned()),
-        Err(error) => Err(FormatError::io(&pointer, error)),
-    }
-}
-
-/// Whether a file name is a state file: `sm.redb` or `sm-<id>.redb` with an id of ASCII
-/// letters, digits and dashes (the rule of the state machine).
-fn is_state_file(name: &str) -> bool {
-    name == INITIAL_STATE_FILE
-        || name
-            .strip_prefix("sm-")
-            .and_then(|rest| rest.strip_suffix(".redb"))
-            .is_some_and(|id| {
-                !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-            })
+    })
 }
 
 /// Copies one file and syncs the copy; returns its size.
 fn copy_file(from: &Path, to: &Path) -> Result<u64, FormatError> {
-    let bytes = fs::copy(from, to).map_err(|error| FormatError::io(from, error))?;
-    File::options()
-        .write(true)
-        .open(to)
-        .and_then(|file| file.sync_all())
+    let file = File::open(from).map_err(|error| FormatError::io(from, error))?;
+    copy_from(&file, from, to)
+}
+
+/// Copies the open file `source` (named `from`) to `to` and syncs the copy; returns its
+/// size.
+fn copy_from(mut source: &File, from: &Path, to: &Path) -> Result<u64, FormatError> {
+    let mut target = File::create(to).map_err(|error| FormatError::io(to, error))?;
+    let bytes = io::copy(&mut source, &mut target).map_err(|error| FormatError::io(from, error))?;
+    target
+        .sync_all()
         .map_err(|error| FormatError::io(to, error))?;
     Ok(bytes)
 }
-
-/// Makes a rename in `dir` durable where the platform allows it (NTFS journals renames;
-/// directories cannot be opened for syncing on Windows).
-#[cfg(unix)]
-fn sync_dir(dir: &Path) {
-    if let Ok(dir) = File::open(dir) {
-        let _ = dir.sync_all();
-    }
-}
-
-#[cfg(not(unix))]
-fn sync_dir(_dir: &Path) {}
 
 #[cfg(test)]
 mod tests {
@@ -649,6 +635,41 @@ mod tests {
             .expect("the copy opens");
         copy.shutdown().await.expect("shutdown");
         drop(copy);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // The check that the store is closed and the copy are one step: while the copy holds the
+    // store, a server that starts waits for it instead of opening the store under the copy,
+    // and opens it once the copy is done.
+    #[cfg(feature = "raft")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_server_waits_while_a_copy_holds_the_store() {
+        let dir = temp_dir("held");
+        let open = || {
+            let mut config = crate::raft::RaftStoreConfig::new(dir.join("store"));
+            config.fsync_probe_samples = 0;
+            crate::raft::RaftStore::open(config)
+        };
+        let store = open().await.expect("open");
+        store.shutdown().await.expect("shutdown");
+        drop(store);
+
+        let held = hold_closed(&dir.join("store")).expect("the store is closed");
+        let names: Vec<&str> = held.files.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["log.redb", "sm.redb"]);
+        let mut starting = tokio::spawn(open());
+        // test-lint: allow deadline a start that is held back passes on any machine; only one that opens the held store in time fails
+        let early = tokio::time::timeout(std::time::Duration::from_secs(2), &mut starting).await;
+        let Err(_still_waiting) = early else {
+            panic!("a server opened the store while the copy held it");
+        };
+        drop(held);
+        let store = starting
+            .await
+            .expect("the start task")
+            .expect("the store opens once the copy is done");
+        store.shutdown().await.expect("shutdown");
+        drop(store);
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -26,8 +26,10 @@
 //! The reader is bounded by declared limits, so a file that was crafted or damaged fails
 //! cleanly instead of making it allocate or write without bound: the header at most
 //! [`MAX_HEADER`] bytes, a key at most [`MAX_KEY`], a value at most [`MAX_FIELD`], and the
-//! records of a file at most [`MAX_PLAIN`] bytes after decompression, whatever the size of
-//! the compressed file.
+//! records of a file at most [`records_bound`] bytes after decompression: [`MAX_EXPANSION`]
+//! times the size of the file, at least [`EXPANSION_FLOOR`] and at most [`MAX_PLAIN`]. The
+//! records are written into the new state file as they are read, before the trailing hash
+//! is checked, so the bound is what keeps a small file from a peer from filling the disk.
 
 use std::{
     fs::File,
@@ -67,6 +69,19 @@ pub(crate) const MAX_HEADER: u32 = 1 << 20;
 /// decompression: the expansion of a compressed snapshot is bounded by it, not by the size
 /// of the file.
 pub(crate) const MAX_PLAIN: u64 = 64 << 30;
+/// How many times its own size a snapshot file may expand to. The store's records compress
+/// a few times (CBOR maps, identifiers, hashes); a file that expands far more is a
+/// compression bomb, not a store.
+pub(crate) const MAX_EXPANSION: u64 = 64;
+/// The bytes of records any snapshot file may hold, whatever its size.
+pub(crate) const EXPANSION_FLOOR: u64 = 1 << 30;
+
+/// The most bytes of records a snapshot file of `file_bytes` bytes may hold.
+pub(crate) fn records_bound(file_bytes: u64) -> u64 {
+    file_bytes
+        .saturating_mul(MAX_EXPANSION)
+        .clamp(EXPANSION_FLOOR, MAX_PLAIN)
+}
 
 /// What a snapshot file describes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,20 +238,29 @@ pub(crate) struct SnapshotReader {
     value: Vec<u8>,
     /// Bytes of records read so far, after decompression.
     plain: u64,
-    /// The most bytes of records this reader takes ([`MAX_PLAIN`]).
+    /// The most bytes of records this reader takes ([`records_bound`]).
     plain_limit: u64,
+    /// The size of the file.
+    file_bytes: u64,
     done: bool,
 }
 
 impl SnapshotReader {
-    /// Opens a file and reads its header.
+    /// Opens a file and reads its header; its records may hold at most [`records_bound`]
+    /// bytes.
     pub(crate) fn open(path: &Path) -> Result<Self, StoreError> {
-        Self::open_with_limit(path, MAX_PLAIN)
+        Self::open_with_limit(path, None)
     }
 
-    /// Opens a file and reads its header; its records may hold at most `plain_limit` bytes.
-    pub(crate) fn open_with_limit(path: &Path, plain_limit: u64) -> Result<Self, StoreError> {
+    /// Opens a file and reads its header; its records may hold at most `plain_limit` bytes,
+    /// by default [`records_bound`] of the file's size.
+    pub(crate) fn open_with_limit(
+        path: &Path,
+        plain_limit: Option<u64>,
+    ) -> Result<Self, StoreError> {
         let file = File::open(path).map_err(storage)?;
+        let file_bytes = file.metadata().map_err(storage)?.len();
+        let plain_limit = plain_limit.unwrap_or_else(|| records_bound(file_bytes));
         let mut input = BufReader::with_capacity(BUFFER, file);
         let mut hasher = Sha256::new();
         let mut magic = [0_u8; 8];
@@ -269,6 +293,7 @@ impl SnapshotReader {
             value: Vec::new(),
             plain: 0,
             plain_limit,
+            file_bytes,
             done: false,
         })
     }
@@ -280,8 +305,10 @@ impl SnapshotReader {
             .saturating_add(u64::try_from(len).unwrap_or(u64::MAX));
         if self.plain > self.plain_limit {
             return Err(StoreError::Storage(format!(
-                "snapshot file is corrupt: more than {} bytes of records",
-                self.plain_limit
+                "the snapshot file of {} bytes holds more than {} bytes of records ({} reached): \
+                 a file may expand to {MAX_EXPANSION} times its size, at least {EXPANSION_FLOOR} \
+                 and at most {MAX_PLAIN} bytes",
+                self.file_bytes, self.plain_limit, self.plain
             )));
         }
         Ok(())
@@ -540,7 +567,7 @@ mod tests {
 
     /// Reads every record until the reader stops, returning its error.
     fn read_until_error(path: &Path, limit: u64) -> StoreError {
-        let mut reader = SnapshotReader::open_with_limit(path, limit).expect("open");
+        let mut reader = SnapshotReader::open_with_limit(path, Some(limit)).expect("open");
         loop {
             match reader.next_record() {
                 Ok(Some(_)) => {}
@@ -552,6 +579,17 @@ mod tests {
 
     // Declared limits bound a crafted file: the header's length, a key's length, and the
     // bytes of records a compressed file expands to.
+    // A file may expand to 64 times its size, never less than the floor or more than the
+    // cap: a file of 64 MiB that inflates to the cap of 64 GiB is refused at 4 GiB.
+    #[test]
+    fn records_are_bounded_by_the_size_of_the_file() {
+        assert_eq!(records_bound(0), EXPANSION_FLOOR);
+        assert_eq!(records_bound(1 << 20), EXPANSION_FLOOR);
+        assert_eq!(records_bound(64 << 20), 4 << 30);
+        assert_eq!(records_bound(2 << 30), MAX_PLAIN);
+        assert_eq!(records_bound(u64::MAX), MAX_PLAIN);
+    }
+
     #[test]
     fn crafted_lengths_and_expansions_are_refused_by_declared_limits() {
         let dir = temp_dir("limits");
@@ -584,13 +622,21 @@ mod tests {
             records.extend_from_slice(&row(8, 65_536));
         }
         let path = crafted(&dir, "bomb.tnks", FORMAT, None, &records);
-        assert!(
-            std::fs::metadata(&path).expect("metadata").len() < 1 << 20,
-            "the compressed file is small"
-        );
+        let bomb_bytes = std::fs::metadata(&path).expect("metadata").len();
+        assert!(bomb_bytes < 1 << 20, "the compressed file is small");
         let error = read_until_error(&path, 1 << 20);
         assert!(error.to_string().contains("bytes of records"), "{error}");
-        // Within the limit the same records read until the missing hash is noticed.
+        assert!(
+            error.to_string().contains(&format!(
+                "the snapshot file of {bomb_bytes} bytes holds more than 1048576 bytes of records ("
+            )),
+            "{error}"
+        );
+        // Within the bound of its size the same records read until the missing hash is
+        // noticed: 256 MiB of records is under the floor.
+        let reader = SnapshotReader::open(&path).expect("open");
+        assert_eq!(reader.plain_limit, EXPANSION_FLOOR);
+        drop(reader);
         let error = read_until_error(&path, MAX_PLAIN);
         assert!(!error.to_string().contains("bytes of records"), "{error}");
 

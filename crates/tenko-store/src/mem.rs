@@ -979,6 +979,7 @@ impl Store for MemStore {
             quorum: QuorumState::Single,
             term: MEM_STORE_TERM,
             members: Vec::new(),
+            stopped: None,
         }
     }
 

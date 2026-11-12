@@ -11,6 +11,9 @@
 //! need. While it builds, the apply path captures every applied batch (with its writes);
 //! the registration then installs the image and replays the captured batches with the same
 //! exact views, so the index never misses a change set and never sees a later state early.
+//! The capture holds at most [`MAX_CAPTURE_BYTES`] of keys and values: past that it is
+//! dropped and the registration starts over, and after a few attempts it builds while it
+//! holds the lock the apply path takes, so its memory stays bounded under any write load.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -21,7 +24,7 @@ use super::{
     apply::AppliedBatch,
     view::{Overlay, OverlayView},
 };
-use crate::api::{DerivedIndex, IndexStatus, ReadView, WatchFilter};
+use crate::api::{DerivedIndex, IndexStatus, ReadView, Versioned, WatchFilter};
 
 /// A registered index.
 pub(crate) struct Registered {
@@ -43,13 +46,18 @@ impl Registered {
     }
 }
 
+/// The most bytes of keys and values a registration's capture holds.
+pub(crate) const MAX_CAPTURE_BYTES: usize = 64 << 20;
+
 /// Batches applied while a registration builds its image.
 pub(crate) enum Capture {
     /// No registration in progress.
     Idle,
-    /// A registration builds from a view; every applied batch since is kept here.
-    Capturing(Vec<AppliedBatch>),
-    /// A snapshot replaced the state during the build; the registration starts over.
+    /// A registration builds from a view; every applied batch since is kept here, with the
+    /// bytes of their keys and values.
+    Capturing(Vec<AppliedBatch>, usize),
+    /// A snapshot replaced the state during the build, or the capture outgrew its limit;
+    /// the registration starts over.
     Invalidated,
 }
 
@@ -58,6 +66,8 @@ pub(crate) enum Capture {
 pub(crate) struct Registry {
     pub(crate) indexes: Vec<Registered>,
     pub(crate) capture: Capture,
+    /// The most bytes the capture holds ([`MAX_CAPTURE_BYTES`]).
+    pub(crate) capture_limit: usize,
 }
 
 impl Registry {
@@ -65,12 +75,13 @@ impl Registry {
         Self {
             indexes: Vec::new(),
             capture: Capture::Idle,
+            capture_limit: MAX_CAPTURE_BYTES,
         }
     }
 
     /// Whether applied batches must keep their writes.
     pub(crate) fn wants_writes(&self) -> bool {
-        !self.indexes.is_empty() || matches!(self.capture, Capture::Capturing(_))
+        !self.indexes.is_empty() || matches!(self.capture, Capture::Capturing(..))
     }
 
     /// Statuses of the registered indexes.
@@ -85,8 +96,19 @@ impl Registry {
             return;
         }
         replay(base, &applied, &mut self.indexes);
-        if let Capture::Capturing(captured) = &mut self.capture {
-            captured.extend(applied);
+        if let Capture::Capturing(captured, bytes) = &mut self.capture {
+            *bytes = applied.iter().fold(*bytes, |sum, batch| {
+                batch.writes.iter().fold(sum, |sum, write| {
+                    let value =
+                        |value: &Option<Versioned>| value.as_ref().map_or(0, |v| v.value.len());
+                    sum.saturating_add(write.key.len() + value(&write.old) + value(&write.new))
+                })
+            });
+            if *bytes > self.capture_limit {
+                self.capture = Capture::Invalidated;
+            } else {
+                captured.extend(applied);
+            }
         }
     }
 }

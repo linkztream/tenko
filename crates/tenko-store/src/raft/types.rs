@@ -118,8 +118,8 @@ pub struct ApplyResponse {
     pub outcomes: Vec<BatchOutcome>,
 }
 
-/// The deterministic result of applying one batch. Storage failures are not outcomes: they
-/// stop the state machine.
+/// The deterministic result of applying one batch. Storage failures and batches this binary
+/// cannot decode are not outcomes: they stop the state machine (`apply`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BatchOutcome {
     /// The batch committed (or replayed an earlier commit).
@@ -130,8 +130,6 @@ pub enum BatchOutcome {
     IdempotencyMismatch,
     /// The batch writes a table the store maintains; nothing applied.
     ReservedTable(TableName),
-    /// The batch or one of its audit records did not encode or decode; nothing applied.
-    Codec(String),
 }
 
 impl BatchOutcome {
@@ -148,7 +146,6 @@ impl BatchOutcome {
             }
             BatchOutcome::IdempotencyMismatch => Err(StoreError::IdempotencyMismatch),
             BatchOutcome::ReservedTable(table) => Err(StoreError::ReservedTable { table }),
-            BatchOutcome::Codec(message) => Err(StoreError::Codec(message)),
         }
     }
 }

@@ -5,9 +5,9 @@
 //! the entry (batches, journal retention, fingerprints) and the transaction. The semantics
 //! are those of `MemStore` (see `crate::api`):
 //!
-//! 1. A batch that fails to decode, writes a reserved table, repeats an idempotency key or
-//!    fails a precondition becomes an outcome; nothing of it is written and it consumes no
-//!    revision and no audit sequence number.
+//! 1. A batch that writes a reserved table, repeats an idempotency key or fails a
+//!    precondition becomes an outcome; nothing of it is written and it consumes no revision
+//!    and no audit sequence number.
 //! 2. Otherwise its mutations are staged in an overlay (a later mutation of the same key
 //!    wins; a bump reads earlier staged bumps), its audit drafts are sealed into the chain
 //!    with `at = proposed_at`, its idempotency record and its journal change set are staged,
@@ -17,8 +17,17 @@
 //!
 //! Storage failures are not outcomes: they abort the transaction and stop the state machine
 //! (`StoreError::Storage` here, converted to openraft's storage error at the boundary).
+//! Neither is a batch or a stored record this binary cannot decode or encode. The leader
+//! decoded every batch before it reached the log, so on a member of the same release the
+//! decode cannot fail; where it fails, the member runs another release (a rolling upgrade,
+//! a learner left behind), and an outcome would let it skip a batch the others applied and
+//! go on at revisions they do not share. The state machine stops instead
+//! ([`crate::api::APPLY_STOPPED`]), at the entry, until its binary can read it.
 
-use std::collections::{BTreeMap, HashMap, hash_map::Entry as MapEntry};
+use std::{
+    collections::{BTreeMap, HashMap, hash_map::Entry as MapEntry},
+    fmt,
+};
 
 use bytes::Bytes;
 use redb::{ReadableTable, Table, WriteTransaction};
@@ -199,10 +208,8 @@ impl<'a, 'txn> Applier<'a, 'txn> {
         journal_retention: u64,
         journal_max_bytes: u64,
     ) -> Result<BatchOutcome, StoreError> {
-        let batch: WriteBatch = match from_cbor(&proposed.batch) {
-            Ok(batch) => batch,
-            Err(error) => return Ok(BatchOutcome::Codec(error.to_string())),
-        };
+        let batch: WriteBatch =
+            from_cbor(&proposed.batch).map_err(|error| unreadable("write batch", &error))?;
         if let Some(table) = reserved_write(&batch) {
             return Ok(BatchOutcome::ReservedTable(table));
         }
@@ -212,10 +219,9 @@ impl<'a, 'txn> Applier<'a, 'txn> {
             Some(key) => {
                 let fingerprint = match proposed.fingerprint {
                     Some(fingerprint) => fingerprint,
-                    None => match batch.fingerprint() {
-                        Ok(fingerprint) => fingerprint,
-                        Err(error) => return Ok(BatchOutcome::Codec(error.to_string())),
-                    },
+                    None => batch
+                        .fingerprint()
+                        .map_err(|error| unencodable("idempotency fingerprint", &error))?,
                 };
                 Some((
                     encode_key(&(batch.principal.subject(), key.as_str().to_owned())),
@@ -227,10 +233,8 @@ impl<'a, 'txn> Applier<'a, 'txn> {
         if let Some((key, fingerprint)) = &idempotency
             && let Some(existing) = self.tables.get(&tables::IDEMPOTENCY, key)?
         {
-            let record: IdempotencyRecord = match from_cbor(&existing.value) {
-                Ok(record) => record,
-                Err(error) => return Ok(BatchOutcome::Codec(error.to_string())),
-            };
+            let record: IdempotencyRecord = from_cbor(&existing.value)
+                .map_err(|error| unreadable("idempotency record", &error))?;
             return Ok(if record.fingerprint == *fingerprint {
                 BatchOutcome::Committed(Committed {
                     replayed: true,
@@ -276,20 +280,17 @@ impl<'a, 'txn> Applier<'a, 'txn> {
             }
             Ok((head, committed))
         })();
-        let (head, committed) = match staged_rest {
-            Ok(staged) => staged,
-            Err(error) => return Ok(BatchOutcome::Codec(error.to_string())),
-        };
+        let (head, committed) =
+            staged_rest.map_err(|error| unencodable("audit or idempotency record", &error))?;
         let change_set = ChangeSet {
             revision,
             principal: batch.principal.clone(),
             at: batch.proposed_at,
             changes: self.change_list(&staged)?,
         };
-        let encoded = match tables::JOURNAL.encode(&change_set) {
-            Ok(encoded) => encoded,
-            Err(error) => return Ok(BatchOutcome::Codec(error.to_string())),
-        };
+        let encoded = tables::JOURNAL
+            .encode(&change_set)
+            .map_err(|error| unencodable("change set", &error))?;
         let added = encoded.len();
         staged.insert(
             (
@@ -458,6 +459,21 @@ impl<'a, 'txn> Applier<'a, 'txn> {
         }
         Ok(changes)
     }
+}
+
+/// A batch or stored record of a committed entry that this binary cannot decode.
+fn unreadable(what: &str, error: &impl fmt::Display) -> StoreError {
+    StoreError::Codec(format!(
+        "this binary cannot read the {what} of a committed entry ({error}); a newer release \
+         may have written it: upgrade this member to the release the leader runs"
+    ))
+}
+
+/// A record of a committed entry that this binary cannot encode.
+fn unencodable(what: &str, error: &impl fmt::Display) -> StoreError {
+    StoreError::Codec(format!(
+        "this binary cannot encode the {what} of a committed entry ({error})"
+    ))
 }
 
 /// The first reserved table a batch writes, if any (validation runs before the log; this

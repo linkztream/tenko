@@ -76,14 +76,10 @@ use super::{
     },
     view::RedbView,
 };
-use crate::api::{DerivedIndex, IndexStatus, KeyRange, ReadView, StoreError, tables};
-
-/// The pointer file naming the active state file.
-const POINTER: &str = "sm.current";
-/// The pointer file while it is written.
-const POINTER_PART: &str = "sm.current.part";
-/// The state file of a store that never installed a snapshot.
-const INITIAL_FILE: &str = "sm.redb";
+use crate::api::{
+    APPLY_STOPPED, ApplyStopped, DerivedIndex, IndexStatus, KeyRange, ReadView, StoreError, tables,
+};
+use crate::layout::{self, POINTER_PART, is_state_file, sync_dir};
 
 /// State machine settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +144,8 @@ struct Shared {
     /// The current snapshot and the one before it (kept while it may still be streamed).
     snapshots: Mutex<SnapshotFiles>,
     stats: SmStats,
+    /// Where the state machine stopped applying, once it did.
+    stopped: Mutex<Option<ApplyStopped>>,
 }
 
 #[derive(Default)]
@@ -191,40 +189,11 @@ fn unique_suffix() -> String {
     format!("{nanos:x}-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
-/// Whether a file name is a state file (`sm.redb` or `sm-<id>.redb`, the id made of ASCII
-/// letters, digits and dashes as `unique_suffix` writes it).
-fn is_state_file(name: &str) -> bool {
-    name == INITIAL_FILE
-        || name
-            .strip_prefix("sm-")
-            .and_then(|rest| rest.strip_suffix(".redb"))
-            .is_some_and(|id| {
-                !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-            })
-}
-
-/// The active state file of `dir`: the one `sm.current` names, or `sm.redb`.
+/// The active state file of `dir` ([`layout::active_file`]).
 fn active_file(dir: &Path) -> Result<String, StoreError> {
-    match fs::read_to_string(dir.join(POINTER)) {
-        Ok(name) => {
-            let name = name.trim().to_owned();
-            if !is_state_file(&name) {
-                return Err(StoreError::Storage(format!(
-                    "{} names {name:?}, which is not a state file",
-                    dir.join(POINTER).display()
-                )));
-            }
-            if !dir.join(&name).is_file() {
-                return Err(StoreError::Storage(format!(
-                    "{} names {name}, which does not exist",
-                    dir.join(POINTER).display()
-                )));
-            }
-            Ok(name)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(INITIAL_FILE.to_owned()),
-        Err(error) => Err(storage(error)),
-    }
+    layout::active_file(dir).map_err(|error| {
+        StoreError::Storage(format!("{}: {error}", layout::pointer(dir).display()))
+    })
 }
 
 /// Points `sm.current` at `name`: written aside, synced and renamed over the old pointer, so
@@ -236,22 +205,10 @@ fn write_pointer(dir: &Path, name: &str) -> Result<(), StoreError> {
         file.write_all(name.as_bytes()).map_err(storage)?;
         file.sync_all().map_err(storage)?;
     }
-    fs::rename(&part, dir.join(POINTER)).map_err(storage)?;
+    fs::rename(&part, layout::pointer(dir)).map_err(storage)?;
     sync_dir(dir);
     Ok(())
 }
-
-/// Makes a rename in `dir` durable where the platform allows it (directories cannot be
-/// opened for syncing on Windows; NTFS journals the rename).
-#[cfg(unix)]
-fn sync_dir(dir: &Path) {
-    if let Ok(dir) = fs::File::open(dir) {
-        let _ = dir.sync_all();
-    }
-}
-
-#[cfg(not(unix))]
-fn sync_dir(_dir: &Path) {}
 
 /// Removes state files other than the active one (left by an install that stopped before
 /// switching, or replaced while a reader still had them open) and a partial pointer.
@@ -373,7 +330,7 @@ impl StateMachine {
     /// Opens or creates the state file and the snapshot directory under `dir`, removes
     /// state files left behind, verifies the audit chain and finds the current snapshot.
     pub(crate) fn open(dir: &Path, options: SmOptions) -> Result<Self, StoreError> {
-        let snapshot_dir = dir.join("snapshots");
+        let snapshot_dir = dir.join(layout::SNAPSHOTS);
         fs::create_dir_all(&snapshot_dir).map_err(storage)?;
         let active = active_file(dir)?;
         remove_stale_files(dir, &active);
@@ -387,7 +344,7 @@ impl StateMachine {
         let db = Arc::new(db);
         let view = RedbView::open(&db)?;
         let meta = view.meta().clone();
-        verify_audit(&view, options.verify_full_chain)?;
+        verify_audit(&view, options.verify_full_chain, "at start-up")?;
         drop(view);
         let snapshots = scan_snapshots(&snapshot_dir)?;
         let (applied, _) = watch::channel(meta.revision);
@@ -407,6 +364,7 @@ impl StateMachine {
                 snapshot_dir,
                 snapshots: Mutex::new(snapshots),
                 stats: SmStats::default(),
+                stopped: Mutex::new(None),
             }),
         })
     }
@@ -544,11 +502,15 @@ impl StateMachine {
                     EntryPayload::Normal(proposal) => {
                         let mut outcomes = Vec::with_capacity(proposal.batches.len());
                         for batch in &proposal.batches {
-                            outcomes.push(applier.apply(
-                                batch,
-                                proposal.journal_retention,
-                                proposal.journal_max_bytes,
-                            )?);
+                            outcomes.push(
+                                applier
+                                    .apply(
+                                        batch,
+                                        proposal.journal_retention,
+                                        proposal.journal_max_bytes,
+                                    )
+                                    .map_err(|error| self.stopped_at(&entry.log_id, &error))?,
+                            );
                         }
                         responses.push(ApplyResponse { outcomes });
                     }
@@ -589,7 +551,7 @@ impl StateMachine {
             // after the view is captured.
             let view = {
                 let mut registry = lock(&shared.registry);
-                registry.capture = Capture::Capturing(Vec::new());
+                registry.capture = Capture::Capturing(Vec::new(), 0);
                 self.view()
             };
             let view = match view {
@@ -607,8 +569,9 @@ impl StateMachine {
             let mut registry = lock(&shared.registry);
             let captured = std::mem::replace(&mut registry.capture, Capture::Idle);
             let image = built?;
-            let Capture::Capturing(captured) = captured else {
-                // A snapshot replaced the state during the build.
+            let Capture::Capturing(captured, _) = captured else {
+                // A snapshot replaced the state during the build, or the capture outgrew
+                // its limit.
                 continue;
             };
             let base = self.view()?;
@@ -626,7 +589,8 @@ impl StateMachine {
             return Ok(());
         }
 
-        // Snapshots kept replacing the state: build while holding the registry lock.
+        // Snapshots kept replacing the state, or writes kept outgrowing the capture: build
+        // while holding the registry lock (applies wait; nothing needs capturing).
         let mut registry = lock(&shared.registry);
         let view = self.view()?;
         let image = index.build(&view)?;
@@ -734,7 +698,12 @@ impl StateMachine {
 
     /// Makes a fresh state file the active one: pointer first, then the database handle;
     /// the replaced file goes once its readers are gone. Called with the registry lock held.
-    fn switch_to(&self, name: &str, path: PathBuf, database: Database) -> Result<(), StoreError> {
+    fn switch_to(
+        &self,
+        name: &str,
+        path: PathBuf,
+        database: Arc<Database>,
+    ) -> Result<(), StoreError> {
         if let Err(error) = write_pointer(&self.shared.dir, name) {
             drop(database);
             let _ = fs::remove_file(&path);
@@ -747,7 +716,7 @@ impl StateMachine {
                 .db
                 .write()
                 .unwrap_or_else(PoisonError::into_inner),
-            Arc::new(database),
+            database,
         );
         // The new file is durable, so nothing of the old one needs a checkpoint any more.
         self.shared.dirty.store(false, Ordering::SeqCst);
@@ -780,9 +749,25 @@ impl StateMachine {
             copy_snapshot(&mut reader, txn)?;
             Ok(state.clone())
         })?;
+        // The header's audit head is checked against the records it names before the new
+        // state is used, as at start-up: a snapshot whose chain does not verify is refused
+        // and the old state stays.
+        let database = Arc::new(database);
+        let verified = RedbView::open(&database).and_then(|view| {
+            verify_audit(
+                &view,
+                shared.options.verify_full_chain,
+                "in the snapshot to install",
+            )
+        });
+        if let Err(error) = verified {
+            drop(database);
+            let _ = fs::remove_file(&file);
+            return Err(error);
+        }
         self.switch_to(&name, file, database)?;
         let revision = state.revision;
-        if matches!(registry.capture, Capture::Capturing(_)) {
+        if matches!(registry.capture, Capture::Capturing(..)) {
             registry.capture = Capture::Invalidated;
         }
 
@@ -844,7 +829,7 @@ impl StateMachine {
             Ok(state)
         })?;
         drop(view);
-        self.switch_to(&name, file.clone(), database)?;
+        self.switch_to(&name, file.clone(), Arc::new(database))?;
         drop(registry);
         self.shared.stats.rewrites.fetch_add(1, Ordering::Relaxed);
         let bytes_after = fs::metadata(&file).map_or(0, |m| m.len());
@@ -887,6 +872,37 @@ impl StateMachine {
             .join(format!("recv-{}.part", unique_suffix()))
     }
 
+    /// Where the state machine stopped applying, once it did.
+    pub(crate) fn stopped(&self) -> Option<ApplyStopped> {
+        lock(&self.shared.stopped).clone()
+    }
+
+    /// The error that stops the state machine at a committed entry it cannot apply: logged
+    /// with [`APPLY_STOPPED`], the entry and the reason, kept for the status, and carried
+    /// into openraft's fatal error, which stops the node (its role becomes `Shutdown`, so
+    /// readiness fails). Nothing of the entry's transaction commits, so after a restart the
+    /// entry applies again.
+    fn stopped_at(&self, log_id: &LogId, error: &StoreError) -> StoreError {
+        let stop = ApplyStopped {
+            index: log_id.index,
+            term: log_id.leader_id.term,
+            reason: error.to_string(),
+        };
+        tracing::error!(
+            code = APPLY_STOPPED,
+            index = stop.index,
+            term = stop.term,
+            reason = %stop.reason,
+            "the state machine stopped at a committed entry it cannot apply"
+        );
+        let stopped = StoreError::Storage(format!(
+            "{APPLY_STOPPED}: the state machine stopped at log entry {} of term {}: {}",
+            stop.index, stop.term, stop.reason
+        ));
+        *lock(&self.shared.stopped) = Some(stop);
+        stopped
+    }
+
     fn set_current(&self, meta: SnapshotMeta, path: PathBuf) {
         let mut files = lock(&self.shared.snapshots);
         let Some((_, old)) = files.current.replace((meta, path)) else {
@@ -913,13 +929,11 @@ fn write_meta(txn: &WriteTransaction, meta: &SmMeta) -> Result<(), StoreError> {
 
 /// Verifies the audit chain against the committed head: the head record recomputes to the
 /// stored hash and links to its predecessor, and nothing follows it. With `full`, every
-/// record from 1 is verified.
-fn verify_audit(view: &RedbView, full: bool) -> Result<(), StoreError> {
+/// record from 1 is verified. `when` names the check in the error.
+fn verify_audit(view: &RedbView, full: bool, when: &str) -> Result<(), StoreError> {
     let head = view.meta().audit_head;
     let fail = |detail: String| {
-        StoreError::Storage(format!(
-            "the audit chain does not verify at start-up: {detail}"
-        ))
+        StoreError::Storage(format!("the audit chain does not verify {when}: {detail}"))
     };
     if full {
         let mut verifier = ChainVerifier::new();
@@ -981,7 +995,13 @@ fn verify_audit(view: &RedbView, full: bool) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Removes partial files and all but the two newest snapshots; returns those two.
+/// The suffix of a snapshot this binary cannot read, moved aside at start.
+const UNREADABLE: &str = "unreadable";
+
+/// Removes partial files and all but the two newest snapshots; returns those two. A
+/// snapshot this binary cannot read (one a newer release wrote, read by an older one) is
+/// moved aside as `<name>.unreadable`, never removed: the release that wrote it may still
+/// need it, and an operator can put it back.
 fn scan_snapshots(dir: &Path) -> Result<SnapshotFiles, StoreError> {
     let mut complete = Vec::new();
     for entry in fs::read_dir(dir).map_err(storage)? {
@@ -1001,8 +1021,17 @@ fn scan_snapshots(dir: &Path) -> Result<SnapshotFiles, StoreError> {
         match read_header(&path) {
             Ok(header) => complete.push((header.meta, path)),
             Err(error) => {
-                tracing::warn!(path = %path.display(), %error, "removing an unreadable snapshot");
-                let _ = fs::remove_file(&path);
+                let mut aside = path.clone().into_os_string();
+                aside.push(".");
+                aside.push(UNREADABLE);
+                let moved = fs::rename(&path, &aside);
+                tracing::warn!(
+                    path = %path.display(),
+                    aside = %Path::new(&aside).display(),
+                    moved = moved.is_ok(),
+                    %error,
+                    "a snapshot this binary cannot read is moved aside and kept"
+                );
             }
         }
     }
@@ -1100,7 +1129,52 @@ impl RaftStateMachine<TypeConfig> for StateMachine {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
+    use tenko_core::{
+        Principal, SystemComponent, Timestamp,
+        audit::{AuditAction, AuditDraft},
+        codec::to_cbor,
+    };
+
     use super::*;
+    use crate::{
+        WriteBatch,
+        layout::INITIAL_FILE,
+        raft::types::{Proposal, ProposedBatch},
+    };
+
+    const OPTIONS: SmOptions = SmOptions {
+        cache_bytes: 1 << 20,
+        durable_apply: false,
+        verify_full_chain: false,
+    };
+
+    /// An entry at `index` of term 1 whose one batch writes the row `n` and audits it.
+    fn audited_entry(index: u64, n: u8) -> Entry {
+        let at = Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("timestamp");
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Store), at);
+        batch
+            .put(
+                TableName::from_static("ipam.sm_test_rows"),
+                Bytes::from(vec![n]),
+                Bytes::from_static(b"value"),
+            )
+            .audit(AuditDraft::success(
+                AuditAction::from_static("ipam.sm_test.write"),
+                Vec::new(),
+            ));
+        Entry {
+            log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), index),
+            payload: EntryPayload::Normal(Proposal {
+                journal_retention: 100,
+                journal_max_bytes: 0,
+                batches: vec![ProposedBatch {
+                    batch: to_cbor(&batch).expect("encode"),
+                    fingerprint: None,
+                }],
+            }),
+        }
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -1110,15 +1184,6 @@ mod tests {
         ));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
-    }
-
-    #[test]
-    fn state_file_names() {
-        assert!(is_state_file("sm.redb"));
-        assert!(is_state_file("sm-18dce4-3.redb"));
-        assert!(!is_state_file("log.redb"));
-        assert!(!is_state_file("sm-x.redb.part"));
-        assert!(!is_state_file("sm-../x.redb"));
     }
 
     #[test]
@@ -1146,6 +1211,173 @@ mod tests {
             active_file(&dir).is_err(),
             "a pointer to a missing file is an error, never an empty store"
         );
+        fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// The rows of `ipam.sm_test_rows` as a count. Each build tells the test it started and
+    /// waits until the test lets it go on.
+    struct GatedRows {
+        started: std::sync::mpsc::Sender<()>,
+        go: Mutex<std::sync::mpsc::Receiver<()>>,
+        rows: Mutex<usize>,
+    }
+
+    struct RowCount(Revision, usize);
+
+    impl crate::api::IndexImage for RowCount {
+        fn revision(&self) -> Revision {
+            self.0
+        }
+    }
+
+    fn count_rows(view: &dyn ReadView) -> Result<usize, StoreError> {
+        let rows = TableName::from_static("ipam.sm_test_rows");
+        Ok(view.scan(&rows, KeyRange::all(), usize::MAX, false)?.len())
+    }
+
+    impl DerivedIndex for GatedRows {
+        fn build(
+            &self,
+            view: &dyn ReadView,
+        ) -> Result<Box<dyn crate::api::IndexImage>, StoreError> {
+            self.started.send(()).expect("the test listens");
+            lock(&self.go)
+                .recv()
+                .expect("the test lets the build go on");
+            Ok(Box::new(RowCount(view.revision(), count_rows(view)?)))
+        }
+
+        fn install(&self, image: Box<dyn crate::api::IndexImage>) {
+            let image = crate::api::downcast_image::<RowCount>(image).expect("a row count");
+            *lock(&self.rows) = image.1;
+        }
+
+        fn apply(&self, _changes: &crate::api::ChangeSet, view: &dyn ReadView) {
+            *lock(&self.rows) = count_rows(view).expect("count");
+        }
+    }
+
+    // A registration whose build is overtaken starts over: by a snapshot install, then by
+    // writes that outgrow the capture, until it builds while holding the lock the apply
+    // path takes. The index it installs is exact either way.
+    #[test]
+    fn an_overtaken_registration_starts_over_and_finally_builds_under_the_lock() {
+        let source_dir = temp_dir("register-source");
+        let source = StateMachine::open(&source_dir, OPTIONS).expect("open");
+        source
+            .apply_entries(vec![audited_entry(1, 1), audited_entry(2, 2)])
+            .expect("apply");
+        let snapshot = source.build_snapshot().expect("snapshot");
+
+        let dir = temp_dir("register");
+        let sm = StateMachine::open(&dir, OPTIONS).expect("open");
+        sm.apply_entries(vec![audited_entry(1, 1)]).expect("apply");
+        lock(&sm.shared.registry).capture_limit = 1;
+        let (started, builds) = std::sync::mpsc::channel();
+        let (go, gate) = std::sync::mpsc::channel();
+        let index = Arc::new(GatedRows {
+            started,
+            go: Mutex::new(gate),
+            rows: Mutex::new(0),
+        });
+        let registering = {
+            let (sm, index) = (sm.clone(), Arc::clone(&index));
+            std::thread::spawn(move || sm.register_index(index))
+        };
+        // Each attempt is overtaken while it builds.
+        builds.recv().expect("first attempt");
+        sm.install(&snapshot.meta, &snapshot.snapshot.path)
+            .expect("install");
+        go.send(()).expect("go");
+        for entry in [3, 4] {
+            builds.recv().expect("next attempt");
+            sm.apply_entries(vec![audited_entry(
+                entry,
+                u8::try_from(entry).expect("row"),
+            )])
+            .expect("apply");
+            go.send(()).expect("go");
+        }
+        // The last build holds the lock: nothing applies until it is done.
+        builds.recv().expect("the build under the lock");
+        go.send(()).expect("go");
+        registering
+            .join()
+            .expect("the registration returns")
+            .expect("registered");
+        assert_eq!(*lock(&index.rows), 4);
+        sm.apply_entries(vec![audited_entry(5, 5)]).expect("apply");
+        assert_eq!(*lock(&index.rows), 5);
+        assert_eq!(sm.index_statuses()[0].revision, sm.meta().revision);
+        drop((source, sm));
+        fs::remove_dir_all(&source_dir).expect("clean up");
+        fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    // A snapshot whose header names an audit head its records do not end at is refused at
+    // install, before the store switches to it: the state stays as it was.
+    #[test]
+    fn a_snapshot_whose_audit_head_does_not_verify_is_not_installed() {
+        let source_dir = temp_dir("audit-source");
+        let source = StateMachine::open(&source_dir, OPTIONS).expect("open");
+        source
+            .apply_entries(vec![audited_entry(1, 1), audited_entry(2, 2)])
+            .expect("apply");
+        let honest = source.build_snapshot().expect("snapshot");
+        let forged = source_dir.join("forged.tnks");
+        {
+            let view = source.view().expect("view");
+            let mut state = view.meta().clone();
+            assert_eq!(state.audit_head.seq, AuditSeq(2));
+            state.audit_head.seq = AuditSeq(1);
+            let header = SnapshotHeader {
+                format: FORMAT,
+                meta: honest.meta.clone(),
+                state,
+            };
+            write_snapshot(view.txn(), &header, &forged).expect("write");
+        }
+
+        let target_dir = temp_dir("audit-target");
+        let target = StateMachine::open(&target_dir, OPTIONS).expect("open");
+        let file = target.file_path();
+        let error = target
+            .install(&honest.meta, &forged)
+            .expect_err("a head the records do not end at");
+        assert!(
+            error.to_string().contains(
+                "does not verify in the snapshot to install: a record follows the head 1"
+            ),
+            "{error}"
+        );
+        assert_eq!(target.meta().revision, Revision::ZERO);
+        assert_eq!(target.file_path(), file, "the store did not switch");
+        target
+            .install(&honest.meta, &honest.snapshot.path)
+            .expect("the honest snapshot installs");
+        assert_eq!(target.meta().revision, source.meta().revision);
+        drop((source, target));
+        fs::remove_dir_all(&source_dir).expect("clean up");
+        fs::remove_dir_all(&target_dir).expect("clean up");
+    }
+
+    // A snapshot this binary cannot read, as a newer release's snapshot read by an older
+    // one, is kept beside the others under another name; the readable ones stay in use.
+    #[test]
+    fn an_unreadable_snapshot_is_moved_aside_not_removed() {
+        let dir = temp_dir("unreadable");
+        let newer = b"TNKSNAP1 a header of a format this binary does not know";
+        fs::write(dir.join("snap-9-newer.tnks"), newer).expect("write");
+        let files = scan_snapshots(&dir).expect("scan");
+        assert!(files.current.is_none() && files.previous.is_none());
+        assert!(!dir.join("snap-9-newer.tnks").exists());
+        assert_eq!(
+            fs::read(dir.join("snap-9-newer.tnks.unreadable")).expect("kept aside"),
+            newer
+        );
+        let again = scan_snapshots(&dir).expect("a second start");
+        assert!(again.current.is_none());
+        assert!(dir.join("snap-9-newer.tnks.unreadable").exists());
         fs::remove_dir_all(&dir).expect("clean up");
     }
 }
