@@ -25,10 +25,10 @@
 //
 // The drawing is counted from outside: an init script counts the canvases' `clearRect` (one per
 // drawing) and times the animation frame callbacks.
-import { readFile, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { testHistory } from "../src/dashboard/historyTestData";
+import { axeViolations } from "./support/axe";
 import { expect, test } from "./support/fixtures";
 import { dhcpPart, dnsPart, sample, type MetricsSnapshot } from "./support/metrics-mock";
 
@@ -104,15 +104,6 @@ async function openTiles(page: Page): Promise<void> {
   for (const chart of await page.locator("[data-testid^='metrics-history-'][role='slider']").all()) {
     await expect.poll(async () => Number(await chart.getAttribute("data-buckets")), { message: (await chart.getAttribute("data-testid")) ?? "" }).toBeGreaterThan(100);
   }
-}
-
-/** Runs axe-core in the page (through the debugging protocol, since the CSP refuses injected tags). */
-async function axeViolations(page: Page, selector: string): Promise<string[]> {
-  await page.evaluate(await readFile(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8"));
-  return page.evaluate(async (scope) => {
-    const axe = (window as unknown as { axe: { run(context: string): Promise<{ violations: { id: string }[] }> } }).axe;
-    return (await axe.run(scope)).violations.map((v) => v.id);
-  }, selector);
 }
 
 test("a late client draws every tile from one history, and each chart reads by keyboard", async ({ page, signedIn }) => {
