@@ -3292,6 +3292,7 @@ name = "tenko-fuzz"
 version = "0.0.0"
 dependencies = [
  "bytes",
+ "ipnet",
  "libfuzzer-sys",
  "serde_json",
  "tenko",

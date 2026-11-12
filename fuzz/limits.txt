@@ -22,8 +22,10 @@ connect_hass_inventory   65536    each Home Assistant answer may reach BODY_LIMI
 connect_hass_ws_frame    65536    MAX_MESSAGE is 64 MiB (crates/tenko-connect-hass/src/ws.rs), the target's own limit 1 MiB; the size checks read the declared length, not the payload
 connect_proxmox_inventory 65536   each Proxmox VE answer may reach BODY_LIMIT (64 MiB, crates/tenko-connect-proxmox/src/api.rs); the mapping works record by record
 connect_unifi_answers    65536    each controller answer may reach MAX_BODY (32 MiB, crates/tenko-connect-unifi/src/http.rs); the input holds several answers split by 0xff
+dhcp4_engine             16393    1 control octet and up to four datagrams behind two-octet lengths, each at most the 4,096 octets of the receive buffer (crates/tenko-dhcp/src/server/mod.rs)
 dhcp4_options            4049     1 control octet, 192 octets of sname and file, and the options area of a 4,096-octet datagram after its 240-octet header (receive buffer, crates/tenko-dhcp/src/server/mod.rs)
 dhcp4_relay_info         4096     the option 82 value travels in a datagram of at most 4,096 octets (receive buffer, crates/tenko-dhcp/src/server/mod.rs)
+dhcp6_engine             65537    1 control octet and up to four datagrams behind two-octet lengths, each up to the 65,536 octets of the receive buffer (crates/tenko-dhcp/src/v6/server.rs); 64 KiB in all reaches the option and relay limits of each
 dhcp6_relay              33003    1 control octet, 7 layers of at most 33 octets and 3 octets of transaction id, then the SOLICIT options, which the target cuts at 32 KiB; production reads 65,536 (crates/tenko-dhcp/src/v6/server.rs)
 dhcp6_wire               65536    the DHCPv6 receive buffer (crates/tenko-dhcp/src/v6/server.rs)
 dhcp_v4                  4096     the DHCPv4 receive buffer (crates/tenko-dhcp/src/server/mod.rs); a longer datagram is cut by the socket
