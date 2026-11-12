@@ -7,10 +7,11 @@ mod engine_world;
 use std::{
     net::{Ipv4Addr, SocketAddrV4, UdpSocket},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use engine_world::{Ask, World, ip};
+use tenko_core::testing::wait_until;
 use tenko_core::{NodeId, dhcp::BindingState};
 use tenko_dhcp::{
     lease::LeaseTable,
@@ -34,14 +35,6 @@ fn exchange(relay: &UdpSocket, server: SocketAddrV4, ask: &Ask) -> Option<Vec<u8
     match relay.recv_from(&mut buf) {
         Ok((len, _)) => Some(buf[..len].to_vec()),
         Err(_) => None,
-    }
-}
-
-fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
-    let start = Instant::now();
-    while !done() {
-        assert!(start.elapsed() < Duration::from_secs(5), "{what}");
-        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -110,7 +103,7 @@ fn a_relay_listener_runs_dora_renew_and_release_through_the_store() {
         .find(|lease| lease.addr == addr)
         .expect("committed");
     assert_eq!(row.state, BindingState::Active);
-    wait_for("the table takes the commit", || {
+    wait_until("the table takes the commit", || {
         server.with_table(|table| table.lease(row.vrf, addr).is_some_and(|l| &l == row))
     });
 
@@ -128,7 +121,7 @@ fn a_relay_listener_runs_dora_renew_and_release_through_the_store() {
         Some(MessageType::Ack)
     );
     let vrf = row.vrf;
-    wait_for("the renewal is applied", || {
+    wait_until("the renewal is applied", || {
         server.with_table(|table| table.get(vrf, addr).is_some_and(|l| l.ends > first_end))
     });
 
@@ -140,7 +133,7 @@ fn a_relay_listener_runs_dora_renew_and_release_through_the_store() {
         exchange(&relay, address, &release).is_none(),
         "no reply to a release"
     );
-    wait_for("the release is committed", || {
+    wait_until("the release is committed", || {
         store
             .leases()
             .values()

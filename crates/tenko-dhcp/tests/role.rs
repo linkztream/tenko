@@ -18,6 +18,7 @@ use std::{
 };
 
 use engine_world::{Ask, ip};
+use tenko_core::testing::wait_until_async;
 use tenko_core::{
     NodeId, PrefixId, Principal, RangeId, RequestCtx, Revision, SystemComponent, VrfId,
     codec::to_cbor,
@@ -320,14 +321,6 @@ async fn dora(relay: &Arc<UdpSocket>, server: SocketAddrV4, client: u8, subnet: 
     ack.yiaddr()
 }
 
-async fn until(what: &str, mut done: impl FnMut() -> bool) {
-    let start = Instant::now();
-    while !done() {
-        assert!(start.elapsed() < Duration::from_secs(5), "{what}");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
 fn active(node: &dyn DhcpNode) -> usize {
     node.status()
         .leases
@@ -534,7 +527,10 @@ async fn the_role_serves_from_the_store_follows_it_and_survives_a_snapshot_insta
         ("198.51.100.10", "198.51.100.20"),
     )
     .await;
-    until("the second scope is served", || node.status().scopes == 2).await;
+    wait_until_async("the second scope is served", async || {
+        node.status().scopes == 2
+    })
+    .await;
     let third = dora(&relay, address, 0x43, "198.51.100.0").await;
     assert_eq!(third.octets()[..3], [198, 51, 100]);
     assert_eq!(active(node.as_ref()), 2);
@@ -570,7 +566,10 @@ async fn the_role_serves_from_the_store_follows_it_and_survives_a_snapshot_insta
         "the lagging feed has not seen the scope"
     );
     installing.install_snapshot().await;
-    until("the new image is installed", || node.status().installs == 1).await;
+    wait_until_async("the new image is installed", async || {
+        node.status().installs == 1
+    })
+    .await;
     assert_eq!(node.status().scopes, 3);
     let after = node.leases().read().sorted_rows();
     for (key, lease) in &before {
@@ -678,7 +677,10 @@ async fn e32_ops_15_the_roles_tables_start_at_the_floor_and_grow_with_the_scopes
         ("203.0.113.1", "203.0.113.254"),
     )
     .await;
-    until("the image holds three scopes", || node.status().scopes == 3).await;
+    wait_until_async("the image holds three scopes", async || {
+        node.status().scopes == 3
+    })
+    .await;
     let room = node.room().expect("a server");
     assert_eq!((room.pending, room.offers), (608, 608));
     assert_eq!(node.lease_store().capacity(), 608);

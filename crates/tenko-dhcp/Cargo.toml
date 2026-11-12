@@ -57,6 +57,7 @@ tokio = { workspace = true }
 # WP7.2: the lease tests on the Raft store with its write-refusal hook, in temporary
 # directories.
 tempfile = { workspace = true }
+tenko-core = { workspace = true, features = ["testing"] }
 tenko-store = { workspace = true, features = ["raft", "testing", "test-hooks"] }
 
 [lints]

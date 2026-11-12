@@ -11,6 +11,7 @@ use std::{net::Ipv6Addr, sync::Arc, time::Duration};
 
 use lease_support::{NODE, addr, change, from_now, mac, mem_store, rows};
 use tenko_core::dhcp::{BindingState, LeaseEventKind};
+use tenko_core::testing::wait_until_async;
 use tenko_core::{
     MacAddr, PrefixId, Revision, Timestamp, VrfId,
     codec::to_cbor,
@@ -146,19 +147,15 @@ async fn commit4(node: &LocalNode, store: &Arc<dyn Store>, pending: &PendingChan
     node.lease_store()
         .submit(pending, Ticket(ticket))
         .expect("the queue has room");
-    for _ in 0..2_000 {
-        let found = rows(store.as_ref()).await;
-        if found
+    wait_until_async("the DHCPv4 change is committed", async || {
+        rows(store.as_ref())
+            .await
             .leases
             .get(&(pending.vrf, pending.addr))
             .is_some_and(|lease| lease.cltt == pending.cltt)
-        {
-            node.lease_store().derived().flush().await;
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    panic!("the change did not commit");
+    })
+    .await;
+    node.lease_store().derived().flush().await;
 }
 
 /// [`commit4`] for a DHCPv6 change of one binding.
@@ -167,18 +164,15 @@ async fn commit6(node: &LocalNode, store: &Arc<dyn Store>, pending: &PendingChan
         .submit6(pending, Ticket(ticket))
         .expect("the queue has room");
     let binding = pending.bindings()[0];
-    for _ in 0..2_000 {
+    wait_until_async("the DHCPv6 change is committed", async || {
         let view = store.read(ReadConsistency::Local).await.expect("a view");
         let row = view
             .get_typed(&tables::LEASES6, &(binding.vrf, binding.addr))
             .expect("read");
-        if row.is_some_and(|(lease, _)| lease.cltt == pending.cltt) {
-            node.lease_store6().derived().flush().await;
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    panic!("the change did not commit");
+        row.is_some_and(|(lease, _)| lease.cltt == pending.cltt)
+    })
+    .await;
+    node.lease_store6().derived().flush().await;
 }
 
 /// The facts of the lease view over the store as it is now.

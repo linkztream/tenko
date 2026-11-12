@@ -30,6 +30,7 @@ use engine6_world::{
     LINK1, LINK2, SERVER_DUID, addr, addresses, client_options, duid_ll, ia_na, mac, message,
     relayed, statuses, unwrap,
 };
+use tenko_core::testing::wait_until_async;
 use tenko_core::{
     AddressId, HostId, InterfaceId, NodeId, PrefixId, Principal, RangeId, RequestCtx, Revision,
     SystemComponent, TenantId, Timestamp, VrfId,
@@ -685,14 +686,6 @@ impl Fixture {
     }
 }
 
-async fn until(what: &str, mut done: impl FnMut() -> bool) {
-    let start = Instant::now();
-    while !done() {
-        assert!(start.elapsed() < Duration::from_secs(5), "{what}");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
 // ---------------------------------------------------------------------------------------
 // The tests
 
@@ -716,7 +709,7 @@ async fn the_status_reports_both_families_and_each_serves_its_own() {
     let duid = duid_ll(mac(0x01));
     let v6 = lease6(&fx.relay6, fx.server6, LINK1, &duid, 1, 0x10).await;
     assert!(addr("2001:db8:1::100") <= v6 && v6 <= addr("2001:db8:1::1ff"));
-    until("the DHCPv4 lease is counted", || {
+    wait_until_async("the DHCPv4 lease is counted", async || {
         fx.node
             .status()
             .leases
@@ -882,7 +875,7 @@ async fn a_scope_written_after_the_start_reaches_the_image_through_the_feed() {
         ("2001:db8:2::100", "2001:db8:2::1ff"),
     )
     .await;
-    until("the second DHCPv6 scope is served", || {
+    wait_until_async("the second DHCPv6 scope is served", async || {
         fx.node.status().scopes6 == 2
     })
     .await;
@@ -1032,7 +1025,7 @@ async fn a_snapshot_install_keeps_the_dhcpv6_rows_and_the_role_keeps_serving() {
 
     // The snapshot: image and table are rebuilt and swapped together.
     fx.installing.install_snapshot().await;
-    until("the new image is installed", || {
+    wait_until_async("the new image is installed", async || {
         fx.node.status().installs == 1
     })
     .await;

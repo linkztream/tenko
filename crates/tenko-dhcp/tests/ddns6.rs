@@ -20,9 +20,10 @@ use std::{
     fmt::Write as _,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::{Arc, Mutex, PoisonError},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
+use tenko_core::testing::wait_until_async;
 use tenko_core::{
     AddressId, NodeId, PrefixId, Principal, RangeId, RequestCtx, SystemComponent, Timestamp, VrfId,
     cluster::LeaderService as _,
@@ -460,21 +461,6 @@ impl Lab {
     }
 }
 
-async fn until<F, Fut>(what: &str, mut done: F)
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = bool>,
-{
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(10) {
-        if done().await {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("timed out waiting for {what}");
-}
-
 fn aaaa_of(last: u16) -> RecordData {
     RecordData::Aaaa { address: ip6(last) }
 }
@@ -502,7 +488,7 @@ async fn a_dhcpv6_lease_gets_its_aaaa_dhcid_and_ptr_and_a_release_takes_them_awa
     let key = lease.client_key();
     lab.commit6(lease).await;
     let owner = "laptop.example.test";
-    until("the names", || async {
+    wait_until_async("the names", async || {
         lab.aaaa(owner).await == vec![aaaa_of(0x10)]
             && lab.ptr6(0x10).await.is_some()
             && lab.ddns6(0x10).await.dhcid.is_some()
@@ -549,7 +535,7 @@ async fn a_dhcpv6_lease_gets_its_aaaa_dhcid_and_ptr_and_a_release_takes_them_awa
     // A second DUID claims the name: refused by name protection, and the row says why.
     lab.commit6(lab.lease6(0x11, 2, Some(("LAPTOP.example.test", FLAGS_S_E))))
         .await;
-    until("the refusal", || async {
+    wait_until_async("the refusal", async || {
         lab.ddns6(0x11)
             .await
             .last_error
@@ -577,13 +563,13 @@ async fn a_dhcpv6_lease_gets_its_aaaa_dhcid_and_ptr_and_a_release_takes_them_awa
 
     // The release removes the AAAA, the DHCID and the PTR.
     lab.end6(0x10, BindingState::Released).await;
-    until("the removal", || async {
+    wait_until_async("the removal", async || {
         lab.aaaa(owner).await.is_empty()
             && lab.ptr6(0x10).await.is_none()
             && lab.rrset(lab.forward, owner, DHCID).await.is_none()
     })
     .await;
-    until("the cleared row", || async {
+    wait_until_async("the cleared row", async || {
         let state = lab.ddns6(0x10).await;
         state.forward.is_none() && state.reverse.is_none()
     })
@@ -591,7 +577,7 @@ async fn a_dhcpv6_lease_gets_its_aaaa_dhcid_and_ptr_and_a_release_takes_them_awa
     // Now the second client may have the name, on its next renewal.
     lab.commit6(lab.lease6(0x11, 2, Some(("laptop", FLAGS_S_E))))
         .await;
-    until("the name for the second client", || async {
+    wait_until_async("the name for the second client", async || {
         lab.aaaa(owner).await == vec![aaaa_of(0x11)]
     })
     .await;
@@ -627,7 +613,7 @@ async fn an_expiry_removes_the_names_and_a_client_may_write_its_own_aaaa_record(
     // A client that writes its AAAA record itself (S clear) gets only its PTR.
     lab.commit6(lab.lease6(0x21, 4, Some(("phone", 0x04))))
         .await;
-    until("the PTRs", || async {
+    wait_until_async("the PTRs", async || {
         lab.ptr6(0x20).await.is_some() && lab.ptr6(0x21).await.is_some()
     })
     .await;
@@ -639,7 +625,7 @@ async fn an_expiry_removes_the_names_and_a_client_may_write_its_own_aaaa_record(
     assert_eq!(lab.ptr6(0x21).await, Some(ptr_to("phone.example.test")));
     // The expiry ends the first client's binding.
     lab.end6(0x20, BindingState::Expired).await;
-    until("the expiry's removal", || async {
+    wait_until_async("the expiry's removal", async || {
         lab.aaaa("tv.example.test").await.is_empty() && lab.ptr6(0x20).await.is_none()
     })
     .await;
@@ -664,13 +650,13 @@ async fn a_dual_stack_client_holds_one_name_with_an_a_and_an_aaaa_record_and_one
         "both families give one DHCID"
     );
     lab.commit4(lease4).await;
-    until("the A record", || async {
+    wait_until_async("the A record", async || {
         lab.a(owner).await == vec![RecordData::A { address: ip4(150) }]
             && lab.ptr4(150).await.is_some()
     })
     .await;
     lab.commit6(lease6).await;
-    until("the AAAA record", || async {
+    wait_until_async("the AAAA record", async || {
         lab.aaaa(owner).await == vec![aaaa_of(0x30)] && lab.ptr6(0x30).await.is_some()
     })
     .await;
@@ -684,7 +670,7 @@ async fn a_dual_stack_client_holds_one_name_with_an_a_and_an_aaaa_record_and_one
     assert_eq!(set.rdata[0].as_bytes(), expected.as_slice());
     assert_eq!(&set.rdata[0].as_bytes()[..2], &[0x00, 0x02]);
     assert_eq!(set.origin, Origin::Dhcp);
-    until("both outcomes on the rows", || async {
+    wait_until_async("both outcomes on the rows", async || {
         lab.ddns6(0x30).await.dhcid == Some(HexBytes(expected.clone()))
     })
     .await;
@@ -692,7 +678,7 @@ async fn a_dual_stack_client_holds_one_name_with_an_a_and_an_aaaa_record_and_one
     // Releasing the DHCPv4 lease removes the A record and its PTR; the AAAA record and the
     // DHCID stay.
     lab.end4(150, BindingState::Released).await;
-    until("the A record's removal", || async {
+    wait_until_async("the A record's removal", async || {
         lab.a(owner).await.is_empty() && lab.ptr4(150).await.is_none()
     })
     .await;
@@ -707,7 +693,7 @@ async fn a_dual_stack_client_holds_one_name_with_an_a_and_an_aaaa_record_and_one
 
     // Releasing the DHCPv6 lease takes the rest.
     lab.end6(0x30, BindingState::Released).await;
-    until("the last removal", || async {
+    wait_until_async("the last removal", async || {
         lab.aaaa(owner).await.is_empty()
             && lab.ptr6(0x30).await.is_none()
             && lab.rrset(lab.forward, owner, DHCID).await.is_none()
@@ -718,17 +704,17 @@ async fn a_dual_stack_client_holds_one_name_with_an_a_and_an_aaaa_record_and_one
     let lease4 = lab.lease4_rfc4361(151, 8, 1, ("tablet", ClientFqdn::FLAG_S));
     let lease6 = lab.lease6(0x31, 8, Some(("tablet", FLAGS_S_E)));
     lab.commit4(lease4).await;
-    until("tablet A", || async {
+    wait_until_async("tablet A", async || {
         lab.a("tablet.example.test").await == vec![RecordData::A { address: ip4(151) }]
     })
     .await;
     lab.commit6(lease6).await;
-    until("tablet AAAA", || async {
+    wait_until_async("tablet AAAA", async || {
         lab.aaaa("tablet.example.test").await == vec![aaaa_of(0x31)]
     })
     .await;
     lab.end6(0x31, BindingState::Expired).await;
-    until("tablet AAAA removal", || async {
+    wait_until_async("tablet AAAA removal", async || {
         lab.aaaa("tablet.example.test").await.is_empty() && lab.ptr6(0x31).await.is_none()
     })
     .await;
@@ -744,7 +730,7 @@ async fn a_dual_stack_client_holds_one_name_with_an_a_and_an_aaaa_record_and_one
         "the DHCID stays while the A record does"
     );
     lab.end4(151, BindingState::Released).await;
-    until("tablet removal", || async {
+    wait_until_async("tablet removal", async || {
         lab.a("tablet.example.test").await.is_empty()
             && lab
                 .rrset(lab.forward, "tablet.example.test", DHCID)
@@ -826,7 +812,7 @@ async fn a_name_of_another_origin_is_refused_whatever_the_family_of_its_records(
         lab.commit6(lab.lease6(last, who, Some((host, FLAGS_S_E))))
             .await;
     }
-    until("the refusal of the manual name", || async {
+    wait_until_async("the refusal of the manual name", async || {
         lab.ddns6(0x40)
             .await
             .last_error
@@ -834,7 +820,7 @@ async fn a_name_of_another_origin_is_refused_whatever_the_family_of_its_records(
     })
     .await;
     for last in [0x41, 0x42] {
-        until("the refusal of IPAM's name", || async {
+        wait_until_async("the refusal of IPAM's name", async || {
             lab.ddns6(last)
                 .await
                 .last_error
@@ -863,7 +849,7 @@ async fn a_name_of_another_origin_is_refused_whatever_the_family_of_its_records(
     // The mirror: a manual AAAA refuses a DHCPv4 claim.
     lab.commit4(lab.lease4_rfc4361(160, 4, 1, ("cam", ClientFqdn::FLAG_S)))
         .await;
-    until("the refusal of the manual AAAA's name", || async {
+    wait_until_async("the refusal of the manual AAAA's name", async || {
         lab.ddns4(160)
             .await
             .last_error
@@ -883,7 +869,7 @@ async fn a_name_of_another_origin_is_refused_whatever_the_family_of_its_records(
     // an operator added beside it changes nothing.
     lab.commit6(lab.lease6(0x43, 5, Some(("phone", FLAGS_S_E))))
         .await;
-    until("the phone's name", || async {
+    wait_until_async("the phone's name", async || {
         lab.aaaa("phone.example.test").await == vec![aaaa_of(0x43)]
     })
     .await;
@@ -904,7 +890,7 @@ async fn a_name_of_another_origin_is_refused_whatever_the_family_of_its_records(
         .expect("a manual TXT beside the client's records");
     lab.commit6(lab.lease6(0x44, 5, Some(("phone", FLAGS_S_E))))
         .await;
-    until("the phone's new address", || async {
+    wait_until_async("the phone's new address", async || {
         lab.aaaa("phone.example.test").await == vec![aaaa_of(0x44)]
     })
     .await;

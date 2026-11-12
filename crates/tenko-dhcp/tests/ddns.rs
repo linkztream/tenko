@@ -25,9 +25,10 @@ use std::{
         Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
+use tenko_core::testing::wait_until_async;
 use tenko_core::{
     AddressId, NodeId, PrefixId, Principal, RangeId, RequestCtx, SystemComponent, Timestamp, VrfId,
     cluster::LeaderService as _,
@@ -338,21 +339,6 @@ impl Lab {
     }
 }
 
-async fn until<F, Fut>(what: &str, mut done: F)
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = bool>,
-{
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(10) {
-        if done().await {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("timed out waiting for {what}");
-}
-
 fn a_of(last: u8) -> RecordData {
     RecordData::A { address: ip(last) }
 }
@@ -376,7 +362,7 @@ async fn names_come_on_ack_and_go_on_release_and_expiry() {
     lab.commit(lab.lease(50, 1, Some(("laptop", ClientFqdn::FLAG_S)), Some("ignored")))
         .await;
     lab.commit(lab.lease(51, 2, None, Some("printer"))).await;
-    until("the names", || async {
+    wait_until_async("the names", async || {
         lab.a("laptop.lan.example.test").await == vec![a_of(50)]
             && lab.a("printer.lan.example.test").await == vec![a_of(51)]
             && lab.ptr(51).await.is_some()
@@ -402,7 +388,7 @@ async fn names_come_on_ack_and_go_on_release_and_expiry() {
         .expect("A");
     assert_eq!(a.origin, Origin::Dhcp);
     assert_eq!(a.ttl, 1_200, "a third of the lease time");
-    until("the outcome on the row", || async {
+    wait_until_async("the outcome on the row", async || {
         lab.ddns(50).await.dhcid.is_some()
     })
     .await;
@@ -420,7 +406,7 @@ async fn names_come_on_ack_and_go_on_release_and_expiry() {
         None,
     ))
     .await;
-    until("the refusal", || async {
+    wait_until_async("the refusal", async || {
         lab.ddns(52)
             .await
             .last_error
@@ -449,7 +435,7 @@ async fn names_come_on_ack_and_go_on_release_and_expiry() {
     // The release removes the first client's names; the expiry the second's.
     lab.end(50, BindingState::Released).await;
     lab.end(51, BindingState::Expired).await;
-    until("the removal", || async {
+    wait_until_async("the removal", async || {
         lab.a("laptop.lan.example.test").await.is_empty()
             && lab.a("printer.lan.example.test").await.is_empty()
             && lab.ptr(50).await.is_none()
@@ -460,14 +446,14 @@ async fn names_come_on_ack_and_go_on_release_and_expiry() {
                 .is_none()
     })
     .await;
-    until("the cleared rows", || async {
+    wait_until_async("the cleared rows", async || {
         lab.ddns(50).await.forward.is_none() && lab.ddns(51).await.reverse.is_none()
     })
     .await;
     // Now the third client may have the name, on its next renewal.
     lab.commit(lab.lease(52, 3, Some(("laptop", ClientFqdn::FLAG_S)), None))
         .await;
-    until("the name for the third client", || async {
+    wait_until_async("the name for the third client", async || {
         lab.a("laptop.lan.example.test").await == vec![a_of(52)]
     })
     .await;
@@ -478,7 +464,7 @@ async fn ipam_names_manual_records_and_zone_policy_are_respected() {
     let lab = lab(DdnsProfile::STANDARD, UpdatePolicy::default()).await;
     // Under Standard a zone that says nothing takes no DHCP updates.
     lab.commit(lab.lease(60, 1, None, Some("desk"))).await;
-    until("the refusal of the zone", || async {
+    wait_until_async("the refusal of the zone", async || {
         lab.ddns(60)
             .await
             .last_error
@@ -507,7 +493,7 @@ async fn ipam_names_manual_records_and_zone_policy_are_respected() {
             .await
             .expect("zone policy");
     }
-    until("the name after the policy change", || async {
+    wait_until_async("the name after the policy change", async || {
         lab.a("desk.lan.example.test").await == vec![a_of(60)] && lab.ptr(60).await.is_some()
     })
     .await;
@@ -532,7 +518,7 @@ async fn ipam_names_manual_records_and_zone_policy_are_respected() {
         .await
         .expect("manual record");
     lab.commit(lab.lease(61, 2, None, Some("nas"))).await;
-    until("the refusal of the manual name", || async {
+    wait_until_async("the refusal of the manual name", async || {
         lab.ddns(61)
             .await
             .last_error
@@ -561,7 +547,7 @@ async fn ipam_names_manual_records_and_zone_policy_are_respected() {
         .expect("index");
     lab.store.propose(batch).await.expect("IPAM address");
     lab.commit(lab.lease(62, 3, None, Some("server"))).await;
-    until("the skip", || async {
+    wait_until_async("the skip", async || {
         lab.ddns(62)
             .await
             .last_error
@@ -598,27 +584,24 @@ async fn replace_moves_a_name_and_a_client_may_write_its_own_a_record() {
         .expect("scope");
     lab.commit(lab.lease(70, 1, Some(("tv", ClientFqdn::FLAG_S)), None))
         .await;
-    until("the first name", || async {
+    wait_until_async("the first name", async || {
         lab.a("tv.lan.example.test").await == vec![a_of(70)]
     })
     .await;
     // Under `replace` the last client wins.
     lab.commit(lab.lease(71, 2, Some(("tv", ClientFqdn::FLAG_S)), None))
         .await;
-    until("the moved name", || async {
+    wait_until_async("the moved name", async || {
         lab.a("tv.lan.example.test").await == vec![a_of(71)]
     })
     .await;
     // The first client's expiry leaves the name alone: its DHCID is gone.
     lab.end(70, BindingState::Expired).await;
-    until("the first PTR gone", || async {
-        lab.ptr(70).await.is_none()
-    })
-    .await;
+    wait_until_async("the first PTR gone", async || lab.ptr(70).await.is_none()).await;
     assert_eq!(lab.a("tv.lan.example.test").await, vec![a_of(71)]);
     // A client that writes its A record itself (S clear) gets only its PTR.
     lab.commit(lab.lease(72, 3, Some(("phone", 0)), None)).await;
-    until("the PTR only", || async { lab.ptr(72).await.is_some() }).await;
+    wait_until_async("the PTR only", async || lab.ptr(72).await.is_some()).await;
     assert_eq!(
         lab.a("phone.lan.example.test").await,
         Vec::<RecordData>::new()
@@ -664,7 +647,7 @@ async fn replace_moves_a_name_and_a_client_may_write_its_own_a_record() {
         .expect("zone policy");
     lab.commit(lab.lease(73, 4, Some(("tv", ClientFqdn::FLAG_S)), None))
         .await;
-    until("the protected name", || async {
+    wait_until_async("the protected name", async || {
         let refused = lab
             .ddns(73)
             .await
@@ -696,7 +679,7 @@ async fn the_policys_ddns_settings_decide_over_the_scopes() {
     lab.commit(printer).await;
     lab.commit(lab.lease(81, 2, Some(("laptop", ClientFqdn::FLAG_S)), None))
         .await;
-    until("the scope's client's name", || async {
+    wait_until_async("the scope's client's name", async || {
         lab.a("laptop.lan.example.test").await == vec![a_of(81)] && lab.ptr(81).await.is_some()
     })
     .await;
@@ -727,7 +710,7 @@ async fn the_policys_ddns_settings_decide_over_the_scopes() {
     let mut sensor = lab.lease(83, 4, Some(("sensor", ClientFqdn::FLAG_S)), None);
     sensor.ddns_policy = Some(on);
     lab.commit(sensor).await;
-    until("the policy's client's name", || async {
+    wait_until_async("the policy's client's name", async || {
         lab.a("sensor.lan.example.test").await == vec![a_of(83)] && lab.ptr(83).await.is_some()
     })
     .await;
@@ -785,7 +768,7 @@ async fn a_manual_mx_or_txt_at_the_name_refuses_a_dhcp_a() {
         (63, "mail.lan.example.test", "MX"),
         (64, "info.lan.example.test", "TXT"),
     ] {
-        until("the refusal", || async {
+        wait_until_async("the refusal", async || {
             lab.ddns(last).await.last_error.is_some_and(|error| {
                 error.contains(&format!("holds {rtype} records of the origin manual"))
             })
@@ -849,14 +832,14 @@ async fn a_name_below_a_child_zone_is_written_and_removed_in_the_forward_zone_on
         None,
     ))
     .await;
-    until("the name under the forward zone", || async {
+    wait_until_async("the name under the forward zone", async || {
         lab.a("h.lan.example.test").await == vec![a_of(65)] && lab.ptr(65).await.is_some()
     })
     .await;
     assert_eq!(lab.ddns(65).await.forward, Some(name("h.lan.example.test")));
     nothing_at(&lab, [lab.forward, child], "h.sub.lan.example.test").await;
     lab.end(65, BindingState::Released).await;
-    until("the removal", || async {
+    wait_until_async("the removal", async || {
         lab.a("h.lan.example.test").await.is_empty()
             && lab
                 .rrset(lab.forward, "h.lan.example.test", DHCID)
@@ -892,7 +875,7 @@ async fn a_name_below_a_child_zone_is_written_and_removed_in_the_forward_zone_on
         None,
     ))
     .await;
-    until("the refusal of the child's name", || async {
+    wait_until_async("the refusal of the child's name", async || {
         lab.ddns(66).await.last_error.is_some_and(|error| {
             error.contains("lies in the zone sub.lan.example.test, not in the scope's forward zone")
         })
@@ -910,7 +893,7 @@ async fn a_name_below_a_child_zone_is_written_and_removed_in_the_forward_zone_on
         None,
     ))
     .await;
-    until("the refusal of the delegated name", || async {
+    wait_until_async("the refusal of the delegated name", async || {
         lab.ddns(67)
             .await
             .last_error

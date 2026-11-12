@@ -14,6 +14,7 @@ use std::{
 };
 
 use lease_support::{NODE, completions, from_now};
+use tenko_core::testing::wait_until_async;
 use tenko_core::{
     PrefixId, Timestamp, VrfId,
     dhcp::{BindingState, LeaseEventKind, tables},
@@ -631,11 +632,10 @@ async fn ack_path(rate: u32, secs: u32) {
             most_queued = most_queued.max(lease_store.derived().stats().queued);
         }
     }
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    while done.lock().unwrap_or_else(PoisonError::into_inner).len() < leases as usize {
-        assert!(std::time::Instant::now() < deadline, "the commits complete");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    wait_until_async("the commits complete", async || {
+        done.lock().unwrap_or_else(PoisonError::into_inner).len() >= leases as usize
+    })
+    .await;
     let flush_started = std::time::Instant::now();
     lease_store.derived().flush().await;
     let drained_ms = flush_started.elapsed().as_millis();

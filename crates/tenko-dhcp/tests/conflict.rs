@@ -27,6 +27,7 @@ use std::{
 };
 
 use engine_world::{Ask, World, ip, mac};
+use tenko_core::testing::wait_until;
 use tenko_core::{
     NodeId, Timestamp,
     dhcp::{BindingState, LeaseEventKind},
@@ -280,14 +281,6 @@ impl Lab {
     }
 }
 
-fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
-    let start = Instant::now();
-    while !done() {
-        assert!(start.elapsed() < Duration::from_secs(5), "{what}");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-}
-
 #[test]
 fn an_offer_waits_for_the_probe_and_goes_out_when_nobody_answered() {
     let fake = Fake::new(|_, _| Answer::Clear(Duration::from_millis(40)));
@@ -353,7 +346,7 @@ fn an_answer_marks_the_address_and_the_next_one_is_offered() {
         held >= Duration::from_secs(86_399) && held <= Duration::from_secs(86_401),
         "{held:?}"
     );
-    wait_for("the conflict is committed", || {
+    wait_until("the conflict is committed", || {
         lab.store
             .history()
             .iter()
@@ -418,7 +411,7 @@ fn one_answering_mac_abandons_two_addresses_an_hour_and_the_rest_are_skipped_onc
                 .is_some_and(|row| row.state == BindingState::Abandoned)
         })
         .collect();
-    wait_for("the two marks", || {
+    wait_until("the two marks", || {
         calls
             .iter()
             .filter(|probed| {
@@ -591,13 +584,13 @@ fn a_decline_holds_the_address_and_a_client_beyond_its_limit_is_dropped() {
     for round in 0..3 {
         let (addr, _) = lab.offer(0x3b);
         lab.ack(0x3b, addr);
-        wait_for("the lease is in the table", || {
+        wait_until("the lease is in the table", || {
             lab.row(addr)
                 .is_some_and(|row| row.state == BindingState::Active)
         });
         lab.decline(0x3b, addr);
         if round < 2 {
-            wait_for("the decline holds the address", || {
+            wait_until("the decline holds the address", || {
                 lab.row(addr)
                     .is_some_and(|row| row.state == BindingState::Abandoned)
             });
