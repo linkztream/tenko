@@ -6,14 +6,20 @@
 //! readers detect the format from the content, the name is only a hint), the rest is the
 //! file. The readers run with the limits of a real installation; whatever they return
 //! stays within them, so a file that parses never holds more sheets, rows, columns, cells
-//! or text than the limits allow. Run it with an allocation limit, for example
-//! `cargo +nightly fuzz run import_files -- -rss_limit_mb=2048 -malloc_limit_mb=1024`,
-//! so that an allocation sized by the input rather than by the limits is reported.
+//! or text than the limits allow. What reads then goes through the import's analysis (the
+//! suggested mapping) and its translation into the model, as a preview does, where cells
+//! become networks, ranges and addresses: the ranges of one import are split into at most
+//! `MAX_RANGE_ADDRESSES` addresses together, so the model holds no more addresses than that
+//! plus one per octet of text, and every data row has at most one outcome.
 
 use std::sync::Once;
 
 use libfuzzer_sys::fuzz_target;
-use tenko_ipam::import::read::{ReadLimits, read_file};
+use tenko_ipam::import::{
+    mapping::analyze,
+    read::{ReadLimits, read_file},
+    translate::{KnownPrefixes, MAX_RANGE_ADDRESSES, translate},
+};
 
 /// The xlsx reader runs `calamine` inside `catch_unwind` and answers a panic there with
 /// "the workbook structure is damaged" (its overflow checks fire on some cell references in
@@ -25,9 +31,9 @@ fn let_calamine_panics_unwind() {
     HOOK.call_once(|| {
         let abort = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            let in_calamine = info.location().is_some_and(|location| {
-                location.file().replace('\\', "/").contains("/calamine-")
-            });
+            let in_calamine = info
+                .location()
+                .is_some_and(|location| location.file().replace('\\', "/").contains("/calamine-"));
             if !in_calamine {
                 abort(info);
             }
@@ -67,4 +73,12 @@ fuzz_target!(|data: &[u8]| {
     }
     assert!(cells <= limits.max_cells);
     assert!(text <= limits.max_text_bytes);
+
+    // The analysis and the translation of a preview, with no networks in the store.
+    let rows: usize = file.sheets.iter().map(|sheet| sheet.rows.len()).sum();
+    let files = [file];
+    let (_, mapping) = analyze(&files);
+    let translation = translate(&files, &mapping, &KnownPrefixes::default(), None);
+    assert!(translation.rows.len() <= rows);
+    assert!(translation.model.addresses.len() <= MAX_RANGE_ADDRESSES + text);
 });
