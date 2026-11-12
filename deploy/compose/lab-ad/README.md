@@ -87,6 +87,7 @@ round creates two more computer accounts for them, `WSBOB$` and `SRV01$`.
 | `own.dc_refresh` | The controller's next registration succeeds and the owner stays |
 | `own.dc_refused` | A user (`alice`) is REFUSED on the controller's host record |
 | `own.locator` | A user is REFUSED on a locator name (`_ldap._tcp`) |
+| `own.service_name` | A user is REFUSED creating the well-known service name `wpad`, and nothing answers there; the domain administrator creates it |
 | `own.admin` | The domain administrator changes a name it does not own; the owner stays `alice` |
 | `own.import` | The dry run of a zone file in the Windows dialect lists `wsbob` (an aging mark) as claimable and not `srv01` (static); the import with the dry run's digest makes `wsbob` claimable, and both answer |
 | `own.claim_other` | Another principal (`bob`) cannot claim the imported dynamic name |

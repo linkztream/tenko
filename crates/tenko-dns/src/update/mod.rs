@@ -746,7 +746,13 @@ impl Inner {
             if let Err(reason) =
                 policy::check(&zone, |id| catalog.acl(id), profile, client, &signer)
             {
-                self.refused(&zone, client, &signer, reason);
+                self.refused(
+                    &zone,
+                    client,
+                    &signer,
+                    tenko_core::dns::codes::UPDATE_REFUSED,
+                    reason,
+                );
                 return Answer::with(rcode::REFUSED, ede::PROHIBITED, reason);
             }
             let apex = zone.name.to_wire();
@@ -782,10 +788,21 @@ impl Inner {
         })
     }
 
-    /// Audits a refusal, at most once a minute per client.
-    fn refused(&self, zone: &Zone, client: IpAddr, signer: &Signer, reason: &str) {
+    /// Audits a refusal with its code, at most once a minute per client; a refusal with a
+    /// code of its own (a rule an operator watches for) is logged too, as often.
+    fn refused(&self, zone: &Zone, client: IpAddr, signer: &Signer, code: &str, reason: &str) {
         if !self.audit.refusal_due(client) {
             return;
+        }
+        if code != tenko_core::dns::codes::UPDATE_REFUSED {
+            tracing::warn!(
+                zone = %zone.name,
+                %client,
+                principal = signer.principal().map(tracing::field::display),
+                key = signer.key().map(KeyName::as_str),
+                code,
+                "dynamic update refused: {reason}"
+            );
         }
         let draft = AuditDraft::denied(audit::UPDATE_REFUSE, vec![ObjectRef::from(zone.id)])
             .with_source_ip(Some(client))
@@ -794,7 +811,7 @@ impl Inner {
         self.audit.record(
             signer
                 .audit(draft)
-                .with_context("code", tenko_core::dns::codes::UPDATE_REFUSED)
+                .with_context("code", code)
                 .with_context("reason", reason),
         );
     }
@@ -935,9 +952,9 @@ impl Inner {
                 "the update is committed; the server does not answer from it yet",
             ),
             Outcome::Unmet(unmet) => Answer::with(unmet.rcode, ede::OTHER, unmet.text()),
-            Outcome::Refused(reason) => {
+            Outcome::Refused(code, reason) => {
                 if let Some(zone) = zone {
-                    self.refused(zone, item.client, &item.signer, &reason);
+                    self.refused(zone, item.client, &item.signer, code, &reason);
                 }
                 Answer::with(rcode::REFUSED, ede::PROHIBITED, reason)
             }

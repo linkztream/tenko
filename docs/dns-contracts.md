@@ -145,6 +145,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.key.not_found`, `dns.key.exists` | 404, 409 | TSIG keys |
 | `dns.list.not_found`, `dns.list.invalid` | 404, 400 | Block lists |
 | `dns.update.refused` | 403 | A dynamic update was refused (key, ACL, prerequisite). WP6.2: carried by the audit record `dns.update.refuse` of a refusal by the policy, the TSIG key or an origin rule; on the wire the client gets REFUSED with the reason in the extended error (a failed prerequisite answers its own RCODE and is not audited) |
+| `dns.update.service_name` | 403 | A dynamic update would change a well-known service name (`wpad`, `isatap`) that has no owner, and its signer is not privileged (dns.md section 13.11): the code of the audit record `dns.update.refuse`; on the wire REFUSED with the reason in the extended error |
 | `dns.transfer.refused` | 403 | A zone transfer was refused (ACL, key); also the last error of a primary that refused a transfer in |
 | `dns.node.not_dns` | 409 | The node does not run the `dns` role |
 | `dns.module.disabled` | 409 | The DNS module is switched off (for the role and the services; the routes answer 404) |

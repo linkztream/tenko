@@ -86,7 +86,8 @@ pub fn keeps_no_owner(zone: &DnsName, name: &DnsName) -> bool {
 /// that the Windows DNS Server answers for nobody by default (its global query block list):
 /// web proxy auto-discovery (`wpad`) and the ISATAP router (`isatap`). Whoever holds such a
 /// name in a domain serves the proxy or the tunnel router of every client that looks for it,
-/// so a zone file import never makes one claimable.
+/// so a zone file import never makes one claimable, and a dynamic update changes one without
+/// an owner only for a privileged principal ([`crate::update::apply`]).
 pub const SERVICE_LABELS: [&str; 2] = ["wpad", "isatap"];
 
 /// Whether the first label of `name` is one of [`SERVICE_LABELS`].

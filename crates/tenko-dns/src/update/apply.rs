@@ -36,9 +36,10 @@
 //! |---|---|---|
 //! | A locator name (every name of an `_msdcs` zone or under `_msdcs`, a first label `_ldap`, `_kerberos`, `_kpasswd`, `_gc`, `DomainDnsZones` or `ForestDnsZones`, the apex) | it is privileged | no owner is kept |
 //! | A wildcard name (`*` first) | it is privileged | no owner is kept |
+//! | A service name (a first label of [`crate::zone::ownership::SERVICE_LABELS`]: `wpad`, `isatap`) without a live owner | it is privileged; never an update signed with TSIG or unsigned (`dns.update.service_name`) | it becomes the owner |
 //! | Owned, the hold not passed | it is the owner (by SID when the owner has one, else by name), or privileged | the owner stays; the hold starts when the last record goes and ends when a record comes back |
 //! | Unowned with a manual, IPAM or DHCP record | it is privileged | it becomes the owner |
-//! | Unowned with a record imported from AD (origin `ad`) | it is privileged, or it claims its own host: `HOST$` claims `host.<zone>`, and a name whose records are PTR records pointing at `host` in its realm's DNS domain or below | it becomes the owner (`claimed` for a claimant) |
+//! | Unowned with a record imported from AD (origin `ad`) | it is privileged, or it claims its own host: `HOST$` claims `host.<zone>`, and a name in the address tree whose records are PTR records pointing at `host` in its realm's DNS domain or below | it becomes the owner (`claimed` for a claimant) |
 //! | Unowned with dynamic records only, or new (no records, the hold passed, or an owner without a hold whose records went outside the update path) | the zone's lists allow it | it becomes the owner, unless it is a member of `DnsUpdateProxy` |
 //!
 //! Privileged principals are the members of the zone's privileged groups by SID from the
@@ -47,7 +48,7 @@
 //! administrator's name afterwards. Whoever changes a name without being privileged (its
 //! owner, its claimant, a `DnsUpdateProxy` member) changes no `manual`, `ipam` or `dhcp`
 //! RRset of it: those stay with privileged principals also beside the owner's records. An update signed with TSIG or unsigned takes no ownership and may not change a name
-//! that is owned and held; it removes an owner whose hold has passed. The owner rows are
+//! that is owned and held, nor a service name without an owner; it removes an owner whose hold has passed. The owner rows are
 //! written in the same batch as the records, with their revisions expected, and the audit
 //! record carries the decision (`owner`, `privileged`, `claimed`, `proxy`) and the
 //! principal with its SID.
@@ -63,7 +64,7 @@ use tenko_core::{
     audit::AuditDraft,
     dns::{
         DnsName, NameOwner, NameOwnerKey, Origin, OwnerSource, Rdata, RecordData, RrSet, RrSetKey,
-        Rtype, ScopeName, Zone, ZoneId, audit, check_apex, check_node,
+        Rtype, ScopeName, Zone, ZoneId, audit, check_apex, check_node, codes,
         tables::{NAME_OWNERS, RRSETS},
     },
     ipam::Stamp,
@@ -78,7 +79,9 @@ use super::{
     prereq::{self, Records, Unmet},
 };
 use crate::zone::{
-    JournalLimits, Planned, ZoneError, ZoneResult, ZoneService, node,
+    JournalLimits, Planned, ZoneError, ZoneResult, ZoneService,
+    import::claim::is_address_tree,
+    node,
     records::{self, Diff, origin_name},
     stage_delete, stage_put,
 };
@@ -134,7 +137,7 @@ struct OwnerState {
 }
 
 // WP13.4: the locator names are shared with the owner view (`zone::ownership`).
-use crate::zone::ownership::{is_locator, keeps_no_owner};
+use crate::zone::ownership::{is_locator, is_service_name, keeps_no_owner};
 
 /// Whether `identity` is `owner`: by SID when the owner has one (a ticket without a PAC,
 /// which has none, never matches it), by the principal's name otherwise.
@@ -152,8 +155,9 @@ fn own_host(identity: &GssIdentity) -> Option<String> {
 
 /// Whether the RRsets of `name` carry `host` of the domain `domain` (the DNS name of the
 /// claimant's realm): the name is `host.<zone>`, or every record there is a PTR record
-/// whose target is `host` in that domain or below it. A PTR to `host` in another domain
-/// names another computer, so it is not claimable (WP13.4).
+/// whose target is `host` in that domain or below it, and the name lies in the address tree
+/// (`in-addr.arpa`, `ip6.arpa`). A PTR to `host` in another domain names another computer,
+/// and a PTR at a forward name is no host's address record, so neither is claimable.
 fn carries_host<'a>(
     zone: &DnsName,
     name: &DnsName,
@@ -174,6 +178,9 @@ fn carries_host<'a>(
     };
     if first_is_host(name) && name.parent().as_ref() == Some(zone) {
         return true;
+    }
+    if !is_address_tree(name) {
+        return false;
     }
     let mut any = false;
     for rrset in rrsets {
@@ -225,8 +232,9 @@ pub enum Outcome {
     },
     /// A prerequisite does not hold.
     Unmet(Unmet),
-    /// Refused by the policy or the origin rules (REFUSED).
-    Refused(String),
+    /// Refused by the policy, the origin rules or the ownership rules (REFUSED): the code
+    /// of the audit record and the reason.
+    Refused(&'static str, String),
     /// A rule of the model broke mid-way (SERVFAIL); nothing of it is written.
     Failed(String),
     /// The zone is gone or is no primary zone of this node any more (NOTAUTH).
@@ -294,8 +302,14 @@ impl Records for ScopeNodes<'_> {
 
 /// Why one update operation stops the update.
 enum Stop {
-    Refused(String),
+    /// The code of the audit record and the reason.
+    Refused(&'static str, String),
     Store(ZoneError),
+}
+
+/// A refusal with the update path's general code.
+fn refused(reason: String) -> Stop {
+    Stop::Refused(codes::UPDATE_REFUSED, reason)
 }
 
 impl From<ZoneError> for Stop {
@@ -376,7 +390,7 @@ impl Planner<'_> {
         if let Some(reason) =
             crate::dnssec::refused_change(&self.zone, rtype, existing.map(|rrset| rrset.origin))
         {
-            return Err(Stop::Refused(format!("{name} {rtype}: {reason}")));
+            return Err(refused(format!("{name} {rtype}: {reason}")));
         }
         let Some(existing) = existing else {
             return Ok(());
@@ -389,7 +403,7 @@ impl Planner<'_> {
                 Origin::Manual | Origin::Ipam | Origin::Dhcp
             )
         {
-            return Err(Stop::Refused(format!(
+            return Err(refused(format!(
                 "{name} {rtype} is a static record ({}); only privileged principals change it",
                 origin_name(existing.origin)
             )));
@@ -399,7 +413,7 @@ impl Planner<'_> {
         {
             return Ok(());
         }
-        Err(Stop::Refused(match existing.origin {
+        Err(refused(match existing.origin {
             Origin::Ipam => format!(
                 "{name} {rtype} belongs to IPAM; the zone's update policy does not let updates replace it"
             ),
@@ -457,6 +471,15 @@ impl Planner<'_> {
         Ok(())
     }
 
+    /// Whether `signer` is a principal of the zone's privileged groups; an update signed
+    /// with TSIG or unsigned never is.
+    fn is_privileged(&self, signer: &Signer) -> bool {
+        signer
+            .gss()
+            .zip(self.zone.update.kerberos.as_ref())
+            .is_some_and(|(identity, kerberos)| kerberos.is_privileged(&identity.groups))
+    }
+
     /// Whether `signer` may change `name`, before the update's first operation on it.
     fn decide(&self, signer: &Signer, scope: &ScopeName, name: &DnsName) -> Result<Decision, Stop> {
         let key = (scope.clone(), name.clone());
@@ -476,9 +499,21 @@ impl Planner<'_> {
                     .collect()
             })
             .unwrap_or_default();
+        // A client finds its proxy (`wpad`) or tunnel router (`isatap`) by name alone, so a
+        // service name without a live owner goes to a privileged principal only, whatever
+        // the type: whoever created the name would own it and could add the address next.
+        // An owner keeps its name; an administrator gives one by assignment.
+        if live.is_none() && is_service_name(name) && !self.is_privileged(signer) {
+            return Err(Stop::Refused(
+                codes::UPDATE_SERVICE_NAME,
+                format!(
+                    "{name} is a well-known service name without an owner; only privileged principals change it"
+                ),
+            ));
+        }
         let Signer::Gss(identity) = signer else {
             return match live {
-                Some(owner) => Err(Stop::Refused(format!(
+                Some(owner) => Err(refused(format!(
                     "{name} is owned by {}; an update signed with TSIG or unsigned does not change it",
                     owner.principal
                 ))),
@@ -486,16 +521,16 @@ impl Planner<'_> {
             };
         };
         let Some(kerberos) = &self.zone.update.kerberos else {
-            return Err(Stop::Refused(format!(
+            return Err(refused(format!(
                 "{name}: the zone takes no GSS-TSIG updates"
             )));
         };
-        let privileged = kerberos.is_privileged(&identity.groups);
+        let privileged = self.is_privileged(signer);
         if is_locator(&self.zone.name, name) {
             return if privileged {
                 Ok(Decision::Privileged)
             } else {
-                Err(Stop::Refused(format!(
+                Err(refused(format!(
                     "{name} is a locator name; only privileged principals change it"
                 )))
             };
@@ -506,7 +541,7 @@ impl Planner<'_> {
             return if privileged {
                 Ok(Decision::Privileged)
             } else {
-                Err(Stop::Refused(format!(
+                Err(refused(format!(
                     "{name} is a wildcard name; only privileged principals change it"
                 )))
             };
@@ -518,10 +553,7 @@ impl Planner<'_> {
             if privileged {
                 return Ok(Decision::Privileged);
             }
-            return Err(Stop::Refused(format!(
-                "{name} is owned by {}",
-                owner.principal
-            )));
+            return Err(refused(format!("{name} is owned by {}", owner.principal)));
         }
         if rrsets
             .iter()
@@ -530,7 +562,7 @@ impl Planner<'_> {
             return if privileged {
                 Ok(Decision::Privileged)
             } else {
-                Err(Stop::Refused(format!(
+                Err(refused(format!(
                     "{name} holds a static record; only privileged principals change it"
                 )))
             };
@@ -542,7 +574,7 @@ impl Planner<'_> {
             return if claims_own_host(&self.zone.name, name, identity, &rrsets) {
                 Ok(Decision::Claimed)
             } else {
-                Err(Stop::Refused(format!(
+                Err(refused(format!(
                     "{name} was imported without an owner; only a privileged principal or the host it names may claim it"
                 )))
             };
@@ -793,7 +825,7 @@ impl Planner<'_> {
         for item in items {
             self.decision = None;
             let outcome = if let Err(reason) = admit(&self.zone, item) {
-                Outcome::Refused(reason.to_owned())
+                Outcome::Refused(codes::UPDATE_REFUSED, reason.to_owned())
             } else if !self.zone.has_scope(&item.scope) {
                 Outcome::Failed(format!("the zone has no scope {}", item.scope))
             } else {
@@ -839,9 +871,9 @@ impl Planner<'_> {
             self.unprivileged = false;
             match step {
                 Ok(()) => {}
-                Err(Stop::Refused(reason)) => {
+                Err(Stop::Refused(code, reason)) => {
                     self.rollback(undo);
-                    return Ok(Outcome::Refused(reason));
+                    return Ok(Outcome::Refused(code, reason));
                 }
                 Err(Stop::Store(error)) => {
                     self.rollback(undo);
@@ -1289,5 +1321,41 @@ mod tests {
             Some(&zone),
             std::iter::empty()
         ));
+    }
+
+    /// DNS-28: a PTR record claims a name only in the address tree; at a forward name it is
+    /// no host's address record, so a computer claims nothing there by it.
+    #[test]
+    fn dns_28_a_pointer_claims_only_in_the_address_tree() {
+        let zone = name("corp.example.test");
+        let pc01 = identity("PC01$@CORP.EXAMPLE.TEST");
+        let host = own_host(&pc01).expect("a computer account");
+        let to_pc01 = [ptr("pc01.corp.example.test")];
+        for forward in ["wpad.corp.example.test", "proxy.lab.corp.example.test"] {
+            let at = rrset(forward, Rtype::PTR, &to_pc01);
+            assert!(
+                !carries_host(&zone, &name(forward), &host, Some(&zone), [&at].into_iter()),
+                "{forward}"
+            );
+        }
+        for (apex, reverse) in [
+            ("2.0.192.in-addr.arpa", "21.2.0.192.in-addr.arpa"),
+            (
+                "8.b.d.0.1.0.0.2.ip6.arpa",
+                "1.2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa",
+            ),
+        ] {
+            let at = rrset(reverse, Rtype::PTR, &to_pc01);
+            assert!(
+                carries_host(
+                    &name(apex),
+                    &name(reverse),
+                    &host,
+                    Some(&zone),
+                    [&at].into_iter()
+                ),
+                "{reverse}"
+            );
+        }
     }
 }

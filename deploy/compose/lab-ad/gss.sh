@@ -380,6 +380,12 @@ user_refused_on_dc() {
 user_refused_on_locator() {
   kinit_as alice && refused_update "update add _ldap._tcp.lab.example.test 600 IN SRV 0 100 389 ws-alice.lab.example.test."
 }
+service_name_privileged_only() {
+  kinit_as alice && refused_update "update add wpad.lab.example.test 60 IN A 198.51.100.67" &&
+    [[ -z "$(dig_short wpad.lab.example.test A)" ]] &&
+    kinit_admin && nsupdate_g "update add wpad.lab.example.test 60 IN A 198.51.100.68" -g >/dev/null &&
+    [[ "$(dig_short wpad.lab.example.test A)" == 198.51.100.68 ]]
+}
 admin_changes() {
   kinit_admin && nsupdate_g "update add ws-alice.lab.example.test 60 IN A 198.51.100.48" -g >/dev/null &&
     grep -q 198.51.100.48 <<<"$(dig_short ws-alice.lab.example.test A)" &&
@@ -425,6 +431,7 @@ row own.dc_host "the controller owns the host name it registered (the owner view
 row own.dc_refresh "the controller's next registration refreshes its names; the owner stays" dc_refreshes
 row own.dc_refused "a user cannot change the controller's host record" user_refused_on_dc
 row own.locator "a user cannot write a locator name (_ldap._tcp)" user_refused_on_locator
+row own.service_name "a user cannot create the service name wpad; the domain administrator can" service_name_privileged_only
 row own.admin "a domain administrator changes a name it does not own; the owner stays alice" admin_changes
 row own.import "the dry run of a Windows zone file lists wsbob (aging mark) as claimable and not srv01 (static); the approved import makes wsbob claimable, and both answer" imports_windows
 row own.claim_other "another principal cannot claim the imported dynamic name" other_cannot_claim

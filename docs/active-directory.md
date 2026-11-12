@@ -121,6 +121,7 @@ Windows secures a dynamic update with GSS-TSIG (RFC 3645): the client negotiates
 | The name | Who may change it |
 |---|---|
 | A locator name (every name of the `_msdcs` zone, the `_ldap`, `_kerberos`, `_kpasswd` and `_gc` names, `DomainDnsZones`, `ForestDnsZones`, the domain's apex) or a wildcard | Privileged principals only; it keeps no owner |
+| A well-known service name without an owner (`wpad`, `isatap`), which clients look up to find their web proxy settings or ISATAP router | Privileged principals only; it becomes the owner. To let another computer serve it, assign it the name in the **Owners** tab |
 | A new name | Any principal of the realm; it becomes the owner (a member of DnsUpdateProxy leaves it without one) |
 | An owned name | The owner and privileged principals |
 | A name imported from the Windows export with an aging timestamp (a record a client registered) that the import approved as claimable (origin `ad`) | The computer it names, which claims it (`PC01$` claims `pc01.corp.example.test` and the PTR names that point at it), and privileged principals |
@@ -128,7 +129,7 @@ Windows secures a dynamic update with GSS-TSIG (RFC 3645): the client negotiates
 
 Privileged principals are the members of the groups the zone names by SID: Domain Admins (RID 512), Domain Controllers (516), Enterprise Admins (519) and DnsAdmins. A privileged principal that writes a name without an owner becomes its owner, as on Windows, so the controllers own their host records. The zone's **Owners** tab lists every owner, since when and how the name was taken, and lets an administrator release a name (it becomes claimable again by the computer it names) or give it to another account, for example after a computer was rebuilt under a new account.
 
-**What it protects against.** An update is signed with a key only the client and Tenko share for the context, so an address cannot be forged into an update, and a captured update is not accepted twice. A workstation cannot change a controller's record, a locator record, a server's record or another workstation's record. What it does not protect against: a compromised controller or administrator account, which is privileged on Windows too; and a member's own names, which its computer account may change.
+**What it protects against.** An update is signed with a key only the client and Tenko share for the context, so an address cannot be forged into an update, and a captured update is not accepted twice. A workstation cannot change a controller's record, a locator record, a server's record or another workstation's record, and cannot create `wpad` or `isatap`. What it does not protect against: a compromised controller or administrator account, which is privileged on Windows too; and a member's own names, which its computer account may change.
 
 **The profiles** (TGL-09, [SECURITY-PROFILES.md](SECURITY-PROFILES.md)):
 

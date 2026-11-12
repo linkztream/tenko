@@ -173,6 +173,10 @@ pub mod codes {
     /// A dynamic update was refused (403): no or a wrong TSIG key, outside the ACL, or a
     /// prerequisite failed. Params: `zone`, `reason`.
     pub const UPDATE_REFUSED: &str = "dns.update.refused";
+    /// A dynamic update was refused because it would change a well-known service name
+    /// (`wpad`, `isatap`) that has no owner, and its signer is not privileged (403). The
+    /// code of the audit record `dns.update.refuse`. Params: `zone`, `reason`.
+    pub const UPDATE_SERVICE_NAME: &str = "dns.update.service_name";
     /// A zone transfer was refused (403): outside the transfer ACL or without the required
     /// TSIG key. Params: `zone`, `reason`.
     pub const TRANSFER_REFUSED: &str = "dns.transfer.refused";
@@ -288,7 +292,7 @@ pub mod codes {
     // WP13.4: end.
 
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 51] = [
+    pub const ALL: [&str; 52] = [
         ZONE_NOT_FOUND,
         ZONE_EXISTS,
         ZONE_INVALID,
@@ -307,6 +311,7 @@ pub mod codes {
         LIST_NOT_FOUND,
         LIST_INVALID,
         UPDATE_REFUSED,
+        UPDATE_SERVICE_NAME,
         TRANSFER_REFUSED,
         NODE_NOT_DNS,
         MODULE_DISABLED,

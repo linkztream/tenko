@@ -1530,6 +1530,202 @@ async fn dns_28_e46_the_remaining_rows() {
     );
 }
 
+/// DNS-28: a well-known service name (`wpad`, `isatap` as the first label) without an owner
+/// goes to a privileged principal only, whatever the record type and whoever the lists
+/// admit (a principal by its Kerberos entry, a `DnsUpdateProxy` member, a TSIG key); a name
+/// below a service label and every other new name are unaffected. The refusal carries its
+/// own code and names the principal.
+#[tokio::test]
+#[allow(clippy::too_many_lines, reason = "one sequence over the signers")]
+async fn dns_28_a_service_name_is_created_by_a_privileged_principal_only() {
+    let lab = lab().await;
+    let alice = lab.who(
+        "pc01$@CORP.EXAMPLE.TEST",
+        Some(sid(1001)),
+        vec![sid(515)],
+        "192.0.2.21",
+    );
+    let proxy = lab.who(
+        "dhcp$@CORP.EXAMPLE.TEST",
+        Some(sid(1003)),
+        vec![sid(1101)],
+        "192.0.2.3",
+    );
+    let dc = lab.who(
+        "dc01$@CORP.EXAMPLE.TEST",
+        Some(sid(1000)),
+        vec![sid(516)],
+        "192.0.2.2",
+    );
+    let wpad = "wpad.corp.example.test";
+    let isatap = "isatap.corp.example.test";
+    for service in [wpad, isatap, "wpad.branch.corp.example.test"] {
+        assert_eq!(
+            lab.gss(&alice, &Msg::default().add_a(service, 21)).await,
+            REFUSED,
+            "{service}"
+        );
+        assert_eq!(
+            lab.gss(&alice, &Msg::default().add_srv(service)).await,
+            REFUSED,
+            "{service} SRV"
+        );
+        assert_eq!(
+            lab.gss(&proxy, &Msg::default().add_a(service, 3)).await,
+            REFUSED,
+            "{service} by DnsUpdateProxy"
+        );
+        assert_eq!(
+            lab.tsig(&Msg::default().add_a(service, 4)).await,
+            REFUSED,
+            "{service} by TSIG"
+        );
+        assert_eq!(lab.rrset(service, Rtype::A).await, None, "{service}");
+        assert_eq!(lab.owner(service).await, None, "{service}");
+    }
+    // Other new names, and a name below a service label, which no client looks up for the
+    // service, stay with the lists.
+    for other in [
+        "wpad2.corp.example.test",
+        "pc01.wpad.corp.example.test",
+        "pc01.corp.example.test",
+    ] {
+        assert_eq!(
+            lab.gss(&alice, &Msg::default().add_a(other, 21)).await,
+            NOERROR,
+            "{other}"
+        );
+    }
+    assert_eq!(
+        lab.tsig(&Msg::default().add_a("printer.corp.example.test", 26))
+            .await,
+        NOERROR
+    );
+    // A privileged principal creates it and owns it; then the owner rule holds.
+    assert_eq!(lab.gss(&dc, &Msg::default().add_a(wpad, 2)).await, NOERROR);
+    assert_eq!(lab.owner(wpad).await.expect("owned").sid, Some(sid(1000)));
+    assert_eq!(
+        lab.gss(&alice, &Msg::default().add_a(wpad, 21)).await,
+        REFUSED
+    );
+    // The refusal is audited with its own code and the principal; a path of its own here,
+    // so that its audit sink can be read.
+    let audit = Arc::new(Audit::default());
+    let directory = Arc::new(Directory::default());
+    directory
+        .load(&lab.zones, &mut HashMap::new())
+        .await
+        .expect("directory");
+    let path = UpdatePath::with_settings(
+        lab.catalog.clone(),
+        directory,
+        Arc::clone(&lab.zones),
+        Arc::new(ProfileCell::new(UpdateProfile::Standard)),
+        Arc::clone(&audit) as Arc<dyn TransferAudit>,
+        lab.stop.child_token(),
+        UpdateSettings::default(),
+    )
+    .with_gss(Arc::clone(&lab.tkey));
+    let mut message = Msg::default().add_a(isatap, 21).bytes();
+    let mut signer = Signer::request(MacKey::Gss(Arc::clone(&alice.client)));
+    assert!(signer.sign(&mut message, now(), 0, &[], MAX_MESSAGE_LEN));
+    let answer = path
+        .answer(&message, &conn(alice.from))
+        .await
+        .expect("an answer");
+    assert_eq!(read(&answer), REFUSED);
+    let refusals = audit.0.lock().expect("audit");
+    let refusal = refusals
+        .iter()
+        .find(|draft| draft.action.as_str() == "dns.update.refuse")
+        .expect("audited");
+    assert_eq!(
+        context_of(refusal, "code").as_deref(),
+        Some("dns.update.service_name")
+    );
+    assert_eq!(
+        context_of(refusal, "principal").as_deref(),
+        Some("pc01$@CORP.EXAMPLE.TEST")
+    );
+    assert!(
+        context_of(refusal, "reason").is_some_and(|reason| reason.contains(isatap)),
+        "the reason names the name"
+    );
+}
+
+/// DNS-28: a service name an unprivileged principal owns stays its own (an administrator
+/// gave it, or it was created before the rule); once released, neither the computer of
+/// that name nor another may claim it, and a privileged principal may.
+#[tokio::test]
+async fn dns_28_an_owned_service_name_stays_with_its_owner_until_released() {
+    let lab = lab().await;
+    let alice = lab.who(
+        "pc01$@CORP.EXAMPLE.TEST",
+        Some(sid(1001)),
+        vec![sid(515)],
+        "192.0.2.21",
+    );
+    let bob = lab.who(
+        "pc02$@CORP.EXAMPLE.TEST",
+        Some(sid(1002)),
+        vec![sid(515)],
+        "192.0.2.22",
+    );
+    let named = lab.who(
+        "WPAD$@CORP.EXAMPLE.TEST",
+        Some(sid(1005)),
+        vec![sid(515)],
+        "192.0.2.25",
+    );
+    let dc = lab.who(
+        "dc01$@CORP.EXAMPLE.TEST",
+        Some(sid(1000)),
+        vec![sid(516)],
+        "192.0.2.2",
+    );
+    let wpad = "wpad.corp.example.test";
+    lab.zones
+        .assign_owner(
+            &cx(),
+            lab.zone.id,
+            &tenko_dns::zone::ownership::OwnerAssignment {
+                scope: ScopeName::DEFAULT,
+                name: name(wpad),
+                principal: PrincipalName::parse("pc01$@CORP.EXAMPLE.TEST").expect("principal"),
+                sid: Some(sid(1001)),
+                expect: None,
+            },
+        )
+        .await
+        .expect("assigned");
+    assert_eq!(
+        lab.gss(&alice, &Msg::default().add_a(wpad, 21)).await,
+        NOERROR
+    );
+    assert_eq!(
+        lab.gss(&alice, &Msg::default().add_a(wpad, 22)).await,
+        NOERROR,
+        "the owner changes it again"
+    );
+    assert_eq!(
+        lab.gss(&bob, &Msg::default().add_a(wpad, 23)).await,
+        REFUSED
+    );
+    lab.zones
+        .release_owner(&cx(), lab.zone.id, &ScopeName::DEFAULT, &name(wpad), None)
+        .await
+        .expect("released");
+    assert_eq!(
+        lab.rrset(wpad, Rtype::A).await.expect("kept").origin,
+        Origin::Ad
+    );
+    for who in [&named, &alice] {
+        assert_eq!(lab.gss(who, &Msg::default().add_a(wpad, 25)).await, REFUSED);
+    }
+    assert_eq!(lab.gss(&dc, &Msg::default().add_a(wpad, 2)).await, NOERROR);
+    assert_eq!(lab.owner(wpad).await.expect("owned").sid, Some(sid(1000)));
+}
+
 impl Lab {
     async fn put_owner(&self, owner: &str, row: NameOwner) {
         let mut batch = WriteBatch::for_request(&cx());
