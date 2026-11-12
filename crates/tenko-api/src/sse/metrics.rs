@@ -713,7 +713,7 @@ impl MetricsPublisher {
 #[cfg(test)]
 mod tests {
     use futures::StreamExt as _;
-    use tenko_core::{Principal, SystemComponent};
+    use tenko_core::{Principal, SystemComponent, testing::wait_until_async};
 
     use super::*;
     use crate::{
@@ -850,11 +850,11 @@ mod tests {
     /// Takes samples until one is folded into the history: the first only sets the baseline
     /// of the rates, and one taken within the same millisecond has no interval.
     async fn fold_once(sampler: &Sampler) {
-        sampler.take().await;
-        while sampler.history().at().is_none() {
-            tokio::task::yield_now().await;
+        wait_until_async("a sample folded into the history", || async {
             sampler.take().await;
-        }
+            sampler.history().at().is_some()
+        })
+        .await;
     }
 
     async fn open(
@@ -1091,16 +1091,11 @@ mod tests {
 
     /// Waits until the fetches of whole histories that a tick started have ended.
     async fn fetches_ended(publisher: &MetricsPublisher) {
-        while publisher
-            .cluster
-            .fetching
-            .lock()
-            .expect("lock")
-            .values()
-            .any(|task| !task.is_finished())
-        {
-            tokio::task::yield_now().await;
-        }
+        wait_until_async("the history fetches to end", || async {
+            let fetching = publisher.cluster.fetching.lock().expect("lock");
+            fetching.values().all(JoinHandle::is_finished)
+        })
+        .await;
     }
 
     /// The events a stream sends until it has sent `count`.
