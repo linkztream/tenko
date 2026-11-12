@@ -502,9 +502,15 @@ fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
     let id = rule["id"].as_str().expect("a rule id");
     api.delete(&format!("/dns/forwarders/{id}"), None)
         .expect(204);
+    // Every ask uses a name of its own: an ask that still went through the rule would
+    // otherwise leave its answer in the cache for 30 seconds, as long as the wait itself.
+    let mut asks = 0_u32;
     let fresh = ask_until(
         "the default forwarder to answer",
-        || udp(dns, "new.example.net", TYPE_A),
+        || {
+            asks += 1;
+            udp(dns, &format!("new{asks}.example.net"), TYPE_A)
+        },
         |answer| holds(answer, [203, 0, 113, 9]),
     );
     assert!(holds(&fresh, [203, 0, 113, 9]), "the default forwarder");
