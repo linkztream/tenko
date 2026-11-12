@@ -18,7 +18,7 @@
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { ChangelogError, isMainModule, unreleasedBody } from "../changelog.mjs";
+import { isMainModule } from "../changelog.mjs";
 import { mergeChangelogConflicts } from "./merge-changelog.mjs";
 
 /**
@@ -101,20 +101,20 @@ export function squashMessage(subject, messages) {
 }
 
 /**
- * Whether the Unreleased section names a work package (`WP` and a digit), which the
- * changelog never does. A changelog that does not parse is left to the changelog step.
+ * The lines of the Unreleased section that name a work package (`WP` and a digit), which the
+ * changelog never does, as `<line>:<text>`. Read from the raw text, so that a changelog that
+ * does not parse is checked too.
  * @param {string} text
- * @returns {string[]} the offending lines
+ * @returns {string[]}
  */
 export function packageNumbers(text) {
-  try {
-    return unreleasedBody(text)
-      .split("\n")
-      .filter((l) => /WP[0-9]/.test(l));
-  } catch (error) {
-    if (error instanceof ChangelogError) return [];
-    throw error;
+  const lines = text.split(/\r?\n/);
+  const found = [];
+  const start = lines.findIndex((l) => l.trimEnd() === "## [Unreleased]");
+  for (let i = start + 1; start !== -1 && i < lines.length && !lines[i]?.startsWith("## "); i += 1) {
+    if (/WP[0-9]/.test(/** @type {string} */ (lines[i]))) found.push(`${i + 1}:${lines[i]}`);
   }
+  return found;
 }
 
 class ApplyError extends Error {}
@@ -224,7 +224,12 @@ export function apply(name, items, { dryRun = false } = {}) {
   if (dryRun) {
     console.log("check CHANGELOG.md: no conflict marker, no work package number under Unreleased");
   } else {
-    const changelog = readFileSync("CHANGELOG.md", "utf8");
+    let changelog;
+    try {
+      changelog = readFileSync("CHANGELOG.md", "utf8");
+    } catch (error) {
+      throw new ApplyError(`CHANGELOG.md: ${/** @type {Error} */ (error).message}`);
+    }
     if (changelog.includes("<<<<<<<")) throw new ApplyError("conflict markers in CHANGELOG.md");
     const numbers = packageNumbers(changelog);
     if (numbers.length > 0) {

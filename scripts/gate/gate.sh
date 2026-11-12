@@ -10,6 +10,7 @@
 #
 # Exit codes: 0 green, 1 a step failed, 2 bad usage or configuration.
 
+shopt -u patsub_replacement 2>/dev/null # a & in a configured value stays a & in --dry-run
 GATE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 
 IDS=(apply regenerate spelling test-lint ui ui-build fmt clippy clippy-linux nextest trace changelog deny fuzz build e2e)
@@ -43,8 +44,8 @@ die() {
   exit 2
 }
 
-# Output: the whole run goes to the log; step headings, the reruns and the result also go to the
-# terminal (descriptor 3).
+# Output: the whole run goes to the log; step headings, the test summaries, the reruns and the
+# result also go to the terminal (descriptor 3), and so does the end of a failed step's output.
 tell() {
   echo "$*"
   echo "$*" >&3
@@ -52,26 +53,36 @@ tell() {
 step() {
   tell ""
   tell "=== $1 ($(date +%H:%M:%S)) ==="
+  STEP_START=$(($(wc -l < "$LOG") + 1))
 }
-NOTES=()
+# The tests that passed only alone, kept across the runs of one name (--from adds to them).
+note() {
+  echo "$1" >> "$NOTES"
+  tell "  $1"
+}
 finish() {
-  if [ ${#NOTES[@]} -gt 0 ]; then
-    tell "failed in the full run, then run alone:"
-    for n in "${NOTES[@]}"; do tell "  $n"; done
+  if [ -s "$NOTES" ]; then
+    tell "failed in a full run, then passed or failed alone:"
+    while read -r n; do tell "  $n"; done < "$NOTES"
   fi
   tell "gate $NAME: $1; log $LOG"
 }
 fail() {
   echo "### FAILED: $1"
+  echo "--- the end of the step's output:" >&3
+  tail -n +"$STEP_START" "$LOG" | tail -20 >&3
   finish "RED at step $CURRENT ($1)"
   exit 1
 }
+# The final statuses of a nextest test that did not pass.
+NOT_PASSED='FAIL|TIMEOUT|LEAK-FAIL|SIG[A-Z]+|ABORT'
 
 # ---------------------------------------------------------------------------------------------
 # The steps, in order. Each runs in the gate's worktree on merge-<name>.
 
 step_apply() {
-  node "$GATE_DIR/apply.mjs" "$NAME" "$SPEC" || fail apply
+  node "$GATE_DIR/apply.mjs" "$NAME" "$SPEC" 2>&1 ||
+    fail "$(tail -n +"$STEP_START" "$LOG" | sed -n 's/^apply: //p' | tail -1)"
 }
 
 step_regenerate() {
@@ -97,22 +108,23 @@ step_test_lint() {
 # A UI test file that fails in the full run is run again alone: one that passes alone is named
 # in the result, one that fails alone too fails the step.
 step_ui() {
-  local out="$OUT/gate-$NAME-ui-tests.txt" rc files f failed=""
+  local out="$P-ui-tests.txt" rc files f failed=""
   (cd ui && npm run -s typecheck && npm run -s lint) || fail ui
   (cd ui && npm run -s test) > "$out" 2>&1
   rc=$?
-  grep -E "×|FAIL |Test Files|Tests " "$out" | head -40
+  grep -E "×|FAIL |Test Files|Tests |Errors " "$out" | head -40
+  grep -E "^\s*(Test Files|Tests|Errors) " "$out" >&3
   [ "$rc" = 0 ] && return 0
+  # An error outside a test names no file to run alone; a rerun of the failed files would hide it.
+  ! grep -qE "Unhandled (Error|Rejection)|^\s*Errors\s+[0-9]+ error" "$out" || fail "ui (errors outside the tests in $out)"
   files=$(grep -oE "FAIL +src/[^ ]+" "$out" | awk '{print $2}' | sort -u)
   [ -n "$files" ] || fail "ui (no failed test file named in $out)"
   tell "the UI tests failed in the full run; each failed file alone:"
   for f in $files; do
     if (cd ui && npx vitest run "$f" 2>&1 | grep -E "Test Files|Tests |×"; exit "${PIPESTATUS[0]}"); then
-      NOTES+=("ui $f: passed alone")
-      tell "  $f: passed alone"
+      note "ui $f: passed alone"
     else
-      NOTES+=("ui $f: failed alone too")
-      tell "  $f: failed alone too"
+      note "ui $f: failed alone too"
       failed="$failed $f"
     fi
   done
@@ -146,26 +158,26 @@ step_clippy_linux() {
 # Every test runs; the tests that fail in the full run run again alone, on one thread. One that
 # passes alone is named in the result, one that fails alone too fails the step.
 step_nextest() {
-  local out="$OUT/gate-$NAME-nextest.txt" alone="$OUT/gate-$NAME-nextest-alone.txt" rc names filter line
+  local out="$P-nextest.txt" alone="$P-nextest-alone.txt" rc names filter status test
   CARGO_TARGET_DIR="$T_TESTS" cargo nextest run --workspace --all-features --locked --test-threads "$THREADS" --no-fail-fast 2>&1 |
     grep -v "^\s*Compiling\|^\s*Checking\|^\s*Blocking\|^\s*Finished\|^\s*PASS\|^\s*SLOW" > "$out"
   rc=${PIPESTATUS[0]}
   tail -40 "$out"
   echo "nextest exit $rc"
-  cp target/nextest/default/junit.xml "$OUT/gate-$NAME-junit.xml" 2>/dev/null || true
+  grep -E '^\s*Summary' "$out" >&3
+  cp target/nextest/default/junit.xml "$P-junit.xml" 2>/dev/null || true
   [ "$rc" = 0 ] && return 0
-  names=$(grep -E '^\s*FAIL \[' "$out" | sed -E 's/^\s*FAIL \[[^]]*\] \([^)]*\) \S+ //' | sort -u)
+  names=$(grep -E "^\s*($NOT_PASSED) \[" "$out" | sed -E "s/^\s*($NOT_PASSED) \[[^]]*\] \([^)]*\) \S+ //" | sort -u)
   [ -n "$names" ] || fail "nextest (no failed test named in $out)"
   filter=$(printf '%s\n' "$names" | sed -E 's/^(.*)$/test(=\1)/' | paste -sd'|' -)
   tell "nextest failed in the full run; the failed tests alone, one thread:"
   CARGO_TARGET_DIR="$T_TESTS" cargo nextest run --workspace --all-features --locked --test-threads 1 --no-fail-fast -E "$filter" 2>&1 |
-    grep -E '^\s*Summary|^\s*FAIL \[|^\s*PASS \[' > "$alone"
+    grep -E "^\s*(Summary|PASS|$NOT_PASSED) \[" > "$alone"
   rc=${PIPESTATUS[0]}
   cat "$alone"
-  while read -r line; do
-    NOTES+=("nextest ${line#* }: $([ "${line%% *}" = PASS ] && echo passed alone || echo failed alone too)")
-    tell "  ${NOTES[-1]#nextest }"
-  done < <(sed -nE 's/^\s*(PASS|FAIL) \[[^]]*\] \([^)]*\) (.*)$/\1 \2/p' "$alone" | sort -u)
+  while read -r status test; do
+    note "nextest $test: $([ "$status" = PASS ] && echo passed alone || echo "$status alone too")"
+  done < <(sed -nE "s/^\s*(PASS|$NOT_PASSED) \[[^]]*\] \([^)]*\) (.*)$/\1 \2/p" "$alone" | sort -u)
   [ "$rc" = 0 ] || fail "nextest (also alone)"
 }
 
@@ -247,6 +259,13 @@ DISTRO=$TENKO_GATE_WSL_DISTRO WSL_CHECKOUT=$TENKO_GATE_WSL_CHECKOUT
 THREADS=${TENKO_GATE_TEST_THREADS:-6} JOBS=${TENKO_GATE_BUILD_JOBS:-6}
 [[ "$THREADS" =~ ^[1-9][0-9]*$ && "$JOBS" =~ ^[1-9][0-9]*$ ]] ||
   die "TENKO_GATE_TEST_THREADS and TENKO_GATE_BUILD_JOBS are positive numbers"
+# Relative paths would land inside the worktree or, for the fuzz package, under fuzz/.
+for v in TENKO_GATE_WORKTREE TENKO_GATE_OUT_DIR TENKO_GATE_TARGET_DIR TENKO_GATE_TESTS_TARGET_DIR TENKO_GATE_FUZZ_TARGET_DIR; do
+  [[ "${!v}" =~ ^([A-Za-z]:)?/ ]] || die "$v is not an absolute path: ${!v}"
+done
+# The outputs of a run; a run with --from keeps its own beside those of the full run.
+P="$OUT/gate-$NAME$([ "$START" -gt 0 ] && echo "-from-$FROM")"
+NOTES="$OUT/gate-$NAME-alone.txt"
 
 export CARGO_BUILD_JOBS=$JOBS CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_INCREMENTAL=0
 export TENKO_DNSSEC_DOCKER=false TENKO_UI_STUB=1
@@ -263,14 +282,17 @@ if [ -n "$DRY" ]; then
       continue
     fi
     body=$(declare -f "step_${IDS[$i]//-/_}" | sed '1,2d;$d')
-    for v in T_MAIN T_TESTS T_FUZZ OUT NAME THREADS DISTRO WSL_CHECKOUT; do body=${body//\$$v/${!v}}; done
+    for v in T_MAIN T_TESTS T_FUZZ P NAME THREADS DISTRO WSL_CHECKOUT; do body=${body//\$$v/${!v}}; done
     echo "$body"
   done
   exit 0
 fi
 
-for tool in git node npm cargo wsl; do
+for tool in git node npm npx cargo wsl; do
   command -v "$tool" > /dev/null || die "$tool is not on PATH"
+done
+for sub in nextest deny; do
+  cargo "$sub" --version > /dev/null 2>&1 || die "cargo $sub is not installed"
 done
 git -C "$WT" rev-parse --is-inside-work-tree > /dev/null 2>&1 || die "TENKO_GATE_WORKTREE is not a git worktree: $WT"
 WT_REAL=$(cd "$WT" && pwd -P)
@@ -282,7 +304,9 @@ if [ "$START" -gt 0 ]; then
   [ "$(git rev-parse --abbrev-ref HEAD)" = "merge-$NAME" ] || die "--from $FROM continues merge-$NAME, which is not checked out in $WT"
 fi
 mkdir -p "$OUT" || die "cannot create $OUT"
-LOG="$OUT/gate-$NAME$([ "$START" -gt 0 ] && echo "-from-$FROM").log"
+LOG="$P.log"
+: > "$LOG" || die "cannot write $LOG"
+[ "$START" -gt 0 ] || : > "$NOTES"
 exec 3>&1 > "$LOG" 2>&1
 
 for ((i = START; i < ${#IDS[@]}; i++)); do

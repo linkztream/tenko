@@ -12,6 +12,9 @@
 repo=$TENKO_GATE_GITHUB_REPO
 [ -n "$repo" ] || { echo "watch-ci: missing configuration: TENKO_GATE_GITHUB_REPO" >&2; exit 2; }
 command -v gh > /dev/null || { echo "watch-ci: gh is not on PATH" >&2; exit 2; }
+# The waits below take a failed gh call for a run still pending; a gh without access would wait forever.
+gh repo view "$repo" --json name > /dev/null 2>&1 ||
+  { echo "watch-ci: gh cannot read $repo (signed in? repository right?)" >&2; exit 2; }
 
 # The jobs of one run that neither succeeded nor were skipped.
 failed_jobs() {

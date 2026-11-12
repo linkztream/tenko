@@ -142,11 +142,11 @@ describe("the changelog conflict merge", skipWithoutGit, () => {
 
 describe("the spec file", () => {
   test("squash and pick items in order; blank lines and comments are skipped", () => {
-    const spec = "# the morning batch\n\npick 745352e7\nsquash topic/a  fix(dns): a subject with  two spaces\n  pick 87315257  \n";
+    const spec = "# a batch\n\npick 0a1b2c3d\nsquash topic/a  fix(dns): a subject with  two spaces\n  pick 4e5f6a7b  \n";
     assert.deepEqual(parseSpec(spec), [
-      { kind: "pick", commit: "745352e7" },
+      { kind: "pick", commit: "0a1b2c3d" },
       { kind: "squash", branch: "topic/a", subject: "fix(dns): a subject with  two spaces" },
-      { kind: "pick", commit: "87315257" },
+      { kind: "pick", commit: "4e5f6a7b" },
     ]);
   });
 
@@ -157,7 +157,7 @@ describe("the spec file", () => {
   for (const [spec, reason] of [
     ["merge topic/a", /line 1: unknown item "merge"/],
     ["squash topic/a", /line 1: a squash needs a subject/],
-    ["\npick 745352e7 87315257", /line 2: a pick takes one commit/],
+    ["\npick 0a1b2c3d 4e5f6a7b", /line 2: a pick takes one commit/],
     ["pick", /line 1: an item needs a branch or a commit/],
     ["pick --upload-pack=x", /line 1: a branch or a commit cannot start with -/],
     ["# only a comment\n", /the spec file has no item/],
@@ -203,11 +203,12 @@ describe("the commit messages", () => {
     assert.equal(withoutSignOff("fix: x\n\nBody.\n\nSigned-off-by: A <a@example.com>\nSigned-off-by: B <b@example.com>\n"), "fix: x\n\nBody.\n\n");
   });
 
-  test("a work package number under Unreleased is found, one in a released section is not", () => {
+  test("a work package number under Unreleased is found with its line, one in a released section is not", () => {
     assert.deepEqual(packageNumbers(`${HEAD}### Fixed\n\n- The import (WP18.1) is bounded.\n${TAIL}- WP3.\n`), [
-      "- The import (WP18.1) is bounded.",
+      "7:- The import (WP18.1) is bounded.",
     ]);
-    assert.deepEqual(packageNumbers("## [Unreleased]\n### Nonsense\n- WP1\n"), []);
+    assert.deepEqual(packageNumbers("## [Unreleased]\n### Nonsense\n- WP1\n"), ["3:- WP1"], "a changelog that does not parse");
+    assert.deepEqual(packageNumbers("# Changelog\n- WP1\n"), []);
   });
 });
 
@@ -304,10 +305,10 @@ describe("the apply step", skipWithoutGit, () => {
   test("a dry run prints the git commands and changes nothing", () => {
     const { clone, run } = origin();
     const before = git(clone, "rev-parse", "HEAD");
-    const r = run("pick 745352e7\nsquash topic fix: x\n", ["--dry-run"]);
+    const r = run("pick 0a1b2c3d\nsquash topic fix: x\n", ["--dry-run"]);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /^git checkout -q -B merge-test origin\/main$/m);
-    assert.match(r.stdout, /^git cherry-pick 745352e7$/m);
+    assert.match(r.stdout, /^git cherry-pick 0a1b2c3d$/m);
     assert.match(r.stdout, /^git merge --squash topic$/m);
     assert.equal(git(clone, "rev-parse", "HEAD"), before);
   });

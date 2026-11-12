@@ -67,15 +67,19 @@ example after fixing what made a step red there; it needs no spec file. `--dry-r
 configuration but runs nothing: it prints the git commands of the apply step and the commands
 of every later step with the configuration filled in.
 
-The terminal shows each step's heading as it starts, the reruns and the result; everything
-else goes to the log. The last line is the result:
+The terminal shows each step's heading as it starts, the test summaries, the reruns and the
+result, and for a red step the last 20 lines of its output; everything goes to the log. The
+last line is the result:
 
 ```text
 gate batch: GREEN; log F:/gate-out/gate-batch.log
-gate batch: RED at step nextest (nextest (also alone)); log F:/gate-out/gate-batch.log
+gate batch: RED at step apply (conflict in crates/tenko-dns/src/lib.rs (0a1b2c3d)); log F:/gate-out/gate-batch.log
 ```
 
-Exit codes: 0 green, 1 a step failed, 2 bad usage or configuration.
+Exit codes: 0 green, 1 a step failed, 2 bad usage or configuration. Before the first step the
+gate checks the configuration (required variables present, paths absolute) and that `git`,
+`node`, `npm`, `npx`, `cargo`, `cargo nextest`, `cargo deny` and `wsl` are there. The commits
+on the merge branch carry the git identity configured for the gate's worktree.
 
 ### The spec file
 
@@ -86,7 +90,7 @@ One item per line, applied in order onto `origin/main`; blank lines and lines st
 # squash <branch> <subject>: the branch as one commit
 squash topic/dhcp-relay fix(dhcp): a relayed request keeps its gateway address
 # pick <commit>: the commit with its own message
-pick 745352e7
+pick 0a1b2c3d
 ```
 
 A squash commit's message is the subject, then the messages of the branch's commits, oldest
@@ -135,25 +139,30 @@ Every cargo command runs with `CARGO_BUILD_JOBS` from the configuration,
 A test that fails in the full run, on a machine loaded by everything else the gate does, is
 run again alone to tell load from a defect:
 
-- `ui`: each failed test file again alone (`npx vitest run <file>`).
-- `nextest`: the failed tests again together on one thread (`--test-threads 1`, a filter of
-  their names).
+- `ui`: each failed test file again alone (`npx vitest run <file>`). An error outside the
+  tests (an unhandled error or rejection) names no file to rerun and fails the step at once.
+- `nextest`: every test that did not pass (failed, timed out, leaked a process or ended on a
+  signal) again, together on one thread (`--test-threads 1`, a filter of their names).
 
 When every rerun passes, the step is green, and the result names each test that passed only
-alone above the last line. When one fails alone too, the step is red. A test that passes only
-alone still has a cause, in the product or in the test; the gate never hides it.
+alone above the last line. When one fails alone too, the step is red. The names are kept in
+`gate-<name>-alone.txt` for every run of that name, so a later `--from` run names them too;
+a run from the first step starts the list again. A test that passes only alone still has a
+cause, in the product or in the test; the gate never hides it.
 
 ## Output
 
-In `TENKO_GATE_OUT_DIR`, for a run named `<name>`:
+In `TENKO_GATE_OUT_DIR`, for a run named `<name>`; a run with `--from <step>` writes its own
+files as `gate-<name>-from-<step>*`, beside those of the full run:
 
 | File | Content |
 |---|---|
-| `gate-<name>.log` | The whole run (`gate-<name>-from-<step>.log` for a run with `--from`). |
+| `gate-<name>.log` | The whole run. |
 | `gate-<name>-ui-tests.txt` | The output of the UI unit tests. |
 | `gate-<name>-nextest.txt` | The nextest output without the passing tests. |
 | `gate-<name>-nextest-alone.txt` | The rerun of the failed tests, when there was one. |
 | `gate-<name>-junit.xml` | nextest's JUnit report of the full run. |
+| `gate-<name>-alone.txt` | The tests that failed in a full run, and how they did alone (shared by the runs of one name). |
 
 ## `watch-ci.sh`
 
