@@ -327,8 +327,13 @@ pub struct TierSpec {
     pub buckets: usize,
 }
 
-/// The tiers of every figure but the ratios, finest first: two days in 274 buckets (71 × 1 s,
-/// 61 × 10 s, 61 × 1 min, 37 × 10 min, 44 × 1 h), 8.6 KiB a figure.
+/// The tiers of every figure but the ratios, finest first: two days in 279 buckets (71 × 1 s,
+/// 61 × 10 s, 61 × 1 min, 37 × 10 min, 49 × 1 h), 8.7 KiB a figure. A ring holds its newest
+/// buckets, the open one included, so a ring of `r` buckets of step `s` reaches back
+/// `(r − 1) × s` in the worst case (its open bucket just started). Each finer ring reaches the
+/// age at which the next coarser tier takes over, `(r − 1) × s` less the coarser step: 60 s,
+/// 9 min, 50 min and 5 h; the hour ring reaches the whole two days by itself (48 h), because
+/// its newest buckets overlap the finer tiers.
 pub const HISTORY_TIERS: [TierSpec; 5] = [
     TierSpec {
         step_ms: 1_000,
@@ -348,7 +353,7 @@ pub const HISTORY_TIERS: [TierSpec; 5] = [
     },
     TierSpec {
         step_ms: 3_600_000,
-        buckets: 44,
+        buckets: 49,
     },
 ];
 
@@ -2159,38 +2164,45 @@ mod tests {
         assert_eq!(merges(MetricsMerge::Sum), 15);
     }
 
-    /// The memory budget of section 2 of the plan (OPS-21): 32 bytes a bucket, 274 buckets a
+    /// The memory budget of section 2 of the plan (OPS-21): 32 bytes a bucket, 279 buckets a
     /// figure, about 214 KiB a controller with 25 figures.
     #[test]
     fn the_tiers_hold_two_days_within_the_budget() {
         assert_eq!(std::mem::size_of::<MetricsBucket>(), BUCKET_BYTES);
         let buckets = |tiers: &[TierSpec]| tiers.iter().map(|tier| tier.buckets).sum::<usize>();
-        assert_eq!(buckets(&HISTORY_TIERS), 274);
+        assert_eq!(buckets(&HISTORY_TIERS), 279);
         assert_eq!(
             buckets(&HISTORY_TIERS) * BUCKET_BYTES,
-            8_768,
-            "8.6 KiB a figure"
+            8_928,
+            "8.7 KiB a figure"
         );
-        assert_eq!(buckets(&RATIO_HISTORY_TIERS), 218);
+        assert_eq!(buckets(&RATIO_HISTORY_TIERS), 223);
         let controller: usize = MetricsFigure::ALL
             .into_iter()
             .map(|figure| buckets(figure.tiers()) * BUCKET_BYTES)
             .sum();
-        assert_eq!(
-            controller, 215_616,
-            "under 25 figures of 274 buckets, 219,200 bytes"
-        );
+        assert_eq!(controller, 219_616, "214 KiB a controller");
+        // A ring of r buckets of step s reaches back (r − 1) × s at least.
+        let reach = |tier: TierSpec| {
+            u64::from(tier.step_ms) * (u64::try_from(tier.buckets).expect("a ring size") - 1)
+        };
         for tiers in [&HISTORY_TIERS, &RATIO_HISTORY_TIERS] {
-            // Each step a whole multiple of the one before, the coarsest reaching two days.
-            assert!(
-                tiers
-                    .windows(2)
-                    .all(|pair| pair[1].step_ms % pair[0].step_ms == 0)
-            );
-            let last = tiers[4];
-            let ring = u64::try_from(last.buckets).expect("a ring size");
-            assert!(u64::from(last.step_ms) * (ring - 1) >= HISTORY_REACH_MS - 6 * 3_600_000);
+            // Each step a whole multiple of the one before; each ring reaches past the next
+            // coarser step, so a coarser tier takes over before the finer one ends.
+            for pair in tiers.windows(2) {
+                assert_eq!(pair[1].step_ms % pair[0].step_ms, 0);
+                assert!(reach(pair[0]) > u64::from(pair[1].step_ms));
+            }
+            // The coarsest ring alone reaches the whole two days: its newest buckets overlap
+            // the finer tiers.
+            assert!(reach(tiers[4]) >= HISTORY_REACH_MS);
         }
+        // The ages at which the next coarser tier takes over: 60 s, 9 min, 50 min, 5 h.
+        let hand_over: Vec<u64> = HISTORY_TIERS
+            .windows(2)
+            .map(|pair| reach(pair[0]) - u64::from(pair[1].step_ms))
+            .collect();
+        assert_eq!(hand_over, [60_000, 540_000, 3_000_000, 18_000_000]);
     }
 
     /// A whole history of 25 figures and three controllers, every ring full, on the event

@@ -14236,7 +14236,7 @@ export interface components {
             /**
              * Format: int64
              * @description Bytes the history of the tiles holds in memory, allocated once at start: this
-             *     controller's rings (32 bytes a bucket, 274 buckets a figure, about 214 KiB for 25
+             *     controller's rings (32 bytes a bucket, 279 buckets a figure, about 214 KiB for 25
              *     figures), on the controller that serves a cluster's dashboard also the peers' tiers and
              *     the combined history with its encoded frame (about 1.0 MiB with three controllers).
              */
