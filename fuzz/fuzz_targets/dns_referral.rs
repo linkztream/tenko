@@ -9,7 +9,7 @@ use tenko_dns::{
         denial::store::{MAX_DELEGATION_ADDRESSES, MAX_DELEGATION_SERVERS},
     },
     recurse::message::{Composed, GlueKind, MAX_RECORDS, Rr, Step, classify, compose, parse, within},
-    recursion::denial::{DenialCache, Origin},
+    recursion::denial::{DenialScope, Origin},
     wire,
 };
 
@@ -24,8 +24,10 @@ const ZONES: [&[u8]; 3] = [b"\x00", b"\x04test\x00", b"\x07example\x04test\x00"]
 fn check_denials(message: &[u8], qname: &[u8], carried: bool) {
     let cache = Denials::new(DenialSettings::default());
     let now = Instant::now();
+    // The default resolution of no view: the path the resolver's own answers take.
+    let scope = DenialScope::of_view(None);
     if !cache.insert_carried(
-        None,
+        scope,
         message,
         &Verdict::UNVALIDATED,
         Origin::Recursion,
@@ -65,7 +67,7 @@ fn check_denials(message: &[u8], qname: &[u8], carried: bool) {
         };
         let mut out = Vec::with_capacity(65_535);
         if cache
-            .answer_carrying(None, &below, 1, &client, now, &mut out, carry)
+            .answer_carrying(scope, &below, 1, &client, now, &mut out, carry)
             .is_none()
         {
             continue;
