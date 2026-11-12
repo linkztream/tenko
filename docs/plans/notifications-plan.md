@@ -416,7 +416,7 @@ Every package below owns files under `crates/tenko-core/src/alarm.rs` and `notif
 #### WP16.7 The lab, the security rows, the documents and the live test (4 builder-days, plus the owner's hour)
 
 - **Requirements:** OPS-29, IAM-16.
-- **Owns:** `deploy/compose/lab-notify/**` once the earlier packages have landed their pieces, the rows below in `deploy/security/`, `docs/notifications.md` (the earlier packages hand their sections over as text in their hand-over notes; one writer), the rows of [CONFORMANCE.md](../CONFORMANCE.md), the TGL-41 row of [SECURITY-PROFILES.md](../SECURITY-PROFILES.md) (with the lead), `bench/notify/results/<date>-live.md` (no real names), `docs/plans/notifications-exit.md`.
+- **Owns:** `deploy/compose/lab-notify/**` once the earlier packages have landed their pieces, the rows below in `deploy/security/`, `docs/notifications.md` (the earlier packages hand their sections over as text in their notes; one writer), the rows of [CONFORMANCE.md](../CONFORMANCE.md), the TGL-41 row of [SECURITY-PROFILES.md](../SECURITY-PROFILES.md) (with the lead), `bench/notify/results/<date>-live.md` (no real names), `docs/plans/notifications-exit.md`.
 - **Depends on:** WP16.2 to WP16.6.
 - **The rows:**
 

@@ -209,7 +209,7 @@ Counts per group: engine and role 6, zones and API 3, IPAM link 4, resolver and 
 | SSID writes (CONN-18) and DHCP relay verification on UniFi | Phase 3, with the DHCP work | plan P2-Q13; phase-1-exit section 4 |
 | DHCP on one node first; failover pairs and relay across nodes with the cluster work | Phase 3 (one node), Phase 5 (cluster) | plan 2.10 |
 | DHCP tiles on the dashboard and samples from probes | Phase 3 | WP5.6 row; phase-1-exit deviation 29 |
-| Raw-socket scanner methods; DHCP snooping with Tenko DHCP | A side package when the quota allows; snooping in Phase 3 | plan P2-Q13; phase-1-exit section 4 |
+| Raw-socket scanner methods; DHCP snooping with Tenko DHCP | A side package when time allows; snooping in Phase 3 | plan P2-Q13; phase-1-exit section 4 |
 | Webhook ingress route `POST /connectors/{id}/webhook` | With its first webhook source | plan P2-Q13 |
 | GSS-TSIG, aging and the AD DNS features (DNS-28 to DNS-33) | Phase 4 | plan 1.6; deviation 139 |
 | Upstream round-trip times and health shown in the status, the forwarders page and the CLI | Backlog | backlog; deviation 89 |
@@ -244,7 +244,7 @@ Counts per group: engine and role 6, zones and API 3, IPAM link 4, resolver and 
 
 ## 6. What the owner runs
 
-Placeholders: `<host-name>` is the name clients use for the controller, `<admin>` an administrator login, `<ctid>` a Proxmox container ID, `<version>` a release version, `192.0.2.10` the node, `192.0.2.20` the load generator and `192.0.2.30` the workstation in section 6.1, `example.test` a zone. Nothing here needs a secret typed into a chat: passwords and tokens go in at the prompt of the command that asks, or into the owner's `.env`.
+Placeholders: `<host-name>` is the name clients use for the controller, `<admin>` an administrator login, `<ctid>` a Proxmox container ID, `<version>` a release version, `192.0.2.10` the node, `192.0.2.20` the load generator and `192.0.2.30` the workstation in section 6.1, `example.test` a zone. Nothing here needs a secret sent in a message: passwords and tokens go in at the prompt of the command that asks, or into the owner's `.env`.
 
 Where a command does not exist, the row says so. Nothing is invented. Commands copied from [deploy/README.md](../../deploy/README.md), [deploy/proxmox/README.md](../../deploy/proxmox/README.md) and [deploy/windows/README.md](../../deploy/windows/README.md) keep the version numbers those files use in their examples (0.2.0, 0.3.0); replace them with the version of the build under test (deviation 130).
 

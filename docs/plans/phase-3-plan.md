@@ -71,11 +71,11 @@ Why this order (decided as P3-Q3 and P3-Q9): Slice 7 is what every other package
 | The move job's DHCP step `ipam.move.dhcp`, a manual task `dhcp.manual` since Phase 1 (docs/moves.md section 4) | WP8.1 makes it automatic |
 | `ObservationSource::DhcpLease { node }`, defined in Phase 1 and unused | WP8.1 writes it at commit |
 | `Origin::Dhcp` on RRsets, defined in Phase 2 and unused | WP8.3 (DDNS) |
-| The Phase 1 scanner's raw-socket methods (WP3.14: `arp_sweep`, `tcp_syn`, passive `lldp`, `os_fingerprint`; deviation 53 of the Phase 1 exit document) | Built now by another builder in parallel, decided by the owner on 2026-10-21; a Phase 1 carry-over that closes alongside Phase 3, not a Phase 3 package. The conflict probe of WP8.5 uses its ARP method when it lands |
+| The Phase 1 scanner's raw-socket methods (WP3.14: `arp_sweep`, `tcp_syn`, passive `lldp`, `os_fingerprint`; deviation 53 of the Phase 1 exit document) | Built now in parallel, decided by the owner on 2026-10-21; a Phase 1 carry-over that closes alongside Phase 3, not a Phase 3 package. The conflict probe of WP8.5 uses its ARP method when it lands |
 | DHCP snooping as a passive source (SCAN-03) | Not built: Tenko's own leases are the better source once Tenko serves DHCP; a probe beside a foreign DHCP server stays a Phase 4 coexistence question |
 | SSID writes and DHCP relay verification on UniFi (P2-Q13 moved them to the DHCP work) | P3-Q18 |
 | The DNS and DHCP tiles of OPS-20 (item 29 of the Phase 1 exit document) | DNS tiles in Phase 2; DHCP tiles in WP8.7 |
-| The owner's backlog of the test drive (phase-2-status.md) | Not DHCP; stays in the Phase 2 status file for the lead to schedule |
+| The owner's backlog of the test drive (phase-2-status.md) | Not DHCP; stays in the Phase 2 status file for the maintainer to schedule |
 
 ### 1.6 Left out, with reasons
 
@@ -94,7 +94,7 @@ Why this order (decided as P3-Q3 and P3-Q9): Slice 7 is what every other package
 
 Facts the packages build on (read on `a3ac150`):
 
-- **Crate.** `crates/tenko-dhcp` is a placeholder (a name and a version, no dependencies). A sibling builder writes the DHCPv4 wire codec in `crates/tenko-dhcp/src/v4/` now (WP7.1a, on its own branch, no commit on `main` yet). ARCHITECTURE.md names `dhcproto` as the candidate wire crate; it decodes into owned structures and allocates per message, so the plan keeps it as the differential test crate only, as `hickory-proto` is for DNS (ADR 0019).
+- **Crate.** `crates/tenko-dhcp` is a placeholder (a name and a version, no dependencies). The DHCPv4 wire codec is written in `crates/tenko-dhcp/src/v4/` now (WP7.1a, on its own branch, no commit on `main` yet). ARCHITECTURE.md names `dhcproto` as the candidate wire crate; it decodes into owned structures and allocates per message, so the plan keeps it as the differential test crate only, as `hickory-proto` is for DNS (ADR 0019).
 - **Roles and modules.** `Role::Dhcp` exists ("DHCP data plane: DHCPv4 and DHCPv6 service") and `TENKO_ROLES=dhcp` parses; the role starts nothing. `TENKO_MODULES=dhcp` parses (OPS-25). The Linux installer, the Proxmox script and the MSI pass roles through (`TENKO_ROLES`), so a `dhcp` role needs no installer change beyond the capabilities.
 - **Store.** Twelve namespaces in `tenko_core::names::NAMESPACES`; `dhcp` is not among them. The data format is 3 (WP4.0). The coalescer measured 1,000 updates per second with deferred durability and 998 with immediate durability, closed loops of 6,271 and 3,156 per second (M5); an RFC 2136 update through the zone service, the store and the index answered with p99 14.9 to 19.4 ms at 1,000 updates per second on one node (M21). The store's test hook `TENKO_TEST_REFUSE_WRITES_FILE` makes it answer NoQuorum (WP6.2). The fsync probe measured p50 3.7 ms on the NVMe drive (M10).
 - **Feed pattern.** `tenko_dns::store_feed` is the in-process derived index of the store that the `dns` role serves from (WP4.3): an image at a revision, then deltas in revision order, a reset after a snapshot install. The DHCP role's configuration and lease tables use the same pattern.
@@ -153,7 +153,7 @@ Decision P3-Q5: the gateway relays every network to one Tenko node; no node per 
 
 ### 2.6 The engine and the codec
 
-The DHCPv4 codec is Tenko's own, allocation-free, in the manner of the DNS codec: a borrowed view over the received octets that validates the fixed header and walks the options once (with RFC 3396 concatenation into a per-worker scratch buffer), and a reply builder into a fixed-capacity buffer that writes the options in order and refuses to overflow. The sibling builder writes it now (WP7.1a) with tests and a fuzz target; `dhcproto` is a dev-dependency only, for a differential test over a corpus (ADR 0019). The engine is a pure function of the configuration image, the lease table, the request and the clock, which returns the reply and the lease change to commit; the role wraps it in the sockets and the commit. Every message type of RFC 2131 is handled: DISCOVER, REQUEST in its four states (SELECTING, INIT-REBOOT, RENEWING, REBINDING), DECLINE, RELEASE, INFORM; NAK where RFC 2131 asks for it and only when the scope is authoritative (an INIT-REBOOT for an address of another network). Client identity follows RFC 4361 and RFC 6842: the client identifier (option 61) when present, else hardware type and `chaddr`, and option 61 is echoed in the reply.
+The DHCPv4 codec is Tenko's own, allocation-free, in the manner of the DNS codec: a borrowed view over the received octets that validates the fixed header and walks the options once (with RFC 3396 concatenation into a per-worker scratch buffer), and a reply builder into a fixed-capacity buffer that writes the options in order and refuses to overflow. It is written now (WP7.1a) with tests and a fuzz target; `dhcproto` is a dev-dependency only, for a differential test over a corpus (ADR 0019). The engine is a pure function of the configuration image, the lease table, the request and the clock, which returns the reply and the lease change to commit; the role wraps it in the sockets and the commit. Every message type of RFC 2131 is handled: DISCOVER, REQUEST in its four states (SELECTING, INIT-REBOOT, RENEWING, REBINDING), DECLINE, RELEASE, INFORM; NAK where RFC 2131 asks for it and only when the scope is authoritative (an INIT-REBOOT for an address of another network). Client identity follows RFC 4361 and RFC 6842: the client identifier (option 61) when present, else hardware type and `chaddr`, and option 61 is echoed in the reply.
 
 ### 2.7 Conflict detection and DECLINE
 
@@ -218,7 +218,7 @@ Measurement rule: every Phase 3 figure is a single-node figure (the load generat
 
 ## 3. Contracts and shared files (WP7.0)
 
-The lead writes these with one Opus builder before any other Slice 7 package starts, as WP4.0 did; WP7.1a runs beside it because the codec owns its own files.
+These are written before any other Slice 7 package starts, as WP4.0 did; WP7.1a runs beside it because the codec owns its own files.
 
 ### 3.1 Model (`tenko-core::dhcp`)
 
@@ -253,7 +253,7 @@ The lead writes these with one Opus builder before any other Slice 7 package sta
 - Config keys `[dhcp]`: `listen` (address and mode `relay` or `direct` per entry), `workers`, `offer_secs`, `[dhcp.probe]` (`timeout_ms` 300, `cache_secs` 600), `[dhcp.decline]` (`hold_secs` 86,400), `[dhcp.ddns]` (`retries`, `backoff_ms`), `[dhcp.history]` (`days` per profile), `[dhcp.v6]` in Slice 9; documented in `deploy/tenko.example.toml`.
 - The UI gets a `dhcp` area with routes scopes, scope page, shared networks, options, classes and policies, filters, leases (with the live view), history; the reservations block on the host page; `/ipam/reconcile`; `/settings/dhcp`; the first-run wizard's DHCP step; i18n units in en and sv per area, loaded with the area's chunk.
 
-### 3.5 Shared files the lead owns
+### 3.5 Shared files the maintainer owns
 
 `Cargo.toml` (workspace dependencies: `dhcproto` as a dev-dependency after WP7.0's evaluation), `deny.toml`, `crates/tenko-core/src/names.rs`, `crates/tenko-cluster/src/node_sync/tables.rs`, `docs/api/openapi.json` (regenerated by the gate), `ui/src/App.tsx` routes, `fuzz/Cargo.toml`, `.github/workflows/ci.yml` (the DHCP lab job), `deploy/systemd/tenko.service` and its drop-ins, `scripts/requirement-trace.mjs` (`--phase 3` with E22 to E32).
 
@@ -272,7 +272,7 @@ The lead writes these with one Opus builder before any other Slice 7 package sta
 #### WP7.1a DHCPv4 wire codec (S, in progress)
 
 - **Owns:** `crates/tenko-dhcp/src/v4/**`: the allocation-free message view and the reply builder, the RFC 3396 concatenation, the option iterator, tests, the fuzz target.
-- **State:** being written now by a sibling builder on its own branch from `main` at `a3ac150` (nothing merged yet).
+- **State:** being written now on its own branch from `main` at `a3ac150` (nothing merged yet).
 - **Acceptance:** byte-exact tests for every builder path and the RFC 2131 header rules; zero allocations under the counting allocator; the fuzz target in the weekly smoke; the differential test against `dhcproto` once WP7.0 adds it.
 - **Size and risk:** S; R67.
 
@@ -421,9 +421,9 @@ Added on 2026-11-03 on the owner's decision, after the security round's `fuzz.ta
 Added on 2026-11-04 on the owner's decision, after feedback that the user interface read as British English ("enrol") where the industry writes American ("enroll"), and a count that found the repository mixed: `/api/v1/nodes/enrol` beside `/api/v1/auth/totp/enroll`, 3,861 British forms in 707 files. One standard, inside and out: code identifiers, API names, CLI names, configuration keys, error codes, interface text, documentation, comments and the changelog are American English with Merriam-Webster's first spelling, and a check in CI keeps it so. <!-- spelling: alias until 0.0.13 -->
 
 - **Owns:** the convention in `CONTRIBUTING.md`; `scripts/spelling.mjs` with its test and the CI job `Spelling`; the renames across `crates/`, `ui/`, `docs/`, `deploy/`, the changelog's text; the public names with their compatibility: the three node enrollment routes answer on the old path as an alias until 0.0.13, the configuration key `enrollment_ttl_secs` and the environment variable `TENKO_ENROLL_TOKEN` read their old names until 0.0.13, `tenko node enroll` and `node enroll-token` carry hidden aliases until 0.0.13, the job and scan state `canceled` reads `cancelled` permanently (stored data carries it), stored key bytes keep their spelling under American constant names (no data migration for a spelling), error codes and audit action names change with every reader of old audit entries matching both. <!-- spelling: alias until 0.0.13 -->
-- **Depends on:** nothing open. Four builders with disjoint files (Rust; UI; documentation and deployment; the check and the convention), merged in that order with the generated UI types and the traces regenerated at the merge.
+- **Depends on:** nothing open. Four packages with disjoint files (Rust; UI; documentation and deployment; the check and the convention), merged in that order with the generated UI types and the traces regenerated at the merge.
 - **Acceptance:** `node scripts/spelling.mjs` exits 0 on the tree with the stated exceptions (third-party data in `crates/tenko-scan/data/oui.tsv`, dependency identifiers, URLs, marked alias lines); the old API paths, configuration key, environment variable and CLI names still work and have tests; data written by 0.0.11 (a `cancelled` job, the enrollment registry) reads back, proven by fixtures; the full gate green including Playwright; the changelog's Changed entry lists every rename with its alias and the release that drops it. <!-- spelling: alias until 0.0.13 -->
-- **Size and risk:** M (one builder-day across four builders). The risk is a public name renamed without its alias or a stored value renamed without its reader; the public surface table of the work's mapping and the fixture tests are the answer.
+- **Size and risk:** M (one builder-day across four packages). The risk is a public name renamed without its alias or a stored value renamed without its reader; the public surface table of the work's mapping and the fixture tests are the answer.
 
 #### WP9.11 The enrollment token carries the CA fingerprint (S)
 
@@ -471,7 +471,7 @@ graph LR
 | Merge | Contents | Gate |
 |---|---|---|
 | M7.0 | WP7.0, and WP7.1a when it is ready (they touch different files) | Workspace builds, model tests, deny, the allocator test, the codec's byte-exact tests and fuzz target listed |
-| M7.1 | WP7.2, WP7.3, WP7.4 (three builders at once after M7.0) | Engine state tests, perfdhcp against the engine, the crash test on the workstation, route tests |
+| M7.1 | WP7.2, WP7.3, WP7.4 (three packages at once after M7.0) | Engine state tests, perfdhcp against the engine, the crash test on the workstation, route tests |
 | M7.2 | WP7.5, WP7.6 | One node serves perfdhcp through the binary; the DHCP lab job green; M26 to M28 on loopback; then the first test drive on the lab VMs (P3-Q11) |
 | M8.1 | WP8.1, WP8.3, WP8.5 (parallel) | E25, E26, the conflict rows of E27 |
 | M8.2 | WP8.2, WP8.4 | E27 complete, E28 |
@@ -480,7 +480,7 @@ graph LR
 | M9.2 | WP9.2, WP9.4 | E29 complete |
 | M9.3 | WP9.5 | E22 on the real link, E32, the exit document |
 
-Builders run as in Phase 2: local Opus agents in their own worktrees with their own `CARGO_TARGET_DIR` under `F:\`, briefed by the lead, Sonnet for the leaf tasks (fixtures, XLIFF units, the option catalog table, captured requests); the lead gates and squashes in `F:\tenko-verify` with the Phase 2 gate (workspace clippy and tests, lab acceptance, UI tests, Playwright, the traces, the changelog, deny, the fuzz crate's `cargo check --locked`, the embedded build) plus the DHCP lab job and a perfdhcp smoke. Up to three builders at once within the weekly quota.
+Packages run as in Phase 2, each with its own `CARGO_TARGET_DIR` under `F:\`; the leaf tasks (fixtures, XLIFF units, the option catalog table, captured requests) are separate small jobs; the maintainer gates and squashes in `F:\tenko-verify` with the Phase 2 gate (workspace clippy and tests, lab acceptance, UI tests, Playwright, the traces, the changelog, deny, the fuzz crate's `cargo check --locked`, the embedded build) plus the DHCP lab job and a perfdhcp smoke. Up to three packages at once.
 
 ## 6. Measurements and exit checks
 
@@ -505,7 +505,7 @@ Comparison points, with their caveats. ISC publishes performance reports per Kea
 
 **Decided by the owner on 2026-10-21:** P3-Q1 to P3-Q11 below, with the options and trade-offs kept as written. P3-Q12 to P3-Q18 were decided by the owner on 2026-10-22 (each marked "Decided by the owner on 2026-10-22" below).
 
-Document changes the decisions imply (the lead's files, proposed here): DHCP-07 to read "Durable leases in the replicated store, committed before the answer, with lease history" (it says today that leases never pass through the global Raft group); ARCHITECTURE.md "What lives where" and "Storage and replication" point 4 the same; ADR 0002 point 4 superseded for leases by ADR 0019 once that is accepted; DHCP-12 and DHCP-18 to Phase 5 in REQUIREMENTS.md; the ROADMAP's Phase 3 "Done when" failover line moved to Phase 5 and its "DHCPv4/v6, failover" theme adjusted; OPS-02 and OPS-26 noted for the DHCP behavior while the store refuses (P3-Q14); a toggle row for DDNS from DHCP and one for lease history in SECURITY-PROFILES.md (2.11); the ROADMAP's open question "IPv6 in the reference home network today" answered by P3-Q3.
+Document changes the decisions imply (the maintainer's files, proposed here): DHCP-07 to read "Durable leases in the replicated store, committed before the answer, with lease history" (it says today that leases never pass through the global Raft group); ARCHITECTURE.md "What lives where" and "Storage and replication" point 4 the same; ADR 0002 point 4 superseded for leases by ADR 0019 once that is accepted; DHCP-12 and DHCP-18 to Phase 5 in REQUIREMENTS.md; the ROADMAP's Phase 3 "Done when" failover line moved to Phase 5 and its "DHCPv4/v6, failover" theme adjusted; OPS-02 and OPS-26 noted for the DHCP behavior while the store refuses (P3-Q14); a toggle row for DDNS from DHCP and one for lease history in SECURITY-PROFILES.md (2.11); the ROADMAP's open question "IPv6 in the reference home network today" answered by P3-Q3.
 
 **P3-Q1. How are leases made durable?**
 - Options: (a) a lease is a row in the replicated store, committed through the coalescer before the ACK; (b) a local lease write-ahead log per node with group commit and a checkpoint, leases outside Raft (DHCP-07 as written, Kea's memfile and ISC dhcpd's lease file in spirit); (c) a node-local `redb` database for leases.
@@ -594,7 +594,7 @@ Document changes the decisions imply (the lead's files, proposed here): DHCP-07 
 
 **P3-Q18. The carried UniFi items: DHCP relay verification and SSID writes?**
 - Options: (a) the relay is set and checked by hand in the cut-over runbook (the classic API shows no relay targets to verify, Phase 1 deviation 47); SSID writes stay out until a move needs them; (b) a connector package for both in Slice 8; (c) relay verification through a test request from the probe instead of the controller's API.
-- Trade-offs: (a) costs nothing and E23 needs only four relay settings once. (b) spends a builder on a vendor API that may not show what is needed. (c) is a real check that needs a probe in each network, which the reference environment has (SCAN-01): a DHCP INFORM from the probe through the gateway shows the relay works.
+- Trade-offs: (a) costs nothing and E23 needs only four relay settings once. (b) spends a package on a vendor API that may not show what is needed. (c) is a real check that needs a probe in each network, which the reference environment has (SCAN-01): a DHCP INFORM from the probe through the gateway shows the relay works.
 - Recommendation: (a), with (c) as a small addition to WP8.7 if the probes are in place. Decided by the owner on 2026-10-22: (a) with (c). Needed before: WP8.7.
 
 ## 8. Risks
@@ -617,7 +617,7 @@ Phase 2 used R38 to R54; this phase continues at R55.
 | R66 | Fingerprint coverage and accuracy | A confidence per guess; the reconciler's precedence puts active scans above it; the rule table grows from captured requests with tests |
 | R67 | Tenko's own DHCPv4 and DHCPv6 codecs carry the parser bugs that DHCP servers are known for | Allocation-free, bounds-checked views; fuzz targets before merge (API-15); the differential test on `dhcproto`; no `unsafe` |
 | R68 | perfdhcp on WSL2 loses packets on the loopback relay (as M24 did for DNS) and its rates differ from real clients | Linux figures on the lab VMs; the workstation gives Windows figures and functional runs; real clients in the lab containers and at E23 |
-| R69 | Quota: three slices of builder work within the weekly pools | Builders start after the Thursday reset; at most three at once; Sonnet for leaf tasks; the lab and measurement runs happen while builders are idle |
+| R69 | Parallel work: three slices of package work | At most three packages at once; the lab and measurement runs happen while no package is running |
 | R70 | DHCPv6 in the reference environment depends on the gateway's router advertisements (M and O flags) and on whether IPv6 is used at all | The RA check of DHCP-10; Slice 9 may slip (P3-Q3); the lab covers the protocol without the home network |
 | R71 | PXE testing needs firmware and VMs | QEMU with its iPXE ROM in BIOS and UEFI mode in the compose lab; one real PXE boot of a throw-away VM on the owner's Proxmox host as an owner step |
 
@@ -626,11 +626,11 @@ Phase 2 used R38 to R54; this phase continues at R55.
 | When | Action |
 |---|---|
 | Before WP7.0 | Read the plan; confirm the fallback line of P3-Q1 and answer P3-Q12 to P3-Q18 (done on 2026-10-22) |
-| Before M7.2 and the first test drive (P3-Q11) | On the two lab VMs: a separate virtual network between them (a Proxmox bridge or VLAN with no other DHCP server on it); perfdhcp from the distribution's Kea packages or ISC's packages on the load VM; the node VM with the musl binary through `deploy/install.sh`; the lead gives the commands |
+| Before M7.2 and the first test drive (P3-Q11) | On the two lab VMs: a separate virtual network between them (a Proxmox bridge or VLAN with no other DHCP server on it); perfdhcp from the distribution's Kea packages or ISC's packages on the load VM; the node VM with the musl binary through `deploy/install.sh`; the maintainer gives the commands |
 | Before WP8.4 | Optional: a throw-away VM on the lab network that boots over PXE, for one real boot besides the QEMU cases |
 | Before WP8.7 and E23 | Choose the cut-over day; shorten the lease time on the existing DHCP server a few days before; confirm that the gateway can relay each of the four networks to one address (the relay setting per network on the UniFi gateway, described generically in the runbook); make sure the reservations of the four networks exist in IPAM (from the spreadsheet import, or entered) |
-| Before WP7.0 (for the Phase 4 mapping, P3-Q10) | Optional: run `Export-DhcpServer` with leases on the existing Windows DHCP server and keep the XML on the owner's machine; the builder writes the mapping against the published structure and a hand-written fixture with documentation addresses, and the owner checks the mapping against the real file locally; nothing from the real export enters the repository |
-| Before WP9.5 | The two lab VMs for the real-link runs and the power-off runs of M32 (the owner powers the VM off from the Proxmox host on the lead's signal) |
+| Before WP7.0 (for the Phase 4 mapping, P3-Q10) | Optional: run `Export-DhcpServer` with leases on the existing Windows DHCP server and keep the XML on the owner's machine; the mapping is written against the published structure and a hand-written fixture with documentation addresses, and the owner checks the mapping against the real file locally; nothing from the real export enters the repository |
+| Before WP9.5 | The two lab VMs for the real-link runs and the power-off runs of M32 (the owner powers the VM off from the Proxmox host on the maintainer's signal) |
 | During the phase | A third VM only if the client simulation in containers proves too thin (real DHCPv6 and PXE client behavior); not needed by the plan as it stands |
 
 ## 10. Documents this phase writes
@@ -643,7 +643,7 @@ Phase 2 used R38 to R54; this phase continues at R55.
 | docs/moves.md and docs/reconciliation.md (the automatic DHCP step, the lease observations, the IPAM-21 view) | WP8.1, WP8.2 |
 | `deploy/README.md` (ports 67 and 547, relay and direct mode, capabilities, LXC and containers), `deploy/tenko.example.toml` (`[dhcp]`), `deploy/compose/lab-dhcp` | WP7.5, WP7.6 |
 | `bench/phase3-dhcp/README.md` and results | WP7.6, WP9.5 |
-| `docs/plans/phase-3-status.md` (the hand-over file), `docs/plans/phase-3-exit.md`, the trace file for E22 to E32 | the lead; WP9.5 |
+| `docs/plans/phase-3-status.md` (the hand-over file), `docs/plans/phase-3-exit.md`, the trace file for E22 to E32 | the maintainer; WP9.5 |
 | CONFORMANCE.md rows from Planned to Implemented as each RFC lands (the DHCP rows this plan adds: RFC 3011, 3396, 3442, 3646, 3942, 4361, 4388, 5071, 5908, 6842, 7969 and the PXE and UEFI specifications); CHANGELOG entries per package | every package |
 
-The lead links this plan from `ROADMAP.md`'s Phase 3 section, records the owner's answers to section 7 here, makes the document changes listed at the head of section 7, and keeps the package states in the status document as in Phase 2.
+The maintainer links this plan from `ROADMAP.md`'s Phase 3 section, records the owner's answers to section 7 here, makes the document changes listed at the head of section 7, and keeps the package states in the status document as in Phase 2.

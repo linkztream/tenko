@@ -78,7 +78,7 @@ One slice, numbered after Phase 3's: **Slice 10, the recursive resolver**. Phase
 | `AnswerBuf::authenticated` and `Request::ad`, present since WP4.0 and set by nothing | WP10.2 sets AD from the validation state |
 | The note "AD clear (no validation in Phase 2)" in `cache.rs` and the keying of the cache on DO and CD | WP10.0 changes the key and the entry (section 2.2) |
 | NSDNAME and NSIP triggers of RPZ, documented as unmatchable by a forwarding resolver | E41 |
-| TGL-12 "DNSSEC validation", listed for Phase 5 with the note that validation is the upstream resolver's job | WP10.2; the SECURITY-PROFILES.md note is removed by the lead (section 7) |
+| TGL-12 "DNSSEC validation", listed for Phase 5 with the note that validation is the upstream resolver's job | WP10.2; the SECURITY-PROFILES.md note is removed by the maintainer (section 7) |
 
 ### 1.6 Left out, with reasons
 
@@ -107,7 +107,7 @@ Facts the packages build on, read on `86518fd` (the paths are `crates/tenko-dns/
 - **Metrics and the log.** The forwarder's families are `tenko_dns_cache_*`, `tenko_dns_upstream_queries_total{rule,upstream,transport,outcome}` and `tenko_dns_upstream_rtt_seconds{upstream}`; the query log entry has `cached` and `blocked` and nothing about how the answer was found.
 - **The lab** (`deploy/compose/lab-dns`): BIND 9.20 as the authority of `example.test` (unsigned, 5 s TTLs), one Tenko node, a client container; rounds `plain`, `dot`, `doh`, `xfr`, `update` and the serve-stale steps. Nothing signs, nothing delegates, nothing talks to a root.
 - **The bench** (`bench/phase2-dns`): the load generator, `zonegen`, the M17 remote driver over the two lab VMs (the node VM with 4 vCPU, the load VM with 8, 0.4 ms apart), the musl rule, dnsperf and flamethrower installed by hand on the load VM; resperf comes with dnsperf's package and is not installed yet.
-- **The role** (`crates/tenko/src/serve/dns.rs`): the forwarder is started in the `dns` start step with its settings, the policy sink around it and the recursion policy watcher; the DHCP builders own `crates/tenko/src/serve/**` for Phase 3 except one marked block in `dns.rs` (section 4).
+- **The role** (`crates/tenko/src/serve/dns.rs`): the forwarder is started in the `dns` start step with its settings, the policy sink around it and the recursion policy watcher; the DHCP packages own `crates/tenko/src/serve/**` for Phase 3 except one marked block in `dns.rs` (section 4).
 - **Trace.** `scripts/requirement-trace.mjs` traces Phases 1 to 3 from their plan files; the exit criteria of this plan are not read by it (section 10).
 
 ## 2. Design decisions the packages share
@@ -234,7 +234,7 @@ Measurement rule: every figure of this slice is a single-node figure, on the mus
 
 ## 3. Contracts and shared files (WP10.0)
 
-The lead writes these with one Opus builder before any other package of the slice starts, as WP4.0 and WP7.0 did.
+These are written before any other package of the slice starts, as WP4.0 and WP7.0 did.
 
 ### 3.1 Model (`tenko-core::dns`)
 
@@ -270,13 +270,13 @@ The lead writes these with one Opus builder before any other package of the slic
 - Configuration `[dns.recursion]`: `enabled` (the profile's default), `hints` (a file; absent: the shipped hints), `outbound` (`auto`, `v4`, `v6`, `both`), `timeout_ms` (2,000), `budget_queries` (32), `budget_restarts` (8), `budget_depth` (6), `budget_ms` (10,000), `infra_entries` (the profile's), `infra_ttl_secs` (900), `qname_minimization` (`relaxed`, `strict`, `off`), `aggressive_nsec` (true), `denial_entries` (the profile's), `failure_cache_max_secs` (300), `trust_anchor_signaling` (RFC 8145, the profile's), `key_sentinel` (true), `fresh_port_per_query` (true), `local_zones_except` (none), `rfc5011_hold_down_secs` (Lab only); documented in `deploy/tenko.example.toml`. Validation on or off and the default resolution are toggles of the profile (TGL-12 and the proposed rows of section 7), stored, read by the role as the recursion policy is.
 - The UI: the resolver page (`/dns/forwarders` today, which the visibility package extends) gains the rule editor's **Recurse** mode, the **Default resolution** block per view (recurse, forward to the default forwarder, refuse; the profile's value shown), the preset **Forward everything to a DoT resolver** (a root rule); a new **Recursion** section with the trust anchors and their state (and the refresh button), the hints source and the last priming, the validation counters, the negative trust anchors with the form (zone, expiry, reason) and their expiry; `/settings/dns` gains the infrastructure cache browse beside the cache browse; the first-run wizard's DNS step asks "resolve names yourself or forward to a resolver of your choice" with the privacy sentence of section 2.8; i18n units in en and sv per area, loaded with the DNS chunk.
 
-### 3.5 Shared files the lead owns
+### 3.5 Shared files the maintainer owns
 
 `Cargo.toml` (no new dependency expected; `aws-lc-rs` features if RSA needs one), `deny.toml`, `crates/tenko-core/src/names.rs`, `crates/tenko-cluster/src/node_sync/tables.rs`, `docs/api/openapi.json` (regenerated by the gate), `ui/src/App.tsx` routes, `fuzz/Cargo.toml`, `.github/workflows/ci.yml` (the lab's recursion rounds in the weekly job), `crates/tenko/src/serve/dns.rs` (one marked block `// recursion:` for the engine's start and the anchor feed) and `crates/tenko/src/serve/leader.rs` (the registration of `dns.trust_anchors` and the negative trust anchor expiry), `scripts/requirement-trace.mjs` (section 10).
 
 ## 4. Work packages
 
-The DHCP builders of Phase 3 own `crates/tenko-dhcp/**`, the `dhcp` routes, `ui/src/dhcp/**`, `deploy/compose/lab-dhcp`, `bench/phase3-dhcp` and `crates/tenko/src/serve/**` beyond the marked block above; no package below touches those. Every package below touches `crates/tenko-dns/**`, `crates/tenko-core/src/dns.rs`, `crates/tenko-api/src/routes/dns/**`, `ui/src/dns/**`, `deploy/compose/lab-dns`, `bench/phase2-dns` and the DNS documents, which no Phase 3 package touches; the two sets of builders can therefore run side by side (REC-Q1) within the quota (R79).
+The DHCP packages of Phase 3 own `crates/tenko-dhcp/**`, the `dhcp` routes, `ui/src/dhcp/**`, `deploy/compose/lab-dhcp`, `bench/phase3-dhcp` and `crates/tenko/src/serve/**` beyond the marked block above; no package below touches those. Every package below touches `crates/tenko-dns/**`, `crates/tenko-core/src/dns.rs`, `crates/tenko-api/src/routes/dns/**`, `ui/src/dns/**`, `deploy/compose/lab-dns`, `bench/phase2-dns` and the DNS documents, which no Phase 3 package touches; the two sets of packages can therefore run side by side (REC-Q1) within the limit on parallel work (R79).
 
 ### Slice 10: the recursive resolver
 
@@ -286,7 +286,7 @@ The DHCP builders of Phase 3 own `crates/tenko-dhcp/**`, the `dhcp` routes, `ui/
 - **Owns:** section 3 in code: the model, the tables and the subset, the engine traits with the in-memory reference implementations, the cache key and entry change with M24 run again, the route stubs at 501, codes, audit actions, metric families, the SSE events, the embedded anchors and hints with their script and test, the configuration keys, the UI route stubs, the lab's compose services as empty shells, ADR 0021 refined with the REC-Q4 evaluation, `docs/dns-contracts.md` gaining the tables, routes and codes.
 - **Depends on:** the owner's acceptance of this plan; the merge of the DNS visibility package (it changes `pool.rs` and the forwarders page).
 - **Content:** 1. the model with validation and property tests; 2. the tables and the subset; 3. the traits and `MemAuthority`, `MemInfra`, `MemAnchors`; 4. the cache change: the key without DO and CD, the entry's state and offsets, the rendering by flags, the listing, the alloc test's new sections, M24 again; 5. the anchors and hints embedded; 6. routes, scopes, codes, audit actions, metric names, i18n units; 7. the REC-Q4 evaluation.
-- **Acceptance:** workspace builds; model tests pass; `cargo deny` passes; the counting-allocator test fails on a deliberate allocation in the new hit rendering; M24 within 5 percent of its Phase 2 figure (M37); the trace question of section 10 answered by the lead.
+- **Acceptance:** workspace builds; model tests pass; `cargo deny` passes; the counting-allocator test fails on a deliberate allocation in the new hit rendering; M24 within 5 percent of its Phase 2 figure (M37); the trace question of section 10 answered by the maintainer.
 - **Size and risk:** M; R76, R86.
 
 #### WP10.1 The iterative engine, the infrastructure cache and the lab root (L)
@@ -353,12 +353,12 @@ graph LR
 | Merge | Contents | Gate |
 |---|---|---|
 | M10.0 | WP10.0 (after the visibility package) | Workspace builds, model tests, deny, the allocator test with the new hit sections, M24 again within 5 percent, the trace question answered |
-| M10.1 | WP10.1, WP10.2a (two builders at once after M10.0) | The engine's table-driven tests; the lab round `recursion` green (E36, E41); the validator's vectors |
+| M10.1 | WP10.1, WP10.2a (two packages at once after M10.0) | The engine's table-driven tests; the lab round `recursion` green (E36, E41); the validator's vectors |
 | M10.2 | WP10.2b, WP10.3 (WP10.3 starts when WP10.2b's chain walk serves the denial cache's proofs) | E33, E34, E35 in the lab; the fuzz targets listed; the allocator test with the synthesis section |
 | M10.3 | WP10.4 | Route tests, UI tests, Playwright |
 | M10.4 | WP10.5 | E37, E38, E42; the exit document; then the Internet smoke (E39) and the owner-run switch on a day the owner chooses |
 
-The gate is the Phase 2 gate (workspace clippy and tests, lab acceptance, UI tests, Playwright, the traces, the changelog, deny, the fuzz crate's `cargo check --locked`, the embedded build) plus the lab's `recursion` and `rfc5011` rounds and a resperf smoke against the sandbox on the workstation. Builders run as in Phase 2 and 3: local Opus agents in their own worktrees with their own `CARGO_TARGET_DIR` under `F:\`, Sonnet for the leaf tasks (the conformance rows, the vectors as fixtures, the XLIFF units, the lab's zone files); the lead gates and squashes. Beside Phase 3's Slice 8 and 9 the plan assumes one recursion builder at a time next to two DHCP builders (R79); WP10.1 and WP10.2a may run at once when the quota allows.
+The gate is the Phase 2 gate (workspace clippy and tests, lab acceptance, UI tests, Playwright, the traces, the changelog, deny, the fuzz crate's `cargo check --locked`, the embedded build) plus the lab's `recursion` and `rfc5011` rounds and a resperf smoke against the sandbox on the workstation. Packages run as in Phase 2 and 3, each with its own `CARGO_TARGET_DIR` under `F:\`; the leaf tasks (the conformance rows, the vectors as fixtures, the XLIFF units, the lab's zone files) are separate small jobs; the maintainer gates and squashes. Beside Phase 3's Slice 8 and 9 the plan assumes one recursion package at a time next to two DHCP packages (R79); WP10.1 and WP10.2a may run at once when the maintainer's gating time allows.
 
 ## 6. Measurements and exit checks
 
@@ -380,9 +380,9 @@ Comparison points, with their caveats. The published resolver figures measure so
 
 ## 7. Owner decisions
 
-Each question lists its options, the trade-offs and the plan's recommendation; the owner decided every question on 2026-10-22, and the decision stands at the end of each question. Document changes the recommendations imply (the lead's files, proposed here): DNS-03, DNS-13 and DNS-34 moved from Phase 5 to the phase REC-Q1 names in REQUIREMENTS.md; the ROADMAP's Phase 5 "Recursive resolver" bullet moved to that phase and its Phase 5 "Until then" sentence removed; the "Recursion" row of the baseline decisions table pointing at ADR 0021; TGL-12's phase and note in SECURITY-PROFILES.md and the toggle rows of 2.11 below; CONFORMANCE.md rows from Planned as the packages land; ADR 0007 point 2 marked as superseded by ADR 0021 for the "later" part (the ADR itself is not edited beyond its status line, as the ADR rules say).
+Each question lists its options, the trade-offs and the plan's recommendation; the owner decided every question on 2026-10-22, and the decision stands at the end of each question. Document changes the recommendations imply (the maintainer's files, proposed here): DNS-03, DNS-13 and DNS-34 moved from Phase 5 to the phase REC-Q1 names in REQUIREMENTS.md; the ROADMAP's Phase 5 "Recursive resolver" bullet moved to that phase and its Phase 5 "Until then" sentence removed; the "Recursion" row of the baseline decisions table pointing at ADR 0021; TGL-12's phase and note in SECURITY-PROFILES.md and the toggle rows of 2.11 below; CONFORMANCE.md rows from Planned as the packages land; ADR 0007 point 2 marked as superseded by ADR 0021 for the "later" part (the ADR itself is not edited beyond its status line, as the ADR rules say).
 
-Proposed toggle rows (SECURITY-PROFILES.md, the lead's file):
+Proposed toggle rows (SECURITY-PROFILES.md, the maintainer's file):
 
 | Toggle | Home | Standard | Hardened | Lab | Where |
 |---|---|---|---|---|---|
@@ -393,9 +393,9 @@ Proposed toggle rows (SECURITY-PROFILES.md, the lead's file):
 | Negative trust anchor lifetime (proposed new row) | At most 7 days | At most 7 days | Expiry required, at most 7 days | At most 7 days | WP10.2 |
 
 **REC-Q1. Where does the slice sit?**
-- Options: (a) now, beside Phase 3's Slice 8 and 9, as Slice 10 with its own exit criteria and status file, one recursion builder at a time next to the DHCP builders; (b) after Phase 3 closes, before Phase 4; (c) Phase 5, as the ROADMAP says.
-- Trade-offs: (a) gives the home the single resolver soonest and uses the DNS lab and bench while they are fresh; the packages touch no DHCP file (section 4), so the only shared resource is the quota (R79) and the lead's gating time; the ROADMAP, REQUIREMENTS.md and ADR 0007 change as listed above. (b) keeps the quota for DHCP and starts recursion with the whole Phase 3 lab in place; the home runs a second resolver for the length of Phase 3. (c) is the ROADMAP's order and the owner's wish disagrees with it.
-- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**, with DNS-03, DNS-13 and DNS-34 moved to Phase 3 as "3 (Slice 10)" so that one trace covers them (section 10 says what the trace script needs), and with the rule that a DHCP package that is ready to merge goes before a recursion package in the lead's queue.
+- Options: (a) now, beside Phase 3's Slice 8 and 9, as Slice 10 with its own exit criteria and status file, one recursion package at a time next to the DHCP packages; (b) after Phase 3 closes, before Phase 4; (c) Phase 5, as the ROADMAP says.
+- Trade-offs: (a) gives the home the single resolver soonest and uses the DNS lab and bench while they are fresh; the packages touch no DHCP file (section 4), so the only shared resource is the maintainer's gating time (R79); the ROADMAP, REQUIREMENTS.md and ADR 0007 change as listed above. (b) keeps the gating time for DHCP and starts recursion with the whole Phase 3 lab in place; the home runs a second resolver for the length of Phase 3. (c) is the ROADMAP's order and the owner's wish disagrees with it.
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**, with DNS-03, DNS-13 and DNS-34 moved to Phase 3 as "3 (Slice 10)" so that one trace covers them (section 10 says what the trace script needs), and with the rule that a DHCP package that is ready to merge goes before a recursion package in the maintainer's queue.
 
 **REC-Q2. The default resolution per profile: recursion or forwarding?**
 - Options: (a) recursion in every profile for a new installation; an installation that has a root forwarding rule keeps it (a rule wins over the default), so nothing changes at an upgrade; (b) recursion under Home and Lab, forwarding under Standard and Hardened (an enterprise usually has an upstream of its own); (c) forwarding everywhere, recursion by a rule or a view.
@@ -480,21 +480,21 @@ Phase 3 uses R55 to R71; this slice continues at R72.
 | R76 | The cache key and entry change breaks what Phase 2 measured and tested: M24, the cache browse, the serve-stale rows of the lab, the alloc test | WP10.0 changes them in one package with M24 run again (M37) and the lab's cache rounds green before anything else merges |
 | R77 | NSEC3 hashing on the worker for aggressive NSEC costs CPU per miss and could be made expensive by a zone with many iterations | The iteration cap of RFC 9276 (zones above 100 iterations are insecure and get no denial cache); the hash in the fixed buffer that the signer already uses; M42 measures; `aggressive_nsec = false` turns it off |
 | R78 | Source ports: the outbound layer reuses a port for 64 exchanges, which gives an attacker who saw one exchange the port for the next 63 | The fresh-port policy per query for authorities (2.1), measured by M36 with the 64-use fallback; cookies and 0x20 on top; the unwanted counter switches a flooded server to TCP |
-| R79 | Quota: a recursion builder beside two DHCP builders within the weekly pools | One recursion builder at a time; DHCP packages first in the merge queue (REC-Q1); Sonnet for the leaf tasks; the lab and measurement runs while builders are idle |
+| R79 | Parallel work: a recursion package beside two DHCP packages | One recursion package at a time; DHCP packages first in the merge queue (REC-Q1); the lab and measurement runs while no package is running |
 | R80 | The household depends on recursion to the real Internet: an ISP that blocks or intercepts port 53, broken IPv6, CGNAT, a slow link make Tenko slower than the public resolver it replaces | E39's day with the figures; the DoT preset as the fallback; serve-stale keeps answering through short outages; the dashboard's SERVFAIL share is the signal |
 | R81 | RPZ NSDNAME and NSIP matching makes every policy answer look at the delegation, which costs on the runtime | The match runs only when an enabled RPZ zone has such triggers (the compiler knows); the delegation is already in hand from the walk |
 | R82 | The AD zone must keep going to the domain controllers after the switch, including `_msdcs` and the reverse zones the controllers hold | The rules of the Phase 2 cut-over stay; the runbook's check rows (section 9); a `recurse` rule never covers a suffix a `forward` rule covers more closely |
 | R83 | Cache poisoning through the infrastructure cache: glue, sibling glue, NS sets above the asked zone | The bailiwick rule of 2.1 (in-domain glue only, sibling glue unconfirmed until its authority answers, nothing above the zone asked), RFC 2181 ranking, validated DS states; the engine's tests include the classic poisoning answers |
 | R84 | Amplification through the resolver: random-subdomain floods, delegations that fan out (the NXNSAttack class), CNAME chains | The work budget and the fetch policy (REC-Q12), the join table, the failure cache, the denial cache against floods under signed zones, the per-client limits of Phase 2 on the way in |
 | R85 | The new parsers (referrals, DNSKEY, DS, RRSIG, NSEC3) carry the bugs resolvers are known for | Bounds-checked readers over the existing `wire` helpers; the differential corpus against `hickory-proto` for the record types; the fuzz targets of E40 |
-| R86 | The DNS visibility package and WP10.0 both change `pool.rs` and the forwarders page | WP10.0 starts after that package merges (section 5) and reuses its fields; the lead orders the queue |
+| R86 | The DNS visibility package and WP10.0 both change `pool.rs` and the forwarders page | WP10.0 starts after that package merges (section 5) and reuses its fields; the maintainer orders the queue |
 
 ## 9. Owner actions
 
 | When | Action |
 |---|---|
 | Before WP10.0 | Read the plan; answer REC-Q1 to REC-Q15 |
-| Before WP10.5's measurements | On the load VM: resperf (it comes with the dnsperf package already installed there), Docker with the compose plugin for the sandbox (or a third VM for it if the load VM should stay a load generator only; the lead says which after M10.1); the lead gives the commands |
+| Before WP10.5's measurements | On the load VM: resperf (it comes with the dnsperf package already installed there), Docker with the compose plugin for the sandbox (or a third VM for it if the load VM should stay a load generator only; the maintainer says which after M10.1); the maintainer gives the commands |
 | Before E39 | Choose the day; make sure the node has a route to the Internet on UDP and TCP port 53 (outbound) over IPv4 and, where the home has it, IPv6, and that the gateway does not intercept port 53; time synchronization on the node (OPS-09) |
 | E39, the Internet smoke | On the node: `tenko dns forwarder delete .` (the DoT root rule of Phase 2 goes; the AD zone's rule stays: `tenko dns forwarder list` shows it, and its reverse zones), validation on (the profile's default); from one client, the check rows below; a day of use; the figures of M43 read from the dashboard. The rollback is `tenko dns forwarder create . --transport dot --tls-name dns.example.net --upstream 198.51.100.53 --upstream 198.51.100.54` (the placeholders of the Phase 2 runbook) |
 | The switch (owner-run) | Nothing changes for the networks: they already point at the node (E14). The step is that the node now resolves alone; the AD zone's forwarding rule to the domain controllers (`ad.example.test` and the reverse zones they hold) is the only forwarding left. If REC-Q13 (b) is chosen: `tenko dns forwarder create <suffix> --recurse` for one suffix first, the root rule kept, then the root rule deleted |
@@ -519,12 +519,12 @@ The check rows from one client after the root rule is gone (every name a placeho
 | `docs/dns-resolver.md` sections 10 (recursion: the algorithm, the infrastructure cache, the budget, the status, the settings) and 11 (QNAME minimization and the denial cache); section 9's runbook gains the recursion variant | WP10.1, WP10.3, WP10.5 |
 | `docs/dnssec.md` section 12 (validation: the chain, the states, the extended errors, the trust anchors and RFC 5011, negative trust anchors, the clock) | WP10.2 |
 | `docs/dns-contracts.md` (the tables, routes, codes, audit actions, metrics, node commands) | WP10.0 |
-| `docs/observability.md` (the families of 2.11 and the tiles), `docs/SECURITY-PROFILES.md` (TGL-12's values and the proposed rows; the lead's file) | WP10.4; the lead |
+| `docs/observability.md` (the families of 2.11 and the tiles), `docs/SECURITY-PROFILES.md` (TGL-12's values and the proposed rows; the maintainer's file) | WP10.4; the maintainer |
 | `deploy/README.md` (outbound port 53, IPv6, the hints file), `deploy/tenko.example.toml` (`[dns.recursion]`), `deploy/compose/lab-dns` (the sandbox and the rounds) | WP10.1, WP10.2 |
 | `bench/phase2-dns/README.md` (resperf, M36 to M44) and results | WP10.5 |
-| `docs/plans/dns-recursion-status.md` (the hand-over file), `docs/plans/dns-recursion-exit.md` | the lead; WP10.5 |
+| `docs/plans/dns-recursion-status.md` (the hand-over file), `docs/plans/dns-recursion-exit.md` | the maintainer; WP10.5 |
 | CONFORMANCE.md rows from Planned to Implemented or Partial as each RFC lands (the rows this plan adds: 2181, 3225, 4509, 5702, 6303, 6605, 6761, 6840, 7646, 7686, 7958, 8020, 8080, 8109, 8145, 8375, 8509, 8624, 8806, 8906, 9018, 9210, 9276, 9471, 9520, and 4033, 4035, 5011, 7871, 8198, 9156 that existed; 6147, 9539 stay Planned; 9558 is skipped); CHANGELOG entries per package | every package |
 
-**The trace.** `scripts/requirement-trace.mjs` reads a phase's exit criteria from one plan file (E22 to E32 from the Phase 3 plan). E33 to E42 live here, so they are not traced today. If REC-Q1 moves DNS-03, DNS-13 and DNS-34 to Phase 3, the script needs this plan listed as a second source of Phase 3's criteria (or the slice as a phase entry of its own with its trace file `docs/plans/dns-recursion-trace.md`); that is a change to the script's `PHASES` table, which the lead makes with WP10.0. Until then the Phase 2 and Phase 3 traces count this document among the documents that name their requirements, which is correct.
+**The trace.** `scripts/requirement-trace.mjs` reads a phase's exit criteria from one plan file (E22 to E32 from the Phase 3 plan). E33 to E42 live here, so they are not traced today. If REC-Q1 moves DNS-03, DNS-13 and DNS-34 to Phase 3, the script needs this plan listed as a second source of Phase 3's criteria (or the slice as a phase entry of its own with its trace file `docs/plans/dns-recursion-trace.md`); that is a change to the script's `PHASES` table, which the maintainer makes with WP10.0. Until then the Phase 2 and Phase 3 traces count this document among the documents that name their requirements, which is correct.
 
-The lead links this plan from `ROADMAP.md`'s Phase 5 section (or the section REC-Q1 chooses), records the owner's answers to section 7 here, makes the document changes listed at the head of section 7, and keeps the package states in the status document as in Phase 2 and 3.
+The maintainer links this plan from `ROADMAP.md`'s Phase 5 section (or the section REC-Q1 chooses), records the owner's answers to section 7 here, makes the document changes listed at the head of section 7, and keeps the package states in the status document as in Phase 2 and 3.

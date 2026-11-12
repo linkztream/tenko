@@ -224,7 +224,7 @@ Counts per group: store and cluster 11, authorization 6, audit 1, vault and back
 
 ## 6. What the owner runs (WP3.8b)
 
-Placeholders: `<host-name>` is the name clients use for the controller, `<admin>` an administrator login, `<ca-root.pem>` the CA root file, `<token>` an enrollment token, `<sha256>` a CA fingerprint, `<segment-prefix>` a prefix such as `192.0.2.0/24`, `<unifi-url>`, `<proxmox-url>`, `<hass-url>` the base URLs of those systems. Nothing here needs a secret typed into a chat: credentials go into the vault or the owner's `.env`.
+Placeholders: `<host-name>` is the name clients use for the controller, `<admin>` an administrator login, `<ca-root.pem>` the CA root file, `<token>` an enrollment token, `<sha256>` a CA fingerprint, `<segment-prefix>` a prefix such as `192.0.2.0/24`, `<unifi-url>`, `<proxmox-url>`, `<hass-url>` the base URLs of those systems. Nothing here needs a secret sent in a message: credentials go into the vault or the owner's `.env`.
 
 Where a command does not exist yet, the row says so. Nothing is invented.
 

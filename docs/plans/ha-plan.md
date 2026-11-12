@@ -6,7 +6,7 @@
 
 The owner compared Tenko with Infoblox, BlueCat and EfficientIP and named two gaps that keep Tenko out of production: high availability of the data plane, above all DHCP failover, and identity. Both are to be done right from the start. This plan covers the first; identity has a plan of its own, written at the same time. The plan has the form of [dns-recursion-plan.md](dns-recursion-plan.md): the goal, the exit criteria as checks, the designs compared and the one recommended, the decisions the packages share, the work packages with their acceptance, the order, the measurements, the owner's decisions, the requirement rows touched, the risks, the owner's actions and the sources. "(proposed)" marks a choice the documents leave open. Sizes are in builder-days.
 
-**Numbering.** Exit criteria, measurements and risks continue the project's series but start at E60, M60 and R100, so that the identity plan written beside this one can take the next free numbers (E43, M45 and R87 onward) without a clash; the lead closes the gap when both plans are accepted. The slice is called Slice 12 and its packages WP12.x, provisionally: Phase 4's slices were to start at 11 (recursion plan, section 1.3), and the identity plan may take 11. Where the slice sits in the calendar was HA-Q1, decided on 2026-10-25, and the lead renumbers accordingly.
+**Numbering.** Exit criteria, measurements and risks continue the project's series but start at E60, M60 and R100, so that the identity plan written beside this one can take the next free numbers (E43, M45 and R87 onward) without a clash; the maintainer closes the gap when both plans are accepted. The slice is called Slice 12 and its packages WP12.x, provisionally: Phase 4's slices were to start at 11 (recursion plan, section 1.3), and the identity plan may take 11. Where the slice sits in the calendar was HA-Q1, decided on 2026-10-25, and the maintainer renumbers accordingly.
 
 Contents:
 
@@ -254,7 +254,7 @@ The pair state is persisted in the node store with its start time, so a restart 
   - **the controllers' witness**: a controller with a quorum, reached by the survivor, has had no heartbeat from the partner for the same period; or
   - **unacknowledged clients**: in communications-interrupted a node answers a client of the partner's bucket (or, as a standby, of the active) only after the client has waited `max_ack_delay_secs`, read from the `secs` field (DHCPv4) or the Elapsed Time option (DHCPv6), or from a third retransmission when a client always sends zero; at least `unacked_clients` distinct such clients within `after_secs` are the evidence. A partner that serves answers its clients first, so they never wait that long. This is Kea's partner-down detection (section 12) inside the draft's states.
 - **Without evidence the node stays in communications-interrupted**, which is safe, and the health view says why it does not take over.
-- **Profiles** (a proposed new toggle row, its number assigned by the lead): Home and Standard automatic with evidence after 600 s; Hardened automatic on the controllers' witness only, else by hand; Lab automatic with evidence after 60 s.
+- **Profiles** (a proposed new toggle row, its number assigned by the maintainer): Home and Standard automatic with evidence after 600 s; Hardened automatic on the controllers' witness only, else by hand; Lab automatic with evidence after 60 s.
 - In partner-down the conflict probe (section 3.10) checks every address of the partner's share before its first offer, whatever its history.
 
 At home the evidence works in both directions: when the second box dies, the first is a controller and is its own witness; when the first dies, the second sees the first one's clients wait.
@@ -339,7 +339,7 @@ The UI: a **Pairs** page under DHCP with one card per pair showing both nodes si
 
 ## 4. Work packages
 
-The DHCP builders of Phase 3 own `crates/tenko-dhcp/**` until WP9.5 merges; this slice starts after that (HA-Q1), except WP12.0's model and contract work, which the lead may start beside WP9.2 because it only adds fields and tables. Every package touches the DHCP and cluster documents named in section 11; WP12.1 touches the DNS serve wiring and node sync, which a recursion builder must not hold at the same time (R112).
+The DHCP packages of Phase 3 own `crates/tenko-dhcp/**` until WP9.5 merges; this slice starts after that (HA-Q1), except WP12.0's model and contract work, which the maintainer may start beside WP9.2 because it only adds fields and tables. Every package touches the DHCP and cluster documents named in section 11; WP12.1 touches the DNS serve wiring and node sync, which a recursion package must not hold at the same time (R112).
 
 ### Slice 12: data-plane high availability
 
@@ -347,7 +347,7 @@ The DHCP builders of Phase 3 own `crates/tenko-dhcp/**` until WP9.5 merges; this
 
 - **Requirements:** DHCP-12, DHCP-18, OPS-02, OPS-26, OPS-28 (the model and the contracts they share).
 - **Owns:** `dhcp.pairs` and the scope's `server`, with validation and property tests; the binding version, `Lease6`'s partner times and share; `PoolOwnership::answers`, the RFC 3074 hash with the RFC's table and its test vectors, the address split function with its property test (both nodes agree, resizing moves nothing, small pools keep a reserve); the `Failover` and `Leases.Publish` messages in `tenko.cluster.v1` with their versioning; the node store's layout and the lease namespace's tables; `dhcp.publish_cursors`; the withdrawal of the purpose `dhcp.failover`; the metric families, health rows, events, audit actions and error codes of section 3.15; route stubs at 501; the pair simulator's skeleton (`tenko-dhcp/src/pair/sim.rs`: two engines over `MemLeaseStore`, a scripted network and two clocks) as the oracle the later packages extend; `docs/dhcp-contracts.md` gaining all of it; ADR 0025 refined.
-- **Acceptance:** the workspace builds; model tests; the counting-allocator test with ownership and the client hash on the DORA path at zero allocations; the RFC 3074 vectors; `cargo deny`; the trace question of section 11 answered by the lead.
+- **Acceptance:** the workspace builds; model tests; the counting-allocator test with ownership and the client hash on the DORA path at zero allocations; the RFC 3074 vectors; `cargo deny`; the trace question of section 11 answered by the maintainer.
 
 #### WP12.1 The node store and the `dns` node without a controller (8 builder-days)
 
@@ -423,12 +423,12 @@ graph LR
 |---|---|---|
 | M12.0 | WP12.0 | The workspace builds; model tests, deny, the allocator test, the RFC 3074 vectors; the trace question answered |
 | M12.1 | WP12.1 | The DNS lab against a fed node; E66 |
-| M12.2 | WP12.2, WP12.8 (two builders after M12.1; WP12.8 touches scopes only) | Every Phase 3 DHCP test on both kinds of node; M32 on the node store; M62 |
+| M12.2 | WP12.2, WP12.8 (two packages after M12.1; WP12.8 touches scopes only) | Every Phase 3 DHCP test on both kinds of node; M32 on the node store; M62 |
 | M12.3 | WP12.3, then WP12.6 beside it | The simulator's schedules; the harness's link tests; E67, E69 |
 | M12.4 | WP12.4, WP12.5 | E65 on loopback; route, UI and Playwright tests |
 | M12.5 | WP12.7 | E60 to E65, E71; the exit document |
 
-The gate is the Phase 3 gate (workspace clippy and tests, lab acceptance, UI tests, Playwright, the three traces, the changelog, deny, the fuzz crate's `cargo check --locked`, the embedded build) plus the pair simulator at 10,000 schedules and the `lab-dhcp-pair` smoke. Builders run as in Phase 3: local Opus agents in their own worktrees with their own `CARGO_TARGET_DIR` under `F:\`, Sonnet for the leaf tasks (the RFC 3074 table and vectors, the XLIFF units, the deploy examples, the conformance rows); the lead gates and squashes. WP12.3 needs the closest review: the lead reads its state machine against section 3.5 before the merge.
+The gate is the Phase 3 gate (workspace clippy and tests, lab acceptance, UI tests, Playwright, the three traces, the changelog, deny, the fuzz crate's `cargo check --locked`, the embedded build) plus the pair simulator at 10,000 schedules and the `lab-dhcp-pair` smoke. Packages run as in Phase 3, each with its own `CARGO_TARGET_DIR` under `F:\`; the leaf tasks (the RFC 3074 table and vectors, the XLIFF units, the deploy examples, the conformance rows) are separate small jobs; the maintainer gates and squashes. WP12.3 needs the closest review: the maintainer reads its state machine against section 3.5 before the merge.
 
 ## 6. Measurements
 
@@ -544,7 +544,7 @@ Each question lists its options, the trade-offs and the recommendation. The docu
 
 ## 8. Requirement rows and documents touched
 
-Changes to the lead's files, applied on 2026-10-25 after the decisions; no new requirement IDs.
+Changes to the maintainer's files, applied on 2026-10-25 after the decisions; no new requirement IDs.
 
 | Row or file | Proposed change |
 |---|---|
@@ -568,7 +568,7 @@ Changes to the lead's files, applied on 2026-10-25 after the decisions; no new r
 
 | # | Risk | Proposed resolution |
 |---|---|---|
-| R100 | The state machine's rare paths (recover after a wipe, conflict resolution, a partition during resync) hold bugs that only show in production | The simulator with 10,000 random schedules per CI run and a growing seed corpus (E68) before any lab run; the lead reads WP12.3 against section 3.5; every transition has a harness test with real processes |
+| R100 | The state machine's rare paths (recover after a wipe, conflict resolution, a partition during resync) hold bugs that only show in production | The simulator with 10,000 random schedules per CI run and a growing seed corpus (E68) before any lab run; the maintainer reads WP12.3 against section 3.5; every transition has a harness test with real processes |
 | R101 | A partner declared down while it still serves gives addresses twice after the MCLT | Automatic partner-down only on evidence (section 3.7, E61); the probe of the partner's share in partner-down; potential-conflict finds and shows what slips through (I6) |
 | R102 | Clock skew between partners breaks the MCLT's arithmetic | Times in every message, the warning at 5 s, no normal state above 60 s (E67); time synchronization is already a stated dependency (OPS-09) |
 | R103 | The second write per lease (the publication) costs the single node its measured rate | Batched publication; M62's threshold; HA-Q2's fallback |
@@ -580,7 +580,7 @@ Changes to the lead's files, applied on 2026-10-25 after the decisions; no new r
 | R109 | Paged snapshots and the node store change node sync, which probes depend on | The probe's subset stays in `state.cbor`; the change is per role; the cluster lab's probe scenarios run in WP12.1's gate |
 | R110 | DNS updates and DDNS stop while no controller has a quorum, which a branch notices | Documented (HA-Q13); the records of existing leases stay; OPS-27 is the later answer for sites that must keep writing |
 | R111 | A data-plane node holds TSIG secrets in memory only and cannot fetch them after a restart without a controller | The behavior of the probe's SNMP secrets (no copy at rest); transfers and updates that need the key wait for a controller; serving needs no key |
-| R112 | WP12.1 and a recursion builder both touch the DNS serve wiring | The lead orders the queue; WP12.1 starts when no recursion package holds `crates/tenko-dns/src/serve` or `crates/tenko/src/serve/dns.rs` |
+| R112 | WP12.1 and a recursion package both touch the DNS serve wiring | The maintainer orders the queue; WP12.1 starts when no recursion package holds `crates/tenko-dns/src/serve` or `crates/tenko/src/serve/dns.rs` |
 | R113 | The evidence rule's delayed answer to the partner's clients (`max_ack_delay_secs`) slows the take-over for new clients | It applies only in communications-interrupted and only to the partner's bucket; M60 measures it; the controllers' witness makes it unnecessary where a controller is reachable (proposed refinement: no delay once the witness has spoken) |
 | R114 | Clients that send `secs` as zero or reset it make the unacknowledged count wrong | The retransmission count as the second signal; the controllers' witness as the first |
 | R115 | The lab VMs share one Proxmox host, so a power-off of a VM is not a separate machine failing | Stated in the result files; the VM's power-off is the stand-in, as in M32; the owner may run E60 once on two physical machines |
@@ -591,7 +591,7 @@ Changes to the lead's files, applied on 2026-10-25 after the decisions; no new r
 | When | Action |
 |---|---|
 | Before WP12.0 | Read the plan; answer HA-Q1 to HA-Q15 (done on 2026-10-25) |
-| Before WP12.7 | A second node VM on the lab host (a clone of the node VM: 4 vCPU, 4 GiB, its own disk on SSD), on the same bridge; the lead gives the commands. perfdhcp is already on the load VM |
+| Before WP12.7 | A second node VM on the lab host (a clone of the node VM: 4 vCPU, 4 GiB, its own disk on SSD), on the same bridge; the maintainer gives the commands. perfdhcp is already on the load VM |
 | Before E64 | Check whether the reference gateway can relay each network to two DHCP servers (two relay targets per network); if it cannot, the lab uses the floating-address fallback and the home stays on hot standby |
 | E64 at home (optional, owner-run) | Enroll the second box as in section 3.17, pair the scopes, add the second relay target and the second option 6 address, then pull each box's power once on a quiet evening and watch the Pairs page and a client |
 | During the slice | Nothing else: no external account or service is needed |
@@ -607,8 +607,8 @@ Changes to the lead's files, applied on 2026-10-25 after the decisions; no new r
 | `docs/dns.md` section 8 (the `dns` node without a controller) and `docs/observability.md` (the families, the readiness route) | WP12.1, WP12.6 |
 | `deploy/` (the keepalived and BIRD examples, the pair keys in `tenko.example.toml`) and `deploy/compose/lab-dhcp-pair` | WP12.6, WP12.7 |
 | `bench/phase3-dhcp/README.md` (M60 to M66) and results; `bench/phase2-dns` (M67, M68) | WP12.7, WP12.1, WP12.6 |
-| `docs/plans/ha-status.md` (the hand-over file), `docs/plans/ha-exit.md` | the lead; WP12.7 |
-| CONFORMANCE.md, REQUIREMENTS.md, ROADMAP.md, ARCHITECTURE.md, SECURITY-PROFILES.md and MIGRATION.md as section 8 lists; CHANGELOG entries per package | the lead; every package |
+| `docs/plans/ha-status.md` (the hand-over file), `docs/plans/ha-exit.md` | the maintainer; WP12.7 |
+| CONFORMANCE.md, REQUIREMENTS.md, ROADMAP.md, ARCHITECTURE.md, SECURITY-PROFILES.md and MIGRATION.md as section 8 lists; CHANGELOG entries per package | the maintainer; every package |
 
 **The trace.** `scripts/requirement-trace.mjs` reads Phase 3's exit criteria from `phase-3-plan.md` and `dns-recursion-plan.md` (`PHASES`). E60 to E71 live here; HA-Q1 was answered (a), and this plan is the third source of Phase 3 in `PHASES`, as the recursion plan was made the second for Slice 10.
 

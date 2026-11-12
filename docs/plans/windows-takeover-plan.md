@@ -491,7 +491,7 @@ ROADMAP: the Phase 4 deliverables gain the line for this slice (written with thi
 | R145 | The mirror token leaks from the controller | It writes one mirror and reads nothing; DPAPI for the task account; replacement from the card; a forged snapshot can change only what a person later prepares or takes over, behind the diff and the loss acknowledgment |
 | R146 | The exporter's PowerShell mapping drifts from the IR | The fixture IR is shared with the Rust tests; the push validates strictly; a refused push is a finding within three minutes |
 | R147 | The rekey rule lets a client claim an adopted lease with a forged MAC | Only a REQUEST with the row's MAC on the same network, the same exposure as any DHCP client today; `ad.dhcid_takeover` tests another MAC; the rule ends at the first REQUEST |
-| R148 | Quota: this slice beside Slice 12, the UI plan and Phase 3's remainder | At most two Rust builders; the script line needs none; the lab and the rehearsal while builders are idle |
+| R148 | Parallel work: this slice beside Slice 12, the UI plan and Phase 3's remainder | At most two Rust packages at once; the script line needs none; the lab and the rehearsal while no package is running |
 | R149 | The frozen names between the flip and the takeover go stale if the window is split | The runbook does both in one window; WT-Q8 (b) adopts what Windows wrote meanwhile; `release` handles the rest |
 | R150 | The runbook's PowerShell drifts from the cmdlets of newer Windows Server versions | Every cmdlet named with its Microsoft page in the Sources; the rehearsal runs them; `Get-Help` checks noted where a page was not found |
 

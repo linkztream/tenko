@@ -61,7 +61,7 @@ Read on 2026-10-24 from the repository and its settings:
 
 - **The repository is public** since 2026-10-22, not private. Every job of `ci.yml` and `release.yml` runs on GitHub's hosted runners (`ubuntu-latest`, `windows-latest`); the self-hosted runner of `.github/runner/README.md` is no longer used (its page says so), although the repository variable `LINUX_RUNNER` is still set and read by nothing. Two consequences for this plan: GitHub's security features (secret scanning, push protection, code scanning, dependency review, artifact attestations) cost nothing on a public repository, and hosted minutes for standard runners are unlimited; but **workflow logs and artifacts are public**, so a security round must not print its evidence into the log (section 4.6).
 - **The settings of the publication checklist's steps 7 to 9 are off.** Secret scanning, push protection, non-provider patterns, Dependabot security updates and private vulnerability reporting all read `disabled` from the API. `SECURITY.md` names private vulnerability reporting as the preferred way to report, so the preferred way does not exist yet. These are the owner's clicks (SA0), five minutes, free.
-- **Branch protection is a ruleset on the default branch** (no deletion, no force push, linear history); it requires no status check and no pull request, which matches how the lead merges (gate on the development machine, then push). No rule covers tags: any token with write access can push `v*`.
+- **Branch protection is a ruleset on the default branch** (no deletion, no force push, linear history); it requires no status check and no pull request, which matches how the maintainer merges (gate on the development machine, then push). No rule covers tags: any token with write access can push `v*`.
 - **No signing secret exists**, so the Windows binary and the MSI ship unsigned (the release workflow leaves a notice), and the Linux binary, `releases.json` and `SHA256SUMS` have only the marked `SIGNING (later)` places.
 - **Releases are frequent.** 0.0.3 on 2026-10-22 and 0.0.4 on 2026-10-23; between them 32 commits and about 31,000 changed lines under `crates/`, `deploy/`, `.github/` and `scripts/`. Any per-release cost in layer 3 is multiplied by that pace (SA-Q2).
 - `SECURITY.md` still says there is no tagged release; its supported-versions table needs the release lines (SA7).
@@ -73,7 +73,7 @@ Read on 2026-10-24 from the repository and its settings:
 | 1. Deterministic, every push | `cargo deny --all-features check` on push and pull request (advisories, licenses with a permissive allow list, crates.io as the only source, no git dependencies, OpenSSL banned); `cargo audit` on push and weekly; the npm license check; clippy, tests and `cargo fmt`; the DCO and changelog jobs; shellcheck of the deploy scripts; `--locked` builds; the default `GITHUB_TOKEN` read-only with jobs raising what they need; `unsafe_code = "forbid"` in every crate | Secret scanning and push protection (off); Dependabot (off); dependency review; `npm audit`; a linter for the workflows themselves; actions pinned to commit SHAs (every `uses:` today names a moving tag, among them `dtolnay/rust-toolchain@stable` and `@nightly`, which are branches); code scanning; a unit check on every push (today weekly only, below) |
 | 1. Deterministic, at release | `SHA256SUMS` and `releases.json` built from the binaries; the static-binary check; the smoke in Debian 12 and RHEL 9 containers; the installer smoke; the MSI install, upgrade and removal | SBOM; build provenance; signatures (API-19) |
 | 2. Lab | The DNS, DHCP and cluster labs with their rounds (weekly and by hand; `deploy/compose/lab-*/smoke.sh`, one `PASS` or `FAIL` line per row); the weekly systemd smoke with the exposure gate of `systemd-analyze security` below 2.5 (`deploy/systemd/smoke.sh` step 10); the weekly fuzz smoke, 60 s for each of the 38 targets under `fuzz/fuzz_targets/` with the seeds of `fuzz/seeds/` | Any round that looks at a node from outside (ports, TLS, the web surface); the ADR 0023 invariants as checks; any of it on the binary being released; any report that a later run can compare with |
-| 3. Review | The lead's gate on the development machine before every merge; the `/security-review` command, available to every session and used by nobody as a rule | A review per release with fixed questions; a rule for when a branch runs `/security-review` |
+| 3. Review | The maintainer's gate on the development machine before every merge; the `/security-review` command, available to everyone and used by nobody as a rule | A review per release with fixed questions; a rule for when a branch runs `/security-review` |
 
 ## 3. Layer 1: deterministic checks on every push and at release
 
@@ -85,7 +85,7 @@ Read on 2026-10-24 from the repository and its settings:
 |---|---|---|---|---|---|---|---|
 | L1.1 | Known secret shapes never land | Secret scanning with push protection and non-provider patterns | GitHub feature (setting, SA0) | Every push, and once over the whole history when switched on | None | Push protection **blocks** the push; alerts for the history **report** | Alerts in the Security tab |
 | L1.2 | Known vulnerabilities in the dependency graph | Dependabot alerts and security updates for Cargo, npm and GitHub Actions; `.github/dependabot.yml` with weekly version updates for `github-actions` only, so the SHA pins of L1.6 stay current | GitHub feature (setting, SA0) and one configuration file (SA1) | When an advisory is published | None | **Reports** (alerts and pull requests); `cargo audit` and L1.4 are what block | Alerts, pull requests |
-| L1.3 | A pull request adds no vulnerable or disallowed dependency | `actions/dependency-review-action`, failing on High and Critical and on a license outside the allow list of `deny.toml` | GitHub feature called by a hosted job | Pull requests (outside contributions and builder pull requests; the lead's direct pushes are covered by `cargo deny` and L1.4) | 30 s | **Blocks** the pull request | A comment on the pull request |
+| L1.3 | A pull request adds no vulnerable or disallowed dependency | `actions/dependency-review-action`, failing on High and Critical and on a license outside the allow list of `deny.toml` | GitHub feature called by a hosted job | Pull requests (outside contributions and other pull requests; the maintainer's direct pushes are covered by `cargo deny` and L1.4) | 30 s | **Blocks** the pull request | A comment on the pull request |
 | L1.4 | No vulnerable production dependency of the UI | `npm audit --omit=dev --audit-level=high` in the `UI` job of `ci.yml`, the full `npm audit` (with development dependencies) printed beside it. At release (`release.yml`), where the bundle is produced: `npm ci --ignore-scripts`, then `npm audit --audit-level=high` over the whole tree, build chain included, with the full audit printed beside it | Hosted job | Every push, pull request and release | 10 s | High and Critical **block** (in production dependencies on every push; anywhere in the tree at release); the rest **reports** | Job summary |
 | L1.5 | Rust advisories, licenses, sources | `cargo deny` and `cargo audit` (exist) | Hosted job | Every push; `cargo audit` also weekly | Exists | **Blocks** (exists) | Job log |
 | L1.6 | The workflows cannot be turned against the release | Every `uses:` pinned to a full commit SHA with the tag in a comment; `zizmor` over `.github/workflows/` (unpinned actions, template injection from event fields, `pull_request_target`, credentials kept by `actions/checkout`, permissions wider than needed), configured in `.github/zizmor.yml`. In `release.yml`: the tag is resolved once, by its full ref name, to a commit that must be on `main`, and every job builds that commit; the toolchain is the exact version of `rust-toolchain.toml`; the base image of `deploy/Dockerfile` is pinned by digest (Dependabot moves it); the Authenticode secrets exist only in the two signing jobs, which run nothing but the signing script, with the password never on a command line | Hosted job | Every push and pull request that changes `.github/**`, and at release | 15 s | High findings **block**; Medium and below **report** | Job summary |
@@ -189,7 +189,7 @@ These rows use the lab mirror of NR7: a second release built from the same sourc
 | `priv.*` | 15 min with the mirror build |
 | **Round** | **About 60 to 75 minutes**, in parallel with the MSI job and the Linux smoke, so the release takes about 30 to 45 minutes longer than today |
 
-Hosted minutes cost nothing here. The cost that matters is the triage (section 4.7): a short session per release.
+Hosted minutes cost nothing here. The cost that matters is the triage (section 4.7): a short triage per release.
 
 ### 4.4 What blocks
 
@@ -237,17 +237,17 @@ On a public repository the log and the artifacts of every run are public. So the
 - packs the evidence (raw outputs, the JSON lines, crash inputs, the journal of the node) into a tar file encrypted with `age` to the owner's public key (the repository variable `SECURITY_AGE_RECIPIENT`; a public key is not a secret) and uploads only that, with a retention of 90 days;
 - runs its scanners (nmap, testssl.sh, ZAP, all pulled by digest) in a job with `contents: read`, no secret and no `id-token`, so a compromised scanner image can read the binary it tests and nothing else.
 
-The owner (or the lead on the owner's machine) decrypts the bundle; the triage gets the decrypted directory, never the key.
+The owner (or the maintainer on the owner's machine) decrypts the bundle; the triage gets the decrypted directory, never the key.
 
 ### 4.7 The triage
 
-After the release run (or a dispatched run), the lead starts one triage session with the fixed brief of Appendix A. It is a leaf task: matching fingerprints, reading evidence and writing a report, which a Sonnet session does well; it escalates to the lead what needs judgment. Inputs: the decrypted bundle, the previous report, the open alerts of layer 1 (`gh api` over code scanning, Dependabot and secret scanning alerts), the repository settings of section 2.1 as `gh api` reads them, and the layer 3 review of this release when there is one. Output: the report, nothing else. Its rule: **a finding is reported with its evidence and never silently closed**; anything that leaves the list goes through a state of section 4.5 with its reason. Cost: about 150,000 to 300,000 tokens per release on Sonnet, rising with the number of open findings.
+After the release run (or a dispatched run), the maintainer starts one triage with the fixed brief of Appendix A. It is a leaf task: matching fingerprints, reading evidence and writing a report; what needs judgment goes to the maintainer. Inputs: the decrypted bundle, the previous report, the open alerts of layer 1 (`gh api` over code scanning, Dependabot and secret scanning alerts), the repository settings of section 2.1 as `gh api` reads them, and the layer 3 review of this release when there is one. Output: the report, nothing else. Its rule: **a finding is reported with its evidence and never silently closed**; anything that leaves the list goes through a state of section 4.5 with its reason. Cost: small per release, rising with the number of open findings.
 
 ## 5. Layer 3: the release review
 
 ### 5.1 What it is
 
-One Opus session per release (or per the cadence of SA-Q2) with the fixed brief of Appendix B. It reads the diff between the last reviewed tag and the new one, filtered to the security paths of section 5.2 and read in their order, and asks of every change the attacker's questions of the brief: who can reach this, with what, and what do they get. It writes findings with the fingerprints of section 4.5 and evidence (a path, a function, the input that reaches it, the reasoning, and a reproduction against the lab when one is cheap), which the triage merges into the release report. It never fixes, commits, pushes or files anything (Appendix B, "Never").
+One review per release (or per the cadence of SA-Q2) with the fixed brief of Appendix B. It reads the diff between the last reviewed tag and the new one, filtered to the security paths of section 5.2 and read in their order, and asks of every change the attacker's questions of the brief: who can reach this, with what, and what do they get. It writes findings with the fingerprints of section 4.5 and evidence (a path, a function, the input that reaches it, the reasoning, and a reproduction against the lab when one is cheap), which the triage merges into the release report. It never fixes, commits, pushes or files anything (Appendix B, "Never").
 
 ### 5.2 The security paths
 
@@ -261,14 +261,14 @@ One list, used by the review to order its reading and by the rule for `/security
 
 ### 5.3 Cost
 
-The diff from 0.0.3 to 0.0.4 changed about 31,000 lines in the paths that matter; a release of that size is the upper case. Filtered to the security paths, such a diff is roughly 10,000 to 15,000 lines, 150,000 to 250,000 tokens to read once, plus the surrounding code the questions send the session to. An estimate for one review of a release of that size on Opus: 2 to 5 million input tokens, most of them read from the cache, and 40,000 to 80,000 output tokens, about the cost of one S builder package; a patch release with a few hundred changed lines in those paths costs a tenth of that. A diff above 20,000 filtered lines is split in two sessions by the groups of section 5.2 (1 and 2, then 3 to 5). The first review has no earlier tag to start from: it is a baseline over the security paths at the reviewed tag, split in four sessions (groups 1, 2, 3, then 4 and 5), and costs about four packages once.
+The diff from 0.0.3 to 0.0.4 changed about 31,000 lines in the paths that matter; a release of that size is the upper case. Filtered to the security paths, such a diff is roughly 10,000 to 15,000 lines to read once, plus the surrounding code the questions lead to. One review of a release of that size costs about one S package; a patch release with a few hundred changed lines in those paths costs a tenth of that. A diff above 20,000 filtered lines is split in two reviews by the groups of section 5.2 (1 and 2, then 3 to 5). The first review has no earlier tag to start from: it is a baseline over the security paths at the reviewed tag, split in four reviews (groups 1, 2, 3, then 4 and 5), and costs about four packages once.
 
 ### 5.4 `/security-review` on branches before the gate
 
-The rule, recorded in the lead's local instructions for the checkout (the gate is the lead's, not the repository's):
+The rule, recorded in the maintainer's local instructions for the checkout (the gate is the maintainer's, not the repository's):
 
-- A branch that changes any path of section 5.2 runs `/security-review` in its worktree before it asks for the gate, and puts the result in its hand-over note under "Security review": the findings with a one-line answer each (fixed in the branch with the commit, or why it is not a problem). A branch that changes no such path writes "Security review: not needed, no security path changed".
-- The lead's gate refuses a branch whose note lacks the section, or that leaves a High or Critical finding unanswered.
+- A branch that changes any path of section 5.2 runs `/security-review` in its worktree before it asks for the gate, and puts the result in its branch note under "Security review": the findings with a one-line answer each (fixed in the branch with the commit, or why it is not a problem). A branch that changes no such path writes "Security review: not needed, no security path changed".
+- The maintainer's gate refuses a branch whose note lacks the section, or that leaves a High or Critical finding unanswered.
 - The command reviews the branch's own diff against its base; it does not replace layer 3, which reads a release's changes together, where interactions between branches show.
 - Cost: one short pass per branch, small next to the package that produced the branch.
 
@@ -283,7 +283,7 @@ The rule, recorded in the lead's local instructions for the checkout (the gate i
 
 - **Owns:** `.github/workflows/ci.yml` (the `npm audit` step in `UI`, a `dependency-review` job on pull requests, a `workflow-lint` job running `zizmor`, a `unit-check` job running L1.8, every `uses:` pinned to a full SHA), `.github/workflows/codeql.yml` (new), `.github/dependabot.yml` (new, `github-actions` weekly), `.github/zizmor.yml` (new), the drop-in gates measured and written into the `unit-check` job, `deploy/systemd/README.md` (a line on the gates).
 - **Depends on:** nothing; SA0 for Dependabot to act on the file.
-- **Tests:** `actionlint` and `zizmor` clean at High on the edited workflows before the lead's gate; the `unit-check` job's script run locally in WSL against the unit and each drop-in (a deliberate `ProtectSystem=` removal fails it); the jobs green on their first run after the lead pushes.
+- **Tests:** `actionlint` and `zizmor` clean at High on the edited workflows before the maintainer's gate; the `unit-check` job's script run locally in WSL against the unit and each drop-in (a deliberate `ProtectSystem=` removal fails it); the jobs green on their first run after the maintainer pushes.
 - **Acceptance:** SA-E2.
 - **Not here:** the pinning of `release.yml`, which is SA2's file.
 
@@ -322,16 +322,16 @@ The rule, recorded in the lead's local instructions for the checkout (the gate i
 - **Tests:** each row against a node where the invariant is broken on purpose (a root-owned `ExecStartPre=+` line, a file capability set on the layout's binary, a third version directory left behind) fails with the expected line.
 - **Acceptance:** SA-E7.
 
-#### SA7 Triage brief and the first triage (S, lead)
+#### SA7 Triage brief and the first triage (S, maintainer)
 
-- **Owns:** the brief of Appendix A kept with the lead's instructions; the first triage after SA3's dispatched run against 0.0.4, which writes `release-0.0.4.md` as the baseline report and gives every finding its first ID.
+- **Owns:** the brief of Appendix A kept with the maintainer's instructions; the first triage after SA3's dispatched run against 0.0.4, which writes `release-0.0.4.md` as the baseline report and gives every finding its first ID.
 - **Depends on:** SA3; the private repository of SA-Q3 (owner action 2).
 - **Acceptance:** SA-E5 once a second report exists.
 
-#### SA8 The first release review (lead, four sessions once, then per SA-Q2)
+#### SA8 The first release review (maintainer, four reviews once, then per SA-Q2)
 
-- **Owns:** the baseline review of section 5.3 at the first release after this plan is accepted, in four sessions with the brief of Appendix B; the gate rule of section 5.4 in the lead's local instructions.
-- **Depends on:** quota after a Thursday reset; then the cadence SA-Q2 decided.
+- **Owns:** the baseline review of section 5.3 at the first release after this plan is accepted, in four reviews with the brief of Appendix B; the gate rule of section 5.4 in the maintainer's local instructions.
+- **Depends on:** the maintainer's time; then the cadence SA-Q2 decided.
 - **Acceptance:** SA-E8.
 
 ## 7. Order, parallelism and dependencies
@@ -354,11 +354,11 @@ flowchart LR
 | Step | Packages | In parallel? | Why |
 |---|---|---|---|
 | 0 | SA0 | Before everything, by the owner | Free, and push protection and private reporting matter now, not at the next release |
-| 1 | SA1, SA2, SA3 | Yes, three builders at most | Disjoint files: `ci.yml` and the new CI files (SA1), `release.yml` and `SECURITY.md` (SA2), `deploy/security/`, `security-round.yml` and the new scripts (SA3); SA3's two lines in `ci.yml` and `release.yml` wait for SA1 and SA2 |
+| 1 | SA1, SA2, SA3 | Yes, three packages at most | Disjoint files: `ci.yml` and the new CI files (SA1), `release.yml` and `SECURITY.md` (SA2), `deploy/security/`, `security-round.yml` and the new scripts (SA3); SA3's two lines in `ci.yml` and `release.yml` wait for SA1 and SA2 |
 | 2 | SA4, SA5 | Yes | Separate scripts and rule files under `deploy/security/`; `round.sh` calls them through a marked block each |
 | 2 | SA7 | After SA3's first dispatched run | Needs a bundle |
 | 3 | SA6 | When NR1 to NR3 are merged (it may be built before, as reports) | Needs ADR 0023 built to pass |
-| 3 | SA8 | After a quota reset | Four Opus sessions |
+| 3 | SA8 | Later, when time allows | Four reviews |
 
 ### 7.2 Dependency on release signing (API-19)
 
@@ -376,17 +376,17 @@ The `priv.*` rows are ADR 0023's invariants made into checks. They can be writte
 
 ## 8. Wednesday afternoon 2026-10-29
 
-A half day of two Opus builders, if the week's quota allows it (the pools reset on Thursday at 11:00; the lead checks the remaining share that morning and spends no more than the remaining share divided by the days left). What lands first, in this order:
+A half day of two work streams, if the week's time allows it. What lands first, in this order:
 
 **Before Wednesday, by the owner:** SA0 (15 minutes, including the `age` key pair); SA-Q1 to SA-Q3 were decided on 2026-10-24. Without SA0 the round runs but refuses to upload its evidence.
 
-**Builder 1: layer 1 complete (SA1, then SA2).** Both are S and touch only workflow and configuration files. SA1 first: the pinning, `zizmor`, `npm audit`, dependency review, the unit check, Dependabot's file and CodeQL. Then SA2: the SBOMs, the `attest` job and the `SECURITY.md` section. The lead gates and pushes SA1 in the afternoon so that its jobs run on `main` the same day; SA2 is exercised by the next release tag.
+**Stream 1: layer 1 complete (SA1, then SA2).** Both are S and touch only workflow and configuration files. SA1 first: the pinning, `zizmor`, `npm audit`, dependency review, the unit check, Dependabot's file and CodeQL. Then SA2: the SBOMs, the `attest` job and the `SECURITY.md` section. The maintainer gates and pushes SA1 in the afternoon so that its jobs run on `main` the same day; SA2 is exercised by the next release tag.
 
-**Builder 2: the round's skeleton with the port and TLS rows (SA3, its first half).** `deploy/security/round.sh` with the row helper and the bundle, `install-node.sh`, `compose.yml`, the rows `net.tcp`, `net.udp`, `net.listeners`, `net.cluster_port`, `tls.api`, `tls.dot`, `unit.exposure`, `security-round.yml` with the dispatch-by-tag trigger and the encryption. The lead pushes it and dispatches it against 0.0.4 before the end of the afternoon.
+**Stream 2: the round's skeleton with the port and TLS rows (SA3, its first half).** `deploy/security/round.sh` with the row helper and the bundle, `install-node.sh`, `compose.yml`, the rows `net.tcp`, `net.udp`, `net.listeners`, `net.cluster_port`, `tls.api`, `tls.dot`, `unit.exposure`, `security-round.yml` with the dispatch-by-tag trigger and the encryption. The maintainer pushes it and dispatches it against 0.0.4 before the end of the afternoon.
 
-**What spills to Thursday or later, in this order:** the rest of SA3 (`net.ipv6`, `tls.headers`, `unit.account`, `scripts/security-report.mjs` with its tests, `docs/security/README.md`, the `release.yml` hook after SA2 merges); SA7, the first triage over the 0.0.4 bundle (a Sonnet session, cheap); SA4 (ZAP and `web.unauth`); SA5 (fuzz rows); SA8, the baseline review, which needs four Opus sessions and waits for the quota after the reset; SA6 waits for ADR 0023's packages; `priv.signature` and the rest of API-19 wait for their own ADR.
+**What spills to a later day, in this order:** the rest of SA3 (`net.ipv6`, `tls.headers`, `unit.account`, `scripts/security-report.mjs` with its tests, `docs/security/README.md`, the `release.yml` hook after SA2 merges); SA7, the first triage over the 0.0.4 bundle (cheap); SA4 (ZAP and `web.unauth`); SA5 (fuzz rows); SA8, the baseline review, which needs four reviews and waits until time allows; SA6 waits for ADR 0023's packages; `priv.signature` and the rest of API-19 wait for their own ADR.
 
-**If the quota allows only one builder:** builder 2's work first (the round is new capability; layer 1 is small and SA0 alone already turns on the most valuable part of it, push protection), then SA1.
+**If time allows only one stream:** stream 2's work first (the round is new capability; layer 1 is small and SA0 alone already turns on the most valuable part of it, push protection), then SA1.
 
 ## 9. Owner decisions
 
@@ -397,7 +397,7 @@ A half day of two Opus builders, if the week's quota allows it (the pools reset 
 
 **SA-Q2. Does layer 3 run per release or per month?**
 - Options: (a) every release; (b) once a month over everything since the last review; (c) per release whose diff touches a security path of section 5.2, the review covering everything since the last reviewed tag (so small releases are batched into the next review), with at least one review a month even when no release touched those paths, and the one-time baseline of section 5.3 first.
-- Trade-offs: (a) at the current pace costs up to one S package per release, most of it on releases that changed the UI or a document. (b) is cheap and predictable but lets a month of changes reach nodes unreviewed, and a month's diff is too big for one careful session. (c) spends the review where the attack surface changed, keeps each review to one or two sessions, and still bounds the gap; its cost follows the work rather than the calendar.
+- Trade-offs: (a) at the current pace costs up to one S package per release, most of it on releases that changed the UI or a document. (b) is cheap and predictable but lets a month of changes reach nodes unreviewed, and a month's diff is too big for one careful review. (c) spends the review where the attack surface changed, keeps each review to one or two reviews, and still bounds the gap; its cost follows the work rather than the calendar.
 - **Recommendation: (c). Decided by the owner on 2026-10-24: (c).**
 
 **SA-Q3. Where do the reports live?**
@@ -415,7 +415,7 @@ A half day of two Opus builders, if the week's quota allows it (the pools reset 
 | SA-R4 | Evidence of an open weakness becomes public through a log or an artifact | Row names and counts only in the log; the bundle encrypted to the owner's key; the reviewers' notes stay in the private place of SA-Q3 |
 | SA-R5 | The review misses what a human would find, and its fluency gives false confidence | The review is a supplement with fixed questions and evidence for every claim; the human pentest at 1.0 stays planned; the report says what was not reviewed |
 | SA-R6 | The security tooling is itself a supply-chain risk: a third-party action or scanner image in the release path | Every action pinned by SHA, every image by digest; the scanners run in a job without write permissions or secrets; only GitHub's own `attest-*` actions see `id-token` |
-| SA-R7 | The quota: the baseline review and the per-release reviews compete with product work | SA-Q2 (c); the baseline after a reset; the triage on Sonnet |
+| SA-R7 | The maintainer's time: the baseline review and the per-release reviews compete with product work | SA-Q2 (c); the baseline when time allows; the triage kept small |
 | SA-R8 | A stolen token with write access publishes a release that nodes install (A4) before API-19 exists | Push protection and the tag ruleset (SA0) reduce the ways a token leaks and what it may do; Hardened installs only uploaded files; the node-side signature of section 7.2 is the fix and is prioritized as API-19's ADR |
 | SA-R9 | The fingerprints change when code moves (renames, new path templates), and old findings reappear as new | Fingerprints exclude line numbers and normalize identifiers; the triage proposes a match with its reason when a new finding resembles an open one, and the report lists such pairs for the owner |
 
@@ -430,37 +430,37 @@ A half day of two Opus builders, if the week's quota allows it (the pools reset 
 
 | Document | Change | Package |
 |---|---|---|
-| `docs/plans/security-audit-plan.md` | This plan | Lead |
+| `docs/plans/security-audit-plan.md` | This plan | Maintainer |
 | `SECURITY.md` | "Verifying a release"; the supported-versions table with release lines | SA2 |
 | `docs/security/README.md` | New: the layers, the report, the IDs and states, the rule files | SA3, SA4 |
 | `docs/security/release-<version>.md` | New per release (the summary under SA-Q3 (b)) | SA7 onward |
 | `deploy/security/README.md` | New: the rows table and how to run the round by hand | SA3 to SA6 |
 | `deploy/systemd/README.md` | The gates of L1.8 | SA1 |
 | `fuzz/README.md` | The release budget | SA5 |
-| `docs/REQUIREMENTS.md` | API-19 note: SBOM and provenance delivered by SA2, signatures pending ADR 0024 (the lead's file) | Lead |
-| `docs/adr/0024-…` | Proposed: release signing and the node's trust root | Lead, after the owner's answer to action 3 |
+| `docs/REQUIREMENTS.md` | API-19 note: SBOM and provenance delivered by SA2, signatures pending ADR 0024 (the maintainer's file) | Maintainer |
+| `docs/adr/0024-…` | Proposed: release signing and the node's trust root | Maintainer, after the owner's answer to action 3 |
 
 ## Appendix A: the triage brief
 
-Given to the triage session as it stands; the lead fills the angle brackets.
+Given to the triage as it stands; the maintainer fills the angle brackets.
 
-> **Task.** Write the security report for Tenko `<version>` from the evidence of its security round, comparing it with the previous report. You write one file, `<path of the new report>`, and nothing else.
+> **Task.** The reviewer writes the security report for Tenko `<version>` from the evidence of its security round, comparing it with the previous report. It writes one file, `<path of the new report>`, and nothing else.
 >
-> **Inputs.** The decrypted evidence bundle at `<directory>` (one JSON line per row in `rows.jsonl`, the raw output of each tool beside it); the previous report at `<path>`; the open alerts of the repository, read with `gh api` (code scanning, Dependabot, secret scanning) at the time you run; the repository's security settings as `gh api` reads them; the release review of this release at `<path>`, if there is one; the owner's decisions since the previous report at `<path>`, if any; the report format and the fingerprint rules in `docs/security/README.md`.
+> **Inputs.** The decrypted evidence bundle at `<directory>` (one JSON line per row in `rows.jsonl`, the raw output of each tool beside it); the previous report at `<path>`; the open alerts of the repository, read with `gh api` (code scanning, Dependabot, secret scanning) at the time of the run; the repository's security settings as `gh api` reads them; the release review of this release at `<path>`, if there is one; the owner's decisions since the previous report at `<path>`, if any; the report format and the fingerprint rules in `docs/security/README.md`.
 >
-> **Steps.** 1. Fill sections 1 and 2 of the format from the bundle (the round's script has done most of this; check it against the raw outputs). 2. Turn every failed row, every scanner finding the rule files mark `FAIL` or `WARN`, every open alert and every review finding into a finding with its fingerprint. 3. Match each to the previous report's findings by fingerprint; give an unmatched finding the next free ID; where a new finding resembles an open one without the same fingerprint, say so in section 5 and do not merge them yourself. 4. Set each state as the format defines it. 5. Write section 4 and, in section 5, what the owner should decide, most severe first.
+> **Steps.** 1. Fill sections 1 and 2 of the format from the bundle (the round's script has done most of this; check it against the raw outputs). 2. Turn every failed row, every scanner finding the rule files mark `FAIL` or `WARN`, every open alert and every review finding into a finding with its fingerprint. 3. Match each to the previous report's findings by fingerprint; give an unmatched finding the next free ID; where a new finding resembles an open one without the same fingerprint, say so in section 5 and do not merge them. 4. Set each state as the format defines it. 5. Write section 4 and, in section 5, what the owner should decide, most severe first.
 >
-> **Rules.** A finding is reported with its evidence: the bundle path, the alert URL or the review reference, and enough of the output to see the problem without opening the bundle, never secrets or tokens from it. A finding is never silently closed: it is `fixed` only with the commit that addresses it, `not seen` when it merely disappeared, and `accepted` or `not a finding` only when the owner's decision says so, quoted. You do not change severities downwards. You do not edit code, rule files, workflows or earlier reports; you do not commit, push, open issues or comment anywhere; you do not run scanners or anything against a network beyond the `gh api` reads above. When the evidence is missing or unreadable for a row, the row's state is "no evidence" and section 5 says so.
+> **Rules.** A finding is reported with its evidence: the bundle path, the alert URL or the review reference, and enough of the output to see the problem without opening the bundle, never secrets or tokens from it. A finding is never silently closed: it is `fixed` only with the commit that addresses it, `not seen` when it merely disappeared, and `accepted` or `not a finding` only when the owner's decision says so, quoted. The reviewer does not change severities downwards, does not edit code, rule files, workflows or earlier reports, does not commit, push, open issues or comment anywhere, and does not run scanners or anything against a network beyond the `gh api` reads above. When the evidence is missing or unreadable for a row, the row's state is "no evidence" and section 5 says so.
 >
 > **Report back.** The path of the report, the counts of new, open, fixed, not seen and decided findings, and the IDs of every Critical and High finding.
 
 ## Appendix B: the release review brief
 
-Given to the review session as it stands; the lead fills the angle brackets.
+Given to the review as it stands; the maintainer fills the angle brackets.
 
-> **Task.** Review the changes of Tenko between `<from tag>` and `<to tag>` as an attacker would, and write your findings to `<path>`. You find and explain; you change nothing.
+> **Task.** The reviewer reviews the changes of Tenko between `<from tag>` and `<to tag>` as an attacker would, and writes the findings to `<path>`, finding and explaining and changing nothing.
 >
-> **The range.** `git diff <from tag>..<to tag>` restricted to the paths of `deploy/security/paths.txt`, read in the order of its groups. For each changed hunk read as much of the surrounding code as the questions need. When the filtered diff is longer than 20,000 lines, review groups `<the groups for this session>` only and say in the output which groups were not reviewed. Other paths (documentation, UI styling, tests) you skim only to see whether they change a security path's behavior, for example a test that was weakened.
+> **The range.** `git diff <from tag>..<to tag>` restricted to the paths of `deploy/security/paths.txt`, read in the order of its groups. For each changed hunk read as much of the surrounding code as the questions need. When the filtered diff is longer than 20,000 lines, review groups `<the groups for this review>` only and say in the output which groups were not reviewed. Other paths (documentation, UI styling, tests) are skimmed only to see whether they change a security path's behavior, for example a test that was weakened.
 >
 > **The threat model.** The attackers A1 to A4 of `docs/plans/security-audit-plan.md` section 1.2, and the owner's principle: an attacker who breaks into Tenko must get neither root nor code execution beyond what the service account already has. Read ADR 0023's invariants I1 to I9; a change that weakens one is a finding even when no exploit is in sight.
 >
@@ -474,8 +474,8 @@ Given to the review session as it stands; the lead fills the angle brackets.
 > 6. **The release path.** For changes in `.github/workflows/**` and the release scripts: a new action, an action not pinned by SHA, a permission raised, an event field used in a shell line, a secret or `id-token` reachable by a step that runs third-party code, a change in what `releases.json` or `SHA256SUMS` contain or who produces them.
 > 7. **Secrets.** Can a secret reach a log, an error message, a metric label, an export, a backup in clear, or an API answer? Is a new secret stored through the vault (NEVER-01)?
 >
-> **Output.** One file in this form: a header with the range, the groups reviewed and not reviewed, and the commit you read; then one entry per finding with a title, a severity (Critical, High, Medium, Low, Info) with one sentence of reasoning, the attacker (A1 to A4) and what they gain, the location (path and function, never only a line number), the fingerprint in the form `review:<question>:<path>#<function>`, the evidence (the input that reaches the code and the path it takes, quoted code under 20 lines), a reproduction against the lab when it is cheap and harmless, and the invariant or requirement it touches; then a short list of things you checked and found sound, so that the next review knows what was covered. No finding without evidence; a suspicion you could not confirm is listed separately as a question with what would settle it.
+> **Output.** One file in this form: a header with the range, the groups reviewed and not reviewed, and the commit read; then one entry per finding with a title, a severity (Critical, High, Medium, Low, Info) with one sentence of reasoning, the attacker (A1 to A4) and what they gain, the location (path and function, never only a line number), the fingerprint in the form `review:<question>:<path>#<function>`, the evidence (the input that reaches the code and the path it takes, quoted code under 20 lines), a reproduction against the lab when it is cheap and harmless, and the invariant or requirement it touches; then a short list of things checked and found sound, so that the next review knows what was covered. No finding without evidence; a suspicion that could not be confirmed is listed separately as a question with what would settle it.
 >
-> **Never.** Do not fix anything, edit any file other than your output, commit, push, open a pull request or an issue, or comment on GitHub. Do not run anything against a host other than a local lab you started yourself, and do not put a working exploit beyond the minimal reproduction in the output. Do not read or print secrets from the development machine or from any environment. When you are unsure whether something is allowed, it is not; write it down as a question instead.
+> **Never.** Do not fix anything, edit any file other than the output, commit, push, open a pull request or an issue, or comment on GitHub. Do not run anything against a host other than a local lab started for the purpose, and do not put a working exploit beyond the minimal reproduction in the output. Do not read or print secrets from the development machine or from any environment. When you are unsure whether something is allowed, it is not; write it down as a question instead.
 >
 > **Report back.** The path of the output, the counts by severity, and every Critical and High finding in one line each.
