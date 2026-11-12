@@ -333,12 +333,14 @@ fn kind_on(cache: &Denials, scope: DenialScope, qname: &str) -> Option<DenialKin
         .map(|hit| hit.kind)
 }
 
-fn rule_path(view: Option<ViewId>) -> DenialScope {
+/// The path of a forwarding rule for `suffix` in `view`.
+fn rule_path(view: Option<ViewId>, suffix: &str) -> DenialScope {
     DenialScope {
         view,
         route: DenialRoute::Rule(tenko_core::dns::ForwardRuleId::from_uuid(
             uuid::Uuid::from_u128(7),
         )),
+        suffix_labels: name::label_count(&wire_name(suffix)),
     }
 }
 
@@ -352,14 +354,40 @@ fn a_name_a_forwarding_rule_routes_is_denied_only_from_what_the_rule_taught() {
         Some(DenialKind::Nxdomain),
         "the default path is answered from its own proofs"
     );
-    // A rule sends `c.example.test` to other servers: the public proofs deny nothing there.
-    assert_eq!(kind_on(&cache, rule_path(None), "dc1.c.example.test"), None);
+    // A rule sends `example.test` to other servers: the public proofs deny nothing there.
+    let rule = rule_path(None, "example.test");
+    assert_eq!(kind_on(&cache, rule, "dc1.c.example.test"), None);
     // What the rule's own servers proved denies its names.
-    nsec_zone_on(&cache, rule_path(None));
+    nsec_zone_on(&cache, rule);
     assert_eq!(
-        kind_on(&cache, rule_path(None), "dc1.c.example.test"),
+        kind_on(&cache, rule, "dc1.c.example.test"),
         Some(DenialKind::Nxdomain)
     );
+}
+
+#[test]
+fn a_rule_is_never_answered_from_a_zone_above_its_suffix() {
+    let cache = denials();
+    // A rule for `c.example.test`: its servers' answer carried the proofs of the parent
+    // `example.test` (an alias out of the rule's zone, a question for the parent's DS).
+    let rule = rule_path(None, "c.example.test");
+    let mut authority: Vec<Rr> = signed_soa("example.test", 300).into();
+    authority.extend(nsec(
+        "example.test",
+        "a.example.test",
+        "m.example.test",
+        &[A, 46, 47],
+        300,
+    ));
+    let answer = message("b.example.test", A, 3, &[], &authority);
+    assert!(
+        !cache.insert(rule, &answer, &SECURE, Origin::Forwarder, Instant::now()),
+        "the parent's proofs are not the rule's to keep"
+    );
+    // Held under the rule (taught while its suffix was the parent), they are not read for
+    // the rule's names once its suffix is `c.example.test`.
+    nsec_zone_on(&cache, rule_path(None, "example.test"));
+    assert_eq!(kind_on(&cache, rule, "dc1.c.example.test"), None);
 }
 
 #[test]
@@ -368,6 +396,7 @@ fn a_name_in_a_stub_zone_is_denied_only_from_what_the_stub_zone_taught() {
     let stub = DenialScope {
         view: None,
         route: DenialRoute::Stub(tenko_core::dns::ZoneId::from_uuid(uuid::Uuid::from_u128(9))),
+        suffix_labels: 2,
     };
     nsec_zone(&cache, None);
     assert_eq!(kind_on(&cache, stub, "dc1.c.example.test"), None);
@@ -397,7 +426,7 @@ fn a_view_is_answered_only_from_what_its_own_paths_taught() {
         "another view"
     );
     assert_eq!(
-        kind_on(&cache, rule_path(inside), "c.example.test"),
+        kind_on(&cache, rule_path(inside, "example.test"), "c.example.test"),
         None,
         "the same view, another route"
     );
@@ -421,7 +450,11 @@ fn a_name_below_a_private_delegation_is_not_cut_off_by_a_public_nxdomain() {
     );
     // A rule delegates `corp.plain.test` to internal servers: its names are theirs to deny.
     assert_eq!(
-        kind_on(&cache, rule_path(None), "dc1.corp.plain.test"),
+        kind_on(
+            &cache,
+            rule_path(None, "corp.plain.test"),
+            "dc1.corp.plain.test"
+        ),
         None
     );
 }

@@ -590,7 +590,8 @@ impl Denials {
         }
         let mut buf = [0u8; ZONE_KEY_MAX];
         let labels = name::label_count(qname);
-        let zone = (0..=labels).find_map(|skip| {
+        // From the name up to the route's suffix, never above it.
+        let zone = (0..=labels.saturating_sub(scope.suffix_labels)).find_map(|skip| {
             store
                 .zones
                 .get(zone_key(scope, name::suffix(qname, skip), &mut buf))
@@ -661,6 +662,10 @@ impl Denials {
             return false;
         };
         let apex = learned.apex;
+        // A zone above the route's suffix is not the route's (see `DenialScope`).
+        if name::label_count(&apex) < scope.suffix_labels {
+            return false;
+        }
         // The delegation the answer carried, built before the lock is taken.
         let shown =
             store::delegation_of(&apex, &parsed.authority, &parsed.additional, now, carried);

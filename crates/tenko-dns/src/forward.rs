@@ -411,8 +411,8 @@ struct StubState {
 
 /// One stub zone's learned servers and the gate of the one query that learns them again.
 /// The state's lock is held only to read or swap it, never across the network: while one
-/// query learns, the others serve the servers learned before, and wait on the gate only
-/// when there are none to serve. Other stub zones never wait on this one.
+/// query learns, the others serve the servers learned before, or fail when there are none
+/// yet; no query waits for another's learning, and other stub zones never do.
 #[derive(Debug, Default)]
 struct StubSlot {
     state: Mutex<StubState>,
@@ -557,12 +557,20 @@ enum Routed<'a> {
 }
 
 impl Routed<'_> {
-    /// The path the denial cache scopes this route's denials by.
-    fn denial_route(&self) -> DenialRoute {
+    /// The path the denial cache scopes this route's denials by, in `view`.
+    fn denial_scope(&self, view: Option<ViewId>) -> DenialScope {
         match self {
-            Routed::Default => DenialRoute::Default,
-            Routed::Rule(rule) => DenialRoute::Rule(rule.id),
-            Routed::Stub(zone) => DenialRoute::Stub(zone.id),
+            Routed::Default => DenialScope::of_view(view),
+            Routed::Rule(rule) => DenialScope {
+                view,
+                route: DenialRoute::Rule(rule.id),
+                suffix_labels: rule.suffix.label_count(),
+            },
+            Routed::Stub(zone) => DenialScope {
+                view,
+                route: DenialRoute::Stub(zone.id),
+                suffix_labels: zone.name.label_count(),
+            },
         }
     }
 }
@@ -592,13 +600,14 @@ fn route(catalog: &Catalog, qname: &[u8], rule: Option<ForwardRuleId>) -> Route 
 }
 
 impl Route {
-    /// The path the denial cache scopes this route's denials by.
-    fn denial_route(&self) -> DenialRoute {
+    /// The path the denial cache scopes this route's denials by, in `view`.
+    fn denial_scope(&self, view: Option<ViewId>) -> DenialScope {
         match self {
-            Route::Default => DenialRoute::Default,
-            Route::Rule(rule) | Route::Recurse(rule) => DenialRoute::Rule(rule.id),
-            Route::Stub(zone) => DenialRoute::Stub(zone.id),
+            Route::Default => Routed::Default,
+            Route::Rule(rule) | Route::Recurse(rule) => Routed::Rule(rule),
+            Route::Stub(zone) => Routed::Stub(zone),
         }
+        .denial_scope(view)
     }
 }
 
@@ -1217,13 +1226,11 @@ impl Shared {
         );
         let (mut specs, due) = slot.snapshot(Instant::now());
         if due {
-            let gate = match slot.learning.try_lock() {
-                Ok(gate) => Some(gate),
-                Err(_) if specs.is_empty() => Some(slot.learning.lock().await),
-                Err(_) => None,
-            };
-            if let Some(_gate) = gate {
-                // A learner that finished while this query waited leaves nothing due.
+            // Never a wait on another query's learning: it can take minutes against silent
+            // sources, and a waiting query holds a permit of the dispatcher. A query that
+            // finds none learned yet fails as an unlearned zone does.
+            if let Ok(_gate) = slot.learning.try_lock() {
+                // A learner that finished just before leaves nothing due.
                 if slot.snapshot(Instant::now()).1 {
                     let learned = self.learn(zone).await;
                     self.store_stub(zone, &slot, learned);
@@ -1423,7 +1430,7 @@ impl Shared {
         question: OwnedQuestion,
         key: Option<CacheKey>,
         rule: Option<ForwardRuleId>,
-        route: DenialRoute,
+        scope: DenialScope,
     ) -> Result<(Vec<u8>, Option<Validation>), UpstreamError> {
         let mut answer = Vec::new();
         set.query(&question.as_question(), self.budget(), &mut answer)
@@ -1456,18 +1463,10 @@ impl Shared {
                     let verdict = validation.verdict(self.failure_ttl());
                     cache.insert_with(key, &answer, Instant::now(), rule, &verdict);
                     // WP10.3: forwarded answers feed the denial cache too.
-                    let scope = DenialScope {
-                        view: key.view(),
-                        route,
-                    };
                     self.keep_denials(scope, &answer, &verdict, Origin::Forwarder, false);
                 }
                 _ if !question.cd => {
                     cache.insert(key, &answer, Instant::now(), rule);
-                    let scope = DenialScope {
-                        view: key.view(),
-                        route,
-                    };
                     self.keep_denials(
                         scope,
                         &answer,
@@ -1607,7 +1606,7 @@ impl ForwardSink for Forwarder {
         let qname = request.qname.as_wire();
         let routed = routed(&catalog, qname, query.rule);
         // WP10.1: a name no rule and no stub zone covers follows the view's resolution.
-        if query.rule.is_none() && !matches!(routed, Routed::Stub(_)) {
+        if matches!(routed, Routed::Default) {
             match shared.default_resolution(&catalog, query.view) {
                 ResolutionMode::Refuse => {
                     shared.count(|counters| &counters.refused);
@@ -1698,10 +1697,7 @@ impl ForwardSink for Forwarder {
                         .is_some_and(|engine| engine.carries());
                 // Only what the path this name takes taught (its view, and its rule or stub
                 // zone or neither) denies it.
-                let scope = DenialScope {
-                    view: query.view,
-                    route: routed.denial_route(),
-                };
+                let scope = routed.denial_scope(query.view);
                 if let Some(denials) = &shared.denials
                     && let Some(hit) = denials.answer_carrying(
                         scope,
@@ -1964,10 +1960,7 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
             cd: false,
             dnssec_ok: true,
         };
-        let scope = DenialScope {
-            view: key.view(),
-            route: route.denial_route(),
-        };
+        let scope = route.denial_scope(key.view());
         let (resolved, _) = shared.recurse(&engine, &question, Some(&key), scope).await;
         if resolved.cacheable() {
             shared.count(|counters| &counters.prefetched);
@@ -1999,7 +1992,7 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
             question,
             Some(key.clone()),
             rule_id,
-            route.denial_route(),
+            route.denial_scope(key.view()),
         )
         .await
     {
@@ -2061,10 +2054,7 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
         .clone()
         .filter(|_| shared.recurses(&catalog, &route, query.view));
     let outcome = if let Some(engine) = engine {
-        let scope = DenialScope {
-            view: query.view,
-            route: route.denial_route(),
-        };
+        let scope = route.denial_scope(query.view);
         let (resolved, validation) = shared
             .recurse(&engine, &question, key.as_ref(), scope)
             .await;
@@ -2094,7 +2084,7 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
                         question,
                         key.clone(),
                         rule_id,
-                        route.denial_route(),
+                        route.denial_scope(query.view),
                     ));
                     tokio::select! {
                         joined = &mut task => match joined {
@@ -2105,7 +2095,13 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
                         () = tokio::time::sleep(shared.settings.stale_budget) => Outcome::Stale,
                     }
                 } else if let Ok((answer, validation)) = Arc::clone(shared)
-                    .fetch(set, question, key.clone(), rule_id, route.denial_route())
+                    .fetch(
+                        set,
+                        question,
+                        key.clone(),
+                        rule_id,
+                        route.denial_scope(query.view),
+                    )
                     .await
                 {
                     Outcome::Upstream(answer, validation)

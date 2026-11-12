@@ -851,6 +851,18 @@ async fn a_stub_zone_learning_its_servers_holds_up_no_other_stub_zone() {
         slow.error, None,
         "the other zone was answered while the slow zone was still learning"
     );
+    // A second query of the zone being learned for the first time does not wait for the
+    // learning: it fails at once, as a zone with no servers learned does.
+    let failed = peer
+        .ask(&forwarder, query_for("www2.slow.example.test", 42, None))
+        .await;
+    assert_eq!(wire::parse_header(&failed).expect("header").rcode, 2);
+    let reports = forwarder.stubs();
+    let slow = reports
+        .iter()
+        .find(|report| report.zone.as_str() == "slow.example.test")
+        .expect("a report");
+    assert_eq!(slow.error, None, "the first learning is still running");
     stop.cancel();
 }
 

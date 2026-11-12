@@ -87,7 +87,7 @@ A stub zone is a zone of kind `stub` whose `source` names the servers to ask (`P
 - A stub zone whose servers were never learned answers SERVFAIL; it is listed with the reason in `problems` of `GET /api/v1/nodes/{id}/dns`.
 - Between a stub zone and a rule, the longer suffix wins; at the same length the stub zone.
 
-A stub zone's name servers are learned again when their TTL ends (or 30 seconds after a failed attempt) by one query at a time: the other queries of the zone are sent to the servers learned before meanwhile, and wait only when none were ever learned; other stub zones never wait. At most 13 name servers of the NS set are looked up, and none once 32 addresses are known.
+A stub zone's name servers are learned again when their TTL ends (or 30 seconds after a failed attempt) by one query at a time: the other queries of the zone are sent to the servers learned before meanwhile, or, when none were learned yet, answered SERVFAIL as for a zone whose servers are not known; no query waits for the learning, and other stub zones are not affected. At most 13 name servers of the NS set are looked up, and none once 32 addresses are known.
 
 The queries to a stub zone's servers are plain DNS with the pool's health, round-trip times and 0x20 (section 4), as for a rule. Zones of kind `forward` are not used by the forwarder; a forwarding rule does that.
 
@@ -1136,7 +1136,7 @@ Each step of the walk asks a cut's servers only for the labels they need: the cu
 
 ### 11.2 The denial cache
 
-The denial cache (`Denials`) is a per-node store beside the answer cache, per resolution path and zone. A path is the view and the route that resolves the names: the forwarding rule (of either mode), the stub zone, or neither (the view's default resolution, recursion or the default forwarder). A name is answered only from records that answers of its own path taught, so a name that a forwarding rule or a stub zone routes to internal servers is never denied from a public zone's proofs, and a name of one view never from another view's:
+The denial cache (`Denials`) is a per-node store beside the answer cache, per resolution path and zone. A path is the view and the route that resolves the names: the forwarding rule (of either mode), the stub zone, or neither (the view's default resolution, recursion or the default forwarder). A name is answered only from records that answers of its own path taught, so a name that a forwarding rule or a stub zone routes to internal servers is never denied from a public zone's proofs, and a name of one view never from another view's. On a rule's or a stub zone's path, a zone above the rule's suffix or the stub zone's apex is neither kept nor read: its proofs speak for the parent, not for the names the route sends elsewhere:
 
 | What | From | Lifetime |
 |---|---|---|

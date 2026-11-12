@@ -73,13 +73,19 @@ pub enum DenialRoute {
 /// what the servers of its own path would answer (RFC 8198 section 5.1 speaks of one
 /// resolver's view of one zone), so the cache answers a name only from records that an
 /// answer of the path the name takes taught: a name under a forwarding rule or a stub zone
-/// is never denied from a public zone's proofs, nor one view's names from another's.
+/// is never denied from a public zone's proofs, nor one view's names from another's. On a
+/// route with a suffix, a zone above the suffix is not the route's to speak for (its
+/// servers answer for the parent, not for the names the route sends them), so it is
+/// neither kept nor read there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct DenialScope {
     /// The view.
     pub view: Option<ViewId>,
     /// The route.
     pub route: DenialRoute,
+    /// The labels of the route's suffix (the rule's suffix, the stub zone's apex; 0 for
+    /// the default resolution): the fewest labels a zone of this path has.
+    pub suffix_labels: usize,
 }
 
 impl DenialScope {
@@ -88,6 +94,7 @@ impl DenialScope {
         Self {
             view,
             route: DenialRoute::Default,
+            suffix_labels: 0,
         }
     }
 }
