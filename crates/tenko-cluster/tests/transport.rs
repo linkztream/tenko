@@ -709,6 +709,7 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
         .await
         .expect_err("role");
     assert_eq!(refused.code(), "cluster.enrollment.roles");
+    assert_eq!(refused.status(), 403);
     // A controller token carries the role alone and lives at most an hour.
     let mixed = controller
         .registry
@@ -722,6 +723,7 @@ async fn tokens_are_single_use_expire_and_limit_the_roles() {
         .await
         .expect_err("controller beside another role");
     assert_eq!(mixed.code(), "cluster.enrollment.roles");
+    assert_eq!(mixed.status(), 403);
     let long = controller
         .registry
         .create_enrollment(

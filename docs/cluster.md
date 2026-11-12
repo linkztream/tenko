@@ -43,8 +43,8 @@ Every field is optional. The command line flags are `--roles` (comma-separated),
 
 | Field | Meaning | Default |
 |---|---|---|
-| `roles` | The roles the node may take: `probe`, `dns`, `dhcp`; or `controller` alone, for a controller that joins the cluster (section 12.1; beside another role 422 `cluster.enrollment.roles`). Only an administrator who signed in within the last five minutes creates a controller token (403 `auth.step_up_required`; a personal API token cannot) | `["probe"]` |
-| `name` | The name the node gets. It must be unique among nodes and has 1 to 63 letters, digits, dots, hyphens and underscores, starting with a letter or digit | The node chooses one, its host name |
+| `roles` | The roles the node may take: `probe`, `dns`, `dhcp`; or `controller` alone, for a controller that joins the cluster (section 12.1; beside another role 403 `cluster.enrollment.roles`). Only an administrator who signed in within the last five minutes creates a controller token (403 `auth.step_up_required`; a personal API token cannot) | `["probe"]` |
+| `name` | The name the node gets. It must be unique among nodes and among the tokens that can still be used (409 `cluster.node.name_taken`), and has 1 to 63 letters, digits, dots, hyphens and underscores, starting with a letter or digit | The node chooses one, its host name |
 | `vrf` | The VRF, by id, of the node's observations when a batch names none (section 6) | The default VRF |
 | `expires_in_secs` | Seconds until the token expires, 60 to 604,800 (seven days); at most 3,600 for a controller token | 3,600, or `[cluster] enrollment_ttl_secs` (at most 3,600 for a controller token) |
 
@@ -211,7 +211,7 @@ A renewal keeps two certificates in the node record: the new one and the one the
 
 A revoked node does not come back by itself. It needs a new token and gets a new id; its name becomes free again. An entry leaves the revocation list after the expiry of its certificate, when the hourly maintenance pass finds it. The revocation is audited as `cluster.node.revoke`.
 
-A controller reads the revocation list from the store at start, every hour and whenever the table changes. In a cluster of controllers the list replicates with the store, so a revocation made on one controller takes effect on every other within a moment (section 12.6).
+A controller reads the revocation list from the store at start, every hour and whenever the table changes. In a cluster of controllers the list replicates with the store, so a revocation made on one controller takes effect on every other within a moment (section 12.6). A controller that is a member of the cluster is not revoked this way (409 `cluster.node.is_member`): it leaves through its removal (section 12.3), which revokes it.
 
 ## 4. The protocol and its versioning rule
 
@@ -403,7 +403,7 @@ The edits (creating and deleting a token, enrollment, renewal, revocation) run a
 | `cluster.member.join` | A controller joined the cluster as a learner, or the first controller recorded itself as a member | The cluster component |
 | `cluster.member.announce` | A controller reported a new binary in its member record after a start; records the version, the previous version and the newest data format the binary knows | The cluster component |
 | `cluster.member.promote` | Learners became voters, by the leader or by an administrator; records the voters afterwards, `force` and a replaced voter | The administrator, or the cluster component for an automatic promotion |
-| `cluster.member.remove` | A controller left the cluster; its certificates were revoked | The administrator |
+| `cluster.member.remove` | A controller left the cluster after its certificates were revoked | The administrator, or the cluster component when the leader finished a removal |
 | `cluster.member.step_down` | The leader handed leadership over; records the new leader | The administrator |
 | `nodes.roles` | A node's stored role set was changed; records the old and the new set (section 13) | The administrator |
 | `vault.kek.transfer` | A controller handed the key encryption keys to a joining controller (`purpose` `join`) or to a member that lacked generations (`purpose` `fetch`); records the generation ids, never the keys | The cluster component |
@@ -425,7 +425,7 @@ Up to 0.0.11 the enrollment codes were spelled with one l (`cluster.enrolment.*`
 | `cluster.enrollment.wrong_controller` | 401 | The CA fingerprint of the token is not this controller's: the token was created by another controller |
 | `cluster.enrollment.used` | 401 | The token was used already |
 | `cluster.enrollment.expired` | 401 | The token expired |
-| `cluster.enrollment.roles` | 403 at enrollment, 422 at creation | The token does not allow a requested role; a token for `controller` is refused |
+| `cluster.enrollment.roles` | 403 | At enrollment, the token does not allow a requested role; at creation, the role `controller` beside another role |
 | `cluster.enrollment.plain_http` | 403 | The token arrived over plain HTTP and the profile is not Lab; the token is withdrawn if it is not used yet (section 1.2) |
 | `cluster.enrollment.lifetime` | 422 | `expires_in_secs` is outside 60 to 604,800 |
 | `cluster.enrollment.not_found` | 404 | No such token |
@@ -433,7 +433,8 @@ Up to 0.0.11 the enrollment codes were spelled with one l (`cluster.enrolment.*`
 | `cluster.enrollment.random` | 500 | The system random number generator failed |
 | `cluster.node.not_found` | 404 | No enrolled node has that id |
 | `cluster.node.name` | 422 | The node name breaks the rule of section 1.1 |
-| `cluster.node.name_taken` | 409 | Another node has the name |
+| `cluster.node.name_taken` | 409 | Another node, or an enrollment token that can still be used, has the name |
+| `cluster.node.is_member` | 409 | The node is a member of the controller cluster: remove it with `tenko cluster remove` (section 12.3) |
 | `cluster.node.address` | 422 | The address is neither an IP address nor a host name |
 | `cluster.node.conflict` | 409 | The node changed during its revocation three times in a row; try again |
 | `cluster.node.unknown` | 403 | The certificate is valid but its node is not enrolled, for example after a revocation |
@@ -458,6 +459,9 @@ Up to 0.0.11 the enrollment codes were spelled with one l (`cluster.enrolment.*`
 | `cluster.member.last_voter` | 409 | The cluster cannot lose its last voter |
 | `cluster.member.is_leader` | 409 | The member leads; step it down first |
 | `cluster.member.changing` | 409 | Another membership change is in progress |
+| `cluster.member.not_revoked` | 409, 503 | A removal (or the replacement of a dead voter) could not revoke the controller's certificates; nothing changed, try again. `cause` names the failure (for example `cluster.node.conflict`, `sys.store.no_quorum`) |
+| `cluster.member.remove_pending` | 503 | The controller is revoked, but it has not left the Raft group (`pending` `leave,record`) or its member record is still there (`pending` `record`), `done` naming the steps that are done and `cause` the failure, and the leader finishes the removal on its own; or members out of contact have not received the removal yet (`pending` `propagate`, `members`) |
+| `cluster.member.stops_writes` | 409 | Removing the voter now would stop the writes until the voters out of contact (`members`) are back; nothing changed. Wait, or pass `force` |
 | `cluster.member.no_successor` | 409 | No other voter is in contact to take over leadership |
 | `cluster.member.no_address` | 409 | The first controller does not know its own cluster port; set `[node] address` |
 | `cluster.member.not_leader` | 503 | No leader is known to take the change; try again after the election |
@@ -555,9 +559,24 @@ A controller dials each peer at the cluster port of the peer's member record, it
 | Change | How | Rule |
 |---|---|---|
 | Promotion | Automatic, or `tenko cluster promote <id>` (`POST /cluster/members/{id}/promote`) | A learner that stayed within `[cluster] promote_lag_entries` (default 100) of the leader and in contact for 10 seconds is promoted when `[cluster] auto_promote` is on, and only to an odd number of voters. By hand the same rules apply (`cluster.member.even_voters`, `cluster.member.not_caught_up`) unless `--force` |
-| Replacement | `tenko cluster promote <new> --replace <dead>` | One joint change removes the dead voter and adds the learner, so the cluster never has two or four voters; the dead voter's certificates are revoked |
-| Removal | `tenko cluster remove <id> --yes` (`DELETE /cluster/members/{id}`) | The member leaves the Raft group, its member record goes and its certificates are revoked. The leader cannot remove itself (`cluster.member.is_leader`): step it down first |
+| Replacement | `tenko cluster promote <new> --replace <dead>` | The dead voter's certificates are revoked first; then one joint change removes it and adds the learner, so the cluster never has two or four voters |
+| Removal | `tenko cluster remove <id> --yes [--force]` (`DELETE /cluster/members/{id}`) | The member's certificates are revoked first, then it leaves the Raft group, then its member record goes (below). The leader cannot remove itself (`cluster.member.is_leader`): step it down first |
 | Step-down | `tenko cluster step-down` (`POST /cluster/step-down`) | Before a planned restart of the leader: new writes wait, the most caught-up voter in contact receives every entry and campaigns, and the command answers when it leads (`cluster.member.no_successor` without one) |
+
+A controller counts as removed when no other controller accepts it and it is no longer a member. Its removal is the only way out of the cluster (`DELETE /api/v1/nodes/{id}` refuses a member), and its steps run in the order that fails closed:
+
+1. **Revocation.** The node record goes and the certificate serials go on the revocation list in one write. From then on every controller that has the write refuses the controller's handshakes and calls, a join included, and closes its connections, and sends it no Raft message whenever the other voters are a majority without it. A removal that cannot revoke (the record changed three times during it, no quorum) changes nothing and answers `cluster.member.not_revoked`: the controller is still a member and still trusted, so try again.
+2. **Leaving the Raft group.** One joint change takes it out.
+3. **The member record** goes, audited as `cluster.member.remove`.
+4. **Propagation.** The answer waits up to five seconds until every other member has the removal in its log. A member that is out of contact still accepts the removed controller until it is in contact with the leader again, so the answer then is `cluster.member.remove_pending` with `pending` `propagate` and the members behind in `members`; nothing is left to do but bring them back.
+
+If step 2 or 3 fails (no quorum for the joint change within 30 seconds, a change of leader, a restart), the answer is `cluster.member.remove_pending` with the steps `done` and `pending`, and the leader finishes the removal on its own: once a second it takes every member whose certificates are revoked out of the cluster, and it never promotes such a learner. Until then the member shows `"revoked": true` in `GET /cluster/members`. A follower that forwards a removal to the leader hands on the code and the detail text, which names the steps too, but not the parameters.
+
+**Quorum.** The removal of a voter is refused before anything changes (409 `cluster.member.stops_writes`, the voters out of contact in `members`) when the voters in contact without it would not be a majority of the voters before and after the change: once it is revoked the leader stops sending to it, so the writes would stop until those voters are back. `tenko cluster remove <id> --yes --force` (`?force=true`) removes it all the same, for a controller that must be cut off now; the cluster then takes no writes until the voters out of contact return, and the leader finishes the removal when they do. "Out of contact" is what the leader knows from replication: no answer for two seconds.
+
+**Two controllers.** Both are needed for every write and for the change that takes one out, so the check above never refuses, and the removed controller is still sent to until the change commits, a few milliseconds. A controller that refuses to cooperate (stopped, or not acknowledging) blocks that change, and the cluster takes no writes until it is back: that is the nature of two voters, which is why three are recommended. To go on without it, stop both controllers, restore a backup of the remaining one as a single controller ([backup.md](backup.md), section 7) and enroll a new second controller; writes made after that backup are lost.
+
+**The leader.** The leader cannot remove itself (`cluster.member.is_leader`): `tenko cluster step-down` first, then remove it from the new leader. If the leader will not step down (it does not answer, or it is the controller that must be cut off), stop it: with three or more voters the others elect a leader within seconds, and `tenko cluster remove <id> --yes` on any of them removes it (the check of the paragraph above counts the voters other than the one removed, so a stopped controller does not stop its own removal). With two controllers there is no quorum without it; follow the paragraph above.
 
 Any controller takes these requests; a follower hands them to the leader. A promotion or removal is an inline job `cluster.edit` (step `cluster.member`) on the controller that took the request, and its answer carries the job id (`job_id`). The changes are audited as `cluster.member.promote`, `.remove` and `.step_down`. They need the rights of an administrator (`update` and `delete` on nodes), which the token of `tenko login` carries. To restart every controller in turn, step the leader down first and restart the followers one at a time, waiting for each to be caught up again.
 

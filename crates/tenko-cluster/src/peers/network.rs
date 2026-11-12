@@ -146,7 +146,12 @@ struct Inner {
     address_map: RwLock<HashMap<String, String>>,
     resolved: Mutex<HashMap<NodeId, (String, Instant)>>,
     channels: Mutex<HashMap<String, Channel>>,
+    /// The nodes no Raft message goes to ([`PeerNetwork::set_refused`]).
+    refused: OnceLock<Refused>,
 }
+
+/// Whether a node gets no Raft message from this controller.
+type Refused = Box<dyn Fn(NodeId) -> bool + Send + Sync>;
 
 impl fmt::Debug for PeerNetwork {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -175,6 +180,7 @@ impl PeerNetwork {
                 address_map: RwLock::new(HashMap::new()),
                 resolved: Mutex::new(HashMap::new()),
                 channels: Mutex::new(HashMap::new()),
+                refused: OnceLock::new(),
             }),
         }
     }
@@ -238,6 +244,13 @@ impl PeerNetwork {
             .get(&endpoint)
             .cloned()
             .unwrap_or(endpoint)
+    }
+
+    /// Sets which nodes get no Raft message (append, vote, snapshot) from this controller:
+    /// the peer layer refuses a revoked controller whose acknowledgment the group does not
+    /// need. Set once.
+    pub fn set_refused(&self, refused: impl Fn(NodeId) -> bool + Send + Sync + 'static) {
+        let _ = self.inner.refused.set(Box::new(refused));
     }
 
     /// Forgets the cached endpoint of `node` (its member record changed).
@@ -379,6 +392,18 @@ impl PeerNetwork {
         node: NodeId,
         fallback: &str,
     ) -> Result<(String, v1::raft_client::RaftClient<Channel>), ClusterError> {
+        if self
+            .inner
+            .refused
+            .get()
+            .is_some_and(|refused| refused(node))
+        {
+            return Err(ClusterError::new(
+                "cluster.peer.revoked",
+                403,
+                format!("controller {node} is revoked; no Raft message goes to it"),
+            ));
+        }
         let endpoint = self.endpoint(node, Some(fallback)).await?;
         let channel = self.channel(&endpoint).await?;
         Ok((

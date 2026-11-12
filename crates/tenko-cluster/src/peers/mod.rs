@@ -25,12 +25,36 @@
 //! (10 seconds below `[cluster] promote_lag_entries` and in contact) when
 //! `[cluster] auto_promote` is on, and only to an odd number of voters: one voter and one
 //! caught-up learner wait for a second learner (R21). An administrator promotes with
-//! `force`, replaces a dead voter in one joint change (`replace`), removes a member (its
-//! certificates are revoked) and hands leadership over before a planned restart
-//! (step-down). Membership changes run on the leader; a follower hands them over
+//! `force`, replaces a dead voter in one joint change (`replace`), removes a member and
+//! hands leadership over before a planned restart (step-down). Membership changes run on the leader; a follower hands them over
 //! (`Cluster.Change`). A promotion or removal is an inline job `cluster.edit` (step
 //! `cluster.member`) on the controller that took the request. The audit actions are
 //! `cluster.member.join`, `.promote`, `.remove` and `.step_down`.
+//!
+//! # Removal
+//!
+//! A controller counts as removed when no other controller accepts it and it is no longer
+//! a member; its removal is the only way out (the registry's revoke refuses a member). The
+//! steps run in the order that fails closed:
+//! 1. Its certificates are revoked: its node record goes and its serials are put on the
+//!    revocation list in one write. From then on every controller that applied the write
+//!    refuses its handshakes and its calls (`Join` included), closes its connections, and
+//!    sends it no Raft message unless the group needs its acknowledgment to take it out
+//!    ([`Peers::refuses`]: a voter of two). A removal whose revocation fails changes
+//!    nothing (`cluster.member.not_revoked`).
+//! 2. It leaves the Raft group.
+//! 3. Its member record goes, with the audit record `cluster.member.remove`.
+//! 4. The answer waits until every other member has the removal in its log; a member out
+//!    of contact accepts the controller until it catches up, and is named
+//!    (`cluster.member.remove_pending`, pending `propagate`).
+//!
+//! A voter whose revocation would leave the voters in contact without a majority is not
+//! removed unless the request forces it (`cluster.member.stops_writes`). When step 2 or 3
+//! fails (no quorum, a change of leader, a crash), the answer says so
+//! (`cluster.member.remove_pending`) and the leader finishes the removal on its own: once a
+//! second it takes every other member whose certificates are revoked out of the group, and
+//! never promotes one. The cluster view marks such a member `revoked` until then. The
+//! leader cannot remove itself: it steps down first.
 //!
 //! The first controller has no node record and keeps its cluster key in the vault. When
 //! the first peer joins, it records itself (node and member record) and moves its identity
@@ -40,7 +64,7 @@ mod identity;
 mod network;
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     net::SocketAddr,
     sync::{Arc, Mutex, OnceLock, PoisonError, Weak},
     time::{Duration, Instant},
@@ -72,7 +96,8 @@ pub use self::{
 use crate::{
     admin::{
         ClusterAdmin, ClusterView, DigestReport, MemberDigest, MemberRole, MemberView,
-        PromoteRequest, StepDown, member_not_found,
+        PromoteRequest, StepDown, member_not_found, not_propagated, not_revoked, remove_pending,
+        stops_writes,
     },
     error::ClusterError,
     identity::split_host_port,
@@ -80,7 +105,7 @@ use crate::{
     model::{KekTransferRecord, MemberRecord, NodeRecord, ProtocolState, tables},
     mtls::PeerInfo,
     proto::v1,
-    registry::{EDIT_JOB, EDIT_TITLE, NodeRegistry, WRITE_PREVIEW, check_name},
+    registry::{EDIT_JOB, EDIT_TITLE, NODE_CONFLICT, NodeRegistry, WRITE_PREVIEW, check_name},
     server::{code_of, status_of},
     trace,
     wire::{self, CLUSTER_WIRE, ChangeEnvelope, ChangeResult, MemberChange, RAFT_WIRE, WireCtx},
@@ -93,6 +118,13 @@ pub const PROMOTE_AFTER: Duration = Duration::from_secs(10);
 pub const CONTACT_WINDOW: Duration = Duration::from_secs(2);
 /// How long a hand-over of leadership may take.
 pub const STEP_DOWN_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a removal waits for the revoked controller to leave the Raft group before it
+/// answers `cluster.member.remove_pending`: the change goes on without the wait, and the
+/// leader finishes the removal.
+pub const LEAVE_WAIT: Duration = Duration::from_secs(30);
+/// How long a removal waits for every other member to have it in its log before it
+/// answers `cluster.member.remove_pending` with the members behind.
+pub const PROPAGATE_WAIT: Duration = Duration::from_secs(5);
 
 /// Audit actions of the controller cluster.
 pub mod actions {
@@ -184,6 +216,8 @@ struct Inner {
     caught_up: Mutex<HashMap<NodeId, Instant>>,
     /// One membership change at a time on this controller.
     changes: tokio::sync::Mutex<()>,
+    /// Revoked members the leader is taking out of the cluster (each logged once).
+    removing: Mutex<HashSet<NodeId>>,
 }
 
 impl std::fmt::Debug for Peers {
@@ -276,6 +310,7 @@ impl Peers {
                 jobs: OnceLock::new(),
                 caught_up: Mutex::new(HashMap::new()),
                 changes: tokio::sync::Mutex::new(()),
+                removing: Mutex::new(HashSet::new()),
             }),
         }
     }
@@ -353,6 +388,12 @@ impl Peers {
     /// and key transfers need it.
     pub fn attach_registry(&self, registry: Arc<NodeRegistry>) {
         let _ = self.inner.registry.set(registry);
+        let peers = Arc::downgrade(&self.inner);
+        self.network().set_refused(move |node| {
+            peers
+                .upgrade()
+                .is_some_and(|inner| Peers { inner }.refuses(node))
+        });
     }
 
     /// Hands over this controller's identity (the first controller's key moves at the
@@ -387,7 +428,7 @@ impl Peers {
     /// Starts the leader's background work: promotion of caught-up learners. It ends when
     /// `stop` turns true.
     pub fn spawn(&self, stop: watch::Receiver<bool>) -> Vec<JoinHandle<()>> {
-        vec![tokio::spawn(promote_loop(self.clone(), stop))]
+        vec![tokio::spawn(leader_loop(self.clone(), stop))]
     }
 
     // -----------------------------------------------------------------------------------
@@ -510,13 +551,7 @@ impl Peers {
             }
         };
         if !record.is_some_and(|record| record.roles.contains(&Role::Controller)) {
-            return Err(ClusterError::new(
-                "cluster.join.not_controller",
-                403,
-                format!(
-                    "node {node} was not enrolled as a controller; enroll it with a controller token"
-                ),
-            ));
+            return Err(not_controller(node));
         }
         let format = self.stored_format().await?;
         if let Some(format) = format
@@ -548,6 +583,15 @@ impl Peers {
         }
         let registry = Arc::clone(self.registry()?);
         let _change = self.inner.changes.lock().await;
+        // Again where it counts: what this leader applied may lag what it committed (a
+        // revocation, which takes the record with it).
+        if !self
+            .node_record(node, ReadConsistency::Linearizable)
+            .await?
+            .is_some_and(|record| record.roles.contains(&Role::Controller))
+        {
+            return Err(not_controller(node));
+        }
         self.register_self(&registry, local_addr).await?;
         self.record_member(&registry, &request).await?;
         self.network().forget(node);
@@ -908,6 +952,7 @@ impl Peers {
                     formats: record
                         .map(|record| record.formats.clone())
                         .unwrap_or_default(),
+                    revoked: self.is_revoked(node),
                 }
             })
             .collect();
@@ -1016,7 +1061,9 @@ impl Peers {
             }
             let mut eligible: Vec<(u64, NodeId)> = caught
                 .iter()
-                .filter(|(_, since)| since.elapsed() >= self.inner.config.promote_after)
+                .filter(|(node, since)| {
+                    since.elapsed() >= self.inner.config.promote_after && !self.is_revoked(**node)
+                })
                 .map(|(node, _)| {
                     let lag = status
                         .members
@@ -1068,6 +1115,12 @@ impl Peers {
         if !membership.learners.contains(&node) {
             return Err(member_not_found(node));
         }
+        // A revoked learner is on its way out (the leader takes it out), never in.
+        let view = self.store().read(ReadConsistency::Local).await?;
+        if revoked_node(view.as_ref(), node)? {
+            return Err(member_not_found(node));
+        }
+        drop(view);
         let mut voters = membership.voters.clone();
         let mut targets = vec![node];
         if let Some(dead) = request.replace {
@@ -1109,11 +1162,23 @@ impl Peers {
         let mut context = vec![("force", request.force.to_string())];
         if let Some(dead) = request.replace {
             context.push(("replaced", dead.to_string()));
+            self.revoke_member(cx, dead)
+                .await
+                .map_err(|cause| not_revoked(dead, &cause))?;
         }
-        self.set_voters(cx, voters, actions::MEMBER_PROMOTE, &targets, context)
-            .await?;
+        let promoted = self
+            .set_voters(cx, voters, actions::MEMBER_PROMOTE, &targets, context)
+            .await;
         if let Some(dead) = request.replace {
-            self.forget_member(cx, dead).await;
+            promoted.map_err(|cause| remove_pending(dead, LEAVE, &cause))?;
+            lock(&self.inner.caught_up).remove(&dead);
+            self.network().forget(dead);
+            self.drop_member(cx, dead)
+                .await
+                .map_err(|cause| remove_pending(dead, RECORD, &cause))?;
+            self.propagated(dead).await?;
+        } else {
+            promoted?;
         }
         self.view_local(None).await
     }
@@ -1122,6 +1187,7 @@ impl Peers {
         &self,
         cx: &RequestCtx,
         node: NodeId,
+        force: bool,
     ) -> Result<ClusterView, ClusterError> {
         if node == self.local() {
             return Err(is_leader(node));
@@ -1131,63 +1197,274 @@ impl Peers {
         if membership.changing {
             return Err(changing());
         }
-        if membership.voters.contains(&node) {
-            let voters: BTreeSet<NodeId> = membership
-                .voters
-                .iter()
-                .copied()
-                .filter(|voter| *voter != node)
-                .collect();
-            if voters.is_empty() {
-                return Err(ClusterError::new(
-                    "cluster.member.last_voter",
-                    409,
-                    "the cluster cannot lose its last voter",
-                ));
-            }
-            self.store()
-                .set_voters(voters, false)
-                .await
-                .map_err(|error| membership_error(&error))?;
-        } else if membership.learners.contains(&node) {
-            self.store()
-                .remove_learner(node)
-                .await
-                .map_err(|error| membership_error(&error))?;
-        } else if !self.member_records().await?.contains_key(&node) {
+        if membership.voters.len() == 1 && membership.voters.contains(&node) {
+            return Err(ClusterError::new(
+                "cluster.member.last_voter",
+                409,
+                "the cluster cannot lose its last voter",
+            ));
+        }
+        if !membership.voters.contains(&node)
+            && !membership.learners.contains(&node)
+            && !self.member_records().await?.contains_key(&node)
+        {
             return Err(member_not_found(node));
         }
+        if !force {
+            let absent = self.writes_stop_without(&membership, node);
+            if !absent.is_empty() {
+                return Err(stops_writes(node, &absent));
+            }
+        }
+        self.revoke_member(cx, node)
+            .await
+            .map_err(|cause| not_revoked(node, &cause))?;
+        self.finish_removal(cx, node, LEAVE_WAIT).await?;
+        self.propagated(node).await?;
+        self.view_local(None).await
+    }
+
+    /// The voters out of contact whose absence stops the cluster's writes once `node` is
+    /// revoked, or none when the voters in contact suffice. After the revocation the members
+    /// stop sending to `node` when the voters without it are a majority
+    /// ([`Peers::refuses`]); the joint change needs a majority of the voters before and of
+    /// those after. "Out of contact" is what the leader knows from replication.
+    fn writes_stop_without(&self, membership: &Membership, node: NodeId) -> Vec<NodeId> {
+        if !membership.voters.contains(&node) {
+            return Vec::new();
+        }
+        let status = self.store().status();
+        let absent: BTreeSet<NodeId> = membership
+            .voters
+            .iter()
+            .copied()
+            .filter(|voter| *voter != self.local() && *voter != node)
+            .filter(|voter| {
+                let member = status.members.iter().find(|member| member.node == *voter);
+                !member.is_some_and(|member| {
+                    member
+                        .last_contact_ms
+                        .is_some_and(|ms| Duration::from_millis(ms) <= CONTACT_WINDOW)
+                })
+            })
+            .collect();
+        let before = &membership.voters;
+        let after: BTreeSet<NodeId> = before.iter().copied().filter(|v| *v != node).collect();
+        // While the others are no majority without it, `node` is still sent to and answers.
+        let answers = after.len() <= before.len() / 2;
+        let present = |config: &BTreeSet<NodeId>| {
+            config
+                .iter()
+                .filter(|voter| !absent.contains(voter) && (**voter != node || answers))
+                .count()
+        };
+        if present(before) > before.len() / 2 && present(&after) > after.len() / 2 {
+            Vec::new()
+        } else {
+            absent.into_iter().collect()
+        }
+    }
+
+    /// The first step of a removal: revokes the certificates of `node`. A lost race wrote
+    /// nothing; after any other failure the write may have committed (a timeout, a change
+    /// of leader, an interrupted removal before), so the revocation table decides.
+    async fn revoke_member(&self, cx: &RequestCtx, node: NodeId) -> Result<(), ClusterError> {
+        let registry = self.registry()?;
+        let Err(error) = registry.revoke_member(cx, node).await else {
+            return Ok(());
+        };
+        if error.code() != NODE_CONFLICT
+            && let Ok(view) = self.store().read(ReadConsistency::Linearizable).await
+            && revoked_node(view.as_ref(), node)?
+        {
+            return Ok(());
+        }
+        Err(error)
+    }
+
+    /// The steps of a removal after the revocation: `node` leaves the Raft group (waited
+    /// for up to `wait`; the change goes on after it), then its member record goes. A step
+    /// an interrupted removal did already is skipped.
+    async fn finish_removal(
+        &self,
+        cx: &RequestCtx,
+        node: NodeId,
+        wait: Duration,
+    ) -> Result<(), ClusterError> {
+        lock(&self.inner.caught_up).remove(&node);
+        self.network().forget(node);
+        let membership = self.store().membership();
+        let leave = async {
+            if membership.voters.contains(&node) {
+                let voters = membership
+                    .voters
+                    .iter()
+                    .copied()
+                    .filter(|voter| *voter != node)
+                    .collect();
+                self.store().set_voters(voters, false).await
+            } else if membership.learners.contains(&node) {
+                self.store().remove_learner(node).await
+            } else {
+                Ok(())
+            }
+        };
+        tokio::time::timeout(wait, leave)
+            .await
+            .unwrap_or(Err(StoreError::Timeout))
+            .map_err(|error| remove_pending(node, LEAVE, &membership_error(&error)))?;
+        self.drop_member(cx, node)
+            .await
+            .map_err(|cause| remove_pending(node, RECORD, &cause))
+    }
+
+    /// The last step of a removal: the member record of `node` goes, with the audit record,
+    /// once.
+    async fn drop_member(&self, cx: &RequestCtx, node: NodeId) -> Result<(), ClusterError> {
+        let view = self.store().read(ReadConsistency::Local).await?;
+        let Some((_, revision)) = view.get_typed(&tables::MEMBERS, &node.0)? else {
+            return Ok(());
+        };
+        drop(view);
         let mut batch = WriteBatch::for_request(cx);
+        batch.expect_typed(&tables::MEMBERS, &node.0, Some(revision));
         batch.delete_typed(&tables::MEMBERS, &node.0);
         batch.audit(
             AuditDraft::success(actions::MEMBER_REMOVE, vec![ObjectRef::node(node)])
                 .with_source_ip(cx.source_ip),
         );
-        self.store().propose(batch).await?;
-        self.forget_member(cx, node).await;
-        self.view_local(None).await
+        let Err(error) = self.store().propose(batch).await else {
+            return Ok(());
+        };
+        // Gone meanwhile: another leader finished it.
+        if matches!(error, StoreError::PreconditionFailed(_))
+            && !self.member_records().await?.contains_key(&node)
+        {
+            return Ok(());
+        }
+        Err(error.into())
     }
 
-    /// Drops the member record of a node that left and revokes its certificates.
-    async fn forget_member(&self, cx: &RequestCtx, node: NodeId) {
-        lock(&self.inner.caught_up).remove(&node);
-        self.network().forget(node);
-        let mut batch = WriteBatch::for_request(cx);
-        batch.delete_typed(&tables::MEMBERS, &node.0);
-        if let Err(error) = self.store().propose(batch).await {
-            tracing::warn!(node = %node, %error, "the member record could not be removed");
-        }
-        if let Ok(registry) = self.registry() {
-            match registry.revoke(cx, node).await {
-                Ok(serials) => {
-                    tracing::warn!(node = %node, count = serials.len(), "the certificates of a removed controller are revoked");
-                }
-                Err(error) if error.code() == "cluster.node.not_found" => {}
-                Err(error) => {
-                    tracing::warn!(node = %node, code = %error.code(), "the certificates of a removed controller could not be revoked: {}", error.detail());
+    /// Waits up to [`PROPAGATE_WAIT`] until every other member has the removal of `node`
+    /// in its log (matched at least the leader's applied index); a member that is behind
+    /// still accepts `node` until it catches up.
+    async fn propagated(&self, node: NodeId) -> Result<(), ClusterError> {
+        let Some(index) = self.store().applied_index() else {
+            return Ok(());
+        };
+        let behind = || -> Vec<NodeId> {
+            let membership = self.store().membership();
+            let status = self.store().status();
+            membership
+                .voters
+                .iter()
+                .chain(&membership.learners)
+                .copied()
+                .filter(|member| *member != self.local() && *member != node)
+                .filter(|member| {
+                    !status.members.iter().any(|seen| {
+                        seen.node == *member && seen.matched.is_some_and(|matched| matched >= index)
+                    })
+                })
+                .collect()
+        };
+        let mut metrics = self.store().raft().metrics();
+        let caught_up = async {
+            while !behind().is_empty() {
+                if metrics.changed().await.is_err() {
+                    return;
                 }
             }
+        };
+        let _ = tokio::time::timeout(PROPAGATE_WAIT, caught_up).await;
+        let behind = behind();
+        if behind.is_empty() {
+            Ok(())
+        } else {
+            Err(not_propagated(node, &behind))
         }
+    }
+
+    /// Whether the node registry knows `node` as revoked.
+    fn is_revoked(&self, node: NodeId) -> bool {
+        self.inner
+            .registry
+            .get()
+            .is_some_and(|registry| registry.is_revoked_node(node))
+    }
+
+    /// Whether this controller sends no Raft message to `node`: its certificates are
+    /// revoked, and in every configuration of the membership that names it (both during a
+    /// joint change) the voters that are not revoked are a majority, so the group does not
+    /// need its acknowledgment to take it out. A revoked learner is always refused; a
+    /// revoked voter of two is not (both are needed to take it out).
+    fn refuses(&self, node: NodeId) -> bool {
+        if !self.is_revoked(node) {
+            return false;
+        }
+        let metrics = self.store().raft().metrics();
+        let metrics = metrics.borrow();
+        metrics
+            .membership_config
+            .membership()
+            .get_joint_config()
+            .iter()
+            .all(|config| {
+                !config.contains(&node.0)
+                    || config
+                        .iter()
+                        .filter(|voter| !self.is_revoked(NodeId(**voter)))
+                        .count()
+                        > config.len() / 2
+            })
+    }
+
+    /// Whether a joint membership change is appended and not applied yet: it is in
+    /// flight, and another change asked now would be refused.
+    fn joint_in_flight(&self) -> bool {
+        let metrics = self.store().raft().metrics();
+        let metrics = metrics.borrow();
+        let config = &metrics.membership_config;
+        config.membership().get_joint_config().len() > 1
+            && config.log_id().as_ref().map(|id| id.index)
+                > metrics.last_applied.as_ref().map(|id| id.index)
+    }
+
+    /// The other members (in the Raft group or with a member record) whose certificates
+    /// are revoked.
+    async fn revoked_members(&self) -> Result<BTreeSet<NodeId>, ClusterError> {
+        let membership = self.store().membership();
+        let mut nodes: BTreeSet<NodeId> = membership
+            .voters
+            .iter()
+            .chain(&membership.learners)
+            .copied()
+            .collect();
+        nodes.extend(self.member_records().await?.into_keys());
+        nodes.retain(|node| *node != self.local() && self.is_revoked(*node));
+        Ok(nodes)
+    }
+
+    /// On the leader: finishes the removal of every other member whose certificates are
+    /// revoked (see the module documentation). It waits for no joint change in flight, and
+    /// for a leave at most [`CONTACT_WINDOW`] per pass, so the other membership changes are
+    /// not held up.
+    async fn finish_removals(&self) -> Result<(), ClusterError> {
+        let pending = self.revoked_members().await?;
+        lock(&self.inner.removing).retain(|node| pending.contains(node));
+        if pending.is_empty() || self.joint_in_flight() {
+            return Ok(());
+        }
+        let _change = self.inner.changes.lock().await;
+        for node in self.revoked_members().await? {
+            if lock(&self.inner.removing).insert(node) {
+                tracing::warn!(node = %node, "a revoked controller is still a member; the leader takes it out of the cluster");
+            }
+            self.finish_removal(&system(), node, CONTACT_WINDOW).await?;
+            lock(&self.inner.removing).remove(&node);
+            tracing::info!(node = %node, "a revoked controller left the cluster");
+        }
+        Ok(())
     }
 
     async fn step_down_here(&self, cx: &RequestCtx) -> Result<StepDown, ClusterError> {
@@ -1289,9 +1566,10 @@ impl Peers {
                     .promote_here(cx, node, request)
                     .await
                     .map(ChangeResult::View),
-                MemberChange::Remove { node } => {
-                    self.remove_here(cx, node).await.map(ChangeResult::View)
-                }
+                MemberChange::Remove { node, force } => self
+                    .remove_here(cx, node, force)
+                    .await
+                    .map(ChangeResult::View),
                 MemberChange::StepDown => self.step_down_here(cx).await.map(ChangeResult::StepDown),
             };
         }
@@ -1312,7 +1590,7 @@ impl Peers {
             wire: CLUSTER_WIRE.to_owned(),
             change: wire::encode(&envelope)?,
         });
-        request.set_timeout(STEP_DOWN_TIMEOUT + Duration::from_secs(10));
+        request.set_timeout(CHANGE_FORWARD_TIMEOUT);
         let answer = trace::rpc(Some(leader), trace::CLUSTER, "Change", async {
             trace::inject(&mut request);
             client.change(request).await
@@ -1415,7 +1693,7 @@ impl Peers {
             )
             .await
             .map_err(|error| {
-                if error.code() == "sys.store.precondition_failed" {
+                if error.code() == StoreError::PRECONDITION_FAILED {
                     ClusterError::new(
                         "vault.kek.transfer.used",
                         409,
@@ -1494,6 +1772,14 @@ fn odd_promotions(voters: usize, eligible: usize) -> usize {
     }
 }
 
+fn not_controller(node: NodeId) -> ClusterError {
+    ClusterError::new(
+        "cluster.join.not_controller",
+        403,
+        format!("node {node} was not enrolled as a controller; enroll it with a controller token"),
+    )
+}
+
 fn is_leader(node: NodeId) -> ClusterError {
     ClusterError::new(
         "cluster.member.is_leader",
@@ -1522,7 +1808,9 @@ fn member_proto(member: &MemberView) -> v1::Member {
     }
 }
 
-async fn promote_loop(peers: Peers, mut stop: watch::Receiver<bool>) {
+/// The leader's work for the group, once a second: it finishes interrupted removals, then
+/// promotes caught-up learners when `[cluster] auto_promote` is on.
+async fn leader_loop(peers: Peers, mut stop: watch::Receiver<bool>) {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -1530,7 +1818,7 @@ async fn promote_loop(peers: Peers, mut stop: watch::Receiver<bool>) {
             () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
             _ = tick.tick() => {}
         }
-        if !peers.inner.config.auto_promote || peers.inner.registry.get().is_none() {
+        if peers.inner.registry.get().is_none() {
             continue;
         }
         let leads = peers
@@ -1540,6 +1828,14 @@ async fn promote_loop(peers: Peers, mut stop: watch::Receiver<bool>) {
             .is_some_and(|seen| seen.is_self);
         if !leads {
             lock(&peers.inner.caught_up).clear();
+            continue;
+        }
+        // Tried again every second until it succeeds; the first try is logged at warn, and
+        // the cluster view shows the member as revoked meanwhile.
+        if let Err(error) = peers.finish_removals().await {
+            tracing::debug!(code = %error.code(), "{}", error.detail());
+        }
+        if !peers.inner.config.auto_promote {
             continue;
         }
         if let Err(error) = peers.auto_promote().await {
@@ -1565,8 +1861,13 @@ impl ClusterAdmin for Peers {
             .await
     }
 
-    async fn remove(&self, cx: &RequestCtx, node: NodeId) -> Result<ClusterView, ClusterError> {
-        self.change_as_job(cx, node, MemberChange::Remove { node })
+    async fn remove(
+        &self,
+        cx: &RequestCtx,
+        node: NodeId,
+        force: bool,
+    ) -> Result<ClusterView, ClusterError> {
+        self.change_as_job(cx, node, MemberChange::Remove { node, force })
             .await
     }
 
@@ -1701,6 +2002,11 @@ pub const MEMBER_STEP: &str = "cluster.member";
 /// leader's figures.
 const MEMBER_JOB_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// How long a follower waits for the leader's answer to a change it forwarded: below the
+/// job's own limit, above what the leader may take (a removal waits up to [`LEAVE_WAIT`]
+/// and [`PROPAGATE_WAIT`] after its revocation).
+const CHANGE_FORWARD_TIMEOUT: Duration = Duration::from_secs(110);
+
 /// The members after a promotion or removal.
 fn view_of(result: ChangeResult) -> Result<ClusterView, ClusterError> {
     match result {
@@ -1736,7 +2042,7 @@ impl StepHandler for MemberStep {
             from_cbor(params).map_err(|error| StepError::InvalidParams(error.to_string()))?;
         let (summary, node) = match &change {
             MemberChange::Promote { node, .. } => (format!("promote controller {node}"), *node),
-            MemberChange::Remove { node } => (format!("remove controller {node}"), *node),
+            MemberChange::Remove { node, .. } => (format!("remove controller {node}"), *node),
             MemberChange::StepDown => {
                 return Err(StepError::InvalidParams(
                     "a step-down is not a job step".to_owned(),
@@ -1786,6 +2092,11 @@ impl StepHandler for MemberStep {
     }
 }
 
+/// The step of a removal after the revocation: leaving the Raft group.
+const LEAVE: &str = "leave";
+/// The last step of a removal: the member record.
+const RECORD: &str = "record";
+
 /// Whether the store revokes the certificate `serial` or the node `node`: a row of
 /// `cluster.revocations` names either.
 fn revoked_in(view: &dyn ReadView, node: NodeId, serial: &str) -> Result<bool, ClusterError> {
@@ -1795,6 +2106,11 @@ fn revoked_in(view: &dyn ReadView, node: NodeId, serial: &str) -> Result<bool, C
     {
         return Ok(true);
     }
+    revoked_node(view, node)
+}
+
+/// Whether a row of `cluster.revocations` names `node`.
+fn revoked_node(view: &dyn ReadView, node: NodeId) -> Result<bool, ClusterError> {
     Ok(view
         .scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
         .iter()

@@ -7,8 +7,8 @@
 //! |---|---|---|
 //! | `GET /nodes` | 200 page of [`NodeView`] by id, each with its live connection | 400 `sys.invalid_query`, `sys.invalid_cursor` |
 //! | `GET /nodes/{id}` | 200 [`NodeView`] with `ETag` | 400, 403, 404 `cluster.node.not_found` |
-//! | `DELETE /nodes/{id}` | 204: the node is revoked, its connections close | 403, 404, 409 `cluster.node.conflict` |
-//! | `POST /nodes/enrollments` | 201 [`CreatedEnrollment`] with the token, `Cache-Control: no-store` | 400, 403 (`auth.step_up_required` for a controller token), 501 `sys.not_implemented` (a controller token without the authentication service), 409 `cluster.node.name_taken`, 422 `cluster.enrollment.*`, `cluster.node.name` |
+//! | `DELETE /nodes/{id}` | 204: the node is revoked, its connections close | 403, 404, 409 `cluster.node.conflict`, `cluster.node.is_member` |
+//! | `POST /nodes/enrollments` | 201 [`CreatedEnrollment`] with the token, `Cache-Control: no-store` | 400, 403 (`auth.step_up_required` for a controller token, `cluster.enrollment.roles`), 501 `sys.not_implemented` (a controller token without the authentication service), 409 `cluster.node.name_taken`, 422 `cluster.enrollment.lifetime`, `cluster.node.name` |
 //! | `GET /nodes/enrollments` | 200 [`EnrollmentList`], newest first, never a secret | 403 |
 //! | `DELETE /nodes/enrollments/{id}` | 204 | 403, 404 `cluster.enrollment.not_found` |
 //! | `POST /nodes/enroll` | 201 [`EnrollResponse`] (public: the token authenticates) | 400, 401 `cluster.enrollment.invalid_token`, `.used`, `.expired`; 403 `cluster.enrollment.roles`, `cluster.enrollment.plain_http`, `cluster.enrollment.scheme_unknown`; 409 `cluster.protocol.unsupported`, `cluster.node.name_taken`; 422 `cluster.ca.invalid_csr`, `cluster.node.name`, `cluster.node.address` |
@@ -235,7 +235,9 @@ async fn get_node(
 
 /// Revokes a node: it is removed from the registry, every certificate it was issued is
 /// refused from now on, its heartbeat stream is told and its connections close. The node
-/// must be enrolled again with a new token to come back, under a new id.
+/// must be enrolled again with a new token to come back, under a new id. A controller that
+/// is a member of the controller cluster is refused: it leaves through the removal
+/// (`DELETE /cluster/members/{id}`), which revokes it.
 #[utoipa::path(
     delete,
     path = "/nodes/{id}",
@@ -249,7 +251,7 @@ async fn get_node(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed to revoke nodes", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node changed at the same time (`cluster.node.conflict`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "The node changed at the same time (`cluster.node.conflict`), or it is a member of the controller cluster, which leaves through `DELETE /cluster/members/{id}` (`cluster.node.is_member`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn revoke_node(
@@ -309,9 +311,9 @@ async fn list_enrollments(
         (status = 201, description = "The token, shown once (`Cache-Control: no-store`)", body = CreatedEnrollment),
         (status = 400, description = "The body is not valid JSON (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Not allowed to enroll nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A node has the name (`cluster.node.name_taken`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 422, description = "The role controller beside another role (`cluster.enrollment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrollment.lifetime`), or a bad name (`cluster.node.name`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "Not allowed to enroll nodes, a controller token without a sign-in in the last five minutes (`auth.step_up_required`), or the role controller beside another role (`cluster.enrollment.roles`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "A node, or an enrollment token that can still be used, has the name (`cluster.node.name_taken`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "A lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrollment.lifetime`), or a bad name (`cluster.node.name`)", body = ProblemDetails, content_type = "application/problem+json")
     ),
     security(("session" = []))
 )]

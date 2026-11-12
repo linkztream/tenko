@@ -13620,6 +13620,11 @@ export interface components {
             protocol_majors?: number[];
             /** @description The wire version of its Raft messages, when reported. */
             raft_wire?: string | null;
+            /**
+             * @description Its certificates are revoked: no controller accepts it any more, and the leader is
+             *     taking it out of the cluster.
+             */
+            revoked?: boolean;
             /** @description Voter or learner. */
             role: components["schemas"]["MemberRole"];
             /** @description The software version it reported when it joined or last started. */
@@ -30341,7 +30346,10 @@ export interface operations {
     };
     remove_cluster_member: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Remove a voter even when the writes stop until the voters out of contact are back */
+                force?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Node id of the member */
@@ -30396,7 +30404,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The change would remove the last voter (`cluster.member.last_voter`), another change is in progress (`cluster.member.changing`) or the controller is not part of a cluster (`cluster.single`) */
+            /** @description The change would remove the last voter (`cluster.member.last_voter`), another change is in progress (`cluster.member.changing`), the removal would stop the writes until the voters out of contact are back and `force` was not given (`cluster.member.stops_writes`, `members` names them), the certificates could not be revoked and nothing changed (`cluster.member.not_revoked`, `cause` names the failure) or the controller is not part of a cluster (`cluster.single`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -30405,7 +30413,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No leader is known to take the change (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`) */
+            /** @description No leader is known to take the change (`cluster.member.not_leader`), the controller is still starting (`cluster.member.starting`), the store could not revoke the certificates and nothing changed (`cluster.member.not_revoked`), or the member is revoked but its removal is not finished (`cluster.member.remove_pending`, with `done` and `pending`; the leader finishes it, and `propagate` names the `members` that have not received it yet) */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -44604,7 +44612,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not allowed to enroll nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`) */
+            /** @description Not allowed to enroll nodes, a controller token without a sign-in in the last five minutes (`auth.step_up_required`), or the role controller beside another role (`cluster.enrollment.roles`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -44613,7 +44621,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A node has the name (`cluster.node.name_taken`) */
+            /** @description A node, or an enrollment token that can still be used, has the name (`cluster.node.name_taken`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -44622,7 +44630,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The role controller beside another role (`cluster.enrollment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrollment.lifetime`), or a bad name (`cluster.node.name`) */
+            /** @description A lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrollment.lifetime`), or a bad name (`cluster.node.name`) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -44804,7 +44812,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The node changed at the same time (`cluster.node.conflict`) */
+            /** @description The node changed at the same time (`cluster.node.conflict`), or it is a member of the controller cluster, which leaves through `DELETE /cluster/members/{id}` (`cluster.node.is_member`) */
             409: {
                 headers: {
                     [name: string]: unknown;

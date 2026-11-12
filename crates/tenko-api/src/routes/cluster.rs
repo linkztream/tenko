@@ -8,7 +8,7 @@
 //! |---|---|---|
 //! | `GET /cluster/members` | 200 [`ClusterView`]: the leader, the term, the quorum state and the members with their replication figures | 401, 403, 503 `cluster.member.not_leader`, `.starting` |
 //! | `POST /cluster/members/{id}/promote` | 200 [`ClusterView`] after the change; body [`PromoteRequest`] (optional) | 400, 401, 403, 404 `cluster.member.not_found`; 409 `cluster.member.even_voters`, `.not_caught_up`, `.changing`, `cluster.single`; 503 `cluster.member.not_leader`, `.starting` |
-//! | `DELETE /cluster/members/{id}` | 200 [`ClusterView`] after the change | 400, 401, 403, 404 `cluster.member.not_found`; 409 `cluster.member.last_voter`, `.changing`, `cluster.single`; 503 `cluster.member.not_leader`, `.starting` |
+//! | `DELETE /cluster/members/{id}` | 200 [`ClusterView`] after the change; `?force=true` removes a voter even when that stops the writes | 400, 401, 403, 404 `cluster.member.not_found`; 409 `cluster.member.last_voter`, `.changing`, `.stops_writes`, `.not_revoked`, `cluster.single`; 503 `cluster.member.not_revoked`, `.remove_pending`, `.not_leader`, `.starting` |
 //! | `POST /cluster/step-down` | 200 [`StepDown`]: who led, who leads now, the new term | 401, 403, 409 `cluster.member.no_successor`, `.changing`, `cluster.single`; 503 `cluster.member.not_leader`, `.starting` |
 //! | `GET /cluster/digests` | 200 [`DigestReport`]: the state digest of every member at one revision (`?revision=` names it) | 400 `sys.invalid_query`, 401, 403, 503 `cluster.member.starting` |
 //!
@@ -216,23 +216,34 @@ async fn promote_cluster_member(
 }
 
 /// Removes a member from the cluster (an inline job `cluster.edit`, audited as
-/// `cluster.member.remove`) and revokes the certificates it was issued, so that it cannot
-/// rejoin without a new enrollment. The last voter cannot be removed.
+/// `cluster.member.remove`). First the certificates it was issued are revoked, so that no
+/// controller accepts it and it cannot rejoin without a new enrollment; then it leaves the
+/// Raft group and its member record goes. A removal that cannot revoke changes nothing
+/// (`cluster.member.not_revoked`). One that revoked but could not finish answers
+/// `cluster.member.remove_pending` with the steps `done` and `pending`: the leader finishes
+/// it, and the member shows `revoked` until then; it answers it too, with the step
+/// `propagate`, while members have not received the removal (they accept the controller
+/// until they catch up). A voter whose removal would stop the writes until a voter out of
+/// contact is back is refused (`cluster.member.stops_writes`) unless `force` is true. The
+/// last voter cannot be removed.
 #[utoipa::path(
     delete,
     path = "/cluster/members/{id}",
     tag = "cluster",
     operation_id = "remove_cluster_member",
     summary = "Remove a controller from the cluster",
-    params(("id" = u64, Path, description = "Node id of the member")),
+    params(
+        ("id" = u64, Path, description = "Node id of the member"),
+        ("force" = Option<bool>, Query, description = "Remove a voter even when the writes stop until the voters out of contact are back")
+    ),
     responses(
         (status = 200, description = "The cluster after the change", body = ClusterView),
         (status = 400, description = "The identifier is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed to change the controller cluster (an administrator right)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "The node is not a member (`cluster.member.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The change would remove the last voter (`cluster.member.last_voter`), another change is in progress (`cluster.member.changing`) or the controller is not part of a cluster (`cluster.single`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "No leader is known to take the change (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "The change would remove the last voter (`cluster.member.last_voter`), another change is in progress (`cluster.member.changing`), the removal would stop the writes until the voters out of contact are back and `force` was not given (`cluster.member.stops_writes`, `members` names them), the certificates could not be revoked and nothing changed (`cluster.member.not_revoked`, `cause` names the failure) or the controller is not part of a cluster (`cluster.single`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "No leader is known to take the change (`cluster.member.not_leader`), the controller is still starting (`cluster.member.starting`), the store could not revoke the certificates and nothing changed (`cluster.member.not_revoked`), or the member is revoked but its removal is not finished (`cluster.member.remove_pending`, with `done` and `pending`; the leader finishes it, and `propagate` names the `members` that have not received it yet)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn remove_cluster_member(
@@ -240,12 +251,15 @@ async fn remove_cluster_member(
     Ctx(cx): Ctx,
     admin: Admin,
     Path(id): Path<String>,
+    filters: Filters,
 ) -> Result<Json<ClusterView>, ApiError> {
     let admin = admin_or_stub(admin, "DELETE", "/cluster/members/{id}")?;
     let node = parse_node(&id)?;
+    filters.only(&["force"])?;
+    let force = filters.parse::<bool>("force")?.unwrap_or(false);
     app.authorize(&cx.principal, Action::Delete, &ObjectRef::node(node))?;
     admin
-        .remove(&cx, node)
+        .remove(&cx, node, force)
         .await
         .map(|view| Json(view.into()))
         .map_err(failed)
@@ -338,7 +352,7 @@ mod tests {
     enum Call {
         View,
         Promote(NodeId, PromoteRequest),
-        Remove(NodeId),
+        Remove(NodeId, bool),
         StepDown,
         Digests(Option<Revision>),
     }
@@ -402,6 +416,7 @@ mod tests {
             &'life0 self,
             _cx: &'life1 RequestCtx,
             node: NodeId,
+            force: bool,
         ) -> Pin<Box<dyn Future<Output = Result<ClusterView, ClusterError>> + Send + 'async_trait>>
         where
             'life0: 'async_trait,
@@ -409,7 +424,7 @@ mod tests {
             Self: 'async_trait,
         {
             Box::pin(std::future::ready(
-                self.record(Call::Remove(node), cluster_view()),
+                self.record(Call::Remove(node, force), cluster_view()),
             ))
         }
 
@@ -464,6 +479,7 @@ mod tests {
             protocol_majors: Vec::new(),
             raft_wire: None,
             formats: Vec::new(),
+            revoked: false,
         }
     }
 
@@ -713,7 +729,15 @@ mod tests {
         let reply = send(&router, "DELETE", "/cluster/members/1002", None).await;
         assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
         assert_eq!(reply.body["members"].as_array().map(Vec::len), Some(3));
-        assert_eq!(fake.calls(), vec![Call::Remove(NodeId(1002))]);
+        let forced = send(&router, "DELETE", "/cluster/members/1002?force=true", None).await;
+        assert_eq!(forced.status, StatusCode::OK, "{}", forced.body);
+        assert_eq!(
+            fake.calls(),
+            vec![
+                Call::Remove(NodeId(1002), false),
+                Call::Remove(NodeId(1002), true)
+            ]
+        );
     }
 
     #[tokio::test]

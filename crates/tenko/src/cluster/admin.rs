@@ -7,7 +7,7 @@
 //! | `status` | `GET /cluster/members` | this controller, the leader, the term, the quorum state and the member count |
 //! | `members` | `GET /cluster/members` | one row per member with its role and replication state |
 //! | `promote <ID>` | `POST /cluster/members/{id}/promote` | the members after the change |
-//! | `remove <ID> --yes` | `DELETE /cluster/members/{id}` | the members after the change |
+//! | `remove <ID> --yes [--force]` | `DELETE /cluster/members/{id}` | the members after the change |
 //! | `step-down` | `POST /cluster/step-down` | who led and who leads now |
 //! | `verify` | `GET /cluster/digests` | one row per member with its digest; exit status 9 when they differ |
 
@@ -72,6 +72,10 @@ pub struct RemoveArgs {
     /// Confirm the removal: the member leaves the cluster and its certificates are revoked.
     #[arg(long)]
     pub yes: bool,
+    /// Remove a voter even when that stops the cluster's writes until the voters out of
+    /// contact are back.
+    #[arg(long)]
+    pub force: bool,
 }
 
 /// Arguments of `tenko cluster step-down`.
@@ -172,8 +176,9 @@ pub async fn remove(args: &RemoveArgs) -> Result<Output, Failure> {
     confirm_removal(args)?;
     let target = Target::resolve(&args.client, true)?;
     let client = target.client()?;
+    let force = if args.force { "?force=true" } else { "" };
     client
-        .delete(&format!("/cluster/members/{}", args.id), None)
+        .delete(&format!("/cluster/members/{}{force}", args.id), None)
         .await?;
     let note = format!("removed node {} and revoked its certificates", args.id);
     match fetch_view(&target).await {
@@ -473,6 +478,7 @@ mod tests {
             protocol_majors: Vec::new(),
             raft_wire: None,
             formats: Vec::new(),
+            revoked: false,
         }
     }
 
@@ -628,6 +634,7 @@ mod tests {
             protocol_majors: Vec::new(),
             raft_wire: None,
             formats: Vec::new(),
+            revoked: false,
         }];
         let text = render_members(&view);
         let row = text.lines().nth(1).expect("row");
@@ -706,6 +713,7 @@ mod tests {
             client: ClientOpts::default(),
             id: 1002,
             yes: false,
+            force: false,
         };
         let failure = confirm_removal(&args).expect_err("refused");
         assert_eq!(failure.status, exit::USAGE);
@@ -738,6 +746,12 @@ mod tests {
         assert!(Promote::try_parse_from(["t"]).is_err());
 
         assert!(!Remove::try_parse_from(["t", "7"]).expect("remove").args.yes);
+        assert!(
+            Remove::try_parse_from(["t", "7", "--yes", "--force"])
+                .expect("remove")
+                .args
+                .force
+        );
         assert!(
             Remove::try_parse_from(["t", "7", "--yes"])
                 .expect("remove")

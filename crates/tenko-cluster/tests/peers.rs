@@ -13,7 +13,10 @@
 use std::{
     net::SocketAddr,
     path::Path,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -25,16 +28,23 @@ use tenko_cluster::{
     kek::{KekSource, SealedKeks},
     model::{EnrollRequest, NewEnrollment},
     mtls::RevocationSet,
-    peers::{ControllerIdentity, PeerConfig, PeerNetwork, PeerTimings, Peers, certificate_ref},
+    peers::{
+        CONTACT_WINDOW, ControllerIdentity, PeerConfig, PeerNetwork, PeerTimings, Peers,
+        certificate_ref,
+    },
     proto::v1,
     registry::{NodeRegistry, RegistryConfig},
     server::{ClusterListener, NodeServices, Port, code_of},
     session::Sessions,
 };
-use tenko_core::{NodeId, RequestCtx, Role, SystemComponent, testing::wait_until_async};
+use tenko_core::{
+    NodeId, RequestCtx, Role, SystemComponent, TableName,
+    testing::{free_port, wait_until_async},
+};
 use tenko_jobs::{EngineConfig, JobEngine};
 use tenko_store::{
-    KeyRange, ReadConsistency, ReadViewExt as _, Store, StoreRole,
+    Committed, KeyRange, Mutation, ReadConsistency, ReadViewExt as _, Store, StoreError, StoreRole,
+    WriteBatch,
     raft::{RaftStore, RaftStoreConfig, SnapshotPolicy},
     testing::{ClusterFixture, ConformanceConfig},
 };
@@ -74,6 +84,91 @@ impl ControllerIdentity for FixedIdentity {
     }
 }
 
+/// A store that a test can make refuse every write to one table as a lost race, or that
+/// puts another write right before the next write to it: what a concurrent request does
+/// between the plan of a write and the write.
+struct Interposed<S> {
+    inner: S,
+    table: TableName,
+    refuse: AtomicBool,
+    before: Mutex<Option<WriteBatch>>,
+}
+
+impl<S> Interposed<S> {
+    fn new(inner: S, table: &TableName) -> Self {
+        Self {
+            inner,
+            table: table.clone(),
+            refuse: AtomicBool::new(false),
+            before: Mutex::new(None),
+        }
+    }
+
+    /// From now on every write to the table fails as a lost race (`refuse`), or not.
+    fn refuse(&self, refuse: bool) {
+        self.refuse.store(refuse, Ordering::SeqCst);
+    }
+
+    /// `batch` commits right before the next write to the table.
+    fn before_next(&self, batch: WriteBatch) {
+        *self.before.lock().unwrap_or_else(PoisonError::into_inner) = Some(batch);
+    }
+}
+
+#[async_trait::async_trait]
+impl<S: Store> Store for Interposed<S> {
+    async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        let touches = batch.mutations.iter().any(|mutation| match mutation {
+            Mutation::Put { table, .. } | Mutation::Delete { table, .. } => *table == self.table,
+            Mutation::Bump { .. } => false,
+        });
+        if touches {
+            if self.refuse.load(Ordering::SeqCst) {
+                return Err(StoreError::PreconditionFailed(Vec::new()));
+            }
+            let before = self
+                .before
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            if let Some(before) = before {
+                self.inner
+                    .propose(before)
+                    .await
+                    .expect("the write in between");
+            }
+        }
+        self.inner.propose(batch).await
+    }
+
+    async fn read(
+        &self,
+        consistency: ReadConsistency,
+    ) -> Result<Arc<dyn tenko_store::ReadView>, StoreError> {
+        self.inner.read(consistency).await
+    }
+
+    fn watch(
+        &self,
+        from: Option<tenko_core::Revision>,
+        filter: tenko_store::WatchFilter,
+    ) -> Result<tenko_store::ChangeStream, StoreError> {
+        self.inner.watch(from, filter)
+    }
+
+    fn register_index(&self, index: Arc<dyn tenko_store::DerivedIndex>) -> Result<(), StoreError> {
+        self.inner.register_index(index)
+    }
+
+    fn status(&self) -> tenko_store::StoreStatus {
+        self.inner.status()
+    }
+
+    fn leadership(&self) -> watch::Receiver<Option<tenko_store::Leadership>> {
+        self.inner.leadership()
+    }
+}
+
 /// One controller: store, registry, peer layer and cluster port.
 struct Member {
     store: RaftStore,
@@ -85,6 +180,9 @@ struct Member {
     engine: JobEngine,
     /// The certificate chain and key it presents to its peers.
     identity: (Vec<rustls::pki_types::CertificateDer<'static>>, SecretBytes),
+    /// What its registry and job engine write through, with the revocation table under
+    /// the test's control.
+    writes: Arc<Interposed<RaftStore>>,
 }
 
 impl Member {
@@ -119,7 +217,11 @@ async fn start_member(
     bookkeeping: bool,
 ) -> Member {
     let node = store.node_id();
-    let store_dyn: Arc<dyn Store> = Arc::new(store.clone());
+    let writes = Arc::new(Interposed::new(
+        store.clone(),
+        tenko_cluster::model::tables::REVOCATIONS.name(),
+    ));
+    let store_dyn: Arc<dyn Store> = Arc::clone(&writes) as Arc<dyn Store>;
     let engine = JobEngine::new(Arc::clone(&store_dyn), EngineConfig::default());
     let revocations = Arc::new(RevocationSet::new());
     let sessions = Sessions::new();
@@ -186,6 +288,7 @@ async fn start_member(
         tasks,
         engine,
         identity: (chain, SecretBytes::from_slice(key.expose())),
+        writes,
     }
 }
 
@@ -841,7 +944,7 @@ async fn a_removed_controller_is_refused_with_every_certificate() {
 
     leader
         .peers
-        .remove(&system(), node)
+        .remove(&system(), node, false)
         .await
         .expect("the removal");
     for member in &staying {
@@ -1020,7 +1123,7 @@ async fn key_transfer_forwarded_changes_and_step_down() {
         .expect("the third member");
     let view = follower
         .peers
-        .remove(&system(), target.node())
+        .remove(&system(), target.node(), false)
         .await
         .expect("removal through a follower");
     assert_eq!(view.members.len(), 2);
@@ -1496,4 +1599,551 @@ async fn a_members_call_continues_the_trace_of_its_caller() {
         "the server span is in the caller's trace"
     );
     lab.stop().await;
+}
+
+/// A certificate chain with its key.
+type Identity = (Vec<rustls::pki_types::CertificateDer<'static>>, SecretBytes);
+
+/// The refusal that `member` gives each call a removed controller `node` makes with
+/// `identity`: `Raft.Vote`, `Raft.AppendEntries`, `Raft.InstallSnapshot` and `Cluster.Join`.
+/// Each is the refusal's code, or `None` when the connection itself was refused (the TLS
+/// handshake, or the first call after it in TLS 1.3). Panics when a call is taken.
+async fn calls_refused(
+    lab: &Lab,
+    node: NodeId,
+    identity: &Identity,
+    member: &Member,
+) -> [Option<String>; 4] {
+    let channel = async || {
+        let network = PeerNetwork::new(node, PeerTimings::default());
+        network.set_tls(
+            tenko_cluster::mtls::client_config(lab.ca.root_der(), identity.0.clone(), &identity.1)
+                .expect("config"),
+        );
+        network.channel(&member.addr.to_string()).await.ok()
+    };
+    let refusal = |what: &str, result: Result<(), tonic::Status>| match result {
+        Ok(()) => panic!(
+            "{what} of removed controller {node} was taken by member {}",
+            member.node()
+        ),
+        Err(status) => code_of(&status).map(str::to_owned),
+    };
+    let raft = async || channel().await.map(v1::raft_client::RaftClient::new);
+    let vote = match raft().await {
+        None => None,
+        Some(mut client) => refusal(
+            "a vote",
+            client.vote(v1::RaftRequest::default()).await.map(drop),
+        ),
+    };
+    let append = match raft().await {
+        None => None,
+        Some(mut client) => refusal(
+            "an append",
+            client
+                .append_entries(v1::RaftRequest::default())
+                .await
+                .map(drop),
+        ),
+    };
+    let snapshot = match raft().await {
+        None => None,
+        Some(mut client) => refusal(
+            "a snapshot",
+            client
+                .install_snapshot(futures::stream::iter([v1::SnapshotChunk::default()]))
+                .await
+                .map(drop),
+        ),
+    };
+    let join = match channel().await {
+        None => None,
+        Some(channel) => refusal(
+            "a join",
+            v1::cluster_client::ClusterClient::new(channel)
+                .join(v1::JoinRequest {
+                    node_id: node.0,
+                    address: "127.0.0.1:9".to_owned(),
+                    version: "0.0.1".to_owned(),
+                    capabilities: Vec::new(),
+                    data_format: 2,
+                })
+                .await
+                .map(drop),
+        ),
+    };
+    [vote, append, snapshot, join]
+}
+
+/// What a removed controller gets from a member: nothing with the certificate it ran with
+/// (the handshake fails), and the refusal of the services with a certificate its record
+/// never held, which passes the handshake and so shows that the member is reachable.
+async fn assert_cut_off(lab: &Lab, node: NodeId, running: &Identity, member: &Member) {
+    assert_eq!(
+        calls_refused(lab, node, running, member).await,
+        [None, None, None, None],
+        "the certificate it ran with, on member {}",
+        member.node()
+    );
+    let unknown = Some("cluster.node.unknown".to_owned());
+    assert_eq!(
+        calls_refused(lab, node, &stray_certificate(lab, node), member).await,
+        [
+            unknown.clone(),
+            unknown.clone(),
+            unknown,
+            Some("cluster.join.not_controller".to_owned())
+        ],
+        "a certificate outside its record, on member {}",
+        member.node()
+    );
+}
+
+/// A certificate of `node` that its record never held: it passes the handshake, so the
+/// refusal comes from the services themselves.
+fn stray_certificate(lab: &Lab, node: NodeId) -> Identity {
+    let (key, csr) = generate_csr().expect("csr");
+    let stray = lab
+        .ca
+        .issue_node_cert_for(
+            node,
+            [Role::Controller].into_iter().collect(),
+            &csr,
+            tenko_core::Timestamp::now(),
+        )
+        .expect("a certificate outside the record");
+    (stray.chain, key)
+}
+
+/// Whether `member` has `node` neither in its Raft group nor among its member records.
+async fn gone_from(member: &Member, node: NodeId) -> bool {
+    let membership = member.store.membership();
+    if membership.voters.contains(&node) || membership.learners.contains(&node) {
+        return false;
+    }
+    let view = member
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    view.get_typed(&tenko_cluster::model::tables::MEMBERS, &node.0)
+        .expect("member record")
+        .is_none()
+}
+
+/// Waits until every one of `members` has applied the revocation of `node`.
+async fn wait_revoked_on(members: &[Arc<Member>], node: NodeId) {
+    for member in members {
+        wait_until_async(
+            &format!("the revocation to reach member {}", member.node()),
+            async || member.registry.is_revoked_node(node),
+        )
+        .await;
+    }
+}
+
+/// Whether `from` sends Raft messages to `to`: a vote request of term 0 through `from`'s
+/// transport, which `to` answers without changing anything. The error text when not.
+async fn sends_raft(from: &Member, to: &Member) -> Result<(), String> {
+    use tenko_store::raft::network::PeerTransport as _;
+    let vote = tenko_store::raft::openraft::Vote::new(0, from.node().0);
+    from.peers
+        .network()
+        .vote(
+            to.node().0,
+            &tenko_store::raft::openraft::BasicNode::new(to.addr.to_string()),
+            tenko_store::raft::openraft::raft::VoteRequest::new(vote, None),
+        )
+        .await
+        .map(drop)
+        .map_err(|error| error.to_string())
+}
+
+/// Cuts `member` off from every other member of `lab`, both ways (`cut`), or joins it
+/// again.
+fn set_cut(lab: &Lab, member: &Member, cut: bool) {
+    let closed = format!("127.0.0.1:{}", free_port().release());
+    for other in lab.members() {
+        if other.node() == member.node() {
+            continue;
+        }
+        let (to_member, to_other) = if cut {
+            (closed.clone(), closed.clone())
+        } else {
+            (member.addr.to_string(), other.addr.to_string())
+        };
+        other.peers.network().pin(member.node(), to_member);
+        member.peers.network().pin(other.node(), to_other);
+    }
+}
+
+/// A write through `member`'s store commits.
+async fn write_commits(member: &Member, n: u64) {
+    let mut batch = WriteBatch::new(
+        tenko_core::Principal::system(SystemComponent::Ipam),
+        tenko_core::Timestamp::now(),
+    );
+    batch.put(
+        TableName::from_static("ipam.peer_rows"),
+        tenko_core::codec::encode_key(&n),
+        prost::bytes::Bytes::from(vec![1_u8; 16]),
+    );
+    member.store.propose(batch).await.expect("a write commits");
+}
+
+/// The first controller and one that joined, both voters.
+async fn two_voters() -> (Lab, Arc<Member>) {
+    let lab = Lab::first(&no_change).await;
+    let second = lab.join("controller-two", &no_change).await;
+    lab.first
+        .peers
+        .promote(
+            &system(),
+            second.node(),
+            PromoteRequest {
+                force: true,
+                replace: None,
+            },
+        )
+        .await
+        .expect("two voters");
+    (lab, second)
+}
+
+/// A removal whose revocation fails is not reported as done and changes nothing: the
+/// controller stays a voter, keeps its records and is still trusted. Done again once the
+/// revocation can be written, the removal completes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_removal_that_cannot_revoke_changes_nothing() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let target = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node() && member.node() != NodeId(1))
+        .expect("a joined member that is not the leader");
+    let node = target.node();
+    // Every revocation loses its race, as against a renewal that wins three times.
+    for member in lab.members() {
+        member.writes.refuse(true);
+    }
+    let refused = leader
+        .peers
+        .remove(&system(), node, false)
+        .await
+        .expect_err("a removal whose revocation fails");
+    assert_eq!(refused.code(), "cluster.member.not_revoked", "{refused}");
+    assert_eq!(refused.status(), 409);
+    let params = &refused.as_coded().params;
+    assert_eq!(
+        params.get("cause").map(String::as_str),
+        Some("cluster.node.conflict")
+    );
+    assert_eq!(params.get("node"), Some(&node.0.to_string()));
+    // Nothing changed.
+    assert!(leader.store.membership().voters.contains(&node));
+    assert!(!gone_from(&leader, node).await);
+    assert!(
+        leader.registry.record(node).await.expect("read").is_some(),
+        "the node record stays"
+    );
+    assert!(!leader.registry.is_revoked_node(node));
+    let view = leader.peers.view().await.expect("view");
+    let member = view
+        .members
+        .iter()
+        .find(|member| member.node == node)
+        .expect("still a member");
+    assert!(!member.revoked);
+
+    for member in lab.members() {
+        member.writes.refuse(false);
+    }
+    let view = leader
+        .peers
+        .remove(&system(), node, false)
+        .await
+        .expect("the removal once the revocation can be written");
+    assert!(view.members.iter().all(|member| member.node != node));
+    assert!(leader.registry.is_revoked_node(node));
+    lab.stop().await;
+}
+
+/// A controller that is a member of the cluster is not revoked through the registry: it
+/// leaves through its removal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_member_is_not_revoked_outside_its_removal() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    for member in lab.members() {
+        let refused = leader
+            .registry
+            .revoke(&system(), member.node())
+            .await
+            .expect_err("a member revoked through the registry");
+        assert_eq!(refused.code(), "cluster.node.is_member");
+        assert_eq!(refused.status(), 409);
+        assert!(!leader.registry.is_revoked_node(member.node()));
+    }
+    lab.stop().await;
+}
+
+/// After a removal, no member accepts a vote, an append, a snapshot or a join from the
+/// removed controller's identity. A member that was out of contact during the removal is
+/// named in the answer (`propagate`), and once it is back it refuses the controller too.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_removed_controller_is_refused_by_every_member_even_one_that_was_away() {
+    let lab = Lab::three(&no_change).await;
+    // A fourth controller, a learner beside three voters: it is cut off during the removal.
+    let away = lab.join("controller-away", &no_change).await;
+    let leader = lab.leader().await;
+    let target = lab
+        .members()
+        .into_iter()
+        .find(|member| ![leader.node(), NodeId(1), away.node()].contains(&member.node()))
+        .expect("a joined voter that is not the leader");
+    let node = target.node();
+    let present: Vec<Arc<Member>> = lab
+        .members()
+        .into_iter()
+        .filter(|member| member.node() != node && member.node() != away.node())
+        .collect();
+    set_cut(&lab, &away, true);
+
+    let pending = leader
+        .peers
+        .remove(&system(), node, false)
+        .await
+        .expect_err("a member has not received the removal");
+    assert_eq!(pending.code(), "cluster.member.remove_pending", "{pending}");
+    let params = &pending.as_coded().params;
+    assert_eq!(params.get("pending").map(String::as_str), Some("propagate"));
+    assert_eq!(params.get("members"), Some(&away.node().0.to_string()));
+    assert!(gone_from(&leader, node).await);
+    assert!(
+        !away.registry.is_revoked_node(node),
+        "the member away has not heard of the removal"
+    );
+    wait_revoked_on(&present, node).await;
+    for member in &present {
+        assert_cut_off(&lab, node, &target.identity, member).await;
+    }
+
+    set_cut(&lab, &away, false);
+    wait_until_async("the member that was away applies the removal", async || {
+        away.registry.is_revoked_node(node) && gone_from(&away, node).await
+    })
+    .await;
+    assert_cut_off(&lab, node, &target.identity, &away).await;
+    lab.stop().await;
+}
+
+/// A revoked learner gets no Raft message from the leader: it is never needed for a quorum.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_revoked_learner_gets_no_raft_message() {
+    let lab = Lab::three(&no_change).await;
+    let learner = lab.join("controller-learner", &no_change).await;
+    let leader = lab.leader().await;
+    sends_raft(&leader, &learner)
+        .await
+        .expect("a learner gets Raft messages");
+    leader
+        .peers
+        .remove(&system(), learner.node(), false)
+        .await
+        .expect("the removal");
+    let refused = sends_raft(&leader, &learner)
+        .await
+        .expect_err("a revoked learner gets no Raft message");
+    assert!(refused.contains("revoked"), "{refused}");
+    lab.stop().await;
+}
+
+/// Case 1, two voters: the removed one is needed for the change that takes it out, so it is
+/// still sent to until the change commits; the removal completes and writes go on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_voters_remove_one_and_keep_writing() {
+    let (lab, _) = two_voters().await;
+    let leader = lab.leader().await;
+    let target = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node())
+        .expect("the other voter");
+    let view = leader
+        .peers
+        .remove(&system(), target.node(), false)
+        .await
+        .expect("the removal of one of two voters");
+    assert_eq!(
+        view.members
+            .iter()
+            .map(|member| member.node)
+            .collect::<Vec<_>>(),
+        [leader.node()]
+    );
+    write_commits(&leader, 1).await;
+    assert_cut_off(&lab, target.node(), &target.identity, &leader).await;
+    lab.stop().await;
+}
+
+/// Case 2, three voters with one out of contact: the removal of another would leave the
+/// leader without a quorum once it stops sending to the revoked voter, so it is refused
+/// and changes nothing. Forced, the controller is revoked and refused at once, the view
+/// marks it, and the removal is finished when the absent voter is back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_removal_that_would_stop_the_writes_needs_force() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let others: Vec<Arc<Member>> = lab
+        .members()
+        .into_iter()
+        .filter(|member| member.node() != leader.node())
+        .collect();
+    let (target, absent) = (&others[0], &others[1]);
+    let node = target.node();
+    set_cut(&lab, absent, true);
+    wait_until_async("the leader sees the voter out of contact", async || {
+        leader.store.status().members.iter().any(|member| {
+            member.node == absent.node()
+                && member
+                    .last_contact_ms
+                    .is_none_or(|ms| Duration::from_millis(ms) > CONTACT_WINDOW)
+        })
+    })
+    .await;
+    let refused = leader
+        .peers
+        .remove(&system(), node, false)
+        .await
+        .expect_err("a removal that stops the writes");
+    assert_eq!(refused.code(), "cluster.member.stops_writes", "{refused}");
+    assert_eq!(refused.status(), 409);
+    assert_eq!(
+        refused.as_coded().params.get("members"),
+        Some(&absent.node().0.to_string())
+    );
+    assert!(!leader.registry.is_revoked_node(node), "nothing changed");
+    assert!(leader.store.membership().voters.contains(&node));
+
+    let removal = tokio::spawn({
+        let peers = leader.peers.clone();
+        async move { peers.remove(&system(), node, true).await }
+    });
+    wait_until_async("the cluster view marks the member revoked", async || {
+        leader.peers.view().await.ok().and_then(|view| {
+            view.members
+                .into_iter()
+                .find(|member| member.node == node && member.revoked)
+        })
+    })
+    .await;
+    let refused = sends_raft(&leader, target)
+        .await
+        .expect_err("the revoked voter gets no Raft message");
+    assert!(refused.contains("revoked"), "{refused}");
+    set_cut(&lab, absent, false);
+    match removal.await.expect("the removal task") {
+        Ok(view) => assert!(view.members.iter().all(|member| member.node != node)),
+        Err(error) => {
+            assert_eq!(error.code(), "cluster.member.remove_pending", "{error}");
+            assert_eq!(
+                error.as_coded().params.get("done").map(String::as_str),
+                Some("revoke")
+            );
+        }
+    }
+    for member in [&leader, absent] {
+        wait_until_async("the removal is finished", async || {
+            gone_from(member, node).await
+        })
+        .await;
+    }
+    write_commits(&*lab.leader().await, 1).await;
+    lab.stop().await;
+}
+
+/// Case 3, the leader: it cannot remove itself; after a step-down the new leader removes
+/// it, with three voters and with two.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_leader_is_removed_after_a_step_down() {
+    for voters in [3, 2] {
+        let lab = if voters == 3 {
+            Lab::three(&no_change).await
+        } else {
+            two_voters().await.0
+        };
+        let old = lab.leader().await;
+        let refused = old
+            .peers
+            .remove(&system(), old.node(), false)
+            .await
+            .expect_err("the leader removes itself");
+        assert_eq!(refused.code(), "cluster.member.is_leader");
+        let moved = old.peers.step_down(&system()).await.expect("step-down");
+        let new = lab
+            .members()
+            .into_iter()
+            .find(|member| member.node() == moved.leader)
+            .expect("the new leader");
+        let view = new
+            .peers
+            .remove(&system(), old.node(), false)
+            .await
+            .expect("the old leader's removal");
+        assert_eq!(view.members.len(), voters - 1, "{voters} voters");
+        write_commits(&new, 1).await;
+        assert_cut_off(&lab, old.node(), &old.identity, &new).await;
+        lab.stop().await;
+    }
+}
+
+/// The prune that loses the race for one of its rows (a token deleted while it planned)
+/// fails nothing: only the fence's failure means that another controller took office.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_prune_that_loses_a_row_race_is_not_a_lost_office() {
+    let mem = Arc::new(tenko_store::mem::MemStore::default());
+    let vault = tenko_vault::MemVault::with_store(Arc::clone(&mem));
+    let ca = InternalCa::load_or_init(mem.as_ref(), &vault, &system(), CaPolicy::default())
+        .await
+        .expect("CA");
+    let store = Arc::new(Interposed::new(
+        (*mem).clone(),
+        tenko_cluster::model::tables::ENROLLMENTS.name(),
+    ));
+    let registry = NodeRegistry::new(
+        Arc::clone(&store) as Arc<dyn Store>,
+        Arc::new(ca),
+        RegistryConfig::new(NodeId(1)),
+    );
+    let (token, _) = registry
+        .create_enrollment(&system(), NewEnrollment::default())
+        .await
+        .expect("a token");
+    // Eight days on, the token expired a week ago and goes; an administrator deletes it
+    // while the prune plans.
+    let later = tenko_core::Timestamp::now()
+        .checked_add(Duration::from_secs(8 * 24 * 3600))
+        .expect("eight days on");
+    let mut delete = WriteBatch::new(
+        tenko_core::Principal::system(SystemComponent::Cluster),
+        tenko_core::Timestamp::now(),
+    );
+    delete.delete_typed(&tenko_cluster::model::tables::ENROLLMENTS, &token.id);
+    store.before_next(delete);
+    assert_eq!(
+        registry
+            .prune_fenced(later, Some(0))
+            .await
+            .expect("a row that changed is no lost office"),
+        0
+    );
+    assert_eq!(
+        registry
+            .prune_fenced(later, Some(0))
+            .await
+            .expect("the next pass"),
+        0
+    );
 }

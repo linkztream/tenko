@@ -41,6 +41,7 @@ use tenko_core::{
     Coded, MessageKey, NodeId, ObjectKind, ObjectRef, Principal, RequestCtx, Revision, Role,
     RoleSet, SystemComponent, Timestamp,
     audit::AuditDraft,
+    cluster::LEADER_EPOCH,
     codec::{from_cbor, to_cbor},
     secret::SecretClass,
     serde_util::HexBytes,
@@ -51,7 +52,8 @@ use tenko_jobs::{
 };
 use tenko_store::WatchFilter;
 use tenko_store::{
-    KeyRange, ReadConsistency, ReadView, ReadViewExt, Store, StoreError, WriteBatch,
+    FailedPrecondition, KeyRange, ReadConsistency, ReadView, ReadViewExt, Store, StoreError,
+    WriteBatch,
 };
 use tenko_vault::{SecretPurpose, SecretSpec, Vault, VaultError};
 use tokio::{
@@ -152,8 +154,10 @@ pub const MAX_NAME_LEN: usize = 63;
 /// How many times a revocation or a renewal is planned before a conflict is reported: the
 /// node's bookkeeping writes the same record, and a lost race records nothing.
 pub const NODE_EDIT_ATTEMPTS: usize = 3;
-/// The code of a store write whose precondition failed (a lost race).
-const PRECONDITION_FAILED: &str = "sys.store.precondition_failed";
+/// The code of a refusal for a node that is not enrolled (or was revoked).
+pub const NODE_NOT_FOUND: &str = "cluster.node.not_found";
+/// The code of an edit of a node that lost the race for its record every time.
+pub const NODE_CONFLICT: &str = "cluster.node.conflict";
 
 /// Settings of the registry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,7 +248,7 @@ impl Coded for Refusal<'_> {
 
 fn not_found(id: NodeId) -> ClusterError {
     ClusterError::new(
-        "cluster.node.not_found",
+        NODE_NOT_FOUND,
         404,
         format!("there is no enrolled node {id}"),
     )
@@ -735,8 +739,17 @@ impl NodeRegistry {
         }
         drop(view);
         if removed > 0 {
-            self.store.propose(batch).await?;
-            self.load_revocations().await?;
+            match self.store.propose(batch).await {
+                Ok(_) => {
+                    self.load_revocations().await?;
+                }
+                // A row changed since the plan (a token deleted meanwhile): the next pass
+                // plans again. Only the fence's failure means that the office moved on.
+                Err(StoreError::PreconditionFailed(failed)) if !failed.iter().any(is_fence) => {
+                    removed = 0;
+                }
+                Err(error) => return Err(error.into()),
+            }
         }
         for (id, record, revision) in trims {
             let mut batch = WriteBatch::for_request(&ctx);
@@ -883,7 +896,7 @@ impl NodeRegistry {
     ///
     /// # Errors
     ///
-    /// `cluster.enrollment.roles` (422) for the role controller beside another role,
+    /// `cluster.enrollment.roles` (403) for the role controller beside another role,
     /// `cluster.enrollment.lifetime` (422; a controller token lives at most an hour),
     /// `cluster.node.name` (422),
     /// `cluster.node.name_taken` (409), or a store or job error.
@@ -902,7 +915,7 @@ impl NodeRegistry {
         if controller && roles.len() > 1 {
             return Err(ClusterError::new(
                 "cluster.enrollment.roles",
-                422,
+                403,
                 "a controller token carries the role controller alone",
             )
             .with_param("field", "roles"));
@@ -938,7 +951,7 @@ impl NodeRegistry {
         let name = match request.name.as_deref().map(str::trim) {
             Some(name) if !name.is_empty() => {
                 check_name(name)?;
-                self.name_free(name).await?;
+                self.name_free(name, cx.now).await?;
                 Some(name.to_owned())
             }
             _ => None,
@@ -1303,12 +1316,13 @@ impl NodeRegistry {
             .read(ReadConsistency::Local)
             .await
             .map_err(|error| with_token(error.into()))?;
+        // An unknown id and a wrong secret name no token: anyone can send those.
         let (mut record, token_revision) = view
             .get_typed(&tables::ENROLLMENTS, &token_id)
             .map_err(|error| with_token(error.into()))?
-            .ok_or_else(|| with_token(invalid_token()))?;
+            .ok_or_else(|| (invalid_token(), None))?;
         if !record.digest.matches(&token) {
-            return Err(with_token(invalid_token()));
+            return Err((invalid_token(), None));
         }
         drop(token);
         if record.used.is_some() {
@@ -1406,11 +1420,11 @@ impl NodeRegistry {
         };
         check_name(&name).map_err(with_token)?;
         let name_key = name.to_lowercase();
-        if view
-            .get_typed(&tables::NODE_NAMES, &name_key)
-            .map_err(|error| with_token(error.into()))?
-            .is_some()
-        {
+        let in_use = || -> Result<bool, ClusterError> {
+            Ok(view.get_typed(&tables::NODE_NAMES, &name_key)?.is_some()
+                || reserved(view.as_ref(), &name_key, cx.now, Some(token_id))?)
+        };
+        if in_use().map_err(with_token)? {
             return Err(with_token(name_taken(&name)));
         }
         drop(view);
@@ -1487,7 +1501,7 @@ impl NodeRegistry {
             .await
         {
             Ok(revision) => revision,
-            Err(error) if error.code() == "sys.store.precondition_failed" => {
+            Err(error) if error.code() == StoreError::PRECONDITION_FAILED => {
                 // Another enrollment won the race for the token, the id or the name.
                 return Err(with_token(self.race_error(token_id, &name_key).await));
             }
@@ -1530,11 +1544,13 @@ impl NodeRegistry {
         )
     }
 
-    async fn name_free(&self, name: &str) -> Result<(), ClusterError> {
+    /// Whether `name` is free for a new token: no node has it, and no token that can still
+    /// be used names it (the enrollment of the second one could never succeed).
+    async fn name_free(&self, name: &str, now: Timestamp) -> Result<(), ClusterError> {
+        let key = name.to_lowercase();
         let view = self.store.read(ReadConsistency::Local).await?;
-        if view
-            .get_typed(&tables::NODE_NAMES, &name.to_lowercase())?
-            .is_some()
+        if reserved(view.as_ref(), &key, now, None)?
+            || view.get_typed(&tables::NODE_NAMES, &key)?.is_some()
         {
             return Err(name_taken(name));
         }
@@ -1785,11 +1801,42 @@ impl NodeRegistry {
     /// leaves re-planning to the caller: the record is read again, with the certificates it
     /// holds by then, up to [`NODE_EDIT_ATTEMPTS`] times.
     ///
+    /// A controller that is a member of the controller cluster is refused: it leaves through
+    /// the cluster's removal, which revokes it in the order that keeps the cluster able to
+    /// write and to take it out (`crate::peers`).
+    ///
     /// # Errors
     ///
-    /// `cluster.node.not_found` (404), `cluster.node.conflict` (409) when every attempt
-    /// lost the race, or a store or job error.
+    /// `cluster.node.not_found` (404), `cluster.node.is_member` (409),
+    /// `cluster.node.conflict` (409) when every attempt lost the race, or a store or job
+    /// error.
     pub async fn revoke(&self, cx: &RequestCtx, node: NodeId) -> Result<Vec<String>, ClusterError> {
+        let view = self.store.read(ReadConsistency::Linearizable).await?;
+        if view.get_typed(&tables::MEMBERS, &node.0)?.is_some() {
+            return Err(ClusterError::new(
+                "cluster.node.is_member",
+                409,
+                format!(
+                    "node {node} is a member of the controller cluster: remove it with                      `tenko cluster remove {node} --yes`, which revokes it"
+                ),
+            )
+            .with_param("node", node.to_string()));
+        }
+        drop(view);
+        self.revoke_member(cx, node).await
+    }
+
+    /// [`Self::revoke`] for a controller that the cluster's removal takes out, which may
+    /// be a member.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::revoke`], without `cluster.node.is_member`.
+    pub(crate) async fn revoke_member(
+        &self,
+        cx: &RequestCtx,
+        node: NodeId,
+    ) -> Result<Vec<String>, ClusterError> {
         let mut attempt = 1;
         let (record, serial_list) = loop {
             let (record, revision) = self
@@ -1848,10 +1895,10 @@ impl NodeRegistry {
                 .await
             {
                 Ok(_) => break (record, serial_list),
-                Err(error) if error.code() == PRECONDITION_FAILED => {
+                Err(error) if error.code() == StoreError::PRECONDITION_FAILED => {
                     if attempt == NODE_EDIT_ATTEMPTS {
                         return Err(ClusterError::new(
-                            "cluster.node.conflict",
+                            NODE_CONFLICT,
                             409,
                             "the node changed at the same time; try again",
                         ));
@@ -1944,7 +1991,8 @@ impl NodeRegistry {
             {
                 Ok(_) => break,
                 Err(error)
-                    if error.code() == PRECONDITION_FAILED && attempt < NODE_EDIT_ATTEMPTS =>
+                    if error.code() == StoreError::PRECONDITION_FAILED
+                        && attempt < NODE_EDIT_ATTEMPTS =>
                 {
                     tracing::debug!(node = %node, attempt, "the node record changed during the renewal; planning it again");
                     attempt += 1;
@@ -2468,13 +2516,37 @@ impl tenko_core::cluster::LeaderService for PruneService {
                     count,
                     "expired revocations and old enrollment tokens removed"
                 ),
-                Err(error) if error.code() == PRECONDITION_FAILED => {
+                Err(error) if error.code() == StoreError::PRECONDITION_FAILED => {
                     return Err("another controller took office".to_owned());
                 }
                 Err(error) => tracing::warn!(code = %error.code(), "{}", error.detail()),
             }
         }
     }
+}
+
+/// Whether a token that can still be used, other than `except`, names `key` (a lower-case
+/// node name).
+fn reserved(
+    view: &dyn ReadView,
+    key: &str,
+    now: Timestamp,
+    except: Option<Uuid>,
+) -> Result<bool, ClusterError> {
+    Ok(view
+        .scan_typed(&tables::ENROLLMENTS, KeyRange::all(), usize::MAX, false)?
+        .into_iter()
+        .any(|(id, token, _)| {
+            Some(id) != except
+                && token.used.is_none()
+                && token.expires_at > now
+                && token.name.is_some_and(|name| name.to_lowercase() == key)
+        }))
+}
+
+/// Whether `failed` is the leader fence of [`tenko_store::fence`].
+fn is_fence(failed: &FailedPrecondition) -> bool {
+    matches!(failed, FailedPrecondition::Counter { counter, .. } if *counter == LEADER_EPOCH)
 }
 
 /// The position of the endpoint that names one of `listening` (by port), if any.
@@ -2499,7 +2571,7 @@ fn name_taken(name: &str) -> ClusterError {
     ClusterError::new(
         "cluster.node.name_taken",
         409,
-        format!("another node is named `{name}`"),
+        format!("another node, or an enrollment token that can still be used, is named `{name}`"),
     )
     .with_param("field", "name")
 }
@@ -2684,6 +2756,128 @@ mod tests {
             _ => None,
         })
         .collect()
+    }
+
+    fn enroll_with(token: &str, roles: Vec<Role>) -> EnrollRequest {
+        EnrollRequest {
+            token: token.to_owned(),
+            csr: String::new(),
+            name: None,
+            roles,
+            address: None,
+            version: String::new(),
+            majors: Vec::new(),
+        }
+    }
+
+    /// A refusal names the token only when the request knew its secret: an unknown id and
+    /// a wrong secret are refusals anyone can send.
+    #[tokio::test]
+    async fn a_refusal_names_the_token_only_when_its_secret_matched() {
+        let (store, registry) = mem_registry().await;
+        let cx = RequestCtx::system(SystemComponent::Cluster);
+        let (created, token) = registry
+            .create_enrollment(&cx, NewEnrollment::default())
+            .await
+            .expect("a probe token");
+        let forged = EnrollmentToken::generate(created.id)
+            .expect("the token's id with another secret")
+            .with_ca_fingerprint(registry.ca_fingerprint());
+        let unknown = EnrollmentToken::generate(Uuid::now_v7())
+            .expect("an id no token has")
+            .with_ca_fingerprint(registry.ca_fingerprint());
+        for text in [forged.to_text(), unknown.to_text()] {
+            let refused = registry
+                .enroll(&cx, enroll_with(&text, Vec::new()))
+                .await
+                .expect_err("a token whose secret does not match");
+            assert_eq!(refused.code(), "cluster.enrollment.invalid_token");
+        }
+        // The real secret, asking for a role the token does not allow.
+        let refused = registry
+            .enroll(&cx, enroll_with(&token.to_text(), vec![Role::Dns]))
+            .await
+            .expect_err("a role the token does not allow");
+        assert_eq!(refused.code(), "cluster.enrollment.roles");
+        let named: Vec<(String, Option<String>)> = refused_enrollments(&store)
+            .await
+            .into_iter()
+            .map(|(code, context)| (code, context.get("enrollment").cloned()))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("cluster.enrollment.invalid_token".to_owned(), None),
+                ("cluster.enrollment.invalid_token".to_owned(), None),
+                (
+                    "cluster.enrollment.roles".to_owned(),
+                    Some(created.id.to_string())
+                ),
+            ]
+        );
+    }
+
+    /// A name that a token which can still be used reserves is taken for a second token,
+    /// whose enrollment could never succeed; an expired or used token reserves nothing.
+    #[tokio::test]
+    async fn a_name_that_a_pending_token_reserves_is_taken() {
+        let (_, registry) = mem_registry().await;
+        let cx = RequestCtx::system(SystemComponent::Cluster);
+        let named = |name: &str| NewEnrollment {
+            name: Some(name.to_owned()),
+            expires_in_secs: Some(60),
+            ..NewEnrollment::default()
+        };
+        registry
+            .create_enrollment(&cx, named("dns-1"))
+            .await
+            .expect("the first token");
+        let second = registry
+            .create_enrollment(&cx, named("DNS-1"))
+            .await
+            .expect_err("a second token for the same name");
+        assert_eq!(second.code(), "cluster.node.name_taken");
+        assert_eq!(second.status(), 409);
+        let expired = cx
+            .now
+            .checked_add(Duration::from_secs(61))
+            .expect("a minute later");
+        registry
+            .name_free("dns-1", expired)
+            .await
+            .expect("an expired token reserves nothing");
+        // A token without a name cannot take the reserved name through its request either.
+        let (_, unnamed) = registry
+            .create_enrollment(&cx, NewEnrollment::default())
+            .await
+            .expect("a token without a name");
+        let (_, csr) = crate::ca::generate_csr().expect("csr");
+        let mut request = enroll_with(&unnamed.to_text(), Vec::new());
+        request.csr = crate::ca::pem_block("CERTIFICATE REQUEST", &csr);
+        request.name = Some("Dns-1".to_owned());
+        let refused = registry
+            .enroll(&cx, request)
+            .await
+            .expect_err("a name another token reserves");
+        assert_eq!(refused.code(), "cluster.node.name_taken");
+    }
+
+    /// The roles a token asks for are refused with 403 at creation as at enrollment.
+    #[tokio::test]
+    async fn a_controller_token_beside_another_role_is_refused_with_403() {
+        let (_, registry) = mem_registry().await;
+        let refused = registry
+            .create_enrollment(
+                &RequestCtx::system(SystemComponent::Cluster),
+                NewEnrollment {
+                    roles: vec![Role::Controller, Role::Probe],
+                    ..NewEnrollment::default()
+                },
+            )
+            .await
+            .expect_err("controller beside another role");
+        assert_eq!(refused.code(), "cluster.enrollment.roles");
+        assert_eq!(refused.status(), 403);
     }
 
     /// A flood of refused enrollments writes a few records one by one and then one summary

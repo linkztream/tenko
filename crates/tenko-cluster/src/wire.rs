@@ -304,6 +304,10 @@ pub enum MemberChange {
     Remove {
         /// The member.
         node: NodeId,
+        /// Remove it even when that stops the cluster's writes until an absent voter is
+        /// back (`force`). Absent from the encoding when false, as before it existed.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        force: bool,
     },
     /// Hand leadership over (`POST /cluster/step-down`).
     StepDown,
@@ -632,7 +636,10 @@ mod tests {
             (
                 "change-remove",
                 10,
-                cbor(&envelope(MemberChange::Remove { node: NodeId(1002) })),
+                cbor(&envelope(MemberChange::Remove {
+                    node: NodeId(1002),
+                    force: false,
+                })),
             ),
             (
                 "change-step-down",

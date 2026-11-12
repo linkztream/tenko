@@ -714,6 +714,22 @@
         <notes><note category="description">Error: a change would remove the last voter.</note></notes>
         <segment><source>The change would remove the last voter.</source></segment>
       </unit>
+      <unit id="errors.cluster.member.not_revoked">
+        <notes><note category="description">Error: a controller was to be removed, but its certificates could not be revoked, so nothing changed.</note></notes>
+        <segment><source>The controller was not removed: its certificates could not be revoked. Nothing changed. Try again.</source></segment>
+      </unit>
+      <unit id="errors.cluster.member.remove_pending">
+        <notes><note category="description">Error: a removed controller's certificates are revoked, but it has not left the cluster yet; the leader finishes that on its own.</note></notes>
+        <segment><source>The controller is revoked and no controller accepts it, but its removal is not finished. The leader finishes it on its own.</source></segment>
+      </unit>
+      <unit id="errors.cluster.member.stops_writes">
+        <notes><note category="description">Error: removing a voter now would stop the cluster's writes until the voters out of contact are back; nothing changed.</note></notes>
+        <segment><source>Removing this controller now would stop the cluster's writes until the controllers out of contact are back. Nothing changed. Wait for them, or force the removal.</source></segment>
+      </unit>
+      <unit id="errors.cluster.node.is_member">
+        <notes><note category="description">Error: a controller that is a member of the cluster was to be revoked directly; it leaves through its removal from the cluster.</note></notes>
+        <segment><source>This controller is a member of the cluster. Remove it from the cluster, which revokes it.</source></segment>
+      </unit>
       <unit id="errors.cluster.member.no_successor">
         <notes><note category="description">Error: leadership cannot be handed over because no other voter has caught up.</note></notes>
         <segment><source>No other voter has caught up to take over.</source></segment>

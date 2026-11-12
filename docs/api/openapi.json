@@ -5921,6 +5921,15 @@
               "format": "int64",
               "minimum": 0
             }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Remove a voter even when the writes stop until the voters out of contact are back",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -5975,7 +5984,7 @@
             }
           },
           "409": {
-            "description": "The change would remove the last voter (`cluster.member.last_voter`), another change is in progress (`cluster.member.changing`) or the controller is not part of a cluster (`cluster.single`)",
+            "description": "The change would remove the last voter (`cluster.member.last_voter`), another change is in progress (`cluster.member.changing`), the removal would stop the writes until the voters out of contact are back and `force` was not given (`cluster.member.stops_writes`, `members` names them), the certificates could not be revoked and nothing changed (`cluster.member.not_revoked`, `cause` names the failure) or the controller is not part of a cluster (`cluster.single`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5985,7 +5994,7 @@
             }
           },
           "503": {
-            "description": "No leader is known to take the change (`cluster.member.not_leader`) or the controller is still starting (`cluster.member.starting`)",
+            "description": "No leader is known to take the change (`cluster.member.not_leader`), the controller is still starting (`cluster.member.starting`), the store could not revoke the certificates and nothing changed (`cluster.member.not_revoked`), or the member is revoked but its removal is not finished (`cluster.member.remove_pending`, with `done` and `pending`; the leader finishes it, and `propagate` names the `members` that have not received it yet)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25049,7 +25058,7 @@
             }
           },
           "403": {
-            "description": "Not allowed to enroll nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`)",
+            "description": "Not allowed to enroll nodes, a controller token without a sign-in in the last five minutes (`auth.step_up_required`), or the role controller beside another role (`cluster.enrollment.roles`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25059,7 +25068,7 @@
             }
           },
           "409": {
-            "description": "A node has the name (`cluster.node.name_taken`)",
+            "description": "A node, or an enrollment token that can still be used, has the name (`cluster.node.name_taken`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25069,7 +25078,7 @@
             }
           },
           "422": {
-            "description": "The role controller beside another role (`cluster.enrollment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrollment.lifetime`), or a bad name (`cluster.node.name`)",
+            "description": "A lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrollment.lifetime`), or a bad name (`cluster.node.name`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25288,7 +25297,7 @@
             }
           },
           "409": {
-            "description": "The node changed at the same time (`cluster.node.conflict`)",
+            "description": "The node changed at the same time (`cluster.node.conflict`), or it is a member of the controller cluster, which leaves through `DELETE /cluster/members/{id}` (`cluster.node.is_member`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -60546,6 +60555,10 @@
               "null"
             ],
             "description": "The wire version of its Raft messages, when reported."
+          },
+          "revoked": {
+            "type": "boolean",
+            "description": "Its certificates are revoked: no controller accepts it any more, and the leader is\ntaking it out of the cluster."
           },
           "role": {
             "$ref": "#/components/schemas/MemberRole",

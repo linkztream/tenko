@@ -388,6 +388,7 @@ mod tests {
             protocol_majors: vec![1],
             raft_wire: Some("openraft-0.9/cbor-1".to_owned()),
             formats: vec![1, 2],
+            revoked: false,
         }
     }
 

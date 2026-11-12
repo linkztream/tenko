@@ -4342,8 +4342,12 @@ export type MessageKey =
   | "errors.cluster.member.not_caught_up"
   | "errors.cluster.member.not_found"
   | "errors.cluster.member.not_learner"
+  | "errors.cluster.member.not_revoked"
+  | "errors.cluster.member.remove_pending"
+  | "errors.cluster.member.stops_writes"
   | "errors.cluster.no_quorum"
   | "errors.cluster.node.conflict"
+  | "errors.cluster.node.is_member"
   | "errors.cluster.node.name"
   | "errors.cluster.node.name_taken"
   | "errors.cluster.node.not_found"
@@ -14330,8 +14334,12 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.cluster.member.not_caught_up",
   "errors.cluster.member.not_found",
   "errors.cluster.member.not_learner",
+  "errors.cluster.member.not_revoked",
+  "errors.cluster.member.remove_pending",
+  "errors.cluster.member.stops_writes",
   "errors.cluster.no_quorum",
   "errors.cluster.node.conflict",
+  "errors.cluster.node.is_member",
   "errors.cluster.node.name",
   "errors.cluster.node.name_taken",
   "errors.cluster.node.not_found",

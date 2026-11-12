@@ -11,6 +11,9 @@
 //! | `cluster.member.not_found` | 404 | the node is not a member |
 //! | `cluster.member.even_voters` | 409 | a promotion would leave an even number of voters; pass `force` |
 //! | `cluster.member.not_caught_up` | 409 | the learner is too far behind or out of contact; pass `force` |
+//! | `cluster.member.not_revoked` | 409, 503 | a removal or replacement could not revoke the controller's certificates; nothing changed (`cause`: the code of the failure) |
+//! | `cluster.member.remove_pending` | 503 | the controller is revoked, but leaving the Raft group or dropping its member record failed (`done`, `pending`, `cause`; the leader finishes the removal), or members have not received the removal yet (`pending` `propagate`, `members`) |
+//! | `cluster.member.stops_writes` | 409 | removing the voter now stops the cluster's writes until the voters out of contact (`members`) are back; nothing changed; pass `force` to remove it anyway |
 //! | `cluster.member.last_voter` | 409 | the change would remove the last voter |
 //! | `cluster.member.no_successor` | 409 | a step-down without another caught-up voter |
 //! | `cluster.member.changing` | 409 | another membership change is in progress |
@@ -165,6 +168,10 @@ pub struct MemberView {
     /// The data formats its binary can open, oldest first; empty when not reported.
     #[serde(default)]
     pub formats: Vec<u32>,
+    /// Its certificates are revoked: no controller accepts it any more, and the leader is
+    /// taking it out of the cluster.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub revoked: bool,
 }
 
 /// Body of `POST /cluster/members/{id}/promote`.
@@ -250,12 +257,20 @@ pub trait ClusterAdmin: Send + Sync + 'static {
         request: PromoteRequest,
     ) -> Result<ClusterView, ClusterError>;
 
-    /// Removes a member and revokes its certificates; audited as `cluster.member.remove`.
+    /// Removes a member: revokes its certificates, takes it out of the Raft group and
+    /// drops its member record, in this order; audited as `cluster.member.remove`. Without
+    /// `force` it is refused when it would stop the cluster's writes until an absent voter
+    /// is back.
     ///
     /// # Errors
     ///
     /// The codes of the module table.
-    async fn remove(&self, cx: &RequestCtx, node: NodeId) -> Result<ClusterView, ClusterError>;
+    async fn remove(
+        &self,
+        cx: &RequestCtx,
+        node: NodeId,
+        force: bool,
+    ) -> Result<ClusterView, ClusterError>;
 
     /// Hands leadership to the most caught-up voter and waits until it leads.
     ///
@@ -281,6 +296,87 @@ pub fn member_not_found(node: NodeId) -> ClusterError {
         format!("node {node} is not a member of the controller cluster"),
     )
     .with_param("node", node.to_string())
+}
+
+/// `cluster.member.not_revoked`: a removal (or the replacement of a dead voter) that could
+/// not revoke the certificates of `node` because of `cause`, and so changed nothing.
+pub fn not_revoked(node: NodeId, cause: &ClusterError) -> ClusterError {
+    ClusterError::new(
+        "cluster.member.not_revoked",
+        if cause.status() >= 500 { 503 } else { 409 },
+        format!(
+            "controller {node} was not removed: its certificates could not be revoked ({}). \
+             Nothing changed: it is still a member and still trusted. Try again",
+            cause.detail()
+        ),
+    )
+    .with_param("node", node.to_string())
+    .with_param("cause", cause.code())
+}
+
+/// `cluster.member.remove_pending`: `node` is revoked, but the step `pending` of its
+/// removal (`leave`: the Raft group, or `record`: the member record) failed with `cause`.
+/// The detail names the steps in words too: a follower that forwarded the change hands on
+/// the code and the detail only.
+pub fn remove_pending(node: NodeId, pending: &str, cause: &ClusterError) -> ClusterError {
+    let (done, pending) = if pending == "record" {
+        ("revoke,leave", "record")
+    } else {
+        ("revoke", "leave,record")
+    };
+    ClusterError::new(
+        "cluster.member.remove_pending",
+        503,
+        format!(
+            "controller {node} is revoked, but its removal is not finished (done: {done};              pending: {pending}): {}. The leader finishes it on its own",
+            cause.detail()
+        ),
+    )
+    .with_param("node", node.to_string())
+    .with_param("done", done)
+    .with_param("pending", pending)
+    .with_param("cause", cause.code())
+}
+
+fn list(nodes: &[NodeId]) -> String {
+    nodes
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// `cluster.member.remove_pending` with the step `propagate`: `node` is removed, but the
+/// members `behind` do not have the removal in their log yet, and accept `node` until
+/// they catch up with the leader.
+pub fn not_propagated(node: NodeId, behind: &[NodeId]) -> ClusterError {
+    let members = list(behind);
+    ClusterError::new(
+        "cluster.member.remove_pending",
+        503,
+        format!(
+            "controller {node} is revoked and out of the cluster, but controllers {members}              have not received the removal yet (done: revoke,leave,record; pending:              propagate): they accept it until they are in contact with the leader again"
+        ),
+    )
+    .with_param("node", node.to_string())
+    .with_param("done", "revoke,leave,record")
+    .with_param("pending", "propagate")
+    .with_param("members", members)
+}
+
+/// `cluster.member.stops_writes` (409): removing `node` now stops the cluster's writes until
+/// the voters `absent` are in contact again; nothing changed.
+pub fn stops_writes(node: NodeId, absent: &[NodeId]) -> ClusterError {
+    let members = list(absent);
+    ClusterError::new(
+        "cluster.member.stops_writes",
+        409,
+        format!(
+            "removing controller {node} now stops the cluster's writes until controllers              {members} are in contact again; nothing changed. Wait until they are back, or              remove it anyway with force (`tenko cluster remove {node} --yes --force`)"
+        ),
+    )
+    .with_param("node", node.to_string())
+    .with_param("members", members)
 }
 
 #[cfg(test)]
