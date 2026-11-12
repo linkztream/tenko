@@ -584,13 +584,30 @@ fn parse_attestation_object(bytes: &[u8]) -> Result<(String, Value, Vec<u8>), We
     }
 }
 
-/// Entry points for the fuzz targets `webauthn_attestation` and `webauthn_certificate`
-/// (not part of the API).
+/// Entry points for the fuzz targets `webauthn_attestation`, `webauthn_certificate` and
+/// `auth_sign_in_inputs` (not part of the API).
 #[doc(hidden)]
 pub mod fuzzing {
     use super::{
-        AttestationKind, AuthenticatorData, WebAuthnError, attestation, parse_attestation_object,
+        AttestationKind, AuthenticatorData, RelyingParty, WebAuthnError, attestation,
+        parse_attestation_object,
     };
+
+    /// Checks `clientDataJSON` as both ceremonies do before they read anything else: its
+    /// type against `ceremony`, its challenge against `challenge`, its origin against the
+    /// relying party's origins, and the cross-origin fields.
+    ///
+    /// # Errors
+    ///
+    /// As the ceremonies.
+    pub fn client_data(
+        relying_party: &RelyingParty,
+        json: &[u8],
+        ceremony: &str,
+        challenge: &[u8],
+    ) -> Result<(), WebAuthnError> {
+        relying_party.check_client_data(json, ceremony, challenge)
+    }
 
     /// 2026-01-01T00:00:00Z: a fixed clock, so an input verifies the same way on every run.
     const NOW_UNIX: i64 = 1_767_225_600;

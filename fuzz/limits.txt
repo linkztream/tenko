@@ -17,6 +17,7 @@ audit_export_cef         65536    MAX_LINE is 4 MiB (crates/tenko-auth/src/audit
 audit_export_jsonl       65536    MAX_LINE is 4 MiB per line (crates/tenko-auth/src/audit_export/format/json.rs); 64 KiB holds several records
 audit_export_syslog      65536    the target's own MAX_FRAME is 64 KiB; the sinks send datagrams of at most 65,000 octets (audit_export/sink/mod.rs MAX_DATAGRAM) and TCP frames without a cap
 auth_device_cookie       65536    a cookie is bounded only by the HTTP header limit of the API server (hundreds of KiB); the parser keeps five marks of 43 octets
+auth_sign_in_inputs      65537    1 control octet and a sign-in's JSON body or field (axum's default body limit, 2 MiB); 64 KiB reaches every length rule (43-octet secrets, 1,023-octet credential ids, codes of 6 to 8 digits)
 backup_archive           131073   1 control octet; a restore reads a local file whose parts may reach 64 GiB (MAX_PART, crates/tenko/src/backup/archive.rs). Twice 64 KiB: the sealed stream is cut into chunks of MIN_CHUNK (65,536 octets), so only a plain stream above 64 KiB has a second chunk, and the key generation part's limit MAX_KEKS_PART is 64 KiB
 cluster_messages         65537    1 control octet; the cluster port decodes up to 64 KiB (Hello), 1 MiB or MAX_MESSAGE_BYTES (32 MiB) per service (crates/tenko-cluster/src/server.rs, max_decoding_message_size)
 cluster_token            65536    the enrollment request carries the token in a message of up to 64 KiB (Hello) or 1 MiB; a token is 125 or 81 characters (TOKEN_TEXT_LEN, crates/tenko-cluster/src/token.rs)
