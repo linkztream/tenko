@@ -33,12 +33,17 @@
 #      198.18.0.0/15, selected by option 118 or link selection, with the in-memory
 #      reference store): relay-test.py with option 118 (offer, ack, renewal, release) and
 #      with the link selection sub-option, and perfdhcp; the other rows are SKIP lines;
-#   4. tears everything down (containers, volumes, networks, work directory), also when a
-#      step fails, after printing the logs of every service. KEEP=1 leaves the lab running.
+#   4. tears everything down (containers, volumes, networks), also when a step fails, after
+#      printing the logs of every service. KEEP=1 leaves the lab running.
 #
-# Needs: bash, Docker with the compose plugin (and buildx for the builds), and with the
-# binary curl and python3 on the host (the host reaches the node's API on the lab network).
-# Run it from the repository root without arguments:
+# This is the host side: it builds the images (1.) and runs the steps 2. and 3. as driver.sh
+# in the lab's driver (the service `driver`, deploy/compose/driver), from inside the lab
+# network, answering the container operations it asks for (driver/host.sh); the round dhcp6
+# runs the same way in its own project.
+#
+# Needs: bash and Docker with the compose plugin (and buildx for the builds), nothing else on
+# the host: no curl or python3, no route to the lab networks. Run it from the repository
+# root without arguments (Git Bash on Windows too):
 #   bash deploy/compose/lab-dhcp/smoke.sh
 #   IMAGE=tenko:lab bash deploy/compose/lab-dhcp/smoke.sh          # skip the build
 #   NODE=example bash deploy/compose/lab-dhcp/smoke.sh             # the example server
@@ -80,11 +85,11 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
-compose_file="$here/compose.yml"
+# shellcheck source=deploy/compose/driver/host.sh
+source "$here/../driver/host.sh"
 
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-tenkodhcplab}"
 node="${NODE:-tenko}"
-wait_secs="${WAIT_SECS:-300}"
 keep="${KEEP:-0}"
 # WP9.1: the rounds. "default" is every row of the other sections; "dhcp6" is the round of
 # dhcp6.sh, which needs the binary.
@@ -99,912 +104,258 @@ for round in $rounds; do
   esac
 done
 ((run_default + run_dhcp6 > 0)) || { printf 'smoke: ROUNDS names no round\n' >&2; exit 2; }
-node_ip=192.0.2.10
-tester_ip=192.0.2.20
-api_base="http://$node_ip:8443"
-# The networks: name, prefix, the gateway's address on it, the pool, the client's MAC.
-networks=(servers lan iot guest)
-declare -A prefix=([servers]=192.0.2.0/26 [lan]=192.0.2.64/26 [iot]=192.0.2.128/26 [guest]=192.0.2.192/26)
-declare -A gateway=([servers]=192.0.2.2 [lan]=192.0.2.66 [iot]=192.0.2.130 [guest]=192.0.2.194)
-declare -A pool_first=([servers]=192.0.2.30 [lan]=192.0.2.94 [iot]=192.0.2.158 [guest]=192.0.2.222)
-declare -A pool_last=([servers]=192.0.2.59 [lan]=192.0.2.123 [iot]=192.0.2.187 [guest]=192.0.2.251)
-declare -A client_mac=([servers]=00:00:5e:00:53:05 [lan]=00:00:5e:00:53:45 [iot]=00:00:5e:00:53:85 [guest]=00:00:5e:00:53:c5)
-# The options of E23: DNS servers (6) and NTP servers (42) for every client.
-dns_server=192.0.2.53
-ntp_server=192.0.2.123
-# The reservation row: client-lan's MAC gets this address, outside the pool.
-reserved_ip=192.0.2.80
-lease_secs=60
-# The example server's scope (198.18.0.0/15, the benchmarking range of RFC 2544).
-example_net=198.18.0.0/15
-example_link=198.18.0.0
-
 case "$node" in
   tenko | example) ;;
   *) printf 'smoke: NODE must be tenko or example, not %s\n' "$node" >&2; exit 2 ;;
 esac
-export TOOLS_IMAGE="${TOOLS_IMAGE:-tenko-dhcp-lab-tools:latest}"
-build_tools=1
-[[ -n "${TOOLS_IMAGE_PREBUILT:-}" ]] && build_tools=0
-# WP9.1: the networkd client of the round dhcp6.
-export NETWORKD_IMAGE="${NETWORKD_IMAGE:-tenko-dhcp-lab-networkd:latest}"
-# WP9.2: the node of the round dhcp6 with the probe's capability.
-export TENKO_PROBE_IMAGE="${TENKO_PROBE_IMAGE:-tenko-dhcp-lab-probe:latest}"
-build_networkd=1
-[[ -n "${NETWORKD_IMAGE_PREBUILT:-}" ]] && build_networkd=0
 if ((run_dhcp6)) && [[ "$node" != tenko ]]; then
   printf 'smoke: the round dhcp6 needs the binary (NODE=tenko)\n' >&2
   exit 2
 fi
-if [[ -n "${IMAGE:-}" ]]; then
-  export TENKO_IMAGE="$IMAGE"
-  build_tenko=0
-else
-  export TENKO_IMAGE=tenko:lab
-  build_tenko=1
+TENKO_IMAGE="${IMAGE:-}"
+export TOOLS_IMAGE="${TOOLS_IMAGE:-tenko-dhcp-lab-tools:latest}"
+export NETWORKD_IMAGE="${NETWORKD_IMAGE:-tenko-dhcp-lab-networkd:latest}"
+export TENKO_PROBE_IMAGE="${TENKO_PROBE_IMAGE:-tenko-dhcp-lab-probe:latest}"
+export PXE_IMAGE="${PXE_IMAGE:-tenko-dhcp-lab-pxe:latest}"
+export KEA_IMAGE="${KEA_IMAGE:-tenko-dhcp-lab-kea:latest}"
+pxe_rows="${PXE:-1}"
+kea_rows="${KEA:-1}"
+
+default_file="$(host_path "$here/compose.yml")"
+v6_file="$(host_path "$here/compose.dhcp6.yml")"
+v6_project=tenkodhcp6lab
+# The machines of the PXE rows run with KVM where the host has it.
+default_files=(-f "$default_file")
+if [[ -e /dev/kvm ]]; then
+  default_files+=(-f "$(host_path "$here/compose.kvm.yml")")
 fi
-if [[ -n "${EXAMPLE_IMAGE:-}" ]]; then
-  build_example=0
-else
-  export EXAMPLE_IMAGE=tenko-dhcp-lab-example:latest
-  build_example=1
-fi
-
-work=""
-cookie=""
-status=0
-rows_failed=0
-summary=()
-
-# admin_password: a random password for a lab administrator. An administrator's password has
-# at least 12 characters and is not digits only, in every profile.
-admin_password() { printf 'Lab-%s-Aa1' "$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')"; }
-
-# WP9.1: the round dhcp6 (ROUNDS=dhcp6): its functions only; it runs in dhcp6_round below.
-# shellcheck source=deploy/compose/lab-dhcp/dhcp6.sh
-source "$here/dhcp6.sh"
-
-step() { printf '\n==> %s\n' "$*"; }
-fail() { printf 'smoke: %s\n' "$*" >&2; exit 1; }
-ok() {
-  local line
-  line="$(printf 'ok   %-22s %s' "$1" "$2")"
-  summary+=("$line")
-  printf '%s\n' "$line"
-}
-compose() { docker compose -f "$compose_file" --profile "$node" "$@"; }
-
-# retry <seconds> <description> <command...>: runs the command every 2 seconds until it
-# succeeds or the time is up.
-retry() {
-  local limit="$1" what="$2" waited=0
-  shift 2
-  until "$@" >/dev/null 2>&1; do
-    if ((waited >= limit)); then
-      fail "timed out after ${limit}s waiting for: $what"
-    fi
-    sleep 2
-    waited=$((waited + 2))
-  done
-}
-
-# within <seconds> <command...>: like retry, every half second, without failing.
-within() {
-  local limit_ms=$(($1 * 1000)) began now
-  shift
-  began="$(date +%s%3N)"
-  while true; do
-    if "$@" >/dev/null 2>&1; then
-      return 0
-    fi
-    now="$(date +%s%3N)"
-    ((now - began >= limit_ms)) && return 1
-    sleep 0.5
-  done
-}
-
-# row <name> <what> <command...>: one PASS or FAIL line; a failed check runs once more
-# with a trace for the log.
-row() {
-  local name="$1" what="$2" line
-  shift 2
-  if "$@"; then
-    line="$(printf 'PASS %-22s %s' "$name" "$what")"
+# The project the current round runs in: compose talks to it, and lab_op's volumes and
+# networks are its own.
+round_project=default
+compose() {
+  if [[ "$round_project" == dhcp6 ]]; then
+    docker compose -p "$v6_project" -f "$v6_file" --profile networkd --profile kea "$@"
   else
-    line="$(printf 'FAIL %-22s %s' "$name" "$what")"
-    rows_failed=$((rows_failed + 1))
-    (set -x; "$@") >&2 2>&1 || true
+    docker compose "${default_files[@]}" --profile "$node" --profile pxe --profile kea "$@"
   fi
-  summary+=("$line")
-  printf '%s\n' "$line"
 }
-skip() {
-  local line
-  line="$(printf 'SKIP %-22s %s' "$1" "$2")"
-  summary+=("$line")
-  printf '%s\n' "$line"
+lab_driver=driver
+# What driver.sh may ask for (driver/host.sh lab_op): the services of both projects, and the
+# command lines in the clients (dhclient, udhcpc, networkd's state), the tester (relay-test,
+# perfdhcp), the gateway, the node's namespace, the boot server and radvd.
+lab_services=(relay netns tenko node-example client-servers client-lan client-iot client-guest
+  tester bootsrv pxe-bios pxe-uefi kea driver client-dhclient6 client-networkd client-iot6
+  client-pd6 router6 kea6)
+lab_exec_services=(relay netns client-servers client-lan client-iot client-guest tester
+  bootsrv client-dhclient6 client-networkd client-iot6 client-pd6 router6)
+lab_networks=(servers)
+
+# lab_extra_op: the Kea checks of E30, in containers of the Kea image (driver/host.sh).
+#   kea-version <4|6>        the version line of kea-dhcp4 or kea-dhcp6
+#   kea-check 4              kea-dhcp4 -t on the lab volume's kea/kea-dhcp4.json, no network
+#   kea-check 6 export       kea-dhcp6 -t on kea/kea-dhcp6.json, in the node's namespace
+#   kea-check 6 golden       the same on the golden file of the unit tests
+lab_extra_op() {
+  local op="$1" volume
+  shift
+  volume="$(lab_project_name)_lab"
+  case "$op:${1:-}:${2:-}" in
+    kea-version:4: | kea-version:6:)
+      docker run --rm --network none "$KEA_IMAGE" "kea-dhcp$1" -V 2>/dev/null
+      ;;
+    kea-check:4:)
+      docker run --rm --network none \
+        --mount "type=volume,source=$volume,target=/lab/kea,volume-subpath=kea,readonly" \
+        "$KEA_IMAGE" kea-dhcp4 -t /lab/kea/kea-dhcp4.json
+      ;;
+    kea-check:6:export)
+      docker run --rm --network "container:$(lab_container netns)" \
+        --mount "type=volume,source=$volume,target=/check,volume-subpath=kea,readonly" \
+        "$KEA_IMAGE" kea-dhcp6 -t /check/kea-dhcp6.json
+      ;;
+    kea-check:6:golden)
+      docker run --rm --network "container:$(lab_container netns)" \
+        -v "$(host_path "$repo/crates/tenko-dhcp/src/export/kea/fixtures"):/check:ro" \
+        "$KEA_IMAGE" kea-dhcp6 -t /check/kea-dhcp6.json
+      ;;
+    *)
+      printf 'lab: unknown operation %s\n' "$op" >&2
+      return 2
+      ;;
+  esac
+}
+lab_project_name() {
+  if [[ "$round_project" == dhcp6 ]]; then
+    printf '%s\n' "$v6_project"
+  else
+    printf '%s\n' "$COMPOSE_PROJECT_NAME"
+  fi
+}
+
+v6_started=0
+default_started=0
+status=0
+
+# The logs of the round dhcp6 (its own project), for a round that failed.
+v6_logs() {
+  local service
+  printf '\n==> FAILED: logs of the round dhcp6\n' >&2
+  for service in relay netns tenko tester client-dhclient6 client-networkd client-iot6 client-pd6 router6 kea6; do
+    printf '\n--- %s ---\n' "$service" >&2
+    compose logs --no-color --tail 200 "$service" >&2 2>&1
+  done
+  for service in client-dhclient6 client-iot6 client-networkd client-pd6; do
+    printf '\n--- %s: /run/lab ---\n' "$service" >&2
+    compose exec -T "$service" sh -c 'tail -n 20 /run/lab/events6 /run/lab/events 2>&1; ls /run/lab /run/systemd/netif/links 2>&1' >&2 2>&1
+  done
+  docker ps -a --filter "label=com.docker.compose.project=$v6_project" >&2 2>&1
+}
+
+# The logs of the default round's project.
+default_logs() {
+  local service
+  printf '\n==> FAILED (status %s): logs of the services\n' "$status" >&2
+  for service in relay netns tenko node-example tester client-servers client-lan client-iot client-guest; do
+    printf '\n--- %s ---\n' "$service" >&2
+    compose logs --no-color --tail 200 "$service" >&2 2>&1
+  done
+  # WP8.4: the boot server's and the machines' logs.
+  for service in bootsrv pxe-bios pxe-uefi; do
+    printf '\n--- %s ---\n' "$service" >&2
+    compose logs --no-color --tail 100 "$service" >&2 2>&1
+  done
+  compose exec -T bootsrv sh -c 'tail -n 50 /run/lab/*.log' >&2 2>&1
+  # WP9.3: the Kea server's log.
+  printf '\n--- kea ---\n' >&2
+  compose logs --no-color --tail 100 kea >&2 2>&1
+  docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" >&2 2>&1
 }
 
 cleanup() {
   status=$?
   set +e
   trap - EXIT
-  # WP9.1: a round dhcp6 that stopped half way prints its logs.
-  if ((status != 0)) && ((v6_started)); then
+  if ((status != 0)) && ((default_started)); then
+    round_project=default
+    default_logs
+  fi
+  if ((status != 0 && v6_started && !v6_logged)); then
+    round_project=dhcp6
     v6_logs
   fi
-  if ((status != 0)) && ((run_default)); then
-    printf '\n==> FAILED (status %s): logs of the services\n' "$status" >&2
-    for service in relay netns tenko node-example tester client-servers client-lan client-iot client-guest; do
-      printf '\n--- %s ---\n' "$service" >&2
-      compose logs --no-color --tail 200 "$service" >&2 2>&1
-    done
-    # WP8.4: the boot server's and the machines' logs.
-    for service in bootsrv pxe-bios pxe-uefi; do
-      printf '\n--- %s ---\n' "$service" >&2
-      pxe_compose logs --no-color --tail 100 "$service" >&2 2>&1
-    done
-    pxe_compose exec -T bootsrv sh -c 'tail -n 50 /run/lab/*.log' >&2 2>&1
-    # WP9.3: the Kea server's log.
-    printf '\n--- kea ---\n' >&2
-    kea_compose logs --no-color --tail 100 kea >&2 2>&1
-    docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" >&2 2>&1
-  fi
-  if ((${#summary[@]} > 0)); then
+  if ((${#lab_summary[@]} > 0)); then
     printf '\n==> summary (node: %s)\n' "$node"
-    printf '%s\n' "${summary[@]}"
+    printf '%s\n' "${lab_summary[@]}"
   fi
   if [[ "$keep" == 1 ]]; then
-    if ((run_default)); then
+    if ((default_started)); then
       printf '\n==> KEEP=1: the lab keeps running; for example\n'
-      printf '    LAB_DIR=%s docker compose -f %s --profile %s exec client-lan dhclient -v -1 -cf /lab/dhclient.conf -sf /lab/client-script.sh eth0\n' \
-        "$work" "$compose_file" "$node"
-      printf 'tear it down with: LAB_DIR=%s docker compose -f %s --profile %s down --volumes\n' \
-        "$work" "$compose_file" "$node"
+      printf '    docker compose -f %s --profile %s exec client-lan dhclient -v -1 -cf /lab/dhclient.conf -sf /lab/client-script.sh eth0\n' \
+        "$default_file" "$node"
+      printf 'tear it down with: docker compose -f %s --profile %s --profile pxe --profile kea down --volumes\n' \
+        "$default_file" "$node"
     fi
-    # WP9.1: the round dhcp6 keeps its own lab.
     if ((v6_started)); then
-      v6_keep_hint
+      printf '\n==> KEEP=1: the round dhcp6 keeps running; for example\n'
+      printf '    docker compose -p %s -f %s --profile networkd exec client-dhclient6 dhclient -6 -D LL -v -1 -cf /lab/dhclient6.conf -sf /lab/client6-script.sh eth0\n' \
+        "$v6_project" "$v6_file"
+      printf 'tear it down with: docker compose -p %s -f %s --profile networkd --profile kea down --volumes\n' \
+        "$v6_project" "$v6_file"
     fi
     exit "$status"
   fi
   printf '\n==> tear down\n'
-  if ((run_default)); then
-    # WP8.4: the pxe profile's services too.
-    pxe_compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
-    # WP9.3: the kea profile's service too.
-    kea_compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
-    compose down --volumes --remove-orphans --timeout 30 >/dev/null 2>&1
-  fi
-  # WP9.1: the round dhcp6, when it is still up.
-  v6_teardown
-  if [[ -n "$work" ]]; then
-    rm -rf "$work"
-  fi
+  round_project=default
+  compose down --volumes --remove-orphans --timeout 30 >/dev/null 2>&1
+  round_project=dhcp6
+  compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
   exit "$status"
 }
 trap cleanup EXIT
 
-# ---------------------------------------------------------------------------------------
-# The clients
+printf '\n==> check the tools\n'
+docker compose version >/dev/null 2>&1 || { echo "smoke: the docker compose plugin is missing" >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "smoke: cannot talk to the Docker daemon" >&2; exit 1; }
 
-# dhclient in a client container: -1 tries once (the timeout of dhclient.conf) and goes
-# to the background with the lease; the lease file and the pid stay in /run/lab.
-dhclient_in() {
-  local service="$1"
-  shift
-  compose exec -T "$service" dhclient -v -cf /lab/dhclient.conf -sf /lab/client-script.sh \
-    -lf /run/lab/dhclient.leases -pf /run/lab/dhclient.pid "$@" eth0
-}
-# The last event line of a client's script (client-script.sh), and a field of it.
-last_event() { compose exec -T "client-$1" sh -c 'tail -n 1 /run/lab/events 2>/dev/null' | tr -d '\r'; }
-event_field() { sed -n "s/.* $1=\\([^ ]*\\).*/\\1/p"; }
-forget() { compose exec -T "$1" rm -f /run/lab/dhclient.leases; }
-events_of() { compose exec -T "client-$1" sh -c 'cat /run/lab/events 2>/dev/null' | tr -d '\r'; }
-
-# in_pool <address> <network name>
-in_pool() {
-  python3 - "$1" "${pool_first[$2]}" "${pool_last[$2]}" <<'PY'
-import ipaddress, sys
-a, f, l = (ipaddress.IPv4Address(x) for x in sys.argv[1:])
-sys.exit(0 if f <= a <= l else 1)
-PY
-}
-
-declare -A leased=()
-
-# lease_ok <network>: the client got an address of its pool with options 3, 6 and 42.
-lease_ok() {
-  local net="$1" line ip
-  dhclient_in "client-$net" -1 >/dev/null 2>&1 || return 1
-  line="$(last_event "$net")"
-  [[ "$line" == BOUND* || "$line" == REBOOT* ]] || return 1
-  ip="$(event_field ip <<<"$line")"
-  leased[$net]="$ip"
-  in_pool "$ip" "$net" &&
-    [[ "$(event_field routers <<<"$line")" == "${gateway[$net]}" ]] &&
-    [[ "$(event_field dns <<<"$line")" == "$dns_server" ]] &&
-    [[ "$(event_field ntp <<<"$line")" == "$ntp_server" ]]
-}
-
-# renewed <network>: a RENEW event with the same address, after the first binding.
-renewed() {
-  events_of "$1" | grep -q "^RENEW ip=${leased[$1]} "
-}
-
-# ---------------------------------------------------------------------------------------
-# The API (the binary only)
-
-# api <method> <path> [<json>]: a request with the session; prints the body, returns 0
-# for a 2xx status and leaves the status in $api_status.
-api() {
-  local method="$1" path="$2" body="${3:-}" out
-  out="$work/api.out"
-  local args=(-sS -o "$out" -w '%{http_code}' -X "$method" -H "Origin: $api_base"
-    -H "Idempotency-Key: $(cat /proc/sys/kernel/random/uuid)")
-  [[ -n "$cookie" ]] && args+=(-H "Cookie: $cookie")
-  [[ -n "$body" ]] && args+=(-H "Content-Type: application/json" --data "$body")
-  api_status="$(curl "${args[@]}" "$api_base/api/v1$path")" || api_status=000
-  cat "$out"
-  [[ "$api_status" == 2* ]]
-}
-# field <expression>: a value of the JSON on standard input (`d` is the document).
-field() { python3 -c "import json,sys; d=json.load(sys.stdin); v=($1); print('' if v is None else v)"; }
-must() {
-  local what="$1"
-  shift
-  "$@" >/dev/null || fail "$what ($api_status: $(cat "$work/api.out"))"
-}
-
-healthy() { [[ "$(docker inspect -f '{{.State.Health.Status}}' "$(compose ps -q tenko)")" == healthy ]]; }
-
-lab_setup() {
-  local token password setup
-  token="$(compose exec -T tenko /usr/local/bin/tenko setup token --data-dir /var/lib/tenko | tr -d '\r\n')"
-  [[ -n "$token" ]] || fail "setup: no setup token"
-  password="$(admin_password)"
-  setup="{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"labadmin\", \"display_name\": \"Lab Admin\", \"password\": \"$password\"}, \"host_name\": \"tenko.example.test\", \"language\": \"en\"}"
-  cookie="$(curl -sS -D - -o "$work/api.out" -H "Origin: $api_base" -H "Content-Type: application/json" \
-    --data "$setup" "$api_base/api/v1/setup" | tr -d '\r' | sed -n 's/^[Ss]et-[Cc]ookie: \(\(__Host-\)\{0,1\}tenko_session=[^;]*\).*/\1/p' | head -n 1)"
-  [[ -n "$cookie" ]] || fail "setup: the setup did not sign in: $(cat "$work/api.out")"
-  ok "setup" "Tenko is set up under the Lab profile"
-}
-
-configure() {
-  local net id
-  must "the server's options" api PUT /dhcp/option-sets/server \
-    "{\"values\": [{\"code\": 6, \"typed\": {\"ipv4\": {\"values\": [\"$dns_server\"]}}}, {\"code\": 42, \"typed\": {\"ipv4\": {\"values\": [\"$ntp_server\"]}}}, {\"code\": 15, \"typed\": {\"text\": \"example.test\"}}]}"
-  for net in "${networks[@]}"; do
-    must "the prefix of $net" api POST /prefixes "{\"cidr\": \"${prefix[$net]}\", \"description\": \"lab network $net\"}"
-    id="$(field "d['item']['id']" <"$work/api.out")"
-    must "the pool of $net" api POST "/prefixes/$id/ranges" \
-      "{\"first\": \"${pool_first[$net]}\", \"last\": \"${pool_last[$net]}\", \"role\": \"dhcp_pool\"}"
-    must "the scope of $net" api POST /dhcp/scopes \
-      "{\"prefix\": \"$id\", \"lease\": {\"default_secs\": $lease_secs, \"min_secs\": $lease_secs, \"max_secs\": $((lease_secs * 2))}}"
-    must "option 3 of $net" api PUT "/dhcp/option-sets/scope:$id" \
-      "{\"values\": [{\"code\": 3, \"typed\": {\"ipv4\": {\"values\": [\"${gateway[$net]}\"]}}}]}"
-  done
-  # The gateway is the one trusted relay agent, bound to the lab's networks (all four in
-  # 192.0.2.0/24); the tester joins it in the rows below.
-  must "the trusted relays" api PUT /dhcp/settings \
-    "{\"trusted_relays\": [{\"relay\": \"${gateway[servers]}/32\", \"links\": [\"192.0.2.0/24\"]}]}"
-  ok "configuration" "four prefixes with a pool and a scope each, options 3, 6, 15 and 42, the gateway as the trusted relay"
-}
-
-# lease_row <address>: the lease row of an address (GET /dhcp/leases/{addr}).
-lease_json() { api GET "/dhcp/leases/$1"; }
-# relay_on_lease <network>: the lease of the network's client holds giaddr (the gateway's
-# address on the network) and the circuit-id dhcrelay adds (the network's name).
-relay_on_lease() {
-  local net="$1" want
-  want="$(printf '%s' "$net" | od -An -v -tx1 | tr -d ' \n')"
-  lease_json "${leased[$net]}" >/dev/null || return 1
-  [[ "$(field "d['relay']['giaddr']" <"$work/api.out")" == "${gateway[$net]}" ]] &&
-    [[ "$(field "(d['relay'].get('circuit_id') or '').lower()" <"$work/api.out")" == "$want" ]]
-}
-lease_state_is() {
-  lease_json "$1" >/dev/null && [[ "$(field "d['state']" <"$work/api.out")" == "$2" ]]
-}
-# The active leases that are still running in 5 seconds: "address client end" per line,
-# sorted (a 60-second lease may end between two reads, so the ones about to end are left
-# out).
-active_leases() {
-  api GET "/dhcp/leases?limit=1000" >/dev/null || return 1
-  python3 - "$work/api.out" <<'PY'
-import datetime, json, re, sys
-d = json.load(open(sys.argv[1]))
-soon = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=5)
-def at(text):
-    text = re.sub(r"(\.\d{6})\d+", r"\1", text).replace("Z", "+00:00")
-    return datetime.datetime.fromisoformat(text)
-for l in sorted(d["items"], key=lambda l: l["addr"]):
-    if l["state"] == "active" and at(l["ends"]) > soon:
-        print(l["addr"], l["client"]["chaddr"], l["ends"])
-PY
-}
-# every_lease_kept: each lease active before the restart and not ended yet is listed after
-# it, active, for the same client.
-every_lease_kept() {
-  api GET "/dhcp/leases?limit=1000" >/dev/null || return 1
-  python3 - "$work/api.out" "$work/leases.before" <<'PY'
-import datetime, json, re, sys
-d = json.load(open(sys.argv[1]))
-now = datetime.datetime.now(datetime.timezone.utc)
-def at(text):
-    text = re.sub(r"(\.\d{6})\d+", r"\1", text).replace("Z", "+00:00")
-    return datetime.datetime.fromisoformat(text)
-held = {l["addr"]: l for l in d["items"] if l["state"] == "active"}
-missing = []
-for line in open(sys.argv[2]):
-    addr, chaddr, ends = line.split()
-    if at(ends) <= now:
-        continue
-    if addr not in held or held[addr]["client"]["chaddr"] != chaddr:
-        missing.append(addr)
-print("missing after the restart:", missing or "none")
-sys.exit(1 if missing else 0)
-PY
-}
-
-# ---------------------------------------------------------------------------------------
-# The tester's rows (both nodes)
-
-# relay_test <expected network> <arguments...>: relay-test.py from the tester.
-relay_test() {
-  local expect="$1"
-  shift
-  compose exec -T tester python3 /lab/relay-test.py --server "$node_ip" --giaddr "$tester_ip" \
-    --expect "$expect" "$@"
-}
-
-# untrusted_refused: relay-test.py from the tester, which is not a trusted relay, gets no
-# answer, and GET /system/status names the tester in dhcp.relay.untrusted.
-untrusted_refused() {
-  if relay_test "${prefix[iot]}" --link "${prefix[iot]%/*}" --mac 00:00:5e:00:53:2a \
-    --timeout 2 >/dev/null 2>&1; then
-    return 1
-  fi
-  api GET /system/status >/dev/null || return 1
-  python3 - "$work/api.out" "$tester_ip" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-rows = [w for w in d.get("warnings", []) if w.get("code") == "dhcp.relay.untrusted"]
-print(json.dumps(rows), file=sys.stderr)
-sys.exit(0 if any(sys.argv[2] in w.get("params", {}).get("senders", "") for w in rows) else 1)
-PY
-}
-
-# offers_limited: with an offer rate of 2 new clients a second per scope (a burst of 20),
-# perfdhcp's 40 new clients at once are not all answered, and GET /system/status names the
-# limit in dhcp.limit.refused; the limits go back to the profile (none under Lab) after.
-offers_limited() {
-  local result=0
-  must "an offer rate of 2 a second" api PUT /dhcp/settings '{"limits": {"offers_per_second": 2}}'
-  if perfdhcp_ok 40; then
-    result=1
-  elif api GET /system/status >/dev/null; then
-    python3 - "$work/api.out" <<'PY' || result=1
-import json, sys
-d = json.load(open(sys.argv[1]))
-rows = [w for w in d.get("warnings", []) if w.get("code") == "dhcp.limit.refused"]
-print(json.dumps(rows), file=sys.stderr)
-sys.exit(0 if any("offers_per_second" in w.get("params", {}).get("limits", "") for w in rows) else 1)
-PY
-  else
-    result=1
-  fi
-  must "the limits back to the profile" api PUT /dhcp/settings '{"limits": {}}'
-  return "$result"
-}
-
-# perfdhcp_ok <clients> [<options...>]: perfdhcp as a relay from the tester, every 4-way
-# exchange answered (no drops in DISCOVER-OFFER or REQUEST-ACK).
-perfdhcp_ok() {
-  local n="$1" out
-  shift
-  out="$(compose exec -T tester perfdhcp -4 -l "$tester_ip" -r "$n" -R "$n" -n "$n" -p 30 \
-    -W 2000000 "$@" "$node_ip" 2>&1)" || true
-  printf '%s\n' "$out" >"$work/perfdhcp.out"
-  python3 - "$work/perfdhcp.out" "$n" <<'PY'
-import re, sys
-text = open(sys.argv[1]).read()
-n = int(sys.argv[2])
-blocks = re.findall(r"Statistics for: ([^*\n]+)\*+\s+sent packets: (\d+)\s+received packets: (\d+)\s+drops: (\d+)", text)
-got = {name: (int(s), int(r), int(d)) for name, s, r, d in blocks}
-ok = all(got.get(k, (0, 0, 1))[1] == n and got[k][2] == 0 for k in ("DISCOVER-OFFER", "REQUEST-ACK"))
-print(got)
-sys.exit(0 if ok else 1)
-PY
-}
-
-# udhcpc_ok <network>: BusyBox's udhcpc gets an address of the network's pool (it quits
-# with the lease, -q, and leaves the interface alone, -s /bin/true).
-udhcpc_ok() {
-  local out
-  out="$(compose exec -T "client-$1" busybox udhcpc -i eth0 -n -q -t 5 -T 2 -s /bin/true 2>&1)" || return 1
-  local ip
-  ip="$(sed -n 's/.*lease of \([0-9.]*\) obtained.*/\1/p' <<<"$out" | head -n 1)"
-  [[ -n "$ip" ]] && in_pool "$ip" "$1"
-}
-
-# ---------------------------------------------------------------------------------------
-# WP8.4: E27's class and PXE rows (docs/dhcp.md section 16), with the binary only. Three
-# policies over classes of the request select their range and options for real dhclient
-# clients: a vendor class on guest, a MAC wildcard on iot (with its lease time), a user
-# class on servers. Then the boot policies of lan (iPXE's user class first, then UEFI HTTP
-# boot, UEFI and BIOS by option 93) with option 150 naming the boot server, the boot server
-# (TFTP and HTTP), QEMU in BIOS mode with its iPXE ROM and in UEFI mode with OVMF booting
-# to the menu over TFTP and HTTP, their lease rows with their architecture, a UEFI HTTP
-# boot client (relay-test.py) getting its URL and fetching it, and the proxy DHCP listener
-# answering the boot server discovery. PXE=0 leaves the PXE rows out.
-
-pxe_rows="${PXE:-1}"
-pxe_wait="${PXE_WAIT_SECS:-300}"
-export PXE_IMAGE="${PXE_IMAGE:-tenko-dhcp-lab-pxe:latest}"
-boot_ip=192.0.2.21
-declare -A vm_mac=([bios]=00:00:5e:00:53:a0 [uefi]=00:00:5e:00:53:a1)
-declare -A vm_platform=([bios]=pcbios [uefi]=efi)
-declare -A vm_arch=([bios]=0 [uefi]="7 9")
-
-# The lab with the pxe profile, and with KVM for the machines where the host has it.
-pxe_compose() {
-  local files=(-f "$compose_file")
-  if [[ -e /dev/kvm ]]; then
-    files+=(-f "$here/compose.kvm.yml")
-  fi
-  docker compose "${files[@]}" --profile "$node" --profile pxe "$@"
-}
-
-# scope_of <network>: the prefix identifier of the network's scope.
-scope_of() {
-  api GET "/dhcp/scopes?limit=1000" >/dev/null || return 1
-  python3 - "$work/api.out" "${prefix[$1]}" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-print(next(s["prefix"] for s in d["items"] if s["cidr"] == sys.argv[2]))
-PY
-}
-
-# new_class <name> <matches JSON>: creates a class and prints its identifier.
-new_class() {
-  must "the class $1" api POST /dhcp/classes "{\"name\": \"$1\", \"matches\": $2}"
-  field "d['id']" <"$work/api.out"
-}
-
-# new_policy <scope> <name> <order> <class> <action JSON> <options JSON>: a policy of the
-# scope over the class, with the action and the option set.
-new_policy() {
-  local id
-  must "the policy $2" api POST /dhcp/policies \
-    "{\"name\": \"$2\", \"scope\": \"$1\", \"order\": $3, \"condition\": {\"join\": \"or\", \"terms\": [{\"class\": \"$4\"}]}, \"action\": $5}"
-  id="$(field "d['id']" <"$work/api.out")"
-  must "the options of the policy $2" api PUT "/dhcp/option-sets/policy:$id" "{\"values\": $6}"
-}
-
-text_option() { printf '{"code": %s, "typed": {"text": "%s"}}' "$1" "$2"; }
-
-# fresh <network>: the network's client releases its lease and forgets it.
-fresh() {
-  dhclient_in "client-$1" -r >/dev/null 2>&1 || true
-  forget "client-$1"
-}
-
-# class_lease_ok <network> <dhclient configuration> <first> <last> <domain> [<lease>]:
-# dhclient with the configuration gets an address of the range with option 15 (and the
-# lease time).
-class_lease_ok() {
-  local net="$1" line ip
-  compose exec -T "client-$net" dhclient -v -cf "/lab/$2" -sf /lab/client-script.sh \
-    -lf /run/lab/dhclient.leases -pf /run/lab/dhclient.pid -1 eth0 >/dev/null 2>&1 || return 1
-  line="$(last_event "$net")"
-  [[ "$line" == BOUND* || "$line" == REBOOT* ]] || return 1
-  ip="$(event_field ip <<<"$line")"
-  printf '%s: %s\n' "$net" "$line" >&2
-  python3 -c 'import ipaddress, sys; a, f, l = (ipaddress.IPv4Address(x) for x in sys.argv[1:]); sys.exit(0 if f <= a <= l else 1)' \
-    "$ip" "$3" "$4" &&
-    [[ "$(event_field domain <<<"$line")" == "$5" ]] &&
-    { [[ -z "${6:-}" ]] || [[ "$(event_field lease <<<"$line")" == "$6" ]]; }
-}
-
-class_rows() {
-  local guest iot servers printers wildcard ops
-  step "E27: classes and policies"
-  guest="$(scope_of guest)" && iot="$(scope_of iot)" && servers="$(scope_of servers)" ||
-    fail "the scopes"
-  printers="$(new_class printers '[{"vendor_class": {"value": "Printer", "prefix": true}}]')"
-  wildcard="$(new_class iot-wildcard '[{"mac": {"pattern": "00:00:5e:00:*:85"}}]')"
-  ops="$(new_class ops '[{"user_class": {"value": "lab-ops"}}]')"
-  new_policy "$guest" printers 1 "$printers" \
-    '{"range": {"first": "192.0.2.230", "last": "192.0.2.234"}}' \
-    "[$(text_option 15 printers.example.test)]"
-  new_policy "$iot" iot-devices 1 "$wildcard" \
-    '{"range": {"first": "192.0.2.170", "last": "192.0.2.175"}, "lease": {"default_secs": 120, "min_secs": 120, "max_secs": 120}}' \
-    "[$(text_option 15 iot.example.test)]"
-  new_policy "$servers" ops 1 "$ops" \
-    '{"range": {"first": "192.0.2.50", "last": "192.0.2.54"}}' \
-    "[$(text_option 15 ops.example.test)]"
-  ok "classes" "three classes (vendor class, MAC wildcard, user class) and a policy each"
-  for net in guest iot servers; do
-    fresh "$net"
-  done
-  row "class.vendor" "vendor class Printer-Lab-1 on guest: an address of .230 to .234, option 15 printers.example.test" \
-    within 30 class_lease_ok guest dhclient-printer.conf 192.0.2.230 192.0.2.234 printers.example.test
-  row "class.mac-wildcard" "MAC 00:00:5e:00:*:85 on iot: an address of .170 to .175, option 15 iot.example.test, 120 s" \
-    within 30 class_lease_ok iot dhclient.conf 192.0.2.170 192.0.2.175 iot.example.test 120
-  row "class.user" "user class lab-ops on servers: an address of .50 to .54, option 15 ops.example.test" \
-    within 30 class_lease_ok servers dhclient-ops.conf 192.0.2.50 192.0.2.54 ops.example.test
-}
-
-boot_log_has() { pxe_compose exec -T bootsrv grep -q -F -- "$2" "/run/lab/$1.log"; }
-http_fetch_ok() {
-  compose exec -T tester python3 -c 'import sys, urllib.request; sys.exit(0 if urllib.request.urlopen(sys.argv[1], timeout=5).status == 200 else 1)' "$1"
-}
-
-# pxe_boot_ok <bios|uefi>: the machine boots to the menu: it fetched /done over HTTP with
-# its platform and MAC address within PXE_WAIT_SECS, after its boot script by TFTP.
-pxe_boot_ok() {
-  local vm="$1" mac
-  mac="${vm_mac[$vm]//:/-}"
-  pxe_compose up -d "pxe-$vm" >/dev/null 2>&1 || return 1
-  within "$pxe_wait" boot_log_has http "GET /done?platform=${vm_platform[$vm]}&mac=$mac" &&
-    boot_log_has tftp "boot.ipxe"
-}
-
-# pxe_lease_ok <bios|uefi>: the machine's lease row holds its architecture (option 93: 0
-# for BIOS, 7 or 9 for UEFI x64) and the PXEClient vendor class.
-pxe_lease_ok() {
-  api GET "/dhcp/leases?limit=1000" >/dev/null || return 1
-  python3 - "$work/api.out" "${vm_mac[$1]}" "${vm_arch[$1]}" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-want = sys.argv[2].replace(":", "").lower()
-def mac(lease):
-    return str(lease["client"]["chaddr"]).replace(":", "").replace("-", "").lower()
-rows = [l for l in d["items"] if mac(l) == want]
-arches = {int(a) for a in sys.argv[3].split()}
-ok = any((l.get("fingerprint") or {}).get("architecture") in arches
-         and (l["fingerprint"].get("vendor_class") or "").startswith("PXEClient") for l in rows)
-print(rows[:1])
-sys.exit(0 if ok else 1)
-PY
-}
-
-pxe_rows() {
-  local lan ipxe http uefi bios
-  step "E27: network boot"
-  if [[ -z "${PXE_IMAGE_PREBUILT:-}" ]]; then
-    docker build -f "$here/pxe.Dockerfile" -t "$PXE_IMAGE" "$here"
-  fi
-  lan="$(scope_of lan)" || fail "the scope of lan"
-  must "the boot server of lan" api PUT "/dhcp/option-sets/scope:$lan" \
-    "{\"values\": [{\"code\": 3, \"typed\": {\"ipv4\": {\"values\": [\"${gateway[lan]}\"]}}}, {\"code\": 150, \"typed\": {\"ipv4\": {\"values\": [\"$boot_ip\"]}}}]}"
-  ipxe="$(new_class ipxe '[{"user_class": {"value": "iPXE"}}]')"
-  http="$(new_class http-boot '[{"vendor_class": {"value": "HTTPClient", "prefix": true}}]')"
-  uefi="$(new_class uefi '[{"architecture": {"code": 7}}, {"architecture": {"code": 9}}]')"
-  bios="$(new_class bios '[{"architecture": {"code": 0}}]')"
-  new_policy "$lan" ipxe 1 "$ipxe" '{}' "[$(text_option 67 boot.ipxe)]"
-  new_policy "$lan" http-boot 2 "$http" '{}' "[$(text_option 67 "http://$boot_ip/ipxe.efi")]"
-  new_policy "$lan" uefi 3 "$uefi" '{}' "[$(text_option 67 ipxe.efi)]"
-  new_policy "$lan" bios 4 "$bios" '{}' "[$(text_option 67 undionly.kpxe)]"
-  pxe_compose up -d bootsrv
-  retry 60 "the boot server" http_fetch_ok "http://$boot_ip/boot.ipxe"
-  ok "boot" "the boot policies of lan, option 150 $boot_ip, the boot server (TFTP and HTTP)"
-  row "pxe.bios" "QEMU in BIOS mode with its iPXE ROM boots to the menu: boot.ipxe by TFTP, the menu by HTTP" \
-    pxe_boot_ok bios
-  row "pxe.bios.lease" "the BIOS machine's lease row holds architecture 0 and PXEClient" pxe_lease_ok bios
-  pxe_compose stop pxe-bios >/dev/null 2>&1 || true
-  row "pxe.uefi" "QEMU in UEFI mode (OVMF) boots to the menu: by TFTP and HTTP" pxe_boot_ok uefi
-  row "pxe.uefi.lease" "the UEFI machine's lease row holds architecture 7 or 9 and PXEClient" pxe_lease_ok uefi
-  pxe_compose stop pxe-uefi >/dev/null 2>&1 || true
-  http_boot_ok() {
-    relay_test "${prefix[lan]}" --link "${prefix[lan]%/*}" --mac 00:00:5e:00:53:a2 \
-      --circuit tester --vendor-class HTTPClient:Arch:00016:UNDI:003001 --arch 16 \
-      --expect-file "http://$boot_ip/ipxe.efi" --expect-vendor HTTPClient --release &&
-      http_fetch_ok "http://$boot_ip/ipxe.efi"
-  }
-  row "pxe.http-boot" "a UEFI HTTP boot client gets its URL in file and option 60 HTTPClient, and fetches it" \
-    http_boot_ok
-  row "pxe.proxy" "proxy DHCP on 4011 answers the boot server discovery: no address, ipxe.efi" \
-    relay_test "${prefix[lan]}" --link "${prefix[lan]%/*}" --mac 00:00:5e:00:53:a3 \
-    --circuit tester --vendor-class PXEClient:Arch:00007:UNDI:003016 --arch 7 \
-    --expect-file ipxe.efi --proxy-port 4011 --release
-}
-# End WP8.4.
-
-# ---------------------------------------------------------------------------------------
-# WP9.3: E30's DHCPv4 rows (docs/dhcp.md section 18), with the binary only. The node's
-# configuration as it stands after the rows above (four scopes, a reservation, classes and
-# policies, the boot policies when the PXE rows ran) plus one policy whose DDNS action Kea
-# cannot express is exported with its leases through GET /dhcp/export. Kea 2.6 (the kea
-# profile, kea.Dockerfile) checks the configuration with `kea-dhcp4 -t`; the report must
-# name the policy; then the node stops and Kea starts from the export on the node's
-# address: client-lan gets its reservation with options 3 and 6, and client-iot keeps
-# the address of its exported lease. KEA=0 leaves the rows out.
-
-kea_rows_on="${KEA:-1}"
-export KEA_IMAGE="${KEA_IMAGE:-tenko-dhcp-lab-kea:latest}"
-kea_compose() { docker compose -f "$compose_file" --profile "$node" --profile kea "$@"; }
-
-# kea_files: the export's answer in $work/export.json split into the files the command
-# line writes (tenko dhcp export --out).
-kea_files() {
-  python3 - "$work/export.json" "$work/kea" <<'PY'
-import json, os, sys
-answer = json.load(open(sys.argv[1]))
-out = sys.argv[2]
-os.makedirs(out, exist_ok=True)
-json.dump(answer["dhcp4"], open(os.path.join(out, "kea-dhcp4.json"), "w"), indent=2)
-open(os.path.join(out, "kea-leases4.csv"), "w").write(answer.get("leases4_csv") or "")
-json.dump({"entries": answer.get("losses", [])}, open(os.path.join(out, "kea-export-report.json"), "w"), indent=2)
-PY
-}
-
-kea_check() {
-  docker run --rm --network none -v "$work/kea:/lab/kea:ro" "$KEA_IMAGE" \
-    kea-dhcp4 -t /lab/kea/kea-dhcp4.json >"$work/kea-check.out" 2>&1
-  local status=$?
-  cat "$work/kea-check.out" >&2
-  return "$status"
-}
-
-# report_names <code> <text>: an entry of the loss report with the code names the text.
-report_names() {
-  python3 - "$work/kea/kea-export-report.json" "$1" "$2" <<'PY'
-import json, sys
-entries = json.load(open(sys.argv[1]))["entries"]
-hits = [e for e in entries if e["code"] == sys.argv[2] and sys.argv[3] in (e["location"].get("sheet") or "")]
-print(hits or entries)
-sys.exit(0 if hits else 1)
-PY
-}
-
-# exported_lease <mac>: the address of the client's lease in the exported lease file.
-exported_lease() {
-  awk -F, -v mac="$1" '$2 == mac && $10 == 0 { print $1 }' "$work/kea/kea-leases4.csv" | head -n 1
-}
-
-kea_rows() {
-  local lan names iot_ip version
-  step "E30: the Kea export"
-  if [[ -z "${KEA_IMAGE_PREBUILT:-}" ]]; then
-    docker build -f "$here/kea.Dockerfile" -t "$KEA_IMAGE" "$here"
-  fi
-  version="$(docker run --rm --network none "$KEA_IMAGE" kea-dhcp4 -V 2>/dev/null | head -n 1 | tr -d '\r')"
-  lan="$(scope_of lan)" || fail "the scope of lan"
-  names="$(new_class lab-names '[{"host_name": {"value": "lab-", "prefix": true}}]')"
-  new_policy "$lan" lab-names 9 "$names" '{"ddns": {"enabled": true}}' '[]'
-  must "the export" api GET "/dhcp/export?format=kea&leases=true"
-  cp "$work/api.out" "$work/export.json"
-  kea_files || fail "the export's files"
-  ok "export" "GET /dhcp/export: $(wc -l <"$work/kea/kea-leases4.csv") lease file line(s), Kea image $version"
-  row "export.kea" "kea-dhcp4 -t ($version) accepts the exported configuration" kea_check
-  row "export.kea.report" "the loss report names the policy lab-names, whose DDNS action Kea cannot express" \
-    report_names export.kea.policy.ddns lab-names
-  iot_ip="$(exported_lease "${client_mac[iot]}")"
-  step "stop the node and start Kea from the export on $node_ip"
-  compose stop tenko
-  kea_compose up -d kea
-  retry 60 "Kea to listen" sh -c "docker compose -f '$compose_file' --profile '$node' --profile kea logs kea 2>&1 | grep -q DHCP4_STARTED"
-  kea_reserved_ok() {
-    local line
-    dhclient_in client-lan -x >/dev/null 2>&1 || true
-    forget client-lan
-    dhclient_in client-lan -1 >/dev/null 2>&1 || return 1
-    line="$(last_event lan)"
-    printf 'lan: %s\n' "$line" >&2
-    [[ "$(event_field ip <<<"$line")" == "$reserved_ip" ]] &&
-      [[ "$(event_field routers <<<"$line")" == "${gateway[lan]}" ]] &&
-      [[ "$(event_field dns <<<"$line")" == "$dns_server" ]]
-  }
-  row "export.kea.reservation" "Kea from the export gives client-lan its reservation $reserved_ip with options 3 and 6" \
-    within 60 kea_reserved_ok
-  kea_lease_ok() {
-    local line
-    [[ -n "$iot_ip" ]] || return 1
-    dhclient_in client-iot -x >/dev/null 2>&1 || true
-    dhclient_in client-iot -1 >/dev/null 2>&1 || return 1
-    line="$(last_event iot)"
-    printf 'iot: %s (exported %s)\n' "$line" "$iot_ip" >&2
-    [[ "$(event_field ip <<<"$line")" == "$iot_ip" ]]
-  }
-  row "export.kea.lease" "client-iot keeps ${iot_ip:-its address} from the exported lease file (INIT-REBOOT to Kea)" \
-    within 60 kea_lease_ok
-  kea_compose logs --no-color --tail 40 kea >&2 2>&1 || true
-  kea_compose stop kea >/dev/null 2>&1 || true
-}
-# End WP9.3.
-
-# ---------------------------------------------------------------------------------------
-# Build and start
-
-if ((build_tools)); then
-  step "build the tools image $TOOLS_IMAGE"
-  docker build -f "$here/tools.Dockerfile" -t "$TOOLS_IMAGE" "$here"
+# The images: every one this run needs, before any round starts.
+tree="$(lab_build_tree "$repo")"
+if [[ -n "${TOOLS_IMAGE_PREBUILT:-}" ]]; then
+  docker image inspect "$TOOLS_IMAGE" >/dev/null 2>&1 || { echo "smoke: image $TOOLS_IMAGE not found" >&2; exit 1; }
+else
+  printf '\n==> build the tools image %s\n' "$TOOLS_IMAGE"
+  docker build -f "$(host_path "$here/tools.Dockerfile")" -t "$TOOLS_IMAGE" "$(host_path "$here")"
 fi
-ok "tools" "$TOOLS_IMAGE (dhcrelay, dhclient, perfdhcp, udhcpc)"
-
-# WP9.1: the round dhcp6 (dhcp6.sh) runs first, in its own compose project; ROUNDS=dhcp6
-# stops after it.
+lab_driver_image "$repo"
+if [[ "$node" == tenko ]]; then
+  lab_image TENKO_IMAGE tenko:lab "$repo/deploy/Dockerfile" "$repo" --build-arg "TENKO_BUILD_TREE=$tree"
+else
+  lab_image EXAMPLE_IMAGE tenko-dhcp-lab-example:latest "$here/example.Dockerfile" "$repo" \
+    --build-arg "TENKO_BUILD_TREE=$tree"
+fi
+export TENKO_IMAGE
 if ((run_dhcp6)); then
-  dhcp6_round
-fi
-if ((run_default == 0)); then
-  ((rows_failed == 0)) || fail "$rows_failed row(s) failed"
-  step "OK: the round dhcp6 passed"
-  exit 0
-fi
-
-if [[ "$node" == tenko ]]; then
-  if ((build_tenko)); then
-    step "build $TENKO_IMAGE from deploy/Dockerfile (the static musl binary)"
-    # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
-    tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
-    docker build -f "$repo/deploy/Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
-      -t "$TENKO_IMAGE" "$repo"
-  else
-    docker image inspect "$TENKO_IMAGE" >/dev/null 2>&1 || fail "image $TENKO_IMAGE not found"
+  if [[ -z "${NETWORKD_IMAGE_PREBUILT:-}" ]]; then
+    printf '\n==> build the networkd image %s\n' "$NETWORKD_IMAGE"
+    docker build -f "$(host_path "$here/networkd.Dockerfile")" -t "$NETWORKD_IMAGE" "$(host_path "$here")"
   fi
-  ok "image" "$TENKO_IMAGE"
-else
-  if ((build_example)); then
-    step "build $EXAMPLE_IMAGE from example.Dockerfile (the example server, static musl)"
-    # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
-    tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
-    docker build -f "$here/example.Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
-      -t "$EXAMPLE_IMAGE" "$repo"
-  else
-    docker image inspect "$EXAMPLE_IMAGE" >/dev/null 2>&1 || fail "image $EXAMPLE_IMAGE not found"
-  fi
-  ok "image" "$EXAMPLE_IMAGE (the example server, not the binary)"
+  docker image inspect "$NETWORKD_IMAGE" >/dev/null 2>&1 || { echo "smoke: image $NETWORKD_IMAGE not found" >&2; exit 1; }
+  # WP9.2: the same binary with the probe's file capability (probe.Dockerfile).
+  printf '\n==> build %s from %s (cap_net_raw on the binary)\n' "$TENKO_PROBE_IMAGE" "$TENKO_IMAGE"
+  docker build -f "$(host_path "$here/probe.Dockerfile")" --build-arg "TENKO_IMAGE=$TENKO_IMAGE" \
+    -t "$TENKO_PROBE_IMAGE" "$(host_path "$here")"
+fi
+if [[ "$node" == tenko && "$kea_rows" == 1 && -z "${KEA_IMAGE_PREBUILT:-}" ]]; then
+  printf '\n==> build the kea image %s\n' "$KEA_IMAGE"
+  docker build -f "$(host_path "$here/kea.Dockerfile")" -t "$KEA_IMAGE" "$(host_path "$here")"
+fi
+if [[ "$node" == tenko && "$pxe_rows" == 1 && "$run_default" == 1 && -z "${PXE_IMAGE_PREBUILT:-}" ]]; then
+  printf '\n==> build the pxe image %s\n' "$PXE_IMAGE"
+  docker build -f "$(host_path "$here/pxe.Dockerfile")" -t "$PXE_IMAGE" "$(host_path "$here")"
 fi
 
-work="$(mktemp -d)"
-export LAB_DIR="$work"
-mkdir -p "$work/secrets"
-head -c 32 /dev/urandom | od -An -v -tx1 | tr -d ' \n' >"$work/secrets/kek"
-chmod 0444 "$work/secrets/kek"
-cat >"$work/tenko.toml" <<TOML
-# The DHCP lab's node (written by smoke.sh).
-roles = "controller,dhcp"
-modules = ["ipam", "dhcp"]
+# driver_env: what driver.sh reads from its environment.
+driver_env=(-e "NODE=$node" -e "WAIT_SECS=${WAIT_SECS:-300}" -e "PXE=$pxe_rows"
+  -e "PXE_WAIT_SECS=${PXE_WAIT_SECS:-300}" -e "KEA=$kea_rows"
+  -e "TOOLS_IMAGE=$TOOLS_IMAGE" -e "TENKO_IMAGE=$TENKO_IMAGE" -e "EXAMPLE_IMAGE=${EXAMPLE_IMAGE:-}"
+  -e "NETWORKD_IMAGE=$NETWORKD_IMAGE" -e "TENKO_PROBE_IMAGE=$TENKO_PROBE_IMAGE")
+v6_logged=0
 
-[profile]
-# The Lab profile: plain HTTP is allowed.
-name = "lab"
-
-[tls]
-mode = "plain"
-
-[server]
-listen = ["0.0.0.0:8443"]
-
-[dhcp]
-# Relay mode on the node's address: the gateway relays every network, the node's own too.
-listen = [{ address = "$node_ip", mode = "relay" }]
-workers = 2
-# WP8.4: the proxy DHCP listener of E27's PXE rows, on port 4011.
-proxy = ["$node_ip"]
-TOML
-chmod 0444 "$work/tenko.toml"
-chmod 0755 "$work"
-compose config --quiet
-# A lab left over from an interrupted run goes first.
-compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
-
-step "start the gateway, the node and the clients"
-compose up -d
-if [[ "$node" == tenko ]]; then
-  retry "$wait_secs" "tenko to become healthy" healthy
-  lab_setup
-  configure
-else
-  retry 60 "the example server to start" \
-    sh -c "docker compose -f '$compose_file' --profile example logs node-example 2>&1 | grep -q serving"
-fi
-# The gateway renames its interfaces and starts dhcrelay.
-retry 60 "dhcrelay to start" sh -c "docker compose -f '$compose_file' --profile '$node' logs relay 2>&1 | grep -q 'Sending on'"
-ok "lab" "gateway, node ($node), four clients and the tester are up"
-
-# ---------------------------------------------------------------------------------------
-# The rows
-
-step "rows"
-if [[ "$node" == tenko ]]; then
-  for net in "${networks[@]}"; do
-    row "lease.$net" "a client on $net gets ${prefix[$net]} through the relay with options 3, 6, 42" lease_ok "$net"
-  done
-  for net in "${networks[@]}"; do
-    row "relay.$net" "the lease row on $net holds giaddr ${gateway[$net]} and circuit-id $net (option 82)" relay_on_lease "$net"
-  done
-  row "relay.untrusted" "the tester, not a trusted relay, is refused and named in dhcp.relay.untrusted" \
-    untrusted_refused
-  must "the tester as a trusted relay" api PUT /dhcp/settings \
-    "{\"trusted_relays\": [{\"relay\": \"${gateway[servers]}/32\", \"links\": [\"192.0.2.0/24\"]}, {\"relay\": \"$tester_ip/32\", \"links\": [\"192.0.2.0/24\"]}]}"
-  row "link-selection" "option 82 link selection from servers picks the iot scope, echoed" \
-    relay_test "${prefix[iot]}" --link "${prefix[iot]%/*}" --mac 00:00:5e:00:53:21 --circuit tester --release
-  row "perfdhcp" "perfdhcp as a relay: 10 4-way exchanges, no drops" perfdhcp_ok 10
-  row "limit.offers" "an offer rate of 2 a second holds back a burst of 40 new clients and is named in dhcp.limit.refused"     offers_limited
-  row "udhcpc" "BusyBox udhcpc on servers gets an address of the pool" udhcpc_ok servers
-  for net in "${networks[@]}"; do
-    row "renew.$net" "the client on $net renews its address at T1 through the gateway" within 60 renewed "$net"
-  done
-
-  step "a reservation for client-lan's MAC at $reserved_ip"
-  must "the reserved host" api POST /hosts \
-    "{\"name\": \"lab-reserved\", \"mode\": \"reserved\", \"interfaces\": [{\"name\": \"eth0\", \"mac\": \"${client_mac[lan]}\"}]}"
-  host="$(field "d['item']['id']" <"$work/api.out")"
-  must "the reserved host's interface" api GET "/hosts/$host/interfaces"
-  iface="$(field "d['items'][0]['id']" <"$work/api.out")"
-  must "the reserved address" api POST /addresses "{\"ip\": \"$reserved_ip\", \"interface\": \"$iface\"}"
-  dhclient_in client-lan -r >/dev/null 2>&1 || true
-  forget client-lan
-  reserved_ok() {
-    dhclient_in client-lan -1 >/dev/null 2>&1 || return 1
-    [[ "$(last_event lan | event_field ip)" == "$reserved_ip" ]]
-  }
-  row "reservation" "a reservation wins: client-lan gets $reserved_ip after its dynamic lease" within 30 reserved_ok
-  leased[lan]="$reserved_ip"
-
-  step "a deny filter for client-guest's MAC"
-  must "the deny filter" api POST /dhcp/filters "{\"mac\": \"${client_mac[guest]}\", \"kind\": \"deny\", \"note\": \"lab\"}"
-  filter="$(field "d['id']" <"$work/api.out")"
-  dhclient_in client-guest -r >/dev/null 2>&1 || true
-  # Without its lease file dhclient starts with a DISCOVER and has no old lease to fall
-  # back to when nobody answers.
-  forget client-guest
-  denied() { ! dhclient_in client-guest -1 >/dev/null 2>&1; }
-  row "filter.deny" "a deny filter: client-guest gets no lease" denied
-  must "the filter's removal" api DELETE "/dhcp/filters/$filter"
-  row "filter.removed" "without the filter client-guest gets a lease again" within 30 lease_ok guest
-
-  step "a release from client-iot"
-  released_ip="${leased[iot]}"
-  dhclient_in client-iot -r >/dev/null 2>&1 || true
-  row "release" "dhclient -r: the lease of $released_ip is released" within 10 lease_state_is "$released_ip" released
-
-  step "restart the node"
-  active_leases >"$work/leases.before" || fail "the lease list"
-  [[ -s "$work/leases.before" ]] || fail "no active lease before the restart"
-  compose restart tenko
-  retry "$wait_secs" "tenko to become healthy again" healthy
-  row "restart.leases" "after a restart the node still holds the $(wc -l <"$work/leases.before") active leases for their clients" within 30 every_lease_kept
-  kept_address() {
-    # Stop the running dhclient without a release; the lease file keeps the address.
-    dhclient_in client-lan -x >/dev/null 2>&1 || true
-    dhclient_in client-lan -1 >/dev/null 2>&1 || return 1
-    [[ "$(last_event lan | event_field ip)" == "$reserved_ip" ]]
-  }
-  row "restart.client" "after the restart client-lan asks again (INIT-REBOOT) and keeps $reserved_ip" kept_address
-
-  # WP8.4: E27's class and PXE rows.
-  class_rows
-  if [[ "$pxe_rows" == 1 ]]; then
-    pxe_rows
-  else
-    skip "pxe" "PXE=0: the network boot rows are left out"
+# WP9.1: the round dhcp6 runs first, in its own compose project, with a driver of its own.
+# A round whose rows failed but that ran to its end (it reports them, lab_rows_failed) lets
+# the other round run, as when both ran in one script; the smoke fails at the end.
+if ((run_dhcp6)); then
+  round_project=dhcp6
+  lab_networks=(servers6)
+  compose config --quiet
+  # A lab left over from an interrupted run goes first.
+  compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
+  v6_started=1
+  compose up -d --no-build driver
+  lab_run /src/lab-dhcp/driver.sh "${driver_env[@]}" -e ROUNDS=dhcp6
+  if ((lab_rows_failed > 0)); then
+    v6_logs
+    v6_logged=1
   fi
-  # WP9.3: E30's DHCPv4 rows, last: they stop the node.
-  if [[ "$kea_rows_on" == 1 ]]; then
-    kea_rows
-  else
-    skip "export.kea" "KEA=0: the Kea export rows are left out"
+  if [[ "$keep" != 1 ]]; then
+    printf '\n==> tear down the round dhcp6\n'
+    compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
+    v6_started=0
   fi
-else
-  for net in "${networks[@]}"; do
-    skip "lease.$net" "the example server has one scope, which giaddr on $net does not select"
-  done
-  row "subnet-selection" "relay-test with option 118: offer, ack, renewal, release in $example_net, option 82 echoed" \
-    relay_test "$example_net" --subnet-selection "$example_link" --mac 00:00:5e:00:53:21 --renew --release
-  row "link-selection" "relay-test with option 82 link selection: the scope of $example_net, echoed" \
-    relay_test "$example_net" --link "$example_link" --mac 00:00:5e:00:53:22 --release
-  row "perfdhcp" "perfdhcp as a relay with option 118: 50 4-way exchanges, no drops" \
-    perfdhcp_ok 50 -o "118,c6120000"
-  skip "renew, reservation" "need the configuration service: the binary (NODE=tenko)"
-  skip "filter, release" "need the configuration service and the lease routes: the binary"
-  skip "restart" "the example server keeps its leases in memory"
-  # WP8.4: E27's class and PXE rows need the configuration service.
-  skip "class, pxe" "classes, policies and network boot need the configuration service: the binary"
 fi
 
-((rows_failed == 0)) || fail "$rows_failed row(s) failed"
-step "OK: the DHCP lab passed (node: $node)"
+if ((run_default)); then
+  round_project=default
+  lab_networks=(servers)
+  compose config --quiet
+  compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
+  default_started=1
+  compose up -d --no-build driver
+  tools_line=1
+  ((run_dhcp6)) && tools_line=0
+  lab_run /src/lab-dhcp/driver.sh "${driver_env[@]}" -e ROUNDS=default -e "TOOLS_LINE=$tools_line"
+fi
+
+if ((lab_rows_failed > 0)); then
+  printf 'smoke: %s row(s) of the round dhcp6 failed\n' "$lab_rows_failed" >&2
+  exit 1
+fi

@@ -7,10 +7,18 @@ things by hand. It is a lab, not a deployment example: every address is a docume
 value (`192.0.2.0/24`, RFC 5737), every MAC one of RFC 7042 (`00:00:5e:00:53:xx`), and
 nothing in it reaches out.
 
-It is a Linux Docker host lab. It runs on Docker Desktop too; the maintainer's host is WSL
-Ubuntu 24.04 with Docker as root. It needs Docker 28 or later with the compose plugin (and
-buildx to build the images), and with the binary as the node `curl` and `python3` on the
-host, which reaches the node's API on the lab network.
+The lab drives itself from inside its own network: the service `driver` is the lab driver
+(image `tenko-lab-driver:local`, built from `deploy/compose/driver/Dockerfile`), and every
+step that talks to the node's API (`curl`), handles JSON (`python3`) or writes the node's
+files runs there, at `192.0.2.24`. The container operations are the host's: the clients'
+`dhclient`, `udhcpc` and networkd state, the tester's `relay-test.py`, `relay-test6.py` and
+`perfdhcp`, the boot server's logs and the Kea checks (`kea-dhcp4 -t` and `kea-dhcp6 -t` in
+containers of the Kea image) are operations the driver asks the host for over its standard
+input and output; it has no Docker socket. The host needs Docker 28 or later with the
+compose plugin (buildx for the builds) and bash, nothing else: no `curl` or `python3`, and no route to the
+lab networks. It runs from Git Bash on Windows against Docker Desktop as well as on a Linux
+Docker host; the maintainer's host is WSL Ubuntu 24.04 with Docker as root. The PXE machines
+use KVM where the host has `/dev/kvm`, else QEMU's TCG.
 
 The gateway is a container that routes between the bridges, so the node's reply to
 `giaddr`, the gateway's address on a client network, comes in on the servers bridge. Docker
@@ -36,15 +44,22 @@ client-servers┤                             │
 |---|---|---|
 | `relay` | The gateway: ISC's `dhcrelay` (Debian's `isc-dhcp-relay` 4.4) relays all four networks to the node, the node's own network included, so that the node runs in relay mode and never sees a broadcast (plan section 2.5, risk R56). It renames its interfaces after their networks and adds option 82 with that name as the circuit-id (`-a`); it routes between the networks, so that a renewal, a unicast from the client to the node, finds its way | `.2`, `.66`, `.130`, `.194` |
 | `netns` | Owns the node's network namespace: the node's address, the route to the other networks through the gateway (replies to a relay go to `giaddr`), and `net.ipv4.ip_unprivileged_port_start=0`, so that the node binds port 67 without a capability | `192.0.2.10` |
-| `tenko` (profile `tenko`) | The node: the image of `deploy/Dockerfile` (the static musl binary) with `--roles controller,dhcp`, the DHCP module on, the Lab profile, `[dhcp] listen = [{ address = "192.0.2.10", mode = "relay" }]`, the API in plain HTTP on 8443. Read-only root file system, no capability, the key-encryption key as a Docker secret | in `netns` |
+| `tenko` (profile `tenko`) | The node: the image of `deploy/Dockerfile` (the static musl binary) with `--roles controller,dhcp`, the DHCP module on, the Lab profile, `[dhcp] listen = [{ address = "192.0.2.10", mode = "relay" }]`, the API in plain HTTP on 8443. Read-only root file system, no capability, the key-encryption key a file of the lab volume (`secrets/kek`, mounted at `/run/secrets`) | in `netns` |
 | `node-example` (profile `example`) | Until the binary has the dhcp role: the engine's example server (`crates/tenko-dhcp/examples/dhcp_server.rs`, built by `example.Dockerfile` with the builder of `deploy/Dockerfile` for musl) with the in-memory reference store `MemLeaseStore`. It serves one scope, `198.18.0.0/15`, selected only by option 118 or the link selection sub-option, so the clients' rows cannot run against it | in `netns` |
 | `client-servers`, `client-lan`, `client-iot`, `client-guest` | One client per network with a fixed MAC: ISC's `dhclient` with `scripts/dhclient.conf` and `scripts/client-script.sh` (which puts the address on the interface and writes one line per event to `/run/lab/events`), and BusyBox's `udhcpc` | `.5`, `.69`, `.133`, `.197` before their lease |
 | `tester` | Kea's `perfdhcp` (Debian's `kea-admin` 2.2) and `scripts/relay-test.py`, a relay agent written against RFC 2131 that sends option 82 with a circuit-id and, when asked, the link selection sub-option or option 118, and checks the echo; for E27 it also sends options 60, 77 and 93 as a boot client, checks the boot file and option 60 of the replies, and sends the boot server discovery to the proxy DHCP port | `192.0.2.20` |
 | `bootsrv` (profile `pxe`) | The boot server of E27's PXE rows (WP8.4): TFTP (Debian's `dnsmasq` with DNS and DHCP off) and HTTP (`python3 -m http.server`) with `undionly.kpxe` and `ipxe.efi` of Debian's `ipxe`, `boot/boot.ipxe` and `boot/menu.ipxe`; it logs to `/run/lab/tftp.log` and `/run/lab/http.log` | `192.0.2.21` |
 | `pxe-bios`, `pxe-uefi` (profile `pxe`) | Two machines that boot over the network on lan (WP8.4): QEMU (Debian's `qemu-system-x86`) with the iPXE ROM of its virtio card in BIOS mode (SeaBIOS), and with OVMF in UEFI mode; the container bridges its `eth0` and the machine's tap device, so the machine's broadcasts reach the gateway. KVM where the host has `/dev/kvm` (`compose.kvm.yml`), else TCG | MACs `00:00:5e:00:53:a0` and `:a1` |
+| `driver` | The lab driver (image `tenko-lab-driver:local`, built from `deploy/compose/driver/Dockerfile`): `driver.sh` runs the rows in it, calls the node's API with `curl` and writes the files of the run into the lab volume, which it mounts at `/work`. It asks the host for every container operation; no capability, no Docker socket | `192.0.2.24`; `docker compose exec driver ...` |
 
-Everything except the node comes from the tools image (`tools.Dockerfile`, Debian 12 packages
-only), so nothing on the other side of the wire shares code with Tenko.
+Everything except the node and the driver comes from the tools image (`tools.Dockerfile`,
+Debian 12 packages only), so nothing on the other side of the wire shares code with Tenko.
+
+The files of a run live in the compose volume `lab` of each project (`tenkodhcplab_lab`, and
+`tenkodhcp6lab_lab` for the round dhcp6), which the driver mounts at `/work`: `node/tenko.toml`
+(the node's `/lab`), `secrets/kek` (the node's `/run/secrets`), `kea/` (the files of the
+export; Kea's `/lab/kea`), `api.out` and the other scratch files. `docker compose down
+--volumes` removes the volume with the lab.
 
 ## The smoke
 
@@ -57,7 +72,14 @@ NODE=example bash deploy/compose/lab-dhcp/smoke.sh       # the example server as
 KEEP=1 bash deploy/compose/lab-dhcp/smoke.sh             # leaves the lab running
 ```
 
-With the binary, the smoke sets the node up through the API under the Lab profile and
+`smoke.sh` is the host side. It builds the images (tools, the node's image or the example
+server, the lab driver `tenko-lab-driver:local`, and as needed networkd, the probe image, kea
+and pxe), starts the service `driver` and runs `driver.sh` in it, once per round (the round
+dhcp6 first, in its own project, then the default round), and answers the container
+operations the driver asks for. `DRIVER_IMAGE` names an existing image of the lab driver;
+default: build `tenko-lab-driver:local`.
+
+With the binary, the driver sets the node up through the API under the Lab profile and
 configures it: the four networks as IPAM prefixes, a `dhcp_pool` range in each (`.30` to
 `.59` of each /26), a scope on each with a 60-second lease (T1 after 30 seconds), option 3
 per scope (the gateway's address on the network) and options 6, 15 and 42 for the server,
@@ -71,7 +93,7 @@ Then the rows, one `PASS`, `FAIL` or `SKIP` line each:
 | `relay.untrusted` | `relay-test.py` on servers, not yet a trusted relay, gets no answer, and `GET /system/status` names the tester in `dhcp.relay.untrusted`; the smoke then adds the tester to the trusted relays for the rows below |
 | `link-selection` | `relay-test.py` on servers sends option 82 with the link selection sub-option (RFC 3527) of iot: the offer and the ack come from the iot scope, option 82 back unchanged |
 | `perfdhcp` | perfdhcp as a relay: 10 4-way exchanges, no drops |
-| `limit.offers` | with `limits.offers_per_second` 2 (a burst of 20), perfdhcp's 40 new clients at once are not all answered and `GET /system/status` names `offers_per_second` in `dhcp.limit.refused`; the limits go back to the profile after |
+| `limit.offers` | with `limits.offers_per_second` 2 (a burst of 20), perfdhcp's 40 new clients at once are not all answered and `GET /system/status` names `offers_per_second` in `dhcp.limit.refused`; the limits go back to the profile after, and the leases of perfdhcp's clients in the servers pool (theirs and the ten of the row `perfdhcp`, every address the pool had left) are released through the API, so that the next new client, `udhcpc`, finds an address |
 | `udhcpc` | BusyBox's `udhcpc` on servers gets an address of the pool |
 | `renew.<network>` | every `dhclient` renews its address at T1, a unicast through the gateway |
 | `reservation` | an IPAM host of mode `reserved` with client-lan's MAC at `192.0.2.80`: after a release client-lan gets `192.0.2.80`, not its dynamic address |
@@ -97,9 +119,10 @@ With `NODE=example` the rows the example server can answer run: `relay-test.py` 
 selection sub-option, and perfdhcp with option 118 (50 exchanges, no drops). The client rows
 are `SKIP` lines that say why.
 
-The smoke tears everything down at the end (containers, the data volume, the networks, the
-work directory), also after a failure, after printing the logs of every service; `KEEP=1`
-leaves the lab running and prints the commands.
+The smoke tears everything down at the end (containers, the data volume, the lab volume with
+the files of the run, the networks), also after a failure, which prints the logs of every
+service, the boot server's logs and Kea's log first; the summary comes last, after the logs.
+`KEEP=1` leaves the lab running and prints the commands.
 
 ## The round dhcp6
 
@@ -130,8 +153,9 @@ same documentation addresses `192.0.2.0/24` as the lab above.
 | `client-iot6` | `dhclient -6` on the second link | `iot6`, MAC `00:00:5e:00:53:63` |
 | `client-pd6` (WP9.2) | `dhclient -6 -P -D LL`, a requesting router asking for a delegated prefix only; `client6-script.sh` writes the prefix (`prefix=`) to `/run/lab/events6` and leaves the interface alone | `lan6`, MAC `00:00:5e:00:53:64` |
 | `router6` (WP9.2) | Debian's `radvd` (`scripts/radvd.sh`) advertising `2001:db8:100::/64` on servers6 every three to four seconds with the router lifetime 0 (no default router) and A off (no SLAAC), so the other rows keep their routes and addresses; `radvd.sh flags <M> <O>` writes new flags and sends radvd SIGHUP. It starts with the RA rows | `192.0.2.30`, `2001:db8:100::30` |
-| `kea6` (profile `kea`) | E30's DHCPv6 rows (WP9.3): Kea 2.6's `kea-dhcp6` from the kea image (`kea.Dockerfile`, `scripts/kea.sh 6`), in the node's namespace once the node has stopped, from the export the rows wrote into the work directory's `kea/` | `2001:db8:100::10` |
+| `kea6` (profile `kea`) | E30's DHCPv6 rows (WP9.3): Kea 2.6's `kea-dhcp6` from the kea image (`kea.Dockerfile`, `scripts/kea.sh 6`), in the node's namespace once the node has stopped, from the export the rows wrote into the lab volume's `kea/` | `2001:db8:100::10` |
 | `tester` | `scripts/relay-test6.py`: a relay agent written against RFC 8415 with the standard library only. It sends a RELAY-FORW around a SOLICIT and then around a REQUEST for the advertised address, from the tester's address on port 547 to the node's, optionally two deep (`--two-deep`: an inner lightweight relay of RFC 6221 with the link address `::`), with an Interface-Id (`--interface-id`), the Client Link-Layer Address of RFC 6939 (`--mac`), the Client FQDN of option 39 (`--fqdn`), Rapid Commit (`--rapid-commit`), a RELEASE at the end (`--release`) and a check of the address (`--expect`). It checks that the RELAY-REPL chain is as deep as the RELAY-FORW chain, that the Interface-Id is echoed in the layer that sent it, and an ADVERTISE and then a REPLY with an address. `relay-test.py` (DHCPv4) for the correlation row | `192.0.2.20`, `2001:db8:100::20` |
+| `driver` | The lab driver of the round, as above: it has its own `driver` in the project `tenkodhcp6lab`, runs `driver.sh` with `dhcp6.sh` for this round, and mounts the project's lab volume (`tenkodhcp6lab_lab`) at `/work` | `192.0.2.24`, `2001:db8:100::24` |
 
 The node is set up as in the lab above (the Lab profile, through the API): the server's option
 set holds the DHCPv4 options 6, 15 and 42 and the DHCPv6 options 23 (`2001:db8:100::53`), 24
@@ -182,11 +206,10 @@ IMAGE=tenko:lab ROUNDS=dhcp6 bash deploy/compose/lab-dhcp/smoke.sh
 `NETWORKD_IMAGE` (with `NETWORKD_IMAGE_PREBUILT=1`) names a built networkd image, as `TOOLS_IMAGE`
 does the tools image; `TENKO_PROBE_IMAGE` names the node image the round builds from the Tenko
 image with `probe.Dockerfile` (default `tenko-dhcp-lab-probe:latest`); `KEEP=1` leaves the round running and prints the commands. By hand, with
-`KEEP=1`:
+`KEEP=1`, from `deploy/compose/lab-dhcp`:
 
 ```sh
-export LAB_DIR=/tmp/tmp.XXXXXX
-alias lab6='docker compose -p tenkodhcp6lab -f deploy/compose/lab-dhcp/compose.dhcp6.yml --profile networkd'
+alias lab6='docker compose -p tenkodhcp6lab -f compose.dhcp6.yml --profile networkd'
 lab6 exec client-iot6 dhclient -6 -D LL -v -1 -cf /lab/dhclient6.conf -sf /lab/client6-script.sh \
   -lf /run/lab/dhclient6.leases -pf /run/lab/dhclient6.pid eth0
 lab6 exec client-iot6 cat /run/lab/events6
@@ -198,23 +221,24 @@ lab6 down --volumes
 
 ## By hand
 
-With `KEEP=1` the lab stays up; the work directory the smoke prints holds `tenko.toml` and
-the key file. For example:
+With `KEEP=1` the lab stays up; the files of the run are in the lab volume (`tenkodhcplab_lab`),
+which the driver mounts at `/work` (`node/tenko.toml`, `secrets/kek`). For example, from
+`deploy/compose/lab-dhcp`:
 
 ```sh
-export LAB_DIR=/tmp/tmp.XXXXXX
-docker compose -f deploy/compose/lab-dhcp/compose.yml --profile tenko exec client-iot \
+docker compose --profile tenko exec client-iot \
   dhclient -v -1 -cf /lab/dhclient.conf -sf /lab/client-script.sh -lf /run/lab/dhclient.leases eth0
-docker compose -f deploy/compose/lab-dhcp/compose.yml --profile tenko exec client-iot cat /run/lab/events
-docker compose -f deploy/compose/lab-dhcp/compose.yml --profile tenko exec tester \
+docker compose --profile tenko exec client-iot cat /run/lab/events
+docker compose --profile tenko exec tester \
   python3 /lab/relay-test.py --server 192.0.2.10 --giaddr 192.0.2.20 --mac 00:00:5e:00:53:21 \
   --expect 192.0.2.192/26 --link 192.0.2.192 --release
-docker compose -f deploy/compose/lab-dhcp/compose.yml --profile tenko logs relay
-docker compose -f deploy/compose/lab-dhcp/compose.yml --profile tenko down --volumes
+docker compose --profile tenko logs relay
+docker compose --profile tenko down --volumes
 ```
 
-The API is at `http://192.0.2.10:8443` from the host (the Lab profile allows plain HTTP); the
-first-run setup token comes from `docker compose ... exec tenko /usr/local/bin/tenko setup
+The API is reached from the driver (the Lab profile allows plain HTTP), for example `docker
+compose exec driver curl -s http://192.0.2.10:8443/api/v1/health/ready`; the host does not
+reach the lab network on Docker Desktop. The first-run setup token comes from `docker compose ... exec tenko /usr/local/bin/tenko setup
 token --data-dir /var/lib/tenko`.
 
 ## CI

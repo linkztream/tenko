@@ -717,6 +717,11 @@ data volume protects nothing.
   and a partition. Its README has the commands; `docs/cluster.md` section 12.10 says what
   the lab covers.
 - `compose/lab-dns/`: the DNS lab, BIND 9 as the plain, DoT and DoH upstream of one node, with `smoke.sh` for the cache and serve-stale (its README).
+- `compose/driver/`: the lab driver, the container the cluster, DNS and DHCP labs are driven
+  from inside their own networks (`Dockerfile`, BIND's image with curl, openssl and python3), and
+  the shell library of both sides (`host.sh` on the host, `ctl.sh` in the driver). A lab's
+  `smoke.sh` needs Docker with the compose plugin and bash on the host, nothing else, so it
+  runs from Git Bash on Windows against Docker Desktop as well as on a Linux Docker host.
 
 The image is distroless and static (no shell, no curl, no C library: the binary is the
 static musl build). Its `HEALTHCHECK` runs `tenko health`, which

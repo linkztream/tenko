@@ -18,8 +18,8 @@
 #   (net.ipv4.ip_unprivileged_port_start), so the node needs no capability for port 67.
 # - tenko (profile tenko): the node from the musl image (deploy/Dockerfile) with the roles
 #   controller and dhcp, the dhcp listener in relay mode on 192.0.2.10:67, the API in plain
-#   HTTP (the Lab profile) on 8443, its data on a volume. smoke.sh writes tenko.toml into
-#   LAB_DIR.
+#   HTTP (the Lab profile) on 8443, its data on a volume. driver.sh writes tenko.toml into
+#   the lab volume (node/, the node's /lab).
 # - node-example (profile example): until the binary has the dhcp role, the engine's
 #   example server (example.Dockerfile) with the in-memory reference store, on the same
 #   address. It serves one scope, 198.18.0.0/15, that only option 118 or the link
@@ -27,10 +27,14 @@
 # - client-servers, client-lan, client-iot, client-guest: dhclient (and busybox udhcpc) in
 #   the tools image, one per network, each with a fixed MAC.
 # - tester: perfdhcp (Kea) and relay-test.py, a relay agent on the servers network.
+# - driver (192.0.2.24): the lab driver (deploy/compose/driver), from which driver.sh drives
+#   the lab; smoke.sh on the host runs the container operations it asks for.
 #
-# Variables (smoke.sh sets them): LAB_DIR (the work directory with tenko.toml and the key
-# file, required), TENKO_IMAGE (default tenko:lab), TOOLS_IMAGE (default
-# tenko-dhcp-lab-tools:latest), EXAMPLE_IMAGE (default tenko-dhcp-lab-example:latest).
+# The lab volume `lab` holds the files of one run, written by driver.sh: node/tenko.toml,
+# secrets/kek (the node's /run/secrets), kea/ (the export of E30's rows). Variables
+# (smoke.sh sets them): DRIVER_IMAGE (default tenko-lab-driver:local), TENKO_IMAGE
+# (default tenko:lab), TOOLS_IMAGE (default tenko-dhcp-lab-tools:latest), EXAMPLE_IMAGE
+# (default tenko-dhcp-lab-example:latest).
 
 name: ${COMPOSE_PROJECT_NAME:-tenkodhcplab}
 
@@ -101,8 +105,6 @@ services:
       TENKO_KEK__PATH: /run/secrets/kek
       TENKO_HIBP__ONLINE: "false"
       TENKO_UPDATES__AIR_GAPPED: "true"
-    secrets:
-      - kek
     healthcheck:
       test: ["CMD", "/usr/local/bin/tenko", "health", "--url", "http://127.0.0.1:8443"]
       interval: 5s
@@ -111,7 +113,18 @@ services:
       retries: 3
     volumes:
       - "tenko-data:/var/lib/tenko"
-      - "${LAB_DIR:?set LAB_DIR}/tenko.toml:/lab/tenko.toml:ro"
+      - type: volume
+        source: lab
+        target: /lab
+        read_only: true
+        volume:
+          subpath: node
+      - type: volume
+        source: lab
+        target: /run/secrets
+        read_only: true
+        volume:
+          subpath: secrets
     read_only: true
     tmpfs:
       - /tmp
@@ -191,6 +204,28 @@ services:
       servers:
         ipv4_address: 192.0.2.20
 
+  # The lab driver (deploy/compose/driver/Dockerfile): it idles until smoke.sh runs
+  # driver.sh in it, which calls the node API at its address and asks the host for every
+  # container operation. Root in its own container (it writes the lab volume, which the
+  # node reads as another user), no capability, no Docker socket.
+  driver:
+    image: ${DRIVER_IMAGE:-tenko-lab-driver:local}
+    restart: "no"
+    stop_grace_period: 1s
+    volumes:
+      - "lab:/work"
+      - "..:/src:ro"
+    tmpfs:
+      - /tmp
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      servers:
+        ipv4_address: 192.0.2.24
+
   # WP8.4: E27's PXE rows (profile pxe, started by smoke.sh when the rows run). The boot
   # server (TFTP and HTTP) on servers, and two machines on lan that boot over the network
   # through the gateway's relay: QEMU in BIOS mode with its iPXE ROM, and in UEFI mode with
@@ -248,10 +283,10 @@ services:
         mac_address: "00:00:5e:00:53:b1"
   # End WP8.4.
 
-  # WP9.3: E30's DHCPv4 rows (profile kea, started by smoke.sh after it stops the node).
+  # WP9.3: E30's DHCPv4 rows (profile kea, started by driver.sh after it stops the node).
   # ISC Kea 2.6 (kea.Dockerfile, KEA_IMAGE, default tenko-dhcp-lab-kea:latest) in the
   # node's network namespace, on the node's address, from the configuration and the lease
-  # file of Tenko's export that smoke.sh writes into LAB_DIR/kea.
+  # file of Tenko's export that driver.sh writes into the lab volume's kea/.
   kea:
     profiles: ["kea"]
     image: ${KEA_IMAGE:-tenko-dhcp-lab-kea:latest}
@@ -263,7 +298,12 @@ services:
     restart: "no"
     stop_grace_period: 5s
     volumes:
-      - "${LAB_DIR:?set LAB_DIR}/kea:/lab/kea:ro"
+      - type: volume
+        source: lab
+        target: /lab/kea
+        read_only: true
+        volume:
+          subpath: kea
   # End WP9.3.
 
 # The gateway is a container that routes between the networks, so the node's reply to
@@ -305,9 +345,8 @@ networks:
         - subnet: 192.0.2.192/26
           gateway: 192.0.2.193
 
-secrets:
-  kek:
-    file: ${LAB_DIR:?set LAB_DIR}/secrets/kek
 
 volumes:
+  # The files of the run, written by driver.sh; `down --volumes` removes it with the lab.
+  lab: {}
   tenko-data: {}

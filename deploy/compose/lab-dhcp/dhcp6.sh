@@ -3,10 +3,10 @@
 # The round dhcp6 of the DHCP lab (WP9.1, docs/dhcp.md section 19): the DHCPv6 server of
 # one Tenko node behind a gateway that relays two dual-stack client links to it, with real
 # clients (ISC dhclient -6, systemd-networkd) and a relay agent written against RFC 8415
-# (scripts/relay-test6.py). smoke.sh sources this file and runs `dhcp6_round` for
+# (scripts/relay-test6.py). driver.sh sources this file and runs `dhcp6_round` for
 # ROUNDS=dhcp6; README.md lists the rows. The round brings its own compose project
-# (compose.dhcp6.yml, tenkodhcp6lab) and its own networks, sets the node up itself and
-# tears down what it started.
+# (compose.dhcp6.yml, tenkodhcp6lab) and its own networks, with a driver of its own, which
+# smoke.sh starts and tears down; the round sets the node up itself.
 #
 # Witnesses: the clients' own results (dhclient's script writes /run/lab/events6, networkd
 # writes /run/systemd/netif), the node's metrics (tenko_dhcp_packets_total{family="v6"}),
@@ -20,8 +20,6 @@
 # GET /system/status says dhcp.ra.flags_off while M and O are off and a scope covers the
 # link, nothing once M is on, dhcp.ra.managed_without_scope once the scope is off).
 
-v6_project=tenkodhcp6lab
-v6_compose_file="$here/compose.dhcp6.yml"
 v6_node4=192.0.2.10
 v6_node6=2001:db8:100::10
 v6_tester4=192.0.2.20
@@ -64,21 +62,20 @@ v6_pd_scope=""
 v6_pd_prefix=""
 v6_servers6=2001:db8:100::/64
 v6_servers6_scope=""
-v6_started=0
-v6_work=""
 declare -A v6_ip=()
 
-c6() { docker compose -p "$v6_project" -f "$v6_compose_file" --profile networkd --profile kea "$@"; }
-v6_healthy() { [[ "$(docker inspect -f '{{.State.Health.Status}}' "$(c6 ps -q tenko)")" == healthy ]]; }
+# The round runs in the driver of its own project (smoke.sh starts it); ctl reaches that
+# project's services.
+v6_healthy() { ctl healthy tenko; }
 # Both relay agents of the gateway run.
 v6_relays_up() {
-  [[ "$(c6 exec -T relay sh -c 'cat /proc/[0-9]*/comm | grep -c dhcrelay')" -ge 2 ]]
+  [[ "$(ctl exec relay -- sh -c 'cat /proc/[0-9]*/comm | grep -c dhcrelay')" -ge 2 ]]
 }
 
 # v6_lab_setup: the first-run setup through the API under the Lab profile.
 v6_lab_setup() {
   local token password setup
-  token="$(c6 exec -T tenko /usr/local/bin/tenko setup token --data-dir /var/lib/tenko | tr -d '\r\n')"
+  token="$(ctl setup-token tenko | tr -d '\r\n')"
   [[ -n "$token" ]] || fail "dhcp6: no setup token"
   password="$(admin_password)"
   setup="{\"setup_token\": \"$token\", \"profile\": \"lab\", \"admin\": {\"name\": \"labadmin\", \"display_name\": \"Lab Admin\", \"password\": \"$password\"}, \"host_name\": \"tenko.example.test\", \"language\": \"en\"}"
@@ -150,15 +147,15 @@ v6_packets() {
 v6_dhclient() {
   local service="$1"
   shift
-  c6 exec -T "$service" dhclient -6 -D LL -v -cf /lab/dhclient6.conf -sf /lab/client6-script.sh \
+  ctl exec "$service" -- dhclient -6 -D LL -v -cf /lab/dhclient6.conf -sf /lab/client6-script.sh \
     -lf /run/lab/dhclient6.leases -pf /run/lab/dhclient6.pid "$@" eth0
 }
-v6_events() { c6 exec -T "$1" sh -c 'cat /run/lab/events6 2>/dev/null' | tr -d '\r'; }
+v6_events() { ctl exec "$1" -- sh -c 'cat /run/lab/events6 2>/dev/null' | tr -d '\r'; }
 v6_last() { v6_events "$1" | tail -n 1; }
 # v6_fresh <service>: the client releases its lease and forgets it.
 v6_fresh() {
   v6_dhclient "$1" -r >/dev/null 2>&1 || true
-  c6 exec -T "$1" rm -f /run/lab/dhclient6.leases
+  ctl exec "$1" -- rm -f /run/lab/dhclient6.leases
 }
 
 # v6_in_pool <address> <first> <last>
@@ -172,11 +169,11 @@ PY
 
 # t6 <relay-test6.py arguments>: the relay agent on servers6 sends to the node.
 t6() {
-  c6 exec -T tester python3 /lab/relay-test6.py --server "$v6_node6" --bind "$v6_tester6" "$@"
+  ctl exec tester -- python3 /lab/relay-test6.py --server "$v6_node6" --bind "$v6_tester6" "$@"
 }
 # t4 <relay-test.py arguments>: the DHCPv4 relay agent of the other rounds.
 t4() {
-  c6 exec -T tester python3 /lab/relay-test.py --server "$v6_node4" --giaddr "$v6_tester4" "$@"
+  ctl exec tester -- python3 /lab/relay-test.py --server "$v6_node4" --giaddr "$v6_tester4" "$@"
 }
 
 # v6_duid_ll <mac>: the DUID-LL (type 3, hardware type 1) dhclient -D LL builds, in hex.
@@ -212,11 +209,11 @@ v6_lease_options_ok() { v6_lease_ok "$1" "$2" && v6_options_ok "$1"; }
 # The networkd client: an address of the lan6 pool on eth0, and the DNS and NTP servers in
 # the link's state file.
 v6_networkd_address() {
-  c6 exec -T client-networkd ip -6 -o addr show dev eth0 scope global | tr -d '\r' |
+  ctl exec client-networkd -- ip -6 -o addr show dev eth0 scope global | tr -d '\r' |
     awk '{ split($4, p, "/"); print p[1]; exit }'
 }
 v6_networkd_state() {
-  c6 exec -T client-networkd sh -c 'cat /run/systemd/netif/links/* 2>/dev/null' | tr -d '\r'
+  ctl exec client-networkd -- sh -c 'cat /run/systemd/netif/links/* 2>/dev/null' | tr -d '\r'
 }
 v6_networkd_has_address() {
   local ip
@@ -240,7 +237,7 @@ v6_networkd_ok() {
 v6_networkd_start() {
   v6_solicit0="$(v6_packets solicit answered)"
   v6_request0="$(v6_packets request answered)"
-  c6 up -d client-networkd >/dev/null 2>&1
+  ctl up client-networkd >/dev/null 2>&1
 }
 v6_rapid_commit_ok() {
   local solicit1 request1 out
@@ -300,9 +297,9 @@ PY
 
 v6_correlation_duid_ok() {
   local ip4 ip6 line
-  c6 exec -T client-dhclient6 dhclient -4 -v -cf /lab/dhclient.conf -sf /lab/client-script.sh \
+  ctl exec client-dhclient6 -- dhclient -4 -v -cf /lab/dhclient.conf -sf /lab/client-script.sh \
     -lf /run/lab/dhclient.leases -pf /run/lab/dhclient.pid -1 eth0 >/dev/null 2>&1 || return 1
-  line="$(c6 exec -T client-dhclient6 sh -c 'tail -n 1 /run/lab/events 2>/dev/null' | tr -d '\r')"
+  line="$(ctl exec client-dhclient6 -- sh -c 'tail -n 1 /run/lab/events 2>/dev/null' | tr -d '\r')"
   printf 'dhclient -4: %s\n' "$line" >&2
   ip4="$(event_field ip <<<"$line")"
   ip6="$(v6_last client-dhclient6 | event_field ip6)"
@@ -433,7 +430,7 @@ v6_duid_kea=000200007ed9cafe0001
 # interface and address for relayed traffic, as the report asks.
 v6_kea_files() {
   local iface
-  iface="$(c6 exec -T netns ip -o -6 addr show | tr -d '\r' |
+  iface="$(ctl exec netns -- ip -o -6 addr show | tr -d '\r' |
     awk -v a="$v6_node6" '{ split($4, p, "/") } p[1] == a { print $2; exit }')"
   [[ -n "$iface" ]] || return 1
   python3 - "$work/export6.json" "$work/kea" "$iface/$v6_node6" <<'PY'
@@ -450,12 +447,12 @@ PY
   chmod -R a+rX "$work/kea"
 }
 
-# v6_kea_check <file>: kea-dhcp6 -t in the node's network namespace (a subnet's or a shared
-# network's interface must exist).
+# v6_kea_check <export|golden>: kea-dhcp6 -t in the node's network namespace (a subnet's or
+# a shared network's interface must exist), on the exported configuration (the lab volume's
+# kea/kea-dhcp6.json) or the golden file of the unit tests; the host runs it.
 v6_kea_check() {
-  docker run --rm --network "container:$(c6 ps -q netns)" -v "$(dirname "$1"):/check:ro" "$KEA_IMAGE" \
-    kea-dhcp6 -t "/check/$(basename "$1")" >"$work/kea6-check.out" 2>&1
-  local status=$?
+  local status=0
+  ctl kea-check 6 "$1" >"$work/kea6-check.out" 2>&1 || status=$?
   tail -n 20 "$work/kea6-check.out" >&2
   return "$status"
 }
@@ -470,7 +467,7 @@ sys.exit(0 if all(c in codes for c in sys.argv[2:]) else 1)
 PY
 }
 
-v6_kea_up() { c6 logs --no-color kea6 2>&1 | grep -q DHCP6_STARTED; }
+v6_kea_up() { [[ "$(ctl logs kea6)" == *DHCP6_STARTED* ]]; }
 
 v6_kea_reserved_ok() {
   v6_fresh client-dhclient6
@@ -497,10 +494,8 @@ v6_kea_lease_ok() {
 v6_kea_rows() {
   local version out
   step "E30: the Kea export, DHCPv6"
-  if [[ -z "${KEA_IMAGE_PREBUILT:-}" ]]; then
-    docker build -f "$here/kea.Dockerfile" -t "$KEA_IMAGE" "$here"
-  fi
-  version="$(docker run --rm --network none "$KEA_IMAGE" kea-dhcp6 -V 2>/dev/null | head -n 1 | tr -d '\r')"
+  # smoke.sh built the kea image (KEA_IMAGE) before the run.
+  version="$(ctl kea-version 6 2>/dev/null | sed -n 1p | tr -d '\r')"
   # A lease the export carries: the DUID-EN client on iot6, not the pool's first address,
   # so that only the lease file can give it back.
   out="$(t6 --link 2001:db8:102::1 --duid "$v6_duid_kea" --expect "${v6_prefix6[iot6]}")" ||
@@ -513,22 +508,22 @@ v6_kea_rows() {
   v6_kea_files || fail "dhcp6: the export's files"
   ok "export6" "GET /dhcp/export: Dhcp6 with $(($(wc -l <"$work/kea/kea-leases6.csv") - 1)) DHCPv6 lease(s), Kea image $version"
   row "export.kea6" "kea-dhcp6 -t ($version) accepts the exported Dhcp6 configuration" \
-    v6_kea_check "$work/kea/kea-dhcp6.json"
+    v6_kea_check export
   row "export.kea6.golden" "kea-dhcp6 -t accepts the golden file of the unit tests (crates/tenko-dhcp/src/export/kea/fixtures/kea-dhcp6.json)" \
-    v6_kea_check "$repo/crates/tenko-dhcp/src/export/kea/fixtures/kea-dhcp6.json"
+    v6_kea_check golden
   row "export.kea6.report" "the loss report names the relay listener's address for interfaces-config and the server DUID Kea cannot hold (the node's default DUID-UUID)" \
     v6_report_has export.kea.v6.interfaces.address export.kea.v6.server_id.type
 
   step "dhcp6: stop the node and start kea-dhcp6 from the export on $v6_node6"
-  c6 stop tenko >/dev/null 2>&1
-  c6 up -d kea6 >/dev/null 2>&1
+  ctl stop tenko >/dev/null 2>&1
+  ctl up kea6 >/dev/null 2>&1
   retry 60 "kea-dhcp6 to start" v6_kea_up
   row "export.kea6.reservation" "kea-dhcp6 from the export gives client-dhclient6 its reservation $v6_reserved_ip through dhcrelay, with options 23, 24 and 56" \
     within 60 v6_kea_reserved_ok
   row "export.kea6.lease" "the DUID-EN client keeps ${v6_kea_ip:-its address} from the exported lease file (iot6 through relay-test6)" \
     within 30 v6_kea_lease_ok
-  c6 logs --no-color --tail 40 kea6 >&2 2>&1 || true
-  c6 stop kea6 >/dev/null 2>&1 || true
+  ctl logs kea6 | tail -n 40 >&2 || true
+  ctl stop kea6 >/dev/null 2>&1 || true
 }
 # End WP9.3.
 
@@ -615,7 +610,7 @@ v6_pd_configure() {
 # v6_pd_dhclient [<dhclient options>]: dhclient -6 -P (prefix delegation only) in
 # client-pd6, with its own lease and pid files.
 v6_pd_dhclient() {
-  c6 exec -T client-pd6 dhclient -6 -P -D LL -v -cf /lab/dhclient6.conf -sf /lab/client6-script.sh \
+  ctl exec client-pd6 -- dhclient -6 -P -D LL -v -cf /lab/dhclient6.conf -sf /lab/client6-script.sh \
     -lf /run/lab/dhclient6pd.leases -pf /run/lab/dhclient6pd.pid "$@" eth0
 }
 
@@ -698,7 +693,7 @@ PY
 
 v6_ra_flags_off_ok() { within 60 v6_ra_warning dhcp.ra.flags_off true; }
 v6_ra_managed_ok() {
-  c6 exec -T router6 /lab/radvd.sh flags on off || return 1
+  ctl exec router6 -- /lab/radvd.sh flags on off || return 1
   within 60 v6_ra_warning dhcp.ra.flags_off false &&
     v6_ra_warning dhcp.ra.managed_without_scope false &&
     v6_ra_warning dhcp.ra.other_only false
@@ -713,7 +708,7 @@ v6_ra_rows() {
   must "the IPv6 prefix of servers6" api POST /prefixes "{\"cidr\": \"$v6_servers6\", \"description\": \"lab link servers6, IPv6\"}"
   v6_servers6_scope="$(field "d['item']['id']" <"$work/api.out")"
   must "the IPv6 scope of servers6" api POST /dhcp/scopes "{\"prefix\": \"$v6_servers6_scope\"}"
-  c6 up -d router6 >/dev/null 2>&1
+  ctl up router6 >/dev/null 2>&1
   row "v6.ra.flags_off" "radvd on servers6 with M and O off: the health view says dhcp.ra.flags_off for the scope $v6_servers6" \
     v6_ra_flags_off_ok
   row "v6.ra.managed" "radvd with M on: the finding is gone and no other dhcp.ra finding names the link" \
@@ -723,72 +718,23 @@ v6_ra_rows() {
 }
 v6_release_all() { v6_release_counted && v6_fqdn_released_ok; }
 
+
 # ---------------------------------------------------------------------------------------
-# The round
-
-v6_logs() {
-  local service
-  printf '\n==> FAILED: logs of the round dhcp6\n' >&2
-  for service in relay netns tenko tester client-dhclient6 client-networkd client-iot6 client-pd6 router6 kea6; do
-    printf '\n--- %s ---\n' "$service" >&2
-    c6 logs --no-color --tail 200 "$service" >&2 2>&1
-  done
-  for service in client-dhclient6 client-iot6 client-networkd client-pd6; do
-    printf '\n--- %s: /run/lab ---\n' "$service" >&2
-    c6 exec -T "$service" sh -c 'tail -n 20 /run/lab/events6 /run/lab/events 2>&1; ls /run/lab /run/systemd/netif/links 2>&1' >&2 2>&1
-  done
-  docker ps -a --filter "label=com.docker.compose.project=$v6_project" >&2 2>&1
-}
-
-v6_keep_hint() {
-  printf '\n==> KEEP=1: the round dhcp6 keeps running; for example\n'
-  printf '    LAB_DIR=%s docker compose -p %s -f %s --profile networkd exec client-dhclient6 dhclient -6 -D LL -v -1 -cf /lab/dhclient6.conf -sf /lab/client6-script.sh eth0\n' \
-    "$v6_work" "$v6_project" "$v6_compose_file"
-  printf 'tear it down with: LAB_DIR=%s docker compose -p %s -f %s --profile networkd down --volumes\n' \
-    "$v6_work" "$v6_project" "$v6_compose_file"
-}
-
-v6_teardown() {
-  ((v6_started)) || return 0
-  c6 down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
-  v6_started=0
-  if [[ -n "$v6_work" ]]; then
-    rm -rf "$v6_work"
-    v6_work=""
-  fi
-}
+# The round (smoke.sh built the images, started this project's driver, and prints the logs
+# and tears the project down after it)
 
 dhcp6_round() {
   step "the round dhcp6: DHCPv6 through dhcrelay to one node"
-  if ((build_networkd)); then
-    step "build the networkd image $NETWORKD_IMAGE"
-    docker build -f "$here/networkd.Dockerfile" -t "$NETWORKD_IMAGE" "$here"
-  fi
-  docker image inspect "$NETWORKD_IMAGE" >/dev/null 2>&1 || fail "image $NETWORKD_IMAGE not found"
   ok "networkd" "$NETWORKD_IMAGE (systemd-networkd as a DHCPv6 client)"
-  if ((build_tenko)); then
-    step "build $TENKO_IMAGE from deploy/Dockerfile (the static musl binary)"
-    # The build's cargo cache belongs to this checkout alone (deploy/Dockerfile says why).
-    tree="$(cd "$repo" && pwd -P | sha256sum | cut -c1-16)"
-    docker build -f "$repo/deploy/Dockerfile" --build-arg "TENKO_BUILD_TREE=$tree" \
-      -t "$TENKO_IMAGE" "$repo"
-  else
-    docker image inspect "$TENKO_IMAGE" >/dev/null 2>&1 || fail "image $TENKO_IMAGE not found"
-  fi
   ok "image" "$TENKO_IMAGE"
   # WP9.2: the same binary with the probe's file capability (probe.Dockerfile).
-  step "build $TENKO_PROBE_IMAGE from $TENKO_IMAGE (cap_net_raw on the binary)"
-  docker build -f "$here/probe.Dockerfile" --build-arg TENKO_IMAGE="$TENKO_IMAGE" -t "$TENKO_PROBE_IMAGE" "$here"
   ok "probe image" "$TENKO_PROBE_IMAGE"
 
-  v6_work="$(mktemp -d)"
-  work="$v6_work"
-  export LAB_DIR="$work"
-  mkdir -p "$work/secrets"
+  mkdir -p "$work/secrets" "$node_dir"
   head -c 32 /dev/urandom | od -An -v -tx1 | tr -d ' \n' >"$work/secrets/kek"
   chmod 0444 "$work/secrets/kek"
-  cat >"$work/tenko.toml" <<TOML
-# The node of the round dhcp6 (written by smoke.sh).
+  cat >"$node_dir/tenko.toml" <<TOML
+# The node of the round dhcp6 (written by driver.sh).
 # WP9.2: the probe role in the process runs the router advertisement check.
 roles = "controller,dhcp,probe"
 # DDNS needs the DNS module next to the DHCP module (the node serves no DNS here).
@@ -810,17 +756,13 @@ listen = ["0.0.0.0:8443"]
 listen = [{ address = "$v6_node4", mode = "relay" }, { address = "$v6_node6", mode = "relay" }]
 workers = 2
 TOML
-  chmod 0444 "$work/tenko.toml"
-  chmod 0755 "$work"
+  chmod 0444 "$node_dir/tenko.toml"
+  chmod 0755 "$work" "$work/secrets" "$node_dir"
   api_base="http://$v6_node4:8443"
   cookie=""
-  c6 config --quiet
-  # A lab left over from an interrupted run goes first.
-  c6 down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
 
   step "start the gateway, the node and the clients"
-  v6_started=1
-  c6 up -d relay netns tenko client-dhclient6 client-iot6 client-pd6 tester
+  ctl up relay netns tenko client-dhclient6 client-iot6 client-pd6 tester >/dev/null
   retry "$wait_secs" "tenko to become healthy" v6_healthy
   v6_lab_setup
   v6_configure
@@ -829,18 +771,4 @@ TOML
   ok "lab6" "gateway, node, two dhclient clients and the tester are up (networkd starts with its row)"
 
   v6_rows
-
-  # A failed row prints the logs before the lab goes.
-  ((rows_failed == 0)) || v6_logs
-  if [[ "$keep" == 1 ]]; then
-    v6_keep_hint
-    v6_started=0
-    v6_work=""
-  else
-    step "tear down the round dhcp6"
-    v6_teardown
-  fi
-  work=""
-  cookie=""
-  api_base="http://$node_ip:8443"
 }

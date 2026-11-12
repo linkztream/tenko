@@ -29,10 +29,13 @@
 #   client-iot6 (iot6, ...:63): dhclient -6.
 # - tester: relay-test6.py and relay-test.py, relay agents on servers6.
 # - kea6 (profile kea, WP9.3): Kea's kea-dhcp6 (kea.Dockerfile) from Tenko's export in
-#   LAB_DIR/kea, on the node's addresses once the node has stopped (E30's DHCPv6 rows).
+#   the lab volume's kea/, on the node's addresses once the node has stopped (E30's DHCPv6 rows).
 #
-# Variables (smoke.sh sets them): LAB_DIR (the work directory with tenko.toml and the key
-# file, required), TENKO_IMAGE, TENKO_PROBE_IMAGE, TOOLS_IMAGE, NETWORKD_IMAGE, KEA_IMAGE.
+# - driver (192.0.2.24): the lab driver (deploy/compose/driver), from which driver.sh runs
+#   the round; smoke.sh on the host runs the container operations it asks for.
+#
+# The lab volume `lab` holds the files of the round, written by driver.sh: node/tenko.toml,
+# secrets/kek, kea/. Variables (smoke.sh sets them): DRIVER_IMAGE, TENKO_IMAGE, TENKO_PROBE_IMAGE, TOOLS_IMAGE, NETWORKD_IMAGE, KEA_IMAGE.
 
 # smoke.sh passes -p tenkodhcp6lab: COMPOSE_PROJECT_NAME of the other rounds would win over
 # this name.
@@ -106,8 +109,6 @@ services:
       TENKO_KEK__PATH: /run/secrets/kek
       TENKO_HIBP__ONLINE: "false"
       TENKO_UPDATES__AIR_GAPPED: "true"
-    secrets:
-      - kek
     healthcheck:
       test: ["CMD", "/usr/local/bin/tenko", "health", "--url", "http://127.0.0.1:8443"]
       interval: 5s
@@ -116,7 +117,18 @@ services:
       retries: 3
     volumes:
       - "tenko-data:/var/lib/tenko"
-      - "${LAB_DIR:?set LAB_DIR}/tenko.toml:/lab/tenko.toml:ro"
+      - type: volume
+        source: lab
+        target: /lab
+        read_only: true
+        volume:
+          subpath: node
+      - type: volume
+        source: lab
+        target: /run/secrets
+        read_only: true
+        volume:
+          subpath: secrets
     read_only: true
     tmpfs:
       - /tmp
@@ -138,7 +150,12 @@ services:
     restart: "no"
     stop_grace_period: 5s
     volumes:
-      - "${LAB_DIR:?set LAB_DIR}/kea:/lab/kea:ro"
+      - type: volume
+        source: lab
+        target: /lab/kea
+        read_only: true
+        volume:
+          subpath: kea
 
   client-dhclient6:
     <<: *client
@@ -218,6 +235,29 @@ services:
         ipv4_address: 192.0.2.20
         ipv6_address: "2001:db8:100::20"
 
+  # The lab driver (deploy/compose/driver/Dockerfile): it idles until smoke.sh runs
+  # driver.sh in it, which calls the node API at its address and asks the host for every
+  # container operation. Root in its own container (it writes the lab volume, which the
+  # node reads as another user), no capability, no Docker socket.
+  driver:
+    image: ${DRIVER_IMAGE:-tenko-lab-driver:local}
+    restart: "no"
+    stop_grace_period: 1s
+    volumes:
+      - "lab:/work"
+      - "..:/src:ro"
+    tmpfs:
+      - /tmp
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      servers6:
+        ipv4_address: 192.0.2.24
+        ipv6_address: "2001:db8:100::24"
+
 # The gateway routes IPv4 between the networks, so the node's reply to giaddr (the
 # gateway's address on a client link) arrives on the servers6 bridge. Docker drops a packet
 # for a container's address that comes in on another bridge (the raw-table rules that keep
@@ -262,9 +302,8 @@ networks:
         - subnet: "2001:db8:102::/64"
           gateway: "2001:db8:102::fffe"
 
-secrets:
-  kek:
-    file: ${LAB_DIR:?set LAB_DIR}/secrets/kek
 
 volumes:
+  # The files of the run, written by driver.sh; `down --volumes` removes it with the lab.
+  lab: {}
   tenko-data: {}
