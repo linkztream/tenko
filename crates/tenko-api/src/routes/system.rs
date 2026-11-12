@@ -31,7 +31,7 @@
 //! `cluster.leader.service_failing`, and a clock that differs from the leader's by more
 //! than five seconds the warning `cluster.clock_skew` (R35).
 
-use std::sync::Arc;
+use std::sync::{Arc, atomic::Ordering};
 
 use axum::{
     Extension, Json,
@@ -47,8 +47,8 @@ use uuid::Uuid;
 
 use crate::{
     dto::system::{
-        DataFormatStatus, Health, HostStatus, LeaderServiceState, LeaderStatus, NodeStatus,
-        Readiness, StatusWarning, StoreSummary, SystemStatus, UiStatus,
+        DataFormatStatus, Health, HostStatus, LeaderServiceState, LeaderStatus, MetricsStatus,
+        NodeStatus, Readiness, StatusWarning, StoreSummary, SystemStatus, UiStatus,
     },
     extract::Ctx,
     host::{HostSample, low_disk_limit},
@@ -1090,8 +1090,10 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
             disk_available: host.disk_available,
             sampled_at: host.sampled_at,
         }),
-        // WP18.0: set from the sampler's history once it keeps one.
-        metrics: None,
+        metrics: match platform.history_bytes.load(Ordering::Relaxed) {
+            0 => None,
+            history_bytes => Some(MetricsStatus { history_bytes }),
+        },
     }
 }
 

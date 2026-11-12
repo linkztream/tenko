@@ -72,7 +72,6 @@ impl v1::metrics_server::Metrics for ClusterService {
         .await
     }
 
-    // WP18.0: the history of the dashboard's figures.
     async fn history(
         &self,
         request: Request<v1::HistoryRequest>,

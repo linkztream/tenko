@@ -5,7 +5,7 @@ use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     convert::Infallible,
     sync::{
-        Arc, Mutex, PoisonError,
+        Arc, Mutex, PoisonError, Weak,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
@@ -13,13 +13,12 @@ use std::{
 
 use arc_swap::ArcSwap;
 use bytes::{Bytes, BytesMut};
-use futures::{Stream, StreamExt, stream};
+use futures::{Stream, StreamExt, future::BoxFuture, stream};
 use tenko_core::{ObjectRef, Principal, Revision, codec::decode_key};
 use tenko_store::{
     ChangeSet, KeyRange, ReadConsistency, Store, StoreError, WatchError, WatchFilter, tables,
 };
 use tokio::sync::{
-    Notify,
     broadcast::{self, error::RecvError},
     watch,
 };
@@ -41,8 +40,9 @@ pub(crate) struct Frame {
     topic: Topic,
     /// References the event carries, for the authorization filter.
     objects: Vec<ObjectRef>,
-    /// The event itself, re-encoded when a filter keeps only some of its references.
-    data: EventData,
+    /// The event itself, re-encoded when a filter keeps only some of its references; `None`
+    /// for an event without references, which a filter admits whole or not at all.
+    data: Option<EventData>,
     /// The complete SSE frame.
     bytes: Bytes,
 }
@@ -115,8 +115,8 @@ struct Inner {
     subscribers: AtomicUsize,
     /// Open streams by topic, in the order of [`Topic::ALL`].
     topic_subscribers: [AtomicUsize; Topic::ALL.len()],
-    /// Signaled when the count of a topic leaves zero.
-    listened: Notify,
+    /// The source of the first event of a topic on a new stream.
+    first: Mutex<Option<(Topic, Weak<dyn FirstFrame>)>>,
     published: AtomicU64,
 }
 
@@ -150,7 +150,7 @@ impl EventHub {
                 shutting_down: AtomicBool::new(false),
                 subscribers: AtomicUsize::new(0),
                 topic_subscribers: std::array::from_fn(|_| AtomicUsize::new(0)),
-                listened: Notify::new(),
+                first: Mutex::new(None),
                 published: AtomicU64::new(0),
             }),
         }
@@ -182,17 +182,15 @@ impl EventHub {
         self.inner.topic_subscribers[topic as usize].load(Ordering::SeqCst)
     }
 
-    /// Returns once at least one open stream receives `topic` (at once when one does).
-    pub async fn listened(&self, topic: Topic) {
-        loop {
-            let notified = self.inner.listened.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            if self.subscribers_of(topic) > 0 {
-                return;
-            }
-            notified.await;
-        }
+    /// Makes `source` give every new stream of `topic` its first event of that topic, after the
+    /// hello and the replay and before the topic's live events. The hub holds the source weakly:
+    /// it lives as long as its producer does.
+    pub fn set_first_frame(&self, topic: Topic, source: Weak<dyn FirstFrame>) {
+        *self
+            .inner
+            .first
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some((topic, source));
     }
 
     /// Frames published since start.
@@ -241,9 +239,13 @@ impl EventHub {
     /// replayed). Store-backed alarms (`ipam.alarms`, `auth.alarms`) need no call: the
     /// journal routes them to the `system` topic.
     pub fn publish_system(&self, data: &EventData) {
-        let frame = Arc::new(encode(None, data));
+        self.publish_frame(&SystemFrame::of(data));
+    }
+
+    /// Publishes a system event encoded before, as [`EventHub::publish_system`] does.
+    pub fn publish_frame(&self, frame: &SystemFrame) {
         self.inner.published.fetch_add(1, Ordering::Relaxed);
-        let _ = self.inner.tx.send(Msg::Frame(frame));
+        let _ = self.inner.tx.send(Msg::Frame(Arc::clone(&frame.0)));
     }
 
     /// Coalescing: sends everything published since the last flush as one batch.
@@ -521,9 +523,34 @@ fn encode(revision: Option<Revision>, data: &EventData) -> Frame {
         revision,
         topic: data.topic,
         objects: data.objects.iter().chain(&data.deleted).copied().collect(),
-        data: data.clone(),
+        data: (!data.objects.is_empty() || !data.deleted.is_empty()).then(|| data.clone()),
         bytes: bytes.freeze(),
     }
+}
+
+/// A system event (no SSE id, not replayed) encoded once, to publish or to give new streams as
+/// their first event. Cloning is cheap and shares the bytes.
+#[derive(Debug, Clone)]
+pub struct SystemFrame(Arc<Frame>);
+
+impl SystemFrame {
+    /// Encodes `data`.
+    pub fn of(data: &EventData) -> Self {
+        Self(Arc::new(encode(None, data)))
+    }
+
+    /// The SSE frame.
+    pub fn bytes(&self) -> &Bytes {
+        &self.0.bytes
+    }
+}
+
+/// The producer of the first event of a topic on a new stream ([`EventHub::set_first_frame`]),
+/// such as the history of the `metrics` topic. A thousand streams opened at once may ask at
+/// once: the source builds once and shares the frame.
+pub trait FirstFrame: Send + Sync + 'static {
+    /// The frame, of the topic it was set for; `None` when there is none.
+    fn first(&self) -> BoxFuture<'_, Option<SystemFrame>>;
 }
 
 /// The `reset` frame; its id is the revision to reload at, so a later reconnect resumes
@@ -543,12 +570,8 @@ struct SubscriberGuard {
 impl SubscriberGuard {
     fn new(inner: &Arc<Inner>, topics: TopicSet) -> Self {
         inner.subscribers.fetch_add(1, Ordering::Relaxed);
-        let mut first = false;
         for topic in topics.topics() {
-            first |= inner.topic_subscribers[topic as usize].fetch_add(1, Ordering::SeqCst) == 0;
-        }
-        if first {
-            inner.listened.notify_waiters();
+            inner.topic_subscribers[topic as usize].fetch_add(1, Ordering::SeqCst);
         }
         Self {
             inner: Arc::clone(inner),
@@ -595,7 +618,7 @@ impl Subscriber {
             Admission::All => Some(frame.bytes.clone()),
             Admission::None => None,
             Admission::Only(kept) => {
-                let mut data = frame.data.clone();
+                let mut data = frame.data.clone()?;
                 data.objects.retain(|object| kept.contains(object));
                 data.deleted.retain(|object| kept.contains(object));
                 (!data.objects.is_empty() || !data.deleted.is_empty())
@@ -701,6 +724,21 @@ pub(crate) async fn event_stream(
         }
     };
     for bytes in frames.iter().filter_map(|frame| subscriber.render(frame)) {
+        first.extend_from_slice(&bytes);
+    }
+    // After subscribing, so that the topic's live events follow the first frame without a hole.
+    let source = hub
+        .inner
+        .first
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .filter(|(topic, _)| topics.contains(*topic))
+        .and_then(|(_, source)| source.upgrade());
+    if let Some(source) = source
+        && let Some(frame) = source.first().await
+        && let Some(bytes) = subscriber.render(&frame.0)
+    {
         first.extend_from_slice(&bytes);
     }
     subscriber.first = Some(first.freeze());
@@ -1050,16 +1088,10 @@ event: ipam
     }
 
     #[tokio::test]
-    async fn streams_are_counted_per_topic_and_the_first_listener_wakes_a_waiter() {
+    async fn streams_are_counted_per_topic() {
         let hub = hub(SseConfig::default());
         let store = tenko_store::MemStore::default();
         let principal = Principal::system(SystemComponent::Api);
-        let waiter = {
-            let hub = hub.clone();
-            tokio::spawn(async move { hub.listened(Topic::Metrics).await })
-        };
-        tokio::task::yield_now().await;
-        assert!(!waiter.is_finished());
         let jobs = event_stream(
             &hub,
             &store,
@@ -1080,14 +1112,6 @@ event: ipam
         .await;
         assert_eq!(hub.subscribers_of(Topic::Metrics), 1);
         assert_eq!(hub.subscribers_of(Topic::Jobs), 2);
-        tokio::time::timeout(Duration::from_secs(5), waiter)
-            .await
-            .expect("woken")
-            .expect("no panic");
-        // Listened already: returns at once.
-        tokio::time::timeout(Duration::from_secs(5), hub.listened(Topic::Metrics))
-            .await
-            .expect("at once");
         drop(metrics);
         assert_eq!(hub.subscribers_of(Topic::Metrics), 0);
         assert_eq!(hub.subscribers_of(Topic::Jobs), 1);

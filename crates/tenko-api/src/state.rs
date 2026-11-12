@@ -18,7 +18,7 @@ use std::{
     collections::BTreeMap,
     sync::{
         Arc, Mutex, PoisonError,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Instant,
 };
@@ -97,6 +97,9 @@ pub(crate) struct Platform {
     pub(crate) kek: ArcSwapOption<tenko_vault::distribution::KekAdmin>,
     /// The host's CPU, memory and free disk space (OPS-20).
     pub(crate) host: crate::host::HostMonitor,
+    /// The bytes the history of the dashboard's tiles holds, as the metrics sampler last
+    /// counted them; 0 without a sampler.
+    pub(crate) history_bytes: AtomicU64,
 }
 
 impl Default for AppState {
@@ -146,6 +149,7 @@ impl AppState {
                 cluster: Mutex::new(None),
                 kek: ArcSwapOption::empty(),
                 host: crate::host::HostMonitor::default(),
+                history_bytes: AtomicU64::new(0),
             }),
             store,
         }

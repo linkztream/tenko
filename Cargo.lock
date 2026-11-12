@@ -3239,6 +3239,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "socket2",
+ "stats_alloc",
  "tenko-api",
  "tenko-auth",
  "tenko-cluster",

@@ -19,10 +19,12 @@
 //! the server.
 //!
 //! The publisher of the `metrics` topic of the event stream
-//! ([`tenko_api::sse::metrics::MetricsPublisher`]) starts next to the timer. While a client
-//! listens it takes a sample every second, and before each one it refreshes the gauges that
-//! read memory only ([`refresh_live`]: the event hub and the store status, Raft, the store
-//! files, the jobs and the connected nodes); the other gauges keep the timer's values.
+//! ([`tenko_api::sse::metrics::MetricsPublisher`]) starts next to the timer. It takes a sample
+//! every second, whether a client listens or not, and folds it into the history of the
+//! dashboard's tiles; before each one it refreshes the gauges that read memory only
+//! ([`refresh_live`]: the event hub and the store status, Raft, the store files, the jobs and
+//! the connected nodes); the other gauges keep the timer's values. It asks the other
+//! controllers and publishes only while a client listens.
 
 use std::{collections::BTreeMap, net::SocketAddr, sync::Arc, time::Duration};
 

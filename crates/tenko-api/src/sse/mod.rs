@@ -28,7 +28,9 @@
 //! `cluster`; `scan.*` (probe configuration, scopes) to `discovery`; `i18n.*`, `backup.*`
 //! and the `sys.audit_export*` tables to `system`; `auth.grants` and `auth.scoped_tokens`
 //! to `admin` (through the `auth` namespace). The topic `metrics` carries one snapshot per
-//! second from the metrics collector, not from the journal ([`metrics`]). RBAC scopes
+//! second from the metrics collector, not from the journal ([`metrics`]), and the history of
+//! the dashboard's tiles as the first event of a new stream ([`EventHub::set_first_frame`],
+//! built once and shared by every new stream). RBAC scopes
 //! install their [`EventFilter`] with [`EventHub::set_filter`].
 
 pub mod filter;
@@ -42,8 +44,8 @@ use std::{
 
 use tenko_core::{ObjectKind, ObjectRef, Principal, TableName};
 
-pub use hub::EventHub;
 pub(crate) use hub::event_stream;
+pub use hub::{EventHub, FirstFrame, SystemFrame};
 
 pub use crate::dto::events::{EventData, ResetData, ResetReason, Topic, TopicSet};
 

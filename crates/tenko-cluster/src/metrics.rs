@@ -54,7 +54,6 @@ pub struct EncodedSample {
     pub encoding: String,
     /// The sample.
     pub payload: Vec<u8>,
-    // WP18.0: the history's closed buckets.
     /// The buckets of the controller's history that closed in its last two ticks, with its
     /// start (always set by a controller with the history); empty from an older build.
     pub closed: Vec<u8>,
@@ -84,7 +83,6 @@ impl EncodedSample {
     }
 }
 
-// WP18.0: a controller's history as it travels between controllers.
 /// One controller's history of the dashboard's figures as it travels between controllers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncodedHistory {
@@ -125,9 +123,10 @@ pub trait MetricsSource: Send + Sync + 'static {
     /// The newest sample; `None` while there is none.
     fn current(&self) -> BoxFuture<'_, Option<EncodedSample>>;
 
-    /// This controller's history of the dashboard's figures, encoded once per change and
-    /// shared; `None` when it keeps none, which `Metrics.History` answers with
-    /// `UNIMPLEMENTED`. The default keeps none.
+    /// This controller's whole history of the dashboard's figures, encoded for the call: a
+    /// peer asks only when it first sees this controller, after a missed call and after a
+    /// restart, never per second or per subscription. `None` when it keeps none, which
+    /// `Metrics.History` answers with `UNIMPLEMENTED`. The default keeps none.
     fn history(&self) -> BoxFuture<'_, Option<EncodedHistory>> {
         Box::pin(async { None })
     }

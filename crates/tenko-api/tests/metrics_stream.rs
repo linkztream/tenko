@@ -5,7 +5,8 @@
 //! window: under the load of a full parallel test run the window stretches (on Windows the
 //! CPU reading alone starts a PowerShell process), and the claim is a rate. The CPU time of
 //! the process is measured and printed (not asserted): once with 100 streams on another
-//! topic, the publisher asleep, and once with 100 streams on `metrics`. Run with
+//! topic, the publisher publishing nothing (its sampler still folds a sample a second into the
+//! history), and once with 100 streams on `metrics`. Run with
 //! `--no-capture` to read it.
 
 use std::{
@@ -193,11 +194,10 @@ async fn one_hundred_streams_get_one_snapshot_per_second_from_one_aggregation() 
     let (stop_tx, stop) = watch::channel(false);
     let task = Arc::clone(&publisher).spawn(stop);
 
-    // 100 streams on another topic: the publisher sleeps.
+    // 100 streams on another topic: nothing is published.
     let idle = open_all(addr, "jobs").await;
     let (idle_cpu, _) = measure().await;
     assert_eq!(publisher.ticks(), 0, "nobody listens to the metrics");
-    assert_eq!(publisher.sampler().taken(), 0);
     for reader in idle {
         reader.task.abort();
     }

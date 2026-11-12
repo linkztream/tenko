@@ -105,8 +105,16 @@ tenko-api = { path = ".", features = ["client"] }
 tenko-auth = { workspace = true, features = ["testing"] }
 tenko-core = { workspace = true, features = ["testing"] }
 tenko-store = { workspace = true }
-tokio = { workspace = true }
+# The counting allocator of tests/metrics_history_alloc.rs (the history's fold allocates nothing).
+stats_alloc = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 tower = { workspace = true, features = ["util"] }
+
+# The no-allocation test of the history is its own harness: the counting allocator counts every
+# thread, and libtest's main thread allocates right after it has spawned the test thread.
+[[test]]
+name = "metrics_history_alloc"
+harness = false
 
 [lints]
 workspace = true
