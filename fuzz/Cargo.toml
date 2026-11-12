@@ -434,3 +434,10 @@ path = "fuzz_targets/dhcp6_engine.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "dns_xfr_message"
+path = "fuzz_targets/dns_xfr_message.rs"
+test = false
+doc = false
+bench = false

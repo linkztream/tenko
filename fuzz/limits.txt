@@ -42,6 +42,7 @@ dns_tls_wire             65536    a PROXY header is at most MAX_LEN (4,096, crat
 dns_trust_anchor_text    65536    the key arrives in the JSON body of POST /dns/trust-anchors (axum's default limit, 2 MiB); a DS or DNSKEY is at most a few KiB of text
 dns_trust_anchor_xml     65536    the parser refuses a file above 1 MiB (crates/tenko-dns/src/anchors/xml.rs); MAX_DIGESTS (64) is reached in about 10 KiB
 dns_tsig                 65536    1 control octet and a message of at most MAX_MESSAGE_LEN
+dns_xfr_message          65535    MAX_MESSAGE_LEN: a request over TCP or UDP, a primary's answer over TCP (the 2-octet frame, crates/tenko-dns/src/xfr/in.rs)
 dns_zonefile             65536    an import body may reach 512 MiB (MAX_ZONE_FILE_REQUEST, crates/tenko-api/src/routes/dns.rs); 64 KiB holds hundreds of records, $GENERATE, $ORIGIN and multi-line entries, while the token cap of 262,140 octets stays out of reach
 gss_mic                  65563    a 28-octet MIC token (TOKEN_LEN, crates/tenko-krb/src/mic.rs) over a DNS message of at most MAX_MESSAGE_LEN
 import_files             65537    1 octet that picks the file name; uploads may reach max_upload (20 MiB, crates/tenko-ipam/src/import/service.rs); compressed workbooks reach the cell and text limits from small inputs
