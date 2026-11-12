@@ -432,3 +432,49 @@ async fn the_records_a_cut_delete_left_are_swept() {
     assert_eq!(lab.served().await, Some(7));
     assert_eq!(lab.zones.purge_orphans().await.expect("sweep"), 0);
 }
+
+/// A refresh that wrote its transfer and then failed (a catalog's members, say) ends with
+/// the expiry of what it wrote: the end of a refresh reads the copy from the store.
+#[tokio::test]
+async fn the_end_of_a_refresh_takes_the_copy_from_the_store() {
+    let primary = Primary::start(Answer::Zone(7)).await;
+    let lab = Lab::new(&primary).await;
+    let node = lab.node();
+    term(&node).await;
+    let written = TransferStamp {
+        zone: lab.zone.id,
+        serial: 7,
+        refreshed: Timestamp::now(),
+    };
+    lab.set_stamp(Some(written.clone())).await;
+    node.lock().get_mut(&lab.zone.id).expect("state").expires = Some(hours_ago(1));
+    node.finish(lab.zone.id, None).await;
+    assert_eq!(
+        node.lock()[&lab.zone.id].expires,
+        Some(after(written.refreshed, 3600))
+    );
+}
+
+/// The record of a zone deleted while its refresh ran is swept with the zone's records.
+#[tokio::test]
+async fn the_record_of_a_deleted_zone_is_swept() {
+    let primary = Primary::start(Answer::Closed).await;
+    let lab = Lab::new(&primary).await;
+    let gone = ZoneId::generate();
+    let mut batch = WriteBatch::for_request(&system());
+    batch
+        .put_typed(
+            &TRANSFER_STATE,
+            &gone,
+            &TransferStamp {
+                zone: gone,
+                serial: 1,
+                refreshed: Timestamp::now(),
+            },
+        )
+        .expect("stage");
+    lab.store.propose(batch).await.expect("write");
+    assert_eq!(lab.zones.purge_orphans().await.expect("sweep"), 1);
+    let view = lab.view().await;
+    assert_eq!(view.get_typed(&TRANSFER_STATE, &gone).expect("read"), None);
+}

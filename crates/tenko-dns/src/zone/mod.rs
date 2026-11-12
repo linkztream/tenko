@@ -1015,8 +1015,9 @@ impl ZoneService {
         Ok(written)
     }
 
-    /// Removes the RRsets and owner rows of every zone that no longer exists, and returns
-    /// how many zones had some. It reads one key per zone of each table, not every row.
+    /// Removes the RRsets, owner rows and transfer stamps of every zone that no longer exists,
+    /// and returns how many zones had some. It reads one key per zone of each table, not
+    /// every row.
     ///
     /// # Errors
     ///
@@ -1032,6 +1033,9 @@ impl ZoneService {
             ),
             (NAME_OWNERS.name(), |key: &[u8]| {
                 NAME_OWNERS.decode_key(key).ok().map(|key| key.zone)
+            }),
+            (TRANSFER_STATE.name(), |key: &[u8]| {
+                TRANSFER_STATE.decode_key(key).ok()
             }),
         ] {
             let mut start = std::ops::Bound::Unbounded;
@@ -1085,6 +1089,9 @@ impl ZoneService {
                 id,
                 self.config.import_chunk,
             )?;
+            if view.get_typed(&TRANSFER_STATE, &id)?.is_some() {
+                batch.delete_typed(&TRANSFER_STATE, &id);
+            }
             if rows.is_empty() && !owners_left && batch.is_empty() {
                 return Ok(());
             }

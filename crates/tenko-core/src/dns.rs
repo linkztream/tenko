@@ -2374,9 +2374,10 @@ pub mod tables {
 
     /// The tables a node with the `dns` role receives through node sync: every table of the
     /// namespace except `dns.sign_state` and `dns.transfer_state`, which only the leader
-    /// services on the controllers read (plan section 3.2). Declared now and consumed by no node in Phase 2: the one
-    /// node of Phase 2 runs the role in the controller's process and reads the store
-    /// directly (plan section 2.10); the node-file feed is Phase 5. The trust anchors and
+    /// services on the controllers read (plan section 3.2). Declared now and consumed by no
+    /// node in Phase 2: the one node of Phase 2 runs the role in the controller's process
+    /// and reads the store directly (plan section 2.10); the node-file feed is Phase 5. The
+    /// trust anchors and
     /// the negative trust anchors are in it (recursion plan section 3.2), so a Phase 5 node
     /// validates with the same anchors. The name owners and the account metadata are in it
     /// (identity plan section 3.20): a Phase 5 `dns` node applies the ownership rules and

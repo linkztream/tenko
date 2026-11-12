@@ -2527,18 +2527,19 @@ impl LeaderLoop {
             // The self-test finishes a pending change first, and its findings tell the
             // operator what the KDC says when the change cannot be finished. Every attempt
             // costs failed pre-authentications that an AD lockout policy counts, so the
-            // next one waits twice as long, up to the self-test's interval.
+            // next one waits twice as long, up to the self-test's interval; the wait is set
+            // before the attempt, so that an attempt that fails on the way waits too.
+            waits.recovery_wait = (waits.recovery_wait * 2).clamp(
+                service.config.tick,
+                service.config.check_every.max(service.config.tick),
+            );
+            waits.recovery = now.checked_add(waits.recovery_wait);
             service.check(&cx, epoch).await?;
             if service
                 .status()
                 .await?
                 .is_some_and(|account| has_pending(&account))
             {
-                waits.recovery_wait = (waits.recovery_wait * 2).clamp(
-                    service.config.tick,
-                    service.config.check_every.max(service.config.tick),
-                );
-                waits.recovery = now.checked_add(waits.recovery_wait);
                 return Ok(Due::Checked);
             }
             *waits = Waits {

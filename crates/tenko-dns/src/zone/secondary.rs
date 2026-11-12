@@ -298,6 +298,9 @@ struct ZoneState {
     requested: Option<Requested>,
     /// The backoff from unsigned NOTIFY messages.
     backoff: Backoff,
+    /// The term start, counted as the last refresh of a copy that had no stamp, while the
+    /// store has not taken it.
+    assumed: Option<Timestamp>,
     /// An operator asked for the refresh through the API: it applies a transfer whose
     /// serial is older than the copy's.
     forced: bool,
@@ -348,6 +351,7 @@ impl ZoneState {
             running: false,
             requested: None,
             backoff: Backoff::default(),
+            assumed: None,
             forced: false,
         }
     }
@@ -885,39 +889,39 @@ impl Inner {
     async fn reconcile(&self, epoch: u64) -> ZoneResult<()> {
         let view = self.zones.view(None).await?;
         let rows = ZoneService::zones(view.as_ref())?;
-        let secondaries: Vec<&Zone> = rows
+        let secondaries: HashMap<ZoneId, &Zone> = rows
             .iter()
             .map(|row| &row.zone)
             .filter(|zone| zone.kind == ZoneKind::Secondary)
+            .map(|zone| (zone.id, zone))
             .collect();
-        let known: Vec<ZoneId> = self.lock().keys().copied().collect();
+        let known: std::collections::HashSet<ZoneId> = self.lock().keys().copied().collect();
         let now = Timestamp::now();
         let mut fresh = Vec::new();
-        let mut unstamped = Vec::new();
-        for zone in secondaries.iter().filter(|zone| !known.contains(&zone.id)) {
+        for zone in secondaries
+            .values()
+            .filter(|zone| !known.contains(&zone.id))
+        {
             let held = held_copy(view.as_ref(), zone)?;
             if let Some(held) = held
                 && let Some(given) = held.given_expire
             {
                 held.timers.log_raised(&zone.name, given);
             }
-            let expires = held.map(|held| {
-                held.expires().unwrap_or_else(|| {
-                    unstamped.push((zone.id, held.serial));
+            let mut state = ZoneState::new(held.map(|held| held.serial), statuses(zone), None);
+            if let Some(held) = held {
+                state.expires = Some(held.expires().unwrap_or_else(|| {
+                    state.assumed = Some(now);
                     after(now, held.timers.expire)
-                })
-            });
-            let state = ZoneState::new(held.map(|held| held.serial), statuses(zone), expires);
+                }));
+            }
             fresh.push((zone.id, state));
         }
-        if !unstamped.is_empty() {
-            self.stamp_unknown(&unstamped, now, epoch).await;
-        }
-        {
+        let unstored: Vec<(ZoneId, u32, Timestamp)> = {
             let mut state = self.lock();
-            state.retain(|id, _| secondaries.iter().any(|zone| zone.id == *id));
-            for zone in &secondaries {
-                let Some(entry) = state.get_mut(&zone.id) else {
+            state.retain(|id, _| secondaries.contains_key(id));
+            for (id, entry) in &mut *state {
+                let Some(zone) = secondaries.get(id) else {
                     continue;
                 };
                 if entry
@@ -933,6 +937,13 @@ impl Inner {
             for (id, entry) in fresh {
                 state.entry(id).or_insert(entry);
             }
+            state
+                .iter()
+                .filter_map(|(id, entry)| Some((*id, entry.serial?, entry.assumed?)))
+                .collect()
+        };
+        if !unstored.is_empty() {
+            self.store_assumed(&unstored, epoch).await;
         }
         for row in rows
             .iter()
@@ -1101,8 +1112,13 @@ impl Inner {
             let mut batch = WriteBatch::for_request(&cx);
             batch.preconditions.push(tenko_store::fence(epoch));
             let last = rows.len() < CHUNK;
+            // The SOA goes in the last batch, as a transfer writes it last: a term that ends
+            // between two batches leaves a copy the next leader still sees and lets go.
+            let soa = soa_key(&zone);
             for (_, rrset, _) in &rows {
-                stage_delete(&mut batch, rrset);
+                if last || rrset.key() != soa {
+                    stage_delete(&mut batch, rrset);
+                }
             }
             if last {
                 for scope in &zone.scopes {
@@ -1124,40 +1140,80 @@ impl Inner {
         }
     }
 
-    /// Stores the term start as the last refresh of copies that have no stamp for their
-    /// serial, so that the grace they get is given once.
-    async fn stamp_unknown(&self, copies: &[(ZoneId, u32)], at: Timestamp, epoch: u64) {
+    /// Stores the term start counted as the last refresh of copies that had no stamp for
+    /// their serial, so that the grace they get is given once; what the store refuses is
+    /// tried again at the next reconcile.
+    async fn store_assumed(&self, copies: &[(ZoneId, u32, Timestamp)], epoch: u64) {
         tracing::info!(
             zones = copies.len(),
-            "secondary copies without a record of their last refresh count as refreshed now"
+            "secondary copies without a record of their last refresh count as refreshed at the term start"
         );
         let cx = system();
         for chunk in copies.chunks(CHUNK) {
             let mut batch = WriteBatch::for_request(&cx);
             batch.preconditions.push(tenko_store::fence(epoch));
-            for (zone, serial) in chunk {
-                if let Err(error) = stage_stamp(&mut batch, *zone, *serial, at) {
+            for (zone, serial, at) in chunk {
+                if let Err(error) = stage_stamp(&mut batch, *zone, *serial, *at) {
                     tracing::warn!(%zone, %error, "the refresh record of a secondary copy could not be staged");
                 }
             }
-            if let Err(error) = self.zones.store().propose_background(batch).await {
-                tracing::warn!(%error, "the refresh records of secondary copies could not be written; they count from the next term start");
+            match self.zones.store().propose_background(batch).await {
+                Ok(_) => {
+                    let mut state = self.lock();
+                    for (zone, serial, _) in chunk {
+                        if let Some(entry) = state.get_mut(zone)
+                            && entry.serial == Some(*serial)
+                        {
+                            entry.assumed = None;
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "the refresh records of secondary copies could not be written; the next look tries again");
+                }
             }
         }
     }
 
     /// The end of a zone's refresh: its state moves by the outcome (`None` when the refresh
     /// could not run or panicked) and the timers of the SOA it holds now.
+    ///
+    /// The serial and the expiry are then taken from the store, not from the outcome: a
+    /// refresh may have written its transfer and failed after (a catalog's members), and
+    /// the stored copy and stamp are what a restart would read.
     async fn finish(&self, id: ZoneId, outcome: Option<Refreshed>) {
-        let timers = match self.zones.view(None).await {
+        let read = match self.zones.view(None).await {
             Ok(view) => ZoneService::zone(view.as_ref(), id)
-                .ok()
-                .and_then(|row| held_copy(view.as_ref(), &row.zone).ok().flatten()),
-            Err(_) => None,
-        }
-        .map_or(Timers::DEFAULT, |held| held.timers);
-        if let Some(zone) = self.lock().get_mut(&id) {
-            zone.finish(outcome, Timestamp::now(), timers);
+                .and_then(|row| held_copy(view.as_ref(), &row.zone)),
+            Err(error) => Err(error),
+        };
+        let mut state = self.lock();
+        let Some(zone) = state.get_mut(&id) else {
+            return;
+        };
+        match read {
+            Ok(held) => {
+                zone.finish(
+                    outcome,
+                    Timestamp::now(),
+                    held.map_or(Timers::DEFAULT, |held| held.timers),
+                );
+                zone.serial = held.map(|held| held.serial);
+                if let Some(held) = held
+                    && let Some(expires) = held.expires()
+                {
+                    zone.expires = Some(expires);
+                    zone.assumed = None;
+                } else if held.is_none() {
+                    zone.expires = None;
+                }
+            }
+            // Without the store's word the refresh counts as failed: the copy keeps its
+            // expiry and is retried on its timer.
+            Err(error) => {
+                tracing::warn!(zone = %id, %error, "the copy of a secondary zone could not be read after its refresh");
+                zone.finish(None, Timestamp::now(), Timers::DEFAULT);
+            }
         }
     }
 
@@ -1240,15 +1296,7 @@ impl Inner {
         // One deadline for the whole refresh, whichever primaries it tries.
         let deadline = tokio::time::Instant::now() + self.settings.limits.deadline;
         let held = view
-            .get_typed(
-                &RRSETS,
-                &RrSetKey {
-                    zone: id,
-                    scope: ScopeName::DEFAULT,
-                    name: zone.name.clone(),
-                    rtype: Rtype::SOA,
-                },
-            )
+            .get_typed(&RRSETS, &soa_key(&zone))
             .ok()
             .flatten()
             .and_then(|(soa, _)| {

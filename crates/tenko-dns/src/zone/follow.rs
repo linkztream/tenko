@@ -10,6 +10,8 @@
 //!   revision becomes the last one seen.
 //! - A stream that ends because its reader lagged is opened again from the last revision
 //!   seen: the change sets in between come as usual, nothing is lost and nothing is reset.
+//!   Before the first change set there is no revision to resume from: the stream is opened
+//!   at the current revision again and the answer is [`Followed::Reset`].
 //! - When the store no longer holds the revisions after the last one seen (`Compacted`,
 //!   whether the stream ends with it or opening answers it), the gap cannot be replayed:
 //!   the stream is opened at the current revision and the answer is [`Followed::Reset`].
@@ -102,13 +104,23 @@ impl Follow {
                     self.backoff = BACKOFF_MIN;
                     return Followed::Changes(set);
                 }
-                Some(Err(WatchError::Lagged { .. })) => self.stream = None,
+                Some(Err(WatchError::Lagged { .. })) => self.reopen(),
                 Some(Err(WatchError::Compacted { .. })) => self.gap(),
                 None => {
-                    self.stream = None;
+                    self.reopen();
                     self.failed(&"the change stream ended");
                 }
             }
+        }
+    }
+
+    /// The stream ends; the next one starts after the last revision seen. Before any
+    /// change set was seen there is no such revision: the next one starts at the current
+    /// revision, and what came in between is read whole (a reset).
+    fn reopen(&mut self) {
+        self.stream = None;
+        if self.last.is_none() {
+            self.reset = true;
         }
     }
 

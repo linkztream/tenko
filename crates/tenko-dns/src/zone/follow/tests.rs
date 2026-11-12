@@ -113,3 +113,21 @@ async fn a_stopped_store_is_tried_once_per_growing_pause() {
         ]
     );
 }
+
+/// A stream that lags before it handed out any change set has no revision to resume
+/// from: the follower says to read everything again, so nothing in between is lost.
+#[tokio::test]
+async fn a_lag_before_the_first_change_set_is_a_reset() {
+    let store = MemStore::new(MemStoreConfig {
+        watch_max_lag: 1,
+        ..MemStoreConfig::default()
+    });
+    let mut follow = Follow::new(Arc::new(store.clone()), filter(), "test");
+    assert!(matches!(follow.next().await, Followed::Reset));
+    for serial in 1..8 {
+        write(&store, serial).await;
+    }
+    assert!(matches!(follow.next().await, Followed::Reset));
+    let after = write(&store, 9).await;
+    assert_eq!(changes(&mut follow).await, after);
+}
