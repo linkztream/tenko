@@ -741,7 +741,7 @@ tenko upgrade layout [--config FILE] [--data-dir PATH]
 |---|---|
 | `--config FILE` | The configuration file (also `TENKO_CONFIG`). It names the data directory and the Raft node id (`node.id`) of the store. |
 | `--data-dir PATH` | The data directory to check. It overrides `data_dir` of the configuration and `TENKO_DATA_DIR`. The server that uses it must be stopped. |
-| `--work-dir PATH` | The directory under which the copy for the dry run goes, in a new subdirectory `tenko-upgrade-check-<id>` that is removed afterwards; the directory itself and its other files stay. The default is `<data_dir>/upgrade-check`, which is removed afterwards. |
+| `--work-dir PATH` | The directory under which the copy for the dry run goes, in a new subdirectory `tenko-upgrade-check-<id>` that is removed afterwards; the directory itself and its other files stay, and a directory that did not exist is created and removed again when it is empty. The default is `<data_dir>/upgrade-check`, which is removed afterwards. |
 | `--json` | Print the report as JSON. |
 
 Two more options exist for the install job and are not part of the operator interface:
@@ -1089,7 +1089,7 @@ A release:
 | `notes` | string | Markdown: the changelog section of the version; installations accept at most 64 KiB, and the release run writes at most 48 KiB (below) |
 | `security` | boolean | True when the changelog section has a non-blank `### Security` subsection; default false |
 | `requires_action` | boolean | True when it has a non-blank `### Action required` subsection; default false |
-| `action` | string | Markdown: what the operator must do. Required when `requires_action` is true; installations accept at most 16 KiB, and the release run fails above 12 KiB |
+| `action` | string | Markdown: what the operator must do. Required when `requires_action` is true; installations accept at most 16 KiB, and the release run writes at most 12 KiB, shortened as the notes are |
 | `format` | number | The data-directory format the release writes; optional, at least 1 |
 | `assets` | array | The downloadable files, at most one per platform |
 | `image` | string | The container image reference of the release; optional |
@@ -1108,24 +1108,30 @@ An asset:
 The release run (`scripts/release-manifest.mjs`) keeps every text and the whole manifest a
 quarter below what installations accept, so that a manifest never stops the update notices
 of installed versions: the notes of a release at most 48 KiB, its action at most 12 KiB, the
-manifest at most 768 KiB. Longer notes are shortened by whole entries, never inside one:
+manifest at most 768 KiB. Longer notes are shortened in stages, each only when the ones
+before are not enough, and the result always fits:
 
-- every `### ` heading stays; a heading whose entries were left out says how many, as
-  `- (and 4 entries more in the full notes)`;
-- the entries under `### Security` and `### Action required`, and every entry that says
-  "Action required", are never left out; the others are left out from the end of the
-  heading that holds the most of them;
-- only when the entries that are never left out do not fit by themselves is each entry under
-  `### Security` shown as its first sentence (an entry without a short first sentence stays
-  whole);
-- a closing line says how many entries are shown, and whether the security entries are in
-  short form, and links the full notes: `CHANGELOG.md` at the release's tag.
+1. entries that are neither under `### Security` nor say "Action required" are left out,
+   whole, from the end of the heading that holds the most of them;
+2. the entries under `### Security` are shown as their first sentence (it ends at the first
+   period followed by a space and a capital letter, or by the end, outside code and
+   parentheses; an entry without one within 600 bytes stays whole);
+3. entries under `### Security` are left out, from the end of the heading that holds the most;
+4. the entries under `### Action required` and those that say "Action required" are shown as
+   their first sentence;
+5. those are left out, the same way;
+6. only the closing line remains.
 
-When the manifest would exceed 768 KiB, the notes of the oldest releases are reduced first to
-the entries never left out. A release whose action, or whose essential entries in short form,
-do not fit, and a manifest that does not fit even then, stop the run with a message that
-names the release and the sizes. The run's log has a line for every release whose notes it
-shortened, with the sizes before and after and the rule that applied.
+Every `### ` heading stays; a heading whose entries were left out says how many, and how many
+of them require an action, as `- (and 4 entries more in the full notes, 1 of them with an
+action required)`. A closing line says how many entries are shown, which are in short form and
+how many with an action required are not shown, and links the full notes: `CHANGELOG.md` at
+the release's tag. The action text is shortened the same way to 12 KiB.
+
+When the manifest would exceed 768 KiB, the notes of the oldest releases are reduced first,
+oldest first, to their essential entries, then to their closing line. Only a manifest whose
+files alone do not fit stops the run. The run's log has a line for every text it shortened,
+with the sizes before and after and the stages that applied.
 
 A release may also have `installers`: packages that install the product, today the Windows
 MSI. An installer has the fields of an asset plus `kind` (`msi`); its file is named

@@ -1160,12 +1160,36 @@ describe("shortenNotes", () => {
     assert.match(lines[0] ?? "", /\(\d+ entries left out, security entries in short form\)$/);
   });
 
-  test("stops the run when even the short form does not fit", () => {
-    const text = body([["Added", 10, 1000], ["Action required", 40, 1000]]);
-    assert.throws(
-      () => shortenNotes(text, { maxBytes: 30000, version: "0.2.0", repository: REPO }),
-      (error) => error instanceof ManifestError && /release 0\.2\.0: .*never left out; the bound is 30000 bytes/.test(error.message),
-    );
+  test("leaves out security entries from the end when their short form does not fit", () => {
+    // Each security entry is one sentence of 1,000 bytes: its short form is the whole entry.
+    const text = body([["Added", 10, 1000], ["Security", 200, 1000], ["Action required", 3, 1000, 2]]);
+    /** @type {string[]} */
+    const lines = [];
+    const notes = shortenNotes(text, { maxBytes: MAX_NOTES_BYTES, version: "0.2.0", repository: REPO, log: (line) => lines.push(line) });
+    assert.ok(Buffer.byteLength(notes, "utf8") <= MAX_NOTES_BYTES);
+    assert.ok(notes.includes("- Security entry 0: "), "the first security entries stay");
+    assert.ok(!notes.includes("- Security entry 199:"), "the last ones are left out");
+    assert.match(notes, /### Security\n\n[^]*- \(and \d+ entries more in the full notes\)/);
+    assert.equal(notes.split("The details follow here:").length - 1, 3, "the action entries stay whole");
+    assert.match(notes, /\*Shortened: \d+ of 213 entries are shown, the security entries in short form \(their first sentence\)\. The full notes are in \[/);
+    assert.match(lines[0] ?? "", /\(10 entries left out, security entries in short form, security entries left out\)$/);
+  });
+
+  test("shortens and then leaves out the action entries last, and says so", () => {
+    const text = body([["Added", 5, 1000], ["Security", 5, 1000], ["Action required", 200, 1000]]);
+    const notes = shortenNotes(text, { maxBytes: 30000, version: "0.2.0", repository: REPO });
+    assert.ok(Buffer.byteLength(notes, "utf8") <= 30000);
+    assert.ok(!notes.includes("- Security entry"), "every security entry went before an action entry");
+    assert.ok(notes.includes("- Action required entry 0: "), "the first action entries stay");
+    assert.match(notes, /- \(and \d+ entries more in the full notes, \d+ of them with an action required\)/);
+    assert.match(notes, /the security and action entries in short form \(their first sentence\)\. \d+ entries with an action required are among those not shown\./);
+  });
+
+  test("always fits, down to the closing line alone", () => {
+    const text = body([["Security", 3, 1000], ["Action required", 3, 1000]]);
+    const notes = shortenNotes(text, { maxBytes: 400, version: "0.2.0", repository: REPO });
+    assert.ok(Buffer.byteLength(notes, "utf8") <= 400, notes);
+    assert.match(notes, /^\*Shortened: 0 of 6 entries are shown, the security and action entries in short form \(their first sentence\)\. 3 entries with an action required are among those not shown\./);
   });
 
   test("the essential form keeps only what is never left out", () => {
@@ -1235,9 +1259,13 @@ describe("fitManifest", () => {
     assert.equal(manifest.releases[29]?.notes, sections.get("0.1.0").body, "the input is not modified");
   });
 
-  test("stops the run when even the essential notes do not fit", () => {
-    const { manifest, sections } = manifestOf(3, 1000);
+  test("reduces old notes to their closing line, and stops only when the files do not fit", () => {
+    const { manifest, sections } = manifestOf(40, 40000);
+    for (const release of manifest.releases) release.assets = [{ platform: "linux-x86_64", name: "x".repeat(19000) }];
+    const fitted = fitManifest(manifest, sections, REPO);
+    assert.ok(Buffer.byteLength(formatManifest(fitted), "utf8") <= MAX_MANIFEST_BYTES);
+    assert.match(fitted.releases[fitted.releases.length - 1]?.notes ?? "", /^\*Shortened: 0 of 41 entries are shown/);
     for (const release of manifest.releases) release.assets = [{ platform: "linux-x86_64", name: "x".repeat(300000) }];
-    assert.throws(() => fitManifest(manifest, sections, REPO), (error) => error instanceof ManifestError && /the bound is 786432 bytes/.test(error.message));
+    assert.throws(() => fitManifest(manifest, sections, REPO), (error) => error instanceof ManifestError && /its files, not its notes, are too many/.test(error.message));
   });
 });

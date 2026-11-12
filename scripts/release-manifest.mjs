@@ -23,10 +23,10 @@
 // section of the changelog being released, its image must be this release's repository with
 // its own version, its format no greater than this one's, and fields schema 1 does not know
 // are left out. Every text is bounded below what every released installation accepts, and so
-// is the whole manifest (READER_LIMITS, MAX_*): long notes are shortened by whole entries,
-// never inside one, the entries under `### Security` and those that say "Action required"
-// are never left out (when they alone do not fit, each Security entry is shown as its first
-// sentence), and a closing line links the full notes (shortenNotes, fitManifest). The run
+// is the whole manifest (READER_LIMITS, MAX_*): long notes are shortened in stages, whole
+// entries first, the entries under `### Security` and those that say "Action required" last,
+// and a closing line links the full notes (shortenNotes, fitManifest); the shortening always
+// fits, so no size of the notes stops a release. The run
 // prints a line for every release whose notes it shortened.
 // SHA256SUMS lists the
 // manifest itself, computed from the final text, so that what is attested and signed covers
@@ -92,10 +92,24 @@ export function repositoryOf(url) {
 }
 
 /**
+ * @typedef {"optional" | "security" | "action"} EntryKind what an entry may lose: an
+ * `optional` entry is left out first; a `security` entry (under `### Security`) is shortened
+ * and then left out; an `action` entry (under `### Action required`, or one that says
+ * "Action required") last of all
+ */
+
+/**
+ * @typedef {object} NotesEntry
+ * @property {string} text
+ * @property {boolean} kept
+ * @property {EntryKind} kind
+ */
+
+/**
  * @typedef {object} NotesPart a `### ` heading of a section with its entries
  * @property {string | null} heading null for text before the first heading
  * @property {string[]} lead lines between the heading and its first entry
- * @property {{ text: string, kept: boolean, protected: boolean }[]} entries
+ * @property {NotesEntry[]} entries
  */
 
 /**
@@ -114,19 +128,19 @@ function notesParts(body) {
     if (heading !== null) {
       parts.push({ heading: /** @type {string} */ (heading[1]).trim(), lead: [], entries: [] });
     } else if (/^[-*] /.test(line)) {
-      part.entries.push({ text: line, kept: true, protected: false });
+      part.entries.push({ text: line, kept: true, kind: "optional" });
     } else if (part.entries.length > 0) {
-      const entry = /** @type {{ text: string }} */ (part.entries[part.entries.length - 1]);
+      const entry = /** @type {NotesEntry} */ (part.entries[part.entries.length - 1]);
       entry.text += `\n${line}`;
     } else {
       part.lead.push(line);
     }
   }
   for (const part of parts) {
-    const all = part.heading === "Security" || part.heading === "Action required";
     for (const entry of part.entries) {
       entry.text = entry.text.trimEnd();
-      entry.protected = all || entry.text.includes("Action required");
+      if (part.heading === "Action required" || entry.text.includes("Action required")) entry.kind = "action";
+      else if (part.heading === "Security") entry.kind = "security";
     }
   }
   return parts.filter((p) => p.heading !== null || p.entries.length > 0 || p.lead.some((l) => l.trim() !== ""));
@@ -174,106 +188,156 @@ export function firstSentence(entry) {
 
 /**
  * The notes of `parts` with the entries still kept, a line per heading for those left out,
- * and the closing line.
+ * and the closing line. `short` names the kinds whose entries are in short form; with
+ * `bare` only the closing line is written.
  *
  * @param {NotesPart[]} parts
  * @param {string} version
  * @param {string | null} repository
+ * @param {Set<EntryKind>} short
+ * @param {boolean} bare
  * @returns {string}
  */
-function renderNotes(parts, version, repository, short = false) {
+function renderNotes(parts, version, repository, short, bare) {
   /** @type {string[]} */
   const blocks = [];
   let shown = 0;
   let total = 0;
+  let actionsLeft = 0;
   for (const part of parts) {
+    const kept = part.entries.filter((e) => e.kept && !bare);
+    const left = part.entries.length - kept.length;
+    const actions = part.entries.filter((e) => e.kind === "action" && !(e.kept && !bare)).length;
+    shown += kept.length;
+    total += part.entries.length;
+    actionsLeft += actions;
+    if (bare) continue;
     if (part.heading !== null) blocks.push(`### ${part.heading}`);
     const lead = part.lead.join("\n").trim();
     if (lead !== "") blocks.push(lead);
-    const kept = part.entries.filter((e) => e.kept);
     blocks.push(...kept.map((e) => e.text));
-    const left = part.entries.length - kept.length;
-    if (left > 0) blocks.push(`- (${kept.length === 0 ? "" : "and "}${left} ${entriesWord(left)} more in the full notes)`);
-    shown += kept.length;
-    total += part.entries.length;
+    if (left > 0) {
+      const among = actions === 0 ? "" : `, ${actions} of them with an action required`;
+      blocks.push(`- (${kept.length === 0 ? "" : "and "}${left} ${entriesWord(left)} more in the full notes${among})`);
+    }
   }
   const where = repository === null ? "CHANGELOG.md of the repository" : `[CHANGELOG.md of ${version}](${repository}/blob/v${version}/CHANGELOG.md)`;
-  const form = short ? ", the security entries in short form (their first sentence)" : "";
-  blocks.push(`*Shortened: ${shown} of ${total} ${entriesWord(total)} are shown${form}. The full notes are in ${where}.*`);
+  const forms = short.has("action") ? "the security and action entries" : "the security entries";
+  const form = short.size === 0 ? "" : `, ${forms} in short form (their first sentence)`;
+  const missing = actionsLeft === 0 ? "" : ` ${actionsLeft} ${entriesWord(actionsLeft)} with an action required ${actionsLeft === 1 ? "is" : "are"} among those not shown.`;
+  blocks.push(`*Shortened: ${shown} of ${total} ${entriesWord(total)} are shown${form}.${missing} The full notes are in ${where}.*`);
   return blocks.join("\n\n");
 }
 
 /**
  * The notes of a release within `maxBytes` (UTF-8): the section body as it is when it fits,
- * else shortened by whole entries. Every heading stays; the entries under `### Security` and
- * `### Action required` and every entry that says "Action required" are never left out; the
- * others are left out from the end of the heading that holds the most of them, until the
- * notes fit; a closing line counts what is shown and links the full notes. Only when the
- * entries never left out do not fit by themselves is each Security entry shown as its
- * first sentence (firstSentence; an entry without one stays whole). With `essentialOnly`,
- * every entry that may be left out is (the reduced form of fitManifest). `log` receives a
- * line for notes it shortened: the sizes and the rule that applied.
+ * else shortened; the result always fits. Every heading stays, a line per heading counts the
+ * entries left out (and how many of them require an action), and a closing line counts what
+ * is shown and links the full notes. The stages, each only when the ones before are not
+ * enough:
  *
- * @param {string} body the changelog section without its heading
+ * 1. entries that are neither under `### Security` nor say "Action required" are left out,
+ *    whole, from the end of the heading that holds the most of them;
+ * 2. the entries under `### Security` are shown as their first sentence (firstSentence; an
+ *    entry without one stays whole);
+ * 3. entries under `### Security` are left out, from the end of the heading that holds the
+ *    most of them;
+ * 4. the entries under `### Action required` and those that say "Action required" are shown
+ *    as their first sentence;
+ * 5. those are left out, the same way;
+ * 6. only the closing line remains.
+ *
+ * When stage 1 alone was not enough, the entries of stage 1 are all left out. With
+ * `essentialOnly`, they are left out in any case (the reduced form of fitManifest). `log`
+ * receives a line for notes it shortened: what, the sizes, and the stages that applied.
+ *
+ * @param {string} body the changelog section, or a text of entries, without its heading
  * @param {object} options
  * @param {number} options.maxBytes
  * @param {string} options.version
  * @param {string | null} options.repository see repositoryOf
  * @param {boolean} [options.essentialOnly]
+ * @param {string} [options.what] what the log line names, `notes` by default
  * @param {(line: string) => void} [options.log]
  * @returns {string}
- * @throws {ManifestError} when the entries that are never left out do not fit
  */
-export function shortenNotes(body, { maxBytes, version, repository, essentialOnly = false, log = () => {} }) {
+export function shortenNotes(body, { maxBytes, version, repository, essentialOnly = false, what = "notes", log = () => {} }) {
   if (!essentialOnly && bytes(body) <= maxBytes) return body;
   const parts = notesParts(body);
-  const optional = parts.flatMap((p) => p.entries.filter((e) => !e.protected));
-  for (const entry of optional) entry.kept = false;
-  const short = bytes(renderNotes(parts, version, repository)) > maxBytes;
-  if (short) {
-    for (const entry of parts.filter((p) => p.heading === "Security").flatMap((p) => p.entries)) {
-      entry.text = firstSentence(entry.text) ?? entry.text;
-    }
-  }
-  if (!essentialOnly) for (const entry of optional) entry.kept = true;
-  for (;;) {
-    const notes = renderNotes(parts, version, repository, short);
-    if (bytes(notes) <= maxBytes) {
-      const left = optional.filter((e) => !e.kept).length;
-      const rules = [`${left} ${entriesWord(left)} left out`, ...(short ? ["security entries in short form"] : [])];
-      log(`notes of ${version}: ${bytes(body)} -> ${bytes(notes)} bytes (${rules.join(", ")})`);
-      return notes;
-    }
-    let largest = null;
-    let largestBytes = 0;
-    for (const part of parts) {
-      const size = part.entries.reduce((sum, e) => sum + (e.kept && !e.protected ? bytes(e.text) : 0), 0);
-      if (size > largestBytes) {
-        largest = part;
-        largestBytes = size;
+  /** @type {Set<EntryKind>} */
+  const short = new Set();
+  let bare = false;
+  const render = () => renderNotes(parts, version, repository, short, bare);
+  const fits = () => bytes(render()) <= maxBytes;
+  /** @param {EntryKind} kind */
+  const ofKind = (kind) => parts.flatMap((p) => p.entries.filter((e) => e.kind === kind));
+  /**
+   * Leaves out entries of `kind` from the end of the heading that holds the most of them
+   * until the notes fit; false when none is left.
+   * @param {EntryKind} kind
+   */
+  const leaveOut = (kind) => {
+    while (!fits()) {
+      let largest = null;
+      let largestBytes = 0;
+      for (const part of parts) {
+        const size = part.entries.reduce((sum, e) => sum + (e.kept && e.kind === kind ? bytes(e.text) : 0), 0);
+        if (size > largestBytes) {
+          largest = part;
+          largestBytes = size;
+        }
       }
+      if (largest === null) return false;
+      /** @type {NotesEntry} */ (largest.entries.findLast((e) => e.kept && e.kind === kind)).kept = false;
     }
-    if (largest === null) {
-      throw new ManifestError(
-        `release ${version}: its notes need ${bytes(notes)} bytes with only the entries under Security and Action required and those that say "Action required", which are never left out; the bound is ${maxBytes} bytes, so shorten those entries in the changelog`,
-      );
+    return true;
+  };
+  /** @param {EntryKind} kind */
+  const shorten = (kind) => {
+    short.add(kind);
+    for (const entry of ofKind(kind)) entry.text = firstSentence(entry.text) ?? entry.text;
+  };
+  /** @type {string[]} */
+  const stages = [];
+  const optional = ofKind("optional");
+  for (const entry of optional) entry.kept = false;
+  if (fits()) {
+    if (!essentialOnly) {
+      for (const entry of optional) entry.kept = true;
+      leaveOut("optional");
     }
-    const last = largest.entries.findLast((e) => e.kept && !e.protected);
-    /** @type {{ kept: boolean }} */ (last).kept = false;
+  } else {
+    shorten("security");
+    stages.push("security entries in short form");
+    if (!leaveOut("security")) {
+      stages.push("security entries left out");
+      shorten("action");
+      stages.push("action entries in short form");
+      if (!leaveOut("action")) {
+        stages.push("action entries left out");
+        bare = true;
+      }
+    } else if (ofKind("security").some((e) => !e.kept)) {
+      stages.push("security entries left out");
+    }
   }
+  const left = optional.filter((e) => !e.kept).length;
+  const notes = render();
+  log(`${what} of ${version}: ${bytes(body)} -> ${bytes(notes)} bytes (${[`${left} ${entriesWord(left)} left out`, ...stages].join(", ")})`);
+  return notes;
 }
 
 /**
  * The manifest within MAX_MANIFEST_BYTES: when it is larger, the notes of the oldest
  * releases are reduced first, oldest first, to their essential entries (shortenNotes with
- * `essentialOnly`), until it fits. `manifest` is not modified.
+ * `essentialOnly`), then to their closing line, until it fits. `manifest` is not modified.
  *
  * @param {{ schema: number, project: string, releases: Release[] }} manifest
  * @param {Map<string, { body: string }>} sections the changelog sections by version
  * @param {string | null} repository see repositoryOf
  * @param {(line: string) => void} [log] see shortenNotes
  * @returns {{ schema: number, project: string, releases: Release[] }}
- * @throws {ManifestError} when even then it does not fit
+ * @throws {ManifestError} when even then it does not fit: the entries' files, not the notes
  */
 export function fitManifest(manifest, sections, repository, log = () => {}) {
   let size = bytes(formatManifest(manifest));
@@ -288,9 +352,20 @@ export function fitManifest(manifest, sections, repository, log = () => {}) {
     releases[i] = { ...release, notes };
     size -= saved;
   }
+  // Then the closing line alone, oldest first.
+  for (let i = releases.length - 1; i >= 0 && size > MAX_MANIFEST_BYTES; i -= 1) {
+    const release = /** @type {Release} */ (releases[i]);
+    const section = sections.get(release.version);
+    if (section === undefined) continue;
+    const notes = shortenNotes(section.body, { maxBytes: 0, version: release.version, repository, essentialOnly: true, log });
+    const saved = bytes(JSON.stringify(release.notes)) - bytes(JSON.stringify(notes));
+    if (saved <= 0) continue;
+    releases[i] = { ...release, notes };
+    size -= saved;
+  }
   if (size > MAX_MANIFEST_BYTES) {
     throw new ManifestError(
-      `the manifest needs ${size} bytes with the notes of every earlier release reduced to their essential entries; the bound is ${MAX_MANIFEST_BYTES} bytes (installations refuse more than ${READER_LIMITS.manifest})`,
+      `the manifest needs ${size} bytes with the notes of every earlier release reduced to their closing line; the bound is ${MAX_MANIFEST_BYTES} bytes (installations refuse more than ${READER_LIMITS.manifest}): its files, not its notes, are too many`,
     );
   }
   return { ...manifest, releases };
@@ -503,28 +578,22 @@ export async function buildRelease({ version, changelogText, assetsDir, baseUrl,
 
 /**
  * The texts of a release's manifest entry, from its changelog section: the date, the notes
- * (shortened to MAX_NOTES_BYTES by shortenNotes), the action and the two flags. The action
- * is never shortened: a longer one stops the run.
+ * and the action (shortened to MAX_NOTES_BYTES and MAX_ACTION_BYTES by shortenNotes) and the
+ * two flags.
  *
  * @param {{ version: string | null, date: string | null, body: string, security: boolean, requiresAction: boolean, action: string }} section
  * @param {string | null} repository see repositoryOf
  * @param {(line: string) => void} log see shortenNotes
  * @returns {{ date: string, notes: string, security: boolean, requires_action: boolean, action?: string }}
- * @throws {ManifestError}
  */
 function releaseTexts(section, repository, log) {
   const version = /** @type {string} */ (section.version);
-  if (section.requiresAction && bytes(section.action) > MAX_ACTION_BYTES) {
-    throw new ManifestError(
-      `release ${version}: its Action required text has ${bytes(section.action)} bytes; the bound is ${MAX_ACTION_BYTES} bytes and the text is never shortened, so shorten it in the changelog`,
-    );
-  }
   return {
     date: /** @type {string} */ (section.date),
     notes: shortenNotes(section.body, { maxBytes: MAX_NOTES_BYTES, version, repository, log }),
     security: section.security,
     requires_action: section.requiresAction,
-    ...(section.requiresAction ? { action: section.action } : {}),
+    ...(section.requiresAction ? { action: shortenNotes(section.action, { maxBytes: MAX_ACTION_BYTES, version, repository, what: "action", log }) } : {}),
   };
 }
 
