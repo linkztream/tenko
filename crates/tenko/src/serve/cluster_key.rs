@@ -188,6 +188,8 @@ mod tests {
                     user: tenko_core::UserId::generate(),
                     first: tenko_core::AuthStrength::Password,
                     attempts: 0,
+                    // A new account whose access never ended is at generation 0.
+                    generation: 0,
                 },
                 now,
             )
