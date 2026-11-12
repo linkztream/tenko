@@ -29,6 +29,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { maskRust } from "./lib/lex.mjs";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** The repository root. */
@@ -48,71 +50,7 @@ const SKIPPED_FILES = /^(?:testing\.rs|testkit\.rs|tests\.rs|.*_tests?\.rs)$/;
  * @returns {{ code: string, masked: string }}
  */
 export function stripRust(source) {
-  const n = source.length;
-  const code = source.split("");
-  const masked = source.split("");
-  const blank = (arr, from, to) => {
-    for (let k = from; k < to; k += 1) if (arr[k] !== "\n") arr[k] = " ";
-  };
-  let i = 0;
-  while (i < n) {
-    const c = source[i];
-    const d = source[i + 1];
-    if (c === "/" && d === "/") {
-      let j = i;
-      while (j < n && source[j] !== "\n") j += 1;
-      blank(code, i, j);
-      blank(masked, i, j);
-      i = j;
-    } else if (c === "/" && d === "*") {
-      let depth = 1;
-      let j = i + 2;
-      while (j < n && depth > 0) {
-        if (source[j] === "/" && source[j + 1] === "*") {
-          depth += 1;
-          j += 2;
-        } else if (source[j] === "*" && source[j + 1] === "/") {
-          depth -= 1;
-          j += 2;
-        } else {
-          j += 1;
-        }
-      }
-      blank(code, i, j);
-      blank(masked, i, j);
-      i = j;
-    } else if (c === "r" && /^r#*"/.test(source.slice(i, i + 40)) && !/[A-Za-z0-9_]/.test(source[i - 1] ?? "")) {
-      // Raw string: r"...", r#"..."#.
-      const hashes = /^r(#*)"/.exec(source.slice(i, i + 40))[1].length;
-      const close = `"${"#".repeat(hashes)}`;
-      const start = i + 2 + hashes;
-      const end = source.indexOf(close, start);
-      const stop = end < 0 ? n : end;
-      blank(masked, start, stop);
-      i = stop + close.length;
-    } else if (c === '"') {
-      let j = i + 1;
-      while (j < n && source[j] !== '"') j += source[j] === "\\" ? 2 : 1;
-      blank(masked, i + 1, j);
-      i = j + 1;
-    } else if (c === "'") {
-      // A character literal or a lifetime.
-      if (d === "\\") {
-        let j = i + 2;
-        while (j < n && source[j] !== "'") j += 1;
-        blank(masked, i + 1, j);
-        i = j + 1;
-      } else if (source[i + 2] === "'") {
-        blank(masked, i + 1, i + 2);
-        i += 3;
-      } else {
-        i += 1;
-      }
-    } else {
-      i += 1;
-    }
-  }
-  return { code: code.join(""), masked: masked.join("") };
+  return { code: maskRust(source, { strings: false }), masked: maskRust(source) };
 }
 
 /**

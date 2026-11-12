@@ -107,14 +107,18 @@
 // The baseline (scripts/test-lint.baseline.json) lists today's findings by rule, file, scope
 // (the test or function) and the matched text, never by line. A finding not in it fails the
 // check, and so does an entry nothing matches any more: whoever fixes a test removes its
-// entry in the same commit (`--prune` does that and never adds one). Node's standard library
+// entry in the same commit (`--prune` does that and never adds one). The lexers and the
+// baseline machinery are shared with the copy lint (scripts/lib/). Node's standard library
 // only.
 
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
+
+import { lintKit } from "./lib/baseline.mjs";
+import { CLOSE, HAS_TEST, OPEN, closing, isIgnoreAttr, lineOf, lineStarts, maskRust, maskTs, parseRust, rel, rustTestModules, walk } from "./lib/lex.mjs";
+
+export { maskRust, maskTs, parseRust };
 
 export const RULES = {
   sleep: "a fixed sleep in a test; wait for a named condition or use a paused clock",
@@ -136,48 +140,23 @@ const SHARED_RS = /^(?:wait_until|wait_for|eventually|until|udp_port|free_port)$
 const SHARED_TS = /(?<![\w$.])(?:(?:async\s+)?function\s*\*?\s*|(?:const|let|var)\s+)(renderApp|axeViolations)\b/g;
 
 const LIMIT_MS = 10_000;
-const DEFAULT_BASELINE = "scripts/test-lint.baseline.json";
+
+const kit = lintKit({
+  tool: "test-lint",
+  rules: RULES,
+  docs: "docs/testing/rules.md",
+  about: "Known findings of scripts/test-lint.mjs (docs/testing/rules.md). This list only shrinks: a finding not listed fails the check, and so does an entry nothing matches. Whoever fixes a test removes its entry in the same commit (node scripts/test-lint.mjs --prune).",
+  fix: "fix the test",
+});
+export const { applyAllows, parseBaseline, growth, toEntries, formatBaseline, compare } = kit;
 
 // ---------------------------------------------------------------------------------------
 // Text helpers
-
-/** Offsets at which each line starts. */
-function lineStarts(text) {
-  const starts = [0];
-  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) starts.push(i + 1);
-  return starts;
-}
-
-/** The 1-based line of an offset. */
-function lineOf(starts, offset) {
-  let lo = 0;
-  let hi = starts.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (starts[mid] <= offset) lo = mid;
-    else hi = mid - 1;
-  }
-  return lo + 1;
-}
 
 /** Whitespace collapsed, a trailing comma before a closing bracket dropped, at most 120 characters. */
 export function normalize(text) {
   const flat = text.replace(/\s+/g, " ").replace(/,\s*([)\]}])/g, "$1").replace(/([([{])\s+/g, "$1").replace(/\s+([)\]}])/g, "$1").trim();
   return flat.length > 120 ? `${flat.slice(0, 117)}...` : flat;
-}
-
-const OPEN = new Set(["(", "[", "{"]);
-const CLOSE = new Set([")", "]", "}"]);
-
-/** The offset of the bracket that closes the one at `open` in masked text, or the text's end. */
-function closing(masked, open) {
-  let depth = 0;
-  for (let i = open; i < masked.length; i++) {
-    const c = masked[i];
-    if (OPEN.has(c)) depth++;
-    else if (CLOSE.has(c) && --depth === 0) return i;
-  }
-  return masked.length - 1;
 }
 
 /** The offset of the unmatched opening bracket before `at`, or -1 at a statement boundary. */
@@ -225,12 +204,6 @@ function statementEnd(masked, at) {
   }
   return masked.length - 1;
 }
-
-function blank(text) {
-  return text.replace(/[^\n\r]/g, " ");
-}
-
-const IDENT_CHAR = /[\w$]/;
 
 // ---------------------------------------------------------------------------------------
 // Runner references and exceptions
@@ -304,42 +277,6 @@ function runnerNear(lines, line, extra = "") {
   return null;
 }
 
-const ALLOW = /test-lint:\s*allow\b\s*([\w-]*)\s*(.*)$/;
-
-/** Applies the exception comments of one file: `{ kept, errors }`. */
-export function applyAllows(findings, text, file) {
-  const lines = text.split(/\r?\n/);
-  const allows = new Map(); // line -> { rule, used }
-  const errors = [];
-  lines.forEach((line, i) => {
-    const m = ALLOW.exec(line);
-    if (!m) return;
-    const rule = m[1];
-    const reason = m[2].replace(/\*\/\s*$|-->\s*$|["'`]\s*[,)]*\s*$/, "").trim();
-    if (!(rule in RULES)) {
-      errors.push({ file, line: i + 1, message: `test-lint: allow names no known rule (${rule || "none"}); rules: ${Object.keys(RULES).join(", ")}` });
-      return;
-    }
-    if (!reason) {
-      errors.push({ file, line: i + 1, message: `test-lint: allow ${rule} has no reason` });
-      return;
-    }
-    allows.set(i + 1, { rule, used: false });
-  });
-  const kept = [];
-  for (const f of findings) {
-    const own = allows.get(f.line);
-    const above = allows.get(f.line - 1);
-    const hit = own?.rule === f.rule ? own : above?.rule === f.rule ? above : null;
-    if (hit) hit.used = true;
-    else kept.push(f);
-  }
-  for (const [line, a] of allows) {
-    if (!a.used) errors.push({ file, line, message: `test-lint: allow ${a.rule} suppresses nothing on this line or the next; remove it` });
-  }
-  return { kept, errors };
-}
-
 // ---------------------------------------------------------------------------------------
 // Durations
 
@@ -365,219 +302,6 @@ function durationMs(m) {
 
 // ---------------------------------------------------------------------------------------
 // Rust
-
-/** Comments and the contents of string and character literals blanked; same length and lines. */
-export function maskRust(src) {
-  const out = [];
-  let i = 0;
-  let from = 0;
-  const n = src.length;
-  const cut = (start, end) => {
-    out.push(src.slice(from, start), blank(src.slice(start, end)));
-    from = end;
-  };
-  while (i < n) {
-    const c = src[i];
-    if (c === "/" && src[i + 1] === "/") {
-      let j = src.indexOf("\n", i);
-      if (j === -1) j = n;
-      cut(i, j);
-      i = j;
-    } else if (c === "/" && src[i + 1] === "*") {
-      let depth = 1;
-      let j = i + 2;
-      while (j < n && depth > 0) {
-        if (src[j] === "/" && src[j + 1] === "*") {
-          depth++;
-          j += 2;
-        } else if (src[j] === "*" && src[j + 1] === "/") {
-          depth--;
-          j += 2;
-        } else j++;
-      }
-      cut(i, j);
-      i = j;
-    } else if (c === '"') {
-      let j = i + 1;
-      while (j < n && src[j] !== '"') j += src[j] === "\\" ? 2 : 1;
-      cut(i + 1, Math.min(j, n));
-      i = j + 1;
-    } else if (c === "'") {
-      if (src[i + 1] === "\\") {
-        const j = src[i + 2] === "'" ? i + 3 : src.indexOf("'", i + 2);
-        if (j === -1) {
-          i++;
-          continue;
-        }
-        cut(i + 1, j);
-        i = j + 1;
-      } else {
-        const cp = src.codePointAt(i + 1);
-        const len = cp > 0xffff ? 2 : 1;
-        if (cp !== undefined && src[i + 1 + len] === "'" && src[i + 1] !== "\n") {
-          cut(i + 1, i + 1 + len);
-          i = i + 2 + len;
-        } else i++; // a lifetime or a label
-      }
-    } else if (/[A-Za-z_]/.test(c)) {
-      let j = i;
-      while (j < n && /\w/.test(src[j])) j++;
-      const word = src.slice(i, j);
-      if ((word === "r" || word === "br") && (src[j] === '"' || src[j] === "#")) {
-        let k = j;
-        let hashes = 0;
-        while (src[k] === "#") {
-          hashes++;
-          k++;
-        }
-        if (src[k] === '"') {
-          const end = src.indexOf(`"${"#".repeat(hashes)}`, k + 1);
-          const stop = end === -1 ? n : end;
-          cut(k + 1, stop);
-          i = stop + 1 + hashes;
-          continue;
-        }
-      }
-      if (word === "b" && src[j] === '"') {
-        i = j; // the string itself is handled next round
-        continue;
-      }
-      i = j;
-    } else i++;
-  }
-  out.push(src.slice(from));
-  return out.join("");
-}
-
-const TEST_ATTR = /^#\[\s*(?:\w+::)*test\s*[(\]]/;
-const IGNORE_ATTR = /^#\[\s*ignore\b|^#\[\s*cfg_attr\s*\([\s\S]*,\s*ignore\b/;
-/** An `#[ignore]` or `#[cfg_attr(<predicate>, ignore)]`, read with its strings blanked. */
-const isIgnoreAttr = (attr) => IGNORE_ATTR.test(maskRust(attr));
-
-/** A `#[cfg(...)]` whose predicate requires `test`: `test` or `all(..., test, ...)`. */
-function isCfgTest(attr) {
-  const m = /^#\[\s*cfg\s*\(([\s\S]*)\)\s*\]$/.exec(attr);
-  if (!m) return false;
-  const pred = m[1].replace(/\bnot\s*\([^()]*\)/g, "").trim();
-  return /^test$/.test(pred) || (/^all\s*\(/.test(pred) && /\btest\b/.test(pred));
-}
-
-/**
- * The structure of one Rust file: functions with their attributes and spans, test regions,
- * module declarations, closures and `return` statements.
- */
-export function parseRust(src, masked, fileIsTest) {
-  const fns = [];
-  const regions = fileIsTest ? [[0, src.length]] : [];
-  const mods = [];
-  const returns = [];
-  const loops = [];
-  const stack = [{ kind: "file", test: fileIsTest, fn: null, closure: false }];
-  let attrs = [];
-  let pending = null;
-  let depth = 0; // ( and [
-  const token = /#!?\[|[{}()[\];]|\b(fn|mod)\s+(?:r#)?([A-Za-z_]\w*)|\breturn\b/g;
-  let m;
-  while ((m = token.exec(masked)) !== null) {
-    const tok = m[0];
-    const top = stack[stack.length - 1];
-    if (tok[0] === "#") {
-      const open = m.index + tok.length - 1;
-      const end = closing(masked, open);
-      const text = src.slice(m.index, end + 1);
-      if (tok === "#![") {
-        if (top.kind === "file" && isCfgTest(text.replace("#![", "#["))) {
-          top.test = true;
-          regions.push([0, src.length]);
-        }
-      } else attrs.push(text);
-      token.lastIndex = end + 1;
-      continue;
-    }
-    if (m[1]) {
-      pending = { kind: m[1], name: m[2], attrs, depth, at: m.index };
-      attrs = [];
-      continue;
-    }
-    if (tok === "return") {
-      let inner = false;
-      for (let k = stack.length - 1; k >= 0 && stack[k].kind !== "fn"; k--) if (stack[k].closure) inner = true;
-      returns.push({ at: m.index, fn: top.fn, inner });
-      continue;
-    }
-    switch (tok) {
-      case "(":
-      case "[":
-        depth++;
-        break;
-      case ")":
-      case "]":
-        depth--;
-        break;
-      case ";":
-        if (pending && depth === pending.depth) {
-          if (pending.kind === "mod") mods.push({ name: pending.name, attrs: pending.attrs, test: top.test || pending.attrs.some(isCfgTest), at: pending.at, nested: stack.some((f) => f.kind === "mod") });
-          pending = null;
-        }
-        attrs = [];
-        break;
-      case "{": {
-        let frame;
-        if (pending && depth === pending.depth) {
-          const cfgTest = pending.attrs.some(isCfgTest);
-          if (pending.kind === "fn") {
-            const isTestFn = pending.attrs.some((a) => TEST_ATTR.test(a));
-            const test = top.test || cfgTest || isTestFn;
-            const testAttr = pending.attrs.find((a) => TEST_ATTR.test(a)) ?? "";
-            const rec = {
-              name: pending.name,
-              start: pending.at,
-              body: m.index,
-              end: src.length,
-              attrs: pending.attrs,
-              test,
-              isTestFn,
-              ignored: pending.attrs.some(isIgnoreAttr),
-              paused: /start_paused\s*=\s*true/.test(testAttr),
-            };
-            fns.push(rec);
-            frame = { kind: "fn", test, fn: rec, closure: false, start: m.index };
-            if (test && !top.test) regions.push([pending.at, null, frame]);
-          } else {
-            const test = top.test || cfgTest;
-            frame = { kind: "mod", test, fn: top.fn, closure: false, start: m.index };
-            if (test && !top.test) regions.push([pending.at, null, frame]);
-          }
-        } else {
-          const before = masked.slice(Math.max(0, m.index - 300), m.index);
-          const closure = /\|[^|;{}]*\|\s*(?:->[^{};|]*)?$/.test(before) || /\b(?:async\s+)?move\s*$|\basync\s*$/.test(before);
-          const head = before.slice(Math.max(before.lastIndexOf(";"), before.lastIndexOf("{"), before.lastIndexOf("}")) + 1);
-          const loop = !closure && /^\s*(?:'\w+\s*:\s*)?(?:loop|while|for)\b/.test(head);
-          // Another item under #[cfg(test)] (an `impl` block of test helpers) is test code too.
-          const cfgTest = !top.test && attrs.some(isCfgTest);
-          frame = { kind: "block", test: top.test || cfgTest, fn: top.fn, closure, loop, start: m.index };
-          if (loop) loops.push(frame);
-          if (cfgTest) regions.push([m.index, null, frame]);
-        }
-        // A brace inside a signature (a closure in a property test's strategy) keeps the
-        // function pending.
-        if (!(pending && depth > pending.depth)) pending = null;
-        attrs = [];
-        stack.push(frame);
-        break;
-      }
-      case "}": {
-        const frame = stack.length > 1 ? stack.pop() : null;
-        if (frame?.kind === "fn") frame.fn.end = m.index;
-        if (frame) frame.end = m.index;
-        attrs = [];
-        break;
-      }
-    }
-  }
-  const spans = regions.map(([start, end, frame]) => [start, end ?? frame?.end ?? src.length]);
-  return { fns, regions: spans, mods, returns, loops: loops.map((l) => [l.start, l.end ?? src.length, l.fn]) };
-}
 
 const ASSERT_MACRO = /\b(assert|assert_eq|assert_ne|debug_assert|debug_assert_eq|debug_assert_ne|prop_assert|prop_assert_eq|prop_assert_ne|assert_matches)!\s*([([{])/g;
 const FIRST_ASSERT = /\b(?:assert\w*|debug_assert\w*|prop_assert\w*|panic|unreachable)!|\.(?:unwrap_err|expect_err)\s*\(|\bassert_\w+\s*\(/g;
@@ -847,121 +571,6 @@ export function scanRust(src, { fileIsTest = false, root = ".", jobs = {} } = {}
 
 // ---------------------------------------------------------------------------------------
 // TypeScript
-
-const REGEX_BEFORE = /^(?:|[(,=:[!&|?{};+\-*%<>~^]|return|typeof|case|do|else|in|of|new|delete|void|throw|await|yield)$/;
-
-/** Comments and the contents of strings, template literals and regex literals blanked. */
-export function maskTs(src) {
-  const out = [];
-  let from = 0;
-  const n = src.length;
-  const cut = (start, end) => {
-    out.push(src.slice(from, start), blank(src.slice(start, end)));
-    from = end;
-  };
-  const templates = []; // brace depth at each open `${`
-  let braces = 0;
-  let i = 0;
-  // The last token of code: a punctuation character, a word, or "lit" after a literal. A
-  // slash after an operator, an opening bracket or a keyword starts a regex literal.
-  let last = "";
-  const template = (start) => {
-    // From inside a template literal at `start`; returns the offset after the closing
-    // backtick, or the offset of a `${` (after it) with the template pushed.
-    let j = start;
-    while (j < n) {
-      if (src[j] === "\\") j += 2;
-      else if (src[j] === "`") {
-        cut(start, j);
-        return j + 1;
-      } else if (src[j] === "$" && src[j + 1] === "{") {
-        cut(start, j);
-        templates.push(braces);
-        braces++;
-        return j + 2;
-      } else j++;
-    }
-    cut(start, n);
-    return n;
-  };
-  while (i < n) {
-    const c = src[i];
-    if (c === "/" && src[i + 1] === "/") {
-      let j = src.indexOf("\n", i);
-      if (j === -1) j = n;
-      cut(i, j);
-      i = j;
-    } else if (c === "/" && src[i + 1] === "*") {
-      let j = src.indexOf("*/", i + 2);
-      j = j === -1 ? n : j + 2;
-      cut(i, j);
-      i = j;
-    } else if (c === '"' || c === "'") {
-      let j = i + 1;
-      while (j < n && src[j] !== c && src[j] !== "\n") j += src[j] === "\\" ? 2 : 1;
-      if (src[j] !== c) {
-        i++; // not a string (an apostrophe in JSX text)
-        continue;
-      }
-      cut(i + 1, j);
-      i = j + 1;
-      last = "lit";
-    } else if (c === "`") {
-      i = template(i + 1);
-      last = "lit";
-    } else if (c === "/") {
-      // JSX: `/>` ends a tag and `</` opens a closing one; neither starts a regex literal.
-      if (!REGEX_BEFORE.test(last) || last === "<" || src[i + 1] === ">") {
-        i++;
-        last = c;
-        continue;
-      }
-      let j = i + 1;
-      let cls = false;
-      while (j < n && src[j] !== "\n") {
-        if (src[j] === "\\") j += 2;
-        else if (src[j] === "[") cls = true, j++;
-        else if (src[j] === "]") cls = false, j++;
-        else if (src[j] === "/" && !cls) break;
-        else j++;
-      }
-      if (src[j] !== "/") {
-        i++;
-        last = c;
-        continue;
-      }
-      cut(i + 1, j);
-      i = j + 1;
-      last = "lit";
-    } else if (c === "{") {
-      braces++;
-      i++;
-      last = c;
-    } else if (c === "}") {
-      braces--;
-      if (templates.length && templates[templates.length - 1] === braces) {
-        templates.pop();
-        out.push(src.slice(from, i + 1));
-        from = i + 1;
-        i = template(i + 1);
-        last = "lit";
-      } else {
-        i++;
-        last = c;
-      }
-    } else if (IDENT_CHAR.test(c)) {
-      let j = i;
-      while (j < n && IDENT_CHAR.test(src[j])) j++;
-      last = src.slice(i, j);
-      i = j;
-    } else {
-      if (!/\s/.test(c)) last = c;
-      i++;
-    }
-  }
-  out.push(src.slice(from));
-  return out.join("");
-}
 
 const TEST_CALL = /^(?:it|test)(?:\.(?:only|skip|fixme|fail|fails|concurrent|sequential|todo|slow))*$/;
 const EACH_CALL = /^(?:it|test)(?:\.\w+)*\.each$/;
@@ -1283,38 +892,6 @@ export function scanRetries(src, kind) {
 // ---------------------------------------------------------------------------------------
 // The tree
 
-const SKIP_DIRS = new Set(["node_modules", "target", "dist", ".git", ".artifacts"]);
-
-function walk(dir, out, filter) {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const e of entries) {
-    if (SKIP_DIRS.has(e.name)) continue;
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) walk(full, out, filter);
-    else if (filter(full)) out.push(full);
-  }
-}
-
-const rel = (root, file) => path.relative(root, file).split(path.sep).join("/");
-
-/** The `mod x;` file of a declaration in `file`, or null. */
-function modFile(file, decl) {
-  const pathAttr = decl.attrs.map((a) => /^#\[\s*path\s*=\s*"([^"]+)"\s*\]$/.exec(a)).find(Boolean);
-  const dir = path.dirname(file);
-  if (pathAttr) return path.join(dir, pathAttr[1]);
-  const base = path.basename(file);
-  const owner = base === "mod.rs" || base === "lib.rs" || base === "main.rs" || /[\\/]tests$/.test(dir) ? dir : path.join(dir, base.replace(/\.rs$/, ""));
-  for (const candidate of [path.join(owner, `${decl.name}.rs`), path.join(owner, decl.name, "mod.rs")]) if (existsSync(candidate)) return candidate;
-  return null;
-}
-
-const HAS_TEST = /cfg\s*\(\s*(?:all\s*\()?[^)]*\btest\b|#\[\s*(?:\w+::)*test\b/;
-
 /** Every finding of the tree under `root`, exceptions applied: `{ findings, errors }`. */
 export function lintTree(root) {
   const jobs = workflowJobs(root);
@@ -1334,39 +911,12 @@ export function lintTree(root) {
   walk(crates, rs, (f) => f.endsWith(".rs"));
   const isIntegration = (f) => /^crates\/[^/]+\/tests\//.test(rel(root, f));
   const isSrc = (f) => /^crates\/[^/]+\/src\//.test(rel(root, f));
-  const testModules = new Set();
   const cache = new Map();
   const read = (f) => {
     if (!cache.has(f)) cache.set(f, readFileSync(f, "utf8"));
     return cache.get(f);
   };
-  const queue = [];
-  for (const f of rs.filter(isSrc)) {
-    const text = read(f);
-    if (!HAS_TEST.test(text)) continue;
-    const { mods } = parseRust(text, maskRust(text), false);
-    for (const d of mods) {
-      if (!d.test || d.nested) continue;
-      const target = modFile(f, d);
-      if (target && !testModules.has(target)) {
-        testModules.add(target);
-        queue.push(target);
-      }
-    }
-  }
-  while (queue.length) {
-    const f = queue.pop();
-    const text = read(f);
-    const { mods } = parseRust(text, maskRust(text), true);
-    for (const d of mods) {
-      if (d.nested) continue;
-      const target = modFile(f, d);
-      if (target && !testModules.has(target)) {
-        testModules.add(target);
-        queue.push(target);
-      }
-    }
-  }
+  const testModules = rustTestModules(rs.filter(isSrc), read);
   for (const f of rs) {
     const integration = isIntegration(f);
     if (!integration && !isSrc(f)) continue;
@@ -1408,250 +958,6 @@ export function lintTree(root) {
   return { findings, errors };
 }
 
-// ---------------------------------------------------------------------------------------
-// The baseline
-
-const keyOf = (f) => JSON.stringify([f.rule, f.file, f.scope, f.text]);
-
-/** The baseline's entries from its JSON text; throws on a malformed file. */
-export function parseBaseline(text) {
-  const data = JSON.parse(text);
-  if (!data || !Array.isArray(data.findings)) throw new Error("the baseline has no findings array");
-  const seen = new Set();
-  for (const e of data.findings) {
-    if (typeof e.rule !== "string" || typeof e.file !== "string" || typeof e.scope !== "string" || typeof e.text !== "string") {
-      throw new Error(`malformed baseline entry ${JSON.stringify(e)}`);
-    }
-    if (!(e.rule in RULES)) throw new Error(`baseline entry with an unknown rule ${e.rule}`);
-    if (e.count !== undefined && !(Number.isInteger(e.count) && e.count > 1)) throw new Error(`baseline entry with a count that is not an integer above 1: ${JSON.stringify(e)}`);
-    if (seen.has(keyOf(e))) throw new Error(`baseline entry listed twice: ${JSON.stringify(e)}`);
-    seen.add(keyOf(e));
-  }
-  return data.findings.map((e) => ({ rule: e.rule, file: e.file, scope: e.scope, text: e.text, count: e.count ?? 1 }));
-}
-
-/** Code-unit order, the same on every host (no locale). */
-const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-
-/** Per rule, how much the baseline grew from `before` to `after`: `[{ rule, before, after }]`. */
-export function growth(before, after) {
-  const total = (entries) => {
-    const t = {};
-    for (const e of entries) t[e.rule] = (t[e.rule] ?? 0) + e.count;
-    return t;
-  };
-  const b = total(before);
-  const a = total(after);
-  return Object.keys(RULES)
-    .filter((r) => (a[r] ?? 0) > (b[r] ?? 0))
-    .map((r) => ({ rule: r, before: b[r] ?? 0, after: a[r] }));
-}
-
-/** Findings grouped into baseline entries, sorted. */
-export function toEntries(findings) {
-  const counts = new Map();
-  for (const f of findings) {
-    const k = keyOf(f);
-    const e = counts.get(k) ?? { rule: f.rule, file: f.file, scope: f.scope, text: f.text, count: 0 };
-    e.count++;
-    counts.set(k, e);
-  }
-  return [...counts.values()].sort((a, b) => order(a.file, b.file) || order(a.rule, b.rule) || order(a.scope, b.scope) || order(a.text, b.text));
-}
-
-/** The baseline file's text: one entry per line, so that removing one is a one-line diff. */
-export function formatBaseline(entries) {
-  const lines = entries.map((e) => {
-    const { count, ...rest } = e;
-    return `    ${JSON.stringify(count > 1 ? { ...rest, count } : rest)}`;
-  });
-  return [
-    "{",
-    '  "about": "Known findings of scripts/test-lint.mjs (docs/testing/rules.md). This list only shrinks: a finding not listed fails the check, and so does an entry nothing matches. Whoever fixes a test removes its entry in the same commit (node scripts/test-lint.mjs --prune).",',
-    '  "findings": [',
-    lines.join(",\n"),
-    "  ]",
-    "}",
-    "",
-  ].join("\n");
-}
-
-/** `{ fresh, stale }`: findings beyond the baseline, and entries (with the missing count) nothing matches. */
-export function compare(findings, entries) {
-  const left = new Map(entries.map((e) => [keyOf(e), e.count]));
-  const fresh = [];
-  for (const f of findings) {
-    const k = keyOf(f);
-    const n = left.get(k) ?? 0;
-    if (n > 0) left.set(k, n - 1);
-    else fresh.push(f);
-  }
-  const stale = [];
-  for (const e of entries) {
-    const n = left.get(keyOf(e));
-    if (n > 0) {
-      stale.push({ ...e, count: n });
-      left.set(keyOf(e), 0);
-    }
-  }
-  return { fresh, stale };
-}
-
-function perRule(items) {
-  const counts = Object.fromEntries(Object.keys(RULES).map((r) => [r, 0]));
-  for (const i of items) counts[i.rule] += i.count ?? 1;
-  return Object.entries(counts)
-    .filter(([, n]) => n > 0)
-    .map(([r, n]) => `${r} ${n}`)
-    .join(", ");
-}
-
-/**
- * `--grown-since <ref>`: fails (1) when a rule has more findings in the working tree's baseline
- * than in the baseline at the git ref, so that the baseline only shrinks. A rename moves an
- * entry without changing a rule's total and passes. A ref without the file (the commit that
- * adds it) or the all-zero SHA of a first push passes with a note.
- */
-function grownSince(root, baselineFile, ref) {
-  let after;
-  try {
-    after = parseBaseline(readFileSync(baselineFile, "utf8"));
-  } catch (error) {
-    console.error(`test-lint: cannot read the baseline ${baselineFile}: ${error.message}`);
-    return 2;
-  }
-  if (/^0+$/.test(ref)) {
-    console.log(`test-lint: no base to compare the baseline with (${ref}); passed`);
-    return 0;
-  }
-  const relPath = rel(root, baselineFile);
-  const exists = spawnSync("git", ["cat-file", "-e", `${ref}^{commit}`], { cwd: root, encoding: "utf8" });
-  if (exists.error) {
-    console.error(`test-lint: git is not available: ${exists.error.message}`);
-    return 2;
-  }
-  if (exists.status !== 0) {
-    // As `changelog.mjs check`: a base that does not exist here (a force push) passes, loudly.
-    console.log(`test-lint: NOTE: ${ref} is not a commit of this repository; the baseline was not compared`);
-    return 0;
-  }
-  const shown = spawnSync("git", ["show", `${ref}:${relPath}`], { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 });
-  if (shown.status !== 0) {
-    console.log(`test-lint: ${relPath} does not exist at ${ref}; nothing to compare with, passed`);
-    return 0;
-  }
-  let before;
-  try {
-    before = parseBaseline(shown.stdout);
-  } catch (error) {
-    console.error(`test-lint: cannot read the baseline at ${ref}: ${error.message}`);
-    return 2;
-  }
-  const grown = growth(before, after);
-  if (grown.length === 0) {
-    console.log(`test-lint: the baseline did not grow since ${ref} (${perRule(before) || "empty"} -> ${perRule(after) || "empty"})`);
-    return 0;
-  }
-  for (const g of grown) console.log(`${relPath}: ${g.rule} grew from ${g.before} to ${g.after} finding(s) since ${ref}`);
-  const added = compare(after.flatMap((e) => Array.from({ length: e.count }, () => e)), before).fresh;
-  for (const e of toEntries(added)) console.log(`  added: ${e.rule} ${e.file} [${e.scope}] \`${e.text}\`${e.count > 1 ? ` (${e.count})` : ""}`);
-  console.log("test-lint: the baseline only shrinks: fix the new finding, or give it an exception with a reason (docs/testing/rules.md)");
-  return 1;
-}
-
-function main() {
-  let values;
-  try {
-    ({ values } = parseArgs({
-      options: {
-        root: { type: "string" },
-        baseline: { type: "string" },
-        list: { type: "boolean", default: false },
-        prune: { type: "boolean", default: false },
-        "write-baseline": { type: "boolean", default: false },
-        "grown-since": { type: "string" },
-      },
-    }));
-  } catch (error) {
-    console.error(`test-lint: ${error.message}`);
-    return 2;
-  }
-  const root = path.resolve(values.root ?? path.dirname(path.dirname(fileURLToPath(import.meta.url))));
-  const baselineFile = path.resolve(root, values.baseline ?? DEFAULT_BASELINE);
-  if (!existsSync(path.join(root, "crates")) && !existsSync(path.join(root, "ui"))) {
-    console.error(`test-lint: ${root} has neither crates/ nor ui/`);
-    return 2;
-  }
-
-  if (values["grown-since"] !== undefined) return grownSince(root, baselineFile, values["grown-since"]);
-
-  if (values["write-baseline"] && existsSync(baselineFile)) {
-    console.error(`test-lint: ${rel(root, baselineFile)} exists. --write-baseline is for the first run only and does not`);
-    console.error("test-lint: overwrite a baseline: fix a new finding or give it an exception with a reason, and");
-    console.error("test-lint: remove fixed entries with --prune. To start over on purpose, delete the file first.");
-    return 2;
-  }
-
-  const { findings, errors } = lintTree(root);
-  const show = (f) => `${f.file}:${f.line}: ${f.rule}: ${f.message}${f.scope ? ` [${f.scope}]` : ""} \`${f.text}\``;
-
-  if (values["write-baseline"]) {
-    const entries = toEntries(findings);
-    console.error("test-lint: ======================================================================");
-    console.error("test-lint: WRITING A NEW BASELINE from every finding of today's tree.");
-    console.error("test-lint: This mode exists for the first run only. It accepts every finding as");
-    console.error("test-lint: known. Afterwards the baseline only shrinks: --prune removes fixed entries.");
-    console.error("test-lint: ======================================================================");
-    mkdirSync(path.dirname(baselineFile), { recursive: true });
-    writeFileSync(baselineFile, formatBaseline(entries));
-    console.error(`test-lint: wrote ${rel(root, baselineFile)}: ${findings.length} finding(s) in ${entries.length} entries (${perRule(entries) || "none"})`);
-    for (const e of errors) console.log(`${e.file}:${e.line}: ${e.message}`);
-    return errors.length ? 1 : 0;
-  }
-
-  let entries;
-  try {
-    entries = parseBaseline(readFileSync(baselineFile, "utf8"));
-  } catch (error) {
-    console.error(`test-lint: cannot read the baseline ${baselineFile}: ${error.message}`);
-    return 2;
-  }
-  const { fresh, stale } = compare(findings, entries);
-
-  if (values.prune) {
-    const staleKeys = new Map(stale.map((s) => [keyOf(s), s.count]));
-    const kept = [];
-    for (const e of entries) {
-      const drop = staleKeys.get(keyOf(e)) ?? 0;
-      if (e.count - drop > 0) kept.push({ ...e, count: e.count - drop });
-    }
-    writeFileSync(baselineFile, formatBaseline(kept));
-    for (const s of stale) console.log(`removed: ${s.rule} ${s.file} [${s.scope}] \`${s.text}\`${s.count > 1 ? ` (${s.count})` : ""}`);
-    console.log(`test-lint: pruned ${stale.reduce((n, e) => n + e.count, 0)} finding(s) from ${rel(root, baselineFile)}; nothing added`);
-  }
-
-  if (values.list) for (const f of findings) console.log(show(f));
-  else for (const f of fresh) console.log(show(f));
-  for (const e of errors) console.log(`${e.file}:${e.line}: ${e.message}`);
-  if (!values.prune) {
-    for (const s of stale) {
-      console.log(`${rel(root, baselineFile)}: stale: ${s.rule} ${s.file} [${s.scope}] \`${s.text}\`${s.count > 1 ? ` (${s.count} fewer)` : ""}: nothing matches it any more; remove the entry (node scripts/test-lint.mjs --prune)`);
-    }
-  }
-  const staleCount = values.prune ? 0 : stale.length;
-  const known = findings.length - fresh.length;
-  if (fresh.length === 0 && staleCount === 0 && errors.length === 0) {
-    console.log(`test-lint: no new finding; ${known} known finding(s) in the baseline (${perRule(findings) || "none"})`);
-    return 0;
-  }
-  const parts = [];
-  if (fresh.length) parts.push(`${fresh.length} finding(s) not in the baseline (fix the test, or add an exception: test-lint: allow <rule> <reason>)`);
-  if (staleCount) parts.push(`${staleCount} stale baseline entr${staleCount === 1 ? "y" : "ies"}`);
-  if (errors.length) parts.push(`${errors.length} malformed or unused exception(s)`);
-  console.log(`test-lint: ${parts.join("; ")}; rules in docs/testing/rules.md`);
-  return 1;
-}
-
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.exitCode = main();
+  process.exitCode = kit.main(lintTree, { defaultRoot: path.dirname(path.dirname(fileURLToPath(import.meta.url))), defaultBaseline: "scripts/test-lint.baseline.json" });
 }
