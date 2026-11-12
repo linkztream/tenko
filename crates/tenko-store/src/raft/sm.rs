@@ -1152,7 +1152,7 @@ impl RaftStateMachine<TypeConfig> for StateMachine {
 }
 
 #[cfg(test)]
-mod golden;
+mod golden_tests;
 
 #[cfg(test)]
 mod tests {
