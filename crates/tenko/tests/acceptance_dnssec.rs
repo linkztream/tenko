@@ -428,6 +428,10 @@ fn a_signed_zone_validates_with_nsec_and_nsec3_and_through_a_zsk_rollover() {
             Err(rows)
         }
     });
-    assert_eq!(answer_types(&ask_do(dns, "www.example.test", 1, true)), [1]);
+    // The answer path follows the store on its own, as it did when the signing started.
+    wait_until("no RRSIG in the answer", || {
+        let answer = answer_types(&ask_do(dns, "www.example.test", 1, true));
+        if answer == [1] { Ok(()) } else { Err(answer) }
+    });
     server.stop().assert_graceful_shutdown();
 }
