@@ -2618,6 +2618,8 @@ impl StepHandler for WriteStep {
 
 #[cfg(test)]
 mod tests {
+    use tenko_core::testing::wait_until_async;
+
     use super::*;
 
     #[test]
@@ -2722,14 +2724,11 @@ mod tests {
         );
 
         // At the end of the window the rest arrive as one summary.
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let all = loop {
+        let all = wait_until_async("the summary of the refusals", async || {
             let all = refused_enrollments(&store).await;
-            if all.len() > one_by_one.len() || Instant::now() > deadline {
-                break all;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        };
+            (all.len() > one_by_one.len()).then_some(all)
+        })
+        .await;
         assert_eq!(all.len(), REFUSAL_AUDIT_BURST as usize + 1, "{all:?}");
         let (code, context) = all.last().expect("the summary");
         assert_eq!(code, "cluster.enrollment.refusals");

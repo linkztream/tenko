@@ -2,11 +2,11 @@
 //! resend after a lost answer, runs, and a node that moves on from a controller that cannot
 //! write.
 
-use tenko_core::{NodeId, Timestamp};
+use tenko_core::{NodeId, Timestamp, testing::wait_until_async};
 use tenko_store::{ReadConsistency, ReadViewExt, Store, WriteBatch};
 use uuid::Uuid;
 
-use super::harness::{Controller, FIRST_NODE, Running, WAIT, batch, system, wait_for};
+use super::harness::{Controller, FIRST_NODE, Running, WAIT, batch, system};
 use crate::{
     identity::{AgentState, Credentials},
     node_sync::{
@@ -72,13 +72,16 @@ async fn a_batch_sent_again_to_another_controller_is_a_duplicate_that_its_sink_n
     // The node delivers a batch to the first controller.
     let running = Running::start(dir.path());
     let agent = &running.agent;
-    wait_for("the node to connect", || {
+    wait_until_async("the node to connect", async || {
         agent.status().state == AgentState::Connected
     })
     .await;
     agent.push(&batch(10)).expect("push");
-    wait_for("the batch to arrive", || first.sink.batches().len() == 1).await;
-    wait_for("the answer to empty the buffer", || {
+    wait_until_async("the batch to arrive", async || {
+        first.sink.batches().len() == 1
+    })
+    .await;
+    wait_until_async("the answer to empty the buffer", async || {
         agent.outbox().stats().batches == 0
     })
     .await;
@@ -224,11 +227,12 @@ async fn an_agent_moves_to_the_next_controller_when_one_has_no_quorum_and_keeps_
     let running = Running::start(dir.path());
     let agent = &running.agent;
     agent.push(&batch(40)).expect("push");
-    wait_for("the batch to reach the controller that can write", || {
-        second.sink.batches().len() == 1
-    })
+    wait_until_async(
+        "the batch to reach the controller that can write",
+        async || second.sink.batches().len() == 1,
+    )
     .await;
-    wait_for("the buffer to empty", || {
+    wait_until_async("the buffer to empty", async || {
         agent.outbox().stats().batches == 0
     })
     .await;
@@ -245,7 +249,7 @@ async fn an_agent_moves_to_the_next_controller_when_one_has_no_quorum_and_keeps_
     // The first controller can write again: nothing is sent twice.
     first.gate.cut_off(false);
     agent.push(&batch(41)).expect("push");
-    wait_for("the second batch", || {
+    wait_until_async("the second batch", async || {
         first.sink.batches().len() + second.sink.batches().len() == 2
     })
     .await;

@@ -6,10 +6,7 @@ use std::{
     collections::BTreeMap,
     fmt, fs,
     path::PathBuf,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -23,7 +20,10 @@ use tenko_cluster::ca::{
     CertSource, ExpiryState, TlsError, TlsMaterial, TlsMode, TlsPolicy, TlsService, TlsStatus,
     TrustedProxies,
 };
-use tenko_core::Timestamp;
+use tenko_core::{
+    Timestamp,
+    testing::{TempDir, wait_until_async},
+};
 use time::OffsetDateTime;
 use tracing::{
     Event, Level, Metadata, Subscriber,
@@ -98,21 +98,16 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
-/// A unique directory below the system temp directory, removed on drop.
+/// The certificate and key files of one imported-mode test, in a temporary directory.
 struct TestDir {
-    root: PathBuf,
+    root: TempDir,
 }
 
 impl TestDir {
     fn new() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let root = std::env::temp_dir().join(format!(
-            "tenko-tls-service-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&root).expect("create the test directory");
-        Self { root }
+        Self {
+            root: TempDir::new("tls-service"),
+        }
     }
 
     fn cert_path(&self) -> PathBuf {
@@ -148,12 +143,6 @@ impl TestDir {
             fs::write(&staging, content).expect("write the staging file");
             fs::rename(&staging, &path).expect("rename over the live file");
         }
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
     }
 }
 
@@ -203,16 +192,6 @@ async fn wait_for_status(
     })
     .await
     .expect("the status reached the expected state in time");
-}
-
-async fn wait_until(mut condition: impl FnMut() -> bool) {
-    tokio::time::timeout(WAIT, async {
-        while !condition() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the condition became true in time");
 }
 
 async fn stop(handle: tokio::task::JoinHandle<()>) {
@@ -839,7 +818,7 @@ async fn watcher_warns_once_per_expiry_state_change() {
     let handle = service.spawn_watcher(Duration::from_millis(20));
 
     // Warning: logged on the first look, not on the ticks after it.
-    wait_until(|| log.len() >= 1).await;
+    wait_until_async("the first log event", async || log.len() >= 1).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(log.len(), 1);
     let warning = log.event(0);
@@ -853,7 +832,7 @@ async fn watcher_warns_once_per_expiry_state_change() {
     // A replacement that is critical logs again.
     let critical = Identity::expiring_in(3);
     dir.replace(&critical);
-    wait_until(|| log.len() >= 2).await;
+    wait_until_async("the second log event", async || log.len() >= 2).await;
     assert_eq!(log.event(1)["state"], "Critical");
 
     // A healthy one does not.
@@ -872,7 +851,7 @@ async fn watcher_warns_once_per_expiry_state_change() {
     // An expired one does.
     let expired = Identity::expiring_in(-1);
     dir.replace(&expired);
-    wait_until(|| log.len() >= 3).await;
+    wait_until_async("the third log event", async || log.len() >= 3).await;
     let event = log.event(2);
     assert_eq!(event["state"], "Expired");
     assert!(event["days_left"].starts_with('-'), "{event:?}");

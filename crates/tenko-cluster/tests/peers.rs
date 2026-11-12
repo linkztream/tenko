@@ -14,7 +14,7 @@ use std::{
     net::SocketAddr,
     path::Path,
     sync::{Arc, Mutex, PoisonError},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use rustls::pki_types::pem::PemObject as _;
@@ -31,7 +31,7 @@ use tenko_cluster::{
     server::{ClusterListener, NodeServices, Port, code_of},
     session::Sessions,
 };
-use tenko_core::{NodeId, RequestCtx, Role, SystemComponent};
+use tenko_core::{NodeId, RequestCtx, Role, SystemComponent, testing::wait_until_async};
 use tenko_jobs::{EngineConfig, JobEngine};
 use tenko_store::{
     KeyRange, ReadConsistency, ReadViewExt as _, Store, StoreRole,
@@ -40,8 +40,6 @@ use tenko_store::{
 };
 use tenko_vault::{KekRing, MemKek, SecretBytes, StoreVault};
 use tokio::{sync::watch, task::JoinHandle};
-
-const WAIT: Duration = Duration::from_secs(30);
 
 fn system() -> RequestCtx {
     RequestCtx::system(SystemComponent::Cluster)
@@ -344,7 +342,7 @@ impl Lab {
         let lab = Self::first_with(configure, policy).await;
         lab.join("controller-two", configure).await;
         lab.join("controller-three", configure).await;
-        wait_until("three voters", || {
+        wait_until_async("three voters", async || {
             lab.first.store.membership().voters.len() == 3
         })
         .await;
@@ -352,20 +350,16 @@ impl Lab {
     }
 
     async fn leader(&self) -> Arc<Member> {
-        let deadline = Instant::now() + WAIT;
-        loop {
-            if let Some(leader) = self.members().into_iter().find(|member| {
+        wait_until_async("a member to take office", async || {
+            self.members().into_iter().find(|member| {
                 member
                     .store
                     .leadership()
                     .borrow()
                     .is_some_and(|seen| seen.is_self)
-            }) {
-                return leader;
-            }
-            assert!(Instant::now() < deadline, "no member took office");
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+            })
+        })
+        .await
     }
 
     async fn follower(&self) -> Arc<Member> {
@@ -405,22 +399,10 @@ impl ClusterFixture for Lab {
             .await
             .expect("hand leadership over");
         assert_ne!(moved, leader.node());
-        let deadline = Instant::now() + WAIT;
-        while Lab::leader(self).await.node() == leader.node() {
-            assert!(
-                Instant::now() < deadline,
-                "the new leader did not take office"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    }
-}
-
-async fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
-    let deadline = Instant::now() + WAIT;
-    while !check() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        wait_until_async("the new leader to take office", async || {
+            Lab::leader(self).await.node() != leader.node()
+        })
+        .await;
     }
 }
 
@@ -546,7 +528,7 @@ async fn controllers_join_as_learners_and_become_three_voters() {
     let lab = Lab::first(&no_change).await;
     let second = lab.join("controller-two", &no_change).await;
     // The learner catches up, but a promotion to two voters does not happen on its own.
-    wait_until("the learner catches up", || {
+    wait_until_async("the learner catches up", async || {
         lab.first
             .store
             .status()
@@ -570,7 +552,7 @@ async fn controllers_join_as_learners_and_become_three_voters() {
     assert_eq!(refused.code(), "cluster.member.even_voters");
 
     lab.join("controller-three", &no_change).await;
-    wait_until("three voters", || {
+    wait_until_async("three voters", async || {
         lab.first.store.membership().voters.len() == 3
     })
     .await;
@@ -757,14 +739,10 @@ async fn the_raft_service_refuses_a_revoked_controller_without_a_record() {
         .into_iter()
         .find(|member| member.node() != NodeId(1))
         .expect("another member");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !second.registry.is_revoked_node(node) {
-        assert!(
-            Instant::now() < deadline,
-            "the revocation did not reach the other member"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    wait_until_async("the revocation to reach the other member", async || {
+        second.registry.is_revoked_node(node)
+    })
+    .await;
 
     let network = PeerNetwork::new(node, PeerTimings::default());
     network.set_tls(
@@ -867,21 +845,18 @@ async fn a_removed_controller_is_refused_with_every_certificate() {
         .await
         .expect("the removal");
     for member in &staying {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !(member.registry.revocations().is_revoked(&running.serial)
-            && member
-                .registry
-                .revocations()
-                .is_revoked(&renewed.info.serial)
-            && member.registry.is_revoked_node(node))
-        {
-            assert!(
-                Instant::now() < deadline,
-                "the revocation did not reach member {}",
-                member.node()
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        wait_until_async(
+            &format!("the revocation to reach member {}", member.node()),
+            async || {
+                member.registry.revocations().is_revoked(&running.serial)
+                    && member
+                        .registry
+                        .revocations()
+                        .is_revoked(&renewed.info.serial)
+                    && member.registry.is_revoked_node(node)
+            },
+        )
+        .await;
     }
     assert!(
         !lab.first
@@ -947,13 +922,13 @@ async fn a_learner_catches_up_by_a_snapshot_over_the_cluster_port() {
     }
     lab.first.store.snapshot_now().await.expect("snapshot");
     let snapshot = lab.first.store.raft().metrics().borrow().snapshot;
-    wait_until("the leader purges its log", || {
+    wait_until_async("the leader purges its log", async || {
         lab.first.store.raft().metrics().borrow().purged >= snapshot
     })
     .await;
     let learner = lab.join("controller-snap", &purge).await;
     let target = lab.first.store.status().revision;
-    wait_until("the learner installs the snapshot", || {
+    wait_until_async("the learner installs the snapshot", async || {
         learner.store.status().revision >= target
     })
     .await;
@@ -1168,14 +1143,10 @@ async fn revocations_and_endpoints_reach_every_member() {
         .revoke(&system(), probe)
         .await
         .expect("revoke on the first controller");
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !second.registry.revocations().is_revoked(&serial) {
-        assert!(
-            Instant::now() < deadline,
-            "the revocation did not reach the other member"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    wait_until_async("the revocation to reach the other member", async || {
+        second.registry.revocations().is_revoked(&serial)
+    })
+    .await;
     // The member closes the probe's connection, and the open stream with it.
     let ended = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -1242,18 +1213,11 @@ async fn connections_through_other_controllers_are_shown() {
         .record_connection(probe, &live)
         .await
         .expect("record");
-    let deadline = Instant::now() + WAIT;
-    let view = loop {
+    let view = wait_until_async("the connection to replicate", async || {
         let view = lab.first.registry.get_node(probe).await.expect("node");
-        if view.connected {
-            break view;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the connection did not replicate"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    };
+        view.connected.then_some(view)
+    })
+    .await;
     assert_eq!(
         view.connection.and_then(|connection| connection.controller),
         Some(second.node())
@@ -1278,21 +1242,15 @@ async fn connections_through_other_controllers_are_shown() {
         .clear_connection(probe)
         .await
         .expect("clear");
-    let deadline = Instant::now() + WAIT;
-    while lab
-        .first
-        .registry
-        .get_node(probe)
-        .await
-        .expect("node")
-        .connected
-    {
-        assert!(
-            Instant::now() < deadline,
-            "the disconnect did not replicate"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    wait_until_async("the disconnect to replicate", async || {
+        !lab.first
+            .registry
+            .get_node(probe)
+            .await
+            .expect("node")
+            .connected
+    })
+    .await;
     lab.stop().await;
 }
 
@@ -1360,7 +1318,7 @@ async fn a_member_reports_its_binary_once_after_a_start() {
     // The voters are set before a leader is elected or known to the follower, and a write
     // needs both.
     lab.leader().await;
-    wait_until("the follower to see the leader", || {
+    wait_until_async("the follower to see the leader", async || {
         follower.store.leadership().borrow().is_some()
     })
     .await;
@@ -1413,20 +1371,16 @@ async fn finished(
     name: &str,
     ready: impl Fn(&[opentelemetry_sdk::trace::SpanData]) -> bool,
 ) -> Vec<opentelemetry_sdk::trace::SpanData> {
-    let deadline = Instant::now() + WAIT;
-    loop {
+    wait_until_async(&format!("a matching span {name}"), async || {
         let spans: Vec<_> = exporter
             .get_finished_spans()
             .expect("the finished spans")
             .into_iter()
             .filter(|span| span.name == name)
             .collect();
-        if ready(&spans) {
-            return spans;
-        }
-        assert!(Instant::now() < deadline, "no matching span {name}");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+        ready(&spans).then_some(spans)
+    })
+    .await
 }
 
 fn attribute(span: &opentelemetry_sdk::trace::SpanData, key: &str) -> Option<String> {

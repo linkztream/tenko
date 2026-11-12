@@ -3,11 +3,11 @@
 
 use std::time::{Duration, Instant};
 
-use tenko_core::{NodeId, codec::key::encode_key};
+use tenko_core::{NodeId, codec::key::encode_key, testing::wait_until_async};
 use tenko_store::mem::MemStoreConfig;
 
 use super::harness::{
-    Controller, FIRST_NODE, Options, Row, Running, WAIT, config_files, state_file, wait_for,
+    Controller, FIRST_NODE, Options, Row, Running, WAIT, config_files, state_file,
 };
 use crate::{
     identity::{AgentState, Credentials},
@@ -89,7 +89,7 @@ async fn a_connected_probe_applies_a_configuration_change_as_it_happens() {
     controller.enroll(dir.path(), "probe-live").await;
     let running = Running::start(dir.path());
     let agent = &running.agent;
-    wait_for("the first sync", || {
+    wait_until_async("the first sync", async || {
         agent.status().state == AgentState::Connected && agent.config().borrow().synced()
     })
     .await;
@@ -98,7 +98,7 @@ async fn a_connected_probe_applies_a_configuration_change_as_it_happens() {
 
     let first = Row::plain(1);
     let written = controller.put_config(FIRST_NODE, &first).await;
-    wait_for("the change to arrive", || {
+    wait_until_async("the change to arrive", async || {
         holds(agent, dir.path(), FIRST_NODE, &first)
     })
     .await;
@@ -119,7 +119,7 @@ async fn a_connected_probe_applies_a_configuration_change_as_it_happens() {
     controller.put_config(NodeId(1002), &Row::plain(50)).await;
     let second = Row::plain(2);
     controller.put_config(FIRST_NODE, &second).await;
-    wait_for("the second change", || {
+    wait_until_async("the second change", async || {
         holds(agent, dir.path(), FIRST_NODE, &second)
     })
     .await;
@@ -136,7 +136,7 @@ async fn a_node_that_was_away_catches_up_from_its_revision_with_a_delta() {
 
     let running = Running::start(dir.path());
     let agent = &running.agent;
-    wait_for("the first row", || {
+    wait_until_async("the first row", async || {
         holds(agent, dir.path(), FIRST_NODE, &Row::plain(1))
     })
     .await;
@@ -163,7 +163,7 @@ async fn a_node_that_was_away_catches_up_from_its_revision_with_a_delta() {
     // The node, started again, ends with the last of the changes.
     let running = Running::start(dir.path());
     let agent = &running.agent;
-    wait_for("the node to catch up", || {
+    wait_until_async("the node to catch up", async || {
         holds(agent, dir.path(), FIRST_NODE, &Row::plain(3))
     })
     .await;
@@ -188,7 +188,7 @@ async fn a_node_behind_a_compacted_journal_gets_a_snapshot_of_exactly_the_curren
 
     let running = Running::start(dir.path());
     let agent = &running.agent;
-    wait_for("the first row", || {
+    wait_until_async("the first row", async || {
         holds(agent, dir.path(), FIRST_NODE, &Row::plain(1))
     })
     .await;
@@ -209,7 +209,7 @@ async fn a_node_behind_a_compacted_journal_gets_a_snapshot_of_exactly_the_curren
 
     let running = Running::start(dir.path());
     let agent = &running.agent;
-    wait_for("the deleted row to disappear", || {
+    wait_until_async("the deleted row to disappear", async || {
         let config = agent.config().borrow().clone();
         config.rows.is_empty()
             && config.revision >= seen.received.revision
@@ -231,7 +231,7 @@ async fn a_node_behind_a_compacted_journal_gets_a_snapshot_of_exactly_the_curren
     assert!(seen.received.snapshot);
     assert_eq!(seen.received.payload.entries.len(), 1);
     let running = Running::start(dir.path());
-    wait_for("the snapshot to apply", || {
+    wait_until_async("the snapshot to apply", async || {
         holds(&running.agent, dir.path(), FIRST_NODE, &Row::plain(9))
     })
     .await;

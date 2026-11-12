@@ -27,6 +27,7 @@ use tenko_cluster::{
 };
 use tenko_core::{
     NodeId, RequestCtx, Revision, Role, SystemComponent, Timestamp, VrfId, observe::ProbeMethod,
+    testing::wait_until_async,
 };
 use tenko_jobs::{EngineConfig, JobEngine};
 use tenko_store::{
@@ -251,17 +252,6 @@ fn run(agent: &Arc<Agent>) -> (watch::Sender<bool>, JoinHandle<()>) {
     (stop, task)
 }
 
-async fn wait_for(what: &str, mut check: impl FnMut() -> bool) {
-    let deadline = tokio::time::Instant::now() + WAIT;
-    while !check() {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timed out waiting for {what}"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
 fn batch(n: u8) -> ProbeBatch {
     ProbeBatch {
         method: ProbeMethod::Arp,
@@ -296,13 +286,13 @@ async fn a_node_enrolls_connects_and_delivers_a_batch() {
 
     let agent = agent(dir.path());
     let (stop, task) = run(&agent);
-    wait_for("the node to connect", || {
+    wait_until_async("the node to connect", async || {
         agent.status().state == AgentState::Connected
             && controller.registry.sessions().view(NodeId(1001)).is_some()
     })
     .await;
     agent.push(&batch(10)).expect("push");
-    wait_for("the batch to arrive", || {
+    wait_until_async("the batch to arrive", async || {
         controller.sink.batches().len() == 1
     })
     .await;
@@ -310,7 +300,7 @@ async fn a_node_enrolls_connects_and_delivers_a_batch() {
     assert_eq!(node, NodeId(1001));
     assert_eq!(vrf, None);
     assert_eq!(address_of(&delivered), "192.0.2.10");
-    wait_for("the buffer to empty", || {
+    wait_until_async("the buffer to empty", async || {
         agent.outbox().stats().batches == 0
     })
     .await;
@@ -324,7 +314,7 @@ async fn a_node_enrolls_connects_and_delivers_a_batch() {
     assert_eq!(view.name, "probe-dmz");
     assert_eq!(view.address.as_deref(), Some("192.0.2.20"));
     assert_eq!(view.protocol.agreed, Some(1));
-    wait_for("a heartbeat", || {
+    wait_until_async("a heartbeat", async || {
         controller
             .registry
             .sessions()
@@ -358,13 +348,13 @@ async fn the_buffer_replays_in_order_after_a_controller_outage() {
     controller.enroll(dir.path(), "probe-lan").await;
     let agent = agent(dir.path());
     let (stop, task) = run(&agent);
-    wait_for("the node to connect", || {
+    wait_until_async("the node to connect", async || {
         agent.status().state == AgentState::Connected
     })
     .await;
 
     controller.halt().await;
-    wait_for("the node to notice the outage", || {
+    wait_until_async("the node to notice the outage", async || {
         agent.status().state != AgentState::Connected
     })
     .await;
@@ -375,7 +365,7 @@ async fn the_buffer_replays_in_order_after_a_controller_outage() {
     assert_eq!(controller.sink.batches().len(), 0);
 
     controller.listen().await;
-    wait_for("the replay", || controller.sink.batches().len() == 3).await;
+    wait_until_async("the replay", async || controller.sink.batches().len() == 3).await;
     let order: Vec<String> = controller
         .sink
         .batches()
@@ -383,7 +373,7 @@ async fn the_buffer_replays_in_order_after_a_controller_outage() {
         .map(|(_, _, batch)| address_of(batch))
         .collect();
     assert_eq!(order, ["192.0.2.1", "192.0.2.2", "192.0.2.3"]);
-    wait_for("the buffer to empty", || {
+    wait_until_async("the buffer to empty", async || {
         agent.outbox().stats().batches == 0
     })
     .await;
@@ -399,7 +389,7 @@ async fn revocation_closes_the_connection_and_refuses_the_certificate() {
     let node = credentials.identity.node;
     let agent = agent(dir.path());
     let (stop, task) = run(&agent);
-    wait_for("the heartbeat session", || {
+    wait_until_async("the heartbeat session", async || {
         agent.status().state == AgentState::Connected
             && controller.registry.sessions().view(node).is_some()
     })
@@ -412,11 +402,11 @@ async fn revocation_closes_the_connection_and_refuses_the_certificate() {
         .await
         .expect("revoke");
     assert_eq!(serials, std::slice::from_ref(&credentials.info.serial));
-    wait_for("the node to learn it was revoked", || {
+    wait_until_async("the node to learn it was revoked", async || {
         agent.status().state == AgentState::Revoked
     })
     .await;
-    wait_for("the connection to close", || {
+    wait_until_async("the connection to close", async || {
         controller.registry.sessions().connection_count(node) == 0
             && controller.registry.sessions().view(node).is_none()
     })
@@ -491,7 +481,7 @@ async fn a_revocation_from_another_controller_into_an_empty_table_closes_the_con
     let node = credentials.identity.node;
     let agent = agent(dir.path());
     let (stop, task) = run(&agent);
-    wait_for("the heartbeat session", || {
+    wait_until_async("the heartbeat session", async || {
         agent.status().state == AgentState::Connected
             && controller.registry.sessions().view(node).is_some()
     })
@@ -499,7 +489,7 @@ async fn a_revocation_from_another_controller_into_an_empty_table_closes_the_con
     assert!(controller.registry.revocations().is_empty());
 
     revoke_on_another_controller(&controller, node).await;
-    wait_for("the connection to close", || {
+    wait_until_async("the connection to close", async || {
         controller.registry.sessions().connection_count(node) == 0
             && controller.registry.sessions().view(node).is_none()
     })
@@ -526,7 +516,7 @@ async fn a_revocation_present_when_following_starts_closes_the_connection() {
     let node = credentials.identity.node;
     let agent = agent(dir.path());
     let (stop, task) = run(&agent);
-    wait_for("the heartbeat session", || {
+    wait_until_async("the heartbeat session", async || {
         agent.status().state == AgentState::Connected
             && controller.registry.sessions().view(node).is_some()
     })
@@ -535,7 +525,7 @@ async fn a_revocation_present_when_following_starts_closes_the_connection() {
 
     let (stop_follow, stopped) = watch::channel(false);
     let follow = controller.registry.follow_revocations(stopped);
-    wait_for("the connection to close", || {
+    wait_until_async("the connection to close", async || {
         controller.registry.sessions().connection_count(node) == 0
             && controller.registry.sessions().view(node).is_none()
     })
@@ -1395,7 +1385,7 @@ async fn open_streams_end_once_the_node_record_is_gone() {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     });
-    wait_for("the heartbeat session", || {
+    wait_until_async("the heartbeat session", async || {
         controller.registry.sessions().view(node).is_some()
     })
     .await;
@@ -1604,18 +1594,19 @@ async fn a_node_renews_and_moves_to_its_new_certificate() {
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let agent = agent(dir.path());
     let (stop, task) = run(&agent);
-    wait_for("the renewal", || {
+    wait_until_async("the renewal", async || {
         Credentials::load(&NodePaths::new(dir.path()))
             .is_ok_and(|now| now.info.serial != credentials.info.serial)
     })
     .await;
     let renewed = Credentials::load(&NodePaths::new(dir.path())).expect("load");
     let renewed_by = Timestamp::now();
-    let mut refused = false;
-    let deadline = tokio::time::Instant::now() + WAIT;
-    loop {
+    let refused = std::cell::Cell::new(false);
+    wait_until_async("the node to move to its new certificate", async || {
         let status = agent.status();
-        refused |= matches!(status.state, AgentState::Refused | AgentState::Revoked);
+        if matches!(status.state, AgentState::Refused | AgentState::Revoked) {
+            refused.set(true);
+        }
         let moved = controller
             .registry
             .sessions()
@@ -1630,15 +1621,13 @@ async fn a_node_renews_and_moves_to_its_new_certificate() {
             .await
             .is_err();
         if moved && retired && status.state == AgentState::Connected {
-            break;
+            Ok(())
+        } else {
+            Err(format!("moved {moved}, retired {retired}: {status:?}"))
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the node did not move to its new certificate (moved {moved}, retired {retired}): {status:?}"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(!refused, "the node was refused on the way");
+    })
+    .await;
+    assert!(!refused.get(), "the node was refused on the way");
     let _ = stop.send(true);
     task.await.expect("agent");
 }

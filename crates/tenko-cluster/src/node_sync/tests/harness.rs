@@ -451,17 +451,6 @@ impl Running {
     }
 }
 
-pub async fn wait_for(what: &str, mut check: impl FnMut() -> bool) {
-    let deadline = tokio::time::Instant::now() + WAIT;
-    while !check() {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timed out waiting for {what}"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
 /// The configuration files of the node whose files live in `dir`.
 pub fn config_files(dir: &Path) -> ConfigFiles {
     ConfigFiles::new(NodePaths::new(dir).config())

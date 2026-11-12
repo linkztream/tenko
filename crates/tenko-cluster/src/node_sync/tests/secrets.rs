@@ -1,10 +1,10 @@
 //! `Config.Secrets` over mutual TLS: the vault secrets a node's configuration names, the
 //! audit record of the hand-over and what is refused.
 
-use tenko_core::{RequestCtx, SecretId, SystemComponent};
+use tenko_core::{RequestCtx, SecretId, SystemComponent, testing::wait_until_async};
 use tenko_vault::{SecretBytes, SecretPurpose, SecretSpec, Vault, operator::OPERATOR_PURPOSE};
 
-use super::harness::{Controller, FIRST_NODE, Options, Row, Running, wait_for};
+use super::harness::{Controller, FIRST_NODE, Options, Row, Running};
 use crate::{
     identity::AgentState,
     node_sync::{
@@ -83,7 +83,7 @@ async fn a_probe_gets_the_secret_its_configuration_names_and_the_hand_over_is_au
 
     let running = Running::start(dir.path());
     let agent = &running.agent;
-    wait_for("the node to connect and sync", || {
+    wait_until_async("the node to connect and sync", async || {
         agent.status().state == AgentState::Connected && !agent.config().borrow().rows.is_empty()
     })
     .await;
