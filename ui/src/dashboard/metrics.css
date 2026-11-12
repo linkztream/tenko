@@ -41,8 +41,7 @@
 /* The history chart (HistoryChart.tsx) takes what the list leaves: a canvas that fills the plot,
    which is the chart's one tab stop. "Held" shows while the pointer or the focus holds it still. */
 .metrics-history { display: flex; flex: 1 1 auto; min-block-size: calc(64px + 14px); }
-.metrics-history-plot { position: relative; flex: 1 1 auto; border-radius: var(--r-1); outline: none; cursor: crosshair; touch-action: pan-y; }
-.metrics-history-plot:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.metrics-history-plot { position: relative; flex: 1 1 auto; border-radius: var(--r-1); cursor: crosshair; touch-action: pan-y; }
 .metrics-history-plot > canvas { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; display: block; }
 .metrics-history-held { position: absolute; inset-block-start: 0; inset-inline-end: 0; font-size: var(--fs-11); color: var(--ink-3); background: var(--surface); padding: 0 var(--sp-2); border-radius: var(--r-1); display: none; }
 .metrics-history-plot.is-held .metrics-history-held { display: block; }

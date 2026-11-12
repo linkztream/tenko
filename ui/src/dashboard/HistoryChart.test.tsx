@@ -78,6 +78,27 @@ describe("the frame loop", () => {
     unmount();
   });
 
+  it("stops while no chart is on screen and starts again when one comes into view", () => {
+    let report: ((entries: { target: Element; isIntersecting: boolean }[]) => void) | undefined;
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(callback: typeof report) {
+          report = callback;
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const { unmount, getByRole } = mountChart();
+    nextFrame(1000);
+    expect(frameLoopRunning()).toBe(false);
+    report!([{ target: getByRole("slider"), isIntersecting: true }]);
+    expect(frameLoopRunning()).toBe(true);
+    unmount();
+  });
+
   it("stops under Pause motion and under reduced motion", () => {
     const { unmount } = mountChart();
     setMotionPaused(true);
@@ -91,6 +112,12 @@ describe("the frame loop", () => {
     again.unmount();
   });
 });
+
+/** `a` over `b` at `share`, as a hex color. */
+function mix(a: string, b: string, share: number): string {
+  const channel = (hex: string, i: number) => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
+  return `#${[0, 1, 2].map((i) => Math.round(share * channel(a, i) + (1 - share) * channel(b, i)).toString(16).padStart(2, "0")).join("")}`;
+}
 
 describe("the chart's colors", () => {
   /** The custom properties of the light `:root` blocks with the dark block over them. */
@@ -110,5 +137,8 @@ describe("the chart's colors", () => {
     for (const mark of ["--series-1", "--chart-ink", "--ink-3"]) {
       expect(contrastRatio(t.get(mark)!, t.get("--surface")!), mark).toBeGreaterThanOrEqual(3);
     }
+    // The mean over the band, a wash of 18 % of its own color.
+    const wash = mix(t.get("--series-1")!, t.get("--surface")!, 0.18);
+    expect(contrastRatio(t.get("--series-1")!, wash)).toBeGreaterThanOrEqual(3);
   });
 });

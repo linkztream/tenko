@@ -65,7 +65,7 @@ export function readout(ctx: ChartContext, b: Bucket, at: number): Readout {
   const lowest = withUnit(b.lowest, ctx.unit);
   const highest = withUnit(b.highest, ctx.unit);
   if (b.step > 1) out.rows.push(t(b.highest > ctx.top ? "metrics.history.band_above" : "metrics.history.band", { lowest, highest }));
-  else if (b.mean > ctx.top) out.rows.push(t("metrics.history.above", { top: withUnit(ctx.top, ctx.unit) }));
+  else if (b.highest > ctx.top) out.rows.push(t("metrics.history.above", { top: withUnit(ctx.top, ctx.unit) }));
   if (b.clipped) out.notes.push(t("metrics.history.clipped"));
   // Whole minutes from a minute on ("7 min of 10 min"), seconds below ("41 sec of 1 min").
   if (b.covered < b.step) out.notes.push(t("metrics.history.partial_time", { covered: formatDuration(b.covered >= 60 ? Math.floor(b.covered / 60) * 60 : Math.floor(b.covered)), step: parts.step }));

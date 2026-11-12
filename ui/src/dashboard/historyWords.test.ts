@@ -30,12 +30,12 @@ describe("the text alternative", () => {
     const lastMinute = buckets.filter((b) => b.step === 1 && AT - b.start <= 61);
     expect(minute).toBe(`Last minute: ${withUnit(Math.min(...lastMinute.map((b) => b.lowest)), "")} to ${withUnit(Math.max(...lastMinute.map((b) => b.highest)), "")}.`);
     expect(hour).toMatch(/^Last hour: mean [\d.]+, highest [\d.]+ at \d\d:\d\d [AP]M\.$/);
-    // The burst five hours back stands in an hour bucket: named with that bucket's span.
+    // The burst five hours back stands in a ten-minute bucket: named with that bucket's span.
     const older = buckets.filter((b) => b.data && AT - b.start - b.step >= 3600);
     const peak = older.reduce((p, b) => (b.highest > p.highest ? b : p));
     const lowest = Math.min(...older.map((b) => b.lowest));
-    expect([peak.step, peak.start]).toEqual([3600, AT - 6 * 3600]);
-    expect(days).toBe(`Last 2 days: highest ${withUnit(peak.highest, "")} between 08:00 AM and 09:00 AM, lowest ${withUnit(lowest, "")}.`);
+    expect([peak.step, peak.start]).toEqual([600, AT - 5 * 3600 - 600]);
+    expect(days).toBe(`Last 2 days: highest ${withUnit(peak.highest, "")} between 08:50 AM and 09:00 AM, lowest ${withUnit(lowest, "")}.`);
   });
 
   it("says 0 throughout for a figure that never moved, and where the history begins after a restart", () => {

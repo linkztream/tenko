@@ -15,12 +15,8 @@
         <segment><source>now</source><target>nu</target></segment>
       </unit>
       <unit id="metrics.history.pause">
-        <notes><note category="description">Button of the live metrics that stops the motion of every history chart; the numbers keep updating.</note></notes>
+        <notes><note category="description">Toggle button of the live metrics that stops the motion of every history chart while pressed; the numbers keep updating.</note></notes>
         <segment><source>Pause motion</source><target>Pausa rörelse</target></segment>
-      </unit>
-      <unit id="metrics.history.resume">
-        <notes><note category="description">The same button while the motion is paused.</note></notes>
-        <segment><source>Resume motion</source><target>Återuppta rörelse</target></segment>
       </unit>
       <unit id="metrics.history.when_one">
         <notes><note category="description">Readout of a history chart: when a one-second bucket was (a clock time), its length and how long ago it ended.</note></notes>

@@ -164,14 +164,13 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
   const live = props.live ?? createLiveMetrics(props.streamOptions);
   return (
     <Live.Provider value={live}>
-      <Tiles diskLow={props.diskLow} live={live} only={props.only} />
+      <Tiles diskLow={props.diskLow} only={props.only} />
     </Live.Provider>
   );
 }
 
-function Tiles(props: { diskLow?: boolean; live: LiveMetrics; only?: "controller" }) {
-  // eslint-disable-next-line solid/reactivity
-  const live = props.live;
+function Tiles(props: { diskLow?: boolean; only?: "controller" }) {
+  const live = useContext(Live)!;
   const history = live.history;
   const all = () => props.only !== "controller";
 
@@ -211,7 +210,7 @@ function Tiles(props: { diskLow?: boolean; live: LiveMetrics; only?: "controller
             redrawCharts();
           }}
         >
-          {t(motionPaused() ? "metrics.history.resume" : "metrics.history.pause")}
+          {t("metrics.history.pause")}
         </button>
       </div>
       <Show when={!latest()}>

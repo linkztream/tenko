@@ -13,6 +13,13 @@ import { emptyHistory, HISTORY, pushSnapshot, snapshotOf, type MetricsHistory } 
 
 /** How far the drawn moment may run past the newest sample: a late sample pauses the chart rather than leaving a gap. */
 const CLOCK_LEAD = 1.5;
+/**
+ * The waits before the stream is opened again for a fresh history: at once the first time, then
+ * from 5 s doubling to a minute, so a mismatch that persists does not fetch the history every second;
+ * a minute without one starts over.
+ */
+const REOPEN_FIRST_MS = 5000;
+const REOPEN_MAX_MS = 60_000;
 
 export interface LiveMetrics {
   history: Accessor<MetricsHistory>;
@@ -22,7 +29,8 @@ export interface LiveMetrics {
   tiers: Accessor<HeldHistory | null>;
   /**
    * The moment the charts are drawn at, in seconds on the controller's clock: the end of the newest
-   * sample plus the time since it arrived, at most `CLOCK_LEAD` past it; null before the first.
+   * sample plus the time since it arrived, at most `CLOCK_LEAD` past it and never back within one
+   * stream; null before the first.
    */
   clock: () => number | null;
 }
@@ -37,21 +45,42 @@ export function createLiveMetrics(options?: EventStreamOptions, clusterLimit = H
   const [stream, setStream] = createSignal<EventStream>();
   let sampleAt: number | null = null;
   let arrived = 0;
+  let shown = -Infinity;
 
-  /** The controller's time of the newest sample or history, kept with the browser's monotonic time it arrived at. */
-  const mark = (stamp: string) => {
+  /**
+   * The controller's time of the newest sample, with the browser's monotonic time it arrived at. A
+   * sample a little older than the newest is out of order and ignored; a history (another controller
+   * may serve it) or a clock that stepped back by more starts the moment over.
+   */
+  const mark = (stamp: string, fresh: boolean) => {
     const at = Date.parse(stamp) / 1000;
-    if (!Number.isFinite(at) || (sampleAt !== null && at < sampleAt)) return;
+    const back = sampleAt !== null && at < sampleAt;
+    if (!Number.isFinite(at) || (back && !fresh && sampleAt! - at < 5)) return;
     sampleAt = at;
     arrived = performance.now();
+    if (fresh || back) shown = -Infinity;
   };
 
   onMount(() => {
     const own = new EventStream({ baseTopics: [], ...options });
+    // The held history no longer matches the stream: no `closed` is applied until a fresh history.
+    let stale = false;
+    let reopens = 0;
+    let lastReopen = -Infinity;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const reopen = () => {
-      setTiers(null);
-      own.stop();
-      own.start();
+      stale = true;
+      if (timer !== undefined) return;
+      const now = performance.now();
+      if (now - lastReopen > REOPEN_MAX_MS) reopens = 0;
+      const wait = reopens === 0 ? 0 : Math.min(REOPEN_MAX_MS, REOPEN_FIRST_MS * 2 ** (reopens - 1));
+      reopens += 1;
+      timer = setTimeout(() => {
+        timer = undefined;
+        lastReopen = performance.now();
+        own.stop();
+        own.start();
+      }, wait);
     };
     // An event handler: it reads the history it appends to, it does not track it.
     // eslint-disable-next-line solid/reactivity
@@ -59,17 +88,18 @@ export function createLiveMetrics(options?: EventStreamOptions, clusterLimit = H
       if (event.data.kind === HISTORY_KIND) {
         const frame = event.data.history as HistoryFrame | undefined;
         if (frame?.figures) {
+          stale = false;
           setTiers(heldOf(frame));
-          mark(frame.at);
+          mark(frame.at, true);
         }
         return;
       }
       const snapshot = snapshotOf(event.data);
       if (!snapshot) return;
       setHistory((h) => pushSnapshot(h, snapshot, clusterLimit));
-      mark(snapshot.cluster.at);
+      mark(snapshot.cluster.at, false);
       const held = tiers();
-      if (held && snapshot.closed) {
+      if (held && !stale && snapshot.closed) {
         const next = withClosed(held, snapshot.closed);
         if (next) setTiers(next);
         else reopen();
@@ -79,6 +109,7 @@ export function createLiveMetrics(options?: EventStreamOptions, clusterLimit = H
     own.start();
     setStream(own);
     onCleanup(() => {
+      clearTimeout(timer);
       off();
       offReset();
       own.stop();
@@ -89,6 +120,11 @@ export function createLiveMetrics(options?: EventStreamOptions, clusterLimit = H
     history,
     state: () => stream()?.state() ?? "idle",
     tiers,
-    clock: () => (sampleAt === null ? null : sampleAt + Math.min(CLOCK_LEAD, (performance.now() - arrived) / 1000)),
+    clock: () => {
+      if (sampleAt === null) return null;
+      // A sample that arrives late but ends little later would step the charts back: they wait instead.
+      shown = Math.max(shown, sampleAt + Math.min(CLOCK_LEAD, (performance.now() - arrived) / 1000));
+      return shown;
+    },
   };
 }

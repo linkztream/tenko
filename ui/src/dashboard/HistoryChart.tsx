@@ -9,21 +9,23 @@
 // at 10 frames a second, at the controller's time (`LiveMetrics.clock`). After five frames in a row
 // over 8 ms the page steps once a second until it is reloaded. Under reduced motion a chart is
 // redrawn in place every 10 s; "Pause motion" stops every chart. Nothing is drawn while the tab is
-// hidden or a chart is off screen; the text alternatives are refreshed every 5 s on the same terms.
+// hidden or a chart is off screen, and the loop stops while no chart is on screen; the text
+// alternatives are refreshed every 5 s on the same terms.
 //
 // Keyboard and screen readers: the chart is one tab stop with the role `slider`; its value is a
-// bucket and its value text the readout. Left and Right move one bucket (Shift: ten), Page Up and
-// Page Down change the tier, Home and End go to the oldest and the newest, Escape closes the
-// readout. Test ids: `metrics-history-<name>` on the slider (`data-top` the top of the scale,
-// `data-buckets` the buckets with data), `metrics-history-readout`, `metrics-history-alt`.
-import { createSignal, createUniqueId, For, onCleanup, onMount, Show } from "solid-js";
+// bucket, the oldest 0, and its value text the readout. Left and Right (and Down and Up) move one
+// bucket (Shift: ten), Page Up goes to the next finer tier and Page Down to the next coarser, Home
+// and End go to the oldest and the newest, Escape closes the readout. Test ids:
+// `metrics-history-<name>` on the slider (`data-top` the top of the scale, `data-buckets` the
+// buckets with data), `metrics-history-readout`, `metrics-history-alt`.
+import { batch, createSignal, createUniqueId, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { motionPaused } from "../app/prefs";
 import { formatDuration, t } from "../i18n";
 import { AGE_LABELS, axisX, bucketsAt, forEachGridLine, place, REACH, scaleTop, type Bucket, type FigureHistory } from "./history";
 import { altText, readout, readoutText, withUnit, type ChartContext, type Readout } from "./historyWords";
 import type { LiveMetrics } from "./liveMetrics";
-import type { TileName } from "./metrics";
+import { PERCENT_TILES, type TileName } from "./metrics";
 
 /** Height of the row of age labels under the plot. */
 const AXIS = 14;
@@ -42,14 +44,17 @@ interface Chart {
   visible: boolean;
   /** Held by the pointer or the keyboard. */
   held: boolean;
-  /** The clock second it was last drawn at, and whether that drawing had a figure. */
-  drawnAt: number;
+  /** Whether the last drawing had a figure. */
   drawnFigure: boolean;
+  /** The plot's size from the ResizeObserver; -1 until it reported. */
+  width: number;
+  height: number;
   draw(): void;
   refreshAlt(): void;
 }
 
-const charts = new Set<Chart>();
+/** The charts by their plot element. */
+const charts = new Map<Element, Chart>();
 let raf = 0;
 /** The wait for the next frame: a timer, so the browser is asked for 10 frames a second, not one at every refresh of the screen. */
 let pause: ReturnType<typeof setTimeout> | undefined;
@@ -58,15 +63,13 @@ let fellBack = false;
 let ticks = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
 let observer: IntersectionObserver | undefined;
-let reducedQuery: MediaQueryList | undefined;
+let resizer: ResizeObserver | undefined;
+let themes: MutationObserver | undefined;
+/** Reduced motion, forced colors and the dark scheme of the system: a change redraws every chart. */
+let queries: MediaQueryList[] = [];
 
-function hidden(): boolean {
-  return typeof document !== "undefined" && document.hidden;
-}
-
-function reduced(): boolean {
-  return reducedQuery?.matches ?? false;
-}
+const hidden = () => typeof document !== "undefined" && document.hidden;
+const reduced = () => queries[0]?.matches ?? false;
 
 /** Whether the charts glide: neither reduced motion, nor "Pause motion", nor a slow device. */
 function gliding(): boolean {
@@ -80,9 +83,16 @@ export function frameLoopRunning(): boolean {
 
 function frame(): void {
   raf = 0;
-  if (!gliding() || hidden() || charts.size === 0) return;
+  if (!gliding() || hidden()) return;
   const start = performance.now();
-  for (const chart of charts) if (chart.visible && !chart.held) chart.draw();
+  let drawn = false;
+  for (const chart of charts.values()) {
+    if (!chart.visible || chart.held) continue;
+    chart.draw();
+    drawn = true;
+  }
+  // Nothing on screen: the loop stops, and a chart that comes into view starts it again.
+  if (!drawn) return;
   const took = performance.now() - start;
   slow = took > SLOW_MS ? slow + 1 : 0;
   if (slow >= 5) fellBack = true;
@@ -103,7 +113,7 @@ function tick(): void {
   if (hidden()) return;
   ticks += 1;
   const glide = gliding();
-  for (const chart of charts) {
+  for (const chart of charts.values()) {
     if (!chart.visible) continue;
     if (ticks % 5 === 0) chart.refreshAlt();
     if (glide || chart.held) continue;
@@ -112,53 +122,68 @@ function tick(): void {
   wake();
 }
 
-/** Every chart again, as it stands: after a theme change or a change of the motion setting. */
+/** Every chart on screen again, as it stands: after a change of the theme or of the motion setting. */
 export function redrawCharts(): void {
   colorsCache = null;
-  for (const chart of charts) if (chart.visible) chart.draw();
+  for (const chart of charts.values()) if (chart.visible) chart.draw();
   wake();
+}
+
+/** The chart of an observed element, with what the observer saw. */
+function observed<E extends { target: Element }>(update: (chart: Chart, entry: E) => void) {
+  return (entries: E[]) => {
+    for (const entry of entries) {
+      const chart = charts.get(entry.target);
+      if (!chart) continue;
+      update(chart, entry);
+      if (chart.visible && !hidden()) chart.draw();
+    }
+    wake();
+  };
 }
 
 function register(chart: Chart, plot: HTMLElement): () => void {
   if (charts.size === 0) {
-    reducedQuery = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : undefined;
+    queries = typeof matchMedia === "function" ? ["(prefers-reduced-motion: reduce)", "(forced-colors: active)", "(prefers-color-scheme: dark)"].map((q) => matchMedia(q)) : [];
+    for (const q of queries) q.addEventListener("change", redrawCharts);
+    themes = new MutationObserver(redrawCharts);
+    themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     timer = setInterval(tick, 1000);
     document.addEventListener("visibilitychange", wake);
-    if (typeof IntersectionObserver === "function") {
-      observer = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-          const c = targets.get(entry.target);
-          if (!c) continue;
-          c.visible = entry.isIntersecting;
-          if (c.visible && !hidden()) c.draw();
-        }
-      });
+    if (typeof IntersectionObserver === "function") observer = new IntersectionObserver(observed((c, e) => (c.visible = e.isIntersecting)));
+    if (typeof ResizeObserver === "function") {
+      resizer = new ResizeObserver(
+        observed((c, e) => {
+          c.width = e.contentRect.width;
+          c.height = e.contentRect.height;
+        }),
+      );
     }
-    themeWatch = watchTheme();
   }
-  charts.add(chart);
-  targets.set(plot, chart);
+  charts.set(plot, chart);
   // Without an observer (tests, very old browsers) a chart counts as on screen.
   if (observer) observer.observe(plot);
   else chart.visible = true;
+  resizer?.observe(plot);
   wake();
   return () => {
-    charts.delete(chart);
-    targets.delete(plot);
+    charts.delete(plot);
     observer?.unobserve(plot);
+    resizer?.unobserve(plot);
     if (charts.size > 0) return;
     clearInterval(timer);
     clearTimeout(pause);
     pause = undefined;
-    cancelAnimationFrame(raf);
+    if (raf !== 0) cancelAnimationFrame(raf);
     raf = 0;
     observer?.disconnect();
-    observer = undefined;
+    resizer?.disconnect();
+    themes?.disconnect();
+    observer = resizer = themes = undefined;
+    for (const q of queries) q.removeEventListener("change", redrawCharts);
     document.removeEventListener("visibilitychange", wake);
-    themeWatch?.();
   };
 }
-const targets = new Map<Element, Chart>();
 
 // ---------------------------------------------------------------------------------------------
 // Colors: the tokens of the theme, or the system colors in forced-colors mode
@@ -176,13 +201,12 @@ interface Colors {
   hatch: CanvasPattern | null;
 }
 let colorsCache: Colors | null = null;
-let themeWatch: (() => void) | undefined;
 
 function colors(ctx: CanvasRenderingContext2D): Colors {
   if (colorsCache) return colorsCache;
   const style = getComputedStyle(document.documentElement);
   const v = (name: string) => style.getPropertyValue(name).trim();
-  const forced = typeof matchMedia === "function" && matchMedia("(forced-colors: active)").matches;
+  const forced = queries[1]?.matches ?? false;
   const c: Colors = forced
     ? { series: "CanvasText", grid: "GrayText", axis: "CanvasText", ink: "CanvasText", ink3: "CanvasText", surface: "Canvas", accent: "Highlight", font: "", forced, hatch: null }
     : { series: v("--series-1"), grid: v("--chart-grid"), axis: v("--chart-axis"), ink: v("--chart-ink"), ink3: v("--ink-3"), surface: v("--surface"), accent: v("--accent"), font: "", forced, hatch: null };
@@ -195,13 +219,7 @@ function colors(ctx: CanvasRenderingContext2D): Colors {
     p.fillStyle = c.surface;
     p.fillRect(0, 0, 7, 7);
     p.strokeStyle = c.ink;
-    p.beginPath();
-    p.moveTo(-1, 8);
-    p.lineTo(8, -1);
-    p.moveTo(-1, 1);
-    p.lineTo(1, -1);
-    p.moveTo(6, 8);
-    p.lineTo(8, 6);
+    path(p, [[-1, 8], [8, -1]], [[-1, 1], [1, -1]], [[6, 8], [8, 6]]);
     p.stroke();
     c.hatch = ctx.createPattern(tile, "repeat");
   }
@@ -209,32 +227,29 @@ function colors(ctx: CanvasRenderingContext2D): Colors {
   return c;
 }
 
-function watchTheme(): () => void {
-  const mutations = new MutationObserver(redrawCharts);
-  mutations.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-  const queries = typeof matchMedia === "function" ? ["(prefers-color-scheme: dark)", "(forced-colors: active)", "(prefers-reduced-motion: reduce)"].map((q) => matchMedia(q)) : [];
-  for (const q of queries) q.addEventListener("change", redrawCharts);
-  return () => {
-    mutations.disconnect();
-    for (const q of queries) q.removeEventListener("change", redrawCharts);
-  };
-}
-
 // ---------------------------------------------------------------------------------------------
 // Painting
+
+/** Begins a path of the given polylines. */
+function path(ctx: CanvasRenderingContext2D, ...lines: (readonly [number, number])[][]): void {
+  ctx.beginPath();
+  for (const points of lines) points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+}
 
 interface Frame {
   buckets: Bucket[];
   top: number;
+  scale: string;
   at: number;
   width: number;
   height: number;
   sel: number | null;
   restarts: number[];
-  partialBelow: number;
+  /** A run of buckets covered by fewer controllers than this has a lighter band and a bar. */
+  controllers: number;
 }
 
-function paint(ctx: CanvasRenderingContext2D, f: Frame, unit: string): void {
+function paint(ctx: CanvasRenderingContext2D, f: Frame): void {
   const C = colors(ctx);
   const { buckets, top, at, width: W } = f;
   const PH = f.height - AXIS;
@@ -244,24 +259,15 @@ function paint(ctx: CanvasRenderingContext2D, f: Frame, unit: string): void {
   ctx.globalAlpha = 1;
   // The baseline, under the series, so a series at zero stays visible on it; the quarters of the scale.
   ctx.strokeStyle = C.axis;
-  ctx.beginPath();
-  ctx.moveTo(0, PH - 0.5);
-  ctx.lineTo(W, PH - 0.5);
+  path(ctx, [[0, PH - 0.5], [W, PH - 0.5]]);
   ctx.stroke();
   ctx.strokeStyle = C.grid;
-  ctx.beginPath();
-  for (const q of [0, 0.25, 0.5, 0.75]) {
-    const yy = Math.round(TOP + (PH - TOP) * q) + 0.5;
-    ctx.moveTo(0, yy);
-    ctx.lineTo(W, yy);
-  }
+  path(ctx, ...[0, 0.25, 0.5, 0.75].map((q) => Math.round(TOP + (PH - TOP) * q) + 0.5).map((yy) => [[0, yy], [W, yy]] as [number, number][]));
   ctx.stroke();
   // The moments, where they stand.
   forEachGridLine(at, W, (_moment, _step, x, alpha) => {
     ctx.globalAlpha = alpha;
-    ctx.beginPath();
-    ctx.moveTo(x, TOP);
-    ctx.lineTo(x, PH);
+    path(ctx, [[x, TOP], [x, PH]]);
     ctx.stroke();
   });
   ctx.globalAlpha = 1;
@@ -274,116 +280,84 @@ function paint(ctx: CanvasRenderingContext2D, f: Frame, unit: string): void {
       ctx.fillStyle = C.hatch;
       ctx.fillRect(gap, TOP, Math.max(1, b.x1 - gap), PH - TOP);
     }
-    if (b.data) gap = null;
-    else if (end) gap = null;
+    if (b.data || end) gap = null;
   });
-  // Band, upper edge, halo and mean, in runs of buckets with data; a run is cut where the coverage of the controllers changes.
-  let run: Bucket[] = [];
+  // Band, upper edge, halo and mean, in runs of buckets with data; a run is cut where the coverage of
+  // the controllers changes, and the mean line bridges that cut from the run before.
+  const line = (list: readonly Bucket[], value: (b: Bucket) => number) =>
+    list.length === 1 ? path(ctx, [[list[0]!.x0, y(value(list[0]!))], [list[0]!.x1, y(value(list[0]!))]]) : path(ctx, list.map((b) => [b.cx, y(value(b))] as const));
+  const runs: { part: boolean; list: Bucket[]; bridge: Bucket | null }[] = [];
   let prev: Bucket | null = null;
-  const flush = (bridge: Bucket | null) => {
-    if (run.length === 0) return;
-    const part = run[0]!.controllers < f.partialBelow;
-    const line = (list: readonly Bucket[], value: (b: Bucket) => number) => {
-      ctx.beginPath();
-      if (list.length === 1) {
-        ctx.moveTo(list[0]!.x0, y(value(list[0]!)));
-        ctx.lineTo(list[0]!.x1, y(value(list[0]!)));
-        return;
-      }
-      list.forEach((b, i) => (i ? ctx.lineTo(b.cx, y(value(b))) : ctx.moveTo(b.cx, y(value(b)))));
-    };
+  for (const b of buckets) {
+    if (!b.data) {
+      prev = null;
+      continue;
+    }
+    const part = b.controllers < f.controllers;
+    const run = runs[runs.length - 1];
+    if (run && prev && run.part === part) run.list.push(b);
+    else runs.push({ part, list: [b], bridge: prev });
+    prev = b;
+  }
+  ctx.strokeStyle = ctx.fillStyle = C.series;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  for (const { part, list, bridge } of runs) {
     if (!C.forced) {
       ctx.fillStyle = C.series;
       ctx.globalAlpha = part ? 0.08 : 0.18;
-      ctx.beginPath();
-      if (run.length === 1) {
-        const b = run[0]!;
+      if (list.length === 1) {
+        const b = list[0]!;
+        ctx.beginPath();
         ctx.rect(b.x0, y(b.h), Math.max(1, b.x1 - b.x0), Math.max(0.5, y(b.l) - y(b.h)));
-      } else {
-        run.forEach((b, i) => (i ? ctx.lineTo(b.cx, y(b.h)) : ctx.moveTo(b.cx, y(b.h))));
-        for (let i = run.length - 1; i >= 0; i--) ctx.lineTo(run[i]!.cx, y(run[i]!.l));
-        ctx.closePath();
-      }
+      } else path(ctx, [...list.map((b) => [b.cx, y(b.h)] as const), ...[...list].reverse().map((b) => [b.cx, y(b.l)] as const)]);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
     // The upper edge shows a short burst in a wide bucket, so it is drawn in forced colors too.
-    ctx.strokeStyle = C.series;
     ctx.lineWidth = 1;
-    line(run, (b) => b.h);
+    line(list, (b) => b.h);
     ctx.stroke();
-    const list = bridge ? [bridge, ...run] : run;
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
+    const mean = bridge ? [bridge, ...list] : list;
+    // The halo: a wide, faint stroke under the mean.
     if (!C.forced) {
       ctx.globalAlpha = 0.16;
       ctx.lineWidth = 5;
-      line(list, (b) => b.m);
+      line(mean, (b) => b.m);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
     ctx.lineWidth = 1.5;
-    line(list, (b) => b.m);
+    line(mean, (b) => b.m);
     ctx.stroke();
-    ctx.lineWidth = 1;
     if (part) {
       ctx.fillStyle = C.ink;
-      ctx.fillRect(run[0]!.x0, PH + 1, Math.max(1, run[run.length - 1]!.x1 - run[0]!.x0), 2);
+      ctx.fillRect(list[0]!.x0, PH + 1, Math.max(1, list[list.length - 1]!.x1 - list[0]!.x0), 2);
     }
-  };
-  let bridge: Bucket | null = null;
-  for (const b of buckets) {
-    if (!b.data) {
-      flush(bridge);
-      run = [];
-      prev = null;
-      bridge = null;
-      continue;
-    }
-    if (run.length > 0 && (run[0]!.controllers < f.partialBelow) !== (b.controllers < f.partialBelow)) {
-      flush(bridge);
-      bridge = prev;
-      run = [];
-    }
-    run.push(b);
-    prev = b;
   }
-  flush(bridge);
+  ctx.lineWidth = 1;
   // A needle above the scale: a caret at the top.
   ctx.fillStyle = C.series;
   for (const b of buckets) {
     if (!b.data || b.highest <= top) continue;
-    ctx.beginPath();
-    ctx.moveTo(b.cx - 3.5, TOP + 5);
-    ctx.lineTo(b.cx, TOP - 1);
-    ctx.lineTo(b.cx + 3.5, TOP + 5);
-    ctx.closePath();
+    path(ctx, [[b.cx - 3.5, TOP + 5], [b.cx, TOP - 1], [b.cx + 3.5, TOP + 5]]);
     ctx.fill();
   }
   // Where a controller started: a hairline with a mark at the top.
   ctx.strokeStyle = ctx.fillStyle = C.ink3;
   for (const started of f.restarts) {
     const x = Math.round(axisX(at - started, W)) + 0.5;
-    ctx.beginPath();
-    ctx.moveTo(x, TOP);
-    ctx.lineTo(x, PH);
+    path(ctx, [[x, TOP], [x, PH]]);
     ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x - 3.5, TOP);
-    ctx.lineTo(x + 3.5, TOP);
-    ctx.lineTo(x, TOP + 4);
-    ctx.closePath();
+    path(ctx, [[x - 3.5, TOP], [x + 3.5, TOP], [x, TOP + 4]]);
     ctx.fill();
   }
   // The newest value: the line runs on to the right edge, where the end marker sits, so the end glides.
-  let last: Bucket | undefined;
-  for (let i = buckets.length - 1; i >= 0 && !last; i--) if (buckets[i]!.data) last = buckets[i];
+  const last = buckets.findLast((b) => b.data);
   if (last && last.step < 60) {
     ctx.strokeStyle = C.series;
     ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(last.cx, y(last.m));
-    ctx.lineTo(W - 3, y(last.m));
+    path(ctx, [[last.cx, y(last.m)], [W - 3, y(last.m)]]);
     ctx.stroke();
     dot(ctx, W - 3, y(last.m), 3, C);
   }
@@ -396,9 +370,7 @@ function paint(ctx: CanvasRenderingContext2D, f: Frame, unit: string): void {
     ctx.globalAlpha = 1;
     ctx.strokeStyle = C.accent;
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(sel.cx, TOP);
-    ctx.lineTo(sel.cx, PH);
+    path(ctx, [[sel.cx, TOP], [sel.cx, PH]]);
     ctx.stroke();
     if (sel.data) dot(ctx, sel.cx, y(sel.m), 3.5, C);
   }
@@ -409,20 +381,16 @@ function paint(ctx: CanvasRenderingContext2D, f: Frame, unit: string): void {
   ctx.strokeStyle = C.axis;
   for (const label of labels(ctx, W)) {
     ctx.fillText(label.text, label.left, f.height - 2);
-    if (label.tick !== null) {
-      ctx.beginPath();
-      ctx.moveTo(label.tick, PH);
-      ctx.lineTo(label.tick, PH + 3);
-      ctx.stroke();
-    }
+    if (label.tick === null) continue;
+    path(ctx, [[label.tick, PH], [label.tick, PH + 3]]);
+    ctx.stroke();
   }
   // The scale, inside the plot.
-  const scale = withUnit(top, unit);
   ctx.lineWidth = 4;
   ctx.strokeStyle = C.surface;
   ctx.lineJoin = "round";
-  ctx.strokeText(scale, 2, TOP + 11);
-  ctx.fillText(scale, 2, TOP + 11);
+  ctx.strokeText(f.scale, 2, TOP + 11);
+  ctx.fillText(f.scale, 2, TOP + 11);
   ctx.lineWidth = 1;
 }
 
@@ -480,14 +448,15 @@ export function HistoryChart(props: { name: TileName; title: string; unit: strin
   const [tip, setTip] = createSignal<{ r: Readout; left: number; top: number; below: boolean } | null>(null);
   const [held, setHeld] = createSignal(false);
   const [valueText, setValueText] = createSignal<string>();
-  const [bucketCount, setBucketCount] = createSignal(0);
+  const [count, setCount] = createSignal(0);
   const [total, setTotal] = createSignal(0);
   const [top, setTop] = createSignal(1);
   const [sel, setSel] = createSignal<number | null>(null);
 
-  let cacheKey = "";
-  let figureSeen: FigureHistory | undefined;
+  let second = Number.NaN;
+  let seen: FigureHistory | undefined;
   let buckets: Bucket[] = [];
+  let scale = "";
   let heldAt: number | null = null;
   let drawnAt = 0;
 
@@ -502,29 +471,36 @@ export function HistoryChart(props: { name: TileName; title: string; unit: strin
   /** The moment drawn: the held one, or the controller's time now. */
   const moment = () => heldAt ?? props.live.clock() ?? Date.now() / 1000;
 
-  /** The buckets at `at`, rebuilt when the second or the figure changes. */
-  function refresh(at: number): void {
+  /** The buckets at `at`, placed on the plot; rebuilt when the second or the figure changes. */
+  function layout(at: number): number {
     const f = figure();
-    const key = `${Math.floor(at)}`;
-    if (key === cacheKey && f === figureSeen) return;
-    cacheKey = key;
-    figureSeen = f;
-    buckets = bucketsAt(f, at);
-    setTop(scaleTop(buckets));
-    setBucketCount(buckets.reduce((n, b) => n + (b.data ? 1 : 0), 0));
-    setTotal(buckets.length);
+    if (Math.floor(at) !== second || f !== seen) {
+      second = Math.floor(at);
+      seen = f;
+      buckets = bucketsAt(f, at);
+      const t = scaleTop(buckets, PERCENT_TILES.has(props.name) ? 100 : undefined);
+      scale = withUnit(t, props.unit);
+      batch(() => {
+        setTop(t);
+        setCount(buckets.reduce((n, b) => n + (b.data ? 1 : 0), 0));
+        setTotal(buckets.length);
+      });
+    }
+    const width = chart.width >= 0 ? chart.width : plot.clientWidth;
+    place(buckets, at, width);
+    return width;
   }
 
   const chart: Chart = {
     visible: false,
     held: false,
-    drawnAt: 0,
     drawnFigure: false,
+    width: -1,
+    height: -1,
     draw() {
       const at = gliding() || heldAt !== null ? moment() : Math.floor(moment());
-      refresh(at);
-      const width = plot.clientWidth;
-      const height = plot.clientHeight;
+      const width = layout(at);
+      const height = chart.height >= 0 ? chart.height : plot.clientHeight;
       if (width < 40 || height < 30) return;
       const dpr = window.devicePixelRatio || 1;
       const w = Math.round(width * dpr);
@@ -536,31 +512,17 @@ export function HistoryChart(props: { name: TileName; title: string; unit: strin
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      place(buckets, at, width);
       const ctrl = props.live.tiers()?.controllers ?? [];
-      paint(
-        ctx,
-        {
-          buckets,
-          top: top(),
-          at,
-          width,
-          height,
-          sel: sel(),
-          restarts: ctrl.filter((c) => c.started !== null && !c.unsupported && at - c.started < REACH).map((c) => c.started!),
-          partialBelow: ctrl.length,
-        },
-        props.unit,
-      );
+      const restarts = ctrl.filter((c) => c.started !== null && !c.unsupported && at - c.started < REACH).map((c) => c.started!);
+      paint(ctx, { buckets, top: top(), scale, at, width, height, sel: sel(), restarts, controllers: ctrl.length });
       drawnAt = at;
-      chart.drawnAt = at;
       chart.drawnFigure = figure() !== undefined;
       if (!alt()) chart.refreshAlt();
     },
     refreshAlt() {
+      // Its own buckets: those drawn keep their places for the pointer.
       const at = moment();
-      refresh(at);
-      setAlt(altText(context(), buckets, at, props.value));
+      setAlt(altText(context(), bucketsAt(figure(), at), at, props.value));
     },
   };
 
@@ -594,7 +556,7 @@ export function HistoryChart(props: { name: TileName; title: string; unit: strin
 
   const pointer = (e: PointerEvent) => {
     hold(true);
-    if (!buckets.length) chart.draw();
+    layout(heldAt!);
     const x = e.clientX - plot.getBoundingClientRect().left;
     let best: number | null = null;
     let distance = Infinity;
@@ -609,26 +571,45 @@ export function HistoryChart(props: { name: TileName; title: string; unit: strin
   };
 
   const keydown = (e: KeyboardEvent) => {
-    refresh(moment());
+    layout(moment());
     const n = buckets.length;
-    if (n === 0) return;
-    let i = sel() ?? n - 1;
-    const b = buckets[i]!;
-    if (e.key === "ArrowLeft") i = Math.max(0, i - (e.shiftKey ? 10 : 1));
-    else if (e.key === "ArrowRight") i = Math.min(n - 1, i + (e.shiftKey ? 10 : 1));
-    else if (e.key === "Home") i = 0;
-    else if (e.key === "End") i = n - 1;
-    else if (e.key === "PageUp" || e.key === "PageDown") {
-      const tier = b.tier + (e.key === "PageUp" ? 1 : -1);
-      const j = e.key === "PageUp" ? buckets.map((x) => x.tier).lastIndexOf(tier) : buckets.findIndex((x) => x.tier === tier);
-      if (j >= 0) i = j;
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      select(null);
-      return;
-    } else return;
+    const current = sel();
+    let i = current ?? n - 1;
+    const tier = buckets[i]?.tier ?? 0;
+    const by = e.shiftKey ? 10 : 1;
+    switch (e.key) {
+      case "ArrowLeft":
+      case "ArrowDown":
+        i = Math.max(0, i - by);
+        break;
+      case "ArrowRight":
+      case "ArrowUp":
+        i = Math.min(n - 1, i + by);
+        break;
+      case "Home":
+        i = 0;
+        break;
+      case "End":
+        i = n - 1;
+        break;
+      case "PageUp":
+      case "PageDown": {
+        // The finer tier is newer, so up; the coarser older, so down: to its bucket next to this tier.
+        const tiers = buckets.map((b) => b.tier);
+        const j = e.key === "PageUp" ? tiers.indexOf(tier - 1) : tiers.lastIndexOf(tier + 1);
+        if (j >= 0) i = j;
+        break;
+      }
+      case "Escape":
+        e.preventDefault();
+        select(null);
+        return;
+      default:
+        return;
+    }
     e.preventDefault();
-    select(i);
+    // After Escape an arrow brings the readout back where it was left: on the newest bucket.
+    select(current === null && e.key.startsWith("Arrow") ? n - 1 : i);
   };
 
   onMount(() => onCleanup(register(chart, plot)));
@@ -649,7 +630,7 @@ export function HistoryChart(props: { name: TileName; title: string; unit: strin
         aria-valuetext={valueText() ?? props.title}
         data-testid={`metrics-history-${props.name}`}
         data-top={top()}
-        data-buckets={bucketCount()}
+        data-buckets={count()}
         onPointerMove={pointer}
         onPointerDown={pointer}
         onPointerLeave={(e) => {
@@ -657,7 +638,7 @@ export function HistoryChart(props: { name: TileName; title: string; unit: strin
         }}
         onFocus={() => {
           hold(true);
-          refresh(moment());
+          layout(heldAt!);
           // A tap selected its bucket before the focus came.
           if (sel() === null && buckets.length) select(buckets.length - 1);
         }}

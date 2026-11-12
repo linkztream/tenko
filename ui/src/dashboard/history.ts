@@ -70,7 +70,7 @@ function tierOf(wire: WireTier): Tier | null {
   return {
     step,
     first: start - (n - 1) * step,
-    ring: wire.ring ?? n,
+    ring: wire.ring ?? Infinity,
     lowest: wire.lowest,
     highest: wire.highest,
     mean: wire.mean,
@@ -141,22 +141,6 @@ export const TAU = 20;
 /** The reach of the chart: two days (DH-Q2). */
 export const REACH = 2 * 86_400;
 const SPAN = Math.asinh(REACH / TAU);
-/** The steps of the five tiers after the finest (1 s, or 5 s for a ratio). */
-const COARSE_STEPS = [10, 60, 600, 3600] as const;
-/**
- * The age at which each tier gives way to the next coarser one, before the history names its rings:
- * those of the contract (see `handover`).
- */
-const HANDOVER = [60, 540, 3000, 18_000] as const;
-
-/**
- * The age at which a held tier gives way to the next coarser one. A ring holds its tier until the
- * next coarser bucket starts, so a ring of r buckets of step s (the open one included) hands over at
- * (r − 1) × s − the next step: 60 s, 9 min, 50 min and 5 h for the contract's 71, 61, 61 and 37.
- */
-function handover(held: Tier | undefined, tier: number, nextStep: number): number {
-  return held ? Math.max(held.step, (held.ring - 1) * held.step - nextStep) : HANDOVER[tier]!;
-}
 /** Ages with a label under the axis. */
 export const AGE_LABELS = [10, 60, 600, 3600, 21_600, 86_400] as const;
 
@@ -208,54 +192,41 @@ function slot(tier: Tier | undefined, start: number) {
   return { lowest: tier.lowest[i] ?? mean, highest: tier.highest[i] ?? mean, mean, covered: covered / 1000, controllers: tier.controllers[i] ?? 0 };
 }
 
+function bucket(start: number, step: number, tier: number, v: ReturnType<typeof slot>, clipped: boolean, parent: Bucket["parent"]): Bucket {
+  return { start, step, tier, data: !!v, lowest: v?.lowest ?? 0, highest: v?.highest ?? 0, mean: v?.mean ?? 0, covered: v?.covered ?? 0, controllers: v?.controllers ?? 0, clipped, parent, x0: 0, x1: 0, cx: 0, m: 0, h: 0, l: 0 };
+}
+
 /**
- * The buckets a chart draws at `at` (the second it stands in), oldest first: each tier's slots from
- * where the next finer tier stops back to where the next coarser takes over. A slot the client
- * holds no data for is a bucket without data (hatched); the finest tier stops at its newest closed
- * bucket, and the line runs on from there to the right edge.
+ * The buckets a chart draws at `at` (the second it stands in), oldest first. Each coarser bucket is
+ * drawn from the finest tier that holds all of it, so every drawn bucket is whole: a tier gives way
+ * at the first start of the next coarser step at or after its oldest bucket (about 60 s, 9 min,
+ * 50 min and 5 h back with full rings of 71, 61, 61 and 37), and a tier the history lacks or that
+ * holds too little leaves its ages to the next. A slot without data is hatched; the finest tier
+ * stops at its newest bucket, and the line runs on from there to the right edge. Without any tier
+ * the chart is one bucket of no data.
  */
 export function bucketsAt(figure: FigureHistory | undefined, at: number): Bucket[] {
   const now = Math.floor(at);
-  const finest = figure?.merge === "ratio" ? 5 : 1;
-  const steps = [finest, ...COARSE_STEPS];
-  const tiers = steps.map((step) => figure?.tiers.find((t) => t.step === step));
+  const tiers = (figure?.tiers ?? []).filter((t) => t.covered.length > 0).sort((a, b) => a.step - b.step);
+  if (tiers.length === 0) return [bucket(now - REACH, REACH, 0, null, false, null)];
   const parts: Bucket[][] = [];
   let edge = now;
-  steps.forEach((step, tier) => {
-    const held = tiers[tier];
-    const nextStep = steps[tier + 1];
-    const age = nextStep ? handover(held, tier, nextStep) : REACH;
-    const low = nextStep ? Math.floor((now - age) / nextStep) * nextStep : now - REACH;
+  tiers.forEach((held, tier) => {
+    const { step } = held;
+    const next = tiers[tier + 1];
+    const low = next ? Math.min(edge, Math.ceil(held.first / next.step) * next.step) : now - REACH;
+    // A finer bucket gives way when the ring no longer holds the start of its coarser bucket: in
+    // its last coarser step before that its drawn values slide toward the coarser bucket's.
+    const reach = (held.covered.length - 1) * step;
     const list: Bucket[] = [];
     for (let b = Math.floor((edge - step) / step) * step; b + step > low; b -= step) {
       const v = slot(held, b);
       // Newer than anything held (the newest buckets are still on their way): not drawn.
-      if (v === undefined && held && b > held.first) continue;
-      let parent: Bucket["parent"] = null;
-      if (nextStep && v) {
-        const start = Math.floor(b / nextStep) * nextStep;
-        const p = slot(tiers[tier + 1], start);
-        if (p) parent = { lowest: p.lowest, highest: p.highest, mean: p.mean, mid: start + nextStep / 2, switchAt: start + nextStep + age, step: nextStep };
-      }
-      list.push({
-        start: b,
-        step,
-        tier,
-        data: !!v,
-        lowest: v?.lowest ?? 0,
-        highest: v?.highest ?? 0,
-        mean: v?.mean ?? 0,
-        covered: v?.covered ?? 0,
-        controllers: v?.controllers ?? 0,
-        clipped: b < now - REACH,
-        parent,
-        x0: 0,
-        x1: 0,
-        cx: 0,
-        m: 0,
-        h: 0,
-        l: 0,
-      });
+      if (v === undefined && b > held.first) continue;
+      const start = next ? Math.floor(b / next.step) * next.step : 0;
+      const p = next && v ? slot(next, start) : null;
+      const parent = next && p ? { lowest: p.lowest, highest: p.highest, mean: p.mean, mid: start + next.step / 2, switchAt: start + reach, step: next.step } : null;
+      list.push(bucket(b, step, tier, v, b < now - REACH, parent));
     }
     parts.push(list.reverse());
     edge = low;
@@ -264,11 +235,12 @@ export function bucketsAt(figure: FigureHistory | undefined, at: number): Bucket
 }
 
 /**
- * The top of the scale (DH-Q6 (b)): the highest after holding each lone needle to half again the
- * highest of its two neighbors on each side, rounded up to a round number; a needle above it is
- * drawn to the top with a caret. 1 for a chart without data.
+ * The top of the scale (DH-Q6 (b)): `fixed` for a share in percent (100), otherwise the highest after
+ * holding each lone needle to half again the highest of its two neighbors on each side, rounded up to
+ * a round number; a needle above it is drawn to the top with a caret. 1 for a chart without data.
  */
-export function scaleTop(buckets: readonly Bucket[]): number {
+export function scaleTop(buckets: readonly Bucket[], fixed?: number): number {
+  if (fixed !== undefined) return fixed;
   let held = 0;
   buckets.forEach((b, i) => {
     if (!b.data) return;
@@ -320,23 +292,28 @@ export function localOffset(t: number): number {
   return offset;
 }
 
+/** A moment's time on the clock of a step: local time for an hour and longer, UTC below (the same moments, as every offset is whole quarters of an hour). */
+function clockOf(moment: number, step: number, offset: (t: number) => number): number {
+  return step > 900 ? moment + offset(moment) : moment;
+}
+
 /**
  * Calls `line` for every moment of the grid on a chart `width` wide at `at`, with its position and
  * opacity: whole days, quarters of a day, hours and so on down to 5 s in local time, each drawn where
- * it stands (not rounded to a pixel), faded by how close its neighbors are.
+ * it stands (not rounded to a pixel), faded by how close its neighbors are. The moments are found by
+ * walking real time, so on a day with a change of daylight saving time a repeated hour has both its
+ * lines and a skipped hour none.
  */
 export function forEachGridLine(at: number, width: number, line: (moment: number, step: number, x: number, alpha: number) => void, offset = localOffset): void {
   GRID_STEPS.forEach((step, i) => {
     // Beyond this age the lines of this step would stand closer than GRID_MIN.
     const far = Math.min(REACH, Math.sqrt(Math.max(0, ((step * width) / (SPAN * GRID_MIN)) ** 2 - TAU * TAU)));
     const coarser = GRID_STEPS[i - 1];
-    let off = offset(at);
-    for (let local = Math.floor((at + off) / step) * step; ; local -= step) {
-      const moment = local - offset(local - off);
-      off = offset(moment);
+    const walk = Math.min(step, 900);
+    for (let moment = Math.floor(at / walk) * walk; at - moment <= far; moment -= walk) {
+      if (clockOf(moment, step, offset) % step !== 0) continue;
+      if (coarser && clockOf(moment, coarser, offset) % coarser === 0) continue;
       const age = at - moment;
-      if (age > far) break;
-      if (coarser && local % coarser === 0) continue;
       const alpha = Math.min(1, (step * pace(age, width) - GRID_MIN) / 4);
       if (alpha > 0) line(moment, step, axisX(age, width), alpha);
     }

@@ -6184,7 +6184,6 @@ export type MessageKey =
   | "metrics.history.partial_controllers"
   | "metrics.history.partial_time"
   | "metrics.history.pause"
-  | "metrics.history.resume"
   | "metrics.history.started_of"
   | "metrics.history.started_one"
   | "metrics.history.when_one"
@@ -16172,7 +16171,6 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.history.partial_controllers",
   "metrics.history.partial_time",
   "metrics.history.pause",
-  "metrics.history.resume",
   "metrics.history.started_of",
   "metrics.history.started_one",
   "metrics.history.when_one",

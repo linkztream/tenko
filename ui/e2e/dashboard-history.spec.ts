@@ -15,12 +15,13 @@
 //   above the scale in its ten-minute bucket; a controller that restarted says where its history
 //   begins; axe finds nothing.
 // - The charts glide at about 10 frames a second while the page is visible, and the frames stay
-//   within M85's budget (p99 of a frame under 12 ms, under 10 % of one core), measured over 20 s
-//   with all 25 tiles on screen; a chart under the pointer holds still while the others glide;
-//   nothing is drawn while the page is hidden or after "Pause motion". Screenshots of the tiles
-//   in the light and the dark theme are attached.
+//   within M85's budget (p99 of a frame under 12 ms, the drawing under 10 % of one core), measured
+//   over 60 s with all 25 tiles on screen; the main thread's busy share is attached beside it,
+//   with what this test's stream costs while the charts stand still. A chart under the pointer
+//   holds still while the others glide; nothing is drawn while the page is hidden or after "Pause
+//   motion". Screenshots of the tiles in the light and the dark theme are attached.
 // - Under reduced motion nothing glides: no animation frame is asked for, and a chart is drawn in
-//   place at most once in ten seconds.
+//   place once in ten seconds.
 //
 // The drawing is counted from outside: an init script counts the canvases' `clearRect` (one per
 // drawing) and times the animation frame callbacks.
@@ -152,15 +153,15 @@ test("M85: the charts glide within the budget, hold under the pointer and stop w
   await instrument(page);
   await openTiles(page);
 
-  // Twenty seconds of gliding with all 25 charts on screen: the frames' times and the main thread's busy time.
+  // A minute of gliding with all 25 charts on screen: the frames' times and the main thread's busy time.
   const session = await page.context().newCDPSession(page);
   await session.send("Performance.enable");
   const busy = async () => (await session.send("Performance.getMetrics")).metrics.find((m) => m.name === "TaskDuration")!.value;
   const start = await counts(page);
   const busyStart = await busy();
   const wallStart = Date.now();
-  // test-lint: allow sleep the 20 s of gliding are the window M85 measures
-  await page.waitForTimeout(20_000);
+  // test-lint: allow sleep the minute of gliding is the window M85 measures
+  await page.waitForTimeout(60_000);
   const wall = (Date.now() - wallStart) / 1000;
   const busyShare = (await busy()) - busyStart;
   const frames = await page.evaluate((from) => (window as unknown as { frames: number[] }).frames.slice(from), start.frames);
@@ -187,9 +188,12 @@ test("M85: the charts glide within the budget, hold under the pointer and stop w
   expect(result.drawingShareOfOneCore).toBeLessThan(10);
 
   for (const theme of ["light", "dark"]) {
+    // Shift+T steps through the themes (system, light, dark); the charts read the colors again.
+    await expect(async () => {
+      if ((await page.evaluate(() => document.documentElement.dataset.theme)) !== theme) await page.keyboard.press("Shift+T");
+      expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+    }).toPass();
     const drawn = await chartDraws(page, "requests");
-    await page.evaluate((t) => (document.documentElement.dataset.theme = t), theme);
-    // The theme's colors are read again and every chart redrawn.
     await expect.poll(() => chartDraws(page, "requests")).toBeGreaterThan(drawn + 2);
     const path = testInfo.outputPath(`metrics-history-${theme}.png`);
     await page.getByTestId("metrics-tiles").screenshot({ path });
@@ -242,15 +246,16 @@ test("M85: the charts glide within the budget, hold under the pointer and stop w
   await expect(page.getByTestId("metrics-pause-motion")).toHaveAttribute("aria-pressed", "false");
 });
 
-test("under reduced motion nothing glides: a chart is drawn in place at most once in ten seconds", async ({ page, signedIn }) => {
+test("under reduced motion nothing glides: a chart is drawn in place once in ten seconds", async ({ page, signedIn }) => {
   void signedIn;
   await page.emulateMedia({ reducedMotion: "reduce" });
   await fakeHistoryStream(page);
   await instrument(page);
   await openTiles(page);
   const before = await chartDraws(page, "requests");
-  // test-lint: allow sleep that a chart is not redrawn for a while is what this test checks
-  await page.waitForTimeout(5000);
-  expect(await chartDraws(page, "requests")).toBeLessThanOrEqual(before + 1);
+  // test-lint: allow sleep that a chart is redrawn once in ten seconds and not more is what this test checks
+  await page.waitForTimeout(11_000);
+  expect(await chartDraws(page, "requests")).toBeGreaterThanOrEqual(before + 1);
+  expect(await chartDraws(page, "requests")).toBeLessThanOrEqual(before + 2);
   expect((await counts(page)).frames).toBe(0);
 });

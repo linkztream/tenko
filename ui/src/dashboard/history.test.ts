@@ -91,9 +91,8 @@ describe("the axis", () => {
   });
 
   it("draws no bucket wider than 5 px on a tile of 283 px (a ratio's 5-second buckets 7 px), at any moment", () => {
-    const at = T0 + 45;
-    const held = heldOf(testHistory({ at, figures: ["dns-queries", "dns-cache"] }));
     for (let t = T0; t < T0 + 40; t += 0.7) {
+      const held = heldOf(testHistory({ at: Math.floor(t), figures: ["dns-queries", "dns-cache"] }));
       for (const b of frame(held, t)) expect(b.x1 - b.x0, `${b.step} s at ${b.start}`).toBeLessThanOrEqual(5);
       for (const b of frame(held, t, "dns-cache")) expect(b.x1 - b.x0).toBeLessThanOrEqual(b.step === 5 ? 7 : 5);
     }
@@ -111,53 +110,70 @@ describe("the axis", () => {
 });
 
 describe("the motion over stepped frames", () => {
-  // Frames a tenth of a second apart over 40 s around a ten-minute mark, where every tier switches at once.
-  const at = T0 + 45;
-  const held = heldOf(testHistory({ at, burstAgo: 3 * 3600 }));
-  const frames = Array.from({ length: 400 }, (_, i) => T0 + i / 10);
+  // Frames a tenth of a second apart over 40 s across a whole hour, where every tier hands over at
+  // once; the client holds what it would at each moment: the history of that second.
+  const HOUR = Date.parse("2026-11-12T10:00:00Z") / 1000;
+  const frames = Array.from({ length: 400 }, (_, i) => HOUR - 20 + i / 10);
+  const histories = new Map<number, HeldHistory>();
+  const burst = HOUR - 3 * 3600;
+  const heldAt = (t: number) => {
+    const second = Math.floor(t);
+    if (!histories.has(second)) histories.set(second, heldOf(testHistory({ at: second, burstAgo: second - burst, figures: ["dns-queries"] })));
+    return histories.get(second)!;
+  };
 
   it("puts every grid line where the axis function puts its moment, fading it in by at most 0.01 a frame", () => {
-    let before = new Map<string, number>();
+    let before = new Map<number, number>();
     for (const t of frames) {
-      const now = new Map<string, number>();
+      const now = new Map<number, number>();
       forEachGridLine(t, W, (moment, step, x, alpha) => {
         expect(x).toBeCloseTo(axisX(t - moment, W), 9);
         expect(moment % step).toBe(0);
-        const key = `${moment}`;
-        const was = before.get(key);
+        const was = before.get(moment);
         if (was !== undefined) expect(Math.abs(alpha - was)).toBeLessThan(0.01);
-        // A line is born at "now" or at full opacity's edge, never in the middle at once.
+        // A line is born at "now" or faint at the far end of its step, never at once in the middle.
         else if (before.size > 0) expect(alpha < 0.01 || t - moment < 0.2).toBe(true);
-        now.set(key, alpha);
+        now.set(moment, alpha);
       });
       before = now;
     }
   });
 
-  it("moves every point left and never right, and changes the line's shape by under half a pixel a frame", () => {
-    let before = new Map<string, { cx: number; y: number }>();
+  it("moves every point left and never right, and changes the line by under half a pixel a frame", () => {
+    let before = new Map<string, { x: number; y: number }>();
+    let line: { x: number; y: number }[] = [];
     let top = 0;
     for (const t of frames) {
-      const buckets = frame(held, t);
+      const buckets = frame(heldAt(t), t);
       const scale = scaleTop(buckets);
-      const y = (v: number) => 61 * (1 - Math.min(v, scale) / scale);
-      const now = new Map<string, { cx: number; y: number }>();
+      const now = new Map<string, { x: number; y: number }>();
       for (const b of buckets) {
         if (!b.data) continue;
         const key = `${b.step}:${b.start}`;
-        const point = { cx: b.cx, y: y(b.m) };
+        const point = { x: b.cx, y: 61 * (1 - Math.min(b.m, scale) / scale) };
         const was = before.get(key);
-        if (was) {
-          expect(point.cx, key).toBeLessThanOrEqual(was.cx + 1e-9);
-          if (scale === top) expect(Math.abs(point.y - was.y), key).toBeLessThan(0.5);
-        }
+        if (was) expect(point.x, key).toBeLessThanOrEqual(was.x + 1e-9);
+        // The same point moves by little; a point that takes over from finer ones (or a newer copy of a
+        // bucket) stands where the line stood. Only a bucket new at the right end comes from nowhere.
+        const from = was?.y ?? (line.length > 0 && point.x <= line[line.length - 1]!.x ? yAt(line, point.x) : undefined);
+        if (from !== undefined && scale === top) expect(Math.abs(point.y - from), `${key} at ${t - HOUR}`).toBeLessThan(0.5);
         now.set(key, point);
       }
       before = now;
+      line = [...now.values()];
       top = scale;
     }
   });
 });
+
+/** The line through `points` (by x, ascending) at `x`. */
+function yAt(points: readonly { x: number; y: number }[], x: number): number {
+  const i = points.findIndex((p) => p.x >= x);
+  if (i <= 0) return points[Math.max(0, i)]!.y;
+  const a = points[i - 1]!;
+  const b = points[i]!;
+  return b.x === a.x ? b.y : a.y + ((b.y - a.y) * (x - a.x)) / (b.x - a.x);
+}
 
 describe("the scale", () => {
   it("lets a lone needle leave the scale, which keeps the normal rhythm readable", () => {
@@ -174,10 +190,14 @@ describe("the scale", () => {
     expect(needle).toBeGreaterThan(3 * top);
   });
 
-  it("is 1 for a chart without data, which then is hatched from end to end", () => {
+  it("is 1 for a chart without data, which then is one bucket of no data from end to end", () => {
     const buckets = frame({ controllers: [], figures: new Map() }, T0);
     expect(scaleTop(buckets)).toBe(1);
-    expect(buckets.every((b) => !b.data)).toBe(true);
+    expect(buckets.map((b) => [b.data, b.step, Math.round(b.x0), Math.round(b.x1)])).toEqual([[false, REACH, 0, W]]);
+  });
+
+  it("is 0 to 100 for a share in percent, whatever the values", () => {
+    expect(scaleTop(frame(heldOf(testHistory({ at: T0, figures: ["dns-queries"] })), T0), 100)).toBe(100);
   });
 });
 
@@ -193,34 +213,43 @@ describe("gaps and restarts", () => {
 });
 
 describe("the grid in local time", () => {
-  it("puts the hour lines on the local hour across a change of daylight saving time", () => {
-    // One hour more from the moment `T0 - 5 h` on, as in spring.
-    const change = T0 - 5 * 3600 + 1800;
-    const offset = (t: number) => (t >= change ? 7200 : 3600);
-    let hours = 0;
-    forEachGridLine(
-      T0,
-      W,
-      (moment, step) => {
-        if (step < 3600) return;
-        hours += 1;
-        expect((moment + offset(moment)) % 3600).toBe(0);
-      },
-      offset,
-    );
-    expect(hours).toBeGreaterThan(5);
+  /** The moments of the lines of an hour or longer within the last eight hours at `at`. */
+  const hourLines = (at: number, offset: (t: number) => number) => {
+    const moments: number[] = [];
+    forEachGridLine(at, W, (moment, step) => step >= 3600 && at - moment <= 8 * 3600 && moments.push(moment), offset);
+    return moments.sort((a, b) => a - b);
+  };
+  const everyHour = (at: number) => Array.from({ length: 8 }, (_, i) => Math.floor(at / 3600) * 3600 - (7 - i) * 3600);
+
+  it("draws each hour once on the day the clocks go back: the repeated hour has both its lines", () => {
+    // Two hours ahead of UTC until the change, one after it, as in autumn.
+    const change = T0 - 4 * 3600 - 1800;
+    expect(hourLines(T0, (t) => (t >= change ? 3600 : 7200))).toEqual(everyHour(T0));
+  });
+
+  it("draws each hour once on the day the clocks go forward: the skipped hour has none", () => {
+    const change = T0 - 4 * 3600 - 1800;
+    expect(hourLines(T0, (t) => (t >= change ? 7200 : 3600))).toEqual(everyHour(T0));
+  });
+
+  it("puts the hour lines on the local hour in a zone half an hour off", () => {
+    const offset = () => 5.5 * 3600;
+    const lines = hourLines(T0, offset);
+    expect(lines.length).toBeGreaterThan(5);
+    for (const moment of lines) expect((moment + offset()) % 3600).toBe(0);
   });
 });
 
 describe("the mock's canned history", () => {
-  it("is the golden example's, every moment moved by the same whole seconds so that it ends now", () => {
+  it("is the golden example's, every moment moved by the same whole hours so that it ends within the last hour", () => {
     const now = Date.parse("2026-11-12T09:30:00.250Z");
     const frame = cannedMetricsHistory(now);
     const event = JSON.parse(frame.split("\n").find((line) => line.startsWith("data: "))!.slice(6)) as { history: HistoryFrame };
     const original = GOLDEN[0]!.history!;
     const shift = Date.parse(event.history.at) - Date.parse(original.at);
-    expect(Math.abs(Date.parse(event.history.at) - now)).toBeLessThanOrEqual(500);
-    expect(shift % 1000).toBe(0);
+    expect(now - Date.parse(event.history.at)).toBeGreaterThanOrEqual(0);
+    expect(now - Date.parse(event.history.at)).toBeLessThan(3_600_000);
+    expect(shift % 3_600_000).toBe(0);
     const back = (stamp: string) => new Date(Date.parse(stamp) - shift).toISOString();
     expect(event.history.controllers.map((c) => (c.started ? { ...c, started: back(c.started) } : c))).toEqual(
       original.controllers.map((c) => (c.started ? { ...c, started: new Date(c.started).toISOString() } : c)),
@@ -246,13 +275,26 @@ describe("the tiers behind the line", () => {
     }
   });
 
-  it("hand over where the rings the history names end, so a longer ring draws further back", () => {
+  it("draw each age from the finest tier that holds it, so a shorter tier gives way earlier and leaves no hole", () => {
     const at = T0;
     const history = testHistory({ at, figures: ["dns-queries"] });
+    const full = bucketsAt(heldOf(history).figures.get("dns-queries"), at);
+    const tenMinutes = history.figures[0]!.tiers.find((t) => t.step_ms === 600_000)!;
+    for (const column of ["lowest", "highest", "mean", "covered_ms", "controllers"] as const) (tenMinutes[column] as unknown[]).splice(0, 20);
     const short = bucketsAt(heldOf(history).figures.get("dns-queries"), at);
-    for (const tier of history.figures[0]!.tiers) if (tier.step_ms === 600_000) tier.ring = 43;
-    const long = bucketsAt(heldOf(history).figures.get("dns-queries"), at);
-    const tenMinutes = (list: Bucket[]) => list.filter((b) => b.step === 600).length;
-    expect(tenMinutes(long)).toBeGreaterThan(tenMinutes(short));
+    const count = (list: Bucket[], step: number) => list.filter((b) => b.step === step).length;
+    expect(count(short, 600)).toBeLessThan(count(full, 600));
+    expect(count(short, 3600)).toBeGreaterThan(count(full, 3600));
+    expect(short.filter((b) => !b.data)).toEqual([]);
+  });
+
+  it("let the next tier the history has take over where one is missing", () => {
+    // The golden history of the DNS queries has the 1-s, 10-s and 1-h tiers only.
+    const held = golden();
+    const at = Date.parse(GOLDEN[0]!.history!.at) / 1000;
+    const buckets = bucketsAt(held.figures.get("dns-queries"), at);
+    // The 10-s tier holds two buckets, too few to give the hour bucket of 11:00 to: the 1-s tier takes over at 12:00.
+    expect([...new Set(buckets.map((b) => b.step))]).toEqual([3600, 1]);
+    expect(buckets.filter((b) => b.data && b.step === 3600).map((b) => b.start)).toEqual([Date.parse("2026-10-09T11:00:00Z") / 1000]);
   });
 });

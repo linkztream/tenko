@@ -227,13 +227,14 @@ const TIMES = new Set(["at", "started", "start"]);
 
 /**
  * The first event of a `metrics` stream: the golden example's `metrics.history` as it stands,
- * every moment in it moved by the same whole seconds so that it ends now. The mock computes no
- * history of its own: the tiles show the golden figures (three of them, a few buckets each).
+ * every moment in it moved by the same whole hours, so that every bucket stays on its step and the
+ * history ends within the last hour. The mock computes no history of its own: the tiles show the
+ * golden figures (three of them, a few buckets each).
  */
 export function cannedMetricsHistory(now = Date.now()): string {
   const line = goldenMetrics.split("\n")[0] ?? "{}";
   const at = Date.parse((JSON.parse(line) as { history?: { at?: string } }).history?.at ?? "");
-  const shift = Number.isFinite(at) ? Math.round((now - at) / 1000) * 1000 : 0;
+  const shift = Number.isFinite(at) ? Math.floor((now - at) / 3_600_000) * 3_600_000 : 0;
   const moved: unknown = JSON.parse(line, (key, value: unknown) => (TIMES.has(key) && typeof value === "string" ? new Date(Date.parse(value) + shift).toISOString() : value));
   return frame("metrics", moved);
 }

@@ -1,5 +1,5 @@
 import { render, screen, waitFor, within } from "@solidjs/testing-library";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { axeViolations } from "../app/testing/axe";
 import { setLocale } from "../i18n";
 import { mockMetricsSnapshot } from "../api/mock/metrics-model";
@@ -782,19 +782,29 @@ describe("the tiles' history", () => {
     return source;
   }
 
-  it("take the first history, append the closed buckets, and open the stream again on a hole or a reset", async () => {
+  it("take the first history, append the closed buckets, and open the stream again on a hole or a reset, the second time after a wait", async () => {
     const source = await streamWithHistory();
     expect(FakeSource.all).toHaveLength(1);
-    // The next closed buckets follow on: still the same stream.
-    send(source, closedAfter(2));
-    expect(FakeSource.all).toHaveLength(1);
-    // Closed buckets ten seconds on leave a hole: the stream is opened again for a fresh history.
-    send(source, closedAfter(12));
-    await waitFor(() => expect(FakeSource.all).toHaveLength(2));
-    expect(source.closed).toBe(true);
-    // The stream's reset does the same.
-    FakeSource.last().emit("reset", { reason: "lagged", revision: 1 });
-    await waitFor(() => expect(FakeSource.all).toHaveLength(3));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // The next closed buckets follow on: still the same stream.
+      send(source, closedAfter(2));
+      vi.advanceTimersByTime(0);
+      expect(FakeSource.all).toHaveLength(1);
+      // Closed buckets ten seconds on leave a hole: the stream is opened again at once for a fresh history.
+      send(source, closedAfter(12));
+      vi.advanceTimersByTime(0);
+      expect(FakeSource.all).toHaveLength(2);
+      expect(source.closed).toBe(true);
+      // The stream's reset does the same, but a second time within a minute only after 5 s.
+      FakeSource.last().emit("reset", { reason: "lagged", revision: 1 });
+      vi.advanceTimersByTime(4999);
+      expect(FakeSource.all).toHaveLength(2);
+      vi.advanceTimersByTime(1);
+      expect(FakeSource.all).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("read each bucket by keyboard as the slider's value text, and name the keys and the text alternative", async () => {
@@ -813,6 +823,11 @@ describe("the tiles' history", () => {
     await waitFor(() => expect(chart.getAttribute("aria-valuenow")).toBe("0"));
     expect(chart.getAttribute("aria-valuetext")).toContain(": No data.");
     expect(chart.getAttribute("aria-valuetext")).toContain("Controller 1 started at 05:00 AM; its history before that is missing.");
+    // A share's scale is 0 to 100.
+    const cache = screen.getByTestId("metrics-history-dns-cache");
+    cache.focus();
+    await waitFor(() => expect(cache.dataset.top).toBe("100"));
+    chart.focus();
     // Escape closes the readout and keeps the focus.
     chart.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await waitFor(() => expect(screen.queryByTestId("metrics-history-readout")).toBeNull());
@@ -825,7 +840,7 @@ describe("the tiles' history", () => {
     expect([button.textContent, button.getAttribute("aria-pressed")]).toEqual(["Pause motion", "false"]);
     button.click();
     await waitFor(() => expect(button.getAttribute("aria-pressed")).toBe("true"));
-    expect(button.textContent).toBe("Resume motion");
+    expect(button.textContent).toBe("Pause motion");
     expect(localStorage.getItem("tenko-motion")).toBe("paused");
     button.click();
     await waitFor(() => expect(button.getAttribute("aria-pressed")).toBe("false"));

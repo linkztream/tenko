@@ -251,6 +251,9 @@ export function tileValue(name: TileName, sample: MetricsSample): number | null 
   }
 }
 
+/** The tiles whose figure is a share in percent: their charts' scale is 0 to 100. */
+export const PERCENT_TILES: ReadonlySet<TileName> = new Set(["host-cpu", "host-memory", "dns-cache", "dns-answers", "dhcp-pools"]);
+
 /** The lag of controller `node` as the cluster reports it (the leader knows every member's). */
 export function lagOf(snapshot: MetricsSnapshot, node: number): number | null {
   const own = snapshot.nodes.find((sample) => sample.node === node);
