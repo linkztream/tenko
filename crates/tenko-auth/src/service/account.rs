@@ -535,15 +535,15 @@ impl AuthService {
         updated.password = Some(password);
         updated.password_change_required = false;
         let view = self.view().await?;
-        let others: Vec<_> = Self::user_sessions(view.as_ref(), user.id)?
-            .into_iter()
-            .filter(|(_, record)| record.id != session.id)
-            .collect();
         let mut batch = WriteBatch::for_request(ctx);
-        Self::stage_revoke(&mut batch, &others);
-        // A token made with the old password does not outlive it, nor does a known device.
-        let tokens = Self::stage_tokens_end(view.as_ref(), &mut batch, user.id)?;
-        let devices = Self::stage_known_devices_end(view.as_ref(), &mut batch, user.id)?;
+        // A session, token or known device of the old password does not outlive it; the
+        // session that changes it stays.
+        let end = self.stage_account_end(
+            view.as_ref(),
+            &mut batch,
+            &mut updated,
+            super::end::EndReason::PasswordChange(session.id),
+        )?;
         if request.remove_factors {
             if let Some(factor) = &user.totp {
                 self.vault.stage_delete(&mut batch, ctx, factor.secret);
@@ -557,23 +557,22 @@ impl AuthService {
         }
         batch.expect_typed(&USERS, &user.id, Some(revision));
         batch.put_typed(&USERS, &user.id, &updated)?;
-        let mut draft = Self::audit(
+        let mut draft = end.annotate(Self::audit(
             actions::PASSWORD_CHANGE,
             vec![ObjectRef::from(user.id)],
             ctx,
-        )
-        .with_context("sessions_revoked", others.len().to_string())
-        .with_context("tokens_revoked", tokens.to_string())
-        .with_context("known_devices", devices.to_string());
+        ));
         if request.remove_factors {
             draft = draft.with_context("factors_removed", "true");
         }
         batch.audit(draft);
-        self.commit(batch).await?;
+        let committed = self.commit(batch).await?;
+        self.finish_account_end(&end, committed.revision, ctx.now)
+            .await;
         Ok(PasswordChanged {
             breach_check,
-            sessions_revoked: others.len(),
-            tokens_revoked: tokens,
+            sessions_revoked: end.sessions,
+            tokens_revoked: end.tokens,
             factors_removed: request.remove_factors,
         })
     }
@@ -1133,6 +1132,7 @@ impl AuthService {
             last_used_at: None,
             issued_with: session.strength,
             prefix: token.expose().chars().take(12).collect(),
+            generation: user.tokens_generation,
         };
         let hash = token.hash();
         let mut batch = WriteBatch::for_request(ctx);

@@ -25,6 +25,7 @@
 //! | `auth.preferences` | ([`UserId`], key) | [`StoredPreference`] (the person's saved table layouts) |
 //! | `auth.known_devices` | SHA-256 of the device mark | [`KnownDeviceRecord`] |
 //! | `auth.user_known_devices` | ([`UserId`], SHA-256 of the device mark) | [`KnownDeviceId`] |
+//! | `auth.access_ends` | [`UserId`] | when an end of the account's access left credentials to remove |
 //! | `auth.providers`, `auth.mappings`, `auth.oidc_flows`, `auth.external_ids` | see [`crate::directory`] | directory sign-in (WP13.0) |
 //!
 //! Scoped grants, role policies and scoped tokens live in tables that builds before
@@ -35,6 +36,12 @@
 //! neither reads nor writes them, so it never sets or honors a device mark, and a backup
 //! taken before them restores with every device unknown. They hold the digest of a mark,
 //! never the mark itself.
+//!
+//! The generations of an account ([`UserRecord::sessions_generation`],
+//! [`UserRecord::tokens_generation`]) and the generation each credential was issued under
+//! are additive fields that are left out while they are zero, so the records of an account
+//! whose access never ended keep their bytes. `auth.access_ends` is an additive table: a
+//! build before it neither reads nor writes it.
 //!
 //! `auth.preferences` is additive in the same way: a build before it does not read the
 //! table, and a backup taken before it restores with the table empty, so every table shows
@@ -123,6 +130,25 @@ pub const KNOWN_DEVICES: TableDef<Vec<u8>, KnownDeviceRecord> = TableDef::new("a
 /// every mark it has, also two made by sign-ins of one browser at the same moment.
 pub const USER_KNOWN_DEVICES: TableDef<(UserId, Vec<u8>), KnownDeviceId> =
     TableDef::new("auth.user_known_devices");
+/// The accounts whose access ended with more credentials than one step removes, by the time
+/// of the end: the removal goes on until the row is gone (`crate::service::end`).
+pub const ACCESS_ENDS: TableDef<UserId, Timestamp> = TableDef::new("auth.access_ends");
+
+/// What a credential was issued under: the generation of the account it then had.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Issued {
+    /// A session, a known-device mark or a pending second factor, under
+    /// [`UserRecord::sessions_generation`].
+    Session(u64),
+    /// A personal or scoped token, under [`UserRecord::tokens_generation`].
+    Token(u64),
+}
+
+/// Whether a stored generation is left out of the encoding (it is zero).
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde passes a reference
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
 
 tenko_core::id_type! {
     /// Identifier of a scoped grant.
@@ -378,6 +404,9 @@ pub struct ScopedTokenRecord {
     /// The special scopes.
     #[serde(default)]
     pub scopes: Vec<TokenScope>,
+    /// The account's generation when it was issued ([`UserRecord::admits`]).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub generation: u64,
 }
 
 /// How a password was set, which decides the strength of a password login.
@@ -522,6 +551,14 @@ pub struct UserRecord {
     #[serde(default, skip_serializing_if = "UserSource::is_local")]
     pub source: UserSource,
     // WP13.0: end.
+    /// Raised by every end of the account's access: a session, a known-device mark or a
+    /// pending second factor issued under a lower value no longer holds.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub sessions_generation: u64,
+    /// Raised by every end of the account's access that ends its tokens: a personal or
+    /// scoped token issued under a lower value no longer holds.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub tokens_generation: u64,
 }
 
 impl UserRecord {
@@ -545,6 +582,17 @@ impl UserRecord {
             owner: None,
             unlocked_at: None,
             source: UserSource::Local,
+            sessions_generation: 0,
+            tokens_generation: 0,
+        }
+    }
+
+    /// Whether a credential issued under `issued` still holds for the account: no end of its
+    /// access came after it. Every check of a credential asks this, and only this.
+    pub fn admits(&self, issued: Issued) -> bool {
+        match issued {
+            Issued::Session(generation) => generation >= self.sessions_generation,
+            Issued::Token(generation) => generation >= self.tokens_generation,
         }
     }
 
@@ -630,6 +678,9 @@ pub struct SessionRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory_checked_at: Option<Timestamp>,
     // WP13.0: end.
+    /// The account's generation when it was issued ([`UserRecord::admits`]).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub generation: u64,
 }
 
 /// A device that completed a sign-in of the account: its browser holds a mark whose
@@ -654,6 +705,9 @@ pub struct KnownDeviceRecord {
     /// Failed attempts made with the mark since it was issued; at the budget it is spent.
     #[serde(default)]
     pub failures: u32,
+    /// The account's generation when it was issued ([`UserRecord::admits`]).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub generation: u64,
 }
 
 /// A personal API token (IAM-10). Stored under the SHA-256 of the token.
@@ -677,6 +731,9 @@ pub struct TokenRecord {
     pub issued_with: AuthStrength,
     /// The first characters of the token, for recognition in listings.
     pub prefix: String,
+    /// The account's generation when it was issued ([`UserRecord::admits`]).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub generation: u64,
 }
 
 /// A registered WebAuthn credential (public data only).
@@ -822,6 +879,7 @@ mod tests {
             mfa_enrollment_required: true,
             source: SessionSource::Local,
             directory_checked_at: None,
+            generation: 0,
         };
         let new = SESSIONS.encode(&record).expect("cbor").to_vec();
         // The bytes 0.0.11 wrote: the same map with the CBOR text key of the old name

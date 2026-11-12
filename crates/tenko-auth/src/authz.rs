@@ -1119,6 +1119,7 @@ mod tests {
                     last_used_at: None,
                     issued_with: AuthStrength::Password,
                     prefix: "tnk_".to_owned(),
+                    generation: 0,
                 },
             )
             .expect("token");

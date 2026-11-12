@@ -749,6 +749,7 @@ impl AuthService {
             prefix: token.expose().chars().take(12).collect(),
             grants,
             scopes,
+            generation: owner.tokens_generation,
         };
         let hash = token.hash();
         let mut batch = WriteBatch::for_request(ctx);
@@ -929,25 +930,6 @@ impl AuthService {
             batch.delete_typed(&GRANTS, grant);
         }
         Ok(removed.len())
-    }
-
-    /// Adds the removal of every scoped token of a user to a batch; returns how many.
-    pub(super) fn stage_scoped_token_removal(
-        view: &dyn ReadView,
-        batch: &mut WriteBatch,
-        id: UserId,
-    ) -> Result<usize, AuthError> {
-        let tokens = view.scan_typed(
-            &USER_SCOPED_TOKENS,
-            KeyRange::prefix(tenko_core::codec::encode_key(&(id,))),
-            LIST_LIMIT,
-            false,
-        )?;
-        for (key, hash, _) in &tokens {
-            batch.delete_typed(&SCOPED_TOKENS, hash);
-            batch.delete_typed(&USER_SCOPED_TOKENS, key);
-        }
-        Ok(tokens.len())
     }
 
     /// The scoped token `id` of `owner` with its hash, if there is one.

@@ -119,6 +119,9 @@ pub enum Pending {
         first: AuthStrength,
         /// Wrong codes so far.
         attempts: u32,
+        /// The account's generation when the password was verified: an end of the
+        /// account's access after it ends the challenge.
+        generation: u64,
     },
     /// A WebAuthn login.
     WebAuthnLogin {
@@ -128,8 +131,9 @@ pub enum Pending {
         user: Option<UserId>,
         /// Whether the allow list was empty (a discoverable login needs the user handle).
         discoverable: bool,
-        /// Whether the login continues a password login (the passkey is a second factor).
-        continuation: bool,
+        /// When the login continues a password login (the passkey is a second factor): the
+        /// account's generation when the password was verified.
+        continuation: Option<u64>,
     },
     /// A WebAuthn registration for a signed-in user.
     WebAuthnRegister {
@@ -295,6 +299,9 @@ enum SealedPending {
         user: UserId,
         first: AuthStrength,
         attempts: u32,
+        // Absent in ids sealed before ends of access were counted: an account never ended.
+        #[serde(default)]
+        generation: u64,
     },
     WebAuthnLogin {
         #[serde(with = "challenge_bytes")]
@@ -302,6 +309,8 @@ enum SealedPending {
         user: Option<UserId>,
         discoverable: bool,
         continuation: bool,
+        #[serde(default)]
+        generation: u64,
     },
     WebAuthnRegister {
         #[serde(with = "challenge_bytes")]
@@ -338,10 +347,12 @@ impl From<Pending> for SealedPending {
                 user,
                 first,
                 attempts,
+                generation,
             } => Self::SecondFactor {
                 user,
                 first,
                 attempts,
+                generation,
             },
             Pending::WebAuthnLogin {
                 challenge,
@@ -352,7 +363,8 @@ impl From<Pending> for SealedPending {
                 challenge,
                 user,
                 discoverable,
-                continuation,
+                continuation: continuation.is_some(),
+                generation: continuation.unwrap_or_default(),
             },
             Pending::WebAuthnRegister {
                 challenge,
@@ -387,21 +399,24 @@ impl From<SealedPending> for Pending {
                 user,
                 first,
                 attempts,
+                generation,
             } => Self::SecondFactor {
                 user,
                 first,
                 attempts,
+                generation,
             },
             SealedPending::WebAuthnLogin {
                 challenge,
                 user,
                 discoverable,
                 continuation,
+                generation,
             } => Self::WebAuthnLogin {
                 challenge,
                 user,
                 discoverable,
-                continuation,
+                continuation: continuation.then_some(generation),
             },
             SealedPending::WebAuthnRegister {
                 challenge,
@@ -887,6 +902,7 @@ mod tests {
             user: UserId::generate(),
             first: AuthStrength::Password,
             attempts: 0,
+            generation: 0,
         }
     }
 
@@ -895,7 +911,7 @@ mod tests {
             challenge: [0xa5; 32],
             user: Some(UserId::generate()),
             discoverable: true,
-            continuation: false,
+            continuation: None,
         }
     }
 
@@ -1067,7 +1083,7 @@ mod tests {
                     challenge: [9; 32],
                     user: Some(user),
                     discoverable: true,
-                    continuation: true,
+                    continuation: Some(3),
                 },
                 clock.now(),
             )
@@ -1085,7 +1101,12 @@ mod tests {
         };
         assert_eq!(challenge, [9; 32]);
         assert_eq!(found, Some(user));
-        assert!(discoverable && continuation);
+        assert!(discoverable);
+        assert_eq!(
+            continuation,
+            Some(3),
+            "a continuation keeps the generation its password was verified under"
+        );
 
         let seed = vec![0, 1, 2, 3, 250, 251, 252, 253, 254, 255];
         let id = a
@@ -1257,6 +1278,7 @@ mod tests {
                     user,
                     first: AuthStrength::Password,
                     attempts: 0,
+                    generation: 0,
                 },
                 clock.now(),
             )
@@ -1274,6 +1296,7 @@ mod tests {
                 user,
                 first: AuthStrength::Password,
                 attempts: attempts + 1,
+                generation: 0,
             },
             clock.now(),
         );
@@ -1424,6 +1447,7 @@ mod tests {
                 user,
                 first: AuthStrength::Password,
                 attempts: 1,
+                generation: 0,
             },
             clock.now(),
         );

@@ -42,7 +42,9 @@ use zeroize::Zeroizing;
 use super::{AuthService, actions, guard::Attempt};
 use crate::{
     error::AuthError,
-    model::{KNOWN_DEVICES, KnownDeviceId, KnownDeviceRecord, USER_KNOWN_DEVICES, UserRecord},
+    model::{
+        Issued, KNOWN_DEVICES, KnownDeviceId, KnownDeviceRecord, USER_KNOWN_DEVICES, UserRecord,
+    },
     secret::{hash_secret, looks_like_session_secret},
     service::types::KnownDeviceInfo,
 };
@@ -245,11 +247,13 @@ type IndexRow = ((UserId, Vec<u8>), KnownDeviceId, tenko_core::Revision);
 const COUNT_TRIES: usize = 4;
 
 /// Whether `record` holds for `user` at `now`: issued to it, not ended, issued under its
-/// current password, and with failures left under `budget`.
+/// current password and after the last end of its access, and with failures left under
+/// `budget`.
 fn holds(record: &KnownDeviceRecord, user: &UserRecord, budget: u32, now: Timestamp) -> bool {
     record.user == user.id
         && now < record.expires_at
         && record.password_changed_at == user.password.as_ref().map(|p| p.changed_at)
+        && user.admits(Issued::Session(record.generation))
         && record.failures < budget
 }
 
@@ -411,11 +415,7 @@ impl AuthService {
                 continue; // Removed above.
             }
             match view.get_typed(&KNOWN_DEVICES, &digest)?.map(|(r, _)| r) {
-                Some(record)
-                    if other != id
-                        && now < record.expires_at
-                        && record.password_changed_at == password_changed_at =>
-                {
+                Some(record) if other != id && holds(&record, user, u32::MAX, now) => {
                     live.push((digest, record.issued_at));
                 }
                 // Ended, or another mark of this device (renewed twice at once): it goes.
@@ -444,6 +444,7 @@ impl AuthService {
                 expires_at: now.checked_add(DEVICE_KEPT).unwrap_or(now),
                 password_changed_at,
                 failures: 0,
+                generation: user.sessions_generation,
             },
         )?;
         batch.put_typed(&USER_KNOWN_DEVICES, &(user.id, digest), &id)?;
@@ -655,9 +656,7 @@ impl AuthService {
                     .is_none()
                 || view
                     .get_typed(&crate::model::USERS, &record.user)?
-                    .is_none_or(|(user, _)| {
-                        record.password_changed_at != user.password.as_ref().map(|p| p.changed_at)
-                    });
+                    .is_none_or(|(user, _)| !holds(&record, &user, u32::MAX, now));
             if ended {
                 batch.delete_typed(&USER_KNOWN_DEVICES, &(record.user, digest.clone()));
                 batch.delete_typed(&KNOWN_DEVICES, &digest);

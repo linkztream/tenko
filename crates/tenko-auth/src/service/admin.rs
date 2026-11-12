@@ -10,6 +10,7 @@ use super::{
     AuthService, LIST_LIMIT,
     account::PasswordOwner,
     actions,
+    end::EndReason,
     types::{
         BreakGlassChange, FactorSummary, RoleInfo, SecuritySettingsView, UserCreate, UserInfo,
         UserUpdate,
@@ -20,7 +21,7 @@ use crate::{
     error::AuthError,
     model::{
         AccountLock, CREDENTIAL_IDS, CREDENTIALS, CredentialRecord, INSTALLATION, LAST_LOGINS,
-        LOCKS, SETTINGS, TOKENS, USER_NAMES, USER_TOKENS, USERS, UserRecord,
+        LOCKS, SETTINGS, USER_NAMES, USERS, UserRecord,
     },
     roles::{RoleName, satisfies},
     settings::{AuditExport, MfaRequirement, SecuritySettings, SettingsPatch, changes},
@@ -348,25 +349,6 @@ impl AuthService {
         Ok(stored)
     }
 
-    /// Adds the removal of every personal token of a user to a batch; returns how many.
-    pub(super) fn stage_token_removal(
-        view: &dyn ReadView,
-        batch: &mut WriteBatch,
-        id: UserId,
-    ) -> Result<usize, AuthError> {
-        let tokens = view.scan_typed(
-            &USER_TOKENS,
-            KeyRange::prefix(tenko_core::codec::encode_key(&(id,))),
-            LIST_LIMIT,
-            false,
-        )?;
-        for (key, hash, _) in &tokens {
-            batch.delete_typed(&TOKENS, hash);
-            batch.delete_typed(&USER_TOKENS, key);
-        }
-        Ok(tokens.len())
-    }
-
     /// Whether `user` may be disabled (or enabled again) by the caller: not the caller's own
     /// account, not the last administrator, and for the break-glass account only with the
     /// step-up its designation needs.
@@ -390,29 +372,6 @@ impl AuthService {
             return Err(AuthError::LastAdministrator);
         }
         Ok(())
-    }
-
-    /// Adds what ends with a disabled account to a batch: its personal and scoped tokens, as
-    /// its sessions end, and its grants with every grant issued under them, since a
-    /// delegation needs its source. Returns the number of grants.
-    fn stage_disable(
-        view: &dyn ReadView,
-        batch: &mut WriteBatch,
-        id: UserId,
-    ) -> Result<usize, AuthError> {
-        Self::stage_tokens_end(view, batch, id)?;
-        Self::stage_grant_removal(view, batch, id)
-    }
-
-    /// Adds the removal of every personal and scoped token of a user to a batch; returns
-    /// how many.
-    pub(super) fn stage_tokens_end(
-        view: &dyn ReadView,
-        batch: &mut WriteBatch,
-        id: UserId,
-    ) -> Result<usize, AuthError> {
-        Ok(Self::stage_token_removal(view, batch, id)?
-            + Self::stage_scoped_token_removal(view, batch, id)?)
     }
 
     /// Serializes changes to the set of administrators: the batch expects the current value
@@ -621,12 +580,13 @@ impl AuthService {
                 new: updated.language.clone(),
             });
         }
-        let mut revoke = false;
+        // A disabled account acts nowhere, and a reset answers a compromised one.
+        let mut ends = None;
         if let Some(disabled) = request.disabled {
             self.check_disable(ctx, view.as_ref(), &user, disabled)
                 .await?;
             updated.disabled = disabled;
-            revoke |= disabled;
+            ends = disabled.then_some(EndReason::Disable);
             fields.push(change(
                 "disabled",
                 &user.disabled.to_string(),
@@ -648,10 +608,7 @@ impl AuthService {
                     .await?,
             );
             updated.password_change_required = true;
-            revoke = true;
-            // A reset answers a compromised account: the networks it signed in from lately are
-            // no longer trusted past the account-wide delay.
-            self.known_networks.forget(&user.name);
+            ends = Some(EndReason::PasswordReset);
             fields.push(FieldChange {
                 object: None,
                 field: "password".to_owned(),
@@ -666,20 +623,15 @@ impl AuthService {
         if user.is_admin() && updated.disabled != user.disabled {
             Self::guard_admins(view.as_ref(), &mut batch)?;
         }
+        let end = ends
+            .map(|reason| self.stage_account_end(view.as_ref(), &mut batch, &mut updated, reason))
+            .transpose()?;
         batch.expect_typed(&USERS, &id, Some(revision));
         batch.put_typed(&USERS, &id, &updated)?;
-        if revoke {
-            Self::stage_revoke(&mut batch, &Self::user_sessions(view.as_ref(), id)?);
-            // A reset or a disabled account ends the account's known devices too.
-            Self::stage_known_devices_end(view.as_ref(), &mut batch, id)?;
-        }
+        // A delegation needs its source: grants issued under a disabled account's end too.
         let grants = if updated.disabled && !user.disabled {
-            Self::stage_disable(view.as_ref(), &mut batch, id)?
+            Self::stage_grant_removal(view.as_ref(), &mut batch, id)?
         } else {
-            if updated.password != user.password {
-                // A reset answers a compromised account: its tokens end with its sessions.
-                Self::stage_tokens_end(view.as_ref(), &mut batch, id)?;
-            }
             0
         };
         let mut draft = Self::audit(actions::USER_UPDATE, vec![Self::user_object(id)], ctx);
@@ -687,8 +639,15 @@ impl AuthService {
         if grants > 0 {
             draft = draft.with_context("grants_revoked", grants.to_string());
         }
+        if let Some(end) = &end {
+            draft = end.annotate(draft);
+        }
         batch.audit(draft);
-        self.commit(batch).await?;
+        let committed = self.commit(batch).await?;
+        if let Some(end) = &end {
+            self.finish_account_end(end, committed.revision, ctx.now)
+                .await;
+        }
         Self::info(self.view().await?.as_ref(), id, ctx.now)
     }
 
@@ -723,12 +682,14 @@ impl AuthService {
         batch.expect_typed(&USERS, &id, Some(revision));
         batch.delete_typed(&USERS, &id);
         batch.delete_typed(&USER_NAMES, &UserRecord::name_key(&user.name));
-        Self::stage_revoke(&mut batch, &Self::user_sessions(view.as_ref(), id)?);
-        Self::stage_token_removal(view.as_ref(), &mut batch, id)?;
-        Self::stage_scoped_token_removal(view.as_ref(), &mut batch, id)?;
+        let end = self.stage_account_end(
+            view.as_ref(),
+            &mut batch,
+            &mut user.clone(),
+            EndReason::Delete,
+        )?;
         let grants = Self::stage_grant_removal(view.as_ref(), &mut batch, id)?;
         batch.delete_typed(&LAST_LOGINS, &id);
-        Self::stage_known_devices_end(view.as_ref(), &mut batch, id)?;
         Self::stage_preference_removal(view.as_ref(), &mut batch, id)?;
         for credential in Self::user_credentials(view.as_ref(), id)? {
             batch.delete_typed(&CREDENTIAL_IDS, &credential.credential_id);
@@ -737,15 +698,17 @@ impl AuthService {
         if let Some(totp) = &user.totp {
             self.vault.stage_delete(&mut batch, ctx, totp.secret);
         }
-        let mut draft = Self::audit(actions::USER_DELETE, vec![Self::user_object(id)], ctx)
-            .with_context("name", user.name.clone());
+        let mut draft = end.annotate(
+            Self::audit(actions::USER_DELETE, vec![Self::user_object(id)], ctx)
+                .with_context("name", user.name.clone()),
+        );
         if grants > 0 {
             draft = draft.with_context("grants_revoked", grants.to_string());
         }
         batch.audit(draft);
-        self.commit(batch).await?;
-        self.throttle.unlock_account(&user.name);
-        self.known_networks.forget(&user.name);
+        let committed = self.commit(batch).await?;
+        self.finish_account_end(&end, committed.revision, ctx.now)
+            .await;
         Ok(())
     }
 
@@ -777,7 +740,8 @@ impl AuthService {
     }
 
     /// `DELETE /users/{id}/sessions`: ends every session of the user and forgets the
-    /// account's known devices, so it is signed out everywhere.
+    /// account's known devices, so it is signed out everywhere; its tokens stay. Returns how
+    /// many sessions had not expired.
     ///
     /// # Errors
     ///
@@ -790,23 +754,26 @@ impl AuthService {
         self.authorize(ctx, Action::Administer, Self::user_object(id))
             .await?;
         let view = self.view().await?;
-        Self::load_user(view.as_ref(), id)?;
-        let sessions = Self::user_sessions(view.as_ref(), id)?;
-        let settings = self.settings();
-        let live = sessions
-            .iter()
-            .filter(|(_, session)| super::effective_expiry(session, &settings).0 > ctx.now)
-            .count();
+        let (mut user, revision) = Self::load_user(view.as_ref(), id)?;
         let mut batch = WriteBatch::for_request(ctx);
-        Self::stage_revoke(&mut batch, &sessions);
-        let devices = Self::stage_known_devices_end(view.as_ref(), &mut batch, id)?;
+        let end = self.stage_account_end(
+            view.as_ref(),
+            &mut batch,
+            &mut user,
+            EndReason::SignOutEverywhere,
+        )?;
+        batch.expect_typed(&USERS, &id, Some(revision));
+        batch.put_typed(&USERS, &id, &user)?;
         batch.audit(
-            Self::audit(actions::SESSION_REVOKE, vec![Self::user_object(id)], ctx)
-                .with_context("sessions", live.to_string())
-                .with_context("known_devices", devices.to_string()),
+            end.annotate(
+                Self::audit(actions::SESSION_REVOKE, vec![Self::user_object(id)], ctx)
+                    .with_context("sessions", end.sessions.to_string()),
+            ),
         );
-        self.commit(batch).await?;
-        Ok(live)
+        let committed = self.commit(batch).await?;
+        self.finish_account_end(&end, committed.revision, ctx.now)
+            .await;
+        Ok(end.sessions)
     }
 
     /// `PUT /users/{id}/roles`.
@@ -908,6 +875,7 @@ impl AuthService {
         let mut updated = user.clone();
         let mut batch = WriteBatch::for_request(ctx);
         Self::guard_admins(view.as_ref(), &mut batch)?;
+        let mut end = None;
         if request.enabled {
             if !credentials.iter().any(|credential| credential.hardware_key) {
                 return Err(AuthError::invalid(
@@ -938,11 +906,13 @@ impl AuthService {
             }
             updated.break_glass = true;
             updated.roles = vec![RoleName::Admin];
-            // Its password sessions, tokens and known devices end: from now on only the
-            // key logs it in.
-            Self::stage_revoke(&mut batch, &Self::user_sessions(view.as_ref(), id)?);
-            Self::stage_token_removal(view.as_ref(), &mut batch, id)?;
-            Self::stage_known_devices_end(view.as_ref(), &mut batch, id)?;
+            // From now on only the key signs it in.
+            end = Some(self.stage_account_end(
+                view.as_ref(),
+                &mut batch,
+                &mut updated,
+                EndReason::BreakGlass,
+            )?);
         } else {
             updated.break_glass = false;
             Self::stage_revoke(
@@ -955,16 +925,21 @@ impl AuthService {
         }
         batch.expect_typed(&USERS, &id, Some(revision));
         batch.put_typed(&USERS, &id, &updated)?;
-        batch.audit(
-            Self::audit(actions::BREAK_GLASS_SET, vec![Self::user_object(id)], ctx).with_change(
-                change(
-                    "break_glass",
-                    &user.break_glass.to_string(),
-                    &updated.break_glass.to_string(),
-                ),
-            ),
-        );
-        self.commit(batch).await?;
+        let mut draft = Self::audit(actions::BREAK_GLASS_SET, vec![Self::user_object(id)], ctx)
+            .with_change(change(
+                "break_glass",
+                &user.break_glass.to_string(),
+                &updated.break_glass.to_string(),
+            ));
+        if let Some(end) = &end {
+            draft = end.annotate(draft);
+        }
+        batch.audit(draft);
+        let committed = self.commit(batch).await?;
+        if let Some(end) = &end {
+            self.finish_account_end(end, committed.revision, ctx.now)
+                .await;
+        }
         Self::info(self.view().await?.as_ref(), id, ctx.now)
     }
 

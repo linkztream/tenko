@@ -1078,6 +1078,7 @@ mod tests {
             mfa_enrollment_required: false,
             source: SessionSource::Local,
             directory_checked_at: None,
+            generation: 0,
         };
         let bytes = SESSIONS.encode(&session).expect("cbor");
         assert!(!bytes.windows(7).any(|w| w == source_key));

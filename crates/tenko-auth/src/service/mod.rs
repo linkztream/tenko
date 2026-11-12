@@ -10,8 +10,9 @@
 //! again on every use with the current settings, so tightening TGL-04 takes effect at once.
 //! Activity moves the idle end forward with a write at most every [`refresh_interval`]
 //! (a quarter of the idle lifetime, between 30 seconds and 5 minutes), so a busy UI does
-//! not turn every request into a Raft entry. Logout, revocation by the user or an
-//! administrator, password changes and account changes delete the session rows.
+//! not turn every request into a Raft entry. Logout and the revocation of one session delete
+//! its rows; a password change or reset, signing out everywhere, disabling, deleting and the
+//! break-glass designation end every session of the account at once (`end`).
 //!
 //! # Write discipline
 //!
@@ -23,6 +24,7 @@ mod access;
 mod account;
 mod admin;
 pub mod devices;
+mod end;
 mod guard;
 mod login;
 mod misses;
@@ -69,9 +71,9 @@ use crate::{
     hibp::{BreachChecker, HibpFilter, HibpRangeSource},
     lockout::Throttle,
     model::{
-        CREDENTIALS, CredentialRecord, INSTALLATION, Installation, LAST_LOGINS, SCOPED_TOKENS,
-        SESSIONS, SETTINGS, ScopedTokenRecord, SessionRecord, TOKENS, TokenRecord, USER_SESSIONS,
-        USERS, UserRecord,
+        CREDENTIALS, CredentialRecord, INSTALLATION, Installation, Issued, LAST_LOGINS,
+        SCOPED_TOKENS, SESSIONS, SETTINGS, ScopedTokenRecord, SessionRecord, TOKENS, TokenRecord,
+        USER_SESSIONS, USERS, UserRecord,
     },
     roles::RoleName,
     secret::{BearerSecret, SetupTokenVerifier, hash_secret, looks_like_session_secret},
@@ -600,6 +602,7 @@ impl AuthService {
             // WP13.0: every session the service makes today is a local one.
             source: crate::directory::SessionSource::Local,
             directory_checked_at: None,
+            generation: user.sessions_generation,
         };
         let hash = secret.hash();
         batch.put_typed(&SESSIONS, &hash, &record)?;
@@ -671,7 +674,10 @@ impl AuthService {
         };
         let ended: Vec<_> = Self::user_sessions(view.as_ref(), user.id)?
             .into_iter()
-            .filter(|(_, session)| effective_expiry(session, &settings).0 <= record.created_at)
+            .filter(|(_, session)| {
+                effective_expiry(session, &settings).0 <= record.created_at
+                    || !user.admits(Issued::Session(session.generation))
+            })
             .collect();
         Self::stage_revoke(&mut batch, &ended);
         self.commit(batch).await?;
@@ -739,12 +745,12 @@ impl AuthService {
             }
             return Err(AuthError::SessionExpired);
         }
-        let user = view
-            .get_typed(&USERS, &session.user)?
-            .map(|(user, _)| user)
-            .filter(|user| !user.disabled && !user.is_service())
-            .ok_or(AuthError::Unauthenticated)?;
-        if session.break_glass && !user.break_glass {
+        let user = Self::holder(
+            view.as_ref(),
+            session.user,
+            Issued::Session(session.generation),
+        )?;
+        if user.is_service() || (session.break_glass && !user.break_glass) {
             return Err(AuthError::Unauthenticated);
         }
         let idle = if session.break_glass {
@@ -810,11 +816,14 @@ impl AuthService {
                 if token_expired(record.created_at, record.expires_at, &settings, now) {
                     return Err(AuthError::SessionExpired);
                 }
-                let user = view
-                    .get_typed(&USERS, &record.owner)?
-                    .map(|(user, _)| user)
-                    .filter(|user| !user.disabled && !user.break_glass && !user.is_service())
-                    .ok_or(AuthError::Unauthenticated)?;
+                let user = Self::holder(
+                    view.as_ref(),
+                    record.owner,
+                    Issued::Token(record.generation),
+                )?;
+                if user.break_glass || user.is_service() {
+                    return Err(AuthError::Unauthenticated);
+                }
                 let principal = Principal::Token {
                     id: record.id,
                     owner: user.id,
@@ -846,11 +855,14 @@ impl AuthService {
                 if token_expired(record.created_at, record.expires_at, &settings, now) {
                     return Err(AuthError::SessionExpired);
                 }
-                let user = view
-                    .get_typed(&USERS, &record.owner)?
-                    .map(|(user, _)| user)
-                    .filter(|user| !user.disabled && !user.break_glass)
-                    .ok_or(AuthError::Unauthenticated)?;
+                let user = Self::holder(
+                    view.as_ref(),
+                    record.owner,
+                    Issued::Token(record.generation),
+                )?;
+                if user.break_glass {
+                    return Err(AuthError::Unauthenticated);
+                }
                 let principal = Principal::Token {
                     id: record.id,
                     owner: user.id,
@@ -887,6 +899,17 @@ impl AuthService {
                 })
             }
         }
+    }
+
+    /// The account a session or token acts for, if the credential may still act: the one
+    /// place every session and token passes on its way to authenticating. A disabled account
+    /// and a credential issued before the last end of the account's access
+    /// ([`UserRecord::admits`]) are refused.
+    fn holder(view: &dyn ReadView, owner: UserId, issued: Issued) -> Result<UserRecord, AuthError> {
+        view.get_typed(&USERS, &owner)?
+            .map(|(user, _)| user)
+            .filter(|user| !user.disabled && user.admits(issued))
+            .ok_or(AuthError::Unauthenticated)
     }
 
     /// The token stored under `hash` and the view it was found in: this controller's copy,
@@ -949,8 +972,9 @@ impl AuthService {
     }
 
     /// Follows the user records so that an unlock by an administrator on any controller
-    /// clears this controller's login throttle for the account (WP3.1b section 7): the
-    /// throttle lives in memory per controller, the unlock is a write of the user record.
+    /// clears this controller's login throttle for the account (WP3.1b section 7), and an
+    /// end of the account's access forgets its known networks: both live in memory per
+    /// controller, and both changes are writes of the user record.
     fn spawn_unlock_watch(&self) {
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
             return;
@@ -1130,30 +1154,103 @@ fn token_expired(
     effective_token_expiry(created_at, expires_at, settings).is_some_and(|end| now >= end)
 }
 
-/// The loop of [`AuthService::spawn_unlock_watch`]: ends when the store shuts down.
+/// What the watch of the user records remembers of an account.
+struct Seen {
+    name: String,
+    unlocked_at: Option<Timestamp>,
+    sessions_generation: u64,
+}
+
+impl Seen {
+    fn of(user: &UserRecord) -> Self {
+        Self {
+            name: user.name.clone(),
+            unlocked_at: user.unlocked_at,
+            sessions_generation: user.sessions_generation,
+        }
+    }
+}
+
+/// Clears this controller's memory of an account whose record went from `old` to `new`
+/// (`None`: absent, or not seen before): an unlock lifts the throttle, an end of the
+/// account's access forgets its known networks, and a rename or a deletion does both for
+/// the old name. The one place that clears this memory: the controller that served the
+/// change sees it here too.
+fn observe(
+    throttle: &Throttle,
+    known: &guard::KnownNetworks,
+    old: Option<&Seen>,
+    new: Option<&Seen>,
+) {
+    match (old, new) {
+        (_, Some(new)) => {
+            let unseen = Seen {
+                name: new.name.clone(),
+                unlocked_at: None,
+                sessions_generation: 0,
+            };
+            let old = old.unwrap_or(&unseen);
+            if new.unlocked_at.is_some() && new.unlocked_at != old.unlocked_at {
+                throttle.unlock_account(&new.name);
+            }
+            if new.sessions_generation != old.sessions_generation {
+                known.forget(&new.name);
+            }
+            if new.name != old.name {
+                throttle.unlock_account(&old.name);
+                known.forget(&old.name);
+            }
+        }
+        (Some(old), None) => {
+            throttle.unlock_account(&old.name);
+            known.forget(&old.name);
+        }
+        (None, None) => {}
+    }
+}
+
+/// The loop of [`AuthService::spawn_unlock_watch`]: ends when the store shuts down. After
+/// the change stream lags, a scan of every user record applies what the gap held.
 async fn unlock_watch(
     store: Arc<dyn Store>,
     throttle: Arc<Throttle>,
     known: Arc<guard::KnownNetworks>,
 ) {
     let filter = WatchFilter::tables([USERS.name().clone()]);
-    // Names by id, so that the throttle of a deleted account is cleared too.
-    let mut names: HashMap<UserId, String> = HashMap::new();
-    let mut unlocked: HashMap<UserId, Timestamp> = HashMap::new();
+    let mut seen: HashMap<UserId, Seen> = HashMap::new();
     loop {
-        let Ok(mut changes) = store.watch(None, filter.clone()) else {
-            return;
-        };
-        // What this controller knows now; unlocks before this point find nothing to clear.
-        if let Ok(view) = store.read(ReadConsistency::Local).await
-            && let Ok(users) = view.scan_typed(&USERS, KeyRange::all(), usize::MAX, false)
-        {
-            for (id, user, _) in users {
-                if let Some(at) = user.unlocked_at {
-                    unlocked.insert(id, at);
-                }
-                names.insert(id, user.name);
+        let mut changes = match store.watch(None, filter.clone()) {
+            Ok(changes) => changes,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "the watch of user records ended: unlocks and ends of access made elsewhere no longer clear this controller's memory"
+                );
+                return;
             }
+        };
+        let scanned = match store.read(ReadConsistency::Local).await {
+            Ok(view) => view
+                .scan_typed(&USERS, KeyRange::all(), usize::MAX, false)
+                .map_err(AuthError::from),
+            Err(error) => Err(error.into()),
+        };
+        match scanned {
+            Ok(users) => {
+                let mut now: HashMap<UserId, Seen> = HashMap::with_capacity(users.len());
+                for (id, user, _) in users {
+                    let current = Seen::of(&user);
+                    observe(&throttle, &known, seen.get(&id), Some(&current));
+                    now.insert(id, current);
+                }
+                for (id, old) in &seen {
+                    if !now.contains_key(id) {
+                        observe(&throttle, &known, Some(old), None);
+                    }
+                }
+                seen = now;
+            }
+            Err(error) => tracing::warn!(%error, "the watch of user records could not scan them"),
         }
         while let Some(item) = changes.next().await {
             let Ok(change_set) = item else {
@@ -1170,28 +1267,17 @@ async fn unlock_watch(
                     continue;
                 };
                 match view.get_typed(&USERS, &id) {
-                    Ok(Some((user, _))) => {
-                        if let Some(at) = user.unlocked_at
-                            && unlocked.get(&id) != Some(&at)
-                        {
-                            throttle.unlock_account(&user.name);
-                            unlocked.insert(id, at);
-                        }
-                        if let Some(old) = names.insert(id, user.name.clone())
-                            && old != user.name
-                        {
-                            throttle.unlock_account(&old);
-                            known.forget(&old);
-                        }
+                    Ok(user) => {
+                        let current = user.map(|(user, _)| Seen::of(&user));
+                        observe(&throttle, &known, seen.get(&id), current.as_ref());
+                        match current {
+                            Some(current) => seen.insert(id, current),
+                            None => seen.remove(&id),
+                        };
                     }
-                    Ok(None) => {
-                        if let Some(name) = names.remove(&id) {
-                            throttle.unlock_account(&name);
-                            known.forget(&name);
-                        }
-                        unlocked.remove(&id);
+                    Err(error) => {
+                        tracing::warn!(%error, "the watch of user records could not read a user");
                     }
-                    Err(error) => tracing::debug!(%error, "unlock watch could not read a user"),
                 }
             }
         }
@@ -1203,4 +1289,131 @@ async fn unlock_watch(
 
 fn role_names(roles: &[RoleName]) -> std::collections::BTreeSet<String> {
     roles.iter().map(|role| role.as_str().to_owned()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{net::IpAddr, time::Duration};
+
+    use tenko_core::testing::wait_until_async;
+    use tenko_store::{ChangeStream, Committed, DerivedIndex, MemStore, StoreStatus, WatchError};
+    use tokio::sync::oneshot;
+
+    use super::*;
+    use crate::lockout::ThrottleKey;
+
+    /// A store whose first watch lags when the test lets it: what was written before that
+    /// reaches the watch only through its scan after the lag.
+    struct LaggingStore {
+        inner: Arc<MemStore>,
+        lag: Mutex<Option<oneshot::Receiver<()>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Store for LaggingStore {
+        async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+            self.inner.propose(batch).await
+        }
+
+        async fn read(
+            &self,
+            consistency: ReadConsistency,
+        ) -> Result<Arc<dyn ReadView>, StoreError> {
+            self.inner.read(consistency).await
+        }
+
+        fn watch(
+            &self,
+            from: Option<tenko_core::Revision>,
+            filter: WatchFilter,
+        ) -> Result<ChangeStream, StoreError> {
+            let lagging = self
+                .lag
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            match lagging {
+                Some(lagging) => Ok(Box::pin(futures::stream::once(async move {
+                    lagging.await.ok();
+                    Err(WatchError::Lagged {
+                        last: tenko_core::Revision(0),
+                    })
+                }))),
+                None => self.inner.watch(from, filter),
+            }
+        }
+
+        fn register_index(&self, index: Arc<dyn DerivedIndex>) -> Result<(), StoreError> {
+            self.inner.register_index(index)
+        }
+
+        fn status(&self) -> StoreStatus {
+            self.inner.status()
+        }
+
+        fn leadership(&self) -> tokio::sync::watch::Receiver<Option<tenko_store::Leadership>> {
+            self.inner.leadership()
+        }
+    }
+
+    async fn put(store: &MemStore, user: &UserRecord, now: Timestamp) {
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
+        batch.put_typed(&USERS, &user.id, user).expect("encode");
+        store.propose(batch).await.expect("the user is written");
+    }
+
+    /// Another controller's memory of two accounts follows what the user records say: an
+    /// unlock written while its watch lagged lifts the lock, and every end of an account's
+    /// access forgets that account's known networks, through the lag and after it.
+    #[tokio::test]
+    async fn the_watch_forgets_known_networks_at_every_end_and_after_a_lag() {
+        let now: Timestamp = "2026-11-12T10:00:00Z".parse().expect("a time");
+        let later = now
+            .checked_add(Duration::from_secs(86_400))
+            .expect("a time");
+        let network: Option<IpAddr> = Some("198.51.100.7".parse().expect("an address"));
+        let inner = Arc::new(MemStore::default());
+        let (lag, lagging) = oneshot::channel();
+        let store: Arc<dyn Store> = Arc::new(LaggingStore {
+            inner: inner.clone(),
+            lag: Mutex::new(Some(lagging)),
+        });
+        let mut ada = UserRecord::new("ada".to_owned(), "Ada".to_owned(), Vec::new(), now);
+        let mut bo = UserRecord::new("bo".to_owned(), "Bo".to_owned(), Vec::new(), now);
+        put(&inner, &ada, now).await;
+        put(&inner, &bo, now).await;
+        let throttle = Arc::new(Throttle::new(64));
+        let known = Arc::new(guard::KnownNetworks::default());
+        throttle.restore_lock(ThrottleKey::account("ada"), later);
+        known.note("ada", network, now);
+        known.note("bo", network, now);
+        let watch = tokio::spawn(unlock_watch(store, throttle.clone(), known.clone()));
+
+        // Written while the watch lags: an unlock of one account, a reset of the other.
+        ada.unlocked_at = Some(now);
+        put(&inner, &ada, now).await;
+        bo.sessions_generation = 1;
+        put(&inner, &bo, now).await;
+        lag.send(()).ok();
+        wait_until_async("the scan after the lag applies both changes", || async {
+            throttle
+                .lock_of(&ThrottleKey::account("ada"), now)
+                .is_none()
+                && !known.contains("bo", network, now)
+        })
+        .await;
+        assert!(
+            known.contains("ada", network, now),
+            "only an end of its access forgets an account's networks"
+        );
+
+        // Through the change stream: an end of the other account's access.
+        ada.sessions_generation = 1;
+        put(&inner, &ada, now).await;
+        wait_until_async("the end forgets the account's networks", || async {
+            !known.contains("ada", network, now)
+        })
+        .await;
+        watch.abort();
+    }
 }

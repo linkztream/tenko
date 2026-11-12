@@ -1094,6 +1094,7 @@ async fn a_personal_token_of_a_service_account_authenticates_nowhere() {
         last_used_at: None,
         issued_with: AuthStrength::Password,
         prefix: secret.chars().take(12).collect(),
+        generation: 0,
     };
     let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), lab.env.now());
     batch.put_typed(&TOKENS, &hash, &record).expect("encode");

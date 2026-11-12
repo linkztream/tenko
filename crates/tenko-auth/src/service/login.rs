@@ -22,7 +22,7 @@ use crate::{
     error::AuthError,
     lockout::{LockoutMode, LockoutPolicy, ThrottleKey},
     model::{
-        ALARMS, AlarmKind, AlarmRecord, CREDENTIAL_IDS, CREDENTIALS, PasswordKind, USERS,
+        ALARMS, AlarmKind, AlarmRecord, CREDENTIAL_IDS, CREDENTIALS, Issued, PasswordKind, USERS,
         UserRecord,
     },
     password::{
@@ -403,6 +403,7 @@ impl AuthService {
                 user: user.id,
                 first,
                 attempts: 0,
+                generation: user.sessions_generation,
             },
             ctx.now,
         )?;
@@ -427,10 +428,17 @@ impl AuthService {
         let (pending, staged) =
             self.ceremonies
                 .take_staged(challenge_id, ctx.now, view.as_ref())?;
-        let Pending::SecondFactor { user, .. } = &pending else {
+        let Pending::SecondFactor {
+            user, generation, ..
+        } = &pending
+        else {
             return Err(AuthError::ChallengeInvalid);
         };
         let (user, revision) = Self::load_user(view.as_ref(), *user)?;
+        // The password it followed belongs to access that has ended since.
+        if !user.admits(Issued::Session(*generation)) {
+            return Err(AuthError::ChallengeInvalid);
+        }
         if user.disabled || user.break_glass {
             return Err(AuthError::InvalidCredentials);
         }
@@ -467,6 +475,7 @@ impl AuthService {
             user: id,
             first,
             attempts,
+            generation,
         } = pending
             && attempts + 1 < MAX_CODE_ATTEMPTS
         {
@@ -476,6 +485,7 @@ impl AuthService {
                     user: id,
                     first,
                     attempts: attempts + 1,
+                    generation,
                 },
                 ctx.now,
             );
@@ -690,7 +700,10 @@ impl AuthService {
             let (pending, staged) =
                 self.ceremonies
                     .take_staged(challenge_id, ctx.now, view.as_ref())?;
-            let Pending::SecondFactor { user, .. } = pending else {
+            let Pending::SecondFactor {
+                user, generation, ..
+            } = pending
+            else {
                 return Err(AuthError::ChallengeInvalid);
             };
             // The second-factor challenge is spent here, in the store, so it cannot also
@@ -702,7 +715,7 @@ impl AuthService {
                 AuthError::Conflict => AuthError::ChallengeInvalid,
                 other => other,
             })?;
-            (Some(user), true)
+            (Some(user), Some(generation))
         } else if let Some(name) = &request.user_name {
             // A named start answers for the account it names: an existing account with
             // passkeys gets their ids and transports in `allowCredentials`, and the
@@ -710,9 +723,9 @@ impl AuthService {
             // gets the empty list of a discoverable login. So the answer tells whether the
             // name has passkeys; the discoverable login (no name) tells nothing.
             let found = Self::find_user(view.as_ref(), name)?.filter(|user| !user.disabled);
-            (found.map(|user| user.id), false)
+            (found.map(|user| user.id), None)
         } else {
-            (None, false)
+            (None, None)
         };
         let mut allow = Vec::new();
         let mut hardware = false;
@@ -729,7 +742,7 @@ impl AuthService {
         }
         let challenge = random::array::<32>()?;
         let policy = AssertionPolicy {
-            user_verification: if continuation {
+            user_verification: if continuation.is_some() {
                 UserVerification::Preferred
             } else {
                 UserVerification::Required
@@ -890,7 +903,9 @@ impl AuthService {
     }
 
     /// Verifies the assertion of a WebAuthn login against the stored credential and the
-    /// account's user handle. Failures are audited (and alarmed for break-glass).
+    /// account's user handle. Failures are audited (and alarmed for break-glass). A login
+    /// that continues a password login (`continuation`: the account's generation when the
+    /// password was verified) holds only for the access that password belonged to.
     #[allow(clippy::too_many_arguments)]
     async fn verify_login(
         &self,
@@ -900,11 +915,14 @@ impl AuthService {
         credential: &crate::model::CredentialRecord,
         (user, revision): (&UserRecord, Revision),
         discoverable: bool,
-        continuation: bool,
+        continuation: Option<u64>,
     ) -> Result<crate::webauthn::VerifiedAssertion, AuthError> {
+        if continuation.is_some_and(|generation| !user.admits(Issued::Session(generation))) {
+            return Err(AuthError::ChallengeInvalid);
+        }
         let rp = self.relying_party()?;
         let policy = AssertionPolicy {
-            user_verification: if continuation && !user.break_glass {
+            user_verification: if continuation.is_some() && !user.break_glass {
                 UserVerification::Preferred
             } else {
                 UserVerification::Required

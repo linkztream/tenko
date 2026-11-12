@@ -9,7 +9,7 @@ use tenko_auth::{
     model::{ALARMS, AlarmKind},
     service::{
         BreakGlassChange, CodeLogin, PasswordLogin, SecondFactorMethod, SetupAdmin, SetupRequest,
-        TotpEnrollFinish, UserCreate, WebAuthnLoginFinish, WebAuthnLoginStart,
+        TokenRequest, TotpEnrollFinish, UserCreate, WebAuthnLoginFinish, WebAuthnLoginStart,
         WebAuthnRegisterFinish, WebAuthnRegisterStart, types::SecretString,
     },
     settings::{Profile, SessionLifetime, SettingsPatch},
@@ -761,6 +761,98 @@ async fn break_glass_needs_an_attested_hardware_key_and_raises_alarms() {
             .await
             .contains(&"auth.login.break_glass".to_owned())
     );
+}
+
+/// The designation ends every credential the account's password gave it, its scoped tokens
+/// too, and none of them comes back when the designation is released.
+#[tokio::test]
+async fn the_break_glass_designation_ends_every_token_and_its_release_brings_none_back() {
+    let (env, session) = TestEnv::installed(Profile::Home).await;
+    let admin = env.session_ctx(&session).await.expect("ctx");
+    let user = env
+        .service
+        .create_user(
+            &admin,
+            &UserCreate {
+                name: "emergency".to_owned(),
+                display_name: None,
+                password: Some(SecretString::new(ADMIN_PASSWORD)),
+                roles: vec![tenko_auth::roles::RoleName::Admin],
+                language: None,
+            },
+        )
+        .await
+        .expect("create");
+    let emergency = expect_session(
+        password_login(&env, "emergency", ADMIN_PASSWORD)
+            .await
+            .expect("password login before designation"),
+    );
+    let emergency_ctx = env.session_ctx(&emergency).await.expect("ctx");
+    let token = |grants: Option<Vec<tenko_auth::model::TokenGrant>>| TokenRequest {
+        name: "automation".to_owned(),
+        expires_in_days: Some(30),
+        grants,
+        scopes: Vec::new(),
+    };
+    let mut tokens = Vec::new();
+    for grants in [
+        None,
+        Some(vec![tenko_auth::model::TokenGrant {
+            role: tenko_auth::roles::RoleName::Viewer,
+            scope: None,
+        }]),
+    ] {
+        let created = env
+            .service
+            .create_token_with(&emergency_ctx, &token(grants))
+            .await
+            .expect("a token");
+        tokens.push(Credentials::Bearer(created.token.expose().to_owned()));
+    }
+    register(
+        &env,
+        &emergency_ctx,
+        SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::PackedCertificate),
+        true,
+    )
+    .await
+    .expect("hardware key");
+    let mut admin_key = register(
+        &env,
+        &admin,
+        SoftAuthenticator::new(SoftKeyAlg::Ed25519, SoftAttestation::None),
+        false,
+    )
+    .await
+    .expect("admin passkey");
+    let strong = passkey_login(&env, &mut admin_key, Some(ADMIN))
+        .await
+        .expect("login");
+    let strong_ctx = env.session_ctx(&strong).await.expect("ctx");
+    for enabled in [true, false] {
+        env.service
+            .set_break_glass(
+                &strong_ctx,
+                &BreakGlassChange {
+                    user_id: user.id,
+                    enabled,
+                },
+            )
+            .await
+            .expect("the designation changes");
+        for credentials in tokens.iter().chain([&session_credentials(&emergency)]) {
+            assert!(
+                matches!(
+                    env.service
+                        .authenticate_credentials(credentials, env.now())
+                        .await,
+                    Err(AuthError::Unauthenticated)
+                ),
+                "a credential of the password survived (designated: {enabled})"
+            );
+        }
+    }
 }
 
 /// Disabling or deleting the break-glass account removes the way back in that its
