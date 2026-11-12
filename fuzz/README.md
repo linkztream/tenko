@@ -1,13 +1,135 @@
 # Fuzz targets
 
-This directory holds `cargo-fuzz` (libFuzzer) targets, one per parser of
-network input: DNS messages, DHCPv4/DHCPv6 packets and options, zone files,
-import formats and similar.
+This directory holds the `cargo-fuzz` targets of Tenko: one program per parser of untrusted
+input (DNS messages, DHCPv4 and DHCPv6 packets and options, cluster and enrollment messages,
+HTTP bodies, uploaded files, answers of remote systems) that feeds it inputs made by
+**libFuzzer**, a coverage-guided fuzzing engine, and stops at the first panic, failed
+assertion, hang or allocation above the limits. A target asserts more than "does not panic"
+where the parser has a round trip or an invariant: what decodes encodes again to the same
+value, a reply fits its buffer, a limit holds.
 
-Project rule: every parser of network input ships with a fuzz target here
-before it merges.
+Project rule (API-15): every new parser of network or file input ships with a target here, or
+a hook in an existing one, before it merges.
 
-| Target | Parser |
+## Layout
+
+- `fuzz_targets/<target>.rs`: the targets, each registered as a `[[bin]]` in `Cargo.toml`.
+- `limits.txt`: the `-max_len` of every target, with the production bound it comes from.
+- `seeds/<target>/`: small valid inputs, one directory per target (every target has one).
+- `Cargo.lock`: committed, so the weekly smoke builds the same dependency versions as the last
+  gate; refresh it with `cargo update` in `fuzz/` when a target needs a newer dependency.
+- `artifacts/`, `corpus/` and `coverage/`: written by `cargo fuzz`, ignored by git.
+
+The fuzz crate is its own workspace, excluded from the main one. Some targets reach private
+code through a module `fuzzing` that the product crate exports for them (`#[doc(hidden)]`,
+not part of the API, for example `tenko_vault::transfer::fuzzing`); such a module only makes
+code reachable and never changes what the product does.
+
+## Running a target
+
+Fuzzing needs a nightly toolchain and `cargo-fuzz`, on Linux or macOS (libFuzzer's sanitizer
+runtime; on Windows use WSL). From the root of the repository:
+
+```sh
+cargo install cargo-fuzz
+cargo +nightly fuzz list
+target=dns_codec
+max_len="$(awk -v t="$target" '$1 == t { print $2 }' fuzz/limits.txt)"
+mkdir -p "fuzz/corpus/$target"
+cargo +nightly fuzz run "$target" "fuzz/corpus/$target" "fuzz/seeds/$target" -- \
+  -max_total_time=60 -rss_limit_mb=2048 -malloc_limit_mb=1024 -max_len="$max_len"
+```
+
+The first corpus directory collects what the run finds; the seed directory is only read.
+Targets that link `tenko-api` embed the web UI: set `TENKO_UI_STUB=1` unless `ui/dist/` is
+built, also for `cargo check`. To compile every target without fuzzing: `cd fuzz && cargo
+check --locked` (the gate runs it).
+
+## The limits on every run
+
+Every run of the weekly smoke and of the security round passes:
+
+- `-rss_limit_mb=2048`: a run whose resident memory passes 2 GiB fails.
+- `-malloc_limit_mb=1024`: a single allocation above 1 GiB fails, so an allocation sized by a
+  length field of the input rather than by a limit of the parser is reported, not survived.
+- `-max_len=<n>` from `limits.txt`: the largest input the parser can meet in production (a
+  receive buffer, a frame, a constant of the parser, an upload limit), plus the control octets
+  the target reads first. Where production accepts megabytes, the target gets 64 KiB plus its
+  control octets, which reaches the parser's own limits, and the line says so; a target that
+  needs more for a branch of its own gets it, with the reason on its line. Without a
+  `-max_len`, libFuzzer stays at 4,096 octets.
+
+A target without a line in `limits.txt` fails both jobs, so a new target cannot run without
+its bound.
+
+## Adding a target
+
+1. Write `fuzz_targets/<target>.rs`: a module comment that names the parser, the layout of the
+   input (control octets first) and what the target asserts beyond "does not panic".
+2. Register it as a `[[bin]]` in `Cargo.toml` (`test = false`, `doc = false`, `bench = false`).
+   A new dependency edge of the fuzz crate changes `Cargo.lock`: run `cargo check` once
+   without `--locked` and commit the lock file.
+3. Add its line to `limits.txt`, sorted by name, with the production bound and where it comes
+   from.
+4. Add `seeds/<target>/` with a few small valid inputs made from the repository's own test
+   vectors (fixtures, the bytes of a unit test), never a file from outside the repository.
+5. Add its row to the table below.
+6. Run it once for up to 60 seconds with one job (the command above) to see that it starts and
+   reads its seeds, then `cd fuzz && cargo check --locked`.
+
+The weekly smoke picks the target up from `cargo fuzz list`; no workflow changes.
+
+## Minimizing
+
+- A crash input: `cargo +nightly fuzz tmin <target> fuzz/artifacts/<target>/crash-<hash>`
+  writes the smallest input that still fails (`minimized-from-<hash>`).
+- A corpus: `cargo +nightly fuzz cmin <target> fuzz/corpus/<target>` keeps the inputs that
+  together reach the same coverage. A seed directory stays small by hand: a handful of inputs,
+  each of a different shape.
+- Reproduce one input: `cargo +nightly fuzz run <target> <file>` runs that input once.
+
+## Where crashes go
+
+- Locally: `fuzz/artifacts/<target>/` (`crash-`, `oom-`, `timeout-`, `slow-unit-` and the hash
+  of the input).
+- In the weekly smoke: the shard fails at its end and uploads `fuzz/artifacts/` as the workflow
+  artifact `fuzz-artifacts-shard-<n>`, kept 14 days; the shard's job summary lists target,
+  result, seconds and the number of crash files.
+- In the security round: the row `fuzz.targets` fails and the inputs go into the round's
+  evidence bundle.
+
+A crash in a parser that a network peer reaches is a security issue: report it as
+[`SECURITY.md`](../SECURITY.md) describes, not in a public issue, and keep the input out of
+the repository until the fix is released. A crash input becomes a unit test of the parser
+with the fix.
+
+## Which job runs what
+
+| Job | When | Targets | Budget |
+|---|---|---|---|
+| `Fuzz smoke` in `.github/workflows/ci.yml` | weekly (Sunday 03:17 UTC) and by hand (`workflow_dispatch`) | every target of `cargo fuzz list`, dealt round-robin over 5 parallel shards (target *i* of the sorted list to shard *i* mod 5) | 60 s per target after its build, one at a time per shard, within the job's 60 minutes |
+| Row `fuzz.targets` of the security round (`deploy/security/fuzz.sh`, `.github/workflows/security-round.yml`) | every release, on the release commit | every target of `cargo fuzz list` | 120 s per target (`FUZZ_RELEASE_SECS`), four at a time |
+| Row `fuzz.dns_wire` of the security round (`deploy/security/dnswire.py`) | every release | the running node: mutations of `seeds/dns_codec` over UDP and TCP | 10 minutes |
+
+Both target jobs start from `seeds/<target>/` and carry the limits above. Keep a shard at about
+11 targets: add a shard to the matrix and raise `FUZZ_SHARDS` in the job when the list passes
+55 targets. A target that crashes does not stop the others of its shard or the other shards.
+The weekly smoke is the regular pass on `main`; the release budget is the deeper pass on the
+exact commit being shipped.
+
+## Seeds
+
+Each target's seeds are a few valid inputs of the shapes it reads, made from the repository's
+own test vectors: the recorded messages under `crates/*/tests/fixtures/`, the byte strings of
+unit tests, and the documented fixtures of the connectors converted to the shape the target
+reads (a poll's snapshot, server WebSocket frames, answers split by `0xff`). Where a target
+starts with control octets, its seeds carry them.
+
+## Targets and the entry points they reach
+
+The table grows as targets land.
+
+| Target | Entry points it reaches |
 |---|---|
 | `scan_dns_message` | DNS messages of the probe: mDNS, LLMNR and reverse DNS answers (`tenko_scan::dns`) |
 | `scan_snmp_message` | SNMPv3 messages and scoped PDUs (`tenko_scan::snmp::message`) |
@@ -20,7 +142,6 @@ before it merges.
 <!-- WP9.2 router advertisement parser (marked block). -->
 | `scan_ra` | The Router Advertisement parser of the DHCPv6 check (RFC 4861 section 4.2): the ICMPv6 message, its options (prefix information, MTU, source link-layer address, RDNSS) and the Router Solicitation builder (`tenko_scan::ra`) |
 <!-- End WP9.2 router advertisement parser. -->
-
 | `connect_hass_ws_frame` | WebSocket frames and messages of the Home Assistant connector (`tenko_connect_hass::ws`) |
 | `connect_hass_inventory` | Home Assistant registry and state answers mapped to hosts and vendor facts (`tenko_connect_hass::inventory`) |
 | `connect_proxmox_inventory` | Proxmox VE API answers mapped to hosts (`tenko_connect_proxmox::inventory`) |
@@ -77,51 +198,3 @@ before it merges.
 | `dns_tkey` | TKEY queries and GSS-TSIG on the update path (`tenko_dns::tkey`, `tenko_dns::tsig`): the TKEY parser with the record in the additional or the answer section, the handler of modes 3 and 5 over UDP and TCP (BADMODE, BADALG, BADNAME, the bounds of the context table, truncation for UDP), and GSS-TSIG verification of any message on a context negotiated beforehand from the recorded Samba exchange with the lab key, so that the context table, the deletion and the MIC check are reached; an answer is a response with the request's id |
 <!-- End WP13.2 TKEY and GSS-TSIG. -->
 <!-- WP13.1: end. -->
-
-`fuzz/Cargo.lock` is committed, so the weekly smoke builds the same dependency versions as the last gate; refresh it with `cargo update` in `fuzz/` when a target needs a newer dependency.
-
-## Running
-
-Fuzzing requires a nightly toolchain and `cargo-fuzz`:
-
-```sh
-cargo install cargo-fuzz
-cargo +nightly fuzz list
-cargo +nightly fuzz run <target>
-```
-
-Targets that link `tenko-api` embed the web UI: set `TENKO_UI_STUB=1` unless `ui/dist/`
-is built, also for `cargo check --bins`.
-
-## Layout
-
-- The fuzz crate is its own workspace and is excluded from the main workspace.
-- `fuzz/artifacts/`, `fuzz/corpus/` and `fuzz/coverage/` are git-ignored.
-- Small, meaningful seed corpora may be committed under `fuzz/seeds/<target>/`.
-  Pass the directory as an extra corpus argument:
-  `cargo +nightly fuzz run <target> fuzz/corpus/<target> fuzz/seeds/<target>`.
-
-## Weekly smoke
-
-The `Fuzz smoke (Linux, weekly schedule)` job of `.github/workflows/ci.yml` (Sunday, or by hand with
-`workflow_dispatch`) runs every target that `cargo fuzz list` prints for 60 seconds, with the
-committed seed corpus when there is one. Since 41 targets in one job did not fit its 60 minutes
-(each target is built first, then fuzzed), the job is a matrix of 4 shards: the sorted target list is
-dealt out round-robin, target number *i* (counted from 0) to shard *i* mod 4, so the split is the same
-on every run, every target runs exactly once, and a new target needs no edit of the workflow. A shard
-holds 10 or 11 targets today; add a shard to the matrix and raise `FUZZ_SHARDS` in the job when the
-list passes 44. A target that crashes does not stop the others of its shard or the other shards: the
-shard fails at its end and uploads `fuzz/artifacts/` as `fuzz-artifacts-shard-<n>`. Each shard writes
-a table to its job summary (target, result, seconds, number of crash files). To reproduce one target
-run `cargo +nightly fuzz run <target>` as above; the workflow has no single-target input.
-
-## Release budget (the row `fuzz.targets` of the security round)
-
-The lab round `security` ([`deploy/security/`](../deploy/security/README.md), the row
-`fuzz.targets`) runs the same targets at release, beside the weekly smoke, for a longer budget:
-**120 seconds per target** (`FUZZ_RELEASE_SECS`), four at a time, on the release commit,
-starting from `fuzz/seeds/` and the corpus the previous release run left in the Actions cache.
-A crash fails the row and its input goes into the round's evidence bundle. The weekly smoke
-stays at 60 seconds per target: it runs every week on `main`, while the release budget is the
-deeper pass on the exact commit being shipped.
-
