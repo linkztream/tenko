@@ -128,7 +128,7 @@ its Unreleased section names a work package (`WP` and a digit).
 | `deny` | deny | `cargo deny check` | Advisories, bans, licenses and sources pass `deny.toml`. |
 | `fuzz` | fuzz check | `cargo check --locked` in `fuzz/` | The fuzz targets still build against the changed crates. |
 | `build` | server build with embedded ui | `cargo build -p tenko --locked` without `TENKO_UI_STUB` | The server builds with the real UI. |
-| `e2e` | e2e | `npm run e2e` in `ui/` against that binary | Every end-to-end scenario passes. |
+| `e2e` | e2e | `npm run e2e` in `ui/` against that binary, with `TENKO_E2E_MEASURE=1` | Every end-to-end scenario passes, and the measured budgets hold on this machine. |
 
 Every cargo command runs with `CARGO_BUILD_JOBS` from the configuration,
 `CARGO_PROFILE_DEV_DEBUG=line-tables-only`, `CARGO_INCREMENTAL=0` and

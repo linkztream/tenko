@@ -214,7 +214,7 @@ step_build() {
 
 step_e2e() {
   unset TENKO_UI_STUB
-  (cd ui && TENKO_BIN="$T_TESTS/debug/tenko.exe" CI=1 npm run -s e2e 2>&1 | tail -15; exit "${PIPESTATUS[0]}") || fail e2e
+  (cd ui && TENKO_BIN="$T_TESTS/debug/tenko.exe" TENKO_E2E_MEASURE=1 CI=1 npm run -s e2e 2>&1 | tail -15; exit "${PIPESTATUS[0]}") || fail e2e
 }
 
 # ---------------------------------------------------------------------------------------------
