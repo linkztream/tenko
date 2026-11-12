@@ -64,6 +64,7 @@ scan_lldp_cdp            4096     the read buffer of the raw link (pnet's defaul
 scan_neighbor_tables     65536    command output is cut at MAX_OUTPUT (16 MiB, crates/tenko-scan/src/sys.rs); the parsers work line by line
 scan_ra                  1500     the receive buffer of the router advertisement check (crates/tenko-scan/src/ra.rs)
 scan_snmp_message        65507    MAX_MESSAGE_LEN of the SNMP codec, the largest UDP payload (crates/tenko-scan/src/snmp/ber.rs)
+store_snapshot           65537    1 control octet and the rest of a snapshot file, which a leader streams in chunks and whose records may reach records_bound (at least 1 GiB, crates/tenko-store/src/raft/snapshot.rs), more than DEFLATE makes of this length; length fields above MAX_KEY and MAX_FIELD are refused from four octets
 upgrade_manifest         65536    MAX_MANIFEST_BYTES is 1 MiB (crates/tenko-api/src/dto/release.rs); 64 KiB reaches the URL, action, name and version limits
 webauthn_attestation     65568    a 32-octet client data hash and an attestation object from a JSON body (axum's default limit, 2 MiB); a chain of eight certificates is about 12 KiB
 webauthn_authdata        65536    authenticator data from a JSON body (axum's default limit, 2 MiB); credential ids are at most 1,023 octets (crates/tenko-auth/src/webauthn/authdata.rs)

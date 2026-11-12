@@ -2250,3 +2250,56 @@ impl Store for RaftStore {
         self.inner.leadership.subscribe()
     }
 }
+
+/// Entry points for the fuzz target `store_snapshot` (not part of the API).
+#[doc(hidden)]
+pub mod fuzzing {
+    use std::path::Path;
+
+    use tenko_core::codec::to_cbor;
+
+    use super::{
+        snapshot::{Record, SnapshotHeader, SnapshotReader},
+        stored::SmMeta,
+    };
+    use crate::api::StoreError;
+
+    /// The start of a snapshot file of `format` up to its records: the magic and the
+    /// header of an empty state machine, so that inputs reach the records.
+    ///
+    /// # Errors
+    ///
+    /// When the header does not encode.
+    pub fn file_start(format: u32) -> Result<Vec<u8>, StoreError> {
+        let header = to_cbor(&SnapshotHeader {
+            format,
+            meta: super::types::SnapshotMeta::default(),
+            state: SmMeta::default(),
+        })?;
+        let len =
+            u32::try_from(header.len()).map_err(|_| StoreError::Storage("header".to_owned()))?;
+        let mut out = b"TNKSNAP1".to_vec();
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(&header);
+        Ok(out)
+    }
+
+    /// Reads a snapshot file to its end as an install does, under the same bound of its
+    /// records: the format of its header and the number of tables and rows.
+    ///
+    /// # Errors
+    ///
+    /// As the install of a snapshot.
+    pub fn read_snapshot(path: &Path) -> Result<(u32, usize, usize), StoreError> {
+        let mut reader = SnapshotReader::open(path)?;
+        let format = reader.header().format;
+        let (mut tables, mut rows) = (0, 0);
+        while let Some(record) = reader.next_record()? {
+            match record {
+                Record::Table(_) => tables += 1,
+                Record::Row(..) => rows += 1,
+            }
+        }
+        Ok((format, tables, rows))
+    }
+}

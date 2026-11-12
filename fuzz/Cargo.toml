@@ -15,10 +15,14 @@ cargo-fuzz = true
 bytes = "1"
 # The request headers of `api_request_headers`.
 http = "1"
+# The DEFLATE stream of format 2 of `store_snapshot`.
+flate2 = "1"
 # The networks of the configuration image of `dhcp4_engine`.
 ipnet = "2"
 libfuzzer-sys = "0.4"
 serde_json = "1"
+# The trailing hash of the snapshot files of `store_snapshot`.
+sha2 = "0.11"
 tenko = { path = "../crates/tenko", default-features = false }
 # `server` for the multipart parser of `POST /imports` (`api_multipart`).
 tenko-api = { path = "../crates/tenko-api", default-features = false, features = ["server"] }
@@ -36,8 +40,8 @@ tenko-ipam = { path = "../crates/tenko-ipam" }
 # The Kerberos codec, cipher, keytab, PAC, SPNEGO, AP-REQ and MIC targets.
 tenko-krb = { path = "../crates/tenko-krb" }
 tenko-scan = { path = "../crates/tenko-scan" }
-# The read view of the `dns_zonefile` target.
-tenko-store = { path = "../crates/tenko-store" }
+# The read view of the `dns_zonefile` target; `raft` for the snapshot files of `store_snapshot`.
+tenko-store = { path = "../crates/tenko-store", features = ["raft"] }
 tenko-vault = { path = "../crates/tenko-vault" }
 # The runtime of the reader of `api_proxy_protocol`.
 tokio = { version = "1", features = ["io-util", "rt", "time"] }
@@ -463,6 +467,13 @@ bench = false
 [[bin]]
 name = "auth_sign_in_inputs"
 path = "fuzz_targets/auth_sign_in_inputs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "store_snapshot"
+path = "fuzz_targets/store_snapshot.rs"
 test = false
 doc = false
 bench = false
