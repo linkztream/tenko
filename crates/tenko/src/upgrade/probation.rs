@@ -15,7 +15,17 @@
 //! with exit status 12 so that the service manager starts the previous version. When the
 //! new version had migrated the store, the record asks the previous version to restore the
 //! copy that the migration took ([`super::datadir::backup`]); data written by the new
-//! version is then lost, but it never became ready, so there is none from users.
+//! version is then lost, but it never became ready, so there is none from users. A member of
+//! a controller cluster records no such copy and restores none: its migration waits for the
+//! leader, and its store holds what the other controllers wrote meanwhile.
+//!
+//! Two versions share the record: the previous version reads what the new one wrote after a
+//! switch back. Every released version ignores keys it does not know, but refuses to start
+//! on a `state` it does not know. So a version writes only the five states below and the
+//! keys of schema 1 into a record that an older version may read (the golden files in
+//! `tests/fixtures/upgrade/` hold those bytes); a new key may be added, a new state
+//! or a changed meaning raises `schema`. This version reads a record with a state it does
+//! not know, or a schema above its own, as nothing pending, with a warning.
 
 use std::{
     fs, io,
@@ -28,7 +38,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tenko_api::dto::{release::ReleaseVersion, updates::AttemptState};
+use tenko_api::dto::{release::ReleaseVersion, updates::AttemptState as DtoState};
 use tenko_core::{JobId, Timestamp};
 use tenko_store::format;
 
@@ -43,6 +53,47 @@ pub const ATTEMPT_FILE: &str = "attempt.json";
 /// How long the watchdog lets a graceful stop take before it ends the process.
 const HARD_EXIT_AFTER: Duration = Duration::from_secs(45);
 
+/// The schema of the record this version writes and understands.
+pub const SCHEMA: u32 = 1;
+
+/// Where an attempt stands, as the record stores it (not the API's type: the bytes of the
+/// record must not change with the API).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum State {
+    /// The install job runs.
+    Installing,
+    /// The switch ran; the new version starts on probation.
+    Restarting,
+    /// The new version became ready.
+    Confirmed,
+    /// The previous version runs again.
+    RolledBack,
+    /// The install job failed before the switch.
+    Failed,
+    /// A state a newer version wrote. Never written; [`read`] drops such a record.
+    #[serde(other)]
+    Unknown,
+}
+
+impl State {
+    /// The state of the API.
+    const fn to_dto(self) -> DtoState {
+        match self {
+            Self::Installing => DtoState::Installing,
+            Self::Restarting => DtoState::Restarting,
+            Self::Confirmed => DtoState::Confirmed,
+            Self::RolledBack => DtoState::RolledBack,
+            // `read` hands out no record in a state it does not know.
+            Self::Failed | Self::Unknown => DtoState::Failed,
+        }
+    }
+}
+
+const fn schema_one() -> u32 {
+    1
+}
+
 /// The last install attempt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attempt {
@@ -51,7 +102,7 @@ pub struct Attempt {
     /// The version installed.
     pub to: ReleaseVersion,
     /// Where it stands.
-    pub state: AttemptState,
+    pub state: State,
     /// When it reached this state.
     pub at: Timestamp,
     /// The install job.
@@ -74,6 +125,9 @@ pub struct Attempt {
     /// The outcome has been written to the audit log.
     #[serde(default)]
     pub reported: bool,
+    /// The schema of the record; a record written before the key existed is schema 1.
+    #[serde(default = "schema_one")]
+    pub schema: u32,
 }
 
 impl Attempt {
@@ -87,7 +141,7 @@ impl Attempt {
         Self {
             from,
             to,
-            state: AttemptState::Restarting,
+            state: State::Restarting,
             at: Timestamp::now(),
             job_id,
             reason: None,
@@ -96,6 +150,7 @@ impl Attempt {
             backup: None,
             restore: false,
             reported: false,
+            schema: SCHEMA,
         }
     }
 
@@ -104,7 +159,7 @@ impl Attempt {
         tenko_api::dto::updates::UpdateAttempt {
             from: self.from.clone(),
             to: self.to.clone(),
-            state: self.state,
+            state: self.state.to_dto(),
             at: self.at,
             job_id: self.job_id,
             reason: self.reason.clone(),
@@ -112,23 +167,35 @@ impl Attempt {
     }
 }
 
-/// Reads the attempt record of `layout`.
+/// Reads the attempt record of `layout`. A record a newer version wrote in a state or a
+/// schema this version does not know is nothing pending: `None`, with a warning.
 ///
 /// # Errors
 ///
 /// The I/O error; a record that does not parse is an error too (it is never guessed at).
 pub fn read(layout: &Layout) -> io::Result<Option<Attempt>> {
     let path = layout.root().join(ATTEMPT_FILE);
-    match fs::read(&path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|error| {
+    let attempt: Attempt = match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("{}: {error}", path.display()),
             )
-        }),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
+        })?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if attempt.state == State::Unknown || attempt.schema > SCHEMA {
+        tracing::warn!(
+            file = %path.display(),
+            schema = attempt.schema,
+            from = %attempt.from,
+            to = %attempt.to,
+            "the update attempt record was written by a newer version; nothing is pending for this one"
+        );
+        return Ok(None);
     }
+    Ok(Some(attempt))
 }
 
 /// Writes the attempt record atomically (aside, synced, renamed).
@@ -171,7 +238,7 @@ pub fn on_start(data_dir: &Path, own: &ReleaseVersion) -> io::Result<StartAction
     let Some(mut attempt) = read(&layout)? else {
         return Ok(StartAction::Normal);
     };
-    if attempt.state == AttemptState::RolledBack && attempt.restore && &attempt.from == own {
+    if attempt.state == State::RolledBack && attempt.restore && &attempt.from == own {
         if let Some(backup) = attempt.backup.clone() {
             restore_store(data_dir, &backup)?;
         }
@@ -179,7 +246,7 @@ pub fn on_start(data_dir: &Path, own: &ReleaseVersion) -> io::Result<StartAction
         write(&layout, &attempt)?;
         return Ok(StartAction::Normal);
     }
-    if attempt.state != AttemptState::Restarting || &attempt.to != own {
+    if attempt.state != State::Restarting || &attempt.to != own {
         return Ok(StartAction::Normal);
     }
     attempt.starts += 1;
@@ -191,6 +258,46 @@ pub fn on_start(data_dir: &Path, own: &ReleaseVersion) -> io::Result<StartAction
     } else {
         StartAction::SwitchBack(probation)
     })
+}
+
+/// When the configuration does not load at the start of this version: if the record says
+/// this version was just installed and is on probation, switches back to the previous
+/// version and returns it, so that the caller stops with exit status 12 and the service
+/// manager starts that version, which read the file before. A version that renamed or
+/// removed a key the file still uses thus never strands the node. The data directory comes
+/// from `--data-dir`, the `TENKO_*` environment, or the top-level `data_dir` of the file,
+/// read without the checks that failed.
+pub fn switch_back_unconfigured(
+    sources: &crate::config::Sources,
+    own: &ReleaseVersion,
+) -> Option<ReleaseVersion> {
+    let data_dir = data_dir_of(sources)?;
+    let layout = Layout::new(&data_dir);
+    let attempt = read(&layout).ok()??;
+    if attempt.state != State::Restarting || &attempt.to != own {
+        return None;
+    }
+    let from = attempt.from.clone();
+    Probation::new(layout, attempt, &data_dir)
+        .switch_back("upgrade.config_refused")
+        .then_some(from)
+}
+
+/// The data directory `sources` name, without the configuration's own checks.
+fn data_dir_of(sources: &crate::config::Sources) -> Option<PathBuf> {
+    let without_file = crate::config::Sources {
+        file: None,
+        ..sources.clone()
+    };
+    let named = crate::config::load(&without_file, std::env::vars())
+        .ok()
+        .and_then(|loaded| loaded.config.data_dir);
+    let dir = named.or_else(|| {
+        let text = fs::read_to_string(sources.file.as_ref()?).ok()?;
+        let table: toml::Table = toml::from_str(&text).ok()?;
+        table.get("data_dir")?.as_str().map(PathBuf::from)
+    })?;
+    std::path::absolute(dir).ok()
 }
 
 /// Puts the store copy `backup` (a directory with `store/`) back in place of the store; the
@@ -263,8 +370,12 @@ impl Probation {
     }
 
     /// Records the store copy taken before this version migrated, so that a switch back
-    /// restores it.
-    pub fn set_backup(&self, backup: &Path) {
+    /// restores it. A member of a controller cluster records none: its store also holds
+    /// what the other controllers wrote since, which a restore would roll back.
+    pub fn set_backup(&self, backup: &Path, member: bool) {
+        if member {
+            return;
+        }
         let mut attempt = self.attempt();
         attempt.backup = Some(backup.to_path_buf());
         if let Err(error) = write(&self.inner.layout, &attempt) {
@@ -279,7 +390,7 @@ impl Probation {
             return false;
         }
         let mut attempt = self.attempt();
-        attempt.state = AttemptState::Confirmed;
+        attempt.state = State::Confirmed;
         attempt.at = Timestamp::now();
         attempt.reason = None;
         if let Err(error) = write(&self.inner.layout, &attempt) {
@@ -301,7 +412,7 @@ impl Probation {
             tracing::error!(%error, from = %attempt.from, "cannot switch back to the previous version");
         }
         let _ = layout.point(PREVIOUS, &attempt.to);
-        attempt.state = AttemptState::RolledBack;
+        attempt.state = State::RolledBack;
         attempt.at = Timestamp::now();
         attempt.reason = Some(reason.to_owned());
         attempt.restore = attempt.backup.is_some();
@@ -399,6 +510,179 @@ mod tests {
         layout
     }
 
+    /// What every released version (0.0.3 to 0.0.11) writes, and what this one writes.
+    const RELEASED: &str = include_str!("../../tests/fixtures/upgrade/attempt-released.json");
+    const SCHEMA_ONE: &str = include_str!("../../tests/fixtures/upgrade/attempt-v1.json");
+
+    fn golden_attempt() -> Attempt {
+        Attempt {
+            at: Timestamp(time::macros::datetime!(2026-11-12 10:00 UTC)),
+            ..Attempt::restarting(version("0.0.4"), version("0.0.12"), None, 180)
+        }
+    }
+
+    /// The record of a released version reads as schema 1, and this version writes exactly
+    /// the bytes of schema 1.
+    #[test]
+    fn the_record_keeps_its_bytes() {
+        let released: Attempt = serde_json::from_str(RELEASED).expect("released record");
+        assert_eq!(released, golden_attempt());
+        let written = serde_json::to_string_pretty(&golden_attempt()).expect("json");
+        assert_eq!(written, SCHEMA_ONE.trim_end());
+    }
+
+    /// The reader every released version has: the API's state with no unknown arm and the
+    /// keys of schema 1, unknown keys ignored. What this version writes must stay readable
+    /// by it, because a switch back starts the previous version on this record.
+    #[derive(Deserialize)]
+    #[allow(dead_code, reason = "the fields are read to show that they parse")]
+    struct ReleasedReader {
+        from: ReleaseVersion,
+        to: ReleaseVersion,
+        state: DtoState,
+        at: Timestamp,
+        #[serde(default)]
+        job_id: Option<JobId>,
+        #[serde(default)]
+        reason: Option<String>,
+        deadline_secs: u64,
+        #[serde(default)]
+        starts: u32,
+        #[serde(default)]
+        backup: Option<PathBuf>,
+        #[serde(default)]
+        restore: bool,
+        #[serde(default)]
+        reported: bool,
+    }
+
+    #[test]
+    fn released_versions_read_every_record_this_version_writes() {
+        let mut attempt = golden_attempt();
+        for state in [
+            State::Installing,
+            State::Restarting,
+            State::Confirmed,
+            State::RolledBack,
+            State::Failed,
+        ] {
+            attempt.state = state;
+            attempt.backup = Some(PathBuf::from("upgrade-backups/copy"));
+            let bytes = serde_json::to_vec_pretty(&attempt).expect("json");
+            let read: ReleasedReader = serde_json::from_slice(&bytes).expect("released reader");
+            assert_eq!(read.state, state.to_dto());
+        }
+    }
+
+    /// A record a newer version wrote, in a state or a schema this one does not know, is
+    /// nothing pending: the start goes on instead of refusing.
+    #[test]
+    fn a_record_of_a_newer_version_is_nothing_pending() {
+        let data = temp_dir("newer");
+        let layout = installed(&data);
+        let path = layout.root().join(ATTEMPT_FILE);
+        let newer_state = SCHEMA_ONE.replace(r#""restarting""#, r#""verifying""#);
+        fs::write(&path, newer_state).expect("record");
+        assert_eq!(read(&layout).expect("read"), None);
+        assert!(matches!(
+            on_start(&data, &version("0.0.12")).expect("start"),
+            StartAction::Normal
+        ));
+        let newer_schema = SCHEMA_ONE.replace(r#""schema": 1"#, r#""schema": 2"#);
+        fs::write(&path, newer_schema).expect("record");
+        assert!(matches!(
+            on_start(&data, &version("0.0.12")).expect("start"),
+            StartAction::Normal
+        ));
+        fs::write(&path, b"{ not json").expect("record");
+        let error = on_start(&data, &version("0.0.12")).expect_err("a broken record");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        fs::remove_dir_all(&data).expect("clean up");
+    }
+
+    /// A member of a controller cluster restores no store copy when it switches back: its
+    /// store holds what the leader replicated meanwhile.
+    #[test]
+    fn a_member_switches_back_without_restoring_a_store_copy() {
+        let data = temp_dir("member");
+        let layout = installed(&data);
+        let backup = data.join("upgrade-backups").join("copy");
+        fs::create_dir_all(backup.join("store")).expect("backup");
+        fs::write(backup.join("store/log.redb"), b"old log").expect("log");
+        fs::create_dir_all(data.join("store")).expect("store");
+        fs::write(data.join("store/log.redb"), b"replicated log").expect("log");
+        write(
+            &layout,
+            &Attempt::restarting(version("0.1.0"), version("0.2.0"), None, 180),
+        )
+        .expect("record");
+        let StartAction::Probation(probation) = on_start(&data, &version("0.2.0")).expect("start")
+        else {
+            panic!("probation");
+        };
+        probation.set_backup(&backup, true);
+        assert!(probation.switch_back("upgrade.crashed"));
+        let attempt = read(&layout).expect("read").expect("record");
+        assert_eq!(attempt.backup, None);
+        assert!(!attempt.restore);
+        assert!(matches!(
+            on_start(&data, &version("0.1.0")).expect("start"),
+            StartAction::Normal
+        ));
+        assert_eq!(
+            fs::read(data.join("store/log.redb")).expect("store"),
+            b"replicated log"
+        );
+        fs::remove_dir_all(&data).expect("clean up");
+    }
+
+    /// A new version that refuses the configuration on its first start switches back; the
+    /// data directory is found in the file even though the file does not load.
+    #[test]
+    fn a_refused_configuration_switches_back_to_the_version_that_read_it() {
+        let data = temp_dir("config");
+        let layout = installed(&data);
+        let file = data.join("tenko.toml");
+        fs::write(
+            &file,
+            format!(
+                "data_dir = {:?}
+[cluster]
+renamed_key = 1
+",
+                data.display().to_string()
+            ),
+        )
+        .expect("file");
+        let sources = crate::config::Sources {
+            file: Some(file),
+            ..crate::config::Sources::default()
+        };
+        // No record: nothing to switch back to.
+        assert_eq!(switch_back_unconfigured(&sources, &version("0.2.0")), None);
+        write(
+            &layout,
+            &Attempt::restarting(version("0.1.0"), version("0.2.0"), None, 180),
+        )
+        .expect("record");
+        // The previous version is not the one on probation.
+        assert_eq!(switch_back_unconfigured(&sources, &version("0.1.0")), None);
+        assert_eq!(
+            switch_back_unconfigured(&sources, &version("0.2.0")),
+            Some(version("0.1.0"))
+        );
+        assert_eq!(layout.current(), Some(version("0.1.0")));
+        let attempt = read(&layout).expect("read").expect("record");
+        assert_eq!(attempt.state, State::RolledBack);
+        assert_eq!(attempt.reason.as_deref(), Some("upgrade.config_refused"));
+        // The previous version then starts normally.
+        assert!(matches!(
+            on_start(&data, &version("0.1.0")).expect("start"),
+            StartAction::Normal
+        ));
+        fs::remove_dir_all(&data).expect("clean up");
+    }
+
     #[test]
     fn a_first_start_is_on_probation_and_confirms() {
         let data = temp_dir("confirm");
@@ -427,7 +711,7 @@ mod tests {
             "a confirmed attempt stays"
         );
         let attempt = read(&layout).expect("read").expect("record");
-        assert_eq!(attempt.state, AttemptState::Confirmed);
+        assert_eq!(attempt.state, State::Confirmed);
         assert_eq!(attempt.starts, 1);
         assert_eq!(layout.current(), Some(version("0.2.0")));
         // Later starts of the confirmed version are normal.
@@ -458,7 +742,7 @@ mod tests {
         else {
             panic!("probation");
         };
-        first.set_backup(&backup);
+        first.set_backup(&backup, false);
         // The process died before it confirmed; the service manager starts it again.
         let StartAction::SwitchBack(second) = on_start(&data, &version("0.2.0")).expect("start")
         else {
@@ -467,7 +751,7 @@ mod tests {
         assert!(second.switch_back("upgrade.crashed"));
         assert_eq!(layout.current(), Some(version("0.1.0")));
         let attempt = read(&layout).expect("read").expect("record");
-        assert_eq!(attempt.state, AttemptState::RolledBack);
+        assert_eq!(attempt.state, State::RolledBack);
         assert_eq!(attempt.reason.as_deref(), Some("upgrade.crashed"));
         assert!(attempt.restore);
         // The previous version restores the copy before it opens the store.

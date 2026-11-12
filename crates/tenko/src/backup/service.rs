@@ -527,6 +527,9 @@ impl BackupService {
         let pending = view
             .get_typed(&restore::PENDING, &())?
             .map(|(notice, _)| notice);
+        let recorded = view
+            .get_typed(&tables::RESTORE, &())?
+            .map(|(record, _)| record);
         drop(view);
         let (notice, found) = match (file, pending) {
             (Some(file), Some(_)) => (file, "file"),
@@ -534,6 +537,16 @@ impl BackupService {
             (None, Some(pending)) => (pending, "missing"),
             (None, None) => return Ok(None),
         };
+        // A notice file whose removal failed after the restore was recorded (the record
+        // removed the row): it is the same restore, recorded once.
+        if found == "file_only"
+            && recorded.is_some_and(|record| {
+                record.restored_at == notice.restored_at && record.file == notice.file
+            })
+        {
+            restore::clear_notice(&self.config.data_dir)?;
+            return Ok(None);
+        }
         let record = RestoreRecord {
             restored_at: notice.restored_at,
             started_at: Timestamp::now(),
@@ -564,7 +577,9 @@ impl BackupService {
         ]);
         batch.audit(draft);
         self.shared.propose(batch).await?;
-        restore::clear_notice(&self.config.data_dir);
+        if let Err(error) = restore::clear_notice(&self.config.data_dir) {
+            tracing::warn!(%error, "the restore is recorded, but its notice file stays");
+        }
         if found == "missing" {
             tracing::warn!(
                 file = %record.file,

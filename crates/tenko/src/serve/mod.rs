@@ -322,7 +322,7 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
         Ok(resolved) => resolved,
         Err(error) => {
             let _ = writeln!(err, "tenko serve: {error}");
-            return exit::CONFIG;
+            return config_refused(&args.sources(), err);
         }
     };
     if let Some(status) = check_roles(resolved.roles, err) {
@@ -409,6 +409,23 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
     }
 }
 
+/// The exit status of a start whose configuration does not load: 12 when this version was
+/// just installed and the previous one takes over
+/// ([`crate::upgrade::probation::switch_back_unconfigured`]), else 3.
+pub fn config_refused(sources: &config::Sources, err: &mut impl Write) -> u8 {
+    let own = crate::upgrade::running_version();
+    match crate::upgrade::probation::switch_back_unconfigured(sources, &own) {
+        Some(previous) => {
+            let _ = writeln!(
+                err,
+                "tenko serve: version {own} was just installed and does not accept the                  configuration; switched back to {previous}, which exit status 12 starts"
+            );
+            exit::RESTART
+        }
+        None => exit::CONFIG,
+    }
+}
+
 /// Loads and validates the configuration of `tenko serve`.
 ///
 /// # Errors
@@ -420,6 +437,7 @@ pub fn load(args: &ServeArgs) -> Result<Resolved, ConfigError> {
         .resolve()?;
     // node-roles: `--roles` pins the roles; the stored role set of the node is then not used.
     resolved.roles_pinned = args.roles.is_some();
+    resolved.config_file.clone_from(&args.config);
     Ok(resolved)
 }
 
@@ -817,7 +835,7 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
     if let Some(updates) = &services.updates {
         let updates = updates.clone();
         running.tasks.push(tokio::spawn(async move {
-            updates.report_outcome().await;
+            updates.at_start().await;
         }));
     }
     if let Some(ready) = ready {
@@ -1002,9 +1020,6 @@ async fn start(
                 .await
                 .map_err(|error| StartError::new("store", "start.store.panic", error.to_string()))?
                 .map_err(|error| upgrade_error("store", &error))?;
-                if let Some(probation) = probation {
-                    probation.set_backup(&copy);
-                }
                 Some(copy)
             } else {
                 None
@@ -1020,6 +1035,9 @@ async fn start(
             // runs it once every voter's binary knows the format (OPS-08).
             let membership = store.membership();
             let member = membership.voters.len() + membership.learners.len() > 1;
+            if let (Some(probation), Some(copy)) = (probation, &backup) {
+                probation.set_backup(copy, member);
+            }
             let finished = crate::upgrade::datadir::finish_with(
                 &store,
                 &layout.store(),
@@ -1578,11 +1596,12 @@ async fn start(
     // before the runner starts.
     let updates = {
         let raft = store.clone();
-        let env = crate::upgrade::updates::Environment::detect(
+        let mut env = crate::upgrade::updates::Environment::detect(
             resolved.data_dir.clone(),
             resolved.node_id,
             &config.updates,
         );
+        env.config_file.clone_from(&resolved.config_file);
         let parts = crate::upgrade::updates::Parts {
             section: config.updates.clone(),
             store: Arc::clone(&store_dyn),
@@ -2500,6 +2519,57 @@ fn register_ipam_steps(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A newly installed version that does not accept the operator's file (a renamed key,
+    /// here) stops with exit status 12 after switching back, instead of exit status 3 with
+    /// nothing to start the previous version.
+    #[test]
+    fn a_new_version_that_refuses_the_configuration_switches_back() {
+        use crate::upgrade::{
+            layout::{CURRENT, Layout, PREVIOUS},
+            probation::{self, Attempt},
+        };
+        let data = tempfile::tempdir().expect("dir");
+        let layout = Layout::new(data.path());
+        let previous: tenko_api::dto::release::ReleaseVersion = "0.0.4".parse().expect("version");
+        let own = crate::upgrade::running_version();
+        let binary = data.path().join("binary");
+        std::fs::write(&binary, b"binary").expect("binary");
+        for version in [&previous, &own] {
+            layout.install_binary(version, &binary).expect("install");
+        }
+        layout.point(PREVIOUS, &previous).expect("previous");
+        layout.point(CURRENT, &own).expect("current");
+        probation::write(
+            &layout,
+            &Attempt::restarting(previous.clone(), own.clone(), None, 180),
+        )
+        .expect("record");
+        let file = data.path().join("tenko.toml");
+        std::fs::write(
+            &file,
+            "[cluster]
+renamed_ttl_secs = 600
+",
+        )
+        .expect("file");
+        let args = ServeArgs {
+            config: Some(file),
+            data_dir: Some(data.path().to_path_buf()),
+            roles: None,
+            stop_on_eof: false,
+        };
+        let mut err = Vec::new();
+        assert_eq!(command(&args, &mut err), exit::RESTART);
+        let err = String::from_utf8(err).expect("text");
+        assert!(err.contains("renamed_ttl_secs"), "{err}");
+        assert!(err.contains("switched back to 0.0.4"), "{err}");
+        assert_eq!(layout.current(), Some(previous));
+        // Without a record of an install, the same file stops the start with exit status 3.
+        std::fs::remove_file(data.path().join("updates").join(probation::ATTEMPT_FILE))
+            .expect("remove the record");
+        assert_eq!(command(&args, &mut Vec::new()), exit::CONFIG);
+    }
 
     /// Every step kind the server's IPAM wiring registers is classified: a kind that
     /// writes intent after its request and cannot be built without the scope guard, a kind

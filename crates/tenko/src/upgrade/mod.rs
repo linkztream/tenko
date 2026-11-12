@@ -39,7 +39,7 @@ use std::{
 };
 
 use clap::{Args, Subcommand};
-use tenko_api::dto::{release::ReleaseVersion, updates::AttemptState};
+use tenko_api::dto::release::ReleaseVersion;
 
 use crate::{config, exit};
 
@@ -291,7 +291,7 @@ pub fn adopt_payload(data_dir: &Path, running: &ReleaseVersion, payload: &Payloa
         Ok(Some(attempt))
             if matches!(
                 attempt.state,
-                AttemptState::Installing | AttemptState::Restarting
+                probation::State::Installing | probation::State::Restarting
             ) =>
         {
             return Adoption::Busy;
@@ -315,15 +315,14 @@ pub fn adopt_payload(data_dir: &Path, running: &ReleaseVersion, payload: &Payloa
         Ok(report) => report,
         Err(error) => return Adoption::Failed(error),
     };
-    match report.verdict {
-        check::Verdict::Fresh | check::Verdict::Current | check::Verdict::MigrationNeeded => {}
-        check::Verdict::Refused => return Adoption::Refused { version, report },
-        check::Verdict::Failed => {
-            return Adoption::Failed(format!(
-                "the store check with version {version} could not run: {}",
-                problem_text(&report)
-            ));
-        }
+    if report.verdict == check::Verdict::Failed {
+        return Adoption::Failed(format!(
+            "the store check with version {version} could not run: {}",
+            problem_text(&report)
+        ));
+    }
+    if !report.verdict.lets_adoption_switch() {
+        return Adoption::Refused { version, report };
     }
     let from = layout.current().unwrap_or_else(|| running.clone());
     if let Err(error) = layout.install_binary(&version, payload.path) {
@@ -340,7 +339,7 @@ pub fn adopt_payload(data_dir: &Path, running: &ReleaseVersion, payload: &Payloa
     if let Err(error) = ensure_layout(data_dir, payload.path, &version) {
         // The record must not say `restarting` for a switch that did not happen: the next
         // start would wait for an attempt that never ends.
-        attempt.state = AttemptState::Failed;
+        attempt.state = probation::State::Failed;
         attempt.reason = Some(ADOPT_FAILED.to_owned());
         if let Err(write_error) = probation::write(&layout, &attempt) {
             tracing::warn!(error = %write_error, "cannot record the failed adoption");
@@ -685,7 +684,7 @@ mod tests {
             std::fs::read(&payload).expect("payload")
         );
         let attempt = probation::read(&layout).expect("read").expect("record");
-        assert_eq!(attempt.state, AttemptState::Restarting);
+        assert_eq!(attempt.state, probation::State::Restarting);
         assert_eq!((attempt.from, attempt.to), (v1, v2));
         assert_eq!(attempt.deadline_secs, 90);
         assert_eq!(attempt.job_id, None);

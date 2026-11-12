@@ -1,0 +1,16 @@
+{
+  "verdict": "migration_needed",
+  "exit_code": 10,
+  "binary_version": "0.0.11",
+  "binary_format": 5,
+  "data_dir": "/var/lib/tenko/updates/check-0.0.11",
+  "found_format": 4,
+  "legacy": false,
+  "steps": [
+    {
+      "to": 5,
+      "summary": "a migration of format 5"
+    }
+  ],
+  "problem": null
+}

@@ -14,6 +14,16 @@
 //! | 11 | Refused: a newer format, a missing migration, records that disagree, or a migration that failed in the dry run |
 //! | 1 | The check could not run: the store is open in a running server, or a file operation failed |
 //! | 3 | The configuration is invalid |
+//!
+//! The running binary of an in-app update runs this check of the new binary, so its command
+//! line and its report are a contract between versions. Every released install job runs
+//! `upgrade check --data-dir <copy> --disposable --node-id <id> --json`, and from this
+//! version on with `--config <file>`; every release reads `verdict` and `problem` of the
+//! report, ignores keys it does not know and accepts only `current` and `migration_needed`.
+//! A later binary keeps those flags and those verdicts; this one reads a verdict it does not
+//! know as a refusal ([`Verdict::Unknown`]) and a report without its other keys as their
+//! defaults. The golden file `tests/fixtures/upgrade/check-report-0.0.11.json` holds a
+//! report as 0.0.11 prints it.
 
 use std::{
     io::Write,
@@ -47,8 +57,9 @@ pub struct CheckArgs {
     #[arg(long, value_name = "PATH")]
     pub data_dir: Option<PathBuf>,
 
-    /// Where the copy for the dry run goes (default `<data dir>/upgrade-check`); it is
-    /// removed afterwards.
+    /// The directory under which the copy for the dry run goes, in a new subdirectory of its
+    /// own that is removed afterwards; the directory itself and what else it holds stay
+    /// (default `<data dir>/upgrade-check`, removed afterwards).
     #[arg(long, value_name = "PATH")]
     pub work_dir: Option<PathBuf>,
 
@@ -79,6 +90,9 @@ pub enum Verdict {
     Refused,
     /// The check could not run.
     Failed,
+    /// A verdict of a newer binary; never printed by this one, and read as a refusal.
+    #[serde(other)]
+    Unknown,
 }
 
 impl Verdict {
@@ -87,9 +101,22 @@ impl Verdict {
         match self {
             Self::Fresh | Self::Current => exit::OK,
             Self::MigrationNeeded => exit::MIGRATION_NEEDED,
-            Self::Refused => exit::UPGRADE_REFUSED,
+            Self::Refused | Self::Unknown => exit::UPGRADE_REFUSED,
             Self::Failed => exit::FAILURE,
         }
+    }
+
+    /// Whether an in-app install switches to the binary that gave this verdict on a copy of
+    /// the running state: the copy is at its format, or its migration passed. A copy of a
+    /// running state is never empty, so `fresh` means the copy failed.
+    pub const fn lets_install_switch(self) -> bool {
+        matches!(self, Self::Current | Self::MigrationNeeded)
+    }
+
+    /// Whether the Windows service adopts the installer's binary that gave this verdict on
+    /// its data directory, which has no store yet before the first start (`fresh`).
+    pub const fn lets_adoption_switch(self) -> bool {
+        matches!(self, Self::Fresh | Self::Current | Self::MigrationNeeded)
     }
 }
 
@@ -112,27 +139,36 @@ pub struct Problem {
 }
 
 /// The report of `tenko upgrade check`, printed as text or as JSON. The JSON is read back by
-/// the service when it runs the check with the installer's file at its start
-/// ([`super::adopt_payload`]).
+/// the install job and by the service when it runs the check with the installer's file at
+/// its start ([`super::parse_check_output`]); the keys besides `verdict` have defaults so
+/// that a report of another version still reads (see the module documentation).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Report {
     /// The verdict.
     pub verdict: Verdict,
     /// The exit status.
+    #[serde(default)]
     pub exit_code: u8,
     /// The version of this binary.
+    #[serde(default)]
     pub binary_version: String,
     /// The data-directory format this binary writes.
+    #[serde(default)]
     pub binary_format: u32,
     /// The data directory.
+    #[serde(default)]
     pub data_dir: PathBuf,
     /// The format the directory has, when there is a store.
+    #[serde(default)]
     pub found_format: Option<u32>,
     /// The directory has no format marker (written before format versions existed).
+    #[serde(default)]
     pub legacy: bool,
     /// The migrations the dry run ran, in order.
+    #[serde(default)]
     pub steps: Vec<Step>,
     /// Why the check refused or failed.
+    #[serde(default)]
     pub problem: Option<Problem>,
 }
 
@@ -204,7 +240,9 @@ impl Report {
                  store aside and migrates at its next start (exit {})",
                 exit::MIGRATION_NEEDED
             ),
-            Verdict::Refused => format!("result: refused (exit {})", exit::UPGRADE_REFUSED),
+            Verdict::Refused | Verdict::Unknown => {
+                format!("result: refused (exit {})", exit::UPGRADE_REFUSED)
+            }
             Verdict::Failed => "result: the check could not run (exit 1)".to_owned(),
         });
         if let Some(problem) = &self.problem {
@@ -267,7 +305,8 @@ pub fn command(args: &CheckArgs, out: &mut impl Write, err: &mut impl Write) -> 
 /// How [`check`] works on the directory.
 #[derive(Debug, Clone)]
 pub struct Options {
-    /// Where the copy goes; default `<data dir>/upgrade-check`.
+    /// The directory under which the copy goes, in a new subdirectory; default
+    /// `<data dir>/upgrade-check`, which belongs to the check.
     pub work_dir: Option<PathBuf>,
     /// Run in place: the directory is a copy.
     pub disposable: bool,
@@ -298,11 +337,19 @@ pub async fn check(data_dir: &Path, options: &Options, registry: Registry<'_>) -
     let (dir, cleanup) = if options.disposable {
         (store_dir.clone(), None)
     } else {
-        let work = options
-            .work_dir
-            .clone()
-            .unwrap_or_else(|| data_dir.join("upgrade-check"));
-        let _ = std::fs::remove_dir_all(&work);
+        // A directory the operator named is never removed: the copy goes into a new
+        // subdirectory of it.
+        let work = match &options.work_dir {
+            Some(parent) => parent.join(format!(
+                "tenko-upgrade-check-{}",
+                uuid::Uuid::now_v7().simple()
+            )),
+            None => {
+                let work = data_dir.join("upgrade-check");
+                let _ = std::fs::remove_dir_all(&work);
+                work
+            }
+        };
         if let Err(error) = datadir::check_space(&work, &store_dir) {
             return report.problem(Verdict::Failed, error.code(), error.to_string());
         }
@@ -510,6 +557,95 @@ mod tests {
         );
         std::fs::remove_dir_all(&dir).expect("clean up");
         std::fs::remove_dir_all(&empty).expect("clean up");
+    }
+
+    /// The report as 0.0.11 prints it reads; a verdict of a newer binary is a refusal, and
+    /// a report with only a verdict still reads.
+    #[test]
+    fn reports_of_other_versions_read() {
+        let released = crate::upgrade::parse_check_output(include_bytes!(
+            "../../tests/fixtures/upgrade/check-report-0.0.11.json"
+        ))
+        .expect("the report of 0.0.11");
+        assert_eq!(released.verdict, Verdict::MigrationNeeded);
+        assert_eq!(released.steps.len(), 1);
+        assert!(released.verdict.lets_install_switch());
+        let newer = crate::upgrade::parse_check_output(
+            br#"{"verdict":"needs_operator","exit_code":13,"hint":"new key"}"#,
+        )
+        .expect("a newer report");
+        assert_eq!(newer.verdict, Verdict::Unknown);
+        assert!(!newer.verdict.lets_install_switch());
+        assert!(!newer.verdict.lets_adoption_switch());
+        assert_eq!(newer.verdict.exit_code(), exit::UPGRADE_REFUSED);
+        let fresh = crate::upgrade::parse_check_output(br#"{"verdict":"fresh"}"#).expect("fresh");
+        assert!(!fresh.verdict.lets_install_switch());
+        assert!(fresh.verdict.lets_adoption_switch());
+    }
+
+    /// The command lines that released install jobs and this one run: a later binary must
+    /// keep accepting them.
+    #[test]
+    fn the_command_lines_of_released_install_jobs_parse() {
+        #[derive(clap::Parser)]
+        struct Check {
+            #[command(flatten)]
+            args: CheckArgs,
+        }
+        let released = <Check as clap::Parser>::try_parse_from([
+            "check",
+            "--data-dir",
+            "/var/lib/tenko/updates/check-0.0.12",
+            "--disposable",
+            "--node-id",
+            "1",
+            "--json",
+        ])
+        .expect("the released command line");
+        assert!(released.args.disposable && released.args.json);
+        assert_eq!(released.args.node_id, Some(1));
+        let with_config = <Check as clap::Parser>::try_parse_from([
+            "check",
+            "--config",
+            "/etc/tenko/tenko.toml",
+            "--data-dir",
+            "/var/lib/tenko/updates/check-0.0.12",
+            "--disposable",
+            "--node-id",
+            "1",
+            "--json",
+        ])
+        .expect("this version's command line");
+        assert_eq!(
+            with_config.args.config.as_deref(),
+            Some(Path::new("/etc/tenko/tenko.toml"))
+        );
+    }
+
+    /// `--work-dir` names a directory of the operator's: the check works in a new
+    /// subdirectory and leaves the directory and its other files in place.
+    #[tokio::test]
+    async fn a_named_work_directory_and_its_files_stay() {
+        let dir = data_dir_at_format_1("work-dir").await;
+        let named = dir.join("operator-tmp");
+        std::fs::create_dir(&named).expect("named");
+        std::fs::write(named.join("keep.txt"), b"the operator's").expect("file");
+        let options = Options {
+            work_dir: Some(named.clone()),
+            ..options()
+        };
+        let two = Registry {
+            current: 2,
+            migrations: &STEPS,
+        };
+        let report = check(&dir, &options, two).await;
+        assert_eq!(report.verdict, Verdict::MigrationNeeded, "{report:?}");
+        let left: Vec<_> = std::fs::read_dir(&named)
+            .expect("the named directory stays")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert_eq!(left, vec![std::ffi::OsString::from("keep.txt")]);
+        std::fs::remove_dir_all(&dir).expect("clean up");
     }
 
     #[tokio::test]

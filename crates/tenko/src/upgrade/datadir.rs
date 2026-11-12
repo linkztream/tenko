@@ -634,7 +634,7 @@ async fn reconcile(
             let version = if fresh {
                 registry.current
             } else {
-                marker.unwrap_or(INITIAL)
+                unrecorded_format(marker)
             };
             if version > registry.current {
                 return Err(UpgradeError::Newer {
@@ -650,6 +650,26 @@ async fn reconcile(
         }
     };
     Ok(reconciled)
+}
+
+/// The data format of a store that holds data but no format record: the format of its
+/// marker, or the initial format when it has none (a store from before format records).
+/// The one answer for the start, the backup and the joining controller.
+pub fn unrecorded_format(marker: Option<u32>) -> u32 {
+    marker.unwrap_or(INITIAL)
+}
+
+/// The data format `view` records, else [`unrecorded_format`] of `marker`.
+///
+/// # Errors
+///
+/// The store's error.
+pub fn stored_format_of(
+    view: &dyn tenko_store::ReadView,
+    marker: Option<u32>,
+) -> Result<u32, StoreError> {
+    Ok(format::read_stored(view)?
+        .map_or_else(|| unrecorded_format(marker), |(stored, _)| stored.version))
 }
 
 fn system_batch() -> WriteBatch {
@@ -814,6 +834,20 @@ mod tests {
         assert_eq!(error.code(), "upgrade.migration_missing");
         assert_eq!(error.params().get("to").map(String::as_str), Some("3"));
         std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// A store with data and no format record is never taken for the current format: the
+    /// backup, the joining controller and the start give the same answer.
+    #[tokio::test]
+    async fn a_store_without_a_format_record_is_at_its_marker_or_the_initial_format() {
+        let store = MemStore::default();
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        assert_eq!(
+            stored_format_of(view.as_ref(), None).expect("format"),
+            INITIAL
+        );
+        assert_eq!(stored_format_of(view.as_ref(), Some(3)).expect("format"), 3);
+        assert_ne!(INITIAL, crate::upgrade::migrations::CURRENT);
     }
 
     #[tokio::test]

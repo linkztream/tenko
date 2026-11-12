@@ -318,9 +318,9 @@ pub(crate) fn ca_fingerprint(
     Ok(Some(hex_encode(&Sha256::digest(der.as_ref()))))
 }
 
-/// The data format the store records (format 1 without a record).
+/// The data format the store records (the initial format without a record).
 pub(crate) fn stored_format(view: &dyn tenko_store::ReadView) -> Result<u32, BackupError> {
-    Ok(format::read_stored(view)?.map_or(1, |(stored, _)| stored.version))
+    Ok(crate::upgrade::datadir::stored_format_of(view, None)?)
 }
 
 /// The generations of `ring`, oldest first and the active one last, with their material.

@@ -459,7 +459,9 @@ fn load_config(config: &Path, data_dir: Option<&Path>) -> Result<Resolved, Confi
         data_dir: data_dir.map(Path::to_path_buf),
         roles: None,
     };
-    config::load(&sources, std::env::vars())?.config.resolve()
+    let mut resolved = config::load(&sources, std::env::vars())?.config.resolve()?;
+    resolved.config_file = Some(config.to_path_buf());
+    Ok(resolved)
 }
 
 /// Refuses relative paths that the service would resolve against its own working directory.
@@ -1201,15 +1203,24 @@ fn serve_until_stopped(
         Ok(resolved) => resolved,
         Err(error) => {
             // The log is not open yet: the Event Log and the exit status are all there is.
+            let mut switched = Vec::new();
+            let sources = Sources {
+                file: Some(args.config.clone()),
+                data_dir: args.data_dir.clone(),
+                roles: None,
+            };
+            let status = serve::config_refused(&sources, &mut switched);
             logging::event_log::report_early(
                 &args.name,
                 &format!(
-                    "tenko service {}: the configuration {} cannot be used: {error}",
+                    "tenko service {}: the configuration {} cannot be used: {error}
+{}",
                     args.name,
-                    args.config.display()
+                    args.config.display(),
+                    String::from_utf8_lossy(&switched).trim_end()
                 ),
             );
-            return exit::CONFIG;
+            return status;
         }
     };
     // A restart request (exit status 12) relies on the failure actions below.

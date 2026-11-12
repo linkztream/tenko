@@ -56,9 +56,9 @@ use tenko_api::{
             parse_changelog,
         },
         updates::{
-            AttemptState, CheckOff, InstallAbility, InstallBlock, InstallPolicy, InstallRequest,
-            InstallStarted, ManifestInfo, ManifestOrigin, PreUpdateBackup, PreUpdateBackupStatus,
-            UpdateCheck, UpdateStatus, UploadQuery, WhatsNew,
+            CheckOff, InstallAbility, InstallBlock, InstallPolicy, InstallRequest, InstallStarted,
+            ManifestInfo, ManifestOrigin, PreUpdateBackup, PreUpdateBackupStatus, UpdateCheck,
+            UpdateStatus, UploadQuery, WhatsNew,
         },
     },
     routes::system::updates::{UpdateService, UploadBody},
@@ -291,6 +291,9 @@ pub struct Environment {
     pub container: bool,
     /// The process runs from the `current` link layout.
     pub layout: bool,
+    /// The configuration file of this process, handed to the new binary's check so that a
+    /// version that does not accept it is refused before the switch.
+    pub config_file: Option<PathBuf>,
 }
 
 impl Environment {
@@ -305,6 +308,7 @@ impl Environment {
             container: section.in_container(),
             layout,
             data_dir,
+            config_file: None,
         }
     }
 }
@@ -766,7 +770,7 @@ impl Updates {
         job.is_some()
             || self
                 .attempt()
-                .is_some_and(|attempt| attempt.state == AttemptState::Restarting)
+                .is_some_and(|attempt| attempt.state == probation::State::Restarting)
     }
 
     /// The block shared by both install paths.
@@ -981,7 +985,7 @@ impl Updates {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(job_id);
         let installing = Attempt {
-            state: AttemptState::Installing,
+            state: probation::State::Installing,
             ..Attempt::restarting(
                 self.inner.env.running.clone(),
                 version.clone(),
@@ -1088,7 +1092,7 @@ impl Updates {
                     |error| error.code.to_string(),
                 );
                 let attempt = Attempt {
-                    state: AttemptState::Failed,
+                    state: probation::State::Failed,
                     reason: Some(reason),
                     job_id: Some(job),
                     ..Attempt::restarting(
@@ -1101,7 +1105,7 @@ impl Updates {
                 // A switch that already ran leaves its own record; never overwrite it.
                 if self
                     .attempt()
-                    .is_none_or(|current| current.state != AttemptState::Restarting)
+                    .is_none_or(|current| current.state != probation::State::Restarting)
                     && let Err(error) = probation::write(&self.inner.layout, &attempt)
                 {
                     tracing::warn!(%error, "cannot record the failed install");
@@ -1109,6 +1113,36 @@ impl Updates {
             }
             None => {}
         }
+    }
+
+    /// What the update service does at every start: follows an install job that a restart
+    /// interrupted, then audits the last attempt's outcome ([`Updates::report_outcome`]).
+    pub async fn at_start(&self) {
+        self.resume_install().await;
+        self.report_outcome().await;
+    }
+
+    /// The job engine resumes an install job pinned to this node after a restart, but its
+    /// follower lived in the process that ended: without a new one, nothing would restart
+    /// into the new version when the job succeeds. Follows the job of a record in state
+    /// `installing` that this version started.
+    async fn resume_install(&self) {
+        let Some(attempt) = self.attempt() else {
+            return;
+        };
+        let Some(job) = attempt.job_id else {
+            return;
+        };
+        if attempt.state != probation::State::Installing || attempt.from != self.inner.env.running {
+            return;
+        }
+        *self
+            .inner
+            .job
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(job);
+        tracing::info!(version = %attempt.to, %job, "following the install job again after a restart");
+        self.follow(job, attempt.to).await;
     }
 
     /// Writes the audit record of the last attempt's outcome once, from the version that
@@ -1120,8 +1154,8 @@ impl Updates {
         };
         let running = &self.inner.env.running;
         let action = match attempt.state {
-            AttemptState::Confirmed if &attempt.to == running => "sys.update.confirm",
-            AttemptState::RolledBack if &attempt.from == running => "sys.update.rollback",
+            probation::State::Confirmed if &attempt.to == running => "sys.update.confirm",
+            probation::State::RolledBack if &attempt.from == running => "sys.update.rollback",
             _ => return,
         };
         if attempt.reported {
@@ -1154,7 +1188,7 @@ impl Updates {
             }
             Err(error) => tracing::warn!(%error, "cannot audit the update outcome"),
         }
-        if attempt.state == AttemptState::Confirmed {
+        if attempt.state == probation::State::Confirmed {
             let removed = layout.prune(self.inner.section.keep_versions);
             if !removed.is_empty() {
                 tracing::info!(?removed, "removed old installed versions");
@@ -1440,6 +1474,7 @@ mod tests {
             supervised: true,
             container: false,
             layout: true,
+            config_file: None,
         }
     }
 
@@ -1917,6 +1952,40 @@ mod tests {
             Some(reason),
             "{error:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn an_install_interrupted_by_a_restart_is_followed_again() {
+        let store = Arc::new(MemStore::default());
+        let updates = service(&store, UpdateInstall::Ui, true);
+        let mut engine = updates.inner.engine.clone();
+        updates.register_steps(&mut engine);
+        let ctx = admin();
+        let asset = manifest().releases[0].assets[0].clone();
+        // What the process that ended left: the job and the record, no follower.
+        let mut spec = steps::job_spec(&version("0.2.0"), &asset, true, false, 180).expect("spec");
+        spec.node = Some(NodeId(1));
+        let job = updates.inner.engine.submit(spec, &ctx).await.expect("job");
+        probation::write(
+            &updates.inner.layout,
+            &Attempt {
+                state: probation::State::Installing,
+                ..Attempt::restarting(version("0.1.0"), version("0.2.0"), Some(job), 180)
+            },
+        )
+        .expect("record");
+        // The job ends while this version runs again; its follower records the outcome.
+        updates
+            .inner
+            .engine
+            .cancel(job, &ctx)
+            .await
+            .expect("cancel");
+        updates.at_start().await;
+        let attempt = updates.attempt().expect("record");
+        assert_eq!(attempt.state, probation::State::Failed);
+        assert_eq!(attempt.job_id, Some(job));
+        assert!(!updates.in_progress());
     }
 
     #[tokio::test]

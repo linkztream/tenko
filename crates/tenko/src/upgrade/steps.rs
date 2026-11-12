@@ -598,13 +598,14 @@ async fn check(inner: &Inner, params: &SwitchParams) -> Result<(), StepError> {
         VERSION_TIMEOUT,
     )
     .await?;
-    let reported = version.stdout.trim();
-    if version.status != Some(0) || reported != params.version.to_string() {
+    let reported = super::parse_version_output(&version.stdout);
+    if version.status != Some(0) || reported.as_ref() != Ok(&params.version) {
         return Err(failed(
             "update.version_mismatch",
             400,
             format!(
-                "the new binary reports version `{reported}` (exit status {:?}), the manifest says {}{}",
+                "the new binary reports version `{}` (exit status {:?}), the manifest says {}{}",
+                version.stdout.trim(),
                 version.status,
                 params.version,
                 version.stderr_note()
@@ -635,25 +636,18 @@ async fn check(inner: &Inner, params: &SwitchParams) -> Result<(), StepError> {
             .map_err(|error| failed("update.io", 500, error.to_string()))?;
     }
     let node = inner.env.node.0.to_string();
-    let result = run_new(
-        "upgrade check",
-        &binary,
-        &[
-            "upgrade".as_ref(),
-            "check".as_ref(),
-            "--data-dir".as_ref(),
-            work.as_os_str(),
-            "--disposable".as_ref(),
-            "--node-id".as_ref(),
-            node.as_ref(),
-            "--json".as_ref(),
-        ],
-        DRY_RUN_TIMEOUT,
-    )
-    .await;
+    let config = inner.env.config_file.as_deref();
+    let arguments = check_arguments(&work, &node, config);
+    let arguments: Vec<&std::ffi::OsStr> = arguments.iter().map(AsRef::as_ref).collect();
+    let result = run_new("upgrade check", &binary, &arguments, DRY_RUN_TIMEOUT).await;
     let _ = std::fs::remove_dir_all(&work);
     let output = result?;
-    let report: serde_json::Value = serde_json::from_str(&output.stdout).map_err(|error| {
+    if let (Some(config), Some(status)) = (config, output.status)
+        && status == i32::from(crate::exit::CONFIG)
+    {
+        return Err(config_refused(&params.version, config, &output.stderr));
+    }
+    let report = super::parse_check_output(output.stdout.as_bytes()).map_err(|error| {
         failed(
             "update.check_failed",
             400,
@@ -664,22 +658,55 @@ async fn check(inner: &Inner, params: &SwitchParams) -> Result<(), StepError> {
             ),
         )
     })?;
-    let verdict = report["verdict"].as_str().unwrap_or_default();
-    if verdict == "current" || verdict == "migration_needed" {
-        tracing::info!(version = %params.version, verdict, "the new binary accepts the data directory");
+    if report.verdict.lets_install_switch() {
+        tracing::info!(version = %params.version, verdict = ?report.verdict, "the new binary accepts the data directory");
         return Ok(());
     }
-    let code = report["problem"]["code"]
-        .as_str()
-        .unwrap_or("upgrade.refused");
-    let message = report["problem"]["message"]
-        .as_str()
-        .unwrap_or("the new binary refuses the data directory");
     Err(failed(
         "update.check_refused",
         409,
-        format!("{code}: {message}"),
+        super::problem_text(&report),
     ))
+}
+
+/// The command line of the new binary's dry run: the arguments every released install job
+/// passes, and the configuration file of the running server, which every released
+/// `upgrade check` accepts, so that a version that does not read it is refused here.
+fn check_arguments(work: &Path, node: &str, config: Option<&Path>) -> Vec<std::ffi::OsString> {
+    let mut arguments: Vec<std::ffi::OsString> = Vec::new();
+    arguments.extend(["upgrade", "check"].map(Into::into));
+    if let Some(config) = config {
+        arguments.extend(["--config".into(), config.into()]);
+    }
+    arguments.extend([
+        "--data-dir".into(),
+        work.into(),
+        "--disposable".into(),
+        "--node-id".into(),
+        node.into(),
+        "--json".into(),
+    ]);
+    arguments
+}
+
+/// The refusal when the new binary does not accept the configuration file (its exit status
+/// 3): it says what to do, before anything was switched.
+fn config_refused(version: &ReleaseVersion, config: &Path, stderr: &str) -> StepError {
+    failed(
+        "update.config_refused",
+        409,
+        format!(
+            "version {version} does not accept the configuration file {}: {}; change the \
+             file so that both versions read it (the release notes name renamed or removed \
+             settings), then install again",
+            config.display(),
+            if stderr.is_empty() {
+                "no message"
+            } else {
+                stderr
+            }
+        ),
+    )
 }
 
 fn switch(inner: &Inner, params: &SwitchParams, job: tenko_core::JobId) -> Result<(), StepError> {
@@ -729,6 +756,55 @@ mod tests {
         };
         assert!(removed("NOTIFY_SOCKET"));
         assert!(removed("TENKO_CONFIG"));
+    }
+
+    #[test]
+    fn the_dry_run_gets_the_configuration_file_and_the_released_arguments() {
+        let work = Path::new("/var/lib/tenko/updates/check-0.0.12");
+        let config = Path::new("/etc/tenko/tenko.toml");
+        let with = check_arguments(work, "1", Some(config));
+        assert_eq!(
+            with,
+            [
+                "upgrade",
+                "check",
+                "--config",
+                "/etc/tenko/tenko.toml",
+                "--data-dir",
+                "/var/lib/tenko/updates/check-0.0.12",
+                "--disposable",
+                "--node-id",
+                "1",
+                "--json"
+            ]
+            .map(std::ffi::OsString::from)
+        );
+        let without = check_arguments(work, "1", None);
+        assert_eq!(&with[..2], &without[..2]);
+        assert_eq!(&with[4..], &without[2..]);
+    }
+
+    #[test]
+    fn a_refused_configuration_says_what_to_do() {
+        let StepError::Coded(error) = config_refused(
+            &"0.0.14".parse().expect("version"),
+            Path::new("/etc/tenko/tenko.toml"),
+            "tenko upgrade check: /etc/tenko/tenko.toml: unknown field `renamed_ttl_secs`",
+        ) else {
+            panic!("a coded error");
+        };
+        assert_eq!(error.code, "update.config_refused");
+        assert_eq!(error.status, 409);
+        assert!(
+            error.detail.contains("renamed_ttl_secs"),
+            "{}",
+            error.detail
+        );
+        assert!(
+            error.detail.contains("then install again"),
+            "{}",
+            error.detail
+        );
     }
 
     #[test]

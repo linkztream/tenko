@@ -227,9 +227,10 @@ pub async fn check(
     let store_dir = work.join("store");
     let store = install(&store_dir, node, "", &report.manifest, &unpacked.snapshot).await?;
     let checked = verify_store(&store, &report.manifest, &ring).await;
-    let _ = store.shutdown().await;
+    let closed = store.shutdown().await;
     drop(store);
     let (envelopes, fingerprint) = checked?;
+    closed?;
     report.digest_matches = true;
     report.envelopes = envelopes;
     report.ca_fingerprint = fingerprint;
@@ -285,6 +286,7 @@ pub async fn restore(
         return Ok(report);
     }
 
+    refuse_leftovers(&target.data_dir)?;
     let (mut cleanup, work) = prepare(target)?;
     let _work_cleanup = Cleanup(vec![work.clone()]);
     let (mut report, unpacked) = unpack(file, unlock, &work)?;
@@ -304,14 +306,17 @@ pub async fn restore(
         Ok(checked) => write_pending(&store, &notice).await.map(|()| checked),
         Err(error) => Err(error),
     };
-    let _ = store.shutdown().await;
+    let closed = store.shutdown().await;
     drop(store);
     let (envelopes, fingerprint) = checked?;
+    closed?;
 
-    // The store is complete: seal the key generations with this host's provider.
-    let (protection, written) = finish(target, &report.manifest, unpacked, &notice)?;
-    cleanup.0.extend(written.iter().cloned());
+    // The store is complete: seal the key generations with this host's provider. The files
+    // written are removed again when a later one fails.
+    let mut written = Cleanup(Vec::new());
+    let protection = finish(target, &report.manifest, unpacked, &notice, &mut written.0)?;
     cleanup.disarm();
+    let written = std::mem::take(&mut written.0);
 
     report.digest_matches = true;
     report.envelopes = envelopes;
@@ -397,14 +402,15 @@ async fn write_pending(store: &RaftStore, notice: &Notice) -> Result<(), BackupE
 }
 
 /// Seals the key generations with this host's provider and writes the format marker, the
-/// extra files and the restore notice; returns the protection of the sealed generations
-/// and the files written.
+/// extra files and the restore notice; returns the protection of the sealed generations.
+/// Each file is added to `written` as soon as it exists, so that a failure removes it.
 fn finish(
     target: &Target,
     manifest: &Manifest,
     unpacked: Unpacked,
     notice: &Notice,
-) -> Result<(KekProtection, Vec<PathBuf>), BackupError> {
+    written: &mut Vec<PathBuf>,
+) -> Result<KekProtection, BackupError> {
     let ids: Vec<String> = unpacked
         .generations
         .iter()
@@ -426,15 +432,37 @@ fn finish(
         &format::Marker::new(manifest.data_format, crate::version()),
     )
     .map_err(|error| BackupError::Internal(error.to_string()))?;
-    let mut written = write_extras(&target.data_dir, unpacked.tls, unpacked.config)?;
-    let notice_path = target.data_dir.join(NOTICE_FILE);
-    write_private(
-        &notice_path,
-        &serde_json::to_vec_pretty(notice)
-            .map_err(|error| BackupError::Internal(error.to_string()))?,
-    )?;
-    written.push(notice_path);
-    Ok((protection, written))
+    write_extras(&target.data_dir, unpacked.tls, unpacked.config, written)?;
+    let notice = serde_json::to_vec_pretty(notice)
+        .map_err(|error| BackupError::Internal(error.to_string()))?;
+    write_private(&target.data_dir.join(NOTICE_FILE), &notice, written)?;
+    Ok(protection)
+}
+
+/// Refuses, before anything is written, a data directory that still holds the notice or an
+/// extra file of an earlier restore: the files are created only when absent, so the restore
+/// would otherwise fail at its end.
+fn refuse_leftovers(data_dir: &Path) -> Result<(), BackupError> {
+    let extras = data_dir.join(EXTRAS_DIR);
+    let paths = [
+        data_dir.join(NOTICE_FILE),
+        extras.join(TLS_CERT_FILE),
+        extras.join(TLS_KEY_FILE),
+        extras.join(CONFIG_FILE),
+    ];
+    match paths
+        .into_iter()
+        .find(|path| path.symlink_metadata().is_ok())
+    {
+        Some(path) => Err(BackupError::io(
+            &path,
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "left by an earlier restore; move it away, then restore again",
+            ),
+        )),
+        None => Ok(()),
+    }
 }
 
 /// Refuses a provider that cannot take the key generations before any work is done: the
@@ -790,10 +818,11 @@ async fn verify_store(
     Ok((envelopes, fingerprint))
 }
 
-/// Writes `bytes` to a new file of this process alone (mode 0600 on Unix); an existing
-/// path, a link included, is refused.
-fn write_private(path: &Path, bytes: &[u8]) -> Result<(), BackupError> {
+/// Writes `bytes` to a new file of this process alone (mode 0600 on Unix) and adds it to
+/// `written` once it exists; an existing path, a link included, is refused.
+fn write_private(path: &Path, bytes: &[u8], written: &mut Vec<PathBuf>) -> Result<(), BackupError> {
     let mut file = create_private_file(path)?;
+    written.push(path.to_path_buf());
     file.write_all(bytes)
         .and_then(|()| file.sync_all())
         .map_err(|error| BackupError::io(path, error))
@@ -803,29 +832,25 @@ fn write_extras(
     data_dir: &Path,
     tls: Option<TlsPair>,
     config: Option<Secret>,
-) -> Result<Vec<PathBuf>, BackupError> {
+    written: &mut Vec<PathBuf>,
+) -> Result<(), BackupError> {
     if tls.is_none() && config.is_none() {
-        return Ok(Vec::new());
+        return Ok(());
     }
     let dir = data_dir.join(EXTRAS_DIR);
     // An earlier restore's directory is reused; a link under the name is refused.
     if !existing_dir_not_link(&dir)? {
         create_private_dir(&dir)?;
     }
-    let mut written = Vec::new();
     if let Some((cert, key)) = tls {
         for (name, bytes) in [(TLS_CERT_FILE, cert), (TLS_KEY_FILE, key)] {
-            let path = dir.join(name);
-            write_private(&path, &bytes)?;
-            written.push(path);
+            write_private(&dir.join(name), &bytes, written)?;
         }
     }
     if let Some(config) = config {
-        let path = dir.join(CONFIG_FILE);
-        write_private(&path, &config)?;
-        written.push(path);
+        write_private(&dir.join(CONFIG_FILE), &config, written)?;
     }
-    Ok(written)
+    Ok(())
 }
 
 /// Reads the restore notice file of a data directory (the first start); the file stays
@@ -846,7 +871,18 @@ pub fn take_notice(data_dir: &Path) -> Result<Option<Notice>, BackupError> {
     Ok(Some(notice))
 }
 
-/// Removes the restore notice once the first start recorded it.
-pub fn clear_notice(data_dir: &Path) {
-    let _ = fs::remove_file(data_dir.join(NOTICE_FILE));
+/// Removes the restore notice once the first start recorded it; a notice that is gone
+/// already is fine.
+///
+/// # Errors
+///
+/// [`BackupError::Io`] when the file stays.
+pub fn clear_notice(data_dir: &Path) -> Result<(), BackupError> {
+    let path = data_dir.join(NOTICE_FILE);
+    match fs::remove_file(&path) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err(BackupError::io(&path, error))
+        }
+        _ => Ok(()),
+    }
 }

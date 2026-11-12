@@ -427,6 +427,42 @@ async fn last_audit(
     })
 }
 
+/// The notice file of a recorded restore that could not be removed (it comes back here) is
+/// the same restore: it is not recorded a second time, and the file goes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_notice_file_left_after_the_record_does_not_record_the_restore_twice() {
+    let fixture = fixture().await;
+    let path = fixture.data_dir.join(restore::NOTICE_FILE);
+    let bytes = serde_json::to_vec(&notice()).expect("json");
+    std::fs::write(&path, &bytes).expect("notice");
+    fixture
+        .service
+        .record_restore()
+        .await
+        .expect("record")
+        .expect("some");
+    std::fs::write(&path, &bytes).expect("the file that stayed");
+    let again = fixture.service.record_restore().await.expect("again");
+    assert_eq!(again, None);
+    assert!(!path.exists());
+    let restores = fixture
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view")
+        .scan_typed(
+            &tenko_store::tables::AUDIT,
+            tenko_store::KeyRange::all(),
+            1_000,
+            true,
+        )
+        .expect("scan")
+        .into_iter()
+        .filter(|(_, record, _)| record.draft.action.as_str() == "sys.backup.restore")
+        .count();
+    assert_eq!(restores, 1);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_restore_is_recorded_once_and_shown_until_the_next_backup() {
     let fixture = fixture().await;

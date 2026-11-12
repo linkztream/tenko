@@ -1,0 +1,14 @@
+{
+  "from": "0.0.4",
+  "to": "0.0.12",
+  "state": "restarting",
+  "at": "2026-11-12T10:00:00Z",
+  "job_id": null,
+  "reason": null,
+  "deadline_secs": 180,
+  "starts": 0,
+  "backup": null,
+  "restore": false,
+  "reported": false,
+  "schema": 1
+}

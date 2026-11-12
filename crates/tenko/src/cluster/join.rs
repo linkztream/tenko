@@ -88,8 +88,9 @@ pub struct JoinArgs {
     #[arg(long, value_name = "HOST:PORT")]
     pub address: String,
 
-    /// Where this host's cluster port listens; default all addresses on the port of
-    /// `--address`.
+    /// Where this host's cluster port listens; default every address of the family of
+    /// `--address` on its port: `[::]` for an IPv6 address, else `0.0.0.0`. On an IPv6-only
+    /// host named by a host name, give `--listen [::]:<port>`.
     #[arg(long, value_name = "ADDR:PORT")]
     pub listen: Option<String>,
 
@@ -186,6 +187,16 @@ fn default_name(host: &str, port: u16) -> String {
 }
 
 /// The lines `tenko serve` needs to start as a member.
+/// The listen address when `--listen` is not given: every address of the family of the
+/// host of `--address`.
+fn default_listen(host: &str, port: u16) -> String {
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[::]:{port}")
+    } else {
+        format!("0.0.0.0:{port}")
+    }
+}
+
 fn fragment(node: NodeId, address: &str, listen: &str) -> String {
     let quote = |text: &str| toml::Value::String(text.to_owned()).to_string();
     format!(
@@ -276,7 +287,7 @@ pub async fn run(args: &JoinArgs) -> Result<Output, Failure> {
     let listen = args
         .listen
         .clone()
-        .unwrap_or_else(|| format!("0.0.0.0:{port}"));
+        .unwrap_or_else(|| default_listen(&host, port));
     let listen_addr: std::net::SocketAddr = listen.parse().map_err(|_| {
         Failure::new(
             exit::USAGE,
@@ -480,9 +491,11 @@ pub async fn run(args: &JoinArgs) -> Result<Output, Failure> {
     };
     let _ = stop.send(true);
     let _ = tokio::time::timeout(Duration::from_secs(10), port).await;
-    let _ = store.shutdown().await;
+    let closed = store.shutdown().await;
     drop(peers);
     let (revision, format) = outcome?;
+    // The marker and the configuration say the copy is complete: only after a clean close.
+    closed.map_err(|error| Failure::other(format!("the store did not close cleanly: {error}")))?;
 
     // 4. The format marker and the configuration.
     format::write_marker(&store_dir, &Marker::new(format, crate::version()))
@@ -546,11 +559,10 @@ async fn copy(store: &RaftStore, node: NodeId, timeout: Duration) -> Result<(u64
         .read(tenko_store::ReadConsistency::Local)
         .await
         .map_err(|error| Failure::other(error.to_string()))?;
-    let stored = format::read_stored(view.as_ref())
-        .map_err(|error| Failure::other(error.to_string()))?
-        .map_or(crate::upgrade::migrations::CURRENT, |(stored, _)| {
-            stored.version
-        });
+    // The cluster's data without a format record predates format records: it is not at
+    // this binary's format.
+    let stored = crate::upgrade::datadir::stored_format_of(view.as_ref(), None)
+        .map_err(|error| Failure::other(error.to_string()))?;
     let revision = view.revision().0;
     drop(view);
     if stored > crate::upgrade::migrations::CURRENT {
@@ -581,6 +593,18 @@ mod tests {
         let long = default_name(&"a".repeat(100), 8444);
         assert!(long.len() <= 63);
         assert!(tenko_cluster::registry::check_name(&long).is_ok());
+    }
+
+    #[test]
+    fn the_default_listen_address_has_the_family_of_the_address() {
+        assert_eq!(default_listen("2001:db8::2", 8444), "[::]:8444");
+        assert_eq!(default_listen("192.0.2.2", 8444), "0.0.0.0:8444");
+        assert_eq!(
+            default_listen("controller-2.example.test", 18444),
+            "0.0.0.0:18444"
+        );
+        let (host, port) = split_host_port("[2001:db8::2]:8444").expect("address");
+        assert_eq!(default_listen(&host, port), "[::]:8444");
     }
 
     #[test]

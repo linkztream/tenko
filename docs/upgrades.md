@@ -741,7 +741,7 @@ tenko upgrade layout [--config FILE] [--data-dir PATH]
 |---|---|
 | `--config FILE` | The configuration file (also `TENKO_CONFIG`). It names the data directory and the Raft node id (`node.id`) of the store. |
 | `--data-dir PATH` | The data directory to check. It overrides `data_dir` of the configuration and `TENKO_DATA_DIR`. The server that uses it must be stopped. |
-| `--work-dir PATH` | Where the copy for the dry run goes. The default is `<data_dir>/upgrade-check`. The copy is removed afterwards. |
+| `--work-dir PATH` | The directory under which the copy for the dry run goes, in a new subdirectory `tenko-upgrade-check-<id>` that is removed afterwards; the directory itself and its other files stay. The default is `<data_dir>/upgrade-check`, which is removed afterwards. |
 | `--json` | Print the report as JSON. |
 
 Two more options exist for the install job and are not part of the operator interface:
@@ -1086,10 +1086,10 @@ A release:
 |---|---|---|
 | `version` | string | SemVer without a leading `v` |
 | `date` | string | `YYYY-MM-DD` |
-| `notes` | string | Markdown: the changelog section of the version; at most 64 KiB |
+| `notes` | string | Markdown: the changelog section of the version; installations accept at most 64 KiB, and the release run writes at most 48 KiB (below) |
 | `security` | boolean | True when the changelog section has a non-blank `### Security` subsection; default false |
 | `requires_action` | boolean | True when it has a non-blank `### Action required` subsection; default false |
-| `action` | string | Markdown: what the operator must do. Required when `requires_action` is true; at most 16 KiB |
+| `action` | string | Markdown: what the operator must do. Required when `requires_action` is true; installations accept at most 16 KiB, and the release run fails above 12 KiB |
 | `format` | number | The data-directory format the release writes; optional, at least 1 |
 | `assets` | array | The downloadable files, at most one per platform |
 | `image` | string | The container image reference of the release; optional |
@@ -1104,6 +1104,28 @@ An asset:
 | `sha256` | string | 64 lowercase hexadecimal digits |
 | `size` | number | Bytes; from 1 to 512 MiB |
 | `signature` | string | Reserved for signed releases (API-19); not checked yet |
+
+The release run (`scripts/release-manifest.mjs`) keeps every text and the whole manifest a
+quarter below what installations accept, so that a manifest never stops the update notices
+of installed versions: the notes of a release at most 48 KiB, its action at most 12 KiB, the
+manifest at most 768 KiB. Longer notes are shortened by whole entries, never inside one:
+
+- every `### ` heading stays; a heading whose entries were left out says how many, as
+  `- (and 4 entries more in the full notes)`;
+- the entries under `### Security` and `### Action required`, and every entry that says
+  "Action required", are never left out; the others are left out from the end of the
+  heading that holds the most of them;
+- only when the entries that are never left out do not fit by themselves is each entry under
+  `### Security` shown as its first sentence (an entry without a short first sentence stays
+  whole);
+- a closing line says how many entries are shown, and whether the security entries are in
+  short form, and links the full notes: `CHANGELOG.md` at the release's tag.
+
+When the manifest would exceed 768 KiB, the notes of the oldest releases are reduced first to
+the entries never left out. A release whose action, or whose essential entries in short form,
+do not fit, and a manifest that does not fit even then, stop the run with a message that
+names the release and the sizes. The run's log has a line for every release whose notes it
+shortened, with the sizes before and after and the rule that applied.
 
 A release may also have `installers`: packages that install the product, today the Windows
 MSI. An installer has the fields of an asset plus `kind` (`msi`); its file is named
@@ -1738,12 +1760,16 @@ audit log (section 8.7). The steps:
 | `sys.update.backup` | Only when the request answered `backup: "run"`: writes a backup into the target directory, wrapped to the configured recipient, and records it with the reason `before_update` (section 8.12). A failed backup fails the step, and with it the job, before anything else ran. | 30 minutes |
 | `sys.update.fetch` | Downloads the release file for this platform into `<data_dir>/updates/<version>/tenko.part`. The address must have the scheme, host and port of the source (section 8.11), and no more bytes are accepted than the manifest gives. Skipped for an uploaded file. | 30 minutes |
 | `sys.update.verify` | Compares the size and the SHA-256 of the file with the manifest (and the signature when the feature `release-signatures` is on), marks it executable, renames it to `tenko` (`tenko.exe`) and writes the manifest entry beside it as `release.json`. A mismatch removes the file. | 5 minutes |
-| `sys.update.check` | Runs the new binary and requires `tenko upgrade version` to print the version of the manifest. Then the running server copies its state from one read transaction to `<data_dir>/updates/check-<version>`, and the new binary runs `tenko upgrade check --disposable --json` on the copy. The verdicts `current` and `migration_needed` pass; anything else fails the step with `update.check_refused` and the code and message of the report. The copy is removed. | 12 minutes |
+| `sys.update.check` | Runs the new binary and requires `tenko upgrade version` to print the version of the manifest. Then the running server copies its state from one read transaction to `<data_dir>/updates/check-<version>`, and the new binary runs `tenko upgrade check --disposable --json` on the copy, with `--config` and the running server's configuration file. A new binary that does not accept that file (exit status 3, for example a setting it renamed or removed) fails the step with `update.config_refused` (409), its message, and what to do: change the file so that both versions read it, then install again. The verdicts `current` and `migration_needed` pass; anything else, a verdict this version does not know included, fails the step with `update.check_refused` and the code and message of the report. The copy is removed. | 12 minutes |
 | `sys.update.switch` | Writes the attempt record (state `restarting`), points `previous` at the running version and `current` at the new one. | 1 minute |
 
 A failed step fails the job, and the job engine undoes the earlier steps: the downloaded
 file and the version directory are removed, and `current` is pointed back if it had moved.
 Until the switch, nothing that the running server uses has changed.
+
+When the server restarts while the job runs (a reboot during the download, for example), the
+job engine resumes the job on this node and the server that starts follows it again, so the
+restart into the new version still happens when the job succeeds.
 
 When the job succeeds, the server waits two seconds so that the last event reaches the UI,
 and then asks for a restart. It stops gracefully, with open requests finished and the store
@@ -1760,6 +1786,7 @@ listens; the moment it is, the attempt is confirmed.
 |---|---|---|
 | `restarting` | The new version, first start | Probation. A watchdog switches back unless the version becomes ready within `updates.ready_timeout_secs` (180 by default). The time a migration of the data directory takes is not counted: the dry run of the install job has shown that it passes, and under systemd the start timeout is extended while it runs (section 3.2). |
 | `restarting` | The new version, a start step fails | It switches back at once and exits with status 12. |
+| `restarting` | The new version, its configuration does not load | It switches back at once and exits with status 12 instead of 3, so the previous version, which read the file before, starts. The record is read for this before the configuration's own checks; the data directory comes from `--data-dir`, `TENKO_DATA_DIR` or the file's top-level `data_dir`. |
 | `restarting` | The new version, a second start | The first start did not confirm (the process crashed or was killed): it switches back at once. |
 | `rolled_back`, with `restore` set | The previous version | It puts the pre-migration copy back before it opens the store (below). |
 | `confirmed`, `failed`, `rolled_back` | Any | Nothing. The outcome is audited once. |
@@ -1773,7 +1800,9 @@ If the new version had migrated the store, it took a copy first (section 3.4) an
 path into the attempt record. The record then asks the previous version to restore the
 copy: before the previous version opens the store, it replaces `<data_dir>/store` with the
 copy. The replaced store is kept as `<data_dir>/store.failed-<unix time>`. Data written by
-the new version is lost, but a version that never became ready has no data from users.
+the new version is lost, but a version that never became ready has no data from users. A
+member of a controller cluster records no copy and restores none: its migration waits for
+the leader, and its store holds what the other controllers wrote meanwhile.
 
 The attempt record is JSON:
 
@@ -1789,6 +1818,15 @@ The attempt record is JSON:
 | `backup` | The pre-migration copy taken by the new version, if any |
 | `restore` | The previous version must restore `backup` before it opens the store |
 | `reported` | The outcome has been written to the audit log |
+| `schema` | 1. A record without it is schema 1 |
+
+The previous version reads what the new one wrote after a switch back, so the record is a
+format two versions share. Every released version ignores a key it does not know but refuses
+to start on a `state` it does not know; a version therefore writes only the five states
+above into a record an older version may read, and a new state raises `schema`. A version
+reads a record with a state or a schema it does not know as nothing pending and logs a
+warning; a record that is not JSON of this shape stops the start (exit status 4) and is never
+guessed at.
 
 An attempt in state `restarting` blocks further installs (`in_progress`) until it settles.
 The UI shows the last attempt on the page `/updates`.

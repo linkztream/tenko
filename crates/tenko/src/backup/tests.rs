@@ -618,3 +618,60 @@ async fn a_restore_follows_no_link_planted_in_the_data_directory() {
     .await
     .expect("restore");
 }
+
+/// The notice of an earlier restore that never started is refused before anything is
+/// written, so no restored key or configuration stays behind, and once it is moved away
+/// the same restore passes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_leftover_notice_is_refused_before_anything_is_written() {
+    let root = tempfile::tempdir().expect("dir");
+    let ring = ring();
+    let source = RaftStore::open(store_config(&root.path().join("source"), 1))
+        .await
+        .expect("source");
+    populate(Arc::new(source.clone()), &ring).await;
+    let config = root.path().join("tenko.toml");
+    std::fs::write(&config, "data_dir = \"/srv/tenko\"\n").expect("config");
+    let mut with_config = request(Target::Dir(root.path().join("backups")));
+    with_config.extras.config = Some(config);
+    let created = create::from_live(&source, &ring, with_config)
+        .await
+        .expect("backup");
+    source.shutdown().await.expect("shutdown");
+
+    let data_dir = root.path().join("restored");
+    std::fs::create_dir(&data_dir).expect("data dir");
+    let leftover = data_dir.join(restore::NOTICE_FILE);
+    std::fs::write(&leftover, b"{}").expect("leftover notice");
+    let error = restore::restore(
+        &created.path,
+        Unlock::Passphrase(PASSPHRASE),
+        &target(&data_dir, 1),
+        false,
+    )
+    .await
+    .expect_err("a leftover notice");
+    assert!(
+        matches!(&error, BackupError::Io { path, .. } if *path == leftover),
+        "{error}"
+    );
+    assert!(!data_dir.join("store").exists());
+    assert!(!data_dir.join(restore::EXTRAS_DIR).exists());
+
+    std::fs::remove_file(&leftover).expect("moved away");
+    let report = restore::restore(
+        &created.path,
+        Unlock::Passphrase(PASSPHRASE),
+        &target(&data_dir, 1),
+        false,
+    )
+    .await
+    .expect("the retry restores");
+    assert!(
+        report.written.contains(
+            &data_dir
+                .join(restore::EXTRAS_DIR)
+                .join(restore::CONFIG_FILE)
+        )
+    );
+}

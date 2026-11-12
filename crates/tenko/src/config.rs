@@ -24,6 +24,14 @@
 //! [`load`] merges the sources; [`Config::resolve`] validates the result into the typed
 //! [`Resolved`] settings that `tenko serve` uses. `tenko config check` prints the effective
 //! configuration; it holds no secrets (the KEK file is named by its path only).
+//!
+//! # Renamed keys
+//!
+//! Every section refuses keys it does not know, in every released version. A renamed key
+//! therefore keeps its old name as an alias permanently: a node may still run, or switch
+//! back to, a version that reads only the old name, and the unit's start-up step may run an
+//! older binary on the same file, so the file with the old name is the one every version
+//! reads.
 
 use std::{
     collections::BTreeMap,
@@ -234,7 +242,7 @@ pub struct ClusterSection {
     pub heartbeat_secs: u32,
     /// Controller: lifetime in seconds of an enrollment token whose request names none
     /// (default 3600, at most 604800).
-    #[serde(alias = "enrolment_ttl_secs")] // spelling: alias until 0.0.13
+    #[serde(alias = "enrolment_ttl_secs")] // spelling: alias, read permanently
     pub enrollment_ttl_secs: u64,
     /// Data-plane node: mebibytes the observation buffer keeps on disk while no controller
     /// is reachable; the oldest batches go first when it is full (default 64).
@@ -1048,7 +1056,7 @@ pub struct DnsRecursionSection {
     /// The longest an infrastructure entry lives in seconds, 10 to 86,400 (default 900).
     pub infra_ttl_secs: u32,
     /// Query name minimization (RFC 9156): `relaxed` (default), `strict` or `off`.
-    #[serde(alias = "qname_minimisation")] // spelling: alias until 0.0.13
+    #[serde(alias = "qname_minimisation")] // spelling: alias, read permanently
     pub qname_minimization: QnameMinimization,
     /// Synthesize negative answers from validated NSEC and NSEC3 records (RFC 8198;
     /// default true).
@@ -1063,7 +1071,7 @@ pub struct DnsRecursionSection {
     /// Tell the root servers which trust anchor keys the resolver holds (RFC 8145; default
     /// on, off under the Hardened profile).
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "trust_anchor_signalling")] // spelling: alias until 0.0.13
+    #[serde(alias = "trust_anchor_signalling")] // spelling: alias, read permanently
     pub trust_anchor_signaling: Option<bool>,
     /// Answer the root key sentinel queries (RFC 8509; default true).
     pub key_sentinel: bool,
@@ -2038,7 +2046,7 @@ pub struct DnsLogSection {
     pub sample: u32,
     /// Replace client addresses with a keyed hash whose key changes every day (default
     /// true in every profile).
-    #[serde(alias = "pseudonymise")] // spelling: alias until 0.0.13
+    #[serde(alias = "pseudonymise")] // spelling: alias, read permanently
     pub pseudonymize: bool,
     /// `logged` (default) or `hidden`: no client field at all.
     pub client: DnsLogClient,
@@ -3277,6 +3285,9 @@ pub struct Resolved {
     /// stored role set of the node (`nodes.roles`) is not used. Set by `tenko serve`.
     pub roles_pinned: bool,
     // node-roles: end.
+    /// The configuration file the settings came from (`--config`), when there is one; set by
+    /// `tenko serve`. An update hands it to the new binary's check.
+    pub config_file: Option<PathBuf>,
     /// Node id.
     pub node_id: NodeId,
     /// Listen addresses.
@@ -3479,6 +3490,7 @@ impl Config {
             roles,
             // node-roles: the file alone never pins the roles.
             roles_pinned: false,
+            config_file: None,
             node_id: NodeId(self.node.id),
             listen,
             tls,
@@ -3888,16 +3900,16 @@ mod tests {
     }
 
     #[test]
-    fn the_british_keys_of_0_0_11_still_load() {
+    fn the_keys_of_0_0_11_load_permanently() {
         let file = concat!(
             "data_dir = \"/d\"\n",
             "[cluster]\n",
-            "enrolment_ttl_secs = 600\n", // spelling: alias until 0.0.13
+            "enrolment_ttl_secs = 600\n", // spelling: alias
             "[dns.recursion]\n",
-            "qname_minimisation = \"strict\"\n", // spelling: alias until 0.0.13
-            "trust_anchor_signalling = false\n", // spelling: alias until 0.0.13
+            "qname_minimisation = \"strict\"\n", // spelling: alias
+            "trust_anchor_signalling = false\n", // spelling: alias
             "[dns.log]\n",
-            "pseudonymise = false\n", // spelling: alias until 0.0.13
+            "pseudonymise = false\n", // spelling: alias
         );
         let loaded = from_text(file, &[]).expect("loads");
         assert_eq!(loaded.config.cluster.enrollment_ttl_secs, 600);
@@ -3909,7 +3921,7 @@ mod tests {
         // The environment form follows from the key.
         let loaded = from_text(
             "data_dir = \"/d\"\n",
-            &[("TENKO_CLUSTER__ENROLMENT_TTL_SECS", "900")], // spelling: alias until 0.0.13
+            &[("TENKO_CLUSTER__ENROLMENT_TTL_SECS", "900")], // spelling: alias
         )
         .expect("loads");
         assert_eq!(loaded.config.cluster.enrollment_ttl_secs, 900);
