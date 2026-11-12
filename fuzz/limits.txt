@@ -55,6 +55,7 @@ krb_der                  65537    1 octet that picks the structure; tokens are a
 krb_keytab               65536    MAX_KEYTAB_LEN is 1 MiB (crates/tenko-krb/src/keytab.rs); 64 KiB holds the 1,024 records of MAX_KEYTAB_RECORDS when they are small
 krb_pac                  16384    the PAC travels inside a ticket of a token of at most MAX_KEY_DATA (16 KiB)
 krb_spnego               65542    up to four legs of at most MAX_KEY_DATA (16 KiB) each and three 2-octet separators
+metrics_peer_tiers       65536    the CBOR of a peer controller's Metrics.History answer, which the caller limits to 1 MiB (crates/tenko-api/src/dto/events.rs, about 230 KB for a whole history); 64 KiB holds rings past the largest of 71 buckets
 node_config_payloads     65537    1 control octet; config payloads may reach MAX_PAYLOAD_BYTES (32 MiB, crates/tenko-cluster/src/node_sync/payload.rs); the frames of a watch stream carry a 2-octet length
 raft_payloads            65537    1 control octet; Raft messages may reach MAX_MESSAGE_BYTES (32 MiB, crates/tenko-cluster/src/server.rs)
 scan_arp                 4096     the read buffer of the raw link (pnet's default, 4,096 octets; crates/tenko-scan/src/methods/raw/link.rs)
