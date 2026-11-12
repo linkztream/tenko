@@ -20,11 +20,12 @@
 //!   `metrics` field carries them and the cluster's buckets that closed. One aggregation per
 //!   second, whatever the number of subscribers: the frame is encoded once and shared.
 //! - **The cluster's history.** Each answer of a peer carries the buckets of its history that
-//!   closed in its last two ticks; its whole history is fetched through `Metrics.History` when
-//!   it first answers, when it answers again after a missed call or a hole, and when it
-//!   restarted, never per subscription. A peer without the history is combined as a missing
-//!   controller. While nobody listens, the peers' tiers are dropped and fetched again with the
-//!   next listener.
+//!   closed in its last two ticks; its whole history is fetched through `Metrics.History` in the
+//!   background when it first answers with the history, when its closed buckets leave a hole
+//!   (it missed more than a tick, or nobody listened for a while) and when it restarted: at
+//!   most once per peer every [`HISTORY_RETRY`], never per subscription, and never in the way
+//!   of the tick. A peer without the history is combined as a missing controller. The peers'
+//!   tiers stay while nobody listens (their memory is bounded like this controller's).
 //! - **The history frame.** Every new stream of the topic first receives one `metrics.history`
 //!   ([`METRICS_HISTORY_KIND`]): the cluster's history, built at most once per tick however
 //!   many streams open, and shared ([`EventHub::set_first_frame`]). When a peer's history was
@@ -48,7 +49,10 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::future::{BoxFuture, join_all};
+use futures::{
+    FutureExt as _,
+    future::{BoxFuture, join_all},
+};
 use tenko_cluster::{
     metrics::{EncodedHistory, EncodedSample, HistoryReply, MetricsSource, PeerReply},
     peers::Peers,
@@ -80,7 +84,7 @@ pub const TICK: Duration = Duration::from_secs(1);
 pub const PEER_DEADLINE: Duration = Duration::from_millis(500);
 /// How long the publisher waits for a peer's whole history (about 230 KB).
 pub const HISTORY_DEADLINE: Duration = Duration::from_secs(2);
-/// After a failed fetch of a peer's history, the publisher asks again no sooner than this.
+/// The publisher fetches a peer's whole history at most once in this time.
 pub const HISTORY_RETRY: Duration = Duration::from_secs(30);
 /// The encoding of a sample for a peer.
 pub const SAMPLE_ENCODING: &str = tenko_cluster::metrics::SAMPLE_ENCODING;
@@ -204,7 +208,7 @@ impl Sampler {
     }
 
     /// This controller's history.
-    pub fn history(&self) -> MutexGuard<'_, History> {
+    pub(crate) fn history(&self) -> MutexGuard<'_, History> {
         self.inner
             .history
             .lock()
@@ -352,7 +356,9 @@ enum Heard {
 struct Cluster {
     sampler: Sampler,
     peers: Mutex<Vec<Peer>>,
-    /// Changes whenever the peers' tiers change.
+    /// The fetches of whole histories in flight.
+    fetching: Mutex<BTreeMap<NodeId, JoinHandle<HistoryReply>>>,
+    /// Changes whenever the peers' past changes.
     version: AtomicU64,
     /// The frame and the sample count and version it was built at.
     frame: tokio::sync::Mutex<Option<((u64, u64), SystemFrame)>>,
@@ -371,7 +377,7 @@ impl Cluster {
         self.peers.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The history frame of the newest tick: built once per tick or change of the peers, then
+    /// The history frame of the newest tick: built once per tick or change of the peers' past, then
     /// shared, however many streams ask at once.
     async fn frame(&self) -> SystemFrame {
         let mut cached = self.frame.lock().await;
@@ -415,124 +421,112 @@ impl Cluster {
         history::closed(&own, &self.peers(), delivered)
     }
 
-    /// Drops the peers' tiers while nobody listens.
-    fn forget(&self) {
-        let forgot = !std::mem::take(&mut *self.peers()).is_empty();
-        if forgot {
-            self.version.fetch_add(1, Ordering::SeqCst);
-            self.account();
-        }
-    }
-
     /// Takes in what the peers `others` said about their histories (`heard`, in the same
-    /// order): merges their closed buckets, fetches the whole history of a peer that is new,
-    /// missed a call, left a hole or restarted, and marks one without the history. Returns the
-    /// closed buckets merged, and whether the past changed (the open streams then need a new
-    /// history).
-    async fn heard(
+    /// order): takes a whole history fetched since the last tick, merges the closed buckets,
+    /// starts the fetch of the whole history of a peer that is new, left a hole or restarted
+    /// (in the background, at most one per peer every [`HISTORY_RETRY`], so the tick never
+    /// waits for one), and marks a peer without the history. Returns the closed buckets merged,
+    /// and whether the past changed (the open streams then need a new history).
+    fn heard(
         &self,
-        source: &dyn PeerSamples,
+        source: &Arc<dyn PeerSamples>,
         others: &[NodeId],
         heard: Vec<Heard>,
     ) -> (Vec<ControllerTiers>, bool) {
         let now = Instant::now();
         let mut delivered = Vec::new();
-        let mut fetch = Vec::new();
         let mut changed = false;
-        {
-            let mut peers = self.peers();
-            let mut before = std::mem::take(&mut *peers);
-            changed |= before.len() != others.len()
-                || before
-                    .iter()
-                    .zip(others)
-                    .any(|(peer, node)| peer.node != *node);
-            *peers = others
+        let mut fetching = self.fetching.lock().unwrap_or_else(PoisonError::into_inner);
+        fetching.retain(|node, _| others.contains(node));
+        let mut peers = self.peers();
+        let mut before = std::mem::take(&mut *peers);
+        changed |= before.len() != others.len()
+            || before
                 .iter()
-                .map(
-                    |node| match before.iter().position(|peer| peer.node == *node) {
-                        Some(at) => before.swap_remove(at),
-                        None => Peer::new(*node),
-                    },
-                )
-                .collect();
-            for (peer, heard) in peers.iter_mut().zip(heard) {
-                match heard {
-                    Heard::Nothing => peer.stale = true,
-                    Heard::Without => {
-                        changed |= !peer.unsupported;
-                        *peer = Peer::without_history(peer.node);
-                    }
-                    Heard::Closed(bytes) => {
-                        match ControllerTiers::decode(CONTROLLER_TIERS_ENCODING, &bytes) {
-                            Err(detail) => {
-                                tracing::debug!(node = %peer.node, %detail, "a controller's closed buckets were refused");
-                                peer.stale = true;
-                            }
-                            Ok(tiers) => {
-                                changed |= std::mem::take(&mut peer.unsupported);
-                                let current = !peer.stale && peer.started == Some(tiers.started);
-                                match peer.rings.as_mut().filter(|_| current) {
-                                    Some(rings) => {
-                                        peer.stale = rings.merge(&tiers);
-                                        delivered.push(tiers);
-                                    }
-                                    None if peer.retry.is_none_or(|at| now >= at) => {
-                                        fetch.push(peer.node);
-                                    }
-                                    None => {}
-                                }
-                            }
-                        }
-                    }
-                }
+                .zip(others)
+                .any(|(peer, node)| peer.node != *node);
+        *peers = others
+            .iter()
+            .map(
+                |node| match before.iter().position(|peer| peer.node == *node) {
+                    Some(at) => before.swap_remove(at),
+                    None => Peer::new(*node),
+                },
+            )
+            .collect();
+        for (peer, heard) in peers.iter_mut().zip(heard) {
+            if let Some(task) = fetching.get_mut(&peer.node)
+                && let Some(reply) = task.now_or_never()
+            {
+                fetching.remove(&peer.node);
+                changed |= take_history(peer, reply);
             }
-        }
-        let replies = join_all(
-            fetch
-                .iter()
-                .map(|node| source.history(*node, HISTORY_DEADLINE)),
-        )
-        .await;
-        {
-            let mut peers = self.peers();
-            for (node, reply) in fetch.iter().zip(replies) {
-                let Some(peer) = peers.iter_mut().find(|peer| peer.node == *node) else {
+            let Heard::Closed(bytes) = heard else {
+                if matches!(heard, Heard::Without) {
+                    changed |= !peer.unsupported;
+                    *peer = Peer::without_history(peer.node);
+                }
+                continue;
+            };
+            let tiers = match ControllerTiers::decode(CONTROLLER_TIERS_ENCODING, &bytes) {
+                Ok(tiers) => tiers,
+                Err(detail) => {
+                    tracing::debug!(node = %peer.node, %detail, "a controller's closed buckets were refused");
+                    peer.stale = true;
                     continue;
-                };
-                let tiers = match reply {
-                    HistoryReply::History(history) => {
-                        ControllerTiers::decode(&history.encoding, &history.payload)
-                    }
-                    HistoryReply::Unsupported => {
-                        *peer = Peer::without_history(*node);
-                        changed = true;
-                        continue;
-                    }
-                    HistoryReply::Failed(detail) => Err(detail),
-                };
-                match tiers {
-                    Ok(tiers) => {
-                        peer.rings = Some(Box::new(Rings::of(&tiers)));
-                        peer.started = Some(tiers.started);
-                        peer.stale = false;
-                        peer.retry = None;
-                        changed = true;
-                    }
-                    Err(detail) => {
-                        tracing::debug!(node = %node, %detail, "a controller sent no history");
-                        peer.retry = Some(now + HISTORY_RETRY);
-                    }
                 }
+            };
+            changed |= std::mem::take(&mut peer.unsupported);
+            let current = !peer.stale && peer.started == Some(tiers.started);
+            match peer.rings.as_mut().filter(|_| current) {
+                Some(rings) => {
+                    peer.stale = rings.merge(&tiers);
+                    delivered.push(tiers);
+                }
+                None if !fetching.contains_key(&peer.node)
+                    && peer.retry.is_none_or(|at| now >= at) =>
+                {
+                    peer.retry = Some(now + HISTORY_RETRY);
+                    let (source, node) = (Arc::clone(source), peer.node);
+                    let fetch = async move { source.history(node, HISTORY_DEADLINE).await };
+                    fetching.insert(node, tokio::spawn(fetch));
+                }
+                None => {}
             }
         }
-        if changed || !delivered.is_empty() {
-            self.version.fetch_add(1, Ordering::SeqCst);
-        }
+        drop((peers, fetching));
         if changed {
+            self.version.fetch_add(1, Ordering::SeqCst);
             self.account();
         }
         (delivered, changed)
+    }
+}
+
+/// Takes a peer's whole history as its fetch ended; returns whether the peer's past changed.
+fn take_history(peer: &mut Peer, reply: Result<HistoryReply, tokio::task::JoinError>) -> bool {
+    let tiers = match reply {
+        Ok(HistoryReply::History(history)) => {
+            ControllerTiers::decode(&history.encoding, &history.payload)
+        }
+        Ok(HistoryReply::Unsupported) => {
+            *peer = Peer::without_history(peer.node);
+            return true;
+        }
+        Ok(HistoryReply::Failed(detail)) => Err(detail),
+        Err(error) => Err(error.to_string()),
+    };
+    match tiers {
+        Ok(tiers) => {
+            peer.rings = Some(Box::new(Rings::of(&tiers)));
+            peer.started = Some(tiers.started);
+            peer.stale = false;
+            true
+        }
+        Err(detail) => {
+            tracing::debug!(node = %peer.node, %detail, "a controller sent no history");
+            false
+        }
     }
 }
 
@@ -564,6 +558,7 @@ impl MetricsPublisher {
         let cluster = Arc::new(Cluster {
             sampler: sampler.clone(),
             peers: Mutex::new(Vec::new()),
+            fetching: Mutex::new(BTreeMap::new()),
             version: AtomicU64::new(0),
             frame: tokio::sync::Mutex::new(None),
             frame_bytes: AtomicUsize::new(0),
@@ -625,8 +620,6 @@ impl MetricsPublisher {
             let local = self.sampler.take().await;
             if self.hub.subscribers_of(Topic::Metrics) > 0 {
                 self.publish(&local).await;
-            } else {
-                self.cluster.forget();
             }
         }
     }
@@ -649,7 +642,7 @@ impl MetricsPublisher {
             let (samples, heard) = self.merge_answers(&others, answers, at);
             nodes.extend(samples);
             let changed;
-            (delivered, changed) = self.cluster.heard(peers.as_ref(), &others, heard).await;
+            (delivered, changed) = self.cluster.heard(peers, &others, heard);
             if changed {
                 let frame = self.cluster.frame().await;
                 self.hub.publish_frame(&frame);
@@ -738,6 +731,7 @@ mod tests {
         answers: Mutex<BTreeMap<NodeId, PeerAnswer>>,
         histories: Mutex<BTreeMap<NodeId, HistoryReply>>,
         fetched: AtomicU64,
+        asked: AtomicU64,
     }
 
     impl Scripted {
@@ -755,6 +749,7 @@ mod tests {
                 answers: Mutex::new(answers),
                 histories: Mutex::new(BTreeMap::new()),
                 fetched: AtomicU64::new(0),
+                asked: AtomicU64::new(0),
             }
         }
 
@@ -791,6 +786,7 @@ mod tests {
         }
 
         fn fetch(&self, node: NodeId, _deadline: Duration) -> BoxFuture<'_, PeerAnswer> {
+            self.asked.fetch_add(1, Ordering::SeqCst);
             let answer = self.answers.lock().expect("lock").get(&node).cloned();
             Box::pin(async move { answer.unwrap_or_else(|| PeerAnswer::Failed("unknown".into())) })
         }
@@ -947,14 +943,17 @@ mod tests {
     }
 
     /// The sampler ticks once a second whether a stream listens or not, so the history has no
-    /// hole; the snapshots are published only while one listens. On a paused clock.
+    /// hole; the snapshots are published, and the peers asked, only while one listens. On a
+    /// paused clock.
     #[tokio::test(start_paused = true)]
     async fn the_sampler_ticks_always_and_publishes_only_while_someone_listens() {
-        let (state, publisher) = publisher(None);
+        let peers = Arc::new(Scripted::new());
+        let (state, publisher) = publisher(Some(peers.clone()));
         let (stop_tx, stop) = watch::channel(false);
         let task = Arc::clone(&publisher).spawn(stop);
         tokio::time::sleep(Duration::from_millis(3_500)).await;
         assert_eq!(publisher.ticks(), 0, "nobody listens");
+        assert_eq!(peers.asked.load(Ordering::SeqCst), 0, "no peer is asked");
         assert_eq!(
             publisher.sampler().taken(),
             4,
@@ -977,6 +976,11 @@ mod tests {
         drop(stream);
         tokio::time::sleep(Duration::from_millis(3_500)).await;
         assert_eq!(publisher.ticks(), 1, "nobody listens again");
+        assert_eq!(
+            peers.asked.load(Ordering::SeqCst),
+            3,
+            "the three peers once"
+        );
         assert_eq!(publisher.sampler().taken(), 8, "and the sampler goes on");
 
         stop_tx.send(true).expect("stop");
@@ -1085,10 +1089,38 @@ mod tests {
         assert_eq!(publisher.histories_built(), 2);
     }
 
-    /// The cluster's history: a peer's whole history is fetched once when it first answers
-    /// with the history, combined, and sent to the open streams; its closed buckets then come
-    /// with each answer; after a restart (another start) it is fetched again; a peer of the
-    /// previous release is combined as a missing controller and never asked.
+    /// Waits until the fetches of whole histories that a tick started have ended.
+    async fn fetches_ended(publisher: &MetricsPublisher) {
+        while publisher
+            .cluster
+            .fetching
+            .lock()
+            .expect("lock")
+            .values()
+            .any(|task| !task.is_finished())
+        {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    /// The events a stream sends until it has sent `count`.
+    async fn next_events(
+        stream: &mut (impl futures::Stream<Item = Result<Bytes, std::convert::Infallible>> + Unpin),
+        count: usize,
+    ) -> Vec<EventData> {
+        let mut received = Vec::new();
+        while received.len() < count {
+            let chunk = stream.next().await.expect("an event").expect("ok");
+            received.extend(events(&chunk));
+        }
+        received
+    }
+
+    /// The cluster's history: a peer's whole history is fetched once in the background when it
+    /// first answers with the history, taken at the next tick, combined and sent to the open
+    /// streams; its closed buckets then come with each answer; after a restart (another start)
+    /// it is fetched again; a peer of the previous release is combined as a missing controller
+    /// and never asked.
     #[tokio::test]
     async fn the_peers_histories_are_fetched_once_combined_and_fetched_again_after_a_restart() {
         let peers = Arc::new(Scripted::new());
@@ -1102,15 +1134,23 @@ mod tests {
         assert_eq!(alone.controllers.len(), 1, "no peer heard yet");
 
         publisher.tick().await;
+        fetches_ended(&publisher).await;
         assert_eq!(peers.fetched(), 1);
-        let chunk = stream.next().await.expect("event").expect("ok");
-        let sent = events(&chunk);
+        publisher.tick().await;
+        // Each tick: a history (the controllers, then the peer's past changed) and a snapshot.
+        let kinds: Vec<_> = next_events(&mut stream, 4)
+            .await
+            .into_iter()
+            .map(|event| (event.kind, event.history))
+            .collect();
+        assert_eq!(kinds[0].0.as_deref(), Some(METRICS_HISTORY_KIND));
+        assert_eq!(kinds[1].0.as_deref(), Some(SNAPSHOT_KIND));
         assert_eq!(
-            sent[0].kind.as_deref(),
+            kinds[2].0.as_deref(),
             Some(METRICS_HISTORY_KIND),
             "the new past"
         );
-        let history = sent[0].history.as_ref().expect("history");
+        let history = kinds[2].1.as_ref().expect("history");
         let controllers: Vec<_> = history
             .controllers
             .iter()
@@ -1142,29 +1182,30 @@ mod tests {
         );
 
         // The next answers bring closed buckets: merged, no fetch, no new history.
+        let built = publisher.histories_built();
         publisher.tick().await;
         assert_eq!(peers.fetched(), 1);
-        // A restart: another start in the closed buckets.
+        assert_eq!(publisher.histories_built(), built);
+        // A restart (another start in the closed buckets), once the fetch is allowed again.
         let restarted = peer_history(5, 9.0);
         peers.history_of(2, &restarted);
+        publisher.cluster.peers()[0].retry = None;
         publisher.tick().await;
+        fetches_ended(&publisher).await;
         assert_eq!(peers.fetched(), 2);
+        publisher.tick().await;
         let history = publisher.cluster.frame().await;
         let data = events(history.bytes()).remove(0);
         assert_eq!(
             data.history.expect("history").controllers[1].started,
             Some(restarted.started())
         );
-        // Nobody listens: the peers' tiers are forgotten and fetched again with the next one.
-        drop(stream);
-        publisher.cluster.forget();
-        assert!(publisher.cluster.peers().is_empty());
     }
 
     /// A peer's malformed or oversized answer is refused without a panic and without memory:
     /// garbage closed buckets and a history with a ring larger than the plan's leave the peer
-    /// out of the combination and the status's bytes where they were; the fetch is retried only
-    /// after a while.
+    /// out of the combination and the status's bytes where they were; one fetch of a whole
+    /// history per peer and [`HISTORY_RETRY`].
     #[tokio::test]
     async fn a_peers_malformed_or_oversized_answer_is_refused() {
         let peers = Arc::new(Scripted::new());
@@ -1202,9 +1243,12 @@ mod tests {
             }),
         );
         publisher.tick().await;
+        fetches_ended(&publisher).await;
         assert_eq!(peers.fetched(), 1);
         publisher.tick().await;
-        assert_eq!(peers.fetched(), 1, "no second fetch before the retry");
+        publisher.tick().await;
+        fetches_ended(&publisher).await;
+        assert_eq!(peers.fetched(), 1, "no second fetch within the retry time");
         {
             let held = publisher.cluster.peers();
             assert!(held[0].rings.is_none(), "the oversized history is refused");

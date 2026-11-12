@@ -86,7 +86,8 @@ async fn open(addr: SocketAddr, topics: &str) -> Reader {
     let events = Arc::new(AtomicU64::new(0));
     let counted = Arc::clone(&events);
     let task = tokio::spawn(async move {
-        const NEEDLE: &[u8] = b"event: metrics\n";
+        // The snapshots only: a stream also starts with the history, of the same topic.
+        const NEEDLE: &[u8] = b"\"kind\":\"metrics.snapshot\"";
         let mut carry: Vec<u8> = Vec::new();
         let mut chunk = vec![0_u8; 64 * 1024];
         loop {

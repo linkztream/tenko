@@ -695,6 +695,20 @@ pub(crate) async fn event_stream(
     }
     let guard = SubscriberGuard::new(&hub.inner, topics);
     let (rx, replay) = hub.subscribe(last);
+    // Right after subscribing and before the replay: the topic's live events follow the first
+    // frame without a hole, and none older than it waits behind a slow replay.
+    let source = hub
+        .inner
+        .first
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .filter(|(topic, _)| topics.contains(*topic))
+        .and_then(|(_, source)| source.upgrade());
+    let first_frame = match source {
+        Some(source) => source.first().await,
+        None => None,
+    };
     let retry = hub.inner.config.retry.as_millis();
     let mut first = BytesMut::from(format!("retry: {retry}\n: connected\n\n").as_bytes());
     let mut subscriber = Subscriber {
@@ -726,17 +740,7 @@ pub(crate) async fn event_stream(
     for bytes in frames.iter().filter_map(|frame| subscriber.render(frame)) {
         first.extend_from_slice(&bytes);
     }
-    // After subscribing, so that the topic's live events follow the first frame without a hole.
-    let source = hub
-        .inner
-        .first
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .as_ref()
-        .filter(|(topic, _)| topics.contains(*topic))
-        .and_then(|(_, source)| source.upgrade());
-    if let Some(source) = source
-        && let Some(frame) = source.first().await
+    if let Some(frame) = first_frame
         && let Some(bytes) = subscriber.render(&frame.0)
     {
         first.extend_from_slice(&bytes);

@@ -400,9 +400,9 @@ pub(super) struct Peer {
     pub(super) started: Option<Timestamp>,
     /// It runs a release without the history.
     pub(super) unsupported: bool,
-    /// It missed a call, or its closed buckets left a hole, since its history was fetched.
+    /// Its closed buckets left a hole, or failed the check, since its history was fetched.
     pub(super) stale: bool,
-    /// No fetch of its history before this moment (after a failed one).
+    /// No fetch of its whole history before this moment (one per [`super::HISTORY_RETRY`]).
     pub(super) retry: Option<std::time::Instant>,
 }
 
@@ -582,9 +582,15 @@ pub(super) fn history(own: &History, node: Option<NodeId>, peers: &[Peer]) -> Me
     }
 }
 
+/// A peer's delivered bucket at most this many steps of its tier old is sent again in `closed`;
+/// an older one (from a peer whose clock lags) comes with the next history instead, so that a
+/// peer cannot make every snapshot carry whole rings.
+const LATE_STEPS: usize = 4;
+
 /// The combined buckets that closed (a snapshot's `closed`): per tier, from the oldest bucket
 /// that closed here in the newest two folds or that a peer `delivered` in this tick, to the
-/// newest bucket that closed here. A peer's bucket after that waits until it closes here too.
+/// newest bucket that closed here. A peer's bucket after that waits until it closes here too;
+/// one older than [`LATE_STEPS`] waits for the next history.
 pub(super) fn closed(
     own: &History,
     peers: &[Peer],
@@ -597,21 +603,24 @@ pub(super) fn closed(
                     let rings = tier_rings(&controllers, t)?;
                     let own = rings[0];
                     let newest = own.newest - own.step;
-                    let floor = own.newest - span(own.step, own.cap - 1);
                     let mine = (own.closed[0] + own.closed[1]).min(own.buckets.len() - 1);
+                    let late = own.newest - span(own.step, LATE_STEPS);
                     let theirs = delivered
                         .iter()
                         .flat_map(|tiers| &tiers.figures)
                         .filter(|delivered| delivered.figure == figure)
                         .flat_map(|delivered| &delivered.tiers)
                         .filter(|tier| i64::from(tier.step_ms) == own.step)
-                        .map(|tier| millis(tier.start) - span(own.step, tier.buckets.len() - 1));
+                        .map(|tier| {
+                            let oldest =
+                                millis(tier.start) - span(own.step, tier.buckets.len() - 1);
+                            oldest.max(late)
+                        });
                     let oldest = (mine > 0)
                         .then(|| own.newest - span(own.step, mine))
                         .into_iter()
                         .chain(theirs)
-                        .min()?
-                        .max(floor);
+                        .min()?;
                     (oldest <= newest).then(|| tier(figure.merge(), &rings, oldest, newest, false))
                 })
                 .collect();
@@ -626,8 +635,8 @@ mod tests {
 
     use super::*;
     use crate::dto::events::{
-        CONTROLLER_TIERS_ENCODING, MetricsDhcp, MetricsDns, MetricsDnsConnections,
-        MetricsDnsRecursion, MetricsHost,
+        CONTROLLER_TIERS_ENCODING, EventData, METRICS_HISTORY_KIND, MetricsDhcp, MetricsDns,
+        MetricsDnsConnections, MetricsDnsRecursion, MetricsHost, Topic,
     };
 
     /// A whole hour since the Unix epoch.
@@ -708,7 +717,8 @@ mod tests {
 
     /// The memory of the history (OPS-21): every ring allocated at start, 219,616 bytes with
     /// all 25 figures, and not one byte more after three days of samples with every role,
-    /// gaps, a clock that jumps back and one that jumps a day ahead.
+    /// gaps, a clock that jumps back and one that jumps a day ahead; with every ring full, the
+    /// history frame of three controllers stays under 300 KB (M84).
     #[test]
     fn the_rings_are_allocated_once_and_never_grow() {
         assert_eq!(RING_BYTES, 219_616, "the plan's 214 KiB a controller");
@@ -733,6 +743,18 @@ mod tests {
         }
         let encoded = tenko_core::codec::to_cbor(&history.tiers()).expect("cbor");
         assert!(encoded.len() < 300_000, "{} bytes", encoded.len());
+        // M84: the history frame of three controllers with every ring full, under 300 KB.
+        let peers = [peer(2, &history), peer(3, &history)];
+        let mut data = EventData::new(Topic::Metrics, None);
+        data.kind = Some(METRICS_HISTORY_KIND.to_owned());
+        data.history = Some(super::history(&history, Some(NodeId(1)), &peers));
+        let frame = serde_json::to_vec(&data).expect("json");
+        assert!(
+            frame.len() < 300_000,
+            "the history frame is {} bytes",
+            frame.len()
+        );
+        assert_eq!(data.history.expect("history").controllers.len(), 3);
     }
 
     /// E115: random series with gaps and uneven intervals through the tiers, every bucket
