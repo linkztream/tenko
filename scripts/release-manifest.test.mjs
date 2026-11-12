@@ -12,7 +12,7 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { ChangelogError } from "./changelog.mjs";
+import { ChangelogError, parseChangelog } from "./changelog.mjs";
 import {
   MAX_RELEASES,
   ManifestError,
@@ -27,8 +27,15 @@ import {
   mergeManifest,
   parseChecksums,
   verifyPreviousReleases,
-  boundText,
+  MAX_ACTION_BYTES,
+  MAX_MANIFEST_BYTES,
   MAX_NOTES_BYTES,
+  MAX_SENTENCE_BYTES,
+  READER_LIMITS,
+  firstSentence,
+  fitManifest,
+  repositoryOf,
+  shortenNotes,
 } from "./release-manifest.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -1044,24 +1051,193 @@ describe("command line", () => {
   });
 });
 
-describe("boundText", () => {
-  test("leaves a text within the bound alone", () => {
-    assert.equal(boundText("### Added\n\n- One.", MAX_NOTES_BYTES), "### Added\n\n- One.");
+describe("the bounds of the manifest", () => {
+  test("are the bounds of the Rust reader, which every released version has", () => {
+    const source = readFileSync(path.join(here, "..", "crates", "tenko-api", "src", "dto", "release.rs"), "utf8");
+    /** @param {string} name */
+    const constant = (name) => {
+      const m = new RegExp(`const ${name}: usize = ([0-9_ *]+);`).exec(source);
+      assert.ok(m !== null, name);
+      return /** @type {string} */ (m[1]).split("*").reduce((product, factor) => product * Number(factor.trim().replaceAll("_", "")), 1);
+    };
+    assert.equal(READER_LIMITS.manifest, constant("MAX_MANIFEST_BYTES"));
+    assert.equal(READER_LIMITS.notes, constant("MAX_NOTES_BYTES"));
+    assert.equal(READER_LIMITS.action, constant("MAX_ACTION_BYTES"));
   });
 
-  test("cuts a longer text at a line boundary and says where the rest is", () => {
-    const line = "- An entry of some length to fill the notes.\n";
-    const text = line.repeat(3000);
-    const bounded = boundText(text, MAX_NOTES_BYTES);
-    assert.ok(Buffer.byteLength(bounded, "utf8") <= MAX_NOTES_BYTES);
-    assert.match(bounded, /\.\n\n\(The notes continue in CHANGELOG\.md of the repository\.\)$/);
-    assert.ok(bounded.startsWith(line));
+  test("leave a quarter of each bound free", () => {
+    assert.equal(MAX_MANIFEST_BYTES, 786432);
+    assert.equal(MAX_NOTES_BYTES, 49152);
+    assert.equal(MAX_ACTION_BYTES, 12288);
   });
 
-  test("never splits a multi-byte character", () => {
-    const text = "- ".concat("å".repeat(70000));
-    const bounded = boundText(text, MAX_NOTES_BYTES);
-    assert.ok(Buffer.byteLength(bounded, "utf8") <= MAX_NOTES_BYTES);
-    assert.ok(!bounded.includes("�"));
+  test("hold for every section of the repository's changelog", () => {
+    const changelog = readFileSync(path.join(here, "..", "CHANGELOG.md"), "utf8");
+    for (const section of parseChangelog(changelog).sections) {
+      const version = section.version ?? "0.0.0-next";
+      const notes = shortenNotes(section.body, { maxBytes: MAX_NOTES_BYTES, version, repository: REPO });
+      assert.ok(Buffer.byteLength(notes, "utf8") <= MAX_NOTES_BYTES, version);
+      assert.ok(Buffer.byteLength(section.action, "utf8") <= MAX_ACTION_BYTES, version);
+    }
+  });
+});
+
+describe("repositoryOf", () => {
+  test("takes the repository from a release download address", () => {
+    assert.equal(repositoryOf("https://github.com/example/tenko/releases/download/v0.2.0"), "https://github.com/example/tenko");
+    assert.equal(repositoryOf("https://github.com/example/tenko/releases/download"), "https://github.com/example/tenko");
+    assert.equal(repositoryOf("https://mirror.example.test/tenko/v0.2.0"), null);
+  });
+});
+
+/**
+ * A section body: per heading, `count` entries of `size` bytes, each one sentence, or a short
+ * one and a long one when `sentences` is 2.
+ * @param {[string, number, number, number?][]} parts heading, entries, bytes per entry, sentences
+ */
+function body(parts) {
+  return parts
+    .map(([heading, count, size, sentences = 1]) => {
+      const entries = Array.from({ length: count }, (_, i) => {
+        const head = sentences === 2 ? `- ${heading} entry ${i}: one sentence. The details follow here: ` : `- ${heading} entry ${i}: `;
+        return head + "x".repeat(Math.max(0, size - head.length - 1)) + ".";
+      });
+      return [`### ${heading}`, ...entries].join("\n\n");
+    })
+    .join("\n\n");
+}
+
+const REPO = "https://github.com/example/tenko";
+
+describe("shortenNotes", () => {
+  test("leaves notes within the bound alone", () => {
+    const text = body([["Added", 3, 100]]);
+    assert.equal(shortenNotes(text, { maxBytes: MAX_NOTES_BYTES, version: "0.2.0", repository: REPO }), text);
+  });
+
+  test("leaves out whole entries, keeps every heading and links the full notes", () => {
+    const text = body([["Added", 60, 1000], ["Security", 5, 1000, 2], ["Fixed", 20, 1000]]);
+    /** @type {string[]} */
+    const lines = [];
+    const notes = shortenNotes(text, { maxBytes: 30000, version: "0.2.0", repository: REPO, log: (line) => lines.push(line) });
+    assert.ok(Buffer.byteLength(notes, "utf8") <= 30000);
+    for (const heading of ["### Added", "### Security", "### Fixed"]) assert.ok(notes.includes(heading), heading);
+    const entries = notes.split("\n\n").filter((b) => b.startsWith("- ") && !b.startsWith("- ("));
+    for (const entry of entries) assert.ok(text.includes(`${entry}\n`) || text.endsWith(entry), "an entry is kept whole or not at all");
+    assert.equal(notes.split("The details follow here:").length - 1, 5, "the security entries stay whole when they fit");
+    assert.match(notes, /\*Shortened: (\d+) of 85 entries are shown\. The full notes are in \[CHANGELOG\.md of 0\.2\.0\]\(https:\/\/github\.com\/example\/tenko\/blob\/v0\.2\.0\/CHANGELOG\.md\)\.\*$/);
+    assert.equal(Number(/Shortened: (\d+)/.exec(notes)?.[1]), entries.length);
+    assert.equal(lines.length, 1);
+    assert.match(lines[0] ?? "", /^notes of 0\.2\.0: \d+ -> \d+ bytes \(\d+ entries left out\)$/);
+  });
+
+  test("takes entries from the longest heading first, from its end", () => {
+    const text = body([["Added", 30, 1000], ["Fixed", 5, 1000]]);
+    const notes = shortenNotes(text, { maxBytes: 30000, version: "0.2.0", repository: null });
+    for (let i = 0; i < 5; i += 1) assert.ok(notes.includes(`- Fixed entry ${i}: `), `Fixed entry ${i}`);
+    assert.ok(notes.includes("- Added entry 0: "));
+    assert.ok(!notes.includes("- Added entry 29: "));
+    assert.match(notes, /- \(and \d+ entries more in the full notes\)/);
+    assert.match(notes, /The full notes are in CHANGELOG\.md of the repository\.\*$/);
+  });
+
+  test("never leaves out an entry under Action required or one that says Action required", () => {
+    const text = [body([["Changed", 40, 1000]]), "- A changed default. Action required: set the key again.", body([["Action required", 3, 1000]])].join("\n\n");
+    const notes = shortenNotes(text, { maxBytes: 20000, version: "0.2.0", repository: REPO });
+    assert.ok(notes.includes("- A changed default. Action required: set the key again."));
+    for (let i = 0; i < 3; i += 1) assert.ok(notes.includes(`- Action required entry ${i}: `));
+  });
+
+  test("shows the security entries by their first sentence only when they alone do not fit", () => {
+    const text = body([["Added", 10, 1000], ["Security", 40, 1000, 2], ["Action required", 2, 1000, 2]]);
+    /** @type {string[]} */
+    const lines = [];
+    const notes = shortenNotes(text, { maxBytes: 30000, version: "0.2.0", repository: REPO, log: (line) => lines.push(line) });
+    assert.ok(Buffer.byteLength(notes, "utf8") <= 30000);
+    for (let i = 0; i < 40; i += 1) assert.ok(notes.includes(`- Security entry ${i}: `), `Security entry ${i}`);
+    assert.equal(notes.split("The details follow here:").length - 1, 2, "only the Action required entries keep their second sentence");
+    assert.match(notes, /are shown, the security entries in short form \(their first sentence\)\. The full notes are in \[CHANGELOG\.md of 0\.2\.0\]/);
+    assert.match(lines[0] ?? "", /\(\d+ entries left out, security entries in short form\)$/);
+  });
+
+  test("stops the run when even the short form does not fit", () => {
+    const text = body([["Added", 10, 1000], ["Action required", 40, 1000]]);
+    assert.throws(
+      () => shortenNotes(text, { maxBytes: 30000, version: "0.2.0", repository: REPO }),
+      (error) => error instanceof ManifestError && /release 0\.2\.0: .*never left out; the bound is 30000 bytes/.test(error.message),
+    );
+  });
+
+  test("the essential form keeps only what is never left out", () => {
+    const text = body([["Added", 3, 100], ["Security", 2, 100]]);
+    const notes = shortenNotes(text, { maxBytes: MAX_NOTES_BYTES, version: "0.2.0", repository: REPO, essentialOnly: true });
+    assert.ok(notes.includes("### Added\n\n- (3 entries more in the full notes)"));
+    assert.ok(notes.includes("- Security entry 1: "));
+    assert.match(notes, /Shortened: 2 of 5 entries are shown\./);
+  });
+});
+
+describe("firstSentence", () => {
+  test("ends at a period followed by a capital or the end, outside code and parentheses", () => {
+    assert.equal(firstSentence("- One thing. Two things."), "- One thing.");
+    assert.equal(firstSentence("- Reads `a. B` and (see c. D) all. Then more."), "- Reads `a. B` and (see c. D) all.");
+    assert.equal(firstSentence("- Version 0.0.12 reads it. More."), "- Version 0.0.12 reads it.");
+    assert.equal(firstSentence("- Several, e.g. Windows ones. More."), "- Several, e.g. Windows ones.");
+    assert.equal(firstSentence("- Only one sentence."), "- Only one sentence.");
+  });
+
+  test("finds none within its bound, so the entry stays whole", () => {
+    assert.equal(firstSentence(`- ${"x".repeat(MAX_SENTENCE_BYTES)}. More.`), null);
+    assert.equal(firstSentence("- No period at all"), null);
+  });
+
+  test("gives a whole sentence for every security entry of the repository's next release", () => {
+    const changelog = readFileSync(path.join(here, "..", "CHANGELOG.md"), "utf8");
+    const next = parseChangelog(changelog).sections[0];
+    const security = (next?.body ?? "").split(/\n(?=### )/).find((part) => part.startsWith("### Security")) ?? "";
+    for (const entry of security.split(/\n(?=[-*] )/).slice(1)) {
+      const sentence = firstSentence(entry.trimEnd());
+      if (sentence === null) continue;
+      assert.equal((sentence.split("`").length - 1) % 2, 0, `no open code span: ${sentence}`);
+      assert.match(sentence, /^- [A-Z`].*\.$/s, sentence);
+      assert.ok(entry.startsWith(sentence), sentence);
+    }
+  });
+});
+
+describe("fitManifest", () => {
+  /** @param {number} count @param {number} size */
+  const manifestOf = (count, size) => {
+    const sections = new Map();
+    const releases = [];
+    for (let i = count; i >= 1; i -= 1) {
+      const version = `0.${i}.0`;
+      const notes = body([["Added", Math.floor(size / 1000), 1000], ["Security", 1, 200]]);
+      sections.set(version, { body: notes });
+      releases.push({ version, date: "2026-01-01", notes, security: true, requires_action: false, assets: [] });
+    }
+    return { manifest: { schema: 1, project: "tenko", releases }, sections };
+  };
+
+  test("leaves a manifest within the bound alone", () => {
+    const { manifest, sections } = manifestOf(3, 10000);
+    assert.deepEqual(fitManifest(manifest, sections, REPO), manifest);
+  });
+
+  test("reduces the notes of the oldest releases first until it fits", () => {
+    const { manifest, sections } = manifestOf(30, 40000);
+    const fitted = fitManifest(manifest, sections, REPO);
+    assert.ok(Buffer.byteLength(formatManifest(fitted), "utf8") <= MAX_MANIFEST_BYTES);
+    assert.equal(fitted.releases[0]?.notes, manifest.releases[0]?.notes, "the newest release keeps its notes");
+    const oldest = fitted.releases[fitted.releases.length - 1];
+    assert.match(oldest?.notes ?? "", /Shortened: 1 of 41 entries are shown/);
+    assert.ok(oldest?.notes.includes("- Security entry 0: "));
+    assert.equal(manifest.releases[29]?.notes, sections.get("0.1.0").body, "the input is not modified");
+  });
+
+  test("stops the run when even the essential notes do not fit", () => {
+    const { manifest, sections } = manifestOf(3, 1000);
+    for (const release of manifest.releases) release.assets = [{ platform: "linux-x86_64", name: "x".repeat(300000) }];
+    assert.throws(() => fitManifest(manifest, sections, REPO), (error) => error instanceof ManifestError && /the bound is 786432 bytes/.test(error.message));
   });
 });

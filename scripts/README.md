@@ -89,7 +89,11 @@ hashes every file of `--assets` named `tenko-<version>-<os>-<arch>` or
 of `--previous` except an entry for the same version, sorts newest first, and writes
 `releases.json` (schema 1, pretty JSON) and `SHA256SUMS` (`sha256sum` format, the assets of
 this release) next to it. An asset URL is `<base-url>/<file name>`. A manifest with more than
-1,000 releases is refused, and so is a release without any asset.
+1,000 releases is refused, and so is a release without any asset. The notes of a release, its
+action and the whole manifest stay a quarter below what installations accept (48 KiB, 12 KiB
+and 768 KiB of 64 KiB, 16 KiB and 1 MiB); longer notes are shortened by whole entries, with the
+Security and Action required entries kept, and a closing line that links the full notes
+(`docs/upgrades.md` section 6.3). The run prints a line for every release it shortened.
 
 `action`, `format` and `image` are left out of a release entry when not given; `action`
 appears only when the section has an `### Action required` subsection.

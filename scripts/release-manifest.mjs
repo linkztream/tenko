@@ -22,7 +22,13 @@
 // besides its files is not taken from it either: its texts come from the same version's
 // section of the changelog being released, its image must be this release's repository with
 // its own version, its format no greater than this one's, and fields schema 1 does not know
-// are left out. SHA256SUMS lists the
+// are left out. Every text is bounded below what every released installation accepts, and so
+// is the whole manifest (READER_LIMITS, MAX_*): long notes are shortened by whole entries,
+// never inside one, the entries under `### Security` and those that say "Action required"
+// are never left out (when they alone do not fit, each Security entry is shown as its first
+// sentence), and a closing line links the full notes (shortenNotes, fitManifest). The run
+// prints a line for every release whose notes it shortened.
+// SHA256SUMS lists the
 // manifest itself, computed from the final text, so that what is attested and signed covers
 // the manifest too (formatReleaseFiles).
 //
@@ -58,31 +64,236 @@ export const PROJECT = "tenko";
 export const MAX_RELEASES = 1000;
 
 /**
- * The bounds an installation applies to a release's texts when it reads the manifest
- * (`crates/tenko-api/src/dto/release.rs`: MAX_NOTES_BYTES and MAX_ACTION_BYTES). A longer text
- * makes the whole manifest invalid for every installation, so the generator cuts the text at
- * a line boundary and says where the rest is.
+ * The bounds every released installation applies when it reads the manifest
+ * (`crates/tenko-api/src/dto/release.rs`: MAX_MANIFEST_BYTES, MAX_NOTES_BYTES and
+ * MAX_ACTION_BYTES, unchanged since 0.0.3; a test compares them). A text or a manifest above
+ * them makes the whole manifest invalid for every installation: update notices stop.
  */
-export const MAX_NOTES_BYTES = 64 * 1024;
-export const MAX_ACTION_BYTES = 16 * 1024;
-const CUT_MARK = "\n\n(The notes continue in CHANGELOG.md of the repository.)";
+export const READER_LIMITS = Object.freeze({ manifest: 1024 * 1024, notes: 64 * 1024, action: 16 * 1024 });
+
+/** What the generator writes: a quarter below each bound of the readers. */
+export const MAX_MANIFEST_BYTES = (READER_LIMITS.manifest * 3) / 4;
+export const MAX_NOTES_BYTES = (READER_LIMITS.notes * 3) / 4;
+export const MAX_ACTION_BYTES = (READER_LIMITS.action * 3) / 4;
+
+/** @param {string} text */
+const bytes = (text) => Buffer.byteLength(text, "utf8");
 
 /**
- * Returns `text` unchanged when it fits in `maxBytes` (UTF-8), else the longest prefix that
- * ends at a line boundary and still fits together with the cut mark.
+ * The web address of the repository a release download URL belongs to
+ * (`https://github.com/<owner>/<repo>/releases/download[/<tag>]`), or null for another form.
  *
- * @param {string} text
- * @param {number} maxBytes
+ * @param {string} url
+ * @returns {string | null}
+ */
+export function repositoryOf(url) {
+  const m = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/releases\/download(?:\/|$)/.exec(url);
+  return m === null ? null : /** @type {string} */ (m[1]);
+}
+
+/**
+ * @typedef {object} NotesPart a `### ` heading of a section with its entries
+ * @property {string | null} heading null for text before the first heading
+ * @property {string[]} lead lines between the heading and its first entry
+ * @property {{ text: string, kept: boolean, protected: boolean }[]} entries
+ */
+
+/**
+ * The parts of a section body: headings with their entries, an entry being a list item at
+ * column 0 with the lines that follow it up to the next item or heading.
+ *
+ * @param {string} body
+ * @returns {NotesPart[]}
+ */
+function notesParts(body) {
+  /** @type {NotesPart[]} */
+  const parts = [{ heading: null, lead: [], entries: [] }];
+  for (const line of body.split("\n")) {
+    const part = /** @type {NotesPart} */ (parts[parts.length - 1]);
+    const heading = /^### (.+)$/.exec(line);
+    if (heading !== null) {
+      parts.push({ heading: /** @type {string} */ (heading[1]).trim(), lead: [], entries: [] });
+    } else if (/^[-*] /.test(line)) {
+      part.entries.push({ text: line, kept: true, protected: false });
+    } else if (part.entries.length > 0) {
+      const entry = /** @type {{ text: string }} */ (part.entries[part.entries.length - 1]);
+      entry.text += `\n${line}`;
+    } else {
+      part.lead.push(line);
+    }
+  }
+  for (const part of parts) {
+    const all = part.heading === "Security" || part.heading === "Action required";
+    for (const entry of part.entries) {
+      entry.text = entry.text.trimEnd();
+      entry.protected = all || entry.text.includes("Action required");
+    }
+  }
+  return parts.filter((p) => p.heading !== null || p.entries.length > 0 || p.lead.some((l) => l.trim() !== ""));
+}
+
+/** @param {number} n */
+const entriesWord = (n) => (n === 1 ? "entry" : "entries");
+
+/** The longest first sentence of a Security entry that its short form takes, in bytes. */
+export const MAX_SENTENCE_BYTES = 600;
+
+/** Abbreviations whose period ends no sentence. */
+const ABBREVIATIONS = new Set(["e.g", "i.e", "etc", "vs", "cf", "approx", "incl", "resp", "no"]);
+
+/**
+ * The first sentence of a list entry (`- ` included): it ends at the first period that is
+ * followed by a space and a capital letter, or by the end of the entry, outside backticks and
+ * parentheses and not after an abbreviation. Null when there is none within
+ * MAX_SENTENCE_BYTES: the entry is then kept whole rather than cut blind.
+ *
+ * @param {string} entry
+ * @returns {string | null}
+ */
+export function firstSentence(entry) {
+  let code = false;
+  let depth = 0;
+  for (let i = 0; i < entry.length; i += 1) {
+    const c = entry[i];
+    if (c === "`") code = !code;
+    else if (code) continue;
+    else if (c === "(") depth += 1;
+    else if (c === ")") depth = Math.max(0, depth - 1);
+    else if (c === "." && depth === 0) {
+      const rest = entry.slice(i + 1);
+      const word = /([A-Za-z.]+)$/.exec(entry.slice(0, i))?.[1]?.toLowerCase() ?? "";
+      if ((rest.trim() === "" || /^ [A-Z]/.test(rest)) && !ABBREVIATIONS.has(word)) {
+        const sentence = entry.slice(0, i + 1);
+        return bytes(sentence) <= MAX_SENTENCE_BYTES ? sentence : null;
+      }
+    }
+    if (bytes(entry.slice(0, i)) > MAX_SENTENCE_BYTES) return null;
+  }
+  return null;
+}
+
+/**
+ * The notes of `parts` with the entries still kept, a line per heading for those left out,
+ * and the closing line.
+ *
+ * @param {NotesPart[]} parts
+ * @param {string} version
+ * @param {string | null} repository
  * @returns {string}
  */
-export function boundText(text, maxBytes) {
-  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
-  const room = maxBytes - Buffer.byteLength(CUT_MARK, "utf8");
-  let cut = Buffer.from(text, "utf8").subarray(0, room).toString("utf8");
-  if (cut.endsWith("�")) cut = cut.slice(0, -1);
-  const lastLine = cut.lastIndexOf("\n");
-  if (lastLine > 0) cut = cut.slice(0, lastLine);
-  return cut.trimEnd() + CUT_MARK;
+function renderNotes(parts, version, repository, short = false) {
+  /** @type {string[]} */
+  const blocks = [];
+  let shown = 0;
+  let total = 0;
+  for (const part of parts) {
+    if (part.heading !== null) blocks.push(`### ${part.heading}`);
+    const lead = part.lead.join("\n").trim();
+    if (lead !== "") blocks.push(lead);
+    const kept = part.entries.filter((e) => e.kept);
+    blocks.push(...kept.map((e) => e.text));
+    const left = part.entries.length - kept.length;
+    if (left > 0) blocks.push(`- (${kept.length === 0 ? "" : "and "}${left} ${entriesWord(left)} more in the full notes)`);
+    shown += kept.length;
+    total += part.entries.length;
+  }
+  const where = repository === null ? "CHANGELOG.md of the repository" : `[CHANGELOG.md of ${version}](${repository}/blob/v${version}/CHANGELOG.md)`;
+  const form = short ? ", the security entries in short form (their first sentence)" : "";
+  blocks.push(`*Shortened: ${shown} of ${total} ${entriesWord(total)} are shown${form}. The full notes are in ${where}.*`);
+  return blocks.join("\n\n");
+}
+
+/**
+ * The notes of a release within `maxBytes` (UTF-8): the section body as it is when it fits,
+ * else shortened by whole entries. Every heading stays; the entries under `### Security` and
+ * `### Action required` and every entry that says "Action required" are never left out; the
+ * others are left out from the end of the heading that holds the most of them, until the
+ * notes fit; a closing line counts what is shown and links the full notes. Only when the
+ * entries never left out do not fit by themselves is each Security entry shown as its
+ * first sentence (firstSentence; an entry without one stays whole). With `essentialOnly`,
+ * every entry that may be left out is (the reduced form of fitManifest). `log` receives a
+ * line for notes it shortened: the sizes and the rule that applied.
+ *
+ * @param {string} body the changelog section without its heading
+ * @param {object} options
+ * @param {number} options.maxBytes
+ * @param {string} options.version
+ * @param {string | null} options.repository see repositoryOf
+ * @param {boolean} [options.essentialOnly]
+ * @param {(line: string) => void} [options.log]
+ * @returns {string}
+ * @throws {ManifestError} when the entries that are never left out do not fit
+ */
+export function shortenNotes(body, { maxBytes, version, repository, essentialOnly = false, log = () => {} }) {
+  if (!essentialOnly && bytes(body) <= maxBytes) return body;
+  const parts = notesParts(body);
+  const optional = parts.flatMap((p) => p.entries.filter((e) => !e.protected));
+  for (const entry of optional) entry.kept = false;
+  const short = bytes(renderNotes(parts, version, repository)) > maxBytes;
+  if (short) {
+    for (const entry of parts.filter((p) => p.heading === "Security").flatMap((p) => p.entries)) {
+      entry.text = firstSentence(entry.text) ?? entry.text;
+    }
+  }
+  if (!essentialOnly) for (const entry of optional) entry.kept = true;
+  for (;;) {
+    const notes = renderNotes(parts, version, repository, short);
+    if (bytes(notes) <= maxBytes) {
+      const left = optional.filter((e) => !e.kept).length;
+      const rules = [`${left} ${entriesWord(left)} left out`, ...(short ? ["security entries in short form"] : [])];
+      log(`notes of ${version}: ${bytes(body)} -> ${bytes(notes)} bytes (${rules.join(", ")})`);
+      return notes;
+    }
+    let largest = null;
+    let largestBytes = 0;
+    for (const part of parts) {
+      const size = part.entries.reduce((sum, e) => sum + (e.kept && !e.protected ? bytes(e.text) : 0), 0);
+      if (size > largestBytes) {
+        largest = part;
+        largestBytes = size;
+      }
+    }
+    if (largest === null) {
+      throw new ManifestError(
+        `release ${version}: its notes need ${bytes(notes)} bytes with only the entries under Security and Action required and those that say "Action required", which are never left out; the bound is ${maxBytes} bytes, so shorten those entries in the changelog`,
+      );
+    }
+    const last = largest.entries.findLast((e) => e.kept && !e.protected);
+    /** @type {{ kept: boolean }} */ (last).kept = false;
+  }
+}
+
+/**
+ * The manifest within MAX_MANIFEST_BYTES: when it is larger, the notes of the oldest
+ * releases are reduced first, oldest first, to their essential entries (shortenNotes with
+ * `essentialOnly`), until it fits. `manifest` is not modified.
+ *
+ * @param {{ schema: number, project: string, releases: Release[] }} manifest
+ * @param {Map<string, { body: string }>} sections the changelog sections by version
+ * @param {string | null} repository see repositoryOf
+ * @param {(line: string) => void} [log] see shortenNotes
+ * @returns {{ schema: number, project: string, releases: Release[] }}
+ * @throws {ManifestError} when even then it does not fit
+ */
+export function fitManifest(manifest, sections, repository, log = () => {}) {
+  let size = bytes(formatManifest(manifest));
+  const releases = [...manifest.releases];
+  for (let i = releases.length - 1; i >= 0 && size > MAX_MANIFEST_BYTES; i -= 1) {
+    const release = /** @type {Release} */ (releases[i]);
+    const section = sections.get(release.version);
+    if (section === undefined) continue;
+    const notes = shortenNotes(section.body, { maxBytes: MAX_NOTES_BYTES, version: release.version, repository, essentialOnly: true, log });
+    const saved = bytes(JSON.stringify(release.notes)) - bytes(JSON.stringify(notes));
+    if (saved <= 0) continue;
+    releases[i] = { ...release, notes };
+    size -= saved;
+  }
+  if (size > MAX_MANIFEST_BYTES) {
+    throw new ManifestError(
+      `the manifest needs ${size} bytes with the notes of every earlier release reduced to their essential entries; the bound is ${MAX_MANIFEST_BYTES} bytes (installations refuse more than ${READER_LIMITS.manifest})`,
+    );
+  }
+  return { ...manifest, releases };
 }
 
 /** The inputs are wrong; the message says how. */
@@ -212,10 +423,11 @@ export function assetUrl(baseUrl, name) {
  * @param {string} input.baseUrl where the assets will be downloadable from
  * @param {string} [input.image] container image reference
  * @param {number} [input.format] data-directory format number of the binaries
+ * @param {(line: string) => void} [input.log] see shortenNotes
  * @returns {Promise<{ release: Release, ignored: string[] }>} `ignored` lists the other files
  * @throws {ManifestError | ChangelogError}
  */
-export async function buildRelease({ version, changelogText, assetsDir, baseUrl, image, format }) {
+export async function buildRelease({ version, changelogText, assetsDir, baseUrl, image, format, log = () => {} }) {
   if (!isSemver(version)) {
     throw new ManifestError(`--version ${JSON.stringify(version)} is not a semantic version (write 0.2.0, without a leading v)`);
   }
@@ -279,7 +491,7 @@ export async function buildRelease({ version, changelogText, assetsDir, baseUrl,
   /** @type {Release} */
   const release = {
     version,
-    ...releaseTexts(section),
+    ...releaseTexts(section, repositoryOf(baseUrl), log),
     ...(format === undefined ? {} : { format }),
     ...(image === undefined ? {} : { image }),
     assets,
@@ -291,18 +503,28 @@ export async function buildRelease({ version, changelogText, assetsDir, baseUrl,
 
 /**
  * The texts of a release's manifest entry, from its changelog section: the date, the notes
- * and the action (each cut to the bound an installation enforces), and the two flags.
+ * (shortened to MAX_NOTES_BYTES by shortenNotes), the action and the two flags. The action
+ * is never shortened: a longer one stops the run.
  *
- * @param {{ date: string | null, body: string, security: boolean, requiresAction: boolean, action: string }} section
+ * @param {{ version: string | null, date: string | null, body: string, security: boolean, requiresAction: boolean, action: string }} section
+ * @param {string | null} repository see repositoryOf
+ * @param {(line: string) => void} log see shortenNotes
  * @returns {{ date: string, notes: string, security: boolean, requires_action: boolean, action?: string }}
+ * @throws {ManifestError}
  */
-function releaseTexts(section) {
+function releaseTexts(section, repository, log) {
+  const version = /** @type {string} */ (section.version);
+  if (section.requiresAction && bytes(section.action) > MAX_ACTION_BYTES) {
+    throw new ManifestError(
+      `release ${version}: its Action required text has ${bytes(section.action)} bytes; the bound is ${MAX_ACTION_BYTES} bytes and the text is never shortened, so shorten it in the changelog`,
+    );
+  }
   return {
     date: /** @type {string} */ (section.date),
-    notes: boundText(section.body, MAX_NOTES_BYTES),
+    notes: shortenNotes(section.body, { maxBytes: MAX_NOTES_BYTES, version, repository, log }),
     security: section.security,
     requires_action: section.requiresAction,
-    ...(section.requiresAction ? { action: boundText(section.action, MAX_ACTION_BYTES) } : {}),
+    ...(section.requiresAction ? { action: section.action } : {}),
   };
 }
 
@@ -426,10 +648,11 @@ export function parseChecksums(text) {
  * @param {string} options.changelogText the changelog being released, the source of every text
  * @param {string} [options.image] the image of this release (`<repository>:<version>`)
  * @param {number} [options.format] the data-directory format of this release
+ * @param {(line: string) => void} [options.log] see shortenNotes
  * @returns {Promise<{ previous: { schema: number, project: string, releases: Release[] }, dropped: { version: string, reason: string }[] }>}
  * @throws {ManifestError}
  */
-export async function verifyPreviousReleases(previous, { downloadUrl, fetchText, skipVersion, changelogText, image, format }) {
+export async function verifyPreviousReleases(previous, { downloadUrl, fetchText, skipVersion, changelogText, image, format, log = () => {} }) {
   if (previous === null || previous === undefined || typeof previous !== "object" || previous.schema !== SCHEMA || previous.project !== PROJECT || !Array.isArray(previous.releases)) {
     throw new ManifestError(`the previous manifest is not a schema ${SCHEMA} manifest of project ${PROJECT}`);
   }
@@ -450,7 +673,7 @@ export async function verifyPreviousReleases(previous, { downloadUrl, fetchText,
       kept.push(structuredClone(r));
       continue;
     }
-    const rebuilt = rebuildEntry(r, { section: sections.get(r.version), repository, format });
+    const rebuilt = rebuildEntry(r, { section: sections.get(r.version), repository, format, source: repositoryOf(downloadUrl), log });
     if (typeof rebuilt === "string") {
       dropped.push({ version: r.version, reason: rebuilt });
       continue;
@@ -477,9 +700,11 @@ export async function verifyPreviousReleases(previous, { downloadUrl, fetchText,
  * @param {ReturnType<typeof parseChangelog>["sections"][number] | undefined} context.section
  * @param {string | undefined} context.repository the image repository of this release
  * @param {number | undefined} context.format the format of this release
+ * @param {string | null} context.source the web address of the repository (repositoryOf)
+ * @param {(line: string) => void} context.log see shortenNotes
  * @returns {Release | string}
  */
-function rebuildEntry(r, { section, repository, format }) {
+function rebuildEntry(r, { section, repository, format, source, log }) {
   const version = r.version;
   if (section === undefined || section.date === null) return `the changelog has no section "## [${version}] - <date>" to take its texts from`;
   if (r.image !== undefined && (repository === undefined || r.image !== `${repository}:${version}`)) {
@@ -507,7 +732,7 @@ function rebuildEntry(r, { section, repository, format }) {
   }
   return {
     version,
-    ...releaseTexts(section),
+    ...releaseTexts(section, source, log),
     ...(r.format === undefined ? {} : { format: r.format }),
     ...(r.image === undefined ? {} : { image: r.image }),
     assets,
@@ -680,6 +905,10 @@ export async function main(argv) {
     const assetsDir = /** @type {string} */ (v.assets);
     if (!(await stat(assetsDir)).isDirectory()) throw new ManifestError(`${assetsDir} is not a directory`);
 
+    /** @param {string} line */
+    const log = (line) => {
+      process.stdout.write(`release-manifest: ${line}\n`);
+    };
     const { release, ignored } = await buildRelease({
       version: /** @type {string} */ (v.version),
       changelogText,
@@ -687,6 +916,7 @@ export async function main(argv) {
       baseUrl: /** @type {string} */ (v["base-url"]),
       image: /** @type {string | undefined} */ (v.image),
       format,
+      log,
     });
     /** @type {{ version: string, reason: string }[]} */
     let dropped = [];
@@ -698,6 +928,7 @@ export async function main(argv) {
         changelogText,
         image: release.image,
         format: release.format,
+        log,
       });
       previous = checked.previous;
       dropped = checked.dropped;
@@ -706,7 +937,8 @@ export async function main(argv) {
       process.stderr.write(`release-manifest: warning: dropped release ${d.version} from the manifest: ${d.reason}\n`);
       if (process.env.GITHUB_ACTIONS === "true") process.stdout.write(`::warning title=releases.json::dropped release ${d.version}: ${d.reason}\n`);
     }
-    const manifest = mergeManifest(/** @type {any} */ (previous), release);
+    const sections = new Map(parseChangelog(changelogText).sections.filter((s) => s.version !== null).map((s) => [/** @type {string} */ (s.version), s]));
+    const manifest = fitManifest(mergeManifest(/** @type {any} */ (previous), release), sections, repositoryOf(/** @type {string} */ (v["base-url"])), log);
 
     // The manifest is final here; SHA256SUMS lists it by the digest of the text written.
     const files = formatReleaseFiles(manifest, release, path.basename(outFile));
