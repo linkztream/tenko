@@ -12,13 +12,16 @@ use crate::{
     cache::{Client, ClientEdns, Verdict},
     dnssec::chain::{base32hex, nsec3_hash},
     recurse::message::{Composed, Rr, compose, parse, types},
-    recursion::denial::{DenialCache, DenialKind, Origin},
+    recursion::denial::{DenialCache, DenialKind, DenialRoute, DenialScope, Origin},
     wire,
 };
 
 const A: u16 = types::A;
 const AAAA: u16 = types::AAAA;
 const MX: u16 = 15;
+
+/// The default resolution of no view.
+const PUBLIC: DenialScope = DenialScope::of_view(None);
 
 fn wire_name(text: &str) -> Vec<u8> {
     DnsName::new(text).expect("name").to_wire()
@@ -133,6 +136,11 @@ fn denials() -> Denials {
 /// `*.w` (A) under the empty non-terminal `w`. Two NXDOMAIN answers give the records
 /// `example.test -> a`, `a -> m`, `m -> sub` and `sub -> *.w`.
 fn nsec_zone(cache: &Denials, view: Option<ViewId>) {
+    nsec_zone_on(cache, DenialScope::of_view(view));
+}
+
+/// [`nsec_zone`], taught on the path `scope`.
+fn nsec_zone_on(cache: &Denials, scope: DenialScope) {
     let mut authority: Vec<Rr> = signed_soa("example.test", 300).into();
     authority.extend(nsec(
         "example.test",
@@ -149,7 +157,7 @@ fn nsec_zone(cache: &Denials, view: Option<ViewId>) {
         300,
     ));
     let answer = message("b.example.test", A, 3, &[], &authority);
-    assert!(cache.insert(view, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(scope, &answer, &SECURE, Origin::Recursion, Instant::now()));
     let mut authority: Vec<Rr> = signed_soa("example.test", 300).into();
     authority.extend(nsec(
         "example.test",
@@ -166,7 +174,7 @@ fn nsec_zone(cache: &Denials, view: Option<ViewId>) {
         300,
     ));
     let answer = message("n.example.test", A, 3, &[], &authority);
-    assert!(cache.insert(view, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(scope, &answer, &SECURE, Origin::Recursion, Instant::now()));
 }
 
 struct Asked {
@@ -215,7 +223,7 @@ fn synthesize(
     let asked = ask(qname, qtype);
     let mut out = Vec::with_capacity(65_535);
     let hit = cache.answer(
-        view,
+        DenialScope::of_view(view),
         &wire_name(qname),
         qtype,
         &client(&asked, dnssec_ok, 1232),
@@ -309,6 +317,115 @@ fn an_existing_name_without_the_type_is_nodata_and_with_it_a_miss() {
     assert_eq!(hit.kind, DenialKind::Nodata);
 }
 
+/// What the cache synthesizes for `qname` (type A) on the path `scope`.
+fn kind_on(cache: &Denials, scope: DenialScope, qname: &str) -> Option<DenialKind> {
+    let asked = ask(qname, A);
+    let mut out = Vec::with_capacity(65_535);
+    cache
+        .answer(
+            scope,
+            &wire_name(qname),
+            A,
+            &client(&asked, true, 1232),
+            Instant::now(),
+            &mut out,
+        )
+        .map(|hit| hit.kind)
+}
+
+fn rule_path(view: Option<ViewId>) -> DenialScope {
+    DenialScope {
+        view,
+        route: DenialRoute::Rule(tenko_core::dns::ForwardRuleId::from_uuid(
+            uuid::Uuid::from_u128(7),
+        )),
+    }
+}
+
+#[test]
+fn a_name_a_forwarding_rule_routes_is_denied_only_from_what_the_rule_taught() {
+    let cache = denials();
+    // The public zone's proofs, from the default resolution: `c` lies in the span a..m.
+    nsec_zone(&cache, None);
+    assert_eq!(
+        kind_on(&cache, PUBLIC, "dc1.c.example.test"),
+        Some(DenialKind::Nxdomain),
+        "the default path is answered from its own proofs"
+    );
+    // A rule sends `c.example.test` to other servers: the public proofs deny nothing there.
+    assert_eq!(kind_on(&cache, rule_path(None), "dc1.c.example.test"), None);
+    // What the rule's own servers proved denies its names.
+    nsec_zone_on(&cache, rule_path(None));
+    assert_eq!(
+        kind_on(&cache, rule_path(None), "dc1.c.example.test"),
+        Some(DenialKind::Nxdomain)
+    );
+}
+
+#[test]
+fn a_name_in_a_stub_zone_is_denied_only_from_what_the_stub_zone_taught() {
+    let cache = denials();
+    let stub = DenialScope {
+        view: None,
+        route: DenialRoute::Stub(tenko_core::dns::ZoneId::from_uuid(uuid::Uuid::from_u128(9))),
+    };
+    nsec_zone(&cache, None);
+    assert_eq!(kind_on(&cache, stub, "dc1.c.example.test"), None);
+    nsec_zone_on(&cache, stub);
+    assert_eq!(
+        kind_on(&cache, stub, "dc1.c.example.test"),
+        Some(DenialKind::Nxdomain)
+    );
+    // And the stub zone's proofs deny nothing on the default path.
+    let cache = denials();
+    nsec_zone_on(&cache, stub);
+    assert_eq!(kind_on(&cache, PUBLIC, "dc1.c.example.test"), None);
+}
+
+#[test]
+fn a_view_is_answered_only_from_what_its_own_paths_taught() {
+    let cache = denials();
+    let inside = Some(ViewId::from_uuid(uuid::Uuid::from_u128(11)));
+    nsec_zone(&cache, inside);
+    assert_eq!(
+        kind_on(&cache, DenialScope::of_view(inside), "c.example.test"),
+        Some(DenialKind::Nxdomain)
+    );
+    assert_eq!(
+        kind_on(&cache, PUBLIC, "c.example.test"),
+        None,
+        "another view"
+    );
+    assert_eq!(
+        kind_on(&cache, rule_path(inside), "c.example.test"),
+        None,
+        "the same view, another route"
+    );
+}
+
+#[test]
+fn a_name_below_a_private_delegation_is_not_cut_off_by_a_public_nxdomain() {
+    let cache = denials();
+    // The public servers deny `corp.plain.test` (unsigned, RFC 8020) on the default path.
+    let answer = message("corp.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
+    assert!(cache.insert(
+        PUBLIC,
+        &answer,
+        &INSECURE,
+        Origin::Recursion,
+        Instant::now()
+    ));
+    assert_eq!(
+        kind_on(&cache, PUBLIC, "dc1.corp.plain.test"),
+        Some(DenialKind::NxdomainCut)
+    );
+    // A rule delegates `corp.plain.test` to internal servers: its names are theirs to deny.
+    assert_eq!(
+        kind_on(&cache, rule_path(None), "dc1.corp.plain.test"),
+        None
+    );
+}
+
 #[test]
 fn a_delegation_proves_nothing_below_it_and_some_types_are_never_synthesized() {
     let cache = denials();
@@ -348,7 +465,7 @@ fn a_validated_wildcard_expansion_answers_other_names_under_it() {
         300,
     );
     let message = message("one.w.example.test", A, 0, &answer, &authority);
-    assert!(cache.insert(None, &message, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(PUBLIC, &message, &SECURE, Origin::Recursion, Instant::now()));
     let (hit, header, records) =
         synthesize(&cache, None, "two.w.example.test", A, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Wildcard);
@@ -391,11 +508,17 @@ fn nothing_is_kept_from_bogus_answers_and_only_names_from_insecure_ones() {
         state: SecurityState::Bogus,
         ..Verdict::UNVALIDATED
     };
-    assert!(!cache.insert(None, &answer, &bogus, Origin::Recursion, Instant::now()));
+    assert!(!cache.insert(PUBLIC, &answer, &bogus, Origin::Recursion, Instant::now()));
     assert!(cache.is_empty());
     // An insecure answer whose SOA is signed keeps nothing: a signed zone is denied by its
     // validated records only.
-    assert!(!cache.insert(None, &answer, &INSECURE, Origin::Recursion, Instant::now()));
+    assert!(!cache.insert(
+        PUBLIC,
+        &answer,
+        &INSECURE,
+        Origin::Recursion,
+        Instant::now()
+    ));
     assert!(cache.is_empty());
     // With the SOA unsigned the NSEC is still not kept; the name of the NXDOMAIN is (RFC
     // 8020).
@@ -408,7 +531,13 @@ fn nothing_is_kept_from_bogus_answers_and_only_names_from_insecure_ones() {
         300,
     ));
     let answer = message("b.example.test", A, 3, &[], &authority);
-    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(
+        PUBLIC,
+        &answer,
+        &INSECURE,
+        Origin::Recursion,
+        Instant::now()
+    ));
     assert_eq!(cache.len(), 1);
     assert!(synthesize(&cache, None, "c.example.test", A, true).is_none());
     assert!(synthesize(&cache, None, "x.b.example.test", A, true).is_some());
@@ -419,7 +548,7 @@ fn names_below_a_cached_nxdomain_of_an_unsigned_zone_are_nxdomain() {
     let cache = denials();
     let answer = message("gone.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
     assert!(cache.insert(
-        None,
+        PUBLIC,
         &answer,
         &Verdict::UNVALIDATED,
         Origin::Recursion,
@@ -453,7 +582,13 @@ fn names_below_a_cached_nxdomain_of_an_unsigned_zone_are_nxdomain() {
         )],
         &[soa("plain.test", 600)],
     );
-    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(
+        PUBLIC,
+        &answer,
+        &INSECURE,
+        Origin::Recursion,
+        Instant::now()
+    ));
     assert!(synthesize(&cache, None, "x.target.plain.test", A, false).is_some());
     assert!(synthesize(&cache, None, "x.alias.plain.test", A, false).is_none());
 }
@@ -462,18 +597,30 @@ fn names_below_a_cached_nxdomain_of_an_unsigned_zone_are_nxdomain() {
 /// records, the whole chain.
 fn nsec3_zone(cache: &Denials, opt_out: bool) {
     let answer = nsec3_answer(opt_out);
-    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(PUBLIC, &answer, &SECURE, Origin::Recursion, Instant::now()));
 }
 
 /// The NXDOMAIN of `nothing.n3.test` with the NSEC3 records of the apex and `www`.
 fn nsec3_answer(opt_out: bool) -> Vec<u8> {
-    let mut hashes: Vec<([u8; 20], Vec<u16>)> = vec![
-        (
-            nsec3_hash(&wire_name("n3.test"), &[], 0),
-            vec![2, 6, 46, 48, 51],
-        ),
-        (nsec3_hash(&wire_name("www.n3.test"), &[], 0), vec![A, 46]),
-    ];
+    nsec3_chain(
+        &[("n3.test", &[2, 6, 46, 48, 51]), ("www.n3.test", &[A, 46])],
+        opt_out,
+        0,
+    )
+}
+
+/// The NXDOMAIN of `nothing.n3.test` with the NSEC3 records of `owners` (each with its
+/// types), no salt, `iterations`.
+fn nsec3_chain(owners: &[(&str, &[u16])], opt_out: bool, iterations: u16) -> Vec<u8> {
+    let mut hashes: Vec<([u8; 20], Vec<u16>)> = owners
+        .iter()
+        .map(|(owner, types_at)| {
+            (
+                nsec3_hash(&wire_name(owner), &[], iterations),
+                types_at.to_vec(),
+            )
+        })
+        .collect();
     hashes.sort();
     let mut authority: Vec<Rr> = signed_soa("n3.test", 300).into();
     for index in 0..hashes.len() {
@@ -483,7 +630,8 @@ fn nsec3_answer(opt_out: bool) -> Vec<u8> {
             "{}.n3.test",
             std::str::from_utf8(&base32hex(hash)).expect("ascii")
         );
-        let mut data = vec![1, u8::from(opt_out), 0, 0, 0, 20];
+        let [high, low] = iterations.to_be_bytes();
+        let mut data = vec![1, u8::from(opt_out), high, low, 0, 20];
         data.extend_from_slice(&next);
         data.extend(bitmap(types_at));
         authority.push(rr(&owner, types::NSEC3, 300, data));
@@ -511,6 +659,46 @@ fn nsec3_proves_nxdomain_and_nodata_by_hashed_owner() {
     let (hit, header, _) = synthesize(&cache, None, "www.n3.test", AAAA, true).expect("hit");
     assert_eq!((hit.kind, header.rcode), (DenialKind::Nodata, 0));
     assert!(synthesize(&cache, None, "www.n3.test", A, true).is_none());
+}
+
+#[test]
+fn an_nsec3_lookup_spends_no_more_hash_work_than_a_validator_step() {
+    // Three names that exist below the apex: a name under the deepest one needs five
+    // hashes (three matches, the next closer, the wildcard).
+    let owners: [(&str, &[u16]); 4] = [
+        ("n3.test", &[2, 6, 46, 48, 51]),
+        ("a.n3.test", &[A, 46]),
+        ("b.a.n3.test", &[A, 46]),
+        ("c.b.a.n3.test", &[A, 46]),
+    ];
+    let cheap = denials();
+    assert!(cheap.insert(
+        PUBLIC,
+        &nsec3_chain(&owners, false, 0),
+        &SECURE,
+        Origin::Recursion,
+        Instant::now()
+    ));
+    let (hit, _, _) = synthesize(&cheap, None, "x.c.b.a.n3.test", A, true).expect("hit");
+    assert_eq!(
+        hit.kind,
+        DenialKind::Nxdomain,
+        "five hashes of one round each"
+    );
+    // At the most iterations kept, a step's work is four hashes: five are left to the
+    // runtime, three are still answered.
+    let costly = denials();
+    let iterations = ValidationCaps::DEFAULT.nsec3_insecure_above;
+    assert!(costly.insert(
+        PUBLIC,
+        &nsec3_chain(&owners, false, iterations),
+        &SECURE,
+        Origin::Recursion,
+        Instant::now()
+    ));
+    assert!(synthesize(&costly, None, "x.c.b.a.n3.test", A, true).is_none());
+    let (hit, _, _) = synthesize(&costly, None, "other.n3.test", A, true).expect("hit");
+    assert_eq!(hit.kind, DenialKind::Nxdomain);
 }
 
 #[test]
@@ -542,7 +730,7 @@ fn the_switch_the_truncation_the_flush_and_the_bound() {
     let asked = ask("c.example.test", A);
     let mut out = Vec::with_capacity(65_535);
     let hit = cache.answer(
-        None,
+        PUBLIC,
         &wire_name("c.example.test"),
         A,
         &client(&asked, true, 100),
@@ -571,7 +759,13 @@ fn the_switch_the_truncation_the_flush_and_the_bound() {
     for index in 0..40u32 {
         let zone = format!("z{index}.test");
         let answer = message(&format!("gone.{zone}"), A, 3, &[], &[soa(&zone, 600)]);
-        assert!(small.insert(None, &answer, &INSECURE, Origin::Recursion, Instant::now()));
+        assert!(small.insert(
+            PUBLIC,
+            &answer,
+            &INSECURE,
+            Origin::Recursion,
+            Instant::now()
+        ));
         assert!(small.len() <= 16, "{index}");
     }
     assert!(small.len() >= 8);
@@ -598,7 +792,7 @@ fn records_expire_with_their_ttl() {
     ));
     let answer = message("b.example.test", A, 3, &[], &authority);
     let now = Instant::now();
-    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &answer, &SECURE, Origin::Recursion, now));
     assert!(synthesize(&cache, None, "c.example.test", A, true).is_some());
     let asked = ask("c.example.test", A);
     let mut out = Vec::new();
@@ -606,7 +800,7 @@ fn records_expire_with_their_ttl() {
     assert!(
         cache
             .answer(
-                None,
+                PUBLIC,
                 &wire_name("c.example.test"),
                 A,
                 &client(&asked, true, 1232),
@@ -669,7 +863,7 @@ fn a_wildcard_expansion_alone_answers_other_names_under_it() {
         300,
     );
     let message = message("one.wild.example.test", A, 0, &answer, &authority);
-    assert!(cache.insert(None, &message, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(PUBLIC, &message, &SECURE, Origin::Recursion, Instant::now()));
     let (hit, header, _) = synthesize(&cache, None, "foo.wild.example.test", A, true).expect("hit");
     assert_eq!((hit.kind, header.ancount), (DenialKind::Wildcard, 2));
     // A name after `host` is not in the range the record covers.
@@ -724,7 +918,13 @@ fn records_are_kept_only_under_the_zone_whose_signature_they_carry() {
     let other = rrsig("0.example", types::NSEC, 2, "example", 300);
     let authority = [record, other, own];
     let wildcard = message("www.0.example", A, 0, &answer, &authority);
-    assert!(cache.insert(None, &wildcard, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(
+        PUBLIC,
+        &wildcard,
+        &SECURE,
+        Origin::Recursion,
+        Instant::now()
+    ));
     assert_eq!(apexes(&cache), vec!["0.example"]);
     // The NSEC record alone: no wildcard RRset is kept from a signature above its signer.
     assert_eq!(cache.len(), 1);
@@ -738,7 +938,13 @@ fn records_are_kept_only_under_the_zone_whose_signature_they_carry() {
         rrsig("www.0.example", A, 2, "0.example", 300),
     ];
     let wildcard = message("www.0.example", A, 0, &answer, &authority);
-    assert!(cache.insert(None, &wildcard, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(
+        PUBLIC,
+        &wildcard,
+        &SECURE,
+        Origin::Recursion,
+        Instant::now()
+    ));
     let (hit, _, records) = synthesize(&cache, None, "a.0.example", A, true).expect("hit");
     assert_eq!(hit.kind, DenialKind::Wildcard);
     // Only the signature of the zone goes out with the record.
@@ -763,7 +969,7 @@ fn records_are_kept_only_under_the_zone_whose_signature_they_carry() {
         300,
     ));
     let answer = message("a.0.example", A, 3, &[], &authority);
-    assert!(!cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(!cache.insert(PUBLIC, &answer, &SECURE, Origin::Recursion, Instant::now()));
     assert!(cache.is_empty());
 }
 
@@ -780,7 +986,7 @@ fn a_record_whose_next_name_leaves_its_zone_proves_nothing_there() {
         300,
     ));
     let answer = message("0a.example", A, 3, &[], &authority);
-    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(PUBLIC, &answer, &SECURE, Origin::Recursion, Instant::now()));
     // A record of attacker.example whose next name is `\000.www.example`, carrying an
     // RRSIG that names `example` as well as its own.
     let mut next = vec![1, 0];
@@ -792,7 +998,7 @@ fn a_record_whose_next_name_leaves_its_zone_proves_nothing_there() {
         rrsig("attacker.example", types::NSEC, 2, "attacker.example", 300),
     ];
     let answer = message("x.attacker.example", A, 3, &[], &authority);
-    assert!(!cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(!cache.insert(PUBLIC, &answer, &SECURE, Origin::Recursion, Instant::now()));
     assert_eq!(apexes(&cache), vec!["example"]);
     for qtype in [A, AAAA, MX] {
         assert!(synthesize(&cache, None, "www.example", qtype, true).is_none());
@@ -823,7 +1029,7 @@ fn an_unvalidated_nxdomain_cuts_only_what_its_path_vouches_for() {
         &[lasting_soa("example", 1 << 30)],
     );
     for verdict in [&Verdict::UNVALIDATED, &INSECURE] {
-        assert!(!cache.insert(None, &answer, verdict, Origin::Forwarder, Instant::now()));
+        assert!(!cache.insert(PUBLIC, &answer, verdict, Origin::Forwarder, Instant::now()));
     }
     // A signed SOA beside an unsigned CNAME: the zone is signed, so a bare NXDOMAIN cuts
     // nothing on either path.
@@ -833,7 +1039,7 @@ fn an_unvalidated_nxdomain_cuts_only_what_its_path_vouches_for() {
     ];
     let answer = message("x.0.example", A, 3, &alias, &authority);
     for origin in [Origin::Recursion, Origin::Forwarder] {
-        assert!(!cache.insert(None, &answer, &INSECURE, origin, Instant::now()));
+        assert!(!cache.insert(PUBLIC, &answer, &INSECURE, origin, Instant::now()));
     }
     assert!(cache.is_empty());
     for name in ["www.example", "a.www.example"] {
@@ -849,7 +1055,13 @@ fn an_unvalidated_nxdomain_cuts_only_what_its_path_vouches_for() {
         &[lasting_soa("0.example", 1 << 30)],
     );
     let now = Instant::now();
-    assert!(cache.insert(None, &answer, &Verdict::UNVALIDATED, Origin::Forwarder, now));
+    assert!(cache.insert(
+        PUBLIC,
+        &answer,
+        &Verdict::UNVALIDATED,
+        Origin::Forwarder,
+        now
+    ));
     let (hit, _, records) = synthesize(&cache, None, "a.gone.0.example", A, false).expect("hit");
     assert_eq!(hit.kind, DenialKind::NxdomainCut);
     assert!(records.iter().all(|record| record.3 <= 60));
@@ -858,7 +1070,7 @@ fn an_unvalidated_nxdomain_cuts_only_what_its_path_vouches_for() {
     assert!(
         cache
             .answer(
-                None,
+                PUBLIC,
                 &wire_name("a.gone.0.example"),
                 A,
                 &client(&asked, false, 1232),
@@ -876,7 +1088,7 @@ fn an_answer_that_is_not_secure_leaves_a_secure_zone_as_it_is() {
     let before = cache.len();
     let answer = message("gone.example.test", A, 3, &[], &[soa("example.test", 600)]);
     for verdict in [&INSECURE, &Verdict::UNVALIDATED] {
-        assert!(!cache.insert(None, &answer, verdict, Origin::Recursion, Instant::now()));
+        assert!(!cache.insert(PUBLIC, &answer, verdict, Origin::Recursion, Instant::now()));
     }
     assert_eq!(cache.len(), before);
     let (hit, header, _) = synthesize(&cache, None, "c.example.test", A, true).expect("hit");
@@ -908,7 +1120,7 @@ fn a_delegation_covering_the_wildcard_proves_nothing_below_it() {
         300,
     ));
     let answer = message("b.sub.example.test", A, 3, &[], &authority);
-    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, Instant::now()));
+    assert!(cache.insert(PUBLIC, &answer, &SECURE, Origin::Recursion, Instant::now()));
     assert!(synthesize(&cache, None, "x.sub.example.test", A, true).is_none());
 }
 
@@ -966,7 +1178,7 @@ fn synthesize_type(
     let asked = ask(qname, qtype);
     let mut out = Vec::with_capacity(65_535);
     cache.answer_carrying(
-        None,
+        PUBLIC,
         &wire_name(qname),
         qtype,
         &client(&asked, false, max_len),
@@ -1004,7 +1216,7 @@ fn a_carried_delegation_is_kept_beside_the_denials_and_written_under_the_carry()
         1,
         120,
     );
-    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &answer, &INSECURE, Origin::Recursion, now));
     // The name of RFC 8020, two NS records and two addresses.
     assert_eq!(DenialCache::len(&cache), 5);
     let (header, records) =
@@ -1035,7 +1247,7 @@ fn under_the_carry_a_zone_without_its_delegation_is_left_to_the_resolver() {
     let cache = denials();
     let now = Instant::now();
     let answer = message("gone.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
-    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &answer, &INSECURE, Origin::Recursion, now));
     assert!(synthesize_carrying(&cache, "x.gone.plain.test", now, false, 1232).is_some());
     assert!(
         synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).is_none(),
@@ -1049,7 +1261,7 @@ fn under_the_carry_a_zone_without_its_delegation_is_left_to_the_resolver() {
         1,
         600,
     );
-    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &answer, &INSECURE, Origin::Recursion, now));
     assert!(synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).is_some());
 }
 
@@ -1064,7 +1276,7 @@ fn an_expired_delegation_stops_the_synthesis_under_the_carry() {
         1,
         2,
     );
-    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &answer, &INSECURE, Origin::Recursion, now));
     let (_, records) =
         synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).expect("synthesized");
     assert!(records.iter().all(|record| record.3 <= 2), "{records:?}");
@@ -1088,10 +1300,10 @@ fn a_delegation_over_the_caps_is_kept_with_none() {
     let now = Instant::now();
     // One within the caps first, then an answer with one name server too many.
     let answer = carried("gone.plain.test", "plain.test", &many[..2], 1, 600);
-    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &answer, &INSECURE, Origin::Recursion, now));
     assert!(synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).is_some());
     let answer = carried("other.plain.test", "plain.test", &many, 1, 600);
-    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &answer, &INSECURE, Origin::Recursion, now));
     assert!(
         synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).is_none(),
         "a truncated set could miss the server a trigger names"
@@ -1102,7 +1314,7 @@ fn a_delegation_over_the_caps_is_kept_with_none() {
     let per_server =
         u8::try_from(store::MAX_DELEGATION_ADDRESSES / 2 + 1).expect("addresses per server");
     let answer = carried("gone.plain.test", "plain.test", &many[..2], per_server, 600);
-    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &answer, &INSECURE, Origin::Recursion, now));
     assert!(synthesize_carrying(&cache, "x.gone.plain.test", now, true, 1232).is_none());
 }
 
@@ -1128,7 +1340,7 @@ fn a_full_delegation_with_names_at_the_length_limit_is_kept_counted_and_written(
     let cache = denials();
     let now = Instant::now();
     let answer = carried("gone.plain.test", "plain.test", &names, per_server, 600);
-    assert!(cache.insert(None, &answer, &INSECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &answer, &INSECURE, Origin::Recursion, now));
     assert_eq!(
         DenialCache::len(&cache),
         1 + store::MAX_DELEGATION_SERVERS + store::MAX_DELEGATION_ADDRESSES
@@ -1159,6 +1371,37 @@ fn a_full_delegation_with_names_at_the_length_limit_is_kept_counted_and_written(
         1 + store::MAX_DELEGATION_SERVERS + store::MAX_DELEGATION_ADDRESSES
     );
     assert!(cache.is_empty());
+}
+
+#[test]
+fn a_trim_with_full_delegations_takes_a_sixteenth_and_never_the_whole_cache() {
+    let bound = 2_000;
+    let cache = Denials::new(DenialSettings {
+        entries: bound,
+        ..DenialSettings::default()
+    });
+    let per_server = u8::try_from(store::MAX_DELEGATION_ADDRESSES / store::MAX_DELEGATION_SERVERS)
+        .expect("addresses per server");
+    // The most one item counts for: a full delegation.
+    let largest = store::MAX_DELEGATION_SERVERS + store::MAX_DELEGATION_ADDRESSES;
+    let now = Instant::now();
+    for index in 0..200 {
+        let zone = format!("z{index}.test");
+        let names: Vec<String> = (0..store::MAX_DELEGATION_SERVERS)
+            .map(|server| format!("ns{server}.{zone}"))
+            .collect();
+        let answer = carried(&format!("gone.{zone}"), &zone, &names, per_server, 600);
+        assert!(cache.insert(PUBLIC, &answer, &INSECURE, Origin::Recursion, now));
+        let held = DenialCache::len(&cache);
+        assert!(held <= bound, "{index}: {held}");
+        if index > bound / largest {
+            assert!(
+                held + bound / 16 + 2 * largest > bound,
+                "{index}: one trim took {} of {bound} records",
+                bound - held
+            );
+        }
+    }
 }
 
 // One server answers for the parent and for the zone below it (the DNS lab's authority
@@ -1197,7 +1440,7 @@ fn under_the_carry_the_denials_of_a_zone_its_parents_servers_answer_are_synthesi
     // NXDOMAIN from the NSEC: after nothing.example.test, nope.example.test.
     let cache = denials();
     let answer = nxdomain_from_the_parents_cut();
-    assert!(cache.insert_carried(None, &answer, &SECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &answer, &SECURE, Origin::Recursion, now, true));
     let (header, records) = synthesize_type(&cache, "nope.example.test", A, now, true, 1232)
         .expect("synthesized under the carry");
     assert_eq!(header.rcode, 3);
@@ -1216,7 +1459,7 @@ fn under_the_carry_the_denials_of_a_zone_its_parents_servers_answer_are_synthesi
         300,
     ));
     let answer = message("m.example.test", AAAA, 0, &[], &authority);
-    assert!(cache.insert_carried(None, &answer, &SECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &answer, &SECURE, Origin::Recursion, now, true));
     let (header, records) = synthesize_type(&cache, "m.example.test", 16, now, true, 1232)
         .expect("NODATA under the carry");
     assert_eq!((header.rcode, header.ancount), (0, 0));
@@ -1224,7 +1467,7 @@ fn under_the_carry_the_denials_of_a_zone_its_parents_servers_answer_are_synthesi
     // NXDOMAIN and NODATA from the NSEC3 chain.
     let cache = denials();
     let answer = nsec3_answer(false);
-    assert!(cache.insert_carried(None, &answer, &SECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &answer, &SECURE, Origin::Recursion, now, true));
     let (header, _) = synthesize_type(&cache, "other.n3.test", A, now, true, 1232)
         .expect("NSEC3 NXDOMAIN under the carry");
     assert_eq!(header.rcode, 3);
@@ -1234,7 +1477,7 @@ fn under_the_carry_the_denials_of_a_zone_its_parents_servers_answer_are_synthesi
     // RFC 8020 in an unsigned zone.
     let cache = denials();
     let answer = message("gone.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
-    assert!(cache.insert_carried(None, &answer, &INSECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &answer, &INSECURE, Origin::Recursion, now, true));
     let (header, records) = synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232)
         .expect("RFC 8020 under the carry");
     assert_eq!(header.rcode, 3);
@@ -1243,12 +1486,12 @@ fn under_the_carry_the_denials_of_a_zone_its_parents_servers_answer_are_synthesi
     // resolver: whether its answers carry a delegation is not known.
     let cache = denials();
     let answer = nxdomain_from_the_parents_cut();
-    assert!(cache.insert(None, &answer, &SECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &answer, &SECURE, Origin::Recursion, now));
     assert!(synthesize_type(&cache, "nope.example.test", A, now, true, 1232).is_none());
     assert!(synthesize_type(&cache, "nope.example.test", A, now, false, 1232).is_some());
     // The next answer of the zone under the carry brings the synthesis back.
     let answer = nxdomain_from_the_parents_cut();
-    assert!(cache.insert_carried(None, &answer, &SECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &answer, &SECURE, Origin::Recursion, now, true));
     assert!(synthesize_type(&cache, "nope.example.test", A, now, true, 1232).is_some());
 }
 
@@ -1280,7 +1523,7 @@ fn under_the_carry_a_wildcard_answer_carries_the_parents_delegation_it_came_thro
         authority: &authority,
         additional: &additional,
     });
-    assert!(cache.insert_carried(None, &wildcard, &SECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &wildcard, &SECURE, Origin::Recursion, now, true));
     let (header, records) = synthesize_type(&cache, "foo.wild.example.test", A, now, true, 1232)
         .expect("synthesized under the carry");
     assert_eq!((header.rcode, header.ancount), (0, 1));
@@ -1293,7 +1536,7 @@ fn under_the_carry_a_wildcard_answer_carries_the_parents_delegation_it_came_thro
     // A delegation of the zone's own replaces it: the resolver follows that cut now.
     let cache = denials();
     let answer = message("gone.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
-    assert!(cache.insert_carried(None, &answer, &INSECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &answer, &INSECURE, Origin::Recursion, now, true));
     let answer = carried(
         "other.plain.test",
         "plain.test",
@@ -1301,7 +1544,7 @@ fn under_the_carry_a_wildcard_answer_carries_the_parents_delegation_it_came_thro
         1,
         600,
     );
-    assert!(cache.insert_carried(None, &answer, &INSECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &answer, &INSECURE, Origin::Recursion, now, true));
     let (_, records) =
         synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232).expect("synthesized");
     assert_eq!(
@@ -1320,20 +1563,20 @@ fn the_mark_of_a_cut_above_follows_the_answers_that_taught_it() {
     let bare = message("gone.plain.test", A, 3, &[], &[soa("plain.test", 600)]);
     // Set by a negative answer composed under the carry without an NS record...
     let cache = denials();
-    assert!(cache.insert_carried(None, &bare, &INSECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &bare, &INSECURE, Origin::Recursion, now, true));
     assert!(synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232).is_some());
     // ...and cleared by one taught without the carry: what the resolver's answers in the
     // zone carry is not known again.
-    assert!(cache.insert(None, &bare, &INSECURE, Origin::Recursion, now));
+    assert!(cache.insert(PUBLIC, &bare, &INSECURE, Origin::Recursion, now));
     assert!(synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232).is_none());
     // Cleared by an answer with more name servers at the apex than kept.
     let cache = denials();
-    assert!(cache.insert_carried(None, &bare, &INSECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &bare, &INSECURE, Origin::Recursion, now, true));
     let names: Vec<String> = (0..=store::MAX_DELEGATION_SERVERS)
         .map(|index| format!("ns{index}.plain.test"))
         .collect();
     let large = carried("other.plain.test", "plain.test", &names, 1, 600);
-    assert!(cache.insert_carried(None, &large, &INSECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &large, &INSECURE, Origin::Recursion, now, true));
     assert!(synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232).is_none());
     // The zone's own delegation wins over a later answer without it: a fresh one is
     // written.
@@ -1345,8 +1588,8 @@ fn the_mark_of_a_cut_above_follows_the_answers_that_taught_it() {
         1,
         600,
     );
-    assert!(cache.insert_carried(None, &own, &INSECURE, Origin::Recursion, now, true));
-    assert!(cache.insert_carried(None, &bare, &INSECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &own, &INSECURE, Origin::Recursion, now, true));
+    assert!(cache.insert_carried(PUBLIC, &bare, &INSECURE, Origin::Recursion, now, true));
     let (_, records) =
         synthesize_type(&cache, "x.gone.plain.test", A, now, true, 1232).expect("synthesized");
     assert!(!no_ns(&records), "{records:?}");

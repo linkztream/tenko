@@ -18,7 +18,9 @@ use crate::{
 };
 
 /// The most NSEC3 hashes one lookup computes: the apex, the names from the apex down to
-/// the closest encloser and the next closer name, and the wildcard.
+/// the closest encloser and the next closer name, and the wildcard. The hash work of a
+/// lookup is bounded besides, as the validator bounds a proof step's (see
+/// [`Zone::lookup`]).
 pub const MAX_HASHES: usize = 8;
 
 /// One RRset as the synthesis writes it: the owner once, then per record its type, class,
@@ -543,8 +545,11 @@ impl Zone {
             + self.delegation.as_ref().map_or(0, Delegation::records)
     }
 
-    /// The answer to `qname`/`qtype` this zone's records prove at `now`, if any.
-    pub fn lookup(&self, qname: &[u8], qtype: u16, now: u32) -> Option<Synth<'_>> {
+    /// The answer to `qname`/`qtype` this zone's records prove at `now`, if any. An NSEC3
+    /// lookup spends at most `nsec3_work` SHA-1 rounds (a hash costs the chain's iterations
+    /// plus one, [`crate::validate::nsec3::step_work`]); a name that needs more is left to
+    /// the runtime.
+    pub fn lookup(&self, qname: &[u8], qtype: u16, now: u32, nsec3_work: u64) -> Option<Synth<'_>> {
         // A negative answer needs the SOA; a wildcard answer does not.
         let soa = self.soa.as_ref().filter(|soa| soa.fresh(now));
         if !self.secure {
@@ -552,7 +557,7 @@ impl Zone {
         }
         let found = match &self.nsec3 {
             Some(chain) => self
-                .nsec3_lookup(chain, soa, qname, qtype, now)
+                .nsec3_lookup(chain, soa, qname, qtype, now, nsec3_work)
                 .or_else(|| self.nsec_lookup(soa, qname, qtype, now)),
             None => self.nsec_lookup(soa, qname, qtype, now),
         }?;
@@ -678,13 +683,17 @@ impl Zone {
         qname: &[u8],
         qtype: u16,
         now: u32,
+        work: u64,
     ) -> Option<Synth<'a>> {
         let labels = name::label_count(qname);
         let apex_labels = name::label_count(&self.apex);
-        let mut spent = 0usize;
+        let per_hash = u64::from(chain.iterations) + 1;
+        let (mut computed, mut rounds) = (0usize, 0u64);
         let mut hash = |name: &[u8]| {
-            spent += 1;
-            (spent <= MAX_HASHES).then(|| nsec3_hash(name, &chain.salt, chain.iterations))
+            computed += 1;
+            rounds = rounds.saturating_add(per_hash);
+            (computed <= MAX_HASHES && rounds <= work)
+                .then(|| nsec3_hash(name, &chain.salt, chain.iterations))
         };
         // Down from the apex: the deepest ancestor that exists is the closest encloser,
         // the name one label below it the next closer (RFC 5155 section 8.3).
@@ -748,7 +757,8 @@ impl Zone {
         ))
     }
 
-    /// The `used` times of every record.
+    /// The `used` times of every record: an item that counts for several records against
+    /// the bound (a delegation) once per record, so that the bound's trim weighs it so.
     pub fn used_times(&self, out: &mut Vec<u32>) {
         out.extend(self.nsec.values().map(|record| record.set.used()));
         if let Some(chain) = &self.nsec3 {
@@ -760,32 +770,33 @@ impl Zone {
                 .values()
                 .map(|cut| cut.used.load(Ordering::Relaxed)),
         );
-        out.extend(
-            self.delegation
-                .iter()
-                .map(|delegation| delegation.used.load(Ordering::Relaxed)),
-        );
+        if let Some(delegation) = &self.delegation {
+            let used = delegation.used.load(Ordering::Relaxed);
+            out.extend(std::iter::repeat_n(used, delegation.records()));
+        }
     }
 
-    /// Drops the records `keep` refuses; returns how many went.
-    pub fn retain(&mut self, mut keep: impl FnMut(&[u8], u32, u32) -> bool) -> usize {
+    /// Drops the items `keep` refuses, given each item's owner, expiry, last use and the
+    /// records it counts for against the bound; returns how many records went.
+    pub fn retain(&mut self, mut keep: impl FnMut(&[u8], u32, u32, usize) -> bool) -> usize {
         let before = self.count();
         self.nsec
-            .retain(|_, record| keep(&record.set.owner, record.set.expires, record.set.used()));
+            .retain(|_, record| keep(&record.set.owner, record.set.expires, record.set.used(), 1));
         if let Some(chain) = &mut self.nsec3 {
-            chain
-                .records
-                .retain(|_, record| keep(&record.set.owner, record.set.expires, record.set.used()));
+            chain.records.retain(|_, record| {
+                keep(&record.set.owner, record.set.expires, record.set.used(), 1)
+            });
         }
         self.wildcards
-            .retain(|_, set| keep(&set.owner, set.expires, set.used()));
+            .retain(|_, set| keep(&set.owner, set.expires, set.used(), 1));
         self.cuts
-            .retain(|owner, cut| keep(owner, cut.expires, cut.used.load(Ordering::Relaxed)));
+            .retain(|owner, cut| keep(owner, cut.expires, cut.used.load(Ordering::Relaxed), 1));
         if self.delegation.as_ref().is_some_and(|delegation| {
             !keep(
                 &delegation.ns.owner,
                 delegation.expires,
                 delegation.used.load(Ordering::Relaxed),
+                delegation.records(),
             )
         }) {
             self.delegation = None;

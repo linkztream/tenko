@@ -780,6 +780,80 @@ async fn a_stub_zone_learns_its_name_servers_and_a_dead_one_is_reported() {
     stop.cancel();
 }
 
+#[tokio::test]
+async fn the_denial_cache_takes_its_settings_without_the_resolver() {
+    let (forwarder, stop) = start_with(
+        ForwardSettings {
+            aggressive_nsec: false,
+            denial_entries: 1_000,
+            recursion: None,
+            ..settings(Vec::new())
+        },
+        Catalog::default(),
+        RecursionDefault::KnownPrefixes,
+    );
+    let denials = forwarder
+        .denials()
+        .expect("a denial cache beside the answer cache");
+    assert!(
+        !denials.settings().aggressive,
+        "aggressive_nsec = false holds"
+    );
+    assert_eq!(denials.settings().entries, 1_000);
+    stop.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stub_zone_learning_its_servers_holds_up_no_other_stub_zone() {
+    // A source that takes the NS question, says so, and never answers: its zone's learning
+    // runs for the whole attempt.
+    let mute = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind the mute source");
+    let mute_address = mute.local_addr().expect("address");
+    let (asked, asked_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = vec![0u8; 4096];
+        while mute.recv_from(&mut buf).is_ok() {
+            let _ = asked.send(());
+        }
+    });
+    let source = udp_upstream(Behavior::Stub);
+    let good = stub_zone("stub.example.test", source.address);
+    let slow = stub_zone("slow.example.test", mute_address);
+    let mut data = DnsData::at(Revision(1));
+    data.zones.insert(good.id, good);
+    data.zones.insert(slow.id, slow);
+    let (forwarder, stop) = start_with(
+        ForwardSettings {
+            timeout: Duration::from_secs(20),
+            retries: 0,
+            ..settings(Vec::new())
+        },
+        Catalog::build(&data),
+        RecursionDefault::KnownPrefixes,
+    );
+    let peer = Arc::new(Peer::new());
+    let waiting = Arc::new(Peer::new());
+    waiting.submit(&forwarder, query_for("www.slow.example.test", 40, None));
+    tokio::task::spawn_blocking(move || asked_rx.recv_timeout(Duration::from_secs(30)))
+        .await
+        .expect("joins")
+        .expect("the slow zone's source is asked for its NS set");
+    let answer = peer
+        .ask(&forwarder, query_for("www.stub.example.test", 41, None))
+        .await;
+    assert_eq!(wire::parse_header(&answer).expect("header").rcode, 0);
+    let reports = forwarder.stubs();
+    let slow = reports
+        .iter()
+        .find(|report| report.zone.as_str() == "slow.example.test")
+        .expect("a report");
+    assert_eq!(
+        slow.error, None,
+        "the other zone was answered while the slow zone was still learning"
+    );
+    stop.cancel();
+}
+
 #[test]
 fn names_are_matched_against_suffixes_by_label() {
     let name = |text: &str| crate::name::NameBuf::from_dns_name(&DnsName::new(text).expect("name"));

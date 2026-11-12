@@ -984,7 +984,13 @@ fn the_denial_synthesis_does_not_allocate() {
             },
             ..Verdict::UNVALIDATED
         };
-        assert!(denials.insert(None, &answer, &verdict, Origin::Recursion, Instant::now()));
+        assert!(denials.insert(
+            tenko_dns::recursion::DenialScope::default(),
+            &answer,
+            &verdict,
+            Origin::Recursion,
+            Instant::now()
+        ));
     }
     let responder = Responder::new(
         Authoritative::new(catalog).with_settings(Settings {

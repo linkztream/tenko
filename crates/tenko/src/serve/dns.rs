@@ -420,6 +420,9 @@ fn forward_settings(
         }),
         stale_budget: Duration::from_millis(cache.stale_answer_ms),
         upstream_ca,
+        // The denial cache's keys hold with recursion off too: forwarded answers feed it.
+        aggressive_nsec: section.recursion.aggressive_nsec,
+        denial_entries: section.recursion.denial_entries_for(profile),
         // WP10.1: set by `recursion_settings` at the start.
         recursion: None,
         // WP10.2: set at the start too.
@@ -475,8 +478,6 @@ fn recursion_settings(
             crate::config::QnameMinimization::Strict => Minimization::Strict,
             crate::config::QnameMinimization::Off => Minimization::Off,
         },
-        aggressive_nsec: keys.aggressive_nsec,
-        denial_entries: keys.denial_entries_for(profile),
         failure_max: Duration::from_secs(u64::from(keys.failure_cache_max_secs)),
         signaling: keys.trust_anchor_signaling_for(profile),
         key_sentinel: keys.key_sentinel,

@@ -17,8 +17,8 @@ use std::{
 use tenko_core::{
     Revision,
     dns::{
-        DnsName, QueryTransport, RecordData, RrSet, ScopeName, SoaDefaults, Zone, ZoneId, ZoneKind,
-        ZoneScope,
+        DnsName, ForwardRule, ForwardRuleId, QueryTransport, RecordData, RrSet, ScopeName,
+        SoaDefaults, Zone, ZoneId, ZoneKind, ZoneScope,
     },
 };
 use tokio_util::sync::CancellationToken;
@@ -264,6 +264,11 @@ impl Node {
     /// What the query path (the sink over the forwarder) answers for `name` without the
     /// runtime, and the answer it wrote.
     fn intake(&self, name: &str) -> (Intake, Vec<u8>) {
+        self.intake_routed(name, None)
+    }
+
+    /// As [`Node::intake`], for a name the forwarding rule `rule` routes.
+    fn intake_routed(&self, name: &str, rule: Option<ForwardRuleId>) -> (Intake, Vec<u8>) {
         let message = query(name);
         let mut request = Request::default();
         DomainCodec::new()
@@ -277,7 +282,7 @@ impl Node {
                 client: CLIENT.parse().expect("client"),
                 transport: QueryTransport::Udp,
                 view: None,
-                rule: None,
+                rule,
                 max_len: 1232,
                 udp_size: wire::SERVER_UDP_PAYLOAD,
                 cookie: None,
@@ -531,4 +536,51 @@ async fn a_flood_of_unwanted_answers_warns_and_flushes_only_under_the_setting() 
             "flush {flush}: {intake:?}"
         );
     }
+}
+
+/// The catalog with one forwarding rule for `suffix` (an upstream of documentation space,
+/// never asked here).
+fn catalog_with_rule(suffix: &str) -> (Catalog, ForwardRuleId) {
+    let rule = ForwardRule {
+        id: ForwardRuleId::generate(),
+        suffix: DnsName::new(suffix).expect("suffix"),
+        upstreams: vec![tenko_core::dns::Upstream {
+            address: "192.0.2.53".parse().expect("address"),
+            port: None,
+            path: None,
+        }],
+        transport: tenko_core::dns::ForwardTransport::Plain,
+        tls_name: None,
+        view: None,
+        mode: tenko_core::dns::RuleMode::Forward,
+        validate: false,
+        description: None,
+    };
+    let id = rule.id;
+    let mut data = DnsData::at(Revision(1));
+    data.forwarders.insert(id, rule);
+    (Catalog::build(&data), id)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_name_a_forwarding_rule_routes_gets_no_denial_the_default_path_taught() {
+    let root = root();
+    let node = node(&root, &[]);
+    // The default path learns that `gone.test` does not exist (RFC 8020).
+    let answer = node.ask("gone.test").await;
+    assert!(natural_nxdomain(&answer));
+    let (intake, _) = node.intake("dc1.inner.gone.test");
+    assert!(
+        matches!(intake, Intake::Synthesized { .. }),
+        "the default path is answered from its own denial: {intake:?}"
+    );
+    // A rule sends `inner.gone.test` to other servers: the query path leaves its names to
+    // them.
+    let (catalog, rule) = catalog_with_rule("inner.gone.test");
+    node.catalog.store(catalog);
+    let (intake, _) = node.intake_routed("dc1.inner.gone.test", Some(rule));
+    assert!(
+        matches!(intake, Intake::Forward),
+        "the rule's servers are asked: {intake:?}"
+    );
 }

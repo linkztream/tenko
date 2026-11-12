@@ -307,7 +307,10 @@ impl ServerTable {
                 figures.unwanted = 0;
             }
             figures.unwanted = figures.unwanted.saturating_add(1);
-            if figures.unwanted > UNWANTED_PER_SERVER && figures.tcp_until.is_none() {
+            // Once per hour of the address: a flood in a later hour switches it again.
+            if figures.unwanted > UNWANTED_PER_SERVER
+                && figures.tcp_until.is_none_or(|until| until <= now)
+            {
                 figures.tcp_until = Some(figures.unwanted_since + HOUR);
                 tracing::warn!(
                     server = %address,
@@ -451,6 +454,27 @@ mod tests {
         assert!(!table.tcp_forced(server, now + HOUR));
         assert!(!table.take_threshold());
         assert_eq!(table.unwanted_total(), u64::from(UNWANTED_PER_SERVER) + 1);
+    }
+
+    #[test]
+    fn a_flood_in_a_later_hour_forces_tcp_again() {
+        let table = ServerTable::new(4, Duration::from_secs(900));
+        let now = Instant::now();
+        let server = address(3);
+        for _ in 0..=UNWANTED_PER_SERVER {
+            table.unwanted(server, now);
+        }
+        assert!(table.tcp_forced(server, now));
+        let later = now + HOUR + HOUR;
+        assert!(!table.tcp_forced(server, later), "the first hour ended");
+        for _ in 0..=UNWANTED_PER_SERVER {
+            table.unwanted(server, later);
+        }
+        assert!(
+            table.tcp_forced(server, later),
+            "the second flood switches the address to TCP again"
+        );
+        assert!(!table.tcp_forced(server, later + HOUR));
     }
 
     #[test]

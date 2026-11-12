@@ -79,7 +79,7 @@ fn cuts_names_and_servers_keep_the_contract() {
         state.edns = EdnsSupport::No;
         state
             .lame
-            .push((name("test"), now + Duration::from_secs(10)));
+            .mark(&name("test"), now + Duration::from_secs(10), now);
     });
     let state = infra.server(v4(21), now);
     assert!(state.is_lame(&name("test"), now));
@@ -194,4 +194,43 @@ fn a_name_server_keeps_at_most_its_first_addresses() {
             .iter()
             .any(|address| address.address == v4(250))
     );
+}
+
+#[test]
+fn an_address_is_remembered_lame_for_at_most_sixteen_zones() {
+    use crate::recursion::infra::{INFRA_TTL, MAX_LAME_PER_SERVER};
+    let infra = Infra::new(InfraBounds::HOME);
+    let start = Instant::now();
+    let server = v4(30);
+    // A peer that answers lame for every zone the resolver meets under it.
+    for n in 0..10_000u64 {
+        let at = start + Duration::from_millis(n);
+        infra.update_server(server, at, &mut |state| {
+            state
+                .lame
+                .mark(&name(&format!("x{n}.attacker.test")), at + INFRA_TTL, at);
+        });
+    }
+    let at = start + Duration::from_millis(10_000);
+    let state = infra.server(server, at);
+    assert_eq!(state.lame.len(), MAX_LAME_PER_SERVER);
+    assert!(
+        state.is_lame(&name("x9999.attacker.test"), at),
+        "the newest stays"
+    );
+    assert!(
+        !state.is_lame(&name("x0.attacker.test"), at),
+        "the earliest went"
+    );
+    // Marking a zone again moves it; it adds no second entry.
+    infra.update_server(server, at, &mut |state| {
+        state
+            .lame
+            .mark(&name("x9999.attacker.test"), at + INFRA_TTL, at);
+    });
+    assert_eq!(infra.server(server, at).lame.len(), MAX_LAME_PER_SERVER);
+    // Past the infrastructure TTL nothing is left.
+    let later = at + INFRA_TTL + Duration::from_secs(11);
+    infra.update_server(server, later, &mut |_| {});
+    assert!(infra.server(server, later).lame.is_empty());
 }

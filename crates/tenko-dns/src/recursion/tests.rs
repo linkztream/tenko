@@ -276,7 +276,7 @@ async fn quirks_follow_the_ladder_or_fail() {
 #[tokio::test]
 async fn the_oracles_compose_into_an_iterative_walk() {
     let lab = lab();
-    let infra = MemInfra::new(InfraBounds::HOME);
+    let infra = crate::infra::Infra::new(InfraBounds::HOME);
     let now = Instant::now();
     // Priming from the hints.
     infra.put_cut(&DnsName::root(), vec![name("a.root.test")], 86_400, now);
@@ -332,7 +332,7 @@ async fn the_oracles_compose_into_an_iterative_walk() {
 
 #[test]
 fn the_infrastructure_cache_keeps_its_rules() {
-    let infra = MemInfra::new(InfraBounds {
+    let infra = crate::infra::Infra::new(InfraBounds {
         cuts: 2,
         servers: 2,
         ttl: Duration::from_secs(900),
@@ -409,7 +409,7 @@ fn the_infrastructure_cache_keeps_its_rules() {
         state.edns = infra::EdnsSupport::No;
         state
             .lame
-            .push((name("example.test"), now + Duration::from_secs(10)));
+            .mark(&name("example.test"), now + Duration::from_secs(10), now);
     });
     let state = infra.server(v4(1), now);
     assert_eq!(state.edns, infra::EdnsSupport::No);
@@ -475,7 +475,7 @@ async fn the_anchors_start_from_the_shipped_file() {
 
 #[test]
 fn failures_hold_five_seconds_doubling_to_the_bound() {
-    let failures = MemFailures::new(Duration::from_secs(20));
+    let failures = crate::cache::Failures::new(Duration::from_secs(20), 100);
     let key = CacheKey::new(None, &name("www.example.test").to_wire(), 1, 1);
     let now = Instant::now();
     let cause = FailureCause::Budget(BudgetBound::Queries);

@@ -143,7 +143,7 @@ impl Infra {
         inner.servers.retain(|_, entry| {
             let (state, learned) = &mut entry.value;
             age_capabilities(state, *learned, ttl, now);
-            state.lame.retain(|(_, until)| *until > now);
+            state.lame.expire(now);
             if state.unreachable_until.is_some_and(|until| until <= now) {
                 state.unreachable_until = None;
             }
@@ -309,8 +309,9 @@ impl InfraCache for Infra {
                 entry.used = tick;
                 let (stored, learned) = &mut entry.value;
                 age_capabilities(stored, *learned, ttl, now);
+                // A copy of the fixed fields; the lame zones are shared (a reference
+                // count), so nothing a peer filled is copied under the lock.
                 let mut state = stored.clone();
-                state.lame.retain(|(_, until)| *until > now);
                 if state.unreachable_until.is_some_and(|until| until <= now) {
                     state.unreachable_until = None;
                 }
@@ -336,7 +337,7 @@ impl InfraCache for Infra {
         entry.used = tick;
         let (state, learned) = &mut entry.value;
         age_capabilities(state, *learned, ttl, now);
-        state.lame.retain(|(_, until)| *until > now);
+        state.lame.expire(now);
         let before = (state.edns, state.tcp_only);
         update(state);
         if (state.edns, state.tcp_only) != before {

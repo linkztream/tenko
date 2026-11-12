@@ -31,11 +31,15 @@ use crate::{
     recurse::{Engine, EngineSettings, Question, hints},
     recursion::{
         Authority, AuthorityError, AuthorityQuery, BogusReason, ChainContext, DsState, Exchange,
-        InfraCache, MemAnchors, MemAuthority, MemFailures, MemZone, Outbound, RecursionSettings,
-        TrustAnchors, Validation, ValidationCaps, Validator,
+        InfraCache, MemAnchors, MemAuthority, MemZone, Outbound, RecursionSettings, TrustAnchors,
+        Validation, ValidationCaps, Validator,
     },
     tree::canonical_cmp,
     validate::{DnssecValidator, EngineFetch, NoFetch},
+};
+use crate::{
+    cache::Failures,
+    recursion::failure::{FAILURE_BOUND, FAILURE_MAX},
 };
 
 const ROOT: u8 = 10;
@@ -524,7 +528,7 @@ async fn harness(keys: &LabKeys, variant: Variant) -> Harness {
             1_000,
             Duration::from_secs(900),
         )),
-        Arc::new(MemFailures::default()),
+        Arc::new(Failures::new(FAILURE_MAX, FAILURE_BOUND)),
         hints::parse(LAB_HINTS).expect("hints"),
         &settings,
     );
@@ -961,7 +965,7 @@ async fn colliding_key_tags_in_a_zone_are_bogus_within_the_caps() {
             1_000,
             Duration::from_secs(900),
         )),
-        Arc::new(MemFailures::default()),
+        Arc::new(Failures::new(FAILURE_MAX, FAILURE_BOUND)),
         hints::parse(LAB_HINTS).expect("hints"),
         &settings,
     );

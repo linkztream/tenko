@@ -1573,8 +1573,7 @@ impl<A: Authority> Engine<A> {
                             let until = Instant::now() + self.infra_ttl();
                             let zone = cut.zone.clone();
                             self.infra.update_server(address, now, &mut |state| {
-                                state.lame.retain(|(lame, _)| *lame != zone);
-                                state.lame.push((zone.clone(), until));
+                                state.lame.mark(&zone, until, now);
                             });
                         }
                         Step::Referral(_) => {

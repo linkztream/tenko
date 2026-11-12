@@ -88,16 +88,17 @@ use tenko_core::dns::{ExtendedError, SecurityState};
 
 use crate::{
     anchors::CatalogAnchors,
-    recursion::{
-        ChainContext, InfraCache, KeyFetch, MemInfra, Validation, ValidationCaps, Validator as _,
-    },
+    recursion::{ChainContext, InfraCache, KeyFetch, Validation, ValidationCaps, Validator as _},
     validate::{self, DnssecValidator, EngineFetch, NoFetch, UpstreamFetch},
 };
 // WP10.2: end.
 // WP10.3: the denial and failure caches.
 use crate::{
     cache::{Denials, Failures, Verdict, denial::DenialSettings},
-    recursion::{DenialCache, FailureCache, FailureCause, Origin, denial::DenialKind},
+    recursion::{
+        DenialCache, DenialRoute, DenialScope, FailureCache, FailureCause, Origin,
+        denial::DenialKind,
+    },
 };
 // WP10.3: end.
 
@@ -148,10 +149,6 @@ const HOUSEKEEPING: Duration = Duration::from_millis(200);
 
 /// The purge period.
 const PURGE: Duration = Duration::from_secs(60);
-
-// WP10.3: the most failures the recursive resolver keeps without an answer cache to size
-// them by.
-const FAILURE_BOUND: usize = 100_000;
 
 const TYPE_A: u16 = 1;
 const TYPE_NS: u16 = 2;
@@ -258,6 +255,12 @@ pub struct ForwardSettings {
     /// The CA (PEM) DoT and DoH certificates are checked against, instead of the system's
     /// roots.
     pub upstream_ca: Option<Vec<u8>>,
+    /// The denial cache answers (`[dns.recursion] aggressive_nsec`). Forwarded answers feed
+    /// the denial cache too, so it holds whether the resolver runs or not.
+    pub aggressive_nsec: bool,
+    /// The denial cache's bound (`[dns.recursion] denial_entries` under the profile),
+    /// whether the resolver runs or not.
+    pub denial_entries: usize,
     // WP10.1: the recursive resolver.
     /// The recursive resolver; `None` runs none (every name then needs a rule, a stub zone
     /// or `upstreams`).
@@ -303,6 +306,8 @@ impl Default for ForwardSettings {
             cache: Some(CacheSettings::default()),
             stale_budget: DEFAULT_STALE_BUDGET,
             upstream_ca: None,
+            aggressive_nsec: DenialSettings::default().aggressive,
+            denial_entries: DenialSettings::default().entries,
             recursion: None,
             validation: None,
         }
@@ -397,10 +402,31 @@ pub struct StubReport {
 
 #[derive(Debug, Default)]
 struct StubState {
-    specs: Vec<UpstreamSpec>,
+    /// Shared, so that a query takes them without copying what a peer named.
+    specs: Arc<[UpstreamSpec]>,
     expires: Option<Instant>,
     retry_at: Option<Instant>,
     error: Option<String>,
+}
+
+/// One stub zone's learned servers and the gate of the one query that learns them again.
+/// The state's lock is held only to read or swap it, never across the network: while one
+/// query learns, the others serve the servers learned before, and wait on the gate only
+/// when there are none to serve. Other stub zones never wait on this one.
+#[derive(Debug, Default)]
+struct StubSlot {
+    state: Mutex<StubState>,
+    learning: tokio::sync::Mutex<()>,
+}
+
+impl StubSlot {
+    /// The servers known at `now`, and whether they are due to be learned again.
+    fn snapshot(&self, now: Instant) -> (Arc<[UpstreamSpec]>, bool) {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let fresh = state.expires.is_some_and(|expires| expires > now);
+        let waiting = state.retry_at.is_some_and(|retry| retry > now);
+        (Arc::clone(&state.specs), !fresh && !waiting)
+    }
 }
 
 struct Submitted {
@@ -416,7 +442,7 @@ struct Shared {
     cache: Option<Cache>,
     pools: Pools,
     recursion: Arc<RecursionPolicy>,
-    stubs: tokio::sync::Mutex<HashMap<ZoneId, StubState>>,
+    stubs: Mutex<HashMap<ZoneId, Arc<StubSlot>>>,
     stub_reports: Mutex<BTreeMap<ZoneId, StubReport>>,
     // WP10.1: the engine, its infrastructure cache and the audit of its flushes.
     engine: Option<Arc<Engine<NetAuthority>>>,
@@ -427,7 +453,7 @@ struct Shared {
     // the last RFC 8145 signaling query.
     validator: Option<Arc<DnssecValidator>>,
     anchors: Arc<CatalogAnchors>,
-    forward_infra: MemInfra,
+    forward_infra: Infra,
     strips: Mutex<BTreeSet<ForwardRuleId>>,
     signaled: Mutex<Option<Instant>>,
     // WP10.3: the denial cache beside the answer cache, and the failure cache the worker
@@ -522,19 +548,57 @@ fn stub_for<'a>(catalog: &'a Catalog, qname: &[u8]) -> Option<&'a Zone> {
         .max_by_key(|zone| zone.name.label_count())
 }
 
-fn route(catalog: &Catalog, qname: &[u8], rule: Option<ForwardRuleId>) -> Route {
+/// What routes a name: the stub zone, when it is at least as deep as the rule; else the
+/// forwarding rule; else neither (the view's default resolution). Read without allocating.
+enum Routed<'a> {
+    Default,
+    Rule(&'a ForwardRule),
+    Stub(&'a Zone),
+}
+
+impl Routed<'_> {
+    /// The path the denial cache scopes this route's denials by.
+    fn denial_route(&self) -> DenialRoute {
+        match self {
+            Routed::Default => DenialRoute::Default,
+            Routed::Rule(rule) => DenialRoute::Rule(rule.id),
+            Routed::Stub(zone) => DenialRoute::Stub(zone.id),
+        }
+    }
+}
+
+fn routed<'a>(catalog: &'a Catalog, qname: &[u8], rule: Option<ForwardRuleId>) -> Routed<'a> {
     let rule = rule.and_then(|id| catalog.forward_rule(id));
     match (stub_for(catalog, qname), rule) {
         (Some(stub), Some(rule)) if stub.name.label_count() >= rule.suffix.label_count() => {
-            Route::Stub(Box::new(stub.clone()))
+            Routed::Stub(stub)
         }
-        (Some(stub), None) => Route::Stub(Box::new(stub.clone())),
+        (Some(stub), None) => Routed::Stub(stub),
+        (_, Some(rule)) => Routed::Rule(rule),
+        (None, None) => Routed::Default,
+    }
+}
+
+fn route(catalog: &Catalog, qname: &[u8], rule: Option<ForwardRuleId>) -> Route {
+    match routed(catalog, qname, rule) {
+        Routed::Stub(stub) => Route::Stub(Box::new(stub.clone())),
         // WP10.0
-        (_, Some(rule)) if rule.mode == tenko_core::dns::RuleMode::Recurse => {
+        Routed::Rule(rule) if rule.mode == tenko_core::dns::RuleMode::Recurse => {
             Route::Recurse(Box::new(rule.clone()))
         }
-        (_, Some(rule)) => Route::Rule(Box::new(rule.clone())),
-        (None, None) => Route::Default,
+        Routed::Rule(rule) => Route::Rule(Box::new(rule.clone())),
+        Routed::Default => Route::Default,
+    }
+}
+
+impl Route {
+    /// The path the denial cache scopes this route's denials by.
+    fn denial_route(&self) -> DenialRoute {
+        match self {
+            Route::Default => DenialRoute::Default,
+            Route::Rule(rule) | Route::Recurse(rule) => DenialRoute::Rule(rule.id),
+            Route::Stub(zone) => DenialRoute::Stub(zone.id),
+        }
     }
 }
 
@@ -559,19 +623,22 @@ impl Forwarder {
             let bound = settings
                 .cache
                 .as_ref()
-                .map_or(FAILURE_BOUND, |cache| cache.entries);
+                .map_or(crate::recursion::failure::FAILURE_BOUND, |cache| {
+                    cache.entries
+                });
             Arc::new(Failures::new(recursion.recursion.failure_max, bound))
         });
         let denials = settings.cache.as_ref().map(|cache| {
-            let defaults = crate::recursion::RecursionSettings::default();
-            let recursion = settings
-                .recursion
+            // Secure records come from the validator's verdicts: its caps decide which
+            // NSEC3 chains are kept.
+            let caps = settings
+                .validation
                 .as_ref()
-                .map_or(&defaults, |engine| &engine.recursion);
+                .map_or(ValidationCaps::DEFAULT, |validation| validation.caps);
             Arc::new(Denials::new(DenialSettings {
-                aggressive: recursion.aggressive_nsec,
-                entries: recursion.denial_entries,
-                nsec3_iterations: recursion.caps.nsec3_insecure_above,
+                aggressive: settings.aggressive_nsec,
+                entries: settings.denial_entries,
+                nsec3_iterations: caps.nsec3_insecure_above,
                 negative_ttl: cache.negative_ttl,
             }))
         });
@@ -593,7 +660,10 @@ impl Forwarder {
         });
         let anchors = Arc::new(CatalogAnchors::new());
         anchors.refresh(&catalog.load());
-        let forward_infra = MemInfra::new(crate::recursion::InfraBounds::HOME);
+        // Without the engine nothing learns zone cuts, so the validator's DS slots stay
+        // empty and its key table holds the zone states; the cache only stands in for the
+        // engine's, and never grows.
+        let forward_infra = Infra::default();
         // WP10.2: end.
         let shared = Arc::new(Shared {
             cache: settings.cache.map(Cache::new),
@@ -603,7 +673,7 @@ impl Forwarder {
             log,
             counters: ForwardCounters::default(),
             recursion,
-            stubs: tokio::sync::Mutex::new(HashMap::new()),
+            stubs: Mutex::new(HashMap::new()),
             stub_reports: Mutex::new(BTreeMap::new()),
             engine,
             infra,
@@ -854,8 +924,9 @@ impl Shared {
         engine: &Arc<Engine<NetAuthority>>,
         question: &OwnedQuestion,
         key: Option<&CacheKey>,
-        view: Option<ViewId>,
+        scope: DenialScope,
     ) -> (Arc<Resolved>, Option<Validation>) {
+        let view = scope.view;
         // The catalog the policy reads decides whether the answer carries its delegation,
         // so that a new NSDNAME or NSIP trigger applies to the next resolution, not only
         // after the housekeeping noted it.
@@ -913,7 +984,7 @@ impl Shared {
                     if keep {
                         cache.insert_with(key, &resolved.message, Instant::now(), None, &verdict);
                         self.keep_denials(
-                            view,
+                            scope,
                             &resolved.message,
                             &verdict,
                             Origin::Recursion,
@@ -924,7 +995,7 @@ impl Shared {
                 _ if !question.cd && keep => {
                     cache.insert(key, &resolved.message, Instant::now(), None);
                     self.keep_denials(
-                        view,
+                        scope,
                         &resolved.message,
                         &Verdict::UNVALIDATED,
                         Origin::Recursion,
@@ -945,18 +1016,18 @@ impl Shared {
 
     // WP10.3: the denial cache's records come from what the answer cache keeps.
     /// Keeps the denial records (or, unsigned, the NXDOMAIN of RFC 8020) of `message`,
-    /// which came from `origin`; `carried` when the resolver composed it while answers
-    /// carry their delegation.
+    /// which came from `origin` on the path `scope`; `carried` when the resolver composed
+    /// it while answers carry their delegation.
     fn keep_denials(
         &self,
-        view: Option<ViewId>,
+        scope: DenialScope,
         message: &[u8],
         verdict: &Verdict,
         origin: Origin,
         carried: bool,
     ) {
         if let Some(denials) = &self.denials {
-            denials.insert_carried(view, message, verdict, origin, Instant::now(), carried);
+            denials.insert_carried(scope, message, verdict, origin, Instant::now(), carried);
         }
     }
     // WP10.3: end.
@@ -1134,18 +1205,58 @@ impl Shared {
         }
     }
 
-    /// The set of a stub zone's name servers, learned when needed.
+    /// The set of a stub zone's name servers, learned when needed by one query at a time
+    /// (see [`StubSlot`]).
     async fn stub_set(self: &Arc<Self>, zone: &Zone) -> Result<Arc<UpstreamSet>, String> {
+        let slot = Arc::clone(
+            self.stubs
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .entry(zone.id)
+                .or_default(),
+        );
+        let (mut specs, due) = slot.snapshot(Instant::now());
+        if due {
+            let gate = match slot.learning.try_lock() {
+                Ok(gate) => Some(gate),
+                Err(_) if specs.is_empty() => Some(slot.learning.lock().await),
+                Err(_) => None,
+            };
+            if let Some(_gate) = gate {
+                // A learner that finished while this query waited leaves nothing due.
+                if slot.snapshot(Instant::now()).1 {
+                    let learned = self.learn(zone).await;
+                    self.store_stub(zone, &slot, learned);
+                }
+                specs = slot.snapshot(Instant::now()).0;
+            }
+        }
+        if specs.is_empty() {
+            return Err(slot
+                .state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .error
+                .clone()
+                .unwrap_or_else(|| "the stub zone's name servers are not known".to_owned()));
+        }
         let label = format!("stub:{}", zone.name);
-        let mut states = self.stubs.lock().await;
+        self.pools.get(PoolKey::Stub(zone.id), &label, &specs)
+    }
+
+    /// Stores what learning `zone`'s name servers gave, and its report.
+    fn store_stub(
+        &self,
+        zone: &Zone,
+        slot: &StubSlot,
+        learned: Result<(Vec<UpstreamSpec>, u32), String>,
+    ) {
         let now = Instant::now();
-        let state = states.entry(zone.id).or_default();
-        let fresh = state.expires.is_some_and(|expires| expires > now);
-        let waiting = state.retry_at.is_some_and(|retry| retry > now);
-        if !fresh && !waiting {
-            match self.learn(zone).await {
+        let report = {
+            let mut state = slot.state.lock().unwrap_or_else(PoisonError::into_inner);
+            match learned {
                 Ok((specs, ttl)) => {
-                    state.specs = specs;
+                    state.specs = specs.into();
                     state.expires = Some(now + Duration::from_secs(u64::from(ttl)));
                     state.retry_at = None;
                     state.error = None;
@@ -1156,31 +1267,20 @@ impl Shared {
                     state.error = Some(error);
                 }
             }
-            self.stub_reports
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .insert(
-                    zone.id,
-                    StubReport {
-                        zone: zone.name.clone(),
-                        servers: state
-                            .specs
-                            .iter()
-                            .map(|spec| spec.address.to_string())
-                            .collect(),
-                        error: state.error.clone(),
-                    },
-                );
-        }
-        if state.specs.is_empty() {
-            return Err(state
-                .error
-                .clone()
-                .unwrap_or_else(|| "the stub zone's name servers are not known".to_owned()));
-        }
-        let specs = state.specs.clone();
-        drop(states);
-        self.pools.get(PoolKey::Stub(zone.id), &label, &specs)
+            StubReport {
+                zone: zone.name.clone(),
+                servers: state
+                    .specs
+                    .iter()
+                    .map(|spec| spec.address.to_string())
+                    .collect(),
+                error: state.error.clone(),
+            }
+        };
+        self.stub_reports
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(zone.id, report);
     }
 
     /// Asks a stub zone's source servers for the NS set of its apex and finds the name
@@ -1234,7 +1334,15 @@ impl Shared {
             "the answer of the zone's servers has no NS set for the apex".to_owned()
         })?;
         let mut addresses: Vec<IpAddr> = Vec::new();
-        for server in &servers {
+        // As many names as the resolver follows a referral with, and no lookups once the
+        // set is full: an NS set of hundreds of names without glue costs no more.
+        for server in servers
+            .iter()
+            .take(crate::recurse::message::MAX_REFERRAL_SERVERS)
+        {
+            if addresses.len() >= crate::pool::MAX_MEMBERS {
+                break;
+            }
             let known: Vec<IpAddr> = glue
                 .iter()
                 .filter(|(owner, _)| owner == server)
@@ -1315,6 +1423,7 @@ impl Shared {
         question: OwnedQuestion,
         key: Option<CacheKey>,
         rule: Option<ForwardRuleId>,
+        route: DenialRoute,
     ) -> Result<(Vec<u8>, Option<Validation>), UpstreamError> {
         let mut answer = Vec::new();
         set.query(&question.as_question(), self.budget(), &mut answer)
@@ -1347,12 +1456,20 @@ impl Shared {
                     let verdict = validation.verdict(self.failure_ttl());
                     cache.insert_with(key, &answer, Instant::now(), rule, &verdict);
                     // WP10.3: forwarded answers feed the denial cache too.
-                    self.keep_denials(key.view(), &answer, &verdict, Origin::Forwarder, false);
+                    let scope = DenialScope {
+                        view: key.view(),
+                        route,
+                    };
+                    self.keep_denials(scope, &answer, &verdict, Origin::Forwarder, false);
                 }
                 _ if !question.cd => {
                     cache.insert(key, &answer, Instant::now(), rule);
+                    let scope = DenialScope {
+                        view: key.view(),
+                        route,
+                    };
                     self.keep_denials(
-                        key.view(),
+                        scope,
                         &answer,
                         &Verdict::UNVALIDATED,
                         Origin::Forwarder,
@@ -1488,8 +1605,9 @@ impl ForwardSink for Forwarder {
         }
         let request = query.request;
         let qname = request.qname.as_wire();
+        let routed = routed(&catalog, qname, query.rule);
         // WP10.1: a name no rule and no stub zone covers follows the view's resolution.
-        if query.rule.is_none() && stub_for(&catalog, qname).is_none() {
+        if query.rule.is_none() && !matches!(routed, Routed::Stub(_)) {
             match shared.default_resolution(&catalog, query.view) {
                 ResolutionMode::Refuse => {
                     shared.count(|counters| &counters.refused);
@@ -1578,9 +1696,15 @@ impl ForwardSink for Forwarder {
                         .engine
                         .as_ref()
                         .is_some_and(|engine| engine.carries());
+                // Only what the path this name takes taught (its view, and its rule or stub
+                // zone or neither) denies it.
+                let scope = DenialScope {
+                    view: query.view,
+                    route: routed.denial_route(),
+                };
                 if let Some(denials) = &shared.denials
                     && let Some(hit) = denials.answer_carrying(
-                        query.view,
+                        scope,
                         qname,
                         request.qtype,
                         &client,
@@ -1840,9 +1964,11 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
             cd: false,
             dnssec_ok: true,
         };
-        let (resolved, _) = shared
-            .recurse(&engine, &question, Some(&key), key.view())
-            .await;
+        let scope = DenialScope {
+            view: key.view(),
+            route: route.denial_route(),
+        };
+        let (resolved, _) = shared.recurse(&engine, &question, Some(&key), scope).await;
         if resolved.cacheable() {
             shared.count(|counters| &counters.prefetched);
         } else {
@@ -1868,7 +1994,13 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
         _ => None,
     };
     match Arc::clone(&shared)
-        .fetch(set, question, Some(key.clone()), rule_id)
+        .fetch(
+            set,
+            question,
+            Some(key.clone()),
+            rule_id,
+            route.denial_route(),
+        )
         .await
     {
         Ok(_) => shared.count(|counters| &counters.prefetched),
@@ -1929,8 +2061,12 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
         .clone()
         .filter(|_| shared.recurses(&catalog, &route, query.view));
     let outcome = if let Some(engine) = engine {
+        let scope = DenialScope {
+            view: query.view,
+            route: route.denial_route(),
+        };
         let (resolved, validation) = shared
-            .recurse(&engine, &question, key.as_ref(), query.view)
+            .recurse(&engine, &question, key.as_ref(), scope)
             .await;
         if u16::from(resolved.rcode) == rcode::SERVFAIL && has_stale(Instant::now()) {
             Outcome::Stale
@@ -1953,8 +2089,13 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
                 if stale && set.all_down(now) {
                     Outcome::Stale
                 } else if stale {
-                    let mut task =
-                        tokio::spawn(Arc::clone(shared).fetch(set, question, key.clone(), rule_id));
+                    let mut task = tokio::spawn(Arc::clone(shared).fetch(
+                        set,
+                        question,
+                        key.clone(),
+                        rule_id,
+                        route.denial_route(),
+                    ));
                     tokio::select! {
                         joined = &mut task => match joined {
                             Ok(Ok((answer, validation))) => Outcome::Upstream(answer, validation),
@@ -1964,7 +2105,7 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
                         () = tokio::time::sleep(shared.settings.stale_budget) => Outcome::Stale,
                     }
                 } else if let Ok((answer, validation)) = Arc::clone(shared)
-                    .fetch(set, question, key.clone(), rule_id)
+                    .fetch(set, question, key.clone(), rule_id, route.denial_route())
                     .await
                 {
                     Outcome::Upstream(answer, validation)

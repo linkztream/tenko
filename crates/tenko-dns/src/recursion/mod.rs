@@ -9,11 +9,11 @@
 //! | Module | Contract | Reference |
 //! |---|---|---|
 //! | [`authority`] | [`Authority`]: one exchange with one authority server | [`MemAuthority`], scripted from zone data |
-//! | [`infra`] | [`InfraCache`]: zone cuts, name servers, server capabilities, lameness, cookies, DS states and key sets | [`MemInfra`] |
+//! | [`infra`] | [`InfraCache`]: zone cuts, name servers, server capabilities, lameness, cookies, DS states and key sets | `crate::infra::Infra` (the node's) |
 //! | [`validator`] | [`Validator`]: an answer and its chain context in, a state and an extended error out | [`Unvalidating`] |
 //! | [`anchors`] | [`TrustAnchors`] (the rows through the catalog), [`AnchorResolver`] (for the leader service) | [`MemAnchors`] |
 //! | [`denial`] | [`DenialCache`]: RFC 8198 and RFC 8020 on the worker | [`NoDenial`] |
-//! | [`failure`] | [`FailureCache`]: RFC 9520 | [`MemFailures`] |
+//! | [`failure`] | [`FailureCache`]: RFC 9520 | `crate::cache::Failures` (the node's) |
 //! | [`shipped`] | the root trust anchors of RFC 7958 and the root hints, embedded | |
 //!
 //! The answer cache's key and entry (`crate::cache`: one entry per view, name, type and
@@ -35,11 +35,11 @@ pub use authority::{
     Asked, Authority, AuthorityError, AuthorityQuery, AuthorityTransport, Exchange, MemAuthority,
     MemServer, MemZone, Quirks, ServerCookie,
 };
-pub use denial::{DenialCache, DenialHit, DenialKind, NoDenial, Origin};
-pub use failure::{FailureCache, FailureCause, MemFailures};
+pub use denial::{DenialCache, DenialHit, DenialKind, DenialRoute, DenialScope, NoDenial, Origin};
+pub use failure::{FailureCache, FailureCause};
 pub use infra::{
-    AddressOrigin, DsState, InfraBounds, InfraCache, InfraSizes, MemInfra, NameServer, ServerState,
-    ZoneCut,
+    AddressOrigin, DsState, InfraBounds, InfraCache, InfraSizes, LameZones, NameServer,
+    ServerState, ZoneCut,
 };
 pub use validator::{
     BogusReason, ChainContext, KeyFetch, Unvalidating, Validation, ValidationCaps, Validator,
@@ -155,10 +155,6 @@ pub struct RecursionSettings {
     pub infra: InfraBounds,
     /// QNAME minimization.
     pub minimization: Minimization,
-    /// The denial cache on (RFC 8198).
-    pub aggressive_nsec: bool,
-    /// The denial cache's bound.
-    pub denial_entries: usize,
     /// The longest hold of the failure cache.
     pub failure_max: Duration,
     /// RFC 8145 trust anchor signaling.
@@ -181,8 +177,6 @@ impl Default for RecursionSettings {
             budget: WorkBudget::DEFAULT,
             infra: InfraBounds::STANDARD,
             minimization: Minimization::Relaxed,
-            aggressive_nsec: true,
-            denial_entries: 20_000,
             failure_max: failure::FAILURE_MAX,
             signaling: true,
             key_sentinel: true,

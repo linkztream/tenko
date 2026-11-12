@@ -7,7 +7,7 @@
 
 use std::time::Instant;
 
-use tenko_core::dns::ViewId;
+use tenko_core::dns::{ForwardRuleId, ViewId, ZoneId};
 
 use crate::cache::{Client, Verdict};
 
@@ -56,6 +56,42 @@ pub enum Origin {
     Forwarder,
 }
 
+/// The route that resolves a name: a forwarding rule, a stub zone, or neither (the view's
+/// default resolution).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum DenialRoute {
+    /// The view's default resolution (the resolver or the default upstreams).
+    #[default]
+    Default,
+    /// A forwarding rule (of any mode).
+    Rule(ForwardRuleId),
+    /// A stub zone.
+    Stub(ZoneId),
+}
+
+/// The resolution path a denial belongs to: the view and the route. A denial proves only
+/// what the servers of its own path would answer (RFC 8198 section 5.1 speaks of one
+/// resolver's view of one zone), so the cache answers a name only from records that an
+/// answer of the path the name takes taught: a name under a forwarding rule or a stub zone
+/// is never denied from a public zone's proofs, nor one view's names from another's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct DenialScope {
+    /// The view.
+    pub view: Option<ViewId>,
+    /// The route.
+    pub route: DenialRoute,
+}
+
+impl DenialScope {
+    /// The default resolution of `view`.
+    pub const fn of_view(view: Option<ViewId>) -> Self {
+        Self {
+            view,
+            route: DenialRoute::Default,
+        }
+    }
+}
+
 /// A synthesized answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DenialHit {
@@ -67,12 +103,12 @@ pub struct DenialHit {
 
 /// The denial cache; see the module documentation.
 pub trait DenialCache: Send + Sync {
-    /// Synthesizes the answer to `qname` (lowercase wire form) and `qtype` in `view` for
-    /// `client` into `out` when a validated record proves it (the worker: allocates
-    /// nothing when `out` has room for 65,535 octets).
+    /// Synthesizes the answer to `qname` (lowercase wire form) and `qtype` on the path
+    /// `scope` for `client` into `out` when a validated record taught on that path proves
+    /// it (the worker: allocates nothing when `out` has room for 65,535 octets).
     fn answer(
         &self,
-        view: Option<ViewId>,
+        scope: DenialScope,
         qname: &[u8],
         qtype: u16,
         client: &Client<'_>,
@@ -81,13 +117,13 @@ pub trait DenialCache: Send + Sync {
     ) -> Option<DenialHit>;
 
     /// Keeps the NSEC or NSEC3 records and the SOA of the validated negative (or
-    /// wildcard) answer `answer`, which came from `origin` (the runtime), under the zone
-    /// that signed them. Returns whether anything was kept: the records only from a
-    /// `secure` verdict, the name an NXDOMAIN of an unsigned zone denies (RFC 8020) from
-    /// any verdict but `bogus`.
+    /// wildcard) answer `answer`, which came from `origin` (the runtime) on the path
+    /// `scope`, under the zone that signed them. Returns whether anything was kept: the
+    /// records only from a `secure` verdict, the name an NXDOMAIN of an unsigned zone
+    /// denies (RFC 8020) from any verdict but `bogus`.
     fn insert(
         &self,
-        view: Option<ViewId>,
+        scope: DenialScope,
         answer: &[u8],
         verdict: &Verdict,
         origin: Origin,
@@ -114,7 +150,7 @@ pub struct NoDenial;
 impl DenialCache for NoDenial {
     fn answer(
         &self,
-        _view: Option<ViewId>,
+        _scope: DenialScope,
         _qname: &[u8],
         _qtype: u16,
         _client: &Client<'_>,
@@ -126,7 +162,7 @@ impl DenialCache for NoDenial {
 
     fn insert(
         &self,
-        _view: Option<ViewId>,
+        _scope: DenialScope,
         _answer: &[u8],
         _verdict: &Verdict,
         _origin: Origin,

@@ -20,10 +20,12 @@ use tenko_core::dns::{DnsName, ExtendedError, RecordData};
 
 use super::*;
 use crate::{
+    cache::Failures,
+    recursion::failure::{FAILURE_BOUND, FAILURE_MAX},
+};
+use crate::{
     infra::Infra,
-    recursion::{
-        InfraBounds, MemAuthority, MemFailures, MemInfra, MemZone, Quirks, infra::EdnsSupport,
-    },
+    recursion::{InfraBounds, MemAuthority, MemZone, Quirks, infra::EdnsSupport},
     wire,
 };
 
@@ -318,7 +320,7 @@ fn engine_with(lab: &Arc<MemAuthority>, settings: &EngineSettings) -> Lab {
         Arc::clone(lab),
         Arc::new(Infra::new(settings.recursion.infra)),
         Arc::new(ServerTable::new(1_000, Duration::from_secs(900))),
-        Arc::new(MemFailures::default()),
+        Arc::new(Failures::new(FAILURE_MAX, FAILURE_BOUND)),
         hints,
         settings,
     )
@@ -659,7 +661,7 @@ async fn priming_fails_with_unreachable_hints_and_names_the_problem() {
         Arc::clone(&lab),
         Arc::new(Infra::default()),
         Arc::new(ServerTable::new(100, Duration::from_secs(900))),
-        Arc::new(MemFailures::default()),
+        Arc::new(Failures::new(FAILURE_MAX, FAILURE_BOUND)),
         Hints::shipped(),
         &EngineSettings {
             metrics: false,
@@ -1008,9 +1010,9 @@ async fn the_reference_infrastructure_cache_runs_the_engine_as_well() {
     let settings = settings();
     let engine = Engine::new(
         Arc::clone(&lab),
-        Arc::new(MemInfra::new(InfraBounds::HOME)),
+        Arc::new(Infra::new(InfraBounds::HOME)),
         Arc::new(ServerTable::new(100, Duration::from_secs(900))),
-        Arc::new(MemFailures::default()),
+        Arc::new(Failures::new(FAILURE_MAX, FAILURE_BOUND)),
         hints::parse(LAB_HINTS).expect("hints"),
         &settings,
     );

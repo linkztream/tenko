@@ -5,14 +5,12 @@
 //! failure. The round-trip times stay in the pool ([`crate::pool`]), keyed by
 //! [`crate::pool::PoolKey::Delegation`].
 //!
-//! It is read on the runtime only, never on the worker, so implementations may allocate
-//! and lock freely. It holds no client data. [`MemInfra`] is the reference: correct,
-//! bounded and simple (a least-recently-used scan on overflow).
+//! It is read on the runtime only, never on the worker. It holds no client data. The node's
+//! implementation is [`crate::infra::Infra`].
 
 use std::{
-    collections::HashMap,
     net::IpAddr,
-    sync::{Arc, Mutex, PoisonError},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -193,6 +191,76 @@ pub enum EdnsSupport {
     No,
 }
 
+/// The most zones one server address is remembered lame for. Past it the zone marked
+/// earliest goes: the zones come from what peers answer, so a peer that makes the resolver
+/// meet many of them must not grow the entry (it is copied on every read of the address).
+pub const MAX_LAME_PER_SERVER: usize = 16;
+
+/// The zones a server address is lame for, each until a time: at most
+/// [`MAX_LAME_PER_SERVER`], shared, so that a copy of the server's state is a reference
+/// count and not a copy of the names.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LameZones(Option<Arc<[(DnsName, Instant)]>>);
+
+impl LameZones {
+    fn entries(&self) -> &[(DnsName, Instant)] {
+        self.0.as_deref().unwrap_or_default()
+    }
+
+    /// Whether `zone` is marked at `now`.
+    pub fn contains(&self, zone: &DnsName, now: Instant) -> bool {
+        self.entries()
+            .iter()
+            .any(|(lame, until)| lame == zone && *until > now)
+    }
+
+    /// Zones held, expired ones included until the next change.
+    pub fn len(&self) -> usize {
+        self.entries().len()
+    }
+
+    /// Whether none is held.
+    pub fn is_empty(&self) -> bool {
+        self.entries().is_empty()
+    }
+
+    /// Marks `zone` until `until`, dropping what expired before `now` and, at the bound,
+    /// the zone marked earliest.
+    pub fn mark(&mut self, zone: &DnsName, until: Instant, now: Instant) {
+        let mut kept: Vec<(DnsName, Instant)> = self
+            .entries()
+            .iter()
+            .filter(|(lame, expires)| *expires > now && lame != zone)
+            .cloned()
+            .collect();
+        if kept.len() >= MAX_LAME_PER_SERVER {
+            kept.sort_unstable_by_key(|(_, expires)| *expires);
+            kept.drain(..=kept.len() - MAX_LAME_PER_SERVER);
+        }
+        kept.push((zone.clone(), until));
+        self.0 = Some(kept.into());
+    }
+
+    /// Drops what expired before `now`; nothing is rebuilt when nothing expired.
+    pub fn expire(&mut self, now: Instant) {
+        let live = self
+            .entries()
+            .iter()
+            .filter(|(_, until)| *until > now)
+            .count();
+        if live == self.len() {
+            return;
+        }
+        self.0 = (live > 0).then(|| {
+            self.entries()
+                .iter()
+                .filter(|(_, until)| *until > now)
+                .cloned()
+                .collect()
+        });
+    }
+}
+
 /// What the resolver learned about one server address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerState {
@@ -206,7 +274,7 @@ pub struct ServerState {
     /// The server cookie it last sent.
     pub cookie: Option<ServerCookie>,
     /// The zones it is lame for, each until a time.
-    pub lame: Vec<(DnsName, Instant)>,
+    pub lame: LameZones,
     /// Unwanted answers in the current hour (recursion plan section 2.1).
     pub unwanted: u32,
     /// Unreachable (a family without a route) until then.
@@ -223,7 +291,7 @@ impl ServerState {
             edns: EdnsSupport::Unknown,
             tcp_only: false,
             cookie: None,
-            lame: Vec::new(),
+            lame: LameZones::default(),
             unwanted: 0,
             unreachable_until: None,
             last_failure: None,
@@ -232,9 +300,7 @@ impl ServerState {
 
     /// Whether it is lame for `zone` at `now`.
     pub fn is_lame(&self, zone: &DnsName, now: Instant) -> bool {
-        self.lame
-            .iter()
-            .any(|(lame, until)| lame == zone && *until > now)
+        self.lame.contains(zone, now)
     }
 
     /// Whether it is skipped as unreachable at `now`.
@@ -318,273 +384,4 @@ pub trait InfraCache: Send + Sync {
 
     /// The sizes.
     fn sizes(&self) -> InfraSizes;
-}
-
-#[derive(Debug, Default)]
-struct Inner {
-    cuts: HashMap<DnsName, (ZoneCut, u64)>,
-    names: HashMap<DnsName, (NameServer, u64)>,
-    servers: HashMap<IpAddr, (ServerState, u64)>,
-    tick: u64,
-    next_id: u64,
-}
-
-impl Inner {
-    fn tick(&mut self) -> u64 {
-        self.tick += 1;
-        self.tick
-    }
-}
-
-/// Drops the least recently used entries of `map` until it holds at most `bound`.
-fn evict<K: Clone + Eq + std::hash::Hash, V>(map: &mut HashMap<K, (V, u64)>, bound: usize) {
-    while map.len() > bound {
-        let Some(oldest) = map
-            .iter()
-            .min_by_key(|(_, (_, used))| *used)
-            .map(|(key, _)| key.clone())
-        else {
-            return;
-        };
-        map.remove(&oldest);
-    }
-}
-
-/// The reference [`InfraCache`]; see the module documentation.
-#[derive(Debug, Default)]
-pub struct MemInfra {
-    bounds: InfraBounds,
-    inner: Mutex<Inner>,
-}
-
-impl MemInfra {
-    /// An empty cache with `bounds`.
-    pub fn new(bounds: InfraBounds) -> Self {
-        Self {
-            bounds,
-            inner: Mutex::new(Inner::default()),
-        }
-    }
-
-    /// The bounds.
-    pub fn bounds(&self) -> InfraBounds {
-        self.bounds
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-impl InfraCache for MemInfra {
-    fn closest_cut(&self, name: &DnsName, now: Instant) -> Option<ZoneCut> {
-        let mut candidate = Some(name.clone());
-        while let Some(zone) = candidate {
-            if let Some(cut) = self.cut(&zone, now) {
-                return Some(cut);
-            }
-            candidate = zone.parent();
-        }
-        None
-    }
-
-    fn cut(&self, zone: &DnsName, now: Instant) -> Option<ZoneCut> {
-        let mut inner = self.lock();
-        let tick = inner.tick();
-        let (cut, used) = inner.cuts.get_mut(zone)?;
-        if cut.expires <= now {
-            return None;
-        }
-        *used = tick;
-        let mut cut = cut.clone();
-        cut.ds = cut.ds.at(now);
-        cut.minimize_fallback = cut.minimize_fallback.filter(|until| *until > now);
-        Some(cut)
-    }
-
-    fn put_cut(&self, zone: &DnsName, servers: Vec<DnsName>, ttl: u32, now: Instant) -> CutId {
-        let mut inner = self.lock();
-        let tick = inner.tick();
-        let expires = now + Duration::from_secs(u64::from(ttl));
-        if let Some((cut, used)) = inner.cuts.get_mut(zone) {
-            cut.servers = servers;
-            cut.expires = expires;
-            *used = tick;
-            return cut.id;
-        }
-        inner.next_id += 1;
-        let id = CutId(inner.next_id);
-        inner.cuts.insert(
-            zone.clone(),
-            (
-                ZoneCut {
-                    id,
-                    zone: zone.clone(),
-                    servers,
-                    expires,
-                    ds: DsState::Unknown,
-                    minimize_fallback: None,
-                },
-                tick,
-            ),
-        );
-        evict(&mut inner.cuts, self.bounds.cuts);
-        id
-    }
-
-    fn set_ds(&self, zone: &DnsName, ds: DsState) {
-        if let Some((cut, _)) = self.lock().cuts.get_mut(zone) {
-            cut.ds = ds;
-        }
-    }
-
-    fn set_minimize_fallback(&self, zone: &DnsName, until: Instant) {
-        if let Some((cut, _)) = self.lock().cuts.get_mut(zone) {
-            cut.minimize_fallback = Some(until);
-        }
-    }
-
-    fn name_server(&self, name: &DnsName, now: Instant) -> Option<NameServer> {
-        let mut inner = self.lock();
-        let tick = inner.tick();
-        let (server, used) = inner.names.get_mut(name)?;
-        *used = tick;
-        let addresses: Vec<ServerAddress> = server
-            .addresses
-            .iter()
-            .copied()
-            .filter(|address| address.expires > now)
-            .collect();
-        (!addresses.is_empty()).then(|| NameServer {
-            name: name.clone(),
-            addresses,
-        })
-    }
-
-    fn put_addresses(
-        &self,
-        name: &DnsName,
-        addresses: &[(IpAddr, u32)],
-        origin: AddressOrigin,
-        now: Instant,
-    ) {
-        let mut inner = self.lock();
-        let tick = inner.tick();
-        let entry = inner.names.entry(name.clone()).or_insert_with(|| {
-            (
-                NameServer {
-                    name: name.clone(),
-                    addresses: Vec::new(),
-                },
-                tick,
-            )
-        });
-        entry.1 = tick;
-        let known = &mut entry.0.addresses;
-        known.retain(|address| address.expires > now);
-        // A more trusted, live origin keeps the set.
-        if known.iter().any(|address| address.origin > origin) {
-            return;
-        }
-        known.retain(|address| address.origin >= origin);
-        for (address, ttl) in addresses {
-            let expires = now + Duration::from_secs(u64::from(*ttl));
-            match known.iter_mut().find(|known| known.address == *address) {
-                Some(known) => {
-                    known.origin = origin;
-                    known.expires = expires;
-                }
-                None => known.push(ServerAddress {
-                    address: *address,
-                    origin,
-                    expires,
-                }),
-            }
-        }
-        evict(&mut inner.names, self.bounds.servers);
-    }
-
-    fn server(&self, address: IpAddr, now: Instant) -> ServerState {
-        let mut inner = self.lock();
-        let tick = inner.tick();
-        match inner.servers.get_mut(&address) {
-            Some((state, used)) => {
-                *used = tick;
-                let mut state = state.clone();
-                state.lame.retain(|(_, until)| *until > now);
-                state
-            }
-            None => ServerState::unknown(address),
-        }
-    }
-
-    fn update_server(
-        &self,
-        address: IpAddr,
-        _now: Instant,
-        update: &mut dyn FnMut(&mut ServerState),
-    ) {
-        let mut inner = self.lock();
-        let tick = inner.tick();
-        let entry = inner
-            .servers
-            .entry(address)
-            .or_insert_with(|| (ServerState::unknown(address), tick));
-        entry.1 = tick;
-        update(&mut entry.0);
-        evict(&mut inner.servers, self.bounds.servers);
-    }
-
-    fn list(
-        &self,
-        suffix: Option<&DnsName>,
-        after: Option<&DnsName>,
-        limit: usize,
-        now: Instant,
-    ) -> Vec<ZoneCut> {
-        let inner = self.lock();
-        let mut cuts: Vec<ZoneCut> = inner
-            .cuts
-            .values()
-            .map(|(cut, _)| cut)
-            .filter(|cut| cut.expires > now)
-            .filter(|cut| suffix.is_none_or(|suffix| cut.zone.is_subdomain_of(suffix)))
-            .filter(|cut| after.is_none_or(|after| cut.zone.as_str() > after.as_str()))
-            .cloned()
-            .collect();
-        cuts.sort_by(|a, b| a.zone.as_str().cmp(b.zone.as_str()));
-        cuts.truncate(limit);
-        for cut in &mut cuts {
-            cut.ds = cut.ds.at(now);
-        }
-        cuts
-    }
-
-    fn flush(&self, suffix: Option<&DnsName>) -> usize {
-        let mut inner = self.lock();
-        match suffix {
-            None => {
-                let removed = inner.cuts.len() + inner.names.len() + inner.servers.len();
-                inner.cuts.clear();
-                inner.names.clear();
-                inner.servers.clear();
-                removed
-            }
-            Some(suffix) => {
-                let before = inner.cuts.len() + inner.names.len();
-                inner.cuts.retain(|zone, _| !zone.is_subdomain_of(suffix));
-                inner.names.retain(|name, _| !name.is_subdomain_of(suffix));
-                before - inner.cuts.len() - inner.names.len()
-            }
-        }
-    }
-
-    fn sizes(&self) -> InfraSizes {
-        let inner = self.lock();
-        InfraSizes {
-            cuts: inner.cuts.len(),
-            servers: inner.servers.len(),
-            names: inner.names.len(),
-        }
-    }
 }

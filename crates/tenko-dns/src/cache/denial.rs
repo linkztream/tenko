@@ -1,7 +1,8 @@
 //! The denial cache (WP10.3, recursion plan section 2.2, RFC 8198, RFC 8020, DNS-34):
 //! [`Denials`], the [`DenialCache`] of a node.
 //!
-//! - **What it holds.** Per view and zone: the zone's SOA with its signatures; the NSEC
+//! - **What it holds.** Per resolution path ([`DenialScope`]: the view and the forwarding
+//!   rule or stub zone that routes the names, if any) and zone: the zone's SOA with its signatures; the NSEC
 //!   records in canonical order (RFC 4034 section 6.1, an order key per owner, [`order`]);
 //!   the NSEC3 records by hashed owner under the chain's parameters (one salt and iteration
 //!   count per zone, at most the iterations the validator still calls secure, RFC 9276); the
@@ -55,7 +56,7 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-use tenko_core::dns::{SecurityState, ViewId};
+use tenko_core::dns::SecurityState;
 
 use self::store::{Chain3, Cut, Nsec, Nsec3, Set, Zone, nsec3_params, wildcard_key};
 use crate::{
@@ -65,13 +66,13 @@ use crate::{
     recurse::message::{self, Rr, types},
     recursion::{
         ValidationCaps,
-        denial::{DenialCache, DenialHit, DenialKind, Origin},
+        denial::{DenialCache, DenialHit, DenialKind, DenialRoute, DenialScope, Origin},
     },
     validate::rrset::{self, Sig},
 };
 
-/// The longest key of a zone: the view's tag and id, and the apex.
-const ZONE_KEY_MAX: usize = 1 + 16 + order::NAME_MAX;
+/// The longest key of a zone: the view's tag and id, the route's tag and id, and the apex.
+const ZONE_KEY_MAX: usize = 2 * (1 + 16) + order::NAME_MAX;
 
 /// The denial cache's settings (`[dns.recursion]`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,21 +109,34 @@ struct Store {
 #[derive(Debug)]
 pub struct Denials {
     settings: DenialSettings,
+    /// The SHA-1 rounds one NSEC3 lookup may spend: the validator's work of one proof step
+    /// at the most iterations kept.
+    nsec3_work: u64,
     epoch: Instant,
     store: RwLock<Store>,
     synthesized: [AtomicU64; 4],
 }
 
-/// The key of a zone in a view, on the stack.
-fn zone_key<'a>(view: Option<ViewId>, apex: &[u8], buf: &'a mut [u8; ZONE_KEY_MAX]) -> &'a [u8] {
-    let mut at = 1;
-    match view {
-        Some(view) => {
-            buf[0] = 1;
-            buf[1..17].copy_from_slice(view.uuid().as_bytes());
-            at = 17;
+/// The key of a zone on a path, on the stack: a tag and an id for the view, the same for
+/// the route, then the apex.
+fn zone_key<'a>(scope: DenialScope, apex: &[u8], buf: &'a mut [u8; ZONE_KEY_MAX]) -> &'a [u8] {
+    let mut at = 0;
+    let mut tagged = |tag: u8, id: Option<[u8; 16]>| {
+        buf[at] = tag;
+        at += 1;
+        if let Some(id) = id {
+            buf[at..at + 16].copy_from_slice(&id);
+            at += 16;
         }
-        None => buf[0] = 0,
+    };
+    match scope.view {
+        Some(view) => tagged(1, Some(*view.uuid().as_bytes())),
+        None => tagged(0, None),
+    }
+    match scope.route {
+        DenialRoute::Default => tagged(0, None),
+        DenialRoute::Rule(rule) => tagged(1, Some(*rule.uuid().as_bytes())),
+        DenialRoute::Stub(zone) => tagged(2, Some(*zone.uuid().as_bytes())),
     }
     let len = apex.len().min(order::NAME_MAX);
     buf[at..at + len].copy_from_slice(&apex[..len]);
@@ -131,8 +145,11 @@ fn zone_key<'a>(view: Option<ViewId>, apex: &[u8], buf: &'a mut [u8; ZONE_KEY_MA
 
 /// The apex in a zone key.
 fn apex_of(key: &[u8]) -> &[u8] {
-    let at = if key.first() == Some(&1) { 17 } else { 1 };
-    key.get(at..).unwrap_or_default()
+    let skip = |at: usize| match key.get(at) {
+        Some(0) => at + 1,
+        _ => at + 17,
+    };
+    key.get(skip(skip(0))..).unwrap_or_default()
 }
 
 /// Whether the type is never synthesized: DS (the parent's), ANY, the DNSSEC types and the
@@ -216,6 +233,10 @@ impl Denials {
     /// An empty cache.
     pub fn new(settings: DenialSettings) -> Self {
         Self {
+            nsec3_work: crate::validate::nsec3::step_work(&ValidationCaps {
+                nsec3_insecure_above: settings.nsec3_iterations,
+                ..ValidationCaps::DEFAULT
+            }),
             settings: DenialSettings {
                 entries: settings.entries.max(1),
                 ..settings
@@ -259,7 +280,7 @@ impl Denials {
         let mut store = self.store.write().unwrap_or_else(PoisonError::into_inner);
         let mut removed = 0;
         store.zones.retain(|_, zone| {
-            removed += zone.retain(|_, expires, _| expires > now);
+            removed += zone.retain(|_, expires, _, _| expires > now);
             if zone.soa.as_ref().is_some_and(|soa| !soa.fresh(now)) {
                 zone.soa = None;
             }
@@ -499,7 +520,10 @@ impl Denials {
         }
     }
 
-    /// Bounds the store: past the bound the least recently used sixteenth goes.
+    /// Bounds the store: past the bound the least recently used sixteenth of the records
+    /// goes, an item weighed by the records it counts for (a delegation by its NS and
+    /// address records), so that one trim never takes more than that sixteenth and one
+    /// item.
     fn trim(&self, store: &mut Store) {
         let bound = self.settings.entries;
         if store.records <= bound {
@@ -520,9 +544,9 @@ impl Denials {
         let mut left = drop;
         let mut removed = 0;
         store.zones.retain(|_, zone| {
-            removed += zone.retain(|_, _, used| {
+            removed += zone.retain(|_, _, used, records| {
                 if left > 0 && used <= cut {
-                    left -= 1;
+                    left = left.saturating_sub(records);
                     false
                 } else {
                     true
@@ -548,7 +572,7 @@ impl Denials {
     )]
     pub fn answer_carrying(
         &self,
-        view: Option<ViewId>,
+        scope: DenialScope,
         qname: &[u8],
         qtype: u16,
         client: &Client<'_>,
@@ -569,9 +593,9 @@ impl Denials {
         let zone = (0..=labels).find_map(|skip| {
             store
                 .zones
-                .get(zone_key(view, name::suffix(qname, skip), &mut buf))
+                .get(zone_key(scope, name::suffix(qname, skip), &mut buf))
         })?;
-        let mut synth = zone.lookup(qname, qtype, now)?;
+        let mut synth = zone.lookup(qname, qtype, now, self.nsec3_work)?;
         if carry {
             let negative = synth.answer.is_none();
             match zone
@@ -613,7 +637,7 @@ impl Denials {
     /// resolver's answers in the zone carry none of it (see [`Zone::above_until`]).
     pub fn insert_carried(
         &self,
-        view: Option<ViewId>,
+        scope: DenialScope,
         answer: &[u8],
         verdict: &Verdict,
         origin: Origin,
@@ -653,7 +677,7 @@ impl Denials {
             .min()
             .map_or(now, |ttl| now.saturating_add(ttl));
         let mut buf = [0u8; ZONE_KEY_MAX];
-        let key: Box<[u8]> = zone_key(view, &apex, &mut buf).into();
+        let key: Box<[u8]> = zone_key(scope, &apex, &mut buf).into();
         let mut guard = self.store.write().unwrap_or_else(PoisonError::into_inner);
         let store = &mut *guard;
         let entry = store
@@ -727,25 +751,25 @@ impl Denials {
 impl DenialCache for Denials {
     fn answer(
         &self,
-        view: Option<ViewId>,
+        scope: DenialScope,
         qname: &[u8],
         qtype: u16,
         client: &Client<'_>,
         now: Instant,
         out: &mut Vec<u8>,
     ) -> Option<DenialHit> {
-        self.answer_carrying(view, qname, qtype, client, now, out, false)
+        self.answer_carrying(scope, qname, qtype, client, now, out, false)
     }
 
     fn insert(
         &self,
-        view: Option<ViewId>,
+        scope: DenialScope,
         answer: &[u8],
         verdict: &Verdict,
         origin: Origin,
         now: Instant,
     ) -> bool {
-        self.insert_carried(view, answer, verdict, origin, now, false)
+        self.insert_carried(scope, answer, verdict, origin, now, false)
     }
 
     fn flush(&self, suffix: Option<&[u8]>) -> usize {
@@ -761,7 +785,7 @@ impl DenialCache for Denials {
                 removed += zone.count();
                 return false;
             }
-            removed += zone.retain(|owner, _, _| !name::is_within(owner, suffix));
+            removed += zone.retain(|owner, _, _, _| !name::is_within(owner, suffix));
             zone.count() > 0
         });
         store.records = store.records.saturating_sub(removed);
