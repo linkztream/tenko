@@ -50,8 +50,9 @@ fn config() -> SupervisorConfig {
     }
 }
 
-/// Waits until the status satisfies `done`, at most `within`.
-async fn wait_for(
+/// Waits until the status satisfies `done`, at most `within`. It follows every change of the
+/// watch channel instead of polling it, so a short-lived state (a backoff) is not missed.
+async fn wait_for_status(
     status: &mut watch::Receiver<SupervisorStatus>,
     within: Duration,
     done: impl Fn(&SupervisorStatus) -> bool,
@@ -104,14 +105,14 @@ async fn a_supervised_plugin_runs_and_stops() {
 async fn a_crashing_plugin_is_restarted_until_the_circuit_opens() {
     let handle = SupervisorHandle::spawn(spec("crash-after-start"), config());
     let mut status = handle.subscribe();
-    let running = wait_for(
+    let running = wait_for_status(
         &mut status,
         Duration::from_secs(10),
         SupervisorStatus::is_running,
     )
     .await;
     assert_eq!(running.restarts, 0);
-    let backoff = wait_for(&mut status, Duration::from_secs(10), |s| {
+    let backoff = wait_for_status(&mut status, Duration::from_secs(10), |s| {
         matches!(s.state, ProcessState::Backoff { .. })
     })
     .await;
@@ -119,19 +120,19 @@ async fn a_crashing_plugin_is_restarted_until_the_circuit_opens() {
         backoff.last_error.as_ref().map(|e| e.code.as_ref()),
         Some("connect.plugin.exited")
     );
-    let restarted = wait_for(&mut status, Duration::from_secs(10), |s| {
+    let restarted = wait_for_status(&mut status, Duration::from_secs(10), |s| {
         s.is_running() && s.restarts >= 1
     })
     .await;
     assert!(restarted.restarts >= 1);
-    let open = wait_for(&mut status, Duration::from_secs(20), |s| {
+    let open = wait_for_status(&mut status, Duration::from_secs(20), |s| {
         matches!(s.state, ProcessState::CircuitOpen { .. })
     })
     .await;
     assert!(open.consecutive_failures >= 3, "{open:?}");
     // A requested restart closes the circuit and starts at once.
     handle.restart().await;
-    wait_for(
+    wait_for_status(
         &mut status,
         Duration::from_secs(10),
         SupervisorStatus::is_running,
@@ -153,14 +154,14 @@ async fn a_plugin_that_stops_answering_is_killed_and_restarted() {
         )
         .await;
     assert!(frozen.is_err(), "{frozen:?}");
-    let failed = wait_for(&mut status, Duration::from_secs(10), |s| {
+    let failed = wait_for_status(&mut status, Duration::from_secs(10), |s| {
         s.last_error
             .as_ref()
             .is_some_and(|e| e.code == "connect.plugin.unresponsive")
     })
     .await;
     assert!(failed.last_error.is_some());
-    let restarted = wait_for(&mut status, Duration::from_secs(10), |s| {
+    let restarted = wait_for_status(&mut status, Duration::from_secs(10), |s| {
         s.is_running() && s.restarts >= 1
     })
     .await;
@@ -172,7 +173,7 @@ async fn a_plugin_that_stops_answering_is_killed_and_restarted() {
 async fn a_plugin_that_cannot_start_fails_without_restarts() {
     let handle = SupervisorHandle::spawn(spec("protocol-2"), config());
     let mut status = handle.subscribe();
-    let failed = wait_for(&mut status, Duration::from_secs(10), |s| {
+    let failed = wait_for_status(&mut status, Duration::from_secs(10), |s| {
         s.state == ProcessState::Failed
     })
     .await;
@@ -194,7 +195,7 @@ async fn a_plugin_that_cannot_start_fails_without_restarts() {
 async fn a_requested_restart_replaces_the_process() {
     let handle = SupervisorHandle::spawn(spec("normal"), config());
     let mut status = handle.subscribe();
-    let first = wait_for(
+    let first = wait_for_status(
         &mut status,
         Duration::from_secs(10),
         SupervisorStatus::is_running,
@@ -204,7 +205,7 @@ async fn a_requested_restart_replaces_the_process() {
         unreachable!()
     };
     handle.restart().await;
-    let second = wait_for(
+    let second = wait_for_status(
         &mut status,
         Duration::from_secs(10),
         |s| matches!(s.state, ProcessState::Running { pid, .. } if pid != first_pid),

@@ -30,6 +30,7 @@ use tenko_connect::{
 use tenko_core::{
     AuthStrength, CodedError, ConnectorId, JobId, Principal, RequestCtx, SessionId, UserId,
     audit::AuditRecord, observe::Observed, principal::SystemComponent, secret::SecretRef,
+    testing::wait_until_async,
 };
 use tenko_jobs::{EngineConfig, JobEngine, JobState};
 use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadViewExt, Store};
@@ -187,25 +188,23 @@ async fn audit(store: &MemStore) -> Vec<AuditRecord> {
 }
 
 async fn wait_running(host: &ConnectorHost, id: ConnectorId) {
-    for _ in 0..100 {
-        let view = host.get(id, None).await.expect("view");
-        if view.health.process.is_running() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    panic!("connector {id} did not start");
+    wait_until_async(&format!("connector {id} to start"), async || {
+        host.get(id, None)
+            .await
+            .expect("view")
+            .health
+            .process
+            .is_running()
+    })
+    .await;
 }
 
 async fn wait_job(engine: &JobEngine, id: JobId) -> tenko_jobs::Job {
-    for _ in 0..200 {
+    wait_until_async(&format!("job {id} to finish"), async || {
         let job = engine.job(id).await.expect("job");
-        if job.state.is_terminal() {
-            return job;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    panic!("job {id} did not finish");
+        job.state.is_terminal().then_some(job)
+    })
+    .await
 }
 
 #[tokio::test]
@@ -459,16 +458,6 @@ fn take_office(host: &Arc<ConnectorHost>, epoch: u64) -> CancellationToken {
     stop
 }
 
-async fn wait_for(mut done: impl FnMut() -> bool) {
-    for _ in 0..100 {
-        if done() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("the condition did not hold in time");
-}
-
 #[tokio::test]
 async fn the_schedule_reads_running_instances() {
     let fx = fixture("normal", true);
@@ -481,36 +470,24 @@ async fn the_schedule_reads_running_instances() {
         .await
         .expect("create");
     let id = view.instance.id;
-    let mut run = None;
-    for _ in 0..100 {
-        run = fx.host.get(id, None).await.expect("view").last_run;
-        if run.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    let run = run.expect("a scheduled run");
+    let run = wait_until_async("a scheduled run", async || {
+        fx.host.get(id, None).await.expect("view").last_run
+    })
+    .await;
     assert_eq!(run.trigger, RunTrigger::Schedule);
     assert_eq!(run.outcome, RunOutcome::Succeeded);
     assert_eq!(run.observations, 6);
     // The remote check ran too.
-    let mut checked = false;
-    for _ in 0..50 {
-        if fx
-            .host
+    wait_until_async("the remote check", async || {
+        fx.host
             .get(id, None)
             .await
             .expect("view")
             .health
             .remote
             .is_some()
-        {
-            checked = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(checked);
+    })
+    .await;
     office.cancel();
     stop_tx.send(true).expect("stop");
     tokio::time::timeout(Duration::from_secs(10), task)
@@ -680,21 +657,16 @@ async fn only_the_controller_that_holds_connect_poll_polls() {
 
     // Taking office: the run that fell due while following starts at once.
     let office = take_office(&fx.host, 0);
-    let mut run = None;
-    for _ in 0..100 {
-        run = fx.host.get(id, None).await.expect("view").last_run;
-        if run.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let run = run.expect("the leader polls");
+    let run = wait_until_async("the leader polls", async || {
+        fx.host.get(id, None).await.expect("view").last_run
+    })
+    .await;
     assert_eq!(run.trigger, RunTrigger::Schedule);
     assert_eq!(run.outcome, RunOutcome::Succeeded);
 
     // Leaving office stops the schedule.
     office.cancel();
-    wait_for(|| !fx.host.polls()).await;
+    wait_until_async("the schedule to stop", async || !fx.host.polls()).await;
 
     // A deposed leader's term (an epoch the store has moved past) reads but records nothing.
     let polled = fx.sink.batches.lock().expect("lock").len();
@@ -707,7 +679,10 @@ async fn only_the_controller_that_holds_connect_poll_polls() {
         .id;
     wait_running(&fx.host, late).await;
     let stale = take_office(&fx.host, 7);
-    wait_for(|| fx.sink.batches.lock().expect("lock").len() > polled).await;
+    wait_until_async("the stale term to poll", async || {
+        fx.sink.batches.lock().expect("lock").len() > polled
+    })
+    .await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(
         fx.host
@@ -718,7 +693,7 @@ async fn only_the_controller_that_holds_connect_poll_polls() {
             .is_none()
     );
     stale.cancel();
-    wait_for(|| !fx.host.polls()).await;
+    wait_until_async("the stale term to stop", async || !fx.host.polls()).await;
     stop_tx.send(true).expect("stop");
     tokio::time::timeout(Duration::from_secs(10), task)
         .await
@@ -787,20 +762,15 @@ async fn the_lab_profile_accepts_tls_insecure_and_a_profile_change_degrades_the_
 
     // The profile changes while the instance is stored: no call, no check, no poll.
     lab.send(false).expect("profile");
-    let mut degraded = None;
-    for _ in 0..100 {
+    let health = wait_until_async("the instance is degraded with the refusal", async || {
         let health = fx.host.get(id, None).await.expect("view").health;
-        if health
+        health
             .remote_error
             .as_ref()
             .is_some_and(|error| error.code == INSECURE_REFUSED)
-        {
-            degraded = Some(health);
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let health = degraded.expect("the instance is degraded with the refusal");
+            .then_some(health)
+    })
+    .await;
     assert_eq!(health.remote.expect("report").health, Health::Degraded);
     let office = take_office(&fx.host, 0);
     tokio::time::sleep(Duration::from_millis(1500)).await;

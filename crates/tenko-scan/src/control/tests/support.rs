@@ -2,7 +2,7 @@
 //! the test support, with probes that the tests play by hand. Test data stays in the
 //! documentation ranges.
 
-use std::{net::IpAddr, sync::Arc, time::Duration};
+use std::{net::IpAddr, sync::Arc};
 
 use tenko_cluster::{
     model::{CertificateRef, NodeRecord, ProtocolState, tables::NODES},
@@ -17,12 +17,10 @@ use tenko_core::{
     audit::AuditRecord,
     observe::{ObservationSource, Observed, ProbeMethod},
     secret::SecretRef,
+    testing::wait_until_async,
 };
 use tenko_ipam::observe::{FactSubject, ObservedFact, source_key, tables::FACTS};
-use tenko_jobs::{
-    RunnerHandle,
-    testing::{TestEngine, within},
-};
+use tenko_jobs::{RunnerHandle, testing::TestEngine};
 use tenko_store::{ReadConsistency, ReadView, ReadViewExt, Store, WriteBatch};
 use tenko_vault::{
     MemVault, SecretBytes, SecretPurpose, SecretSpec, Vault, operator::OPERATOR_PURPOSE,
@@ -323,14 +321,9 @@ impl Rig {
 
     /// Polls the run until `pred` holds.
     pub(super) async fn wait_run(&self, id: Uuid, pred: impl Fn(&ScanView) -> bool) -> ScanView {
-        within(async {
-            loop {
-                let view = self.control.scan(id).await.expect("the run");
-                if pred(&view) {
-                    return view;
-                }
-                tokio::time::sleep(Duration::from_millis(2)).await;
-            }
+        wait_until_async("the run reaches the state", async || {
+            let view = self.control.scan(id).await.expect("the run");
+            pred(&view).then_some(view)
         })
         .await
     }

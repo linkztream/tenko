@@ -24,7 +24,7 @@ use tenko_connect::{
 };
 use tenko_core::{
     AuthStrength, ConnectorId, JobId, Principal, RequestCtx, SessionId, Timestamp, UserId,
-    audit::AuditRecord,
+    audit::AuditRecord, testing::wait_until_async,
 };
 use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadViewExt, Store, WriteBatch};
 use tokio::sync::watch;
@@ -109,21 +109,17 @@ async fn switch(fx: &Fixture, settings: serde_json::Value, writes: bool) -> Conn
         .await
         .expect("create");
     let id = view.instance.id;
-    for _ in 0..100 {
-        if fx
-            .host
+    wait_until_async("the sample switch to start", async || {
+        fx.host
             .get(id, None)
             .await
             .expect("view")
             .health
             .process
             .is_running()
-        {
-            return id;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    panic!("the sample switch did not start");
+    })
+    .await;
+    id
 }
 
 fn device() -> DeviceRef {
@@ -161,16 +157,6 @@ async fn audit(store: &MemStore, action: &str) -> Vec<AuditRecord> {
     .map(|(_, record, _)| record)
     .filter(|record: &AuditRecord| record.draft.action.as_str() == action)
     .collect()
-}
-
-async fn until(what: &str, mut check: impl AsyncFnMut() -> bool) {
-    for _ in 0..150 {
-        if check().await {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    panic!("timed out waiting for {what}");
 }
 
 #[tokio::test]
@@ -219,7 +205,7 @@ async fn the_port_comes_up_although_the_caller_went_away() {
     );
     assert_eq!(enabled(&fx, id, 8).await, Some(false), "the port is down");
     assert_eq!(records(&fx.store).await.len(), 1, "the record is pending");
-    until("the port to come up", async || {
+    wait_until_async("the port to come up", async || {
         enabled(&fx, id, 8).await == Some(true) && records(&fx.store).await.is_empty()
     })
     .await;
@@ -260,7 +246,7 @@ async fn a_port_that_does_not_come_up_is_stuck_until_the_host_brings_it_up() {
         .update(&admin(), id, patch, None)
         .await
         .expect("update");
-    until("the stuck port to come up", async || {
+    wait_until_async("the stuck port to come up", async || {
         records(&fx.store).await.is_empty()
     })
     .await;
@@ -303,7 +289,7 @@ async fn a_record_left_by_a_previous_process_is_re_enabled_at_the_start() {
 
     let (_stop_tx, stop) = watch::channel(false);
     let _task = fx.host.start(stop);
-    until("the start to bring the port up", async || {
+    wait_until_async("the start to bring the port up", async || {
         records(&fx.store).await.is_empty()
     })
     .await;

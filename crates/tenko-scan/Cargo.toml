@@ -50,6 +50,7 @@ tenko-store = { workspace = true, features = ["testing"] }
 tenko-vault = { workspace = true, features = ["testing"] }
 proptest = { workspace = true }
 tempfile = { workspace = true }
+tenko-core = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

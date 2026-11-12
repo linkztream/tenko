@@ -22,7 +22,10 @@ use std::{
     time::Duration,
 };
 
-use tenko_core::{JobId, NodeId, RequestCtx, SystemComponent, cluster::LEADER_EPOCH};
+use tenko_core::{
+    JobId, NodeId, RequestCtx, SystemComponent, cluster::LEADER_EPOCH,
+    testing::wait_until_async_within,
+};
 use tenko_jobs::{
     EngineConfig, GroupKey, Job, JobEngine, JobQuery, JobState, RunnerExit, StepContext, StepError,
     StepHandler, StepKind, StepOutcome, StepPreview, StepState,
@@ -83,34 +86,28 @@ async fn take_office(member: &RaftStore) -> u64 {
 
 /// Polls until the job is in `state` on this engine's member and returns it.
 async fn wait_for_state(engine: &JobEngine, id: JobId, state: JobState) -> Job {
-    within(&format!("job {id} in {state:?}"), async {
-        loop {
-            let job = engine.job(id).await.expect("read the job");
-            if job.state == state {
-                return job;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
+    wait_until_async_within(&format!("job {id} in {state:?}"), LIMIT, async || {
+        let job = engine.job(id).await.expect("read the job");
+        (job.state == state).then_some(job)
     })
     .await
 }
 
 /// Polls until `count` jobs are in `state`.
 async fn wait_for_count(engine: &JobEngine, state: JobState, count: usize) {
-    within(&format!("{count} jobs in {state:?}"), async {
-        loop {
-            let page = engine
-                .list(&JobQuery {
-                    states: vec![state],
-                    limit: 1_000,
-                    ..JobQuery::default()
-                })
-                .await
-                .expect("list the jobs");
-            if page.items.len() >= count {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+    wait_until_async_within(&format!("{count} jobs in {state:?}"), LIMIT, async || {
+        let page = engine
+            .list(&JobQuery {
+                states: vec![state],
+                limit: 1_000,
+                ..JobQuery::default()
+            })
+            .await
+            .expect("list the jobs");
+        if page.items.len() >= count {
+            Ok(())
+        } else {
+            Err(format!("{} jobs", page.items.len()))
         }
     })
     .await;

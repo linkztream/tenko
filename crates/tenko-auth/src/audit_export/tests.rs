@@ -7,6 +7,7 @@ use tenko_core::{
     AuditSeq, Principal, SystemComponent, Timestamp,
     audit::{AuditAction, AuditDraft, AuditRecord},
     cluster::{LEADER_EPOCH, LeaderService},
+    testing::wait_until_async,
 };
 use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadViewExt, Store, WriteBatch, tables};
 use tokio::{io::AsyncReadExt, net::TcpListener, sync::mpsc, task::JoinHandle};
@@ -240,20 +241,6 @@ async fn cursor(store: &MemStore, sink: Uuid) -> Option<ExportCursor> {
         .map(|(cursor, _)| cursor)
 }
 
-async fn eventually<F, Fut>(what: &str, mut check: F)
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = bool>,
-{
-    for _ in 0..400 {
-        if check().await {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    panic!("timed out waiting for {what}");
-}
-
 #[tokio::test]
 async fn records_reach_a_tcp_receiver_with_checkpoints_and_the_cursor_follows() {
     let store = Arc::new(MemStore::default());
@@ -283,7 +270,7 @@ async fn records_reach_a_tcp_receiver_with_checkpoints_and_the_cursor_follows() 
     assert!(report.checkpoints >= 3, "{report:?}");
     assert!(report.head.seq.0 >= 13);
 
-    eventually("the cursor", || async {
+    wait_until_async("the cursor", async || {
         cursor(&store, sink.id)
             .await
             .is_some_and(|cursor| cursor.delivered.seq.0 >= 13)
@@ -387,7 +374,7 @@ async fn files_in_every_format_and_the_json_file_verifies_offline() {
     let epoch = bump_epoch(&store).await;
     let (stop, task) = start(&store, Some(dir.path()), epoch);
     for sink in [&json_sink, &syslog_sink, &cef_sink] {
-        eventually("every record in every file", || async {
+        wait_until_async("every record in every file", async || {
             cursor(&store, sink.id)
                 .await
                 .is_some_and(|cursor| cursor.delivered.seq.0 >= 12)
@@ -467,7 +454,7 @@ async fn a_rotated_file_starts_with_a_checkpoint_and_verifies_alone() {
     }
     let epoch = bump_epoch(&store).await;
     let (stop, task) = start(&store, Some(dir.path()), epoch);
-    eventually("the export", || async {
+    wait_until_async("the export", async || {
         cursor(&store, sink.id)
             .await
             .is_some_and(|cursor| cursor.delivered.seq.0 >= 120)
@@ -511,7 +498,7 @@ async fn a_sink_that_is_down_raises_the_alarm_and_catches_up_without_gaps() {
     let epoch = bump_epoch(&store).await;
     let (stop, task) = start(&store, None, epoch);
 
-    eventually("the alarm", || async {
+    wait_until_async("the alarm", async || {
         cursor(&store, sink.id)
             .await
             .is_some_and(|cursor| cursor.alarmed)
@@ -539,7 +526,7 @@ async fn a_sink_that_is_down_raises_the_alarm_and_catches_up_without_gaps() {
 
     let listener = TcpListener::bind(address).await.expect("rebinds");
     let (mut rx, _receiver) = receiver(listener);
-    eventually("the recovery", || async {
+    wait_until_async("the recovery", async || {
         cursor(&store, sink.id)
             .await
             .is_some_and(|cursor| cursor.failing_since.is_none() && !cursor.alarmed)
@@ -617,7 +604,7 @@ async fn a_settings_change_restarts_the_sinks_and_a_disabled_sink_rests() {
     .await;
     let epoch = bump_epoch(&store).await;
     let (stop, task) = start(&store, Some(dir.path()), epoch);
-    eventually("the first export", || async {
+    wait_until_async("the first export", async || {
         cursor(&store, sink.id)
             .await
             .is_some_and(|cursor| cursor.delivered.seq.0 >= 3)
@@ -638,7 +625,7 @@ async fn a_settings_change_restarts_the_sinks_and_a_disabled_sink_rests() {
         .expect("encodes");
     store.propose(batch).await.expect("commits");
     write_records(&store, 2).await;
-    eventually("the new sink", || async {
+    wait_until_async("the new sink", async || {
         cursor(&store, added.id)
             .await
             .is_some_and(|cursor| cursor.delivered.seq.0 >= 5)
@@ -646,7 +633,7 @@ async fn a_settings_change_restarts_the_sinks_and_a_disabled_sink_rests() {
     .await;
     let rested = cursor(&store, sink.id).await.expect("cursor");
     write_records(&store, 2).await;
-    eventually("the new sink again", || async {
+    wait_until_async("the new sink again", async || {
         cursor(&store, added.id)
             .await
             .is_some_and(|cursor| cursor.delivered.seq.0 >= 7)
@@ -814,15 +801,11 @@ async fn a_system_secret_as_client_key_fails_the_sink_without_a_read() {
     let token = stop.clone();
     let task = tokio::spawn(async move { exporter.run(epoch, token).await });
     let id = sink.id;
-    let watched = Arc::clone(&store);
-    eventually("the sink fails on its key", move || {
-        let store = Arc::clone(&watched);
-        async move {
-            cursor(&store, id)
-                .await
-                .and_then(|cursor| cursor.last_error)
-                .is_some_and(|error| error.code == "audit.export.client_key")
-        }
+    wait_until_async("the sink fails on its key", async || {
+        cursor(&store, id)
+            .await
+            .and_then(|cursor| cursor.last_error)
+            .is_some_and(|error| error.code == "audit.export.client_key")
     })
     .await;
     stop.cancel();

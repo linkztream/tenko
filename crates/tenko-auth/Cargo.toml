@@ -55,6 +55,7 @@ zeroize = { workspace = true }
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }
 tempfile = { workspace = true }
 tenko-auth = { path = ".", features = ["testing"] }
+tenko-core = { workspace = true, features = ["testing"] }
 # The production store, for the scope matrix that runs against both stores.
 tenko-store = { workspace = true, features = ["raft", "testing"] }
 tokio = { workspace = true }

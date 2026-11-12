@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use tenko_core::testing::wait_until_async_within;
 use tenko_jobs::{
     EngineConfig, GroupKey, JobQuery, JobState, StepContext, StepError, StepHandler, StepKind,
     StepOutcome, StepPreview,
@@ -92,27 +93,27 @@ async fn a_group_limit_of_ten_holds_across_a_thousand_jobs() {
         ids.push(t.engine.submit(job, &t.ctx()).await.expect("submit"));
     }
     let _runner = t.engine.start().expect("runner");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
-    loop {
-        let page = t
-            .engine
-            .list(&JobQuery {
-                states: vec![JobState::Succeeded],
-                limit: 1_000,
-                ..JobQuery::default()
-            })
-            .await
-            .expect("list");
-        if page.items.len() == 1_000 {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "only {} of 1,000 jobs finished",
-            page.items.len()
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    wait_until_async_within(
+        "all 1,000 jobs to finish",
+        Duration::from_secs(120),
+        async || {
+            let page = t
+                .engine
+                .list(&JobQuery {
+                    states: vec![JobState::Succeeded],
+                    limit: 1_000,
+                    ..JobQuery::default()
+                })
+                .await
+                .expect("list");
+            if page.items.len() == 1_000 {
+                Ok(())
+            } else {
+                Err(format!("only {} finished", page.items.len()))
+            }
+        },
+    )
+    .await;
     assert_eq!(slow.done.load(Ordering::SeqCst), 2_000);
     let max = slow.max.load(Ordering::SeqCst);
     assert!(max <= 10, "{max} steps of one group ran at once");

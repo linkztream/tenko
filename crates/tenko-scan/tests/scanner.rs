@@ -13,7 +13,7 @@ use std::{
 
 use async_trait::async_trait;
 use tenko_cluster::probe::{ProbeBatch, SightingSubject};
-use tenko_core::observe::ProbeMethod;
+use tenko_core::{observe::ProbeMethod, testing::wait_until_async};
 use tenko_scan::{
     ScanError,
     capability::{Capabilities, IcmpSupport},
@@ -160,17 +160,6 @@ fn rig(config: ScanConfig, methods: Vec<Arc<dyn Method>>, timing: Timing) -> Rig
     }
 }
 
-/// Waits until `check` holds, at most five seconds.
-async fn until(what: &str, check: impl Fn() -> bool) {
-    for _ in 0..500 {
-        if check() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("timed out waiting for {what}");
-}
-
 fn batches_of(sink: &MemorySink, method: ProbeMethod) -> Vec<ProbeBatch> {
     sink.batches()
         .into_iter()
@@ -194,7 +183,7 @@ async fn scheduled_runs_hand_complete_batches_that_live_three_intervals() {
     );
     let (stop, stopped) = watch::channel(false);
     let task = tokio::spawn(Arc::clone(&rig.scanner).run(stopped));
-    until("an ARP batch", || {
+    wait_until_async("an ARP batch", async || {
         !batches_of(&rig.sink, ProbeMethod::Arp).is_empty()
     })
     .await;
@@ -210,7 +199,7 @@ async fn scheduled_runs_hand_complete_batches_that_live_three_intervals() {
         "198.51.100.10 is outside the scope"
     );
     assert_eq!(batch.sightings[0].ttl_secs, Some(900));
-    until("the status file", || {
+    wait_until_async("the status file", async || {
         rig.paths
             .read_status()
             .and_then(|status| {
@@ -259,7 +248,7 @@ async fn methods_on_known_addresses_wait_for_the_others() {
     let rig = rig(config(), vec![arp.clone(), tcp.clone()], timing);
     let (stop, stopped) = watch::channel(false);
     let task = tokio::spawn(Arc::clone(&rig.scanner).run(stopped));
-    until("a TCP batch", || {
+    wait_until_async("a TCP batch", async || {
         !batches_of(&rig.sink, ProbeMethod::TcpConnect).is_empty()
     })
     .await;
@@ -337,13 +326,13 @@ async fn the_kill_switch_stops_a_running_scan_and_holds_the_next() {
     );
     let (stop, stopped) = watch::channel(false);
     let task = tokio::spawn(Arc::clone(&rig.scanner).run(stopped));
-    until("the sweep to start", || icmp.runs() == 1).await;
+    wait_until_async("the sweep to start", async || icmp.runs() == 1).await;
     rig.paths.kill("test").expect("kill");
-    until("the partial batch", || !rig.sink.batches().is_empty()).await;
+    wait_until_async("the partial batch", async || !rig.sink.batches().is_empty()).await;
     let batch = rig.sink.batches().remove(0);
     assert!(!batch.complete, "a stopped run is not complete");
     assert_eq!(batch.sightings.len(), 1, "what it saw before the stop");
-    until("the stopped state", || {
+    wait_until_async("the stopped state", async || {
         rig.paths
             .read_status()
             .and_then(|status| status.method(MethodKind::Icmp).map(|m| m.state))
@@ -365,7 +354,7 @@ async fn the_kill_switch_stops_a_running_scan_and_holds_the_next() {
     assert_eq!(refused.code(), "scan.stopped");
     assert_eq!(icmp.runs(), 1);
     rig.paths.resume().expect("resume");
-    until("the next sweep", || icmp.runs() == 2).await;
+    wait_until_async("the next sweep", async || icmp.runs() == 2).await;
     stop.send(true).expect("stop");
     tokio::time::timeout(Duration::from_secs(10), task)
         .await
@@ -395,8 +384,8 @@ async fn blackout_windows_hold_every_method_that_sends_packets() {
     );
     let (stop, stopped) = watch::channel(false);
     let task = tokio::spawn(Arc::clone(&rig.scanner).run(stopped));
-    until("the ARP table read", || arp.runs() == 1).await;
-    until("the blackout state", || {
+    wait_until_async("the ARP table read", async || arp.runs() == 1).await;
+    wait_until_async("the blackout state", async || {
         rig.paths
             .read_status()
             .and_then(|status| status.method(MethodKind::Icmp).map(|m| m.state))
@@ -570,22 +559,19 @@ async fn the_kill_switch_file_stops_an_on_demand_run_without_a_scheduler() {
         Timing::immediate(Duration::from_millis(10)),
     )
     .expect("scanner");
-    let killer = {
-        let paths = paths.clone();
-        let slow = Arc::clone(&slow);
-        tokio::spawn(async move {
-            until("the run to start", || slow.runs() == 1).await;
-            paths.kill("test").expect("kill");
-        })
+    let killer = async {
+        wait_until_async("the run to start", async || slow.runs() == 1).await;
+        paths.kill("test").expect("kill");
     };
-    let record = tokio::time::timeout(
-        Duration::from_secs(10),
-        scanner.run_now(MethodKind::Arp, &RunRequest::default()),
-    )
-    .await
-    .expect("the run stops")
-    .expect("run");
-    killer.await.expect("killer");
+    let request = RunRequest::default();
+    let (record, ()) = tokio::join!(
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            scanner.run_now(MethodKind::Arp, &request),
+        ),
+        killer
+    );
+    let record = record.expect("the run stops").expect("run");
     assert_eq!(record.outcome, RunOutcome::Canceled);
     assert_eq!(record.error.as_deref(), Some("stopped by the kill switch"));
     assert!(record.queued, "what it saw went out, not complete");

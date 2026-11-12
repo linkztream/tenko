@@ -29,6 +29,7 @@ utoipa = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+tenko-core = { workspace = true, features = ["testing"] }
 # The in-process cluster of Raft stores for the leader-only runner tests.
 tenko-store = { workspace = true, features = ["raft", "testing"] }
 # Enables the test support for this package's own integration tests.
