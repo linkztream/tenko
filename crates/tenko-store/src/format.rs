@@ -193,7 +193,7 @@ impl fmt::Display for FormatError {
             ),
             Self::InUse(path) => write!(
                 f,
-                "{} is open in another process: stop the server before copying or checking                  its store",
+                "{} is open in another process: stop the server before copying or checking its store",
                 path.display()
             ),
             Self::Store(error) => write!(f, "the store refused the format record: {error}"),

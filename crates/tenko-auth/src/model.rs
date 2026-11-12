@@ -327,7 +327,7 @@ impl PartialSchema for TokenScope {
             ObjectBuilder::new()
                 .schema_type(Type::String)
                 .description(Some(
-                    "A special scope of a scoped token: `metrics`, `audit:read`, or                      `mirror:<id>` (the push of one mirrored source; minted when the                      mirror is created, never requested here)",
+                    "A special scope of a scoped token: `metrics`, `audit:read`, or `mirror:<id>` (the push of one mirrored source; minted when the mirror is created, never requested here)",
                 ))
                 .examples(["metrics", "audit:read"])
                 .build(),

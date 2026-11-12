@@ -3588,7 +3588,7 @@ impl TlsSection {
     fn check_profile(&self, profile: Profile) -> Result<(), ConfigError> {
         if self.accept_external_replacement == Some(true) && profile == Profile::Hardened {
             return Err(ConfigError::invalid(
-                "tls.accept_external_replacement = true is not allowed under the Hardened                  profile: a replaced certificate is loaded at the next restart only (TGL-08)",
+                "tls.accept_external_replacement = true is not allowed under the Hardened profile: a replaced certificate is loaded at the next restart only (TGL-08)",
             ));
         }
         Ok(())

@@ -76,19 +76,19 @@ pub const FORMATS: &[FormatInfo] = &[
     FormatInfo {
         version: 3,
         since: "0.1.0",
-        summary: "the Phase 2 contract format (WP4.0), raised once so that a format 2 binary refuses \n                  a Phase 2 data directory: the dns namespace of tables, audit actions and error \n                  codes, the DNS object kinds and the system component dns; the tables of later \n                  Phase 2 packages are additive; the migration changes no row",
+        summary: "the Phase 2 contract format (WP4.0), raised once so that a format 2 binary refuses a Phase 2 data directory: the dns namespace of tables, audit actions and error codes, the DNS object kinds and the system component dns; the tables of later Phase 2 packages are additive; the migration changes no row",
     },
     // WP7.0
     FormatInfo {
         version: 4,
         since: "0.1.0",
-        summary: "the Phase 3 contract format (WP7.0), raised once so that a format 3 binary refuses \n                  a Phase 3 data directory: the dhcp namespace of tables, audit actions and error \n                  codes, the DHCP object kinds and the system component dhcp; the tables of later \n                  Phase 3 packages are additive; the migration changes no row",
+        summary: "the Phase 3 contract format (WP7.0), raised once so that a format 3 binary refuses a Phase 3 data directory: the dhcp namespace of tables, audit actions and error codes, the DHCP object kinds and the system component dhcp; the tables of later Phase 3 packages are additive; the migration changes no row",
     },
     // WP9.2
     FormatInfo {
         version: 5,
         since: "0.1.0",
-        summary: "the delegation pools of DHCPv6 prefix delegation (WP9.2), raised so that a format 4                   binary refuses a data directory that may hold an IPAM range of the role                   dhcp_pd_pool, which it cannot decode; the migration changes no row",
+        summary: "the delegation pools of DHCPv6 prefix delegation (WP9.2), raised so that a format 4 binary refuses a data directory that may hold an IPAM range of the role dhcp_pd_pool, which it cannot decode; the migration changes no row",
     },
     // WP14.0, WP13.0
     FormatInfo {

@@ -4052,7 +4052,7 @@ export interface paths {
         };
         /**
          * List what a node's DNS cache holds
-         * @description Scope: `dns.read`. Issues the node command `dns.cache.list`: a page of the                    entries of the node's cache in the canonical order of their names, then by                    type and view, with the cursor of the next page; each entry has its name,                    type, view, RCODE, the seconds it stays fresh, the stale flag, its hits and                    the records of a positive answer. `suffix` keeps the names at or below it,                    `view` one view (`default` for the entries asked outside any view). The                    entries reveal the names the clients asked, so the read is recorded in the                    node's commands and audited as `dns.cache.read` with the filters and the                    cursor range. A node without a cache answers an empty page.
+         * @description Scope: `dns.read`. Issues the node command `dns.cache.list`: a page of the entries of the node's cache in the canonical order of their names, then by type and view, with the cursor of the next page; each entry has its name, type, view, RCODE, the seconds it stays fresh, the stale flag, its hits and the records of a positive answer. `suffix` keeps the names at or below it, `view` one view (`default` for the entries asked outside any view). The entries reveal the names the clients asked, so the read is recorded in the node's commands and audited as `dns.cache.read` with the filters and the cursor range. A node without a cache answers an empty page.
          */
         get: operations["list_node_dns_cache"];
         put?: never;
@@ -23802,7 +23802,7 @@ export interface components {
             days: number;
         } | "unlimited";
         /**
-         * @description A special scope of a scoped token: `metrics`, `audit:read`, or                      `mirror:<id>` (the push of one mirrored source; minted when the                      mirror is created, never requested here)
+         * @description A special scope of a scoped token: `metrics`, `audit:read`, or `mirror:<id>` (the push of one mirrored source; minted when the mirror is created, never requested here)
          * @example metrics
          * @example audit:read
          */

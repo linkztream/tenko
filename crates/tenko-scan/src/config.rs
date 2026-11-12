@@ -1172,33 +1172,33 @@ fn validate_device(device: &SnmpDevice, credentials: Credentials) -> Result<(), 
             || device.privacy_password_file.is_some())
     {
         return Err(ScanError::config(format!(
-            "scan.snmp.devices ({at}): a configuration held by the controllers names vault              secrets (auth_secret, privacy_secret), never passwords or password files"
+            "scan.snmp.devices ({at}): a configuration held by the controllers names vault secrets (auth_secret, privacy_secret), never passwords or password files"
         )));
     }
     if device.auth_secret.is_some() && auth_sources > 1 {
         return Err(ScanError::config(format!(
-            "scan.snmp.devices ({at}): auth_secret cannot be combined with auth_password or              auth_password_file"
+            "scan.snmp.devices ({at}): auth_secret cannot be combined with auth_password or auth_password_file"
         )));
     }
     if device.privacy_secret.is_some() && privacy_sources > 1 {
         return Err(ScanError::config(format!(
-            "scan.snmp.devices ({at}): privacy_secret cannot be combined with              privacy_password or privacy_password_file"
+            "scan.snmp.devices ({at}): privacy_secret cannot be combined with privacy_password or privacy_password_file"
         )));
     }
     if device.auth.is_some() && auth_sources == 0 && credentials == Credentials::Local {
         return Err(ScanError::config(format!(
-            "scan.snmp.devices ({at}): auth needs auth_password_file, auth_password or              auth_secret"
+            "scan.snmp.devices ({at}): auth needs auth_password_file, auth_password or auth_secret"
         )));
     }
     if device.privacy.is_some() {
         if device.auth.is_none() {
             return Err(ScanError::config(format!(
-                "scan.snmp.devices ({at}): privacy needs auth (SNMPv3 has no privacy without                  authentication)"
+                "scan.snmp.devices ({at}): privacy needs auth (SNMPv3 has no privacy without authentication)"
             )));
         }
         if privacy_sources == 0 && credentials == Credentials::Local {
             return Err(ScanError::config(format!(
-                "scan.snmp.devices ({at}): privacy needs privacy_password_file,                  privacy_password or privacy_secret"
+                "scan.snmp.devices ({at}): privacy needs privacy_password_file, privacy_password or privacy_secret"
             )));
         }
     }

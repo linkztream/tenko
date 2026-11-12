@@ -624,7 +624,7 @@ impl LocalNode {
             Err(error) => CommandResult {
                 outcome: Outcome::Failed,
                 detail: format!(
-                    "the query log is {} until the node restarts, but its marker file could                      not be changed: {error}",
+                    "the query log is {} until the node restarts, but its marker file could not be changed: {error}",
                     if stopped { "stopped" } else { "started" }
                 ),
                 output: Output::None,

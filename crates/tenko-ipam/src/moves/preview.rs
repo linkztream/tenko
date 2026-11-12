@@ -1360,14 +1360,14 @@ fn nudge_step(
             params.insert("port".to_owned(), port.to_string());
             params.insert("down_secs".to_owned(), down_secs.to_string());
             format!(
-                "Wait up to {wait} s for {who} to come back by itself, then take port {port} of                  {device} down for {down_secs} s through {connector}; Tenko brings it up again,                  and does the same after a rollback"
+                "Wait up to {wait} s for {who} to come back by itself, then take port {port} of {device} down for {down_secs} s through {connector}; Tenko brings it up again, and does the same after a rollback"
             )
         }
         crate::vlan::controllers::NudgeChange::KickClient { mac } => {
             params.insert("action".to_owned(), "kick".to_owned());
             params.insert("mac".to_owned(), mac.to_string());
             format!(
-                "Wait up to {wait} s for {who} to come back by itself, then disconnect it from                  {device} through {connector} so that it reconnects and asks for an address;                  the same after a rollback"
+                "Wait up to {wait} s for {who} to come back by itself, then disconnect it from {device} through {connector} so that it reconnects and asks for an address; the same after a rollback"
             )
         }
     };

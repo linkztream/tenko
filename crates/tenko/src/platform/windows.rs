@@ -767,7 +767,7 @@ fn configure(service: &Service, out: &mut impl Write, err: &mut impl Write) {
         Err(error) => {
             let _ = writeln!(
                 err,
-                "tenko service install: warning: cannot set the failure actions: {}; the \n                 service will not be started again after a failure or an update",
+                "tenko service install: warning: cannot set the failure actions: {}; the service will not be started again after a failure or an update",
                 error_text(&error)
             );
         }
@@ -830,7 +830,7 @@ fn register_event_source(name: &str, out: &mut impl Write, err: &mut impl Write)
     if message_file.is_none() {
         let _ = writeln!(
             err,
-            "tenko service install: warning: the .NET Framework message file is missing;              events are written but the Event Viewer shows them without their text"
+            "tenko service install: warning: the .NET Framework message file is missing; events are written but the Event Viewer shows them without their text"
         );
     }
 }

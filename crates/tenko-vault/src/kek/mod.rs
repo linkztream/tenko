@@ -687,7 +687,7 @@ impl KekConfig {
         match self {
             KekConfig::File { .. } if options.file_dir.is_none() => {
                 Err(VaultError::Unsupported {
-                    what: "rotating a file KEK without a generation directory; set kek.dir,                            or configure a new key file and list the old one under `retired`"
+                    what: "rotating a file KEK without a generation directory; set kek.dir, or configure a new key file and list the old one under `retired`"
                         .to_owned(),
                 })
             }

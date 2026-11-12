@@ -1622,7 +1622,7 @@ async fn start(
                 .map_err(|error| StartError::coded("jobs", &error))?;
             leaders.register(engine.leader_service());
             let summary = format!(
-                "{} workers; the runner of jobs pinned to node {} runs, the job runner of the                  installation runs on the leader",
+                "{} workers; the runner of jobs pinned to node {} runs, the job runner of the installation runs on the leader",
                 config.jobs.workers, resolved.node_id
             );
             Ok((runner, summary))

@@ -117,7 +117,7 @@ pub(super) async fn start(
                     "tls",
                     "start.tls.plain_not_allowed",
                     format!(
-                        "tls.mode = \"plain\" is allowed under the Lab profile only (TGL-08),                          and the stored profile is `{}`; choose another tls.mode",
+                        "tls.mode = \"plain\" is allowed under the Lab profile only (TGL-08), and the stored profile is `{}`; choose another tls.mode",
                         profile.as_str()
                     ),
                 ));

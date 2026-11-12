@@ -249,7 +249,7 @@ impl ListenerInfo {
             warnings.push(warning(
                 "sys.tls.certificate_pending",
                 &format!(
-                    "a newer certificate (valid until {}) is on disk and is not served: this                      security profile does not accept a replaced certificate while the                      listener runs; restart to apply it",
+                    "a newer certificate (valid until {}) is on disk and is not served: this security profile does not accept a replaced certificate while the listener runs; restart to apply it",
                     pending.certificate.not_after
                 ),
                 &[

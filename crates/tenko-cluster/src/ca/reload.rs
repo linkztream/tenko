@@ -331,7 +331,7 @@ impl TlsService {
                 subject = %info.subject,
                 sha256 = %info.sha256,
                 not_after = %info.not_after,
-                "a newer TLS certificate is on disk; replacing a certificate while the                  listener runs is not accepted under this security profile, so it is loaded                  at the next start"
+                "a newer TLS certificate is on disk; replacing a certificate while the listener runs is not accepted under this security profile, so it is loaded at the next start"
             );
         }
         let pending = PendingCertificate {
