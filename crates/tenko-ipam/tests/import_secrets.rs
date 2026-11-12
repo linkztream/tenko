@@ -404,3 +404,42 @@ async fn an_apply_while_a_pin_only_account_may_reveal_is_refused_with_the_accoun
     assert_eq!(params.get("accounts").map(String::as_str), Some("pat"));
     assert_eq!(params.get("required"), None);
 }
+
+/// The credential of a preview row says what the summary says: a re-import of the same
+/// credential is unchanged in both, a changed one is an update in both.
+#[tokio::test]
+async fn a_preview_row_gives_the_credential_the_action_of_the_summary() {
+    use tenko_ipam::import::{reconcile::ItemAction, translate::ItemKey};
+
+    let env = env();
+    let cx = person();
+    import(&env, &cx, FIRST).await;
+    for (text, expected) in [(FIRST, ItemAction::Unchanged), (SECOND, ItemAction::Update)] {
+        let view = env
+            .imports
+            .upload(&cx, vec![csv(text)])
+            .await
+            .expect("upload");
+        let preview = env
+            .imports
+            .preview(&cx, view.id, None, &CredentialGate::Allowed)
+            .await
+            .expect("preview");
+        let in_summary: Vec<_> = preview
+            .summary
+            .counts
+            .iter()
+            .filter(|count| count.kind == "credential")
+            .map(|count| (count.action, count.count))
+            .collect();
+        assert_eq!(in_summary, [(expected, 1)], "{text}");
+        let in_rows: Vec<_> = preview
+            .rows
+            .iter()
+            .flat_map(|row| &row.items)
+            .filter(|item| matches!(item.key, ItemKey::Credential { .. }))
+            .map(|item| item.action)
+            .collect();
+        assert_eq!(in_rows, [expected], "{text}");
+    }
+}

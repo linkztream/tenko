@@ -143,12 +143,14 @@ pub struct ImportOptions {
 }
 
 impl ImportOptions {
-    /// Whether a proposed prefix is accepted.
-    pub fn accepts(&self, cidr: &IpNet) -> bool {
-        self.proposals
-            .iter()
-            .find(|d| &d.cidr == cidr)
-            .is_none_or(|d| d.accept)
+    /// The decisions on proposed prefixes by network (the first decision of a network
+    /// counts), looked up once per proposal; a network without one is accepted.
+    pub fn decisions(&self) -> BTreeMap<IpNet, bool> {
+        let mut decisions = BTreeMap::new();
+        for decision in &self.proposals {
+            decisions.entry(decision.cidr).or_insert(decision.accept);
+        }
+        decisions
     }
 }
 
@@ -294,20 +296,30 @@ pub struct SheetRef<'a> {
 }
 
 /// Unique sheet names across the files of an import: a name that repeats gets ` (2)`,
-/// ` (3)` and so on, in upload order.
+/// ` (3)` and so on, in upload order, skipping every name a sheet of the upload already
+/// has (`A`, `A (2)` and a second `A` give `A`, `A (2)` and `A (3)`).
 pub fn sheet_names(files: &[SourceFile]) -> Vec<String> {
-    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+    let sheets = || files.iter().flat_map(|file| &file.sheets);
+    let own: BTreeSet<&str> = sheets().map(|sheet| sheet.name.as_str()).collect();
+    let mut used: BTreeSet<String> = BTreeSet::new();
+    // The next number to try per repeated name.
+    let mut next: BTreeMap<&str, usize> = BTreeMap::new();
     let mut names = Vec::new();
-    for file in files {
-        for sheet in &file.sheets {
-            let count = seen.entry(sheet.name.clone()).or_default();
-            *count += 1;
-            names.push(if *count == 1 {
-                sheet.name.clone()
-            } else {
-                format!("{} ({count})", sheet.name)
-            });
-        }
+    for sheet in sheets() {
+        let name = if used.contains(&sheet.name) {
+            let n = next.entry(sheet.name.as_str()).or_insert(2);
+            loop {
+                let candidate = format!("{} ({n})", sheet.name);
+                *n += 1;
+                if !own.contains(candidate.as_str()) && !used.contains(&candidate) {
+                    break candidate;
+                }
+            }
+        } else {
+            sheet.name.clone()
+        };
+        used.insert(name.clone());
+        names.push(name);
     }
     names
 }
@@ -383,22 +395,45 @@ pub struct IndexEntries {
     pub networks: Vec<(IpNet, Option<String>, usize)>,
     /// Listed single addresses with description and 0-based row.
     pub hosts: Vec<(IpAddr, Option<String>, usize)>,
+    /// The first position in `networks` of each network, so that every sheet of a large
+    /// upload looks its network up without a scan of the list.
+    network_slots: BTreeMap<IpNet, usize>,
+    /// The first position in `hosts` of each address.
+    host_slots: BTreeMap<IpAddr, usize>,
 }
 
 impl IndexEntries {
-    /// The listed network whose network address is `ip`.
+    fn add_network(&mut self, net: IpNet, description: Option<String>, row: usize) {
+        self.network_slots.entry(net).or_insert(self.networks.len());
+        self.networks.push((net, description, row));
+    }
+
+    fn add_host(&mut self, ip: IpAddr, description: Option<String>, row: usize) {
+        self.host_slots.entry(ip).or_insert(self.hosts.len());
+        self.hosts.push((ip, description, row));
+    }
+
+    /// The first listed network whose network address is `ip`: at most one candidate per
+    /// prefix length.
     pub fn network_at(&self, ip: IpAddr) -> Option<&(IpNet, Option<String>, usize)> {
-        self.networks.iter().find(|(net, _, _)| net.network() == ip)
+        let low = IpNet::new(ip, 0).ok()?;
+        let high = IpNet::from(ip);
+        let slot = self
+            .network_slots
+            .range(low..=high)
+            .map(|(_, &slot)| slot)
+            .min()?;
+        self.networks.get(slot)
     }
 
     /// The listed network equal to `cidr`.
     pub fn network(&self, cidr: &IpNet) -> Option<&(IpNet, Option<String>, usize)> {
-        self.networks.iter().find(|(net, _, _)| net == cidr)
+        self.networks.get(*self.network_slots.get(cidr)?)
     }
 
     /// The listed single address `ip`.
     pub fn host(&self, ip: IpAddr) -> Option<&(IpAddr, Option<String>, usize)> {
-        self.hosts.iter().find(|(addr, _, _)| *addr == ip)
+        self.hosts.get(*self.host_slots.get(&ip)?)
     }
 }
 
@@ -423,9 +458,9 @@ pub fn index_entries(sheet: &Sheet, mapping: &SheetMapping) -> IndexEntries {
             .and_then(|c| sheet.cell(row, c).value())
             .map(str::to_owned);
         if let Some(ip) = shape::parse_address(value) {
-            entries.hosts.push((ip, description, row));
+            entries.add_host(ip, description, row);
         } else if let Some(net) = shape::parse_cidr(value) {
-            entries.networks.push((net.trunc(), description, row));
+            entries.add_network(net.trunc(), description, row);
         }
     }
     entries
@@ -538,9 +573,22 @@ pub fn analyze(files: &[SourceFile]) -> (Vec<SheetAnalysis>, Mapping) {
             interfaces: d.interfaces.clone(),
         })
         .collect();
+    // Sheets of one header layout are one candidate with their number and the first of
+    // them, so a sheet without a header is compared with each distinct layout once.
+    let mut distinct: BTreeMap<&[Target], (usize, usize)> = BTreeMap::new();
+    for (index, layout) in layouts.iter().enumerate() {
+        distinct
+            .entry(layout.targets.as_slice())
+            .and_modify(|(count, _)| *count += 1)
+            .or_insert((1, index));
+    }
+    let distinct: Vec<(&[Target], usize, usize)> = distinct
+        .into_iter()
+        .map(|(targets, (count, first))| (targets, count, first))
+        .collect();
     for (draft, sheet) in drafts.iter_mut().zip(&refs) {
         if draft.header.is_none() && !is_index_name(&draft.name) {
-            draft.borrow_or_infer(sheet.sheet, &layouts);
+            draft.borrow_or_infer(sheet.sheet, &layouts, &distinct);
         }
         if is_index_name(&draft.name) {
             draft.index_columns(sheet.sheet);
@@ -630,30 +678,41 @@ impl Draft {
 
     /// Roles for a sheet without a header: the most common fitting header layout of the
     /// upload, else value shapes.
-    fn borrow_or_infer(&mut self, sheet: &Sheet, layouts: &[Layout]) {
+    /// `distinct` holds each header layout of `layouts` once, with the number of sheets
+    /// that have it and the position of the first of them.
+    fn borrow_or_infer(
+        &mut self,
+        sheet: &Sheet,
+        layouts: &[Layout],
+        distinct: &[(&[Target], usize, usize)],
+    ) {
         let profiles: Vec<ShapeCounts> = (0..self.width).map(|c| profile(sheet, c, 0).0).collect();
-        let mut candidates: BTreeMap<Vec<Target>, (usize, &Layout)> = BTreeMap::new();
-        for layout in layouts {
-            if layout.targets.len() < self.width {
+        // By the targets of this sheet's width: the number of sheets and the first one.
+        let mut candidates: BTreeMap<&[Target], (usize, usize)> = BTreeMap::new();
+        for &(targets, count, first) in distinct {
+            let Some(targets) = targets.get(..self.width) else {
                 continue;
-            }
-            let targets = &layout.targets[..self.width];
+            };
             let anchored = targets
                 .first()
                 .is_some_and(|t| matches!(t, Target::Address | Target::Prefix));
             let all_fit = targets.iter().zip(&profiles).all(|(t, c)| fits(t, c));
             if anchored && all_fit {
                 candidates
-                    .entry(targets.to_vec())
-                    .and_modify(|(count, _)| *count += 1)
-                    .or_insert((1, layout));
+                    .entry(targets)
+                    .and_modify(|(sheets, earliest)| {
+                        *sheets += count;
+                        *earliest = (*earliest).min(first);
+                    })
+                    .or_insert((count, first));
             }
         }
-        if let Some((targets, (_, layout))) = candidates
-            .into_iter()
-            .max_by_key(|(_, (count, layout))| (*count, std::cmp::Reverse(layout.sheet.clone())))
-        {
-            self.targets = targets;
+        let best = candidates.into_iter().max_by_key(|(_, (count, first))| {
+            (*count, std::cmp::Reverse(layouts[*first].sheet.as_str()))
+        });
+        if let Some((targets, (_, first))) = best {
+            let layout = &layouts[first];
+            self.targets = targets.to_vec();
             self.interfaces = layout.interfaces[..self.width].to_vec();
             self.roles_from = Some(layout.sheet.clone());
             return;
@@ -828,7 +887,9 @@ pub fn infer_network(
     let bits: u8 = if ip.is_ipv4() { 32 } else { 128 };
     let neighborhood: u8 = if ip.is_ipv4() { 24 } else { 64 };
     let near = IpNet::new(ip, neighborhood).map(|n| n.trunc()).ok();
-    let mut own: Vec<IpAddr> = Vec::new();
+    // Every own address is at or after `ip`, so a block that starts at `ip` holds them all
+    // when it holds the highest: only that one is kept.
+    let mut own: Option<IpAddr> = None;
     for row in first_row..sheet.rows.len() {
         for &column in address_columns {
             let text = &sheet.cell(row, column).text;
@@ -839,7 +900,7 @@ pub fn infer_network(
                 .unwrap_or_default();
             for address in found {
                 if near.is_some_and(|n| n.contains(&address)) && address >= ip {
-                    own.push(address);
+                    own = own.max(Some(address));
                 }
             }
         }
@@ -887,8 +948,12 @@ pub struct MappingError(pub String);
 /// Returns [`MappingError`] naming the first problem.
 pub fn validate(mapping: &Mapping, analyses: &[SheetAnalysis]) -> Result<(), MappingError> {
     let mut seen = BTreeSet::new();
+    let mut by_name: BTreeMap<&str, &SheetAnalysis> = BTreeMap::new();
+    for analysis in analyses {
+        by_name.entry(analysis.sheet.as_str()).or_insert(analysis);
+    }
     for sheet in &mapping.sheets {
-        let Some(found) = analyses.iter().find(|a| a.sheet == sheet.sheet) else {
+        let Some(found) = by_name.get(sheet.sheet.as_str()) else {
             return Err(MappingError(format!(
                 "the upload has no sheet `{}`",
                 sheet.sheet
@@ -1015,6 +1080,57 @@ mod tests {
         assert_eq!(
             sheet_names(&[file("a.csv"), file("b.csv")]),
             ["Sheet1", "Sheet1 (2)"]
+        );
+    }
+
+    /// A number given to a repeated name never takes a name another sheet of the upload
+    /// has, before or after it.
+    #[test]
+    fn numbered_sheet_names_skip_names_the_upload_has() {
+        let file = |sheet: &str| SourceFile {
+            name: format!("{sheet}.csv"),
+            format: super::super::read::SourceFormat::Csv,
+            sheets: vec![Sheet {
+                name: sheet.to_owned(),
+                rows: Vec::new(),
+            }],
+            text: None,
+        };
+        assert_eq!(
+            sheet_names(&[file("A"), file("A (2)"), file("A")]),
+            ["A", "A (2)", "A (3)"]
+        );
+        assert_eq!(
+            sheet_names(&[file("A"), file("A"), file("A (2)")]),
+            ["A", "A (3)", "A (2)"]
+        );
+        let names = sheet_names(&[file("A"), file("A"), file("A (2)"), file("A (2)")]);
+        let unique: BTreeSet<&String> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "{names:?}");
+    }
+
+    /// The `Index` lookups give the first listed entry, as a scan of the list would.
+    #[test]
+    fn index_lookups_find_the_first_listed_entry() {
+        let mut entries = IndexEntries::default();
+        let net = |text: &str| text.parse::<IpNet>().expect("net");
+        entries.add_network(net("192.0.2.0/25"), Some("first".to_owned()), 0);
+        entries.add_network(net("192.0.2.0/24"), Some("second".to_owned()), 1);
+        entries.add_network(net("192.0.2.0/25"), Some("again".to_owned()), 2);
+        entries.add_host("198.51.100.7".parse().expect("ip"), None, 3);
+        let at = entries.network_at("192.0.2.0".parse().expect("ip"));
+        assert_eq!(
+            at.map(|(n, _, row)| (*n, *row)),
+            Some((net("192.0.2.0/25"), 0))
+        );
+        let same = entries.network(&net("192.0.2.0/25"));
+        assert_eq!(same.map(|(_, d, _)| d.as_deref()), Some(Some("first")));
+        assert_eq!(entries.network_at("192.0.2.1".parse().expect("ip")), None);
+        assert_eq!(
+            entries
+                .host("198.51.100.7".parse().expect("ip"))
+                .map(|(_, _, row)| *row),
+            Some(3)
         );
     }
 }

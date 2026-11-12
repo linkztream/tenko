@@ -66,6 +66,9 @@ use super::{
 
 /// Most addresses one range cell is split into.
 pub const MAX_RANGE: u128 = 1024;
+/// Most addresses the range cells of one import are split into together. Without it, a
+/// file of many distinct ranges below [`MAX_RANGE`] builds a thousand addresses per row.
+pub const MAX_RANGE_ADDRESSES: usize = 65_536;
 /// The name of the default VRF and tenant.
 pub const DEFAULT_NAME: &str = "default";
 
@@ -73,32 +76,67 @@ pub const DEFAULT_NAME: &str = "default";
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KnownPrefixes(pub BTreeMap<String, Vec<(IpNet, PrefixRole)>>);
 
-impl KnownPrefixes {
-    /// The most specific known prefix of `vrf` containing `ip`.
-    pub fn containing(&self, vrf: &str, ip: IpAddr) -> Option<(IpNet, PrefixRole)> {
-        self.0
-            .get(vrf)?
-            .iter()
-            .filter(|(net, _)| net.contains(&ip))
-            .max_by_key(|(net, _)| net.prefix_len())
-            .copied()
-    }
+/// Networks by VRF key and network (host bits cleared). Ordered by address, then length, so
+/// a lookup by prefix length or a range of addresses costs the same whatever the number of
+/// networks a file holds.
+type Nets<V> = BTreeMap<(String, IpNet), V>;
 
-    /// Whether a known prefix of `vrf` overlaps `net`.
-    pub fn overlaps(&self, vrf: &str, net: &IpNet) -> bool {
-        self.0.get(vrf).is_some_and(|nets| {
-            nets.iter()
-                .any(|(known, _)| known.contains(net) || net.contains(known))
-        })
-    }
+#[cfg(test)]
+thread_local! {
+    /// The lookup steps of this thread's translations, for the tests that state how the
+    /// work grows with the file.
+    static STEPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 
-    /// Whether a known prefix of `vrf` lies strictly inside `net`.
-    pub fn inside(&self, vrf: &str, net: &IpNet) -> bool {
-        self.0.get(vrf).is_some_and(|nets| {
-            nets.iter()
-                .any(|(known, _)| known != net && net.contains(known))
-        })
+/// Counts one lookup step (in tests only).
+fn step() {
+    #[cfg(test)]
+    STEPS.with(|steps| steps.set(steps.get() + 1));
+}
+
+/// The most specific network of `vrf` that contains `net` or equals it: one lookup per
+/// prefix length.
+fn enclosing<'a, V>(nets: &'a Nets<V>, vrf: &str, net: IpNet) -> Option<(IpNet, &'a V)> {
+    let mut key = (vrf.to_owned(), net);
+    for length in (0..=net.prefix_len()).rev() {
+        step();
+        key.1 = IpNet::new(net.addr(), length).ok()?.trunc();
+        if let Some(((_, found), value)) = nets.get_key_value(&key) {
+            return Some((*found, value));
+        }
     }
+    None
+}
+
+/// The networks of `vrf` inside `net`, `net` itself included: one range of the ordered
+/// keys. Keys before the first hit can only be shorter networks at the same address, at
+/// most one per prefix length.
+fn inside<'a, V>(nets: &'a Nets<V>, vrf: &str, net: IpNet) -> impl Iterator<Item = IpNet> + 'a {
+    let low = IpNet::new(net.network(), 0).unwrap_or(net);
+    let high = IpNet::new(net.broadcast(), net.max_prefix_len()).unwrap_or(net);
+    nets.range((vrf.to_owned(), low)..=(vrf.to_owned(), high))
+        .inspect(|_| step())
+        .map(|((_, other), _)| *other)
+        .filter(move |other| other.prefix_len() >= net.prefix_len())
+}
+
+/// The number of leading bits two addresses of one family share.
+fn common_length(a: IpAddr, b: IpAddr) -> u8 {
+    let bits: u8 = if a.is_ipv4() { 32 } else { 128 };
+    let unused = 128 - u32::from(bits);
+    let same = (ip_to_u128(a) ^ ip_to_u128(b))
+        .leading_zeros()
+        .saturating_sub(unused);
+    u8::try_from(same).unwrap_or(bits)
+}
+
+/// Keeps the first of every repeated tag.
+fn dedupe(tags: &mut Vec<String>) {
+    let mut seen = BTreeSet::new();
+    tags.retain(|tag| {
+        step();
+        seen.insert(tag.clone())
+    });
 }
 
 /// A proposed prefix for addresses outside every known network (rule 4).
@@ -258,10 +296,15 @@ pub fn translate(
     let refs = sheets(files, &names);
     let mut builder = Builder::new(mapping, known);
     builder.frozen = frozen;
+    // The first mapping of each sheet, found once rather than by a scan per sheet.
+    let mut by_name: BTreeMap<&str, &SheetMapping> = BTreeMap::new();
+    for sheet in &mapping.sheets {
+        by_name.entry(sheet.sheet.as_str()).or_insert(sheet);
+    }
+    let sheet_mapping = |name: &str| by_name.get(name).copied();
 
     let index = refs.iter().find_map(|r| {
-        mapping
-            .sheet(r.name)
+        sheet_mapping(r.name)
             .filter(|m| m.kind == SheetKind::Index)
             .map(|m| (r.name, r.sheet, m))
     });
@@ -271,7 +314,7 @@ pub fn translate(
     });
 
     for sheet in &refs {
-        let Some(sheet_mapping) = mapping.sheet(sheet.name) else {
+        let Some(sheet_mapping) = sheet_mapping(sheet.name) else {
             builder.skip(sheet.name, sheet.sheet, None);
             continue;
         };
@@ -342,13 +385,18 @@ struct PendingInterface {
 /// The state of a translation.
 struct Builder<'m> {
     mapping: &'m Mapping,
-    known: &'m KnownPrefixes,
+    /// The store's prefixes, keyed like the model's.
+    known: Nets<PrefixRole>,
     frozen: Option<&'m [(String, IpNet)]>,
     import_vrf: Option<&'m str>,
     loss: LossReport,
-    prefixes: BTreeMap<(String, IpNet), ModelPrefix>,
+    prefixes: Nets<ModelPrefix>,
     vlans: BTreeMap<(Option<String>, u16), ModelVlan>,
     hosts: BTreeMap<HostName, ModelHost>,
+    /// Where each interface sits in its host's list while rows are read.
+    interface_slots: BTreeMap<(HostName, String), usize>,
+    /// Addresses the range cells were split into so far ([`MAX_RANGE_ADDRESSES`]).
+    range_addresses: usize,
     addresses: BTreeMap<(String, IpAddr), ModelAddress>,
     /// The prefix length of the network sheet an address came from, for proposals.
     address_lengths: BTreeMap<(String, IpAddr), u8>,
@@ -364,16 +412,24 @@ struct Builder<'m> {
 }
 
 impl<'m> Builder<'m> {
-    fn new(mapping: &'m Mapping, known: &'m KnownPrefixes) -> Self {
+    fn new(mapping: &'m Mapping, known: &KnownPrefixes) -> Self {
+        let mut index = Nets::new();
+        for (vrf, nets) in &known.0 {
+            for (net, role) in nets {
+                index.entry((vrf.clone(), net.trunc())).or_insert(*role);
+            }
+        }
         Self {
             mapping,
-            known,
+            known: index,
             frozen: None,
             import_vrf: mapping.options.vrf.as_deref(),
             loss: LossReport::default(),
             prefixes: BTreeMap::new(),
             vlans: BTreeMap::new(),
             hosts: BTreeMap::new(),
+            interface_slots: BTreeMap::new(),
+            range_addresses: 0,
             addresses: BTreeMap::new(),
             address_lengths: BTreeMap::new(),
             address_vlans: Vec::new(),
@@ -653,7 +709,8 @@ impl<'m> Builder<'m> {
             };
             let header = mapping
                 .header_row
-                .and_then(|h| sheet.cell(h as usize - 1, column).value());
+                .and_then(|h| usize::try_from(h).ok()?.checked_sub(1))
+                .and_then(|h| sheet.cell(h, column).value());
             let letter = column_letter(column);
             let location = SourceLocation {
                 sheet: Some(name.to_owned()),
@@ -760,10 +817,7 @@ impl<'m> Builder<'m> {
         prefix.alarm_crit = self.parse(row, &Target::AlarmCrit, "a percentage", transform::percent);
         prefix.alloc = self.parse(row, &Target::Alloc, "a next-free policy", transform::alloc);
         prefix.description = row.get(&Target::Description).map(|(v, _)| v.to_owned());
-        prefix.tags = row
-            .get(&Target::Tags)
-            .map(|(v, _)| transform::tags(v))
-            .unwrap_or_default();
+        prefix.tags = row_tags(row);
         prefix.custom = custom_values(row);
         self.credentials_without_host(row);
         match self.prefixes.get_mut(&key) {
@@ -857,71 +911,76 @@ impl<'m> Builder<'m> {
     }
 
     fn merge_host(&mut self, host: ModelHost, location: &SourceLocation) {
-        match self.hosts.get_mut(&host.name) {
-            Some(existing) => {
-                let name = existing.name.clone();
-                let loss = &mut self.loss;
-                let text = |v: &String| v.clone();
-                merge_field(
-                    &mut existing.tenant,
-                    host.tenant,
-                    text,
-                    "tenant",
-                    &name,
-                    location,
-                    loss,
-                );
-                merge_field(
-                    &mut existing.mode,
-                    host.mode,
-                    snake,
-                    "mode",
-                    &name,
-                    location,
-                    loss,
-                );
-                merge_field(
-                    &mut existing.lock,
-                    host.lock,
-                    bool::to_string,
-                    "lock",
-                    &name,
-                    location,
-                    loss,
-                );
-                merge_field(
-                    &mut existing.site,
-                    host.site,
-                    text,
-                    "site",
-                    &name,
-                    location,
-                    loss,
-                );
-                merge_field(
-                    &mut existing.description,
-                    host.description,
-                    text,
-                    "description",
-                    &name,
-                    location,
-                    loss,
-                );
-                for tag in host.tags {
-                    if !existing.tags.contains(&tag) {
-                        existing.tags.push(tag);
-                    }
-                }
-                for (key, value) in host.custom {
-                    existing.custom.entry(key).or_insert(value);
-                }
-                for interface in host.interfaces {
-                    merge_interface(existing, interface, location, loss);
-                }
+        let Some(existing) = self.hosts.get_mut(&host.name) else {
+            for (slot, interface) in host.interfaces.iter().enumerate() {
+                self.interface_slots
+                    .entry((host.name.clone(), interface.name.clone()))
+                    .or_insert(slot);
             }
-            None => {
-                self.hosts.insert(host.name.clone(), host);
-            }
+            self.hosts.insert(host.name.clone(), host);
+            return;
+        };
+        let name = existing.name.clone();
+        let loss = &mut self.loss;
+        let text = |v: &String| v.clone();
+        merge_field(
+            &mut existing.tenant,
+            host.tenant,
+            text,
+            "tenant",
+            &name,
+            location,
+            loss,
+        );
+        merge_field(
+            &mut existing.mode,
+            host.mode,
+            snake,
+            "mode",
+            &name,
+            location,
+            loss,
+        );
+        merge_field(
+            &mut existing.lock,
+            host.lock,
+            bool::to_string,
+            "lock",
+            &name,
+            location,
+            loss,
+        );
+        merge_field(
+            &mut existing.site,
+            host.site,
+            text,
+            "site",
+            &name,
+            location,
+            loss,
+        );
+        merge_field(
+            &mut existing.description,
+            host.description,
+            text,
+            "description",
+            &name,
+            location,
+            loss,
+        );
+        // Repeated tags are dropped once, when the model is finished.
+        existing.tags.extend(host.tags);
+        for (key, value) in host.custom {
+            existing.custom.entry(key).or_insert(value);
+        }
+        for interface in host.interfaces {
+            merge_interface(
+                existing,
+                &mut self.interface_slots,
+                interface,
+                location,
+                loss,
+            );
         }
     }
 
@@ -1094,10 +1153,7 @@ impl<'m> Builder<'m> {
         if host.is_none() && address.description.is_none() {
             address.description = label.map(str::to_owned);
         }
-        address.tags = row
-            .get(&Target::Tags)
-            .map(|(v, _)| transform::tags(v))
-            .unwrap_or_default();
+        address.tags = row_tags(row);
         address.custom = custom_values(row);
         if let Some(vid) = self.vlan_of(row) {
             let location = row.location(row.get(&Target::Vlan).map(|(_, c)| c));
@@ -1163,15 +1219,30 @@ impl<'m> Builder<'m> {
     ) -> RowOutcome {
         let start = ip_to_u128(first);
         let end = ip_to_u128(last);
-        let count = end - start + 1;
-        if count > MAX_RANGE {
+        // Both bounds are checked before anything is built: the whole IPv6 space holds one
+        // address more than a u128 counts.
+        let size = end.checked_sub(start).and_then(|span| span.checked_add(1));
+        let count = size
+            .filter(|size| *size <= MAX_RANGE)
+            .and_then(|size| usize::try_from(size).ok());
+        let Some(count) = count else {
+            let size = size.map_or_else(|| "2^128".to_owned(), |size| size.to_string());
             self.push(
                 row.location(Some(column)),
                 codes::RANGE_TOO_LARGE,
-                format!("the range {first}-{last} holds {count} addresses, more than {MAX_RANGE}; the row is not imported"),
+                format!("the range {first}-{last} holds {size} addresses, more than {MAX_RANGE}; the row is not imported"),
+            );
+            return Self::skipped(row);
+        };
+        if count > MAX_RANGE_ADDRESSES.saturating_sub(self.range_addresses) {
+            self.push(
+                row.location(Some(column)),
+                codes::RANGE_TOO_LARGE,
+                format!("the range {first}-{last} holds {count} addresses, and the ranges of one import hold at most {MAX_RANGE_ADDRESSES} together; the row is not imported"),
             );
             return Self::skipped(row);
         }
+        self.range_addresses += count;
         let label = row
             .get(&Target::Description)
             .or(row.get(&Target::Name))
@@ -1238,6 +1309,8 @@ impl<'m> Builder<'m> {
         }];
         let vrf_name = row.get(&Target::Vrf).map(|(v, _)| v.to_owned());
         let vrf = self.vrf(vrf_name.as_deref());
+        let status = self.parse(row, &Target::Status, "a status", transform::status);
+        let (mac, dns_name) = self.single_address_values(row, columns);
         for (n, &column) in columns.iter().enumerate() {
             let Some(text) = row.cell(column).value().map(transform::unescape) else {
                 continue;
@@ -1265,7 +1338,7 @@ impl<'m> Builder<'m> {
             let mut update = ModelHost::new(host.clone(), row.location(None));
             update.interfaces.push(ModelInterface {
                 name: interface.clone(),
-                mac: None,
+                mac,
                 duid: None,
                 client_id: None,
                 origin: row.location(Some(column)),
@@ -1279,17 +1352,19 @@ impl<'m> Builder<'m> {
             address.vrf.clone_from(&vrf_name);
             address.host = Some(host.clone());
             address.interface = Some(interface);
+            address.status = status;
+            address.dns_name.clone_from(&dns_name);
             let key = (vrf.clone(), ip);
             self.record_length(&key, length);
             if self.merge_address(address, &row.location(Some(column))) {
                 items.push(address_key(&key));
             }
         }
-        if let Some((description, _)) = row.get(&Target::Description) {
-            let mut update = ModelHost::new(host.clone(), row.location(None));
-            update.description = Some(description.to_owned());
-            self.merge_host(update, &row.location(None));
-        }
+        let mut update = ModelHost::new(host.clone(), row.location(None));
+        update.description = row.get(&Target::Description).map(|(v, _)| v.to_owned());
+        update.tags = row_tags(row);
+        update.custom = custom_values(row);
+        self.merge_host(update, &row.location(None));
         if let Some(item) = self.credentials(row, Some(&host)) {
             items.push(item);
         }
@@ -1298,6 +1373,40 @@ impl<'m> Builder<'m> {
             status: RowStatus::Imported,
             items,
         }
+    }
+
+    /// The MAC address and DNS name of a device row: they belong to one address, so they
+    /// apply when the row has one, and are reported as left out when it has none or
+    /// several.
+    fn single_address_values(
+        &mut self,
+        row: &Row<'_>,
+        columns: &[usize],
+    ) -> (Option<tenko_core::MacAddr>, Option<Fqdn>) {
+        let addresses = columns
+            .iter()
+            .filter_map(|&c| row.cell(c).value().map(transform::unescape))
+            .filter(|text| {
+                shape::parse_address(text).is_some() || shape::parse_cidr(text).is_some()
+            })
+            .count();
+        if addresses == 1 {
+            return (
+                self.parse(row, &Target::Mac, "a MAC address", shape::parse_mac),
+                self.parse(row, &Target::DnsName, "a DNS name", |v| Fqdn::new(v).ok()),
+            );
+        }
+        let has = if addresses == 0 { "none" } else { "several" };
+        for target in [Target::Mac, Target::DnsName] {
+            if let Some((value, column)) = row.get(&target) {
+                self.push(
+                    row.location(Some(column)),
+                    codes::VALUE_INVALID,
+                    format!("`{value}` belongs to one address, and the device row has {has}; the value is left out"),
+                );
+            }
+        }
+        (None, None)
     }
 
     /// A row of a host list.
@@ -1328,10 +1437,7 @@ impl<'m> Builder<'m> {
         }];
         let mut update = ModelHost::new(host.clone(), row.location(None));
         update.description = row.get(&Target::Description).map(|(v, _)| v.to_owned());
-        update.tags = row
-            .get(&Target::Tags)
-            .map(|(v, _)| transform::tags(v))
-            .unwrap_or_default();
+        update.tags = row_tags(row);
         update.custom = custom_values(row);
         if let Some((value, column)) = row.get(&Target::Interfaces) {
             let (entries, bad) = transform::interfaces(value);
@@ -1443,11 +1549,7 @@ impl<'m> Builder<'m> {
         fill(&mut existing.status, address.status);
         fill(&mut existing.dns_name, address.dns_name);
         fill(&mut existing.description, address.description);
-        for tag in address.tags {
-            if !existing.tags.contains(&tag) {
-                existing.tags.push(tag);
-            }
-        }
+        existing.tags.extend(address.tags);
         for (k, v) in address.custom {
             existing.custom.entry(k).or_insert(v);
         }
@@ -1463,6 +1565,10 @@ impl<'m> Builder<'m> {
         self.network_and_broadcast();
         self.address_vlans();
         self.default_interfaces();
+        let tags = self.prefixes.values_mut().map(|p| &mut p.tags);
+        let tags = tags.chain(self.hosts.values_mut().map(|h| &mut h.tags));
+        tags.chain(self.addresses.values_mut().map(|a| &mut a.tags))
+            .for_each(dedupe);
 
         let mut credentials = CredentialValues::default();
         let mut references = Vec::new();
@@ -1509,13 +1615,10 @@ impl<'m> Builder<'m> {
 
     /// The most specific prefix of the model or the store containing an address.
     fn containing(&self, vrf: &str, ip: IpAddr) -> Option<(IpNet, PrefixRole)> {
-        let model = self
-            .prefixes
-            .iter()
-            .filter(|((v, net), _)| v == vrf && net.contains(&ip))
-            .max_by_key(|((_, net), _)| net.prefix_len())
-            .map(|((_, net), p)| (*net, p.role.unwrap_or(PrefixRole::Network)));
-        let known = self.known.containing(vrf, ip);
+        let host = IpNet::from(ip);
+        let model = enclosing(&self.prefixes, vrf, host)
+            .map(|(net, p)| (net, p.role.unwrap_or(PrefixRole::Network)));
+        let known = enclosing(&self.known, vrf, host).map(|(net, role)| (net, *role));
         match (model, known) {
             (Some(m), Some(k)) => Some(if m.0.prefix_len() >= k.0.prefix_len() {
                 m
@@ -1531,22 +1634,18 @@ impl<'m> Builder<'m> {
         if let Some(frozen) = self.frozen {
             return self.frozen_proposals(frozen);
         }
-        let mut proposals: BTreeMap<(String, IpNet), Proposal> = BTreeMap::new();
+        let mut proposals: Nets<Proposal> = BTreeMap::new();
+        let decisions = self.mapping.options.decisions();
         let keys: Vec<(String, IpAddr)> = self.addresses.keys().cloned().collect();
         for key in keys {
             let (vrf, ip) = &key;
-            if self.containing(vrf, *ip).is_some()
-                || proposals
-                    .keys()
-                    .any(|(v, net)| v == vrf && net.contains(ip))
-            {
-                if let Some(proposal) = proposals
-                    .iter_mut()
-                    .find(|((v, net), _)| v == vrf && net.contains(ip))
-                    .map(|(_, p)| p)
-                {
+            if let Some((net, _)) = enclosing(&proposals, vrf, IpNet::from(*ip)) {
+                if let Some(proposal) = proposals.get_mut(&(vrf.clone(), net)) {
                     proposal.addresses.push(*ip);
                 }
+                continue;
+            }
+            if self.containing(vrf, *ip).is_some() {
                 continue;
             }
             let bits: u8 = if ip.is_ipv4() { 32 } else { 128 };
@@ -1555,21 +1654,25 @@ impl<'m> Builder<'m> {
                 .get(&key)
                 .copied()
                 .unwrap_or(if ip.is_ipv4() { 24 } else { 64 });
-            let overlapping = |builder: &Self, net: &IpNet| {
-                builder
-                    .prefixes
-                    .keys()
-                    .any(|(v, other)| v == vrf && (other.contains(net) || net.contains(other)))
-                    || builder.known.overlaps(vrf, net)
-            };
             let mut net = IpNet::new(*ip, length).map_or(IpNet::from(*ip), |n| n.trunc());
-            while length < bits && overlapping(self, &net) {
-                length += 1;
+            // No network contains the address, so none contains a block around it either:
+            // the block only has to shrink until no network lies inside it. Each network
+            // found inside moves the length past the bits it shares with the address.
+            while length < bits {
+                let Some(other) = inside(&self.prefixes, vrf, net)
+                    .next()
+                    .or_else(|| inside(&self.known, vrf, net).next())
+                else {
+                    break;
+                };
+                length = common_length(*ip, other.addr())
+                    .saturating_add(1)
+                    .clamp(length + 1, bits);
                 net = IpNet::new(*ip, length).map_or(IpNet::from(*ip), |n| n.trunc());
             }
             let origin = self.addresses[&key].origin.clone();
             let vrf_name = self.addresses[&key].vrf.clone();
-            let accepted = self.mapping.options.accepts(&net);
+            let accepted = decisions.get(&net).copied().unwrap_or(true);
             proposals.insert(
                 (vrf.clone(), net),
                 Proposal {
@@ -1621,9 +1724,8 @@ impl<'m> Builder<'m> {
         for (vrf, net) in frozen {
             let addresses: Vec<IpAddr> = self
                 .addresses
-                .keys()
-                .filter(|(v, ip)| v == vrf && net.contains(ip))
-                .map(|(_, ip)| *ip)
+                .range((vrf.clone(), net.network())..=(vrf.clone(), net.broadcast()))
+                .map(|((_, ip), _)| *ip)
                 .collect();
             let Some(first) = addresses.first() else {
                 continue;
@@ -1660,16 +1762,19 @@ impl<'m> Builder<'m> {
 
     /// A prefix that contains another one of the import or the store is a supernet.
     fn supernets(&mut self) {
-        let nets: Vec<(String, IpNet)> = self.prefixes.keys().cloned().collect();
-        for ((vrf, net), prefix) in &mut self.prefixes {
-            if prefix.role.is_some() {
-                continue;
-            }
-            let contains = nets
-                .iter()
-                .any(|(v, other)| v == vrf && other != net && net.contains(other))
-                || self.known.inside(vrf, net);
-            if contains {
+        let supernets: Vec<(String, IpNet)> = self
+            .prefixes
+            .iter()
+            .filter(|(_, prefix)| prefix.role.is_none())
+            .map(|(key, _)| key)
+            .filter(|(vrf, net)| {
+                inside(&self.prefixes, vrf, *net).any(|other| other != *net)
+                    || inside(&self.known, vrf, *net).any(|other| other != *net)
+            })
+            .cloned()
+            .collect();
+        for key in supernets {
+            if let Some(prefix) = self.prefixes.get_mut(&key) {
                 prefix.role = Some(PrefixRole::Supernet);
             }
         }
@@ -1679,12 +1784,7 @@ impl<'m> Builder<'m> {
     /// VLAN for the same network is reported and left out.
     fn address_vlans(&mut self) {
         for ((vrf, ip), vid, location) in std::mem::take(&mut self.address_vlans) {
-            let key = self
-                .prefixes
-                .keys()
-                .filter(|(v, net)| *v == vrf && net.contains(&ip))
-                .max_by_key(|(_, net)| net.prefix_len())
-                .cloned();
+            let key = enclosing(&self.prefixes, &vrf, IpNet::from(ip)).map(|(net, _)| (vrf, net));
             let Some(key) = key else {
                 self.loss.push(
                     location,
@@ -1718,6 +1818,7 @@ impl<'m> Builder<'m> {
     /// Leaves out host addresses equal to the network or broadcast address of an IPv4
     /// network of /30 or wider (rule 6: `import.address.is_network`).
     fn network_and_broadcast(&mut self) {
+        let mut left: BTreeMap<HostName, BTreeSet<String>> = BTreeMap::new();
         let keys: Vec<(String, IpAddr)> = self.addresses.keys().cloned().collect();
         for key in keys {
             let (vrf, ip) = &key;
@@ -1746,27 +1847,41 @@ impl<'m> Builder<'m> {
                 }
             };
             self.loss.push(address.origin, code, detail);
-            if let (Some(host), Some(interface)) = (&address.host, &address.interface) {
-                self.drop_interface_if_unused(host, interface);
+            if let (Some(host), Some(interface)) = (address.host, address.interface) {
+                left.entry(host).or_default().insert(interface);
+            }
+        }
+        self.drop_unused_interfaces(left);
+    }
+
+    /// Drops the interfaces in `left` (by host) that no remaining address uses and that
+    /// carry no MAC address or DUID: one pass over the addresses for all of them.
+    fn drop_unused_interfaces(&mut self, mut left: BTreeMap<HostName, BTreeSet<String>>) {
+        if left.is_empty() {
+            return;
+        }
+        for address in self.addresses.values() {
+            step();
+            if let (Some(host), Some(interface)) = (&address.host, &address.interface)
+                && let Some(names) = left.get_mut(host)
+            {
+                names.remove(interface);
+            }
+        }
+        for (host, names) in left {
+            if let Some(model) = self.hosts.get_mut(&host) {
+                model
+                    .interfaces
+                    .retain(|i| !names.contains(&i.name) || i.mac.is_some() || i.duid.is_some());
             }
         }
     }
 
-    fn drop_interface_if_unused(&mut self, host: &HostName, interface: &str) {
-        let used = self
-            .addresses
-            .values()
-            .any(|a| a.host.as_ref() == Some(host) && a.interface.as_deref() == Some(interface));
-        if !used && let Some(model) = self.hosts.get_mut(host) {
-            model
-                .interfaces
-                .retain(|i| i.name != interface || i.mac.is_some() || i.duid.is_some());
-        }
-    }
-
     /// Names the interfaces of addresses whose source names none: `nic1`, `nic2`... per
-    /// host, skipping names in use, in source order.
+    /// host, skipping names in use, in source order. The names of each host and the next
+    /// number to try are kept, so naming does not grow with the square of the interfaces.
     fn default_interfaces(&mut self) {
+        let mut taken: BTreeMap<HostName, (BTreeSet<String>, usize)> = BTreeMap::new();
         for pending in std::mem::take(&mut self.pending) {
             let Some(address) = self.addresses.get_mut(&pending.key) else {
                 continue;
@@ -1777,10 +1892,18 @@ impl<'m> Builder<'m> {
             let Some(host) = self.hosts.get_mut(&pending.host) else {
                 continue;
             };
-            let name = (1..=host.interfaces.len() + 1)
-                .map(vocab::default_interface)
-                .find(|name| host.interface(name).is_none())
-                .unwrap_or_default();
+            let (names, next) = taken.entry(pending.host.clone()).or_insert_with(|| {
+                let names = host.interfaces.iter().map(|i| i.name.clone()).collect();
+                (names, 1)
+            });
+            let name = loop {
+                step();
+                let name = vocab::default_interface(*next);
+                *next += 1;
+                if names.insert(name.clone()) {
+                    break name;
+                }
+            };
             host.interfaces.push(ModelInterface {
                 name: name.clone(),
                 mac: pending.mac,
@@ -1824,6 +1947,17 @@ fn address_key(key: &(String, IpAddr)) -> ItemKey {
         vrf: key.0.clone(),
         ip: key.1.to_string(),
     }
+}
+
+/// The tags of a row, each once. Rows that repeat tags of an earlier row are merged by
+/// appending, and the model drops those repeats once when it is finished.
+fn row_tags(row: &Row<'_>) -> Vec<String> {
+    let mut tags = row
+        .get(&Target::Tags)
+        .map(|(v, _)| transform::tags(v))
+        .unwrap_or_default();
+    dedupe(&mut tags);
+    tags
 }
 
 /// Custom field values of a row, by key.
@@ -1886,19 +2020,25 @@ fn merge_field<T: PartialEq>(
     }
 }
 
+/// Merges an interface into its host, found by name through `slots` (the position of each
+/// interface in its host's list).
 fn merge_interface(
     host: &mut ModelHost,
+    slots: &mut BTreeMap<(HostName, String), usize>,
     interface: ModelInterface,
     location: &SourceLocation,
     loss: &mut LossReport,
 ) {
     let name = host.name.clone();
-    match host
-        .interfaces
-        .iter_mut()
-        .find(|i| i.name == interface.name)
+    let key = (name.clone(), interface.name.clone());
+    match slots
+        .get(&key)
+        .and_then(|&slot| host.interfaces.get_mut(slot))
     {
-        None => host.interfaces.push(interface),
+        None => {
+            slots.insert(key, host.interfaces.len());
+            host.interfaces.push(interface);
+        }
         Some(existing) => {
             for (field, ours, theirs) in [
                 (
@@ -1945,11 +2085,7 @@ fn merge_prefix(
     fill(&mut existing.alarm_crit, prefix.alarm_crit);
     fill(&mut existing.alloc, prefix.alloc);
     fill(&mut existing.description, prefix.description);
-    for tag in prefix.tags {
-        if !existing.tags.contains(&tag) {
-            existing.tags.push(tag);
-        }
-    }
+    existing.tags.extend(prefix.tags);
     for (k, v) in prefix.custom {
         existing.custom.entry(k).or_insert(v);
     }
@@ -1970,5 +2106,255 @@ fn u128_to_ip(family: IpAddr, value: u128) -> IpAddr {
     match family {
         IpAddr::V4(_) => IpAddr::V4(u32::try_from(value).unwrap_or(u32::MAX).into()),
         IpAddr::V6(_) => IpAddr::V6(value.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Write as _;
+
+    use tenko_core::ipam::Status;
+
+    use super::*;
+    use crate::import::{
+        mapping,
+        read::{self, ReadLimits},
+    };
+
+    /// Translates CSV files with their suggested mapping.
+    fn translate_csv(files: &[(&str, &str)]) -> Translation {
+        let files: Vec<SourceFile> = files
+            .iter()
+            .map(|(name, text)| {
+                read::read_file(name, text.as_bytes(), &ReadLimits::default()).expect("read")
+            })
+            .collect();
+        let (_, suggested) = mapping::analyze(&files);
+        translate(&files, &suggested, &KnownPrefixes::default(), None)
+    }
+
+    /// The lookup steps of one translation.
+    fn steps_of(files: &[(&str, &str)]) -> u64 {
+        STEPS.with(|steps| steps.set(0));
+        translate_csv(files);
+        STEPS.with(std::cell::Cell::get)
+    }
+
+    /// The rows and details of the loss entries with `code`.
+    fn entries(translation: &Translation, code: &str) -> Vec<(Option<u32>, String)> {
+        translation
+            .loss
+            .entries
+            .iter()
+            .filter(|entry| entry.code == code)
+            .map(|entry| (entry.location.row, entry.detail.clone()))
+            .collect()
+    }
+
+    fn has_address(translation: &Translation, ip: &str) -> bool {
+        let ip: IpAddr = ip.parse().expect("ip");
+        translation.model.addresses.iter().any(|a| a.ip == ip)
+    }
+
+    /// A range of the whole IPv6 space counts one address more than a u128 holds: it is
+    /// refused with its row and size before any address is built, like a range of 2^127.
+    #[test]
+    fn a_range_of_the_whole_ipv6_space_is_refused_before_anything_is_built() {
+        let translation = translate_csv(&[(
+            "list.csv",
+            "IP,Name\n\
+             ::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff,all\n\
+             ::-7fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff,half\n",
+        )]);
+        assert_eq!(translation.model.addresses.len(), 0);
+        let refused = entries(&translation, codes::RANGE_TOO_LARGE);
+        let rows: Vec<Option<u32>> = refused.iter().map(|(row, _)| *row).collect();
+        assert_eq!(rows, [Some(2), Some(3)]);
+        assert!(
+            refused[0].1.contains("holds 2^128 addresses"),
+            "{refused:?}"
+        );
+        assert!(
+            refused[1]
+                .1
+                .contains("holds 170141183460469231731687303715884105728 addresses"),
+            "{refused:?}"
+        );
+    }
+
+    /// A range of exactly the limit is split, one address more is refused, and ranges at
+    /// both ends of the address space (the largest value of the type included) are split
+    /// without wrapping. A prefix length of 0 adds its network and nothing else.
+    #[test]
+    fn ranges_at_the_limits_of_the_count_and_the_type_are_split_exactly() {
+        let translation = translate_csv(&[(
+            "list.csv",
+            "IP,Name\n\
+             2001:db8::-2001:db8::3ff,full\n\
+             2001:db8:1::-2001:db8:1::400,over\n\
+             ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff,top\n\
+             ::-::1,bottom\n\
+             2001:db8:2::5/0,everything\n",
+        )]);
+        let refused = entries(&translation, codes::RANGE_TOO_LARGE);
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert_eq!(refused[0].0, Some(3));
+        assert!(refused[0].1.contains("holds 1025 addresses"), "{refused:?}");
+        for ip in [
+            "2001:db8::",
+            "2001:db8::3ff",
+            "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "::",
+            "::1",
+            "2001:db8:2::5",
+        ] {
+            assert!(has_address(&translation, ip), "{ip}");
+        }
+        assert!(!has_address(&translation, "2001:db8:1::"));
+        assert_eq!(translation.model.addresses.len(), 1024 + 2 + 2 + 1);
+        let everything: IpNet = "::/0".parse().expect("net");
+        assert!(
+            translation
+                .model
+                .prefixes
+                .iter()
+                .any(|p| p.cidr == everything)
+        );
+    }
+
+    /// The ranges of one import are split into at most [`MAX_RANGE_ADDRESSES`] together:
+    /// the range that would pass it is refused with its row and size, however many rows
+    /// of allowed size the file holds.
+    #[test]
+    fn the_ranges_of_one_import_share_one_address_budget() {
+        let mut text = "IP,Name\n".to_owned();
+        for n in 0..65 {
+            writeln!(text, "2001:db8:0:{n:x}::-2001:db8:0:{n:x}::3ff,range{n}").expect("text");
+        }
+        let translation = translate_csv(&[("list.csv", &text)]);
+        assert_eq!(translation.model.addresses.len(), MAX_RANGE_ADDRESSES);
+        let refused = entries(&translation, codes::RANGE_TOO_LARGE);
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert_eq!(refused[0].0, Some(66));
+        assert!(
+            refused[0].1.contains("at most 65536 together"),
+            "{refused:?}"
+        );
+    }
+
+    /// The largest allowed range repeated row after row is charged every time: the budget
+    /// bounds the work of splitting, not only the addresses kept.
+    #[test]
+    fn a_repeated_largest_range_is_charged_on_every_row() {
+        let mut text = "IP,Name\n".to_owned();
+        for n in 0..100 {
+            writeln!(text, "2001:db8::-2001:db8::3ff,again{n}").expect("text");
+        }
+        let translation = translate_csv(&[("list.csv", &text)]);
+        assert_eq!(translation.model.addresses.len(), 1024);
+        let refused = entries(&translation, codes::RANGE_TOO_LARGE);
+        let rows: Vec<Option<u32>> = refused.iter().map(|(row, _)| *row).collect();
+        let expected: Vec<Option<u32>> = (66..=101).map(Some).collect();
+        assert_eq!(rows, expected);
+    }
+
+    /// A device row keeps its tags and status, and the MAC address of its only address; a
+    /// MAC address of a row with several addresses is reported as left out.
+    #[test]
+    fn a_device_row_keeps_its_tags_status_and_single_mac() {
+        let translation = translate_csv(&[(
+            "devices.csv",
+            "Name,Nic1,Nic2,Tags,Status,MAC\n\
+             web01,192.0.2.10,192.0.2.11,prod,planned,00:00:5e:00:53:01\n\
+             web02,192.0.2.12,,lab,planned,00:00:5e:00:53:02\n\
+             web03,n/a,,,,00:00:5e:00:53:03\n",
+        )]);
+        let host = |name: &str| {
+            translation
+                .model
+                .hosts
+                .iter()
+                .find(|h| h.name.as_str() == name)
+                .expect("host")
+        };
+        assert_eq!(host("web01").tags, ["prod"]);
+        assert_eq!(host("web02").tags, ["lab"]);
+        for address in &translation.model.addresses {
+            assert_eq!(address.status, Some(Status::Planned), "{}", address.ip);
+        }
+        let mac = host("web02").interface("nic1").and_then(|i| i.mac);
+        assert_eq!(
+            mac.map(|m| m.to_string()),
+            Some("00:00:5e:00:53:02".to_owned())
+        );
+        assert!(host("web01").interfaces.iter().all(|i| i.mac.is_none()));
+        // A cell that is not an address does not count: web03 has none for its MAC.
+        let left_out = entries(&translation, codes::VALUE_INVALID);
+        let rows: Vec<Option<u32>> = left_out.iter().map(|(row, _)| *row).collect();
+        assert_eq!(rows, [Some(2), Some(4)], "{left_out:?}");
+        assert!(left_out[0].1.contains("00:00:5e:00:53:01"), "{left_out:?}");
+        assert!(left_out[0].1.contains("has several"), "{left_out:?}");
+        assert!(left_out[1].1.contains("has none"), "{left_out:?}");
+    }
+
+    /// Networks, addresses inside them and addresses that need a proposal: a file ten
+    /// times larger takes at most about ten times the lookup steps.
+    #[test]
+    fn the_network_passes_grow_with_the_file_not_its_square() {
+        let files = |n: usize| {
+            let mut nets = "Network\n".to_owned();
+            let mut addresses = "IP,Name\n".to_owned();
+            for i in 0..n {
+                let (a, b) = (i / 256, i % 256);
+                writeln!(nets, "10.{a}.{b}.0/24").expect("text");
+                writeln!(addresses, "10.{a}.{b}.5,inside{i}").expect("text");
+                writeln!(addresses, "172.{}.{b}.9,outside{i}", 16 + a).expect("text");
+            }
+            (nets, addresses)
+        };
+        let (small_nets, small_addresses) = files(300);
+        let (large_nets, large_addresses) = files(3000);
+        let small = steps_of(&[
+            ("nets.csv", &small_nets),
+            ("addresses.csv", &small_addresses),
+        ]);
+        let large = steps_of(&[
+            ("nets.csv", &large_nets),
+            ("addresses.csv", &large_addresses),
+        ]);
+        assert!(small > 0);
+        assert!(large <= small * 12, "{small} steps, then {large}");
+    }
+
+    /// One host with many unnamed interfaces and tags: naming the interfaces and dropping
+    /// repeated tags grow with the rows, not with their square.
+    #[test]
+    fn interface_names_and_tags_of_one_host_grow_with_the_rows() {
+        let files = |n: usize| {
+            let mut addresses = "IP,Name\n".to_owned();
+            let mut hosts = "Name,Tags\n".to_owned();
+            for i in 0..n {
+                writeln!(addresses, "192.0.{}.{},web01", i / 200, 1 + i % 200).expect("text");
+                writeln!(hosts, "web01,t{i};shared").expect("text");
+            }
+            (addresses, hosts)
+        };
+        let (small_addresses, small_hosts) = files(300);
+        let (large_addresses, large_hosts) = files(3000);
+        let small = steps_of(&[("list.csv", &small_addresses), ("hosts.csv", &small_hosts)]);
+        let large = steps_of(&[("list.csv", &large_addresses), ("hosts.csv", &large_hosts)]);
+        assert!(large <= small * 12, "{small} steps, then {large}");
+
+        let translation =
+            translate_csv(&[("list.csv", &small_addresses), ("hosts.csv", &small_hosts)]);
+        let host = &translation.model.hosts[0];
+        assert_eq!(host.interfaces.len(), 300);
+        assert_eq!(
+            host.interface("nic300").map(|i| i.name.as_str()),
+            Some("nic300")
+        );
+        assert_eq!(host.tags.len(), 301);
+        let shared = host.tags.iter().filter(|t| *t == "shared").count();
+        assert_eq!(shared, 1);
     }
 }

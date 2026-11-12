@@ -778,36 +778,33 @@ impl ImportService {
         plan_cx
     }
 
+    /// Translates, reconciles and plans an import. The work grows with the file, so it runs
+    /// like a read: on a thread of the blocking pool, at most [`MAX_PARSES`] at once.
     async fn evaluate(
         &self,
         cx: &RequestCtx,
-        files: &[SourceFile],
+        files: &Arc<Vec<SourceFile>>,
         mapping: &Mapping,
-        acknowledge: &BTreeSet<String>,
     ) -> IpamResult<Evaluation> {
         let view = self.view_at(ReadConsistency::Local).await?;
-        let known = reconcile::known_prefixes(view.as_ref())?;
-        let translation = translate::translate(files, mapping, &known, None);
-        let items = reconcile::work_items(&translation.model, &mapping.options);
-        let reconciled =
-            reconcile::reconcile(view.as_ref(), &translation.model, &mapping.options, &items)?;
-        let options = PlanOptions {
-            acknowledge: mapping
-                .options
-                .acknowledge
-                .iter()
-                .chain(acknowledge)
-                .cloned()
-                .collect(),
-            supernet_step: true,
-            ..PlanOptions::default()
-        };
-        let plan = crate::plan::plan(
-            view.as_ref(),
-            &Self::plan_context(cx),
-            &options,
-            &reconciled.commands,
-        );
+        let (files, mapping, cx) = (Arc::clone(files), mapping.clone(), Self::plan_context(cx));
+        let worker_view = Arc::clone(&view);
+        let (translation, items, reconciled, plan) = off_runtime(move || {
+            let view = worker_view.as_ref();
+            let known = reconcile::known_prefixes(view)?;
+            let translation = translate::translate(&files, &mapping, &known, None);
+            let items = reconcile::work_items(&translation.model, &mapping.options);
+            let reconciled =
+                reconcile::reconcile(view, &translation.model, &mapping.options, &items)?;
+            let options = PlanOptions {
+                acknowledge: mapping.options.acknowledge.clone(),
+                supernet_step: true,
+                ..PlanOptions::default()
+            };
+            let plan = crate::plan::plan(view, &cx, &options, &reconciled.commands);
+            IpamResult::Ok((translation, items, reconciled, plan))
+        })
+        .await??;
         Ok(Evaluation {
             view,
             translation,
@@ -817,18 +814,19 @@ impl ImportService {
         })
     }
 
-    /// Compares the credentials of the evaluation with the vault: new, changed,
-    /// unchanged.
-    async fn credential_counts(
+    /// Compares the credentials of the evaluation with the vault, per host: new
+    /// ([`ItemAction::Create`]), changed ([`ItemAction::Update`]) or
+    /// [`ItemAction::Unchanged`]. The preview's counts and its rows both read this.
+    async fn credential_actions(
         &self,
         cx: &RequestCtx,
         credentials: &CredentialValues,
         reconciled: &Reconciled,
-    ) -> (usize, usize, usize) {
-        let (mut new, mut changed, mut unchanged) = (0, 0, 0);
+    ) -> BTreeMap<String, ItemAction> {
+        let mut actions = BTreeMap::new();
         for op in &reconciled.credentials {
             let Some(existing) = &op.existing else {
-                new += 1;
+                actions.insert(op.host.to_string(), ItemAction::Create);
                 continue;
             };
             let Some(value) = credentials.0.get(&op.host) else {
@@ -841,13 +839,14 @@ impl ImportService {
                     .is_ok_and(|stored| stored.expose() == value.to_secret_bytes().as_slice()),
                 None => false,
             };
-            if same {
-                unchanged += 1;
+            let action = if same {
+                ItemAction::Unchanged
             } else {
-                changed += 1;
-            }
+                ItemAction::Update
+            };
+            actions.insert(op.host.to_string(), action);
         }
-        (new, changed, unchanged)
+        actions
     }
 
     /// Why credentials cannot be stored now, if they cannot.
@@ -892,9 +891,7 @@ impl ImportService {
         let (session, _) = self.session(cx, id).await?;
         let files = self.files(&session).await?;
         let mapping = Self::effective_mapping(&session, &files);
-        let evaluation = self
-            .evaluate(cx, &files, &mapping, &BTreeSet::new())
-            .await?;
+        let evaluation = self.evaluate(cx, &files, &mapping).await?;
         let limit = rows.unwrap_or(self.config.preview_rows);
         let (mut preview, all_rows) = self
             .build_preview(cx, id, &mapping, &evaluation, limit, gate)
@@ -1100,12 +1097,23 @@ impl ImportService {
         // Credentials.
         let hosts = translation.model.credentials.len();
         let credentials_on = mapping.options.credentials == CredentialPolicy::Import && hosts > 0;
-        let (new, changed, unchanged) = if credentials_on {
-            self.credential_counts(cx, &translation.credentials, reconciled)
+        let credential_actions = if credentials_on {
+            self.credential_actions(cx, &translation.credentials, reconciled)
                 .await
         } else {
-            (0, 0, 0)
+            BTreeMap::new()
         };
+        let count = |wanted: ItemAction| {
+            credential_actions
+                .values()
+                .filter(|action| **action == wanted)
+                .count()
+        };
+        let (new, changed, unchanged) = (
+            count(ItemAction::Create),
+            count(ItemAction::Update),
+            count(ItemAction::Unchanged),
+        );
         let block = credentials_on
             .then(|| self.credential_block(gate))
             .flatten();
@@ -1163,7 +1171,10 @@ impl ImportService {
                         key: key.clone(),
                         action: match key {
                             ItemKey::Credential { .. } if !credentials_on => ItemAction::Kept,
-                            ItemKey::Credential { .. } => ItemAction::Create,
+                            ItemKey::Credential { host } => credential_actions
+                                .get(host)
+                                .copied()
+                                .unwrap_or(ItemAction::Create),
                             other => actions.get(other).copied().unwrap_or(ItemAction::Unchanged),
                         },
                     })
@@ -1351,9 +1362,7 @@ impl ImportService {
             .options
             .acknowledge
             .extend(request.acknowledge.iter().cloned());
-        let evaluation = self
-            .evaluate(cx, &files, &mapping, &BTreeSet::new())
-            .await?;
+        let evaluation = self.evaluate(cx, &files, &mapping).await?;
         let model = &evaluation.translation.model;
         self.check_apply(&mapping, &evaluation, gate)?;
         let model_digest = digest(model)?;
@@ -1390,14 +1399,15 @@ impl ImportService {
             }
         }
         let secrets = if mapping.options.credentials == CredentialPolicy::Import {
-            let (new, changed, _) = self
-                .credential_counts(
-                    cx,
-                    &evaluation.translation.credentials,
-                    &evaluation.reconciled,
-                )
-                .await;
-            new + changed
+            self.credential_actions(
+                cx,
+                &evaluation.translation.credentials,
+                &evaluation.reconciled,
+            )
+            .await
+            .values()
+            .filter(|action| **action != ItemAction::Unchanged)
+            .count()
         } else {
             0
         };
@@ -1523,15 +1533,20 @@ static PARSES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(MAX_PA
 /// Runs the readers on a thread of the blocking pool: parsing an upload is CPU work that
 /// the read limits bound but that would otherwise hold an async worker of the API, and of
 /// a DNS or DHCP role in the same process, for its whole length. At most [`MAX_PARSES`]
-/// run at once, since each may build up to the read limits; the others wait their turn. A
-/// panic the readers did not catch is an unreadable file.
+/// run at once, since each may build up to the read limits; the others wait their turn. The
+/// permit goes with the work, so a request that is dropped while its parse runs on does not
+/// let another one start. A panic the readers did not catch is an unreadable file.
 async fn off_runtime<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> IpamResult<T> {
-    let _permit = PARSES
+    let permit = PARSES
         .acquire()
         .await
         .map_err(|_| IpamError::new(codes::UNAVAILABLE, 503, "the import readers are closed"))?;
+    let work = move || {
+        let _permit = permit;
+        work()
+    };
     tokio::task::spawn_blocking(work).await.map_err(|_| {
         read_error(ReadError::Malformed(
             "the file structure is damaged".to_owned(),
@@ -1737,6 +1752,33 @@ mod tests {
         }
         assert!(most.load(Ordering::SeqCst) <= MAX_PARSES, "{most:?}");
         assert_eq!(MAX_PARSES, 2);
+    }
+
+    /// A request dropped while its parse runs on leaves the parse its permit: the parses
+    /// that run at once stay at [`MAX_PARSES`] however many clients disconnect.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dropped_request_holds_its_parse_permit_until_the_parse_ends() {
+        let (started, has_started) = mpsc::channel::<()>();
+        let (release, released) = mpsc::channel::<()>();
+        let request = tokio::spawn(off_runtime(move || {
+            started.send(()).expect("the test waits");
+            released.recv().expect("the test releases the parse");
+        }));
+        tokio::task::spawn_blocking(move || has_started.recv_timeout(Duration::from_secs(30)))
+            .await
+            .expect("joined")
+            .expect("the parse started");
+        request.abort();
+        assert!(request.await.expect_err("dropped").is_cancelled());
+        assert_eq!(
+            PARSES.available_permits(),
+            MAX_PARSES - 1,
+            "the running parse still holds its permit"
+        );
+        release.send(()).expect("the parse waits");
+        let all = u32::try_from(MAX_PARSES).expect("small");
+        let permits = PARSES.acquire_many(all).await.expect("the permits return");
+        drop(permits);
     }
 
     /// A panic of the work is an unreadable file, not a lost request.
