@@ -1,6 +1,6 @@
 # Cluster update plan: one action updates the whole installation, one member at a time
 
-- Status: Proposed on 2026-11-12, waiting for the owner's decisions CU-Q1 to CU-Q12 of section 8. It asks the owner to replace S3-Q14 (a) of [slice-3-plan.md](slice-3-plan.md), "the UI installs nothing on a cluster", by the orchestrated update described here, which S3-Q14 itself left to be revisited
+- Status: Accepted on 2026-11-12: the owner took the recommendation of every question of section 8, CU-Q1 to CU-Q12. It replaces S3-Q14 (a) of [slice-3-plan.md](slice-3-plan.md), "the UI installs nothing on a cluster", by the orchestrated update described here, which S3-Q14 itself left to be revisited. The packages wait for the changes named in WP19.1 and for the order section 5 gives with the cluster recovery plan
 - Date: 2026-11-12
 - Scope: OPS-08 (rolling upgrades) and the cluster half of OPS-24 (in-app updates), plus a general rule for new behavior that an older member cannot read. Written against `main` at `6595569b`. Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md). Exit criteria, measurements and risks continue the project's series from E121, M86 and R197 (the dashboard history plan ends at E120, M85 and R196); the slice number is the lead's, and this plan calls it Slice 19 with packages WP19.0 to WP19.8, provisionally
 
@@ -180,11 +180,15 @@ A run starts only when an administrator starts it. The start dialog may set a st
 
 ### 2.15 What the plan needs from the one-version change on Linux nodes
 
-The run restarts each member and relies on the member's own switch back. It needs from the change of section 1.8: (1) every start of a member after a switch (the run's restart, a later crash restart, a switch back) runs only binaries of the layout, the version the run installed or the one it switched back to, so that the start that probation watches is the whole start; (2) the member can report this in its member record or heartbeat (the preflight refuses a Linux member that does not); (3) the switch back keeps working: the previous version's start runs with its own binary. WP19.1 starts after that change is merged.
+The run restarts each member and relies on the member's own switch back. It needs from the change of section 1.8: (1) every start of a member after a switch (the run's restart, a later crash restart, a switch back) runs only binaries of the layout, the version the run installed or the one it switched back to, so that the start that probation watches is the whole start; (2) the member can report this in its member record or heartbeat (the preflight refuses a Linux member that does not); (3) the switch back keeps working: the previous version's start runs with its own binary. WP19.1 starts after that change is merged; on 2026-11-12 it had not started.
 
 ### 2.16 What stays and what is reused
 
 `tenko cluster upgrade-check`, the manual procedure of section 7.7 of upgrades.md and its notes stay as the fallback, for installations in containers and for the case where a run cannot be used. The run reuses: the fit rules and the order function of `upgrade-check` (moved into the new binary's `upgrade fit` and the run's planner, one implementation for both), the install job's five steps unchanged, the attempt record and probation, the member records and announce, the leader-gated migration, step-down, the promotion's caught-up rule, the job engine's fencing and resumption, and the backup rule of an install. Nothing of the manual path is removed. The block reason `cluster` stays for a single install on a cluster member, now for every installation with more than one member, with the text pointing to the run.
+
+### 2.17 A forced recovery step during a run
+
+The cluster recovery plan ([cluster-recovery-plan.md](cluster-recovery-plan.md)) lets an operator make one surviving controller the only voter of a new history when the quorum is gone for good, and numbers each history with a signed **generation** that every call between controllers carries; a controller of a superseded history fences itself, and a restore of a cluster backup starts a new generation too. A run never continues across such a step, and both sides refuse. On the recovery side, the forced step halts an active run in the same batch that writes the generation record (halt reason `cluster.recover`), and the run's own cluster-port calls (`Peer.Ready` for the gate, `Release.Fetch` for the files) carry and check the generation as the other calls between controllers do, so a superseded member's answer is a refusal that the gate counts as a failed check. On the run's side, the run row records the generation the run started in, and every step reads the stored generation before it acts and halts with `cluster.recover` when it differs; this also stops a run that a restored backup brings back, whose job would otherwise resume. A run halted for `cluster.recover` offers only End here, because its order and its gate counted voters that are gone, and the preflight of a new run refuses while any controller is superseded and neither rejoined nor removed; the halt leaves joins and removals allowed (section 2.3), as the recovery needs. A run that an old majority kept driving behind a partition stops when those controllers fence and stays in their kept copies; the members it updated keep their version, and the next run brings the installation to one. The migration hold stays across the step, as after any run that did not finish. In the other direction, the level of section 2.8 serves the recovery plan: a superseded controller that rejoins passes the level check at join, and once the release that knows generations has raised the level, "every member knows generations" is a read of the level instead of a list of versions.
 
 ## 3. Exit checks
 
@@ -215,7 +219,7 @@ Every check runs on the shipped binary: in-process tests use the release build g
 
 ## 5. Work packages
 
-Sizes in builder-days. WP19.1, with the contracts of WP19.0, is useful alone: a cluster of controllers that can reach the release source updates itself with the gate and the halt, from the CLI. Order: WP19.0; then WP19.1; then WP19.3 and WP19.4 in parallel (disjoint files); then WP19.2 (the lab uses the leader as the source for its members); WP19.5 can start after WP19.0 on the UI's mock; WP19.6 after WP19.3; WP19.7 after Slice 12's WP12.1 to WP12.3; WP19.8 last. Every brief carries the gate's whole check suite and the economy rule of the builder rules, and names the files it owns.
+Sizes in builder-days. WP19.1, with the contracts of WP19.0, is useful alone: a cluster of controllers that can reach the release source updates itself with the gate and the halt, from the CLI. Order: WP19.0; then WP19.1; then WP19.3 and WP19.4 in parallel (disjoint files); then WP19.2 (the lab uses the leader as the source for its members); WP19.5 can start after WP19.0 on the UI's mock; WP19.6 after WP19.3; WP19.7 after Slice 12's WP12.1 to WP12.3; WP19.8 last. The cluster recovery plan asks that its first two packages, the generation and the forced step, come before WP19.4; this order allows it, and whichever of WP19.1 and that forced step merges second carries the run's side of section 2.17. Every brief carries the gate's whole check suite and the economy rule of the builder rules, and names the files it owns.
 
 #### WP19.0 The contracts (2 builder-days)
 
@@ -225,7 +229,7 @@ Sizes in builder-days. WP19.1, with the contracts of WP19.0, is useful alone: a 
 #### WP19.1 The run for controllers (7 builder-days)
 
 - **Owns:** the job `sys.update.cluster` and its steps (preflight with `upgrade fit`, backup, the member steps, the finish without compensation), the run row and its one-run condition, the follower of pinned `sys.update` jobs and the submission that never restarts the submitter, the drain, the gate's checks 1 to 10 for controllers, the step-down to a named voter, the halt with its three choices, the pause and the refusal of the generic cancel in the job engine, take back as the member steps' compensation (chosen only by an administrator, refused past the point of no return), the migration hold and its release, the refusal of membership changes during a run, the `cluster` block for every installation with more than one member, the outcome in the member record, the CLI commands of section 2.13, the move of `upgrade-check`'s fit rules and order into one implementation.
-- **Depends on:** WP19.0; the one-version change of section 2.15 merged; the change that stops a member at an unreadable entry merged (check 6).
+- **Depends on:** WP19.0; the one-version change of section 2.15 merged; the change that stops a member at an unreadable entry merged (check 6). On 2026-11-12 that change was finished and waited for its merge, and the one-version change had not started.
 - **Done means:** E121 to E124.
 
 #### WP19.2 The lab (3 builder-days)
@@ -298,26 +302,52 @@ Total: 26 builder-days for WP19.0 to WP19.6 and WP19.8; 27.5 with WP19.7 once Sl
 
 Each question gives the options, where they stand in the owner's order (security, performance, usability, features) and one recommendation.
 
+**Decided by the owner (2026-11-12): every question as recommended.** Each decision is stated under its question.
+
 **CU-Q1. Replace S3-Q14.** (a) The run of this plan on clusters; (b) keep the manual procedure and only extend `tenko cluster upgrade-check` with the gate's checks (health, catch-up, quorum) as a guide. Security: (a) makes every member's update a dry-run-checked, audited action that a replaced leader cannot continue (fenced), with a halt, where (b) relies on a person following ten steps per member; (a) adds a new way for a binary to reach a machine, the copy from the leader to the other members (R203). Performance: equal. Usability: (a) is one action; (b) is about ten commands per member. **Recommendation: (a).**
+
+**Decided (2026-11-12): (a).** On a cluster the run replaces S3-Q14 (a); the manual procedure stays as the fallback.
 
 **CU-Q2. When a run may start.** A *maintenance window* is an agreed period in which interruptions are allowed. (a) Only when an administrator presses Start; (b) (a) plus an optional start time and window end in the start dialog, after which no further member starts and the run pauses; (c) automatic updates on a schedule. Security: (c) installs without a person's decision at the moment, which no profile allows today. Usability: (b) lets a run begin at night without anyone at the screen, and never runs past the window. **Recommendation: (b).**
 
+**Decided (2026-11-12): (b).** A run starts when an administrator presses Start, with an optional start time and window end.
+
 **CU-Q3. How many members at once.** (a) Strictly one member of the installation at a time; (b) several at once when they share no role, pair or zone. Security and usability: (a) is the owner's rule as stated and the simplest to prove; (b) is faster for large installations but rests on the product knowing right which members stand in for each other (a DHCP pair, two DNS servers of the same zones). Performance: (a) takes longer, about the restart plus the gate per member. **Recommendation: (a), and (b) only if a large installation asks for it.**
+
+**Decided (2026-11-12): (a).** Strictly one member of the installation at a time.
 
 **CU-Q4. A role or the writes with no second member.** One DNS server, or a single voter (with learners or enrolled nodes), whose restart pauses DNS answers or writes for its restart, about 20 s. (Two voters are always refused, section 2.2: the run could not record its progress.) (a) The preflight names the outage and the run starts only after an explicit acknowledgment; (b) refuse such a run. Security: equal (the outage happens with the manual procedure too). Usability: (b) leaves such installations to the manual procedure, which has the same outage without the gate. **Recommendation: (a).**
 
+**Decided (2026-11-12): (a).** The preflight names the outage and the run starts only after an explicit acknowledgment; two voters stay refused.
+
 **CU-Q5. The point of no return.** After the last member's gate, the data migrates and the level rises, and from then on the way back is the backup. (a) The run finishes by itself; (b) the run waits for an administrator's "Finish" (with a fresh sign-in), and until then the new behavior stays off and Take back stays possible; (c) (a) by default with (b) as an option in the start dialog. Security: (b) keeps the cheap way back longer, but keeps the installation without the new behavior while nobody acts. Usability: (a) reaches the owner's goal, one version and its behavior, without a second visit. **Recommendation: (c).**
+
+**Decided (2026-11-12): (c).** The run finishes by itself; the start dialog offers to wait for the administrator's Finish instead.
 
 **CU-Q6. The soak.** How long an updated member must stay healthy before the next starts: (a) 0; (b) 2 minutes; (c) 10 minutes; a setting in every case. Security: a longer soak catches a slow failure (a leak, a crash under load) on one member instead of several. Performance: each minute is added per member (a three-controller, two-node installation: 10 minutes for (b), 50 for (c)). **Recommendation: (b).**
 
+**Decided (2026-11-12): (b).** Two minutes, the default of the setting `soak_secs`.
+
 **CU-Q7. Where members get the release file.** (a) The leader stages it once per platform, copies it to the other controllers, and every member fetches it from the leader over the cluster port (the members' own encrypted connection, on which each side proves itself with its certificate); (b) every member downloads it from the release source itself. Security: (a) needs one host with access to the release source instead of all, and each member still verifies the digest; (b) has no file moving between members. Performance: (a) downloads once per platform. Usability: (a) works for nodes in networks without internet and for air-gapped installations (those that never contact the internet) with one upload per platform. **Recommendation: (a).**
+
+**Decided (2026-11-12): (a).** The leader stages the file per platform and copies it to the other controllers; members fetch it over the cluster port and verify its digest.
 
 **CU-Q8. The fresh sign-in.** A *step-up* is a sign-in within the last five minutes. (a) Starting a run needs a step-up in every profile, Home and Lab included; (b) as an install today: Standard and Hardened only. Security: (a) puts one confirmation of identity before an action that touches every machine. Usability: one sign-in at most once per run. **Recommendation: (a).**
 
+**Decided (2026-11-12): (a).** Starting a run needs a fresh sign-in in every profile.
+
 **CU-Q9. The backup before a run.** (a) As an install today: a backup younger than an hour, one taken by the run, or an explicit skip where the profile allows; (b) a backup is always required, no skip. Security: (b) always keeps a way back after the point of no return; (a) lets a home installation without a backup target run. **Recommendation: (a), with the run's default answer "take a backup".**
+
+**Decided (2026-11-12): (a).** The backup rule of an install, with "take a backup" as the run's default answer.
 
 **CU-Q10. An enrolled node that is offline.** (a) The preflight refuses the run until the node is back or removed; (b) the run updates the others and the node is updated when it returns, while it holds the installation level back. Security: (a) never leaves a known old member behind; (b) updates the rest without waiting for a node that may be gone for good. Usability: (b) does not let one dead probe block everyone. **Recommendation: (a) in the first release; (b) as a later option.**
 
+**Decided (2026-11-12): (a).** An offline enrolled node blocks the run until it is back or removed; (b) may come later as an option.
+
 **CU-Q11. Members in containers.** (a) The preflight refuses a run with a member in a container (such installations use the manual procedure, section 7.5 of upgrades.md); (b) a later package lets the run wait at such a member until the operator has replaced its image, then gates it as usual. Security and performance: equal. Usability: (b) brings container installations into the run with one manual step per member. **Recommendation: (a) now, (b) when container clusters are used.**
 
+**Decided (2026-11-12): (a).** The preflight refuses a run with a member in a container; (b) when container clusters are used.
+
 **CU-Q12. The lab's container setting.** Today a container is recognized by the setting or by marker files, the empty files `/.dockerenv` and `/run/.containerenv` that container engines place in every container; either blocks an install. (a) An explicit `updates.container = false` in the configuration file (which only root writes) takes precedence over the marker files, so the cluster lab, and system containers (containers that run a whole system with its own service manager, like a small virtual machine) can run updates; (b) the lab runs the exit checks on virtual machines instead. Security: (a) moves the decision to the root-written file, which already holds the release location; the image keeps setting `true`. Usability: (a) keeps the exit checks in the compose lab that the weekly job runs. **Recommendation: (a).**
+
+**Decided (2026-11-12): (a).** An explicit `updates.container = false` in the configuration file takes precedence over the marker files.
