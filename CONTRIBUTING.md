@@ -169,6 +169,38 @@ Development and test builds carry line tables for the workspace crates and no de
 
 Rust-only builds use a placeholder UI page: set `TENKO_UI_STUB=1` when `ui/dist` has not been built (CI does this for its Rust jobs). Release builds refuse the placeholder.
 
+## The gate
+
+Changes reach `main` through the gate: a full local check that applies them onto
+`origin/main` as one merge branch, regenerates the generated files and runs every check of
+the project on the result: spelling and the test rules, the UI's type check, lint, unit
+tests, build and size, formatting, clippy on Windows and on Linux, every Rust test, the traces
+and the script tests, the changelog rule, `cargo deny`, the fuzz package, the server build
+with the real UI, and the end-to-end suite. The maintainer who merges runs it for each
+batch of changes before pushing to `main`; CI then runs again on the push. The scripts, their
+configuration and the steps with what each proves are in `scripts/gate/README.md`:
+
+```sh
+. ~/tenko-gate.env                        # your configuration, from scripts/gate/gate.env.example
+scripts/gate/gate.sh <name> <spec file>   # the spec lists the branches and commits to apply
+scripts/gate/gate.sh --list               # the steps
+```
+
+The run ends with one line: green, or the step that failed, with the log beside it.
+
+- **A red step** means the merged result fails that check; nothing is merged. The log names
+  the check and its output. Fix the change on its branch and run the gate again, or continue
+  the merge branch from the failed step with `--from <step>` after a fix made there.
+- **A test that fails in the full run is run again alone.** If it passes alone the step is
+  green, but the result names the test: a test that passes only alone has a cause, in the
+  product or in the test, and is fixed, never retried away.
+- **The gate runs alone on its machine.** It uses every core for a long time, and another
+  heavy job beside it makes tests fail from load and can stall the machine. While it runs,
+  other work on the same machine uses targeted checks only (`cargo clippy -p <crate>`,
+  `cargo nextest run -p <crate> --test-threads 4`, `npx vitest run <files>`, one end-to-end
+  spec file) and never a whole-workspace command (`--workspace`, `npm run test` without a
+  file, `npm run e2e`).
+
 ## Continuous integration
 
 The workflows live in `.github/workflows/`: `ci.yml` on every push and pull request, `codeql.yml` (code scanning, reporting only) on pull requests and weekly, `release.yml` for a tag. The security checks among them are layer 1 of `docs/plans/security-audit-plan.md`.

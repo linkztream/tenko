@@ -13,6 +13,7 @@ root.
 | `root-anchors.mjs` | WP10.0: converts the shipped DNS root trust anchors (`crates/tenko-dns/anchors/root-anchors.xml`, RFC 7958) and root hints (`named.root`) into `crates/tenko-dns/src/recursion/shipped.rs`, and with `--check` (exit 1) verifies that the committed file is current. `crates/tenko-dns/anchors/README.md` says how to refresh the inputs. |
 | `label-catalog.mjs` | Finds the job kinds and audit actions the Rust code can write; `label-catalog.test.mjs` fails, naming each one, when `ui/i18n/<language>.d/labels.xlf` has no `jobs.title.<kind>` or `audit.action.<code>` unit (with a Swedish target) for it. |
 | `test-lint.mjs` | Checks the standing rules for tests (`docs/testing/rules.md`) over the Rust tests, the UI unit and end-to-end tests and the test configuration, against the baseline `test-lint.baseline.json`: `node scripts/test-lint.mjs` (check), `--list` (every finding), `--prune` (drop the entries nothing matches). Exit codes 0, 1 (a finding outside the baseline, a stale entry, a malformed exception), 2 (bad usage or baseline). Runs in CI (job `spelling`) and in the gate. |
+| `gate/` | The gate, the full local check before a merge into `main` (`gate/README.md`): `gate.sh` (the entry point), `apply.mjs` (builds the merge branch from a spec file), `merge-changelog.mjs` (merges `CHANGELOG.md` conflicts, both sides kept), `watch-ci.sh` (waits for the CI runs of a commit and prints the failed jobs), `gate.env.example` (the configuration). Tested by `gate.test.mjs`. |
 | `*.test.mjs` | Tests with `node:test`. |
 
 ```sh
