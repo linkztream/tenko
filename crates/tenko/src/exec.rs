@@ -1,12 +1,13 @@
 //! The privilege check of ADR 0023 (`exec.unsafe_owner`, items 3 and 11, invariants I1, I2
-//! and I10): an offline command that opens the store or writes under the data directory
+//! and I10): a command that reads, writes or executes anything under the data directory
 //! never runs with full privileges over files that belong to another account.
 //!
-//! Before [`crate::execute`] runs one of the commands in [`offline_paths`], `main` asks this
-//! module whether the process runs as root (on Windows: as `SYSTEM`, as an elevated member
-//! of Administrators, or with a token that holds a privilege acting beyond its account, see
-//! the module `token`; a Windows token that cannot be read counts as privileged) and whether this binary's own file, the data directory or another directory the
-//! command writes into belongs to an account other than the privileged ones. When both
+//! Before [`crate::execute`] runs one of the commands that [`guarded_paths`] covers, `main`
+//! asks this module whether the process runs as root (on Windows: as `SYSTEM`, as an
+//! elevated member of Administrators, or with a token that holds a privilege acting beyond
+//! its account, see the module `token`; a Windows token that cannot be read in time counts
+//! as privileged) and whether this binary's own file, the data directory or another
+//! directory the command uses belongs to an account other than the privileged ones. When both
 //! hold, the command does not run: the process exits with status 2 (`exit::USAGE`) and
 //! prints one line that names the code, the file and its owner, and the same command in
 //! the form that runs it as that account (`runuser -u <account> -- tenko …` on Linux).
@@ -16,12 +17,14 @@
 //! so that the decision is tested with two accounts without being root: [`Host`] reads
 //! the real process and file system.
 //!
-//! The commands covered are the ones that open the store or write under the data
-//! directory with the server stopped: `backup restore`, `backup create` of a stopped node
-//! (`--config` or `--data-dir`), `backup verify` (its work directory), `kek rotate`, `user unlock`,
-//! `upgrade check` and `upgrade layout`. `tenko serve` is not among them: the unit and
-//! the Windows service run it as the service account, and a container runs it as the
-//! owner of its own files.
+//! [`guarded_paths`] decides for every command, with no catch-all arm: `serve`, the
+//! offline store commands (`backup restore`, `backup create` of a stopped node, `backup
+//! verify` with its work directory, `kek rotate`, `user unlock`, `upgrade check`, `upgrade
+//! layout`), the node's own commands (`node enroll`, `status`, `renew`, `inject`, `node
+//! scan …`), `cluster join`, `setup token`, `plugin list` and `plugin test` (the plugin it
+//! executes) are covered. The unit and a container run `serve` as the owner of its files,
+//! which passes; `service run` is started by the Service Control Manager as the service's
+//! virtual account only.
 
 use std::{
     fmt,
@@ -29,7 +32,16 @@ use std::{
 };
 
 use crate::{
-    Cli, Command, backup::BackupCommand, config, kek::KekCommand, upgrade::UpgradeCommand,
+    Cli, Command, ConfigCommand, RolesCommand,
+    backup::BackupCommand,
+    client::{audit::AuditCommand, hibp::HibpCommand, login::SetupCommand},
+    cluster::ClusterCommand,
+    config,
+    kek::KekCommand,
+    node::{NodeCommand, NodeDirArgs, scan::cli::ScanCommand},
+    platform::ServiceCommand,
+    plugin::PluginCommand,
+    upgrade::UpgradeCommand,
     user::UserCommand,
 };
 
@@ -74,6 +86,12 @@ pub enum Privilege {
     Unprivileged,
     /// It cannot be told (Unix other than Linux); the check does not refuse.
     Unknown,
+    /// What it may do could not be read, also when the tool that reads it did not end in
+    /// time; the check counts it as privileged (fail closed) and says why.
+    Unreadable {
+        /// Why: "its token could not be read (…)".
+        why: String,
+    },
     /// More than its own account.
     Privileged {
         /// Why, for the refusal: "the effective uid is 0", "its token holds …".
@@ -121,6 +139,8 @@ pub struct Refusal {
     pub arguments: Vec<String>,
     /// Why the process counts as privileged.
     pub why: String,
+    /// Whether it counts as privileged only because its privileges could not be read.
+    pub unread: bool,
     /// What to do instead, when it is not the platform's usual advice.
     pub advice: Option<String>,
 }
@@ -145,7 +165,14 @@ impl fmt::Display for Refusal {
         } else {
             "the directory"
         };
-        if cfg!(windows) {
+        if self.unread {
+            write!(
+                f,
+                "tenko {}: [{CODE}] refusing to run because {}, and a process whose privileges \
+                 cannot be read counts as privileged: ",
+                self.command, self.why
+            )?;
+        } else if cfg!(windows) {
             write!(
                 f,
                 "tenko {}: [{CODE}] refusing to run with a privileged token ({}): ",
@@ -168,10 +195,22 @@ impl fmt::Display for Refusal {
         }
         if let Some(advice) = &self.advice {
             f.write_str(advice)
+        } else if cfg!(windows) && self.command == "serve" {
+            f.write_str(
+                "start the server as its service instead (`tenko service start`), which runs \
+                 it as the service account",
+            )
         } else if cfg!(windows) {
             f.write_str(
                 "run the MSI's payload C:\\Program Files\\Tenko\\tenko.exe from the elevated \
                  prompt instead; the service account's own files are changed by the service",
+            )
+        } else if self.command == "serve" {
+            write!(
+                f,
+                "start the server as its service instead (`systemctl start tenko`), or run it \
+                 as that account: {}",
+                self.as_owner()
             )
         } else {
             write!(f, "run it as that account: {}", self.as_owner())
@@ -192,12 +231,24 @@ fn shell_word(word: &str) -> String {
     }
 }
 
-/// The directories an offline command writes into or opens the store under, or `None` for
-/// a command this check does not cover. The data directory comes from the configuration
-/// as the command itself would read it; when that fails, the command reports it and the
-/// list is empty (the binary is still checked).
-pub fn offline_paths(cli: &Cli) -> Option<Vec<PathBuf>> {
-    let data_dir = |file: &Option<PathBuf>, dir: &Option<PathBuf>| {
+/// The directories and files a command reads, writes, executes or opens the store under,
+/// or `None` for a command that touches nothing of the service account's: an API client,
+/// a command that prints a constant, or one that only writes where its flags say.
+///
+/// The match names every command and has no catch-all arm, so that a new command does not
+/// compile until it is decided here. The data directory comes from the configuration as
+/// the command itself would read it. When the file does not load, it is resolved again
+/// without the file, as a command that creates its configuration does (`cluster join`),
+/// and else `--data-dir` is taken as given, so that a configuration that fails does not
+/// leave the data directory unchecked; with neither, the list is empty and the binary is
+/// still checked.
+#[allow(
+    clippy::too_many_lines,
+    clippy::match_same_arms,
+    reason = "one arm per command of the binary, each with why it is or is not covered"
+)]
+pub fn guarded_paths(cli: &Cli) -> Option<Vec<PathBuf>> {
+    let resolve = |file: &Option<PathBuf>, dir: &Option<PathBuf>| {
         let sources = config::Sources {
             file: file.clone(),
             data_dir: dir.clone(),
@@ -207,59 +258,158 @@ pub fn offline_paths(cli: &Cli) -> Option<Vec<PathBuf>> {
             .and_then(|loaded| loaded.config.resolve())
             .ok()
     };
-    let mut paths = Vec::new();
-    match &cli.command {
-        Command::Backup {
-            action: BackupCommand::Restore(args),
-        } => {
-            if let Some(resolved) = data_dir(&args.config, &args.data_dir) {
-                paths.push(resolved.data_dir);
+    let data_dir = |file: &Option<PathBuf>, dir: &Option<PathBuf>| {
+        resolve(file, dir)
+            .or_else(|| resolve(&None, dir))
+            .map(|resolved| resolved.data_dir)
+            .or_else(|| dir.clone())
+    };
+    let node_dir = |node: &NodeDirArgs| data_dir(&node.config, &node.data_dir);
+    let paths: Vec<PathBuf> = match &cli.command {
+        // The server writes all of the data directory. The unit and a container run it as
+        // the owner of its files, which passes; root over the account's files is refused.
+        Command::Serve(args) => data_dir(&args.config, &args.data_dir).into_iter().collect(),
+        Command::Backup { action } => match action {
+            BackupCommand::Restore(args) => {
+                data_dir(&args.config, &args.data_dir).into_iter().collect()
             }
-        }
-        Command::Backup {
-            action: BackupCommand::Create(args),
-        } if args.config.is_some() || args.data_dir.is_some() => {
-            if let Some(resolved) = data_dir(&args.config, &args.data_dir) {
-                paths.push(args.out.clone().unwrap_or_else(|| resolved.backup_dir()));
-                paths.push(resolved.data_dir);
-            } else if let Some(out) = &args.out {
-                paths.push(out.clone());
+            BackupCommand::Create(args) if args.config.is_some() || args.data_dir.is_some() => {
+                match resolve(&args.config, &args.data_dir) {
+                    Some(resolved) => vec![
+                        args.out.clone().unwrap_or_else(|| resolved.backup_dir()),
+                        resolved.data_dir,
+                    ],
+                    None => args
+                        .out
+                        .iter()
+                        .cloned()
+                        .chain(data_dir(&args.config, &args.data_dir))
+                        .collect(),
+                }
             }
-        }
-        Command::Backup {
-            action: BackupCommand::Verify(args),
-        } => paths.extend(args.work_dir.clone()),
+            // Online: the server writes the file.
+            BackupCommand::Create(_) => return None,
+            // Unpacks the archive it reads into its work directory.
+            BackupCommand::Verify(args) => std::iter::once(args.file.clone())
+                .chain(args.work_dir.iter().cloned())
+                .collect(),
+            // Creates a new file where `--out` says and refuses an existing path.
+            BackupCommand::Keygen(_) => return None,
+        },
         Command::Kek {
             action: KekCommand::Rotate(args),
-        } => {
-            if let Some(resolved) = data_dir(&args.config, &args.data_dir) {
-                paths.push(resolved.data_dir);
-            }
-        }
+        } => data_dir(&args.config, &args.data_dir).into_iter().collect(),
         Command::User {
             action: UserCommand::Unlock(args),
-        } => {
-            if let Some(resolved) = data_dir(&args.config, &args.data_dir) {
-                paths.push(resolved.data_dir);
+        } => data_dir(&args.config, &args.data_dir).into_iter().collect(),
+        Command::Upgrade { action } => match action {
+            UpgradeCommand::Check(args) => args
+                .work_dir
+                .iter()
+                .cloned()
+                .chain(data_dir(&args.config, &args.data_dir))
+                .collect(),
+            UpgradeCommand::Layout(args) => {
+                data_dir(&args.config, &args.data_dir).into_iter().collect()
             }
-        }
-        Command::Upgrade {
-            action: UpgradeCommand::Check(args),
-        } => {
-            paths.extend(args.work_dir.clone());
-            if let Some(resolved) = data_dir(&args.config, &args.data_dir) {
-                paths.push(resolved.data_dir);
+            UpgradeCommand::Format | UpgradeCommand::Version => return None,
+        },
+        Command::Node { action } => match action {
+            // The node's identity, key, buffer and scanner files under `<data_dir>/node`
+            // and `<data_dir>/scan`, read and written.
+            NodeCommand::Enroll(args) => node_dir(&args.node).into_iter().collect(),
+            NodeCommand::Status(args) => node_dir(&args.node).into_iter().collect(),
+            NodeCommand::Renew(args) => node_dir(&args.node).into_iter().collect(),
+            NodeCommand::Inject(args) => node_dir(&args.node).into_iter().collect(),
+            NodeCommand::Scan(args) => match &args.action {
+                ScanCommand::Status(args) | ScanCommand::Resume(args) => {
+                    node_dir(&args.node).into_iter().collect()
+                }
+                ScanCommand::Run(args) => node_dir(&args.node).into_iter().collect(),
+                ScanCommand::Stop(args) => node_dir(&args.node).into_iter().collect(),
+            },
+            NodeCommand::EnrollToken(_) | NodeCommand::Roles(_) => return None,
+        },
+        Command::Cluster { action } => match action {
+            // Enrolls, imports key generations and copies the store into the data directory.
+            ClusterCommand::Join(args) => node_dir(&args.node).into_iter().collect(),
+            ClusterCommand::Status(_)
+            | ClusterCommand::Members(_)
+            | ClusterCommand::Promote(_)
+            | ClusterCommand::Remove(_)
+            | ClusterCommand::StepDown(_)
+            | ClusterCommand::Verify(_)
+            | ClusterCommand::UpgradeCheck(_) => return None,
+        },
+        Command::Setup(args) => match &args.action {
+            // Reads `<data_dir>/setup-token`.
+            Some(SetupCommand::Token(args)) => {
+                data_dir(&args.config, &args.data_dir).into_iter().collect()
             }
-        }
-        Command::Upgrade {
-            action: UpgradeCommand::Layout(args),
-        } => {
-            if let Some(resolved) = data_dir(&args.config, &args.data_dir) {
-                paths.push(resolved.data_dir);
+            None => return None,
+        },
+        Command::Plugin { action } => match action {
+            // Reads the manifests under `<data_dir>/plugins` or `--plugins-dir`.
+            PluginCommand::List(args) => args
+                .plugins_dir
+                .iter()
+                .cloned()
+                .chain(data_dir(&args.config, &args.data_dir))
+                .collect(),
+            // Executes the plugin it is given.
+            PluginCommand::Test(args) => vec![args.target.clone()],
+            // A bundled plugin runs inside this process.
+            PluginCommand::Run(_) => return None,
+        },
+        Command::Service { action } => match action {
+            // Only the Service Control Manager starts it, as the service's virtual account,
+            // the only account `service install` accepts.
+            ServiceCommand::Run(_) => return None,
+            // Elevated by design: it restricts a data directory before the account gets it
+            // and refuses one that holds data under another access list.
+            ServiceCommand::Install(_) => return None,
+            // The Service Control Manager and the registry only.
+            ServiceCommand::Uninstall(_) | ServiceCommand::Start(_) | ServiceCommand::Stop(_) => {
+                return None;
             }
+        },
+        Command::Config { action } => match action {
+            // Reads the file it is given.
+            ConfigCommand::Check(_) => return None,
+            // Writes the file `--out` names, which root owns when root writes it.
+            ConfigCommand::Init(_) => return None,
+        },
+        // Read the files their flags name, write where `--output` says.
+        Command::Hibp {
+            action: HibpCommand::Build(_),
         }
-        _ => return None,
-    }
+        | Command::Import(_)
+        | Command::Export(_) => return None,
+        Command::Audit { action } => match action {
+            // A file it is given, or the API; writes where `--output` says.
+            AuditCommand::Verify(_) | AuditCommand::Export(_) => return None,
+        },
+        // Constants.
+        Command::Roles {
+            action: RolesCommand::List,
+        }
+        | Command::Openapi => return None,
+        // API clients, whose modules under `client/` open no file of the data directory but
+        // the node's CA root: they read the caller's own credentials and write where their
+        // flags say.
+        Command::Login(_)
+        | Command::Logout(_)
+        | Command::Prefix { .. }
+        | Command::Ipam { .. }
+        | Command::Dns { .. }
+        | Command::Dhcp { .. }
+        | Command::Migrate { .. }
+        | Command::Auth { .. }
+        | Command::Access { .. }
+        | Command::CaRoot(_)
+        | Command::Health(_)
+        | Command::System { .. } => return None,
+    };
     Some(paths)
 }
 
@@ -267,10 +417,32 @@ pub fn offline_paths(cli: &Cli) -> Option<Vec<PathBuf>> {
 ///
 /// `arguments` are the command-line arguments after the program name, repeated in the
 /// refusal as the command to run as the owner.
+///
+/// On Unix this binary's own file is checked for every command, as ADR 0023 item 3 says.
+/// On Windows it is checked for the commands [`guarded_paths`] covers only: reading what
+/// the token may do runs `whoami.exe`, with a limit of 30 seconds, and doing that before
+/// every client command would slow each one and refuse it whenever the machine is too
+/// loaded to answer in time.
 pub fn check(cli: &Cli, facts: &dyn Facts, arguments: &[String]) -> Option<Refusal> {
-    let paths = offline_paths(cli)?;
-    let Privilege::Privileged { why, advice } = facts.privilege() else {
+    check_with(cli, facts, arguments, cfg!(not(windows)))
+}
+
+/// [`check`], with whether the binary is checked for the commands that are not covered.
+fn check_with(
+    cli: &Cli,
+    facts: &dyn Facts,
+    arguments: &[String],
+    binary_always: bool,
+) -> Option<Refusal> {
+    let paths = guarded_paths(cli);
+    if paths.is_none() && !binary_always {
         return None;
+    }
+    let paths = paths.unwrap_or_default();
+    let (why, advice, unread) = match facts.privilege() {
+        Privilege::Privileged { why, advice } => (why, advice, false),
+        Privilege::Unreadable { why } => (why, None, true),
+        Privilege::Unprivileged | Privilege::Unknown => return None,
     };
     let command = cli.command.name();
     let refusal = |path: PathBuf, binary: bool, owner: Result<Owner, String>| Refusal {
@@ -280,22 +452,30 @@ pub fn check(cli: &Cli, facts: &dyn Facts, arguments: &[String]) -> Option<Refus
         owner,
         arguments: arguments.to_vec(),
         why: why.clone(),
+        unread,
         advice: advice.clone(),
     };
-    // Another account's file, or one whose owner cannot be read, refuses (fail closed).
-    let unsafe_owner = |path: &Path| match facts.owner(path) {
-        Ok(Some(owner)) if owner.privileged => None,
-        Ok(None) => None,
-        Ok(Some(owner)) => Some(Ok(owner)),
-        Err(error) => Some(Err(error)),
+    // Another account's file, or one whose owner cannot be read, refuses (fail closed). A
+    // path that does not exist yet would be created in its nearest existing ancestor, which
+    // decides in its place.
+    let unsafe_owner = |path: &Path| {
+        for candidate in path.ancestors() {
+            match facts.owner(candidate) {
+                Ok(None) => {}
+                Ok(Some(owner)) if owner.privileged => return None,
+                Ok(Some(owner)) => return Some((candidate.to_path_buf(), Ok(owner))),
+                Err(error) => return Some((candidate.to_path_buf(), Err(error))),
+            }
+        }
+        None
     };
     if let Some(exe) = facts.exe()
-        && let Some(owner) = unsafe_owner(&exe)
+        && let Some((path, owner)) = unsafe_owner(&exe)
     {
-        return Some(refusal(exe, true, owner));
+        return Some(refusal(path, true, owner));
     }
     for path in paths {
-        if let Some(owner) = unsafe_owner(&path) {
+        if let Some((path, owner)) = unsafe_owner(&path) {
             return Some(refusal(path, false, owner));
         }
     }
@@ -326,31 +506,17 @@ mod host {
 
     use super::{Owner, Privilege};
 
-    /// The effective uid from `/proc/self/status` (`Uid: real effective saved fs`), which
-    /// needs no library; elsewhere than Linux it is not known.
+    /// The effective uid and capabilities from `/proc/self/status`, which needs no library;
+    /// elsewhere than Linux they are not known. A status that cannot be read counts as
+    /// privileged (fail closed).
     pub(super) fn privilege() -> Privilege {
         if !cfg!(target_os = "linux") {
             return Privilege::Unknown;
         }
-        match std::fs::read_to_string("/proc/self/status")
-            .ok()
-            .and_then(|status| effective_uid(&status))
-        {
-            Some(0) => Privilege::Privileged {
-                why: "the effective uid is 0".to_owned(),
-                advice: None,
-            },
-            Some(_) => Privilege::Unprivileged,
-            None => Privilege::Unknown,
+        match std::fs::read_to_string("/proc/self/status") {
+            Ok(status) => super::linux::classify(&status),
+            Err(error) => super::linux::unreadable(&error.to_string()),
         }
-    }
-
-    pub(super) fn effective_uid(status: &str) -> Option<u32> {
-        status
-            .lines()
-            .find_map(|line| line.strip_prefix("Uid:"))
-            .and_then(|fields| fields.split_whitespace().nth(1))
-            .and_then(|uid| uid.parse().ok())
     }
 
     pub(super) fn owner(path: &Path) -> Result<Option<Owner>, String> {
@@ -583,6 +749,99 @@ mod host {
     }
 }
 
+/// What a Linux process may do beyond its own account, read from `/proc/self/status`: the
+/// effective uid (`Uid: real effective saved fs`) and the effective capabilities (`CapEff:`,
+/// a hexadecimal mask). A process that is not root but holds a capability that reaches
+/// another account's files or processes counts as privileged; the capabilities the unit
+/// grants the service (`CAP_NET_BIND_SERVICE`, and `CAP_NET_RAW` for some roles) do not.
+#[cfg(any(unix, test))]
+mod linux {
+    use super::Privilege;
+
+    /// The capabilities that act beyond the account, by their bit number.
+    pub(super) const BEYOND_THE_ACCOUNT: [(u32, &str); 15] = [
+        // Change the owner of any file.
+        (0, "CAP_CHOWN"),
+        // Read, write and execute any file.
+        (1, "CAP_DAC_OVERRIDE"),
+        // Read any file and search any directory.
+        (2, "CAP_DAC_READ_SEARCH"),
+        // Act as the owner of any file: modes, access lists, links in sticky directories.
+        (3, "CAP_FOWNER"),
+        // Become any group or user.
+        (6, "CAP_SETGID"),
+        (7, "CAP_SETUID"),
+        // Grant capabilities to other processes and files.
+        (8, "CAP_SETPCAP"),
+        // Load kernel modules: code in the kernel.
+        (16, "CAP_SYS_MODULE"),
+        // Raw access to devices and memory.
+        (17, "CAP_SYS_RAWIO"),
+        // Trace any process, read and write its memory.
+        (19, "CAP_SYS_PTRACE"),
+        // Mount, namespaces and much else that reaches root.
+        (21, "CAP_SYS_ADMIN"),
+        // Set file capabilities.
+        (31, "CAP_SETFCAP"),
+        // Override or change the mandatory access control policy.
+        (32, "CAP_MAC_OVERRIDE"),
+        (33, "CAP_MAC_ADMIN"),
+        // Load programs into the kernel.
+        (39, "CAP_BPF"),
+    ];
+
+    /// A status that could not be read: counted as privileged, so that the check fails
+    /// closed.
+    pub(super) fn unreadable(reason: &str) -> Privilege {
+        Privilege::Unreadable {
+            why: format!("/proc/self/status could not be read ({reason})"),
+        }
+    }
+
+    fn field<'a>(status: &'a str, name: &str) -> Option<&'a str> {
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(name))
+            .map(str::trim)
+    }
+
+    pub(super) fn effective_uid(status: &str) -> Option<u32> {
+        field(status, "Uid:")
+            .and_then(|fields| fields.split_whitespace().nth(1))
+            .and_then(|uid| uid.parse().ok())
+    }
+
+    /// Classifies the text of `/proc/self/status`.
+    pub(super) fn classify(status: &str) -> Privilege {
+        let Some(uid) = effective_uid(status) else {
+            return unreadable("no effective uid in it");
+        };
+        if uid == 0 {
+            return Privilege::Privileged {
+                why: "the effective uid is 0".to_owned(),
+                advice: None,
+            };
+        }
+        let Some(mask) = field(status, "CapEff:").and_then(|hex| u64::from_str_radix(hex, 16).ok())
+        else {
+            return unreadable("no effective capabilities in it");
+        };
+        let held: Vec<&str> = BEYOND_THE_ACCOUNT
+            .iter()
+            .filter(|(bit, _)| mask & (1 << bit) != 0)
+            .map(|(_, name)| *name)
+            .collect();
+        if held.is_empty() {
+            Privilege::Unprivileged
+        } else {
+            Privilege::Privileged {
+                why: format!("its effective capabilities hold {}", held.join(", ")),
+                advice: None,
+            }
+        }
+    }
+}
+
 /// What a Windows token may do beyond its own account, read from the output of
 /// `whoami /user /groups /priv /fo csv /nh`. Only what Windows does not translate is read:
 /// the SIDs (the user, the groups, the integrity label) and the constant names of the
@@ -669,11 +928,11 @@ mod token {
             && field.bytes().all(|byte| byte.is_ascii_alphabetic())
     }
 
-    /// A token that could not be read: privileged, so that the check fails closed.
+    /// A token that could not be read: counted as privileged, so that the check fails
+    /// closed.
     pub(super) fn unreadable(reason: &str) -> Privilege {
-        Privilege::Privileged {
+        Privilege::Unreadable {
             why: format!("its token could not be read ({reason})"),
-            advice: None,
         }
     }
 
@@ -965,10 +1224,47 @@ mod tests {
     }
 
     #[test]
-    fn every_offline_command_is_covered_and_nothing_else() {
+    fn every_command_over_the_data_directory_is_covered_and_nothing_else() {
         let (_dir, data) = data_dir();
         let data_arg = data.to_str().expect("UTF-8");
-        let covered: [&[&str]; 7] = [
+        let covered: [&[&str]; 21] = [
+            &["serve", "--data-dir", data_arg],
+            &["user", "unlock", "admin", "--data-dir", data_arg],
+            &[
+                "node",
+                "enroll",
+                "--controller",
+                "https://ddi.example.test:8443",
+                "--data-dir",
+                data_arg,
+            ],
+            &["node", "status", "--data-dir", data_arg],
+            &["node", "renew", "--data-dir", data_arg],
+            &[
+                "node",
+                "inject",
+                "--file",
+                "batch.json",
+                "--data-dir",
+                data_arg,
+            ],
+            &["node", "scan", "status", "--data-dir", data_arg],
+            &["node", "scan", "run", "icmp", "--data-dir", data_arg],
+            &["node", "scan", "stop", "--data-dir", data_arg],
+            &["node", "scan", "resume", "--data-dir", data_arg],
+            &[
+                "cluster",
+                "join",
+                "--controller",
+                "https://ddi.example.test:8443",
+                "--address",
+                "192.0.2.10",
+                "--data-dir",
+                data_arg,
+            ],
+            &["setup", "token", "--data-dir", data_arg],
+            &["plugin", "list", "--data-dir", data_arg],
+            &["plugin", "test", data_arg],
             &["backup", "restore", "f.tkbk", "--data-dir", data_arg],
             &[
                 "backup",
@@ -986,7 +1282,7 @@ mod tests {
         ];
         for args in covered {
             let cli = parse(args);
-            let paths = offline_paths(&cli).expect("covered");
+            let paths = guarded_paths(&cli).expect("covered");
             assert!(paths.contains(&data), "{args:?}: {paths:?}");
             assert!(
                 check(
@@ -998,27 +1294,91 @@ mod tests {
                 "{args:?}"
             );
         }
-        let not_covered: [&[&str]; 6] = [
+    }
+
+    #[test]
+    fn the_commands_that_touch_nothing_of_the_account_are_not_covered() {
+        let (_dir, data) = data_dir();
+        let data_arg = data.to_str().expect("UTF-8");
+        let not_covered: [&[&str]; 10] = [
             &["backup", "create", "--url", "https://ddi.example.test:8443"],
             &["backup", "keygen", "--out", "k"],
             &["upgrade", "format"],
             &["config", "check", "--data-dir", data_arg],
             &["roles", "list"],
             &["health"],
+            &["node", "enroll-token", "--roles", "probe"],
+            &["cluster", "status"],
+            &["plugin", "run", "sample"],
+            &[
+                "setup",
+                "--admin",
+                "admin",
+                "--host-name",
+                "ddi.example.test",
+            ],
         ];
         for args in not_covered {
             let cli = parse(args);
-            assert!(offline_paths(&cli).is_none(), "{args:?}");
+            assert!(guarded_paths(&cli).is_none(), "{args:?}");
+            let facts = facts(Some(true), account(), &data, account());
+            // Windows: an uncovered command is not checked at all.
             assert!(
-                check(
+                check_with(&cli, &facts, &arguments(args), false).is_none(),
+                "{args:?}"
+            );
+            // Unix: the binary is checked for every command, and nothing else.
+            let refusal = check_with(&cli, &facts, &arguments(args), true)
+                .unwrap_or_else(|| panic!("{args:?}: the binary is the account's"));
+            assert!(refusal.binary, "{args:?}");
+            assert!(
+                check_with(
                     &cli,
-                    &facts(Some(true), account(), &data, account()),
-                    &arguments(args)
+                    &self::facts(Some(true), root(), &data, account()),
+                    &arguments(args),
+                    true
                 )
                 .is_none(),
                 "{args:?}"
             );
         }
+    }
+
+    /// Root over the account's data directory does not serve; root over its own files, as
+    /// in a container that runs as root, does.
+    #[test]
+    fn root_serves_only_over_its_own_files() {
+        let (_dir, data) = data_dir();
+        let data_arg = data.to_str().expect("UTF-8");
+        let args = ["serve", "--data-dir", data_arg];
+        let cli = parse(&args);
+        let refusal = check(
+            &cli,
+            &facts(Some(true), root(), &data, account()),
+            &arguments(&args),
+        )
+        .expect("refused");
+        assert_eq!(refusal.path, data);
+        let line = refusal.to_string();
+        #[cfg(unix)]
+        assert!(
+            line.contains("`systemctl start tenko`")
+                && line.contains(&format!(
+                    "runuser -u tenko -- tenko serve --data-dir {}",
+                    shell_word(data_arg)
+                )),
+            "{line}"
+        );
+        #[cfg(windows)]
+        assert!(line.contains("`tenko service start`"), "{line}");
+        assert!(
+            check(
+                &cli,
+                &facts(Some(true), root(), &data, root()),
+                &arguments(&args)
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1035,12 +1395,59 @@ mod tests {
             out.to_str().expect("UTF-8"),
         ];
         let cli = parse(&args);
-        let paths = offline_paths(&cli).expect("covered");
+        let paths = guarded_paths(&cli).expect("covered");
         assert_eq!(paths, vec![out.clone(), data.clone()]);
         let mut facts = facts(Some(true), root(), &data, root());
         facts.owners.insert(out.clone(), account());
         let refusal = check(&cli, &facts, &arguments(&args)).expect("refused");
         assert_eq!(refusal.path, out);
+    }
+
+    /// A configuration file that does not load leaves neither the data directory a command
+    /// would create it beside (`cluster join`) nor the one `--data-dir` names unchecked.
+    #[test]
+    fn a_configuration_that_does_not_load_still_checks_the_data_directory() {
+        let (_dir, data) = data_dir();
+        let data_arg = data.to_str().expect("UTF-8");
+        let args = [
+            "cluster",
+            "join",
+            "--config",
+            "/no/such/tenko.toml",
+            "--controller",
+            "https://ddi.example.test:8443",
+            "--address",
+            "192.0.2.10",
+            "--data-dir",
+            data_arg,
+        ];
+        let cli = parse(&args);
+        assert_eq!(guarded_paths(&cli), Some(vec![data.clone()]));
+        let refusal = check(
+            &cli,
+            &facts(Some(true), root(), &data, account()),
+            &arguments(&args),
+        )
+        .expect("refused");
+        assert_eq!(refusal.path, data);
+    }
+
+    /// A directory that does not exist yet is decided by the nearest one that does, where
+    /// the command would create it.
+    #[test]
+    fn a_missing_directory_is_decided_by_its_nearest_existing_ancestor() {
+        let (_dir, data) = data_dir();
+        let below = data.join("not-yet").join("data");
+        let args = ["serve", "--data-dir", below.to_str().expect("UTF-8")];
+        let cli = parse(&args);
+        let refusal = check(
+            &cli,
+            &facts(Some(true), root(), &data, account()),
+            &arguments(&args),
+        )
+        .expect("refused");
+        assert_eq!(refusal.path, data);
+        assert!(!refusal.binary);
     }
 
     #[test]
@@ -1053,7 +1460,6 @@ mod tests {
             "/no/such/tenko.toml",
         ];
         let cli = parse(&args);
-        assert_eq!(offline_paths(&cli), Some(Vec::new()));
         let facts = Fixed {
             privileged: privilege(Some(true)),
             exe: PathBuf::from("/opt/tenko/cli/tenko"),
@@ -1061,6 +1467,54 @@ mod tests {
             unreadable: Vec::new(),
         };
         assert!(check(&cli, &facts, &arguments(&args)).is_some());
+    }
+
+    /// `/proc/self/status` of a process: root, the service with the capabilities its unit
+    /// grants, a process holding a capability beyond its account, and a status that cannot be
+    /// read, which counts as privileged.
+    #[test]
+    fn the_linux_status_decides_by_the_effective_uid_and_capabilities() {
+        let status = |uid: &str, caps: &str| {
+            format!(
+                "Name:\ttenko\nUid:\t1000\t{uid}\t{uid}\t{uid}\nCapInh:\t0000000000000000\n\
+                 CapEff:\t{caps}\n"
+            )
+        };
+        assert_eq!(linux::effective_uid(&status("0", "0")), Some(0));
+        assert_eq!(
+            linux::classify(&status("0", "0000000000000000")),
+            Privilege::Privileged {
+                why: "the effective uid is 0".to_owned(),
+                advice: None
+            }
+        );
+        // CAP_NET_BIND_SERVICE (10) and CAP_NET_RAW (13): the service's own.
+        assert_eq!(
+            linux::classify(&status("998", "0000000000002400")),
+            Privilege::Unprivileged
+        );
+        // CAP_DAC_OVERRIDE (1) and CAP_SYS_ADMIN (21).
+        assert_eq!(
+            linux::classify(&status("998", "0000000000200002")),
+            Privilege::Privileged {
+                why: "its effective capabilities hold CAP_DAC_OVERRIDE, CAP_SYS_ADMIN".to_owned(),
+                advice: None
+            }
+        );
+        for unread in [
+            "Name:\ttenko\n".to_owned(),
+            "Uid:\t998\t998\t998\t998\n".to_owned(),
+            status("998", "not-hex"),
+        ] {
+            let privilege = linux::classify(&unread);
+            let Privilege::Unreadable { why } = &privilege else {
+                panic!("{unread:?} is read as {privilege:?}");
+            };
+            assert!(
+                why.starts_with("/proc/self/status could not be read"),
+                "{why}"
+            );
+        }
     }
 
     #[test]
@@ -1076,9 +1530,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_effective_uid_and_the_account_name_are_read_from_the_host_files() {
-        let status = "Name:\ttenko\nUid:\t1000\t0\t0\t0\nGid:\t1000\t1000\t1000\t1000\n";
-        assert_eq!(host::effective_uid(status), Some(0));
-        assert_eq!(host::effective_uid("Name:\ttenko\n"), None);
         let passwd =
             "root:x:0:0:root:/root:/bin/bash\ntenko:x:998:998::/var/lib/tenko:/usr/sbin/nologin\n";
         assert_eq!(host::account_name(passwd, 998).as_deref(), Some("tenko"));
@@ -1235,8 +1686,13 @@ mod tests {
             .collect()
     }
 
+    /// Whether the check refuses a process with `privilege`: a privileged one, and one whose
+    /// privileges could not be read.
     fn is_privileged(privilege: &Privilege) -> bool {
-        matches!(privilege, Privilege::Privileged { .. })
+        matches!(
+            privilege,
+            Privilege::Privileged { .. } | Privilege::Unreadable { .. }
+        )
     }
 
     #[test]
@@ -1318,14 +1774,35 @@ mod tests {
             no_privileges.as_str(),
         ] {
             let privilege = token::classify(output);
-            let Privilege::Privileged { why, .. } = &privilege else {
+            let Privilege::Unreadable { why } = &privilege else {
                 panic!("{output:?} is read as {privilege:?}");
             };
             assert!(why.starts_with("its token could not be read"), "{why}");
         }
-        assert!(is_privileged(&token::unreadable(
-            "whoami.exe did not end within 30 s"
-        )));
+    }
+
+    /// A token read that timed out refuses, and the line says that the token could not be
+    /// read in time, not that the caller is privileged.
+    #[test]
+    fn a_token_read_that_timed_out_refuses_and_says_so() {
+        let (_dir, data) = data_dir();
+        let args = ["serve", "--data-dir", data.to_str().expect("UTF-8")];
+        let cli = parse(&args);
+        let mut facts = facts(None, account(), &data, account());
+        facts.privileged = token::unreadable(
+            "C:\\Windows\\System32\\whoami.exe did not end within 30 s and was stopped; run \
+             the command again",
+        );
+        let refusal = check(&cli, &facts, &arguments(&args)).expect("refused");
+        assert!(refusal.unread);
+        let line = refusal.to_string();
+        assert!(
+            line.contains("refusing to run because its token could not be read (")
+                && line.contains("did not end within 30 s"),
+            "{line}"
+        );
+        assert!(!line.contains("privileged token ("), "{line}");
+        assert_eq!(line.lines().count(), 1, "{line}");
     }
 
     /// The privileges a token holds that do not reach beyond its account, and why: these
@@ -1453,12 +1930,25 @@ mod tests {
     fn an_elevated_administrator_and_system_are_still_refused_over_the_service_accounts_files() {
         let (_dir, data) = data_dir();
         let data_arg = data.to_str().expect("UTF-8");
-        let commands: [&[&str]; 5] = [
+        let commands: [&[&str]; 9] = [
             &["backup", "restore", "f.tkbk", "--data-dir", data_arg],
             &["user", "unlock", "admin", "--data-dir", data_arg],
             &["kek", "rotate", "--data-dir", data_arg],
             &["upgrade", "check", "--data-dir", data_arg],
             &["upgrade", "layout", "--data-dir", data_arg],
+            &["serve", "--data-dir", data_arg],
+            &["node", "renew", "--data-dir", data_arg],
+            &["setup", "token", "--data-dir", data_arg],
+            &[
+                "cluster",
+                "join",
+                "--controller",
+                "https://ddi.example.test:8443",
+                "--address",
+                "192.0.2.10",
+                "--data-dir",
+                data_arg,
+            ],
         ];
         for output in [ELEVATED_ADMINISTRATOR, SYSTEM] {
             for args in commands {
@@ -1477,10 +1967,12 @@ mod tests {
                         line.contains("refusing to run with a privileged token ("),
                         "{line}"
                     );
-                    assert!(
-                        line.contains("C:\\Program Files\\Tenko\\tenko.exe"),
-                        "{line}"
-                    );
+                    let advice = if args[0] == "serve" {
+                        "`tenko service start`"
+                    } else {
+                        "C:\\Program Files\\Tenko\\tenko.exe"
+                    };
+                    assert!(line.contains(advice), "{line}");
                 }
             }
         }
@@ -1513,10 +2005,10 @@ mod tests {
     #[test]
     fn the_token_of_this_process_is_read() {
         let privilege = Host.privilege();
-        if let Privilege::Privileged { why, .. } = &privilege {
-            assert!(!why.starts_with("its token could not be read"), "{why}");
-        }
-        assert_ne!(privilege, Privilege::Unknown);
+        assert!(
+            !matches!(privilege, Privilege::Unreadable { .. } | Privilege::Unknown),
+            "{privilege:?}"
+        );
     }
 
     /// A privileged process refuses a file whose owner it cannot read; an unprivileged one
@@ -1648,9 +2140,10 @@ mod tests {
     #[test]
     fn the_guard_reads_token_and_owner_under_a_planted_module_path() {
         let privilege = Host.privilege();
-        if let Privilege::Privileged { why, .. } = &privilege {
-            assert!(!why.starts_with("its token could not be read"), "{why}");
-        }
+        assert!(
+            !matches!(privilege, Privilege::Unreadable { .. }),
+            "{privilege:?}"
+        );
         let dir = tempfile::tempdir().expect("dir");
         let owner = Host.owner(dir.path()).expect("readable").expect("exists");
         assert!(owner.id.starts_with("S-1-"), "{owner:?}");

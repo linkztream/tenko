@@ -245,3 +245,9 @@ The MSI and `tenko service install` meet the same invariants in Windows terms:
 - **The store copy taken before a migration as the rollback point.** Rejected by the owner: it covers only the migration step and not what else the new version changed, it lives beside the data, and the restore point should be one thing, a backup, whatever the new version does to the store.
 - **A wrapper on `PATH` that runs the layout's binary as the service account** (`runuser -u tenko -- …`). Rejected: it needs `sudo` or root at every call, against I3, it hides that the client runs with the service's rights and the service's key within reach, and it attaches a process the account controls to the administrator's terminal.
 - **A warning instead of a refusal when root runs the layout's binary, or a profile setting that allows it in Lab.** Rejected by the owner: a warning is printed after root has already executed the file, and an exception in one profile is an escalation path in that profile.
+
+## Implementation state
+
+| Item | State |
+|---|---|
+| Item 3: the binary refuses a privileged run when its own file belongs to another account | On Linux for every command (`crates/tenko/src/exec.rs`, `check`). On Windows only for the commands the guard covers (`guarded_paths`): reading what a token may do runs `whoami.exe` with a limit of 30 seconds, and doing that before every client command would slow each one and refuse it whenever the machine is too loaded to answer in time. A token that cannot be read in time counts as privileged, and the refusal says so. |

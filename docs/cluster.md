@@ -65,7 +65,7 @@ Up to 0.0.11 these names were spelled with one l: the paths `/api/v1/nodes/enrol
 
 ### 1.2 Enrolling the node
 
-On the node, run the command that the token answer printed, or give the token alone, which carries the CA fingerprint:
+On the node, run the command that the token answer printed, or give the token alone, which carries the CA fingerprint. Run it as the account that owns the data directory: on a node installed by `deploy/install.sh` that is `runuser -u tenko -- tenko node enroll …`. Run as root over that account's files, `node enroll`, `node status`, `node renew`, `node scan` and `cluster join` exit with status 2 and `exec.unsafe_owner` ([backup.md](backup.md) section 3).
 
 ```
 tenko node enroll --controller https://ddi.example.net:8443 --token tnk2.… \

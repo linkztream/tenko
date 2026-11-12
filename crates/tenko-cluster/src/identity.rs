@@ -261,15 +261,36 @@ pub fn create_private_dir(dir: &Path) -> Result<(), ClusterError> {
 
 /// Writes a file atomically (temporary file, flush to disk, rename), `0600` on Unix.
 ///
+/// Nothing on the way is followed as a link: a directory that is a link is refused, and
+/// whatever lies at the temporary name (a stale file, a symbolic or hard link) is removed
+/// as an entry before the file is created anew, which fails if anything took the name in
+/// between. Another account that can write the directory therefore cannot make this write
+/// land in a file of its choosing (ADR 0023, I2), and the rename replaces the entry at
+/// `path` without following it. The steps go by path, so an account that can swap the
+/// directory for a link between them still could; what keeps a privileged process from
+/// writing here at all is the guard of the `tenko` binary (`exec.unsafe_owner`).
+///
 /// # Errors
 ///
 /// `cluster.node.files`.
 pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), ClusterError> {
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
+    if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        let is_link = fs::symlink_metadata(dir).map_err(|error| io_error(dir, &error))?;
+        if is_link.file_type().is_symlink() {
+            return Err(io_error(
+                dir,
+                &"the directory is a link, which is not followed",
+            ));
+        }
+    }
+    let tmp = with_suffix(path, ".tmp");
+    match fs::symlink_metadata(&tmp) {
+        Ok(_) => fs::remove_file(&tmp).map_err(|error| io_error(&tmp, &error))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(io_error(&tmp, &error)),
+    }
     let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -731,6 +752,70 @@ mod tests {
         };
         status.save(&paths).expect("save");
         assert_eq!(AgentStatus::load(&paths).expect("load"), Some(status));
+    }
+
+    /// A node directory with a file outside it that another account wants overwritten.
+    fn planted() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().expect("dir");
+        let node = dir.path().join(NODE_DIR);
+        create_private_dir(&node).expect("node dir");
+        let outside = dir.path().join("outside");
+        fs::write(&outside, b"not yours").expect("outside file");
+        (dir, node, outside)
+    }
+
+    /// A hard link planted at the temporary name shares the outside file's contents: the
+    /// write removes the name and leaves the outside file as it was.
+    #[test]
+    fn a_hard_link_at_the_temporary_name_is_not_written_through() {
+        let (_dir, node, outside) = planted();
+        let target = node.join("node-key.pem.new");
+        fs::hard_link(&outside, with_suffix(&target, ".tmp")).expect("hard link");
+        write_private(&target, b"the new key").expect("written");
+        assert_eq!(fs::read(&outside).expect("outside"), b"not yours");
+        assert_eq!(fs::read(&target).expect("target"), b"the new key");
+        assert!(!with_suffix(&target, ".tmp").exists());
+    }
+
+    /// A symbolic link planted at the temporary name, to an existing file or to a name that
+    /// does not exist yet, is removed and never followed.
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_at_the_temporary_name_is_not_followed() {
+        let (dir, node, outside) = planted();
+        let target = node.join("node-cert.pem.new");
+        let tmp = with_suffix(&target, ".tmp");
+        std::os::unix::fs::symlink(&outside, &tmp).expect("symlink");
+        write_private(&target, b"the new certificate").expect("written");
+        assert_eq!(fs::read(&outside).expect("outside"), b"not yours");
+        assert_eq!(fs::read(&target).expect("target"), b"the new certificate");
+        let missing = dir.path().join("created-by-root");
+        std::os::unix::fs::symlink(&missing, &tmp).expect("dangling symlink");
+        write_private(&target, b"again").expect("written");
+        assert_eq!(
+            fs::symlink_metadata(&missing)
+                .map_err(|error| error.kind())
+                .err(),
+            Some(std::io::ErrorKind::NotFound),
+            "nothing created outside"
+        );
+        assert_eq!(fs::read(&target).expect("target"), b"again");
+    }
+
+    /// A node directory replaced by a link to another directory is refused before anything
+    /// is written into it.
+    #[cfg(unix)]
+    #[test]
+    fn a_node_directory_that_is_a_link_is_refused() {
+        let (dir, node, _outside) = planted();
+        let elsewhere = dir.path().join("elsewhere");
+        create_private_dir(&elsewhere).expect("dir");
+        fs::remove_dir(&node).expect("remove");
+        std::os::unix::fs::symlink(&elsewhere, &node).expect("symlink");
+        let error = write_private(&node.join("identity.json"), b"{}").expect_err("refused");
+        assert_eq!(error.code(), "cluster.node.files");
+        assert!(error.detail().contains("is a link"), "{}", error.detail());
+        assert_eq!(fs::read_dir(&elsewhere).expect("dir").count(), 0);
     }
 
     #[test]
