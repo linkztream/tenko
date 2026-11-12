@@ -636,7 +636,7 @@ pub struct DhcpSettings {
     pub history_days: Option<u32>,
     /// The relay agents the server trusts, each with the links it may name: `giaddr`, option
     /// 82, option 118 and a DHCPv6 RELAY-FORW are honored only from a sender in the list,
-    /// only for a scope whose network overlaps one of that relay's links, and replies go
+    /// only for a scope that is one of that relay's links, and replies go
     /// only to a trusted relay or to the client's own link. None follows the security
     /// profile (every sender for every link under Lab, none otherwise); a list, even an
     /// empty one, applies under every profile. At most [`MAX_TRUSTED_RELAYS`] entries.
@@ -763,11 +763,12 @@ pub const MAX_RELAY_LINKS: usize = 64;
 /// A trusted relay agent and the links it may name (`docs/dhcp.md` section 9.8).
 ///
 /// The relay's word (its `giaddr`, option 82, option 118, or the link address, Interface-Id
-/// and other data of a DHCPv6 relay) counts only for a scope whose network overlaps one of
-/// `links`: a scope inside a link prefix, or one that holds it (a link given as the relay's
-/// own `giaddr`, `/32`, names the scope around it). A sender that more than one entry
-/// holds is judged by the most specific one. A link of prefix length 0 (`0.0.0.0/0`,
-/// `::/0`) lets the relay name every link of its family.
+/// and other data of a DHCPv6 relay) counts only for a scope that is one of `links`: a scope
+/// inside a link prefix, or the scope a link's address selects (a link given as the
+/// relay's own `giaddr`, `/32`, names the most specific scope around it, not a wider one
+/// around that). A sender that more than one entry holds is judged by the most specific
+/// one. Links that cover the relay's whole address family (`0.0.0.0/0`, `::/0`, or halves
+/// that add up to it) let the relay name every link of its family.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema)]
 pub struct TrustedRelay {
     /// The prefix of the addresses the relay's messages come from (the datagram's source,
@@ -795,14 +796,56 @@ impl TrustedRelay {
         }
     }
 
-    /// Whether the relay may name every link of its family (a link of prefix length 0).
+    /// Whether the relay may name every link of its family: its links of that family cover
+    /// the whole family (`0.0.0.0/0`, or `0.0.0.0/1` and `128.0.0.0/1`, and so on).
     pub fn is_any_link(&self) -> bool {
-        self.links.iter().any(|link| link.prefix_len() == 0)
+        let bits: u32 = match self.relay {
+            IpNet::V4(_) => 32,
+            IpNet::V6(_) => 128,
+        };
+        let mut links: Vec<IpNet> = self
+            .links
+            .iter()
+            .filter(|link| link.max_prefix_len() == self.relay.max_prefix_len())
+            .map(IpNet::trunc)
+            .collect();
+        links.sort_by_key(|link| (link.network(), link.prefix_len()));
+        // The addresses the links hold, each counted once: a link inside the one before it
+        // adds nothing (sorted by first address, a link that holds another comes first). The
+        // whole IPv6 family is 2^128 addresses, one more than a u128 holds, so reaching it
+        // shows as an overflow.
+        let mut held: u128 = 0;
+        let mut last: Option<IpNet> = None;
+        for link in links {
+            if last.is_some_and(|last| last.contains(&link)) {
+                continue;
+            }
+            last = Some(link);
+            let size = 1u128.checked_shl(bits - u32::from(link.prefix_len()));
+            match size.and_then(|size| held.checked_add(size)) {
+                Some(sum) => held = sum,
+                None => return true,
+            }
+        }
+        bits == 32 && held == 1 << 32
     }
 
     /// Checks the entry; `field` names it in the error.
     fn validate(&self, field: &str) -> Result<(), DhcpError> {
         let relay = self.relay;
+        // An IPv4 sender is matched as its IPv4 address, so an IPv4-mapped IPv6 prefix would
+        // trust nothing and name nothing.
+        let mapped = |prefix: &IpNet| matches!(prefix, IpNet::V6(v6) if v6.addr().to_ipv4_mapped().is_some());
+        if let Some(prefix) = std::iter::once(&relay)
+            .chain(&self.links)
+            .find(|prefix| mapped(prefix))
+        {
+            return Err(DhcpError::invalid(
+                codes::SETTINGS_INVALID,
+                field,
+                &format!("{prefix} is an IPv4-mapped prefix: write the IPv4 prefix"),
+            ));
+        }
         if relay.trunc() != relay {
             return Err(DhcpError::invalid(
                 codes::SETTINGS_INVALID,

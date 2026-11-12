@@ -770,6 +770,41 @@ fn trusted_relays_validate() {
     assert!(refused(vec![entry("192.0.2.1/32", &[])]).contains("needs 1 to 64 links"));
     assert!(refused(vec![entry("192.0.2.1/32", &["198.51.100.1/24"])]).contains("host bits"));
     assert!(refused(vec![entry("192.0.2.1/32", &["2001:db8::/48"])]).contains("address family"));
+    assert!(refused(vec![entry("::ffff:192.0.2.1/128", &["::/0"])]).contains("IPv4-mapped"));
+    assert!(
+        refused(vec![entry("2001:db8::1/128", &["::ffff:198.51.100.0/120"])])
+            .contains("IPv4-mapped")
+    );
+    // Every link: a /0, or links that add up to the whole family; anything less is not.
+    for (links, every) in [
+        (&["0.0.0.0/0"][..], true),
+        (&["0.0.0.0/1", "128.0.0.0/1"], true),
+        (
+            &["128.0.0.0/1", "0.0.0.0/2", "64.0.0.0/2", "10.0.0.0/8"],
+            true,
+        ),
+        (&["0.0.0.0/1", "128.0.0.0/2"], false),
+        (&["0.0.0.0/1", "0.0.0.0/1"], false),
+        (&["10.0.0.0/8"], false),
+    ] {
+        assert_eq!(
+            entry("192.0.2.1/32", links).is_any_link(),
+            every,
+            "{links:?}"
+        );
+    }
+    for (links, every) in [
+        (&["::/0"][..], true),
+        (&["::/1", "8000::/1"], true),
+        (&["::/1", "8000::/2"], false),
+        (&["2001:db8::/32"], false),
+    ] {
+        assert_eq!(
+            entry("2001:db8::1/128", links).is_any_link(),
+            every,
+            "{links:?}"
+        );
+    }
     assert!(
         refused(vec![
             entry("192.0.2.1/32", &["198.51.100.0/24"]),

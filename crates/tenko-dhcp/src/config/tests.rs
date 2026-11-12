@@ -1092,9 +1092,10 @@ async fn a_new_relay_for_every_link_is_written_only_explicitly_and_never_under_h
         .set_profile(Arc::new(|_: &dyn tenko_store::ReadView| {
             crate::ddns::DdnsProfile::HARDENED
         }));
-    let lists: [&[&str]; 2] = [
+    let lists: [&[&str]; 3] = [
         &["192.0.2.1/32=0.0.0.0/0"],
         &["2001:db8::1/128=2001:db8::/32+::/0"],
+        &["192.0.2.1/32=0.0.0.0/1+128.0.0.0/1"],
     ];
     for list in lists {
         let error = hardened

@@ -1309,8 +1309,8 @@
       <unit id="dhcp.settings.relays_trust_label">
         <segment><source>Trust {source} as a relay agent</source><target>Lita på {source} som reläagent</target></segment>
       </unit>
-      <unit id="dhcp.settings.relays_trusted">
-        <segment><source>{source} is now a trusted relay agent with its links</source><target>{source} är nu en betrodd reläagent med sina länkar</target></segment>
+      <unit id="dhcp.settings.relays_draft">
+        <segment><source>Not saved yet. Check that the relay agent really serves each of its links before you save.</source><target>Inte sparat än. Kontrollera att reläagenten verkligen betjänar varje länk den har innan du sparar.</target></segment>
       </unit>
       <unit id="dhcp.settings.relays_col_link">
         <segment><source>Network outside its links</source><target>Nät utanför länkarna</target></segment>

@@ -20,7 +20,7 @@ import { thisNodeDhcp } from "../leases/api";
 import { draftOfLease, leaseOfDraft, type LeaseDraft, type LeaseField } from "../model";
 import { Check, describedBy, DhcpProblem, errorFor, Field, fieldErrors, hasField, unavailable } from "../Parts";
 import { LIMITS, limitDraft, limitsOfDraft, limitsStored, type EffectiveLimits, type LimitName } from "./limits";
-import { entryFor, holdsLink, hostPrefix, MAX_RELAY_LINKS, MAX_TRUSTED_RELAYS, relayList, relayText, withLink, type RelayProblem, type TrustedRelay } from "./relays";
+import { entryFor, holdsLink, hostPrefix, MAX_RELAY_LINKS, MAX_TRUSTED_RELAYS, relayList, relayLink, relayText, withLink, type RelayProblem, type TrustedRelay } from "./relays";
 import "../dhcp.css";
 
 function relayProblem(check: Exclude<ReturnType<typeof relayList>, { ok: true }>): string {
@@ -40,9 +40,8 @@ function relayProblem(check: Exclude<ReturnType<typeof relayList>, { ok: true }>
 }
 
 /** The panel of the senders this server refused as relay agents; hidden when the node cannot be read. */
-function RelaysSeen(props: { settings: Settings; onSave: (list: TrustedRelay[], source: string) => Promise<void> }) {
+function RelaysSeen(props: { settings: Settings; onEdit: (change: (list: TrustedRelay[]) => TrustedRelay[]) => void }) {
   const [node] = createResource(() => props.settings.revision, () => thisNodeDhcp());
-  const [failure, setFailure] = createSignal<unknown>();
   const report = () => (node.error ? undefined : node.latest?.relays);
   const listed = () => props.settings.trusted_relays ?? [];
   // A refusal stays until the list handles it: an untrusted sender until it is listed, a trusted relay
@@ -56,14 +55,6 @@ function RelaysSeen(props: { settings: Settings; onSave: (list: TrustedRelay[], 
   const hasLinks = () => refused().some((r) => r.link);
   const relayed = () => (props.settings.trusted_relays === undefined || props.settings.trusted_relays === null ? (report()?.relayed ?? []) : []);
   const unlogged = () => report()?.unlogged ?? 0;
-  const save = async (list: TrustedRelay[], source: string) => {
-    setFailure(undefined);
-    try {
-      await props.onSave(list, source);
-    } catch (err) {
-      setFailure(err);
-    }
-  };
   return (
     <Show when={report() && (refused().length > 0 || relayed().length > 0 || anyLink().length > 0)}>
       <section class="page-section" aria-labelledby="dhcp-settings-relays-seen-title" data-testid="settings-relays-seen">
@@ -92,7 +83,7 @@ function RelaysSeen(props: { settings: Settings; onSave: (list: TrustedRelay[], 
                         class="btn"
                         aria-label={t("dhcp.settings.relays_bind_label", { relay: a.relay })}
                         data-testid="relay-bind"
-                        onClick={() => void save(listed().map((e) => (e.relay === a.relay ? { ...e, links: a.seen } : e)), a.relay)}
+                        onClick={() => props.onEdit((list) => list.map((e) => (e.relay === a.relay ? { ...e, links: a.seen } : e)))}
                       >
                         {t("dhcp.settings.relays_bind")}
                       </button>
@@ -145,7 +136,7 @@ function RelaysSeen(props: { settings: Settings; onSave: (list: TrustedRelay[], 
                               class="btn"
                               aria-label={t("dhcp.settings.relays_trust_label", { source: r.source })}
                               data-testid="relay-trust"
-                              onClick={() => void save(withLink(listed(), r.source, hostPrefix(r.relay)), r.source)}
+                              onClick={() => props.onEdit((list) => withLink(list, r.source, relayLink(r.relay)))}
                             >
                               {t("dhcp.settings.relays_trust")}
                             </button>
@@ -157,7 +148,7 @@ function RelaysSeen(props: { settings: Settings; onSave: (list: TrustedRelay[], 
                               class="btn"
                               aria-label={t("dhcp.settings.relays_add_link_label", { source: r.source, link: link() })}
                               data-testid="relay-add-link"
-                              onClick={() => void save(withLink(listed(), r.source, link()), r.source)}
+                              onClick={() => props.onEdit((list) => withLink(list, r.source, link()))}
                             >
                               {t("dhcp.settings.relays_add_link")}
                             </button>
@@ -176,7 +167,6 @@ function RelaysSeen(props: { settings: Settings; onSave: (list: TrustedRelay[], 
             {t("dhcp.settings.relays_unlogged", { count: unlogged() })}
           </p>
         </Show>
-        <ErrorNotice error={failure()} />
       </section>
     </Show>
   );
@@ -311,6 +301,7 @@ function SettingsForm(props: { initial: Settings }) {
   const [historyDays, setHistoryDays] = createSignal(String(initial.history_days ?? initial.effective_history_days));
   const [relaysFollow, setRelaysFollow] = createSignal(initial.trusted_relays === undefined || initial.trusted_relays === null);
   const [relays, setRelays] = createSignal(relayText(initial.trusted_relays ?? []));
+  const [draftNote, setDraftNote] = createSignal(false);
   const [limitsFollow, setLimitsFollow] = createSignal(!limitsStored(initial.limits));
   const [limits, setLimits] = createSignal(limitDraft(initial.limits, initial.effective_limits));
   const [errors, setErrors] = createSignal<Record<string, string>>({});
@@ -351,6 +342,7 @@ function SettingsForm(props: { initial: Settings }) {
     try {
       const next = await putSettings(current(), body);
       setCurrent(next);
+      setDraftNote(false);
       toast({ kind: "ok", title: t("dhcp.settings.saved") });
     } catch (err) {
       const fields = fieldErrors(err);
@@ -361,19 +353,15 @@ function SettingsForm(props: { initial: Settings }) {
     }
   };
 
-  // The buttons of the relays panel: the changed list, saved with the stored values of the rest.
-  const saveRelays = async (list: TrustedRelay[], source: string) => {
-    const base = current();
-    const body: SettingsUpdate = { authoritative: base.authoritative ?? true, ddns: base.ddns ?? {}, trusted_relays: list };
-    if (base.lease) body.lease = base.lease;
-    if (base.conflict_detection !== undefined && base.conflict_detection !== null) body.conflict_detection = base.conflict_detection;
-    if (base.history_days !== undefined && base.history_days !== null) body.history_days = base.history_days;
-    if (limitsStored(base.limits)) body.limits = base.limits;
-    const next = await putSettings(base, body);
-    setCurrent(next);
+  // The buttons of the relays panel change the draft only: the data they use (the refused link, the
+  // networks of the lease rows) comes from the network, so the operator checks it and saves.
+  const editRelays = (change: (list: TrustedRelay[]) => TrustedRelay[]) => {
+    const draft = relayList(relays());
+    const list = change(!relaysFollow() && draft.ok ? draft.list : (current().trusted_relays ?? []));
     setRelaysFollow(false);
-    setRelays(relayText(next.trusted_relays ?? list));
-    toast({ kind: "ok", title: t("dhcp.settings.relays_trusted", { source }) });
+    setRelays(relayText(list));
+    setDraftNote(true);
+    queueMicrotask(() => document.getElementById("dhcp-f-trusted_relays")?.focus());
   };
 
   const onOff = (on: boolean) => (on ? t("dhcp.settings.on") : t("dhcp.settings.off"));
@@ -444,9 +432,14 @@ function SettingsForm(props: { initial: Settings }) {
               onInput={(ev) => setRelays(ev.currentTarget.value)}
             />
           </Field>
+          <Show when={draftNote()}>
+            <Notice kind="warn" testid="settings-relays-draft">
+              {t("dhcp.settings.relays_draft")}
+            </Notice>
+          </Show>
         </Show>
       </section>
-      <RelaysSeen settings={current()} onSave={saveRelays} />
+      <RelaysSeen settings={current()} onEdit={editRelays} />
       <section class="page-section" aria-labelledby="dhcp-settings-limits-title">
         <h2 id="dhcp-settings-limits-title">{t("dhcp.settings.limits")}</h2>
         <p class="muted">{t("dhcp.settings.limits_help")}</p>

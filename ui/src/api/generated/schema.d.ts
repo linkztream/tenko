@@ -9366,7 +9366,7 @@ export interface components {
             /**
              * @description The relay agents the server trusts, each with the links it may name: `giaddr`, option
              *     82, option 118 and a DHCPv6 RELAY-FORW are honored only from a sender in the list,
-             *     only for a scope whose network overlaps one of that relay's links, and replies go
+             *     only for a scope that is one of that relay's links, and replies go
              *     only to a trusted relay or to the client's own link. None follows the security
              *     profile (every sender for every link under Lab, none otherwise); a list, even an
              *     empty one, applies under every profile. At most [`MAX_TRUSTED_RELAYS`] entries.
@@ -24239,11 +24239,12 @@ export interface components {
          * @description A trusted relay agent and the links it may name (`docs/dhcp.md` section 9.8).
          *
          *     The relay's word (its `giaddr`, option 82, option 118, or the link address, Interface-Id
-         *     and other data of a DHCPv6 relay) counts only for a scope whose network overlaps one of
-         *     `links`: a scope inside a link prefix, or one that holds it (a link given as the relay's
-         *     own `giaddr`, `/32`, names the scope around it). A sender that more than one entry
-         *     holds is judged by the most specific one. A link of prefix length 0 (`0.0.0.0/0`,
-         *     `::/0`) lets the relay name every link of its family.
+         *     and other data of a DHCPv6 relay) counts only for a scope that is one of `links`: a scope
+         *     inside a link prefix, or the scope a link's address selects (a link given as the
+         *     relay's own `giaddr`, `/32`, names the most specific scope around it, not a wider one
+         *     around that). A sender that more than one entry holds is judged by the most specific
+         *     one. Links that cover the relay's whole address family (`0.0.0.0/0`, `::/0`, or halves
+         *     that add up to it) let the relay name every link of its family.
          */
         TrustedRelay: {
             /**

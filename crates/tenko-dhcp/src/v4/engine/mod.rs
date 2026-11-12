@@ -399,9 +399,11 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
         return answer(request, Action::Drop(DropReason::NoScope));
     };
     // A trusted relay's word counts only for the links it is bound to.
-    if let Err(reason) = relay_link_gate(ctx, &message, received, scope, selector) {
-        return dropped(request, reason, selector);
-    }
+    let trusted = match relay_link_gate(ctx, &message, received, scope, selector, trusted) {
+        Ok(bound) => bound,
+        Err(reason) => return dropped(request, reason, selector),
+    };
+    let relay = relay.filter(|_| trusted);
     // ADR 0027: the activity of a client a move job is moving (two relaxed stores).
     note_moving(ctx, &message, scope);
     // WP8.4: a reservation by client identity or by hardware address.
@@ -498,28 +500,34 @@ pub(super) fn relay_gate(
     Ok(true)
 }
 
-/// Whether the relay data that selected `scope` may name it: when the scope was selected by
-/// the link selection sub-option, option 118 or `giaddr`, its network must overlap a link
-/// of the sender's entry in the trusted relays ([`crate::relay::RelayTrust::may_name`]).
-/// A refusal goes to the relay log with the scope's network and is dropped as
-/// `untrusted_relay`.
+/// Whether the sender's relay data counts for `scope`: the sender is trusted and the scope's
+/// network is one of the links of its entry in the trusted relays
+/// ([`crate::relay::RelayTrust::may_name`]). When relay data selected the scope (the link
+/// selection sub-option, option 118 or `giaddr`) and it does not count, the request is
+/// refused: it goes to the relay log with the scope's network and is dropped as
+/// `untrusted_relay`. Otherwise the request is served without its relay data, so that a
+/// trusted sender's option 82 (classes, server identifier) counts only on its own links.
 fn relay_link_gate(
     ctx: &Context<'_>,
     message: &Message<'_>,
     received: &Received<'_>,
     scope: &ScopeImage,
     selector: Selector,
-) -> Result<(), DropReason> {
-    if !matches!(
-        selector,
-        Selector::LinkSelection | Selector::SubnetSelection | Selector::Giaddr
-    ) {
-        return Ok(());
+    trusted: bool,
+) -> Result<bool, DropReason> {
+    if !trusted {
+        return Ok(false);
     }
     let sender = IpAddr::V4(*received.source.ip());
     let network = ipnet::IpNet::V4(scope.network);
     if ctx.guard.relay_may_name(ctx.image, sender, network) {
-        return Ok(());
+        return Ok(true);
+    }
+    if !matches!(
+        selector,
+        Selector::LinkSelection | Selector::SubnetSelection | Selector::Giaddr
+    ) {
+        return Ok(false);
     }
     ctx.guard
         .refuse_relay_link(sender, IpAddr::V4(message.giaddr()), network, ctx.now);

@@ -2454,6 +2454,7 @@ export type MessageKey =
   | "dhcp.settings.relays_col_link"
   | "dhcp.settings.relays_col_relay"
   | "dhcp.settings.relays_col_source"
+  | "dhcp.settings.relays_draft"
   | "dhcp.settings.relays_follow"
   | "dhcp.settings.relays_known"
   | "dhcp.settings.relays_list"
@@ -2466,7 +2467,6 @@ export type MessageKey =
   | "dhcp.settings.relays_trust"
   | "dhcp.settings.relays_trust_any"
   | "dhcp.settings.relays_trust_label"
-  | "dhcp.settings.relays_trusted"
   | "dhcp.settings.relays_unlogged"
   | "dhcp.settings.save"
   | "dhcp.settings.saved"
@@ -8763,7 +8763,6 @@ export interface MessageArgs {
   "dhcp.settings.relays_bind_label": { relay: string | number };
   "dhcp.settings.relays_seen_relayed_item": { network: string | number; relays: string | number };
   "dhcp.settings.relays_trust_label": { source: string | number };
-  "dhcp.settings.relays_trusted": { source: string | number };
   "dhcp.settings.relays_unlogged": { count: number };
   "dhcp.strip.commit": { ms: string | number };
   "dhcp.strip.listeners": { count: number };
@@ -12401,6 +12400,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.settings.relays_col_link",
   "dhcp.settings.relays_col_relay",
   "dhcp.settings.relays_col_source",
+  "dhcp.settings.relays_draft",
   "dhcp.settings.relays_follow",
   "dhcp.settings.relays_known",
   "dhcp.settings.relays_list",
@@ -12413,7 +12413,6 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.settings.relays_trust",
   "dhcp.settings.relays_trust_any",
   "dhcp.settings.relays_trust_label",
-  "dhcp.settings.relays_trusted",
   "dhcp.settings.relays_unlogged",
   "dhcp.settings.save",
   "dhcp.settings.saved",

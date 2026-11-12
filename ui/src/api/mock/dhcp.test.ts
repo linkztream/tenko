@@ -191,6 +191,8 @@ describe("settings", () => {
     expect(refused([{ relay: "192.0.2.1/32", links: ["198.51.100.1/24"] }])).toEqual(invalid);
     expect(refused([{ relay: "192.0.2.1/32", links: ["2001:db8::/32"] }])).toEqual(invalid);
     expect(refused([{ relay: "192.0.2.1/32", links: link }, { relay: "192.0.2.1/32", links: ["203.0.113.0/24"] }])).toEqual(invalid);
+    const dups = [...Array.from({ length: 64 }, (_, i) => `10.${i}.0.0/16`), "10.0.0.0/16", "10.1.0.0/16"];
+    expect(putSettings(state, ctx, { lease: LEASE, trusted_relays: [{ relay: "192.0.2.1/32", links: dups }] }, "*").trusted_relays?.[0]?.links).toHaveLength(64);
     const many = Array.from({ length: 257 }, (_, i) => ({ relay: `10.0.${Math.floor(i / 256)}.${i % 256}/32`, links: link }));
     expect(refused(many)).toEqual(invalid);
     const both = failure(() => putSettings(state, ctx, { lease: LEASE, trusted_relays: [], clear_trusted_relays: true }, "*"));

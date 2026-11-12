@@ -2,7 +2,7 @@
 // line, `RELAY = LINK, LINK`) to the list the server takes, and the other way. A bare address
 // means the host prefix (/32 or /128); a prefix with host bits is refused, the way the server
 // refuses it. The links are the networks the relay may name.
-import { compareCidr, containsCidr, formatCidr, overlaps, parseCidr, type Cidr } from "../../ipam/ip";
+import { compareCidr, containsCidr, formatCidr, overlaps, parseCidr, parseIp, type Cidr } from "../../ipam/ip";
 import type { components } from "../../api/generated/schema";
 
 export const MAX_TRUSTED_RELAYS = 256;
@@ -85,9 +85,26 @@ export function holdsLink(entry: TrustedRelay, network: string): boolean {
   });
 }
 
-/** The list with `link` added to the entry of the sender, or a new entry for the sender with that link. */
-export function withLink(list: readonly TrustedRelay[], source: string, link: string): TrustedRelay[] {
+/**
+ * The link a relay address names: its host prefix, or none for the unspecified address (`::`,
+ * `0.0.0.0`), which names no network, so the operator has to give the links.
+ */
+export function relayLink(address: string): string | undefined {
+  const ip = parseIp(address.split("/")[0] ?? "");
+  return ip === null || ip.value === 0n ? undefined : hostPrefix(address);
+}
+
+/**
+ * The list with `link` (when there is one) added for the sender. An entry that is the sender's own host
+ * prefix gets the link; a wider entry shared with other relays stays as it is, and the sender gets an
+ * entry of its own with the wider entry's links and the new one. Without an entry the sender gets a new one.
+ */
+export function withLink(list: readonly TrustedRelay[], source: string, link: string | undefined): TrustedRelay[] {
+  const host = hostPrefix(source);
   const entry = entryFor(list, source);
-  if (entry === undefined) return [...list, { relay: hostPrefix(source), links: [link] }];
-  return list.map((e) => (e === entry && !e.links.includes(link) ? { ...e, links: [...e.links, link] } : e));
+  const extra = link === undefined ? [] : [link];
+  if (entry === undefined) return [...list, { relay: host, links: extra }];
+  const links = [...entry.links, ...extra.filter((l) => !entry.links.includes(l))];
+  if (entry.relay !== host) return [...list, { relay: host, links }];
+  return list.map((e) => (e === entry ? { ...e, links } : e));
 }

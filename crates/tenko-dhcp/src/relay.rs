@@ -10,12 +10,12 @@
 //!   existed, said as the warning [`TRUST_ANY`]), none under Home, Standard and Hardened. A
 //!   list that is set, even an empty one, applies under every profile.
 //! - **The links.** Each entry names the links its relay may name
-//!   ([`tenko_core::dhcp::TrustedRelay`]): a scope selected by relay data must have a
-//!   network that overlaps one of them ([`RelayTrust::may_name`]), judged by the most
-//!   specific entry that holds the relay's address. A forged source address of a trusted
-//!   relay therefore reaches only the scopes that relay serves. A link of prefix length 0
-//!   names every link of its family: the meaning of an entry stored before entries had
-//!   links, said as the warning [`ANY_LINK`].
+//!   ([`tenko_core::dhcp::TrustedRelay`]): relay data counts only for a scope that is one
+//!   of them ([`RelayTrust::may_name`]), judged by the most specific entry that holds the
+//!   relay's address. A forged source address of a trusted relay therefore reaches only the
+//!   scopes that relay serves. Links that cover their whole address family (such as
+//!   `0.0.0.0/0`) name every link: the meaning of an entry stored before entries had links,
+//!   said as the warning [`ANY_LINK`].
 //! - **What is refused.** A relayed request (a `giaddr`, or a RELAY-FORW) from an untrusted
 //!   sender, or one whose relay data selects a scope outside the relay's links, is dropped
 //!   (`tenko_dhcp_dropped_total{reason="untrusted_relay"}`); option 82 and option 118 of a
@@ -72,6 +72,8 @@ pub const MAX_RELAYS_PER_NETWORK: usize = 8;
 struct Bound {
     relay: IpNet,
     links: Box<[IpNet]>,
+    /// Whether the links cover the relay's whole address family.
+    any_link: bool,
 }
 
 /// The trusted relays of a configuration image: the stored list, or none when it is unset.
@@ -89,6 +91,7 @@ impl RelayTrust {
                     .map(|entry| Bound {
                         relay: entry.relay.trunc(),
                         links: entry.links.iter().map(IpNet::trunc).collect(),
+                        any_link: entry.is_any_link(),
                     })
                     .collect()
             }),
@@ -106,9 +109,7 @@ impl RelayTrust {
         self.list
             .iter()
             .flatten()
-            .filter(|entry| {
-                !exempt_from_links(entry.relay) && entry.links.iter().any(|l| l.prefix_len() == 0)
-            })
+            .filter(|entry| entry.any_link && !exempt_from_links(entry.relay))
             .map(|entry| entry.relay)
     }
 
@@ -146,23 +147,30 @@ impl RelayTrust {
         }
     }
 
-    /// Whether the relay at `relay` may name a scope of `network`: the most specific entry
-    /// that holds the relay has a link that overlaps the network (the network lies in the
-    /// link, or holds it). `any_when_unset` is what an unset list means. An address no entry
-    /// holds may name nothing.
-    pub fn may_name(&self, relay: IpAddr, network: IpNet, any_when_unset: bool) -> bool {
+    /// Whether the relay at `relay` may name the scope of `network`: the most specific entry
+    /// that holds the relay has a link that holds the network, or a link inside the network
+    /// whose own scope is this one. `home` gives the network of the scope a link's first
+    /// address selects (the most specific scope that holds it), so that a link given as the
+    /// relay's `giaddr` names the scope around it but not a wider scope around that one.
+    /// `any_when_unset` is what an unset list means. An address no entry holds may name
+    /// nothing.
+    pub fn may_name(
+        &self,
+        relay: IpAddr,
+        network: IpNet,
+        any_when_unset: bool,
+        home: impl Fn(IpNet) -> Option<IpNet>,
+    ) -> bool {
         match &self.list {
             None => any_when_unset,
-            Some(_) => self
-                .holder(relay)
-                .is_some_and(|entry| entry.links.iter().any(|link| overlaps(*link, network))),
+            Some(_) => self.holder(relay).is_some_and(|entry| {
+                entry.links.iter().any(|link| {
+                    link.contains(&network)
+                        || (network.contains(link) && home(*link) == Some(network))
+                })
+            }),
         }
     }
-}
-
-/// Whether two prefixes share an address: one holds the other's first address.
-fn overlaps(a: IpNet, b: IpNet) -> bool {
-    a.contains(&b.network()) || b.contains(&a.network())
 }
 
 /// Whether an entry needs no links of its own to be safe: a link-local relay prefix shorter
@@ -355,9 +363,9 @@ impl RelayReport {
         Some(RelayWarning {
             code: ANY_LINK,
             detail: format!(
-                "trusted relays may name every link: {}{}, so a host that sends with such a \
-                 relay's address can take leases in any scope; under the DHCP settings, give \
-                 each relay the links it serves{hardened}",
+                "trusted relays may name every link: {}{}, so relay data from such a relay's \
+                 address counts for every scope; under the DHCP settings, give each relay the \
+                 links it serves{hardened}",
                 relays.join(", "),
                 more(self.any_link.len()),
             ),
@@ -690,6 +698,16 @@ mod tests {
         }
     }
 
+    /// The scope a link's first address selects among the scopes of these tests: the most
+    /// specific of them that holds it.
+    fn home(link: IpNet) -> Option<IpNet> {
+        ["203.0.113.64/26", "10.0.0.0/8", "10.1.0.0/16"]
+            .iter()
+            .map(|scope| net(scope))
+            .filter(|scope| scope.contains(&link))
+            .max_by_key(IpNet::prefix_len)
+    }
+
     fn any(list: &[&str]) -> Vec<TrustedRelay> {
         list.iter()
             .map(|relay| TrustedRelay::any_link(net(relay)))
@@ -702,11 +720,11 @@ mod tests {
         let unset = RelayTrust::new(None);
         assert!(unset.trusts(sender, true));
         assert!(!unset.trusts(sender, false));
-        assert!(unset.may_name(sender, net("198.51.100.0/24"), true));
-        assert!(!unset.may_name(sender, net("198.51.100.0/24"), false));
+        assert!(unset.may_name(sender, net("198.51.100.0/24"), true, home));
+        assert!(!unset.may_name(sender, net("198.51.100.0/24"), false, home));
         let empty = RelayTrust::new(Some(&[]));
         assert!(!empty.trusts(sender, true));
-        assert!(!empty.may_name(sender, net("198.51.100.0/24"), true));
+        assert!(!empty.may_name(sender, net("198.51.100.0/24"), true, home));
         let listed = RelayTrust::new(Some(&any(&["192.0.2.0/30", "2001:db8::/64"])));
         assert!(listed.trusts(sender, false));
         assert!(!listed.trusts(Ipv4Addr::new(192, 0, 2, 4).into(), true));
@@ -724,26 +742,49 @@ mod tests {
         let v4: IpAddr = Ipv4Addr::new(192, 0, 2, 1).into();
         let v6: IpAddr = "2001:db8::1".parse().expect("v6");
         // A scope inside a link, and a scope that holds a link given as a giaddr.
-        assert!(trust.may_name(v4, net("198.51.100.0/24"), false));
-        assert!(trust.may_name(v4, net("198.51.100.128/25"), false));
-        assert!(trust.may_name(v4, net("203.0.113.64/26"), false));
+        assert!(trust.may_name(v4, net("198.51.100.0/24"), false, home));
+        assert!(trust.may_name(v4, net("198.51.100.128/25"), false, home));
+        assert!(trust.may_name(v4, net("203.0.113.64/26"), false, home));
         // Any other scope, and a scope of the other family, is not the relay's.
-        assert!(!trust.may_name(v4, net("198.51.101.0/24"), false));
-        assert!(!trust.may_name(v4, net("203.0.113.0/26"), false));
-        assert!(!trust.may_name(v4, net("2001:db8:10::/64"), false));
-        assert!(trust.may_name(v6, net("2001:db8:10:5::/64"), false));
-        assert!(!trust.may_name(v6, net("2001:db8:11::/64"), false));
+        assert!(!trust.may_name(v4, net("198.51.101.0/24"), false, home));
+        assert!(!trust.may_name(v4, net("203.0.113.0/26"), false, home));
+        assert!(!trust.may_name(v4, net("2001:db8:10::/64"), false, home));
+        assert!(trust.may_name(v6, net("2001:db8:10:5::/64"), false, home));
+        assert!(!trust.may_name(v6, net("2001:db8:11::/64"), false, home));
         // An address no entry holds names nothing, whatever the profile.
         assert!(!trust.may_name(
             Ipv4Addr::new(192, 0, 2, 2).into(),
             net("198.51.100.0/24"),
-            true
+            true,
+            home
         ));
         // An entry stored before entries had links names every link of its family.
         let old = RelayTrust::new(Some(&any(&["192.0.2.1/32"])));
-        assert!(old.may_name(v4, net("198.51.101.0/24"), false));
+        assert!(old.may_name(v4, net("198.51.101.0/24"), false, home));
         assert_eq!(old.any_link().collect::<Vec<_>>(), [net("192.0.2.1/32")]);
         assert_eq!(trust.any_link().count(), 0);
+    }
+
+    #[test]
+    fn a_link_inside_a_scope_names_that_scope_and_not_a_wider_one_around_it() {
+        // Scope 10.0.0.0/8 holds the more specific scope 10.1.0.0/16; the relay serves the
+        // link of the /16, given as the /16 or as its giaddr.
+        let relay: IpAddr = Ipv4Addr::new(192, 0, 2, 1).into();
+        for link in ["10.1.0.0/16", "10.1.0.1/32"] {
+            let trust = RelayTrust::new(Some(&[entry("192.0.2.1/32", &[link])]));
+            assert!(
+                trust.may_name(relay, net("10.1.0.0/16"), false, home),
+                "{link}"
+            );
+            assert!(
+                !trust.may_name(relay, net("10.0.0.0/8"), false, home),
+                "{link}"
+            );
+        }
+        // A link of the /8 outside the /16 names the /8.
+        let trust = RelayTrust::new(Some(&[entry("192.0.2.1/32", &["10.2.0.0/16"])]));
+        assert!(trust.may_name(relay, net("10.0.0.0/8"), false, home));
+        assert!(!trust.may_name(relay, net("10.1.0.0/16"), false, home));
     }
 
     #[test]
@@ -757,18 +798,18 @@ mod tests {
         ]));
         let router: IpAddr = Ipv4Addr::new(192, 0, 2, 5).into();
         let lab: IpAddr = Ipv4Addr::new(192, 0, 2, 9).into();
-        assert!(trust.may_name(router, net("198.51.100.0/24"), false));
-        assert!(trust.may_name(router, net("203.0.113.0/25"), false));
-        assert!(trust.may_name(lab, net("203.0.113.128/25"), false));
-        assert!(!trust.may_name(lab, net("198.51.100.0/24"), false));
-        assert!(!trust.may_name(lab, net("203.0.113.0/25"), false));
+        assert!(trust.may_name(router, net("198.51.100.0/24"), false, home));
+        assert!(trust.may_name(router, net("203.0.113.0/25"), false, home));
+        assert!(trust.may_name(lab, net("203.0.113.128/25"), false, home));
+        assert!(!trust.may_name(lab, net("198.51.100.0/24"), false, home));
+        assert!(!trust.may_name(lab, net("203.0.113.0/25"), false, home));
         // The order of the list does not matter.
         let reversed = RelayTrust::new(Some(&[
             entry("192.0.2.9/32", &["203.0.113.128/25"]),
             entry("192.0.2.0/24", &["198.51.100.0/24", "203.0.113.0/24"]),
         ]));
-        assert!(!reversed.may_name(lab, net("198.51.100.0/24"), false));
-        assert!(reversed.may_name(router, net("198.51.100.0/24"), false));
+        assert!(!reversed.may_name(lab, net("198.51.100.0/24"), false, home));
+        assert!(reversed.may_name(router, net("198.51.100.0/24"), false, home));
     }
 
     #[test]

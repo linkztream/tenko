@@ -350,7 +350,7 @@ pub fn relays_trusted(
 /// Whether every relay whose data counts (the trusted relays of `chain`, from the
 /// outermost) may name `scope`: each relay's address (the datagram's source for the
 /// outermost, the peer address its enclosing relay recorded for an inner one) must have an
-/// entry in the trusted relays with a link that overlaps the scope's network
+/// entry in the trusted relays whose links name the scope
 /// ([`crate::relay::RelayTrust::may_name`]). A forged outermost relay can write any inner
 /// chain, so its own links bound what the chain may select. A refusal goes to the relay log
 /// with the scope's network and is dropped as `untrusted_relay`; a message that is not

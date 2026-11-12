@@ -268,7 +268,7 @@ fn a_trusted_relay_names_only_its_own_links_by_giaddr_option_82_and_option_118()
         assert_eq!(answer.selector, Some(Selector::Giaddr), "{profile:?}");
         let (offer, _) = reply(&answer, &scratch);
         assert_eq!(offer.yiaddr().octets()[..3], [192, 0, 2], "{profile:?}");
-        assert!(link_refusals(&world).is_empty(), "{profile:?}");
+        assert_eq!(link_refusals(&world), Vec::new(), "{profile:?}");
         // Another link by giaddr, by the link selection sub-option and by option 118.
         let mut by_giaddr = Ask::new(MessageType::Discover, 0x41);
         by_giaddr.giaddr = Some(ip("203.0.113.1"));
@@ -430,4 +430,36 @@ fn a_relay_list_stored_before_relays_had_links_works_as_before_and_raises_its_he
             "{row:?}"
         );
     }
+}
+
+#[test]
+fn a_trusted_relay_s_option_82_without_giaddr_counts_only_on_its_own_links() {
+    // An INFORM from the relay's address with no giaddr selects its scope by ciaddr. The
+    // relay is bound to scope A; on scope C its option 82 (here the server identifier
+    // override) counts for nothing, on scope A it counts.
+    let world = World::trusting(DhcpProfile::Standard, Some(&["192.0.2.1/32=192.0.2.0/24"]));
+    let mut scratch = Scratch::new();
+    let inform = |client: u8, ciaddr: &str| {
+        let mut ask = Ask::new(MessageType::Inform, client);
+        ask.giaddr = None;
+        ask.ciaddr = Some(ip(ciaddr));
+        ask.relay = Some(server_override("192.0.2.99"));
+        ask.bytes()
+    };
+    let from_relay = SocketAddrV4::new(RELAY, 68);
+    let answer = world.run_from(
+        &inform(0x80, "203.0.113.50"),
+        from_relay,
+        t0(),
+        &mut scratch,
+    );
+    assert_eq!(answer.selector, Some(Selector::ClientAddress));
+    let (ack, _) = reply(&answer, &scratch);
+    assert_ne!(ack.server_identifier().expect("54"), Some(ip("192.0.2.99")));
+    // Not a refusal: the request was not relayed, so nothing goes to the relay log.
+    assert_eq!(link_refusals(&world), Vec::new());
+    let answer = world.run_from(&inform(0x81, "192.0.2.50"), from_relay, t0(), &mut scratch);
+    assert_eq!(answer.selector, Some(Selector::ClientAddress));
+    let (ack, _) = reply(&answer, &scratch);
+    assert_eq!(ack.server_identifier().expect("54"), Some(ip("192.0.2.99")));
 }

@@ -49540,7 +49540,7 @@
             "items": {
               "$ref": "#/components/schemas/TrustedRelay"
             },
-            "description": "The relay agents the server trusts, each with the links it may name: `giaddr`, option\n82, option 118 and a DHCPv6 RELAY-FORW are honored only from a sender in the list,\nonly for a scope whose network overlaps one of that relay's links, and replies go\nonly to a trusted relay or to the client's own link. None follows the security\nprofile (every sender for every link under Lab, none otherwise); a list, even an\nempty one, applies under every profile. At most [`MAX_TRUSTED_RELAYS`] entries.\n\nA row written before relays had links holds plain prefixes; each reads as that relay\nwith every link of its address family ([`TrustedRelay::any_link`]), which is what it\nmeant then."
+            "description": "The relay agents the server trusts, each with the links it may name: `giaddr`, option\n82, option 118 and a DHCPv6 RELAY-FORW are honored only from a sender in the list,\nonly for a scope that is one of that relay's links, and replies go\nonly to a trusted relay or to the client's own link. None follows the security\nprofile (every sender for every link under Lab, none otherwise); a list, even an\nempty one, applies under every profile. At most [`MAX_TRUSTED_RELAYS`] entries.\n\nA row written before relays had links holds plain prefixes; each reads as that relay\nwith every link of its address family ([`TrustedRelay::any_link`]), which is what it\nmeant then."
           },
           "updated": {
             "oneOf": [
@@ -86157,7 +86157,7 @@
       },
       "TrustedRelay": {
         "type": "object",
-        "description": "A trusted relay agent and the links it may name (`docs/dhcp.md` section 9.8).\n\nThe relay's word (its `giaddr`, option 82, option 118, or the link address, Interface-Id\nand other data of a DHCPv6 relay) counts only for a scope whose network overlaps one of\n`links`: a scope inside a link prefix, or one that holds it (a link given as the relay's\nown `giaddr`, `/32`, names the scope around it). A sender that more than one entry\nholds is judged by the most specific one. A link of prefix length 0 (`0.0.0.0/0`,\n`::/0`) lets the relay name every link of its family.",
+        "description": "A trusted relay agent and the links it may name (`docs/dhcp.md` section 9.8).\n\nThe relay's word (its `giaddr`, option 82, option 118, or the link address, Interface-Id\nand other data of a DHCPv6 relay) counts only for a scope that is one of `links`: a scope\ninside a link prefix, or the scope a link's address selects (a link given as the\nrelay's own `giaddr`, `/32`, names the most specific scope around it, not a wider one\naround that). A sender that more than one entry holds is judged by the most specific\none. Links that cover the relay's whole address family (`0.0.0.0/0`, `::/0`, or halves\nthat add up to it) let the relay name every link of its family.",
         "required": [
           "relay",
           "links"

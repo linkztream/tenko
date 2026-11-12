@@ -155,17 +155,27 @@ impl Guard {
             .trusts_sender(sender, self.profile().trusts_any_relay())
     }
 
-    /// Whether the trusted relay at `relay` may name a scope of `network` under `image`'s
-    /// list and the profile ([`crate::relay::RelayTrust::may_name`]).
+    /// Whether the trusted relay at `relay` may name the scope of `network` under `image`'s
+    /// list, scopes and the profile ([`crate::relay::RelayTrust::may_name`]).
     pub fn relay_may_name(
         &self,
         image: &ConfigImage,
         relay: IpAddr,
         network: ipnet::IpNet,
     ) -> bool {
+        use ipnet::IpNet;
+        let home = |link: IpNet| match link {
+            IpNet::V4(link) => image
+                .select(link.network())
+                .map(|scope| IpNet::V4(scope.network)),
+            IpNet::V6(link) => image
+                .v6()
+                .select(link.network())
+                .map(|scope| IpNet::V6(scope.network)),
+        };
         image
             .relay_trust()
-            .may_name(relay, network, self.profile().trusts_any_relay())
+            .may_name(relay, network, self.profile().trusts_any_relay(), home)
     }
 
     /// Notes that `sender`, which named `relay`, was refused as a relay.

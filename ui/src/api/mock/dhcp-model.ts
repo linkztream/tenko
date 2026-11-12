@@ -228,7 +228,6 @@ function checkTrustedRelays(value: unknown): TrustedRelay[] {
     if (entry === null || typeof entry !== "object" || typeof entry.relay !== "string" || !Array.isArray(entry.links)) return refuse("an object with relay and links");
     const relay = parseCidr(entry.relay);
     if (relay === null) return refuse(`${entry.relay} is not a prefix without host bits`);
-    if (entry.links.length < 1 || entry.links.length > 64) return refuse(`${entry.relay} needs 1 to 64 links`);
     const links: Cidr[] = [];
     for (const text of entry.links) {
       const link = typeof text === "string" ? parseCidr(text) : null;
@@ -236,6 +235,7 @@ function checkTrustedRelays(value: unknown): TrustedRelay[] {
       if (link.version !== relay.version) return refuse(`${text} is not of the family of ${entry.relay}`);
       if (!links.some((l) => compareCidr(l, link) === 0)) links.push(link);
     }
+    if (links.length < 1 || links.length > 64) return refuse(`${entry.relay} needs 1 to 64 distinct links`);
     links.sort(compareCidr);
     const key = formatCidr(relay);
     const same = out.get(key);
