@@ -1,6 +1,7 @@
 # Shared code plan: one place per fact
 
-Status: plan, 2026-11-12. Base: `main` at `6595569b`. Nothing in this plan has been built.
+Status: accepted by the owner on 2026-11-12, with the answers in section 6. Counted on
+`main` at `6595569b`, rebased onto `640c0322`. Nothing in this plan has been built.
 
 ## 0. Summary and terms
 
@@ -23,11 +24,13 @@ The decisions in short:
   lead. A copy is kept from coming back by a copy lint whose baseline only shrinks, by
   `clippy` bans where a type or method marks the copy, and by tests that collect every
   instance of a fact across the workspace.
-- **The 52 facts** (section 3): 37 move to one place (24 with packages of this plan, 13 by
+- **The 52 facts** (section 3): 43 move to one place (30 with packages of this plan, 13 by
   repair packages already proposed or by approved cleanups alone), 7 are already in flight,
-  2 are not one fact and stay apart on purpose, and 6 wait for an owner decision.
-- **Twenty-four packages** of one to three builder-days, 60 builder-days in all (section 4).
-- **Ten questions** for the owner (section 6).
+  and 2 are not one fact and stay apart on purpose. Six of the 43 waited for an owner
+  decision; the owner answered on 2026-11-12.
+- **Twenty-seven packages** of one to three builder-days, 67 builder-days in all (section 4).
+- **Eleven questions** for the owner, all answered on 2026-11-12; the eleventh came out of
+  the answer to the third (section 6).
 
 Terms used below, explained once. A **crate** is one Rust library or program, the unit the
 compiler builds; the **workspace** is the 19 crates under `crates/`. A crate's **dependents**
@@ -318,9 +321,9 @@ operator can see, rows 24 to 41 have drifted with an effect that is latent or on
 rows 42 to 52 have not drifted yet. "Repair" names a package of the review's repair list,
 which this plan does not re-plan; "S" names a package of section 4. "Agree" says whether the
 copies agree today; where they do not, the column says which behavior the single place takes
-and why. "Owner decides" marks a row whose single place cannot be built before the owner
-answers; rows 47 and 49 carry a question on one detail only and are built with the
-recommended answer, which changes one value if the owner chooses otherwise.
+and why. Six rows (6, 11, 13, 25, 35, 41) waited for an owner decision; the owner answered on
+2026-11-12 (section 6), and they move to one place with the answers given. Rows 47 and 49
+carried a question on one detail only, answered the same day.
 
 | # | Fact | Home | Copies today | What happens to the copies | Agree, and the behavior taken | Outcome |
 |---|---|---|---|---|---|---|
@@ -329,14 +332,14 @@ recommended answer, which changes one value if the owner chooses otherwise.
 | 3 | The tolerance rule for stored and cross-version formats | The rule in `docs/upgrades.md`, one decode test per stored type, golden files per format | The rule in one document; about 96 stored enumerations in `tenko-core` alone and more types in 8 other crates that do not follow it | Unknown fields ignored, unknown values an explicit unknown arm (decided); a format raise where that is unsafe | No. The documented rule is right. | One place (repair: tolerance, one package per crate; the store's golden files are in flight) |
 | 4 | Second implementations that tests prove instead of production | `tenko-store`: one staging core used by both stores; the DNS and DHCP reference twins removed; the IPAM VLAN double behind a test feature | Store: memory and Raft staging (161 test files see the memory one); DNS 2 caches; DHCP 5 twins; IPAM 1 double (1,053 lines) | Store: one staging core, and the conformance suite gains the journal byte limit, counter overflow and decode failure (S8). DNS: the resolver repair (in flight). DHCP: the DHCP test twins repair. VLAN double: S15. | No. Production is right. The two store backends themselves stay two on purpose, held equal by the conformance suite. | One place (S8, S15; repairs) |
 | 5 | DHCPv4 and DHCPv6 behavior at every layer | The shared family core, step by step (decided) | 10 layers in 2 families | The server's slot table and commit loop first, with differential scenarios across both families | No. | In flight. The protocol layers (message formats, IA handling) stay two on purpose. |
-| 6 | What a form counts as changed, which revision it sends, how it shows errors | `ui/src/components/form/` `createFormModel` | about 45 forms in 40 files | Every form moves to the model (S10); the two forms that send the live object's revision are fixed first (repair: UI forms and zone page) | No. Sending the revision the values came from is right; it is the only way a save cannot undo another operator's change. What the form does when the object changes under it is visible: SC-Q1. | Owner decides (SC-Q1) |
+| 6 | What a form counts as changed, which revision it sends, how it shows errors | `ui/src/components/form/` `createFormModel` | about 45 forms in 40 files | Every form moves to the model (S10); the two forms that send the live object's revision are fixed first (repair: UI forms and zone page) | No. Sending the revision the values came from is right; it is the only way a save cannot undo another operator's change. What the form does when the object changes under it is visible: SC-Q1. | One place (S10) |
 | 7 | Settings bounds and defaults | The owning type (H7), published through OpenAPI | PIN minimum 7 (`tenko-auth`, UI 3, installer, OpenAPI text, mock); config defaults 2 (code, example file); scan defaults 4 (code, docs, UI, mock); DHCP profile defaults 4 (API, `tenko-dhcp`, server, mock); connector defaults 2 per connector | Readers generated or checked (S7, S18) | No. The server is right for the PIN minimum (6, raised deliberately) and for the worker count (0 to 64; the example file follows). The Proxmox page size takes 10 (1 is a typing error). The configuration section list gains the missing section. | One place (S7, S18) |
 | 8 | Error codes and error text used as contracts | H6: codes exported by their owner, collected by a test | Store codes as literals in other crates (about 20); a code the store never produces (1); the job-stage code in 9 files of 6 crates; DNS error text matched in the API (2); one retry keyed on error text; 3 codes defined twice; enrollment refusals in 4 places | Constants and typed errors (S5; repairs: controller removal and store, in flight; IPAM unattended writes) | No. The producer is right. An enrollment refusal of roles answers 403 (decided). | One place (S5; repairs) |
 | 9 | The API handler contract, written twice | H4 answer groups, and a conformance test beside the scope table | 426 annotations against the handlers; the 401 answer in 281 copies and 12 wordings, 503 in 84, 403 in 76, 409 in 36, 415 in 18, 412 in 20 | Annotations take their answers from the groups the handlers return; the scope text comes from the scope types (S9) | No. The handler is right; the description follows it. Planned routes stay and are marked planned (decided). | One place (S9) |
 | 10 | Request rules in the API | H4 request module | `If-Match` 3; path ids 25; JSON bodies 7 plus 7 plain; query 4 plus about 50 plain; allowed origins 2 | Strict requests (decided) | No. | One place (repair: strict requests) |
-| 11 | Network rules | H1 for address classes and reverse names; `tenko-ipam::query` for the most specific prefix; `tenko-scan` for LLDP identifiers; `tenko-ipam` for a reservation's identity; `tenko-dns` for the closest enclosing zone of the planners; `tenko-connect`'s normalization for connector inventories | Reverse names 7 functions in 4 crates; LLDP 2; reservation identity 3; subnet edge addresses 2; most specific prefix 5; closest enclosing zone 6 in 3 crates; connector address and MAC rules 10 sites in 4 crates; DHCPv4 option parsing 2 | S6 creates the functions and moves the copies in `tenko-dns` and the IPAM observation code; the IPAM network rules repair, the DDNS worker repair, S14 (the Kea export) and the store and connector guards repair move theirs | No, all of them. The subnet-router anycast address is refused (RFC 4291 2.6.1); split options are joined (RFC 3396); link-local addresses are filtered from inventories as the connector documentation says; a reservation is keyed by MAC when there is no DUID (the DHCP role's rule). Owner: mapped addresses (SC-Q2), the LLDP format (SC-Q3), VRF ties (SC-Q4). The query-path zone index of `tenko-dns` stays separate (wire bytes, a speed-bound path). The scanner's DHCPv4 parser stays separate for now, held to the server's codec by a differential fuzz target, because `tenko-scan` sits below `tenko-dhcp`. | Owner decides (SC-Q2 to SC-Q4) |
+| 11 | Network rules | H1 for address classes and reverse names; `tenko-ipam::query` for the most specific prefix; `tenko-scan` for LLDP identifiers; `tenko-ipam` for a reservation's identity; `tenko-dns` for the closest enclosing zone of the planners; `tenko-connect`'s normalization for connector inventories | Reverse names 7 functions in 4 crates; LLDP 2; reservation identity 3; subnet edge addresses 2; most specific prefix 5; closest enclosing zone 6 in 3 crates; connector address and MAC rules 10 sites in 4 crates; DHCPv4 option parsing 2 | S6 creates the functions and moves the copies in `tenko-dns` and the IPAM observation code; the IPAM network rules repair, the DDNS worker repair, S14 (the Kea export) and the store and connector guards repair move theirs; S26 makes the LLDP format one | No, all of them. The subnet-router anycast address is refused (RFC 4291 2.6.1); split options are joined (RFC 3396); link-local addresses are filtered from inventories as the connector documentation says; a reservation is keyed by MAC when there is no DUID (the DHCP role's rule). Owner: mapped addresses (SC-Q2), the LLDP format (SC-Q3), VRF ties (SC-Q4). The query-path zone index of `tenko-dns` stays separate (wire bytes, a speed-bound path). The scanner's DHCPv4 parser stays separate for now, held to the server's codec by a differential fuzz target, because `tenko-scan` sits below `tenko-dhcp`. | One place (S6, S26; repairs) |
 | 12 | The server's start sequence and what it records | One `prepare_server` in `tenko` | 2 (command line, Windows service) | One function | No. The command-line start is right. | One place (repair: server start and shutdown) |
-| 13 | Conflict and "gone" in IPAM | One definition each in `tenko-ipam::reconcile` | Conflict 2 (rules, view); gone 2 | One function each (S15) | No; the two differ on unmanaged hosts and abandoned leases, and on the lease time used. Visible on the discovery page: SC-Q5. | Owner decides (SC-Q5) |
+| 13 | Conflict and "gone" in IPAM | One definition each in `tenko-ipam::reconcile` | Conflict 2 (rules, view); gone 2 | One function each (S15) | No; the two differ on unmanaged hosts and abandoned leases, and on the lease time used. Visible on the discovery page: SC-Q5. | One place (S15) |
 | 14 | Ending an account's access, and per-controller memory | One function in `tenko-auth` | 5 paths | Built | — | In flight |
 | 15 | Release manifest limits, and the release tools' view of the server | Constants in Rust source, a problem-details fixture written by a Rust test | Manifest limits 2; the mirror's error shape 2; the mirror's version 2 | Script tests read the Rust constants and the fixture | No. The server is right. | One place (repairs: release path; Windows installer and mirror) |
 | 16 | The privilege layout of ADR 0023 against what ships | The ADR, with an implementation-state table checked by the installer's unit test | 4 documents and files | The shipped files follow the ADR | The shipped files are brought to the ADR (decided 2026-10-24). | One place (repair: command on the path) |
@@ -348,7 +351,7 @@ recommended answer, which changes one value if the owner chooses otherwise.
 | 22 | DNS record data and wire handling, server health and choice | H5 for layout, decompression and the exchange; one health statistic | Layout and decompression 4 plus 2 partial; health 2; exchange 2 | One each (S12; the DNS wire facts repair moves the layout) | No. The complete type table is right. The two ways of choosing a server (configured forwarders, delegated name servers) stay two on purpose; the statistic under them becomes one, with its window measured and chosen in S12. | One place (S12; repair) |
 | 23 | Store-watch loops and feed machinery | H3 `follow` and `feed` | Watch loops: 4 in `tenko-dns` plus the DNSSEC signer's own, 16 in 7 files of the server, more in `tenko-auth` and `tenko-connect`; feeds 2 plus 2 | The follower is built in flight; S4 moves it into `tenko-store`, S19 makes the feed generic; the server start repair moves the server's loops | No. The follower's stated contract is right. | One place (S4, S19) |
 | 24 | Metric family names | H6 `metrics::names`; a registry that refuses a duplicate | About 30 literals in `tenko-api` against their producers | Imported (repair: DNS wire facts and metric names); registry (S2) | Yes today. | One place (S2; repair) |
-| 25 | The drop-reason vocabulary in DHCP | One enumeration with its label | 5 places | One enumeration (S18) | No: no family label, one reason used for two causes. Labels are visible to whoever queries metrics: SC-Q6. | Owner decides (SC-Q6) |
+| 25 | The drop-reason vocabulary in DHCP | One enumeration with its label | 5 places | One enumeration (S18) | No: no family label, one reason used for two causes. Labels are visible to whoever queries metrics: SC-Q6. | One place (S18) |
 | 26 | DNS ownership and origin rules | Methods on the origin type in `tenko-core` (the type's crate) | Static origins 3; has served records 3; hold end 2; origin list 4; replace rule 1 | Methods (S2); callers moved (S12) | The code agrees; the replace rule's documentation is wrong and is corrected. | One place (S2, S12) |
 | 27 | A record type as stored | A pinning test; storing the number waits for the next format raise | 2 | Pinning test (repair: DNS wire facts) | No (one type stored by its generic name). | One place (repair) |
 | 28 | Tables the DNS feed decodes | The node table list, with a test that each is decoded or listed as skipped | 2 | Test (repair: DNS wire facts) | No (4 of 14 not decoded). | One place (repair) |
@@ -358,13 +361,13 @@ recommended answer, which changes one value if the owner chooses otherwise.
 | 32 | The store's file layout and "format of a store" answers | H3 `layout`; one format answer | 2 and 3 | Built | No. | In flight |
 | 33 | The list of offline commands and their privilege classes | An exhaustive match | 2 | Built | — | In flight |
 | 34 | Shapes exchanged between binary versions | The typed reader; a versioned record of an update attempt | 2 readers; 1 borrowed API type | Built | No. | In flight |
-| 35 | The connector web layer and certificate pinning | The connector SDK's HTTP module | 4 crates and 2 documents | One health path with fingerprint capture, one JSON GET, one send with retries (S22 after the answer) | No; the documents teach two pinning flows. Visible to operators: SC-Q7. | Owner decides (SC-Q7) |
+| 35 | The connector web layer and certificate pinning | The connector SDK's HTTP module | 4 crates and 2 documents | One health path with fingerprint capture, one JSON GET, one send with retries (S22) | No; the documents teach two pinning flows. Visible to operators: SC-Q7. | One place (S22) |
 | 36 | The job step contract and its codes | `tenko-jobs`: the contract on the step trait, one code constant | 3 | Repair: job engine | No. | One place (repair) |
 | 37 | Tables of one crate read as the API of others | H8 `read`; shared constants for plugin names and guardrail codes | Job table key 4 crates; probe scopes 2; plugin names 2; guardrail codes 2 | S17 | No (a renamed field decodes as empty). | One place (S17) |
 | 38 | Interactive-only kinds, security settings fields, code lists | Exhaustive matches; serialize-and-compare; `codes!` | 3 lists, 15 hand-written name ladders (131 lines) | `codes!` (S2); kinds (S5); settings comparison (repair: audit export and vault rotation) | No (a test lists 7 of 9 kinds). | One place (S2, S5; repair) |
 | 39 | Order of DNS names against the order of their store keys | Two orders on purpose: text order for display, reversed-label order for keys | 2 | Stays two; the difference is documented on the type, and the key-order test gains the nine key types it omits (S12) | Not one fact. | Stays separate |
 | 40 | Deploy and script code that repeats itself | H10 | Lab helpers about 20; Rust lexers in scripts 3; benchmark result parsers 3; test rule texts 4 | Lab helpers (repair: lab helper); one lexer (S1); results reader, generated rules table (S16) | No. | One place (S1, S16; repair) |
-| 41 | The Windows data directory, and how `tenko.toml` is written | One source of the data directory; the configuration written through the product | Data directory 3; configuration writers 2 on Linux (a template and an editor) and 1 on Windows | Data directory: repair (Windows installer and mirror). Writer: SC-Q8. | No. | Owner decides (SC-Q8) |
+| 41 | The Windows data directory, and how `tenko.toml` is written | One source of the data directory; the configuration written through the product | Data directory 3; configuration writers 2 on Linux (a template and an editor) and 1 on Windows | Data directory: repair (Windows installer and mirror). Writer: S25, the product with an editor of its own (SC-Q8). | No. | One place (S25; repair) |
 | 42 | Stored types used as API types | Made two on purpose: a stored type and an API type; a placement rule and an allowlist test | 20 flattened domain types in `tenko-api` | The allowlist test stops new ones (S9); own API types as each area is touched | Not one fact: the stored shape changes with the data format, the API shape with the API version. | Stays separate |
 | 43 | IPAM paging, receipts and enumeration names | One module each in `tenko-ipam`; names from `codes!` | Paging 3; receipts 3; hand-written names 4 | S15 | Not yet. | One place (S15) |
 | 44 | API paging, sort keys, the default VRF, capacity, the DHCP family | H4 paging; `tenko-ipam::query`; the existing family type | Paging 7 structures; sort keys 2; default VRF 2; capacity 1 plus a test copy; family as strings 3 | S20 | Not yet. | One place (S20) |
@@ -377,9 +380,8 @@ recommended answer, which changes one value if the owner chooses otherwise.
 | 51 | Kerberos exchange fixtures | The crate's own fixtures | 2, byte-identical | The benchmark copy is removed with its spike when the Kerberos line closes | Yes. | One place (removal) |
 | 52 | Test helpers and fixtures copied between test files | `tenko_core::testing` and per-crate test support | Many | Built in part (merged today), the rest per crate | — | In flight |
 
-Count: one place 37 (24 rows carried by packages of this plan, alone or with a repair
-package; 13 by repair packages or approved cleanups alone), in flight 7, stays separate 2,
-owner decides 6. Within rows that move to one place, parts stay two on purpose: the two
+Count: one place 43 (30 rows carried by packages of this plan, alone or with a repair
+package; 13 by repair packages or approved cleanups alone), in flight 7, stays separate 2. Within rows that move to one place, parts stay two on purpose: the two
 store backends (row 4), the protocol layers of the two DHCP families (row 5), the query-path zone index and, for now, the
 scanner's DHCPv4 parser (row 11), and the two ways of choosing a DNS server (row 22).
 
@@ -410,27 +412,31 @@ scanner's DHCPv4 parser (row 11), and the two ways of choosing a DNS server (row
 | **S3 Client address behind proxies** (security) | 2 | `tenko-net/src/proxy.rs`; `tenko-dns/src/tls/proxy.rs`; `tenko-api/src/server/proxy_protocol.rs`, `forwarded.rs`; their fuzz targets | Parsers 2 → 1; one fuzz target covers it; tests for chains of trusted and untrusted hops | S1 |
 | **S4 Store homes: follower and private writer** | 3 | `tenko-store/src/{follow.rs, fs.rs, lib.rs}`; `tenko-dns/src/zone/follow.rs` (moved) and the import lines of its callers; `tenko-cluster/src/buffer.rs`, `identity.rs`; `tenko-scan/src/status.rs` | Private-file writers 8 → 1 when the owners of the other files have moved theirs (this package: 8 → at most 4); follower implementations in `tenko-dns` outside the home 2 → 0; the home's guarantees stated and tested | S1; the DNS secondaries, store, and offline command guard repairs merged |
 | **S5 Error codes owned and collected** | 3 | `tenko-jobs/src/stage.rs` and the callers keyed on its code: `tenko-ipam/src/jobs.rs`, `moves/steps.rs`, `moves/lease.rs`, `vlan/steps.rs`, `tenko-scan/src/control/steps.rs`, `tenko-dhcp/src/config/jobs.rs`, `tenko-dns/src/zone/jobs.rs`, `tenko-connect/src/host/service/steps.rs`; `tenko-cluster/src/registry.rs` (enrollment refusals and its stage-code use); `tenko-dns/src/recurse/net.rs`; `tenko-api/src/routes/dns/blocking.rs`, `nodes.rs`; `tenko-auth/src/roles.rs`; the collecting test in `tenko` | Literal codes of another crate: about 30 → 0; codes defined twice 3 → 0; crates whose codes a uniqueness test covers 2 → all; the interactive-only kinds matched exhaustively (a test listing 7 of 9 → a match the compiler checks) | S2; the controller removal repair (in flight), the resolver repair and the IPAM unattended writes repair merged |
-| **S6 Address rules and reverse names** | 2 | `tenko-net/src/{addr.rs, reverse.rs}` with tests and a fuzz target for the reverse-name parser; `tenko-dns/src/zone/import/claim.rs` and `tenko-ipam/src/observe/dns.rs` (their reverse-name functions) | Reverse-name functions 7 → 5 here, → 1 once the IPAM network rules repair, the DDNS worker repair and S14 move theirs; subnet edge rules 2 → 1 with the IPAM network rules repair; link-local filters 4 → 1 once the connector guards repair moves its own | S1; SC-Q2 |
+| **S6 Address rules and reverse names** | 2 | `tenko-net/src/{addr.rs, reverse.rs}` with tests and a fuzz target for the reverse-name parser; `tenko-dns/src/zone/import/claim.rs` and `tenko-ipam/src/observe/dns.rs` (their reverse-name functions) | Reverse-name functions 7 → 5 here, → 1 once the IPAM network rules repair, the DDNS worker repair and S14 move theirs; subnet edge rules 2 → 1 with the IPAM network rules repair; link-local filters 4 → 1 once the connector guards repair moves its own | S1 |
 | **S7 Settings bounds and defaults published** | 3 | `tenko-auth/src/password/policy.rs`; `ui/src/auth/account/PasswordSection.tsx`, `ui/src/settings/toggles.ts`, `ToggleEditors.tsx`; `tenko/src/config.rs` (section list, example test); `deploy/tenko.example.toml`; `tenko-scan/src/config.rs` (defaults); `docs/scanning.md` tables; `ui/src/scans/model.ts`; `tenko-connect-proxmox/src/lib.rs`; the value generation in `ui/scripts/api-types.mjs` | PIN minimum 7 → 2 (the installer's copy goes with the command-on-path repair, which owns `deploy/install.sh`), then → 1; configuration keys documented nowhere 4 → 0; scan default tables written from code; connectors whose stored and described defaults differ 1 → 0, a test per connector | S1; the UI grid and build checks repair if it has started (it owns `api-types.mjs`) |
 | **S8 Store staging core** | 3 | `tenko-store/src/mem.rs`, `raft/apply.rs`, `raft/watch.rs`, a new `staging.rs`; the conformance suite | Implementations of staging 2 → 1; conformance cases added 3 (journal byte limit, counter overflow, decode failure), run against both stores | The store repair merged (in flight) |
 | **S9 API answers from one set of types** | 3 | `tenko-api/src/problem.rs` and a new answers module; `routes/scope_table.rs` and its conformance test; the route files of DHCP and DNS | Hand-written 401 answers in DHCP and DNS routes → 0; operations whose listed answers differ from what the test observes → 0 for those areas; flattened stored types in the API: an allowlist test, new ones refused | The strict-requests and event-stream repairs, and the marking of planned routes; runs alone in `tenko-api/src/routes` |
-| **S10 UI form kit, field errors, form model** | 3 | `ui/src/components/form/**` (new); `dns/Parts.tsx`, `dhcp/Parts.tsx`, `ipam/formKit.tsx`, `ipam/tenancy/FormDialog.tsx`, `settings/fields.tsx`; `api/problem.ts`; the forms moved first: `nodes/ScanConfigForm.tsx` with `nodes/scanDraft.ts` (the model's source), `hosts/HostForm.tsx`, `dhcp/policies/PoliciesPage.tsx`, `dns/ZoneSettings.tsx`, `dhcp/ScopeSettings.tsx` | Field kits 5 → 1; field-error mappers 3 → 1; forms on the model 1 → 5 (the rest by area afterwards) | The UI forms and zone page repair; S7 (the `settings/` editors); SC-Q1; the mock plan's packages that edit the same test kits |
+| **S10 UI form kit, field errors, form model** | 3 | `ui/src/components/form/**` (new); `dns/Parts.tsx`, `dhcp/Parts.tsx`, `ipam/formKit.tsx`, `ipam/tenancy/FormDialog.tsx`, `settings/fields.tsx`; `api/problem.ts`; the forms moved first: `nodes/ScanConfigForm.tsx` with `nodes/scanDraft.ts` (the model's source), `hosts/HostForm.tsx`, `dhcp/policies/PoliciesPage.tsx`, `dns/ZoneSettings.tsx`, `dhcp/ScopeSettings.tsx` | Field kits 5 → 1; field-error mappers 3 → 1; forms on the model 1 → 5 (the rest by area afterwards) | The UI forms and zone page repair; S7 (the `settings/` editors); the mock plan's packages that edit the same test kits |
 | **S11 UI data helpers** | 2 | `api/paginate.ts`, `api/live.ts`, `grid/source.ts`, `dns/log/LogPage.tsx`, `settings/dns/InfraSection.tsx`, `ipam/history/HistoryPanel.tsx`, `secrets/api.ts`; `app/format/**`, `nodes/format.ts`, `discovery/AddressConflictActions.tsx`, `discovery/dialogs.tsx`; `app/clipboard.ts` (new, from `secrets/clipboard.ts`) and the clipboard writers `components/RecoveryCodes.tsx`, `setup/steps/Result.tsx`, `shell/BugReport.tsx`, `updates/InstallPanel.tsx`; `ui/eslint.config.js` | Paging helpers 5 → 1; read guards 3 → 1, with a lint rule; byte formatters 3 → 1 in base 1024; clipboard writers → 1 (the account page's by the UI sign-out repair) | The UI sign-out and caches repair (it owns several of the cache files and the account page) |
 | **S12 DNS wire, health, exchange, ownership** | 3 | `tenko-dns/src/wire.rs` and its numbers module; `pool.rs`, `infra/servers.rs`, `recurse/net.rs`, `upstream.rs`; `update/mod.rs` (TSIG mapping), `update/apply.rs`, `xfr/out.rs`; `querylog/read.rs`, `querylog/stats.rs`; `zone/ownership.rs`, `zone/mod.rs`, `zone/records.rs`; `tenko-core/tests/key_order.rs` | Local RCODE and type constants 38 → 0; health statistics 2 → 1; exchanges 2 → 1; TSIG refusal mappings 2 → 1; segment walks 2 → 1; origin rules in `tenko-dns` → 1 (the DHCP copy by the DDNS worker repair) | S2, S5 (shares `recurse/net.rs`); the resolver, DNS secondaries, DNS wire facts and DNS query path repairs; any open work in `update/` |
 | **S13 Server configuration sources** | 2 | `tenko/src/plugin/serve.rs`, `serve/dhcp.rs`, `serve/dns.rs`, `serve/tls.rs`, `node_roles.rs`, `config.rs` (the readers) | Places that decide the profile in force 8 → 1; role readers 3 → 1; "recursion on" rules 2 → 1 | The update-path and server start repairs (they own `serve/mod.rs`, `prepared.rs`); S7 (`config.rs`) |
 | **S14 Kea export reads the engine** | 2 | `tenko-dhcp/src/export/kea/**` (with its reverse-name copy); the engine's exported constants in `v4/engine/boot.rs`, `class.rs`; the property test | Constants copied into the export → 0; policy sort keys 3 → 1; a differential property test of admission | The relay trust work (in flight), the family core's first step, S6 |
-| **S15 IPAM shared modules** | 3 | `tenko-ipam/src/query.rs`, `observe/view.rs`, `findings/index.rs`, `plan/planner.rs`, `vlan/provision.rs`, `moves/submit.rs`, `export/mod.rs`, `import/transform.rs`, `findings/model.rs`, `reconcile/rules.rs`, `reconcile/view.rs`, `vlan/memory.rs` | Paging 3 → 1; receipts 3 → 1; hand-written names 4 → 0; conflict and gone definitions 2 + 2 → 1 + 1; the VLAN double out of the product (1,053 product lines → test support) | The IPAM unattended writes repair; S17 (shares `findings/index.rs`); SC-Q5 |
+| **S15 IPAM shared modules** | 3 | `tenko-ipam/src/query.rs`, `observe/view.rs`, `findings/index.rs`, `plan/planner.rs`, `vlan/provision.rs`, `moves/submit.rs`, `export/mod.rs`, `import/transform.rs`, `findings/model.rs`, `reconcile/rules.rs`, `reconcile/view.rs`, `vlan/memory.rs` | Paging 3 → 1; receipts 3 → 1; hand-written names 4 → 0; conflict and gone definitions 2 + 2 → 1 + 1; the VLAN double out of the product (1,053 product lines → test support) | The IPAM unattended writes repair; S17 (shares `findings/index.rs`) |
 | **S16 Scripts, deploy lists, documented checks** | 2 | `scripts/label-catalog.mjs`, `requirement-trace.mjs` (onto the shared lexer); `docs/testing/rules.md` (generated table); `deploy/proxmox/ct/tenko.sh`, `release-files.sh`, `test/dry-run-test.sh`, `deploy/proxmox/README.md`; `tenko/src/upgrade/steps.rs` (step kinds); the benchmark results reader in test support; a check of documented runs | Lexers 2 → 1; results parsers 3 → 1; rule texts 4 → 1 (generated); release file lists 6 → 1; step kinds as strings → an enumeration; documented runs without a workflow job → 0 | S1; the lab helper, release path, release and CI checks, and update-path repairs |
 | **S17 Tables read through their owner** | 2 | `tenko-jobs/src/read.rs` (new); `tenko-ipam/src/findings/index.rs`, `scope.rs`, `reconcile/scopes.rs`, `reconcile/names.rs`, `vlan/controllers.rs`; `tenko-dns/src/zone/import.rs`; `tenko-scan/src/control/steps.rs`; `tenko-cluster/src/probe.rs`; `tenko-connect/src/network.rs` | Crates that know the job key layout 4 → 1; probe scope decoders 2 → 1; plugin name lists 2 → 1; guardrail code lists 2 → 1 | S5 (shares `control/steps.rs`); the job engine repair; the IPAM unattended writes repair |
-| **S18 DHCP small facts and defaults** | 2 | `tenko-dhcp/src/limits.rs`, `relay.rs`, `class/facts.rs`, `conflict/rules.rs`, `config/jobs.rs`, `lease/metrics.rs`, `v4/engine/metrics.rs`, `role/metrics.rs`, `lease/history.rs`; `tenko-jobs/src/handoff.rs` (new); `tenko-api/src/routes/dhcp/settings.rs` (profile defaults); `tenko-cluster/src/identity.rs` (renewal constant) | Drop-reason places 5 → 1; offer bounds 2 → 1; client MAC rules 2 → 1; inline job hand-offs 3 → 1; DHCP profile defaults 4 → 1 | The relay trust work, the DHCP failure visibility repair, the DHCP unset convention repair, S4 (shares `identity.rs`), S5 (shares `config/jobs.rs`); SC-Q6, SC-Q9 |
+| **S18 DHCP small facts and defaults** | 2 | `tenko-dhcp/src/limits.rs`, `relay.rs`, `class/facts.rs`, `conflict/rules.rs`, `config/jobs.rs`, `lease/metrics.rs`, `v4/engine/metrics.rs`, `role/metrics.rs`, `lease/history.rs`; `tenko-jobs/src/handoff.rs` (new); `tenko-api/src/routes/dhcp/settings.rs` (profile defaults); `tenko-cluster/src/identity.rs` (renewal constant) | Drop-reason places 5 → 1; offer bounds 2 → 1; client MAC rules 2 → 1; inline job hand-offs 3 → 1; DHCP profile defaults 4 → 1 | The relay trust work, the DHCP failure visibility repair, the DHCP unset convention repair, S4 (shares `identity.rs`), S5 (shares `config/jobs.rs`) |
 | **S19 Generic store feed** | 3 | `tenko-store/src/feed.rs` (new); `tenko-dns/src/feed.rs`, `store_feed.rs`; `tenko-dhcp/src/feed.rs`, `store_feed.rs` | Feed implementations 2 + 2 → 1 | S4; the DNS wire facts repair; the family core's first step |
 | **S20 API paging, sort keys, the dry-run set** | 2 | `tenko-api/src/request` paging; `routes/common.rs` sort keys; `routes/prefixes.rs`; `routes/dhcp/scopes.rs`; `middleware/quorum.rs`; the route table | Paging structures 7 → 1; sort keys back to strings 2 → 0; default VRF 2 → 1; family strings 3 → 0; OpenAPI built at run time 2 → 1 | S9 |
-| **S21 Client common** | 3 | `tenko/src/client/common.rs` (new), `mod.rs`, `dns.rs`, `dns_view.rs`, `dns_recursion.rs`, `dhcp.rs`, `prefix.rs`, `migrate.rs`, `ipam.rs`, `import.rs`, `auth.rs`, `access.rs` | Name arms 208 → 0 (path from the parsed arguments); pagination 6 → 1; usage 7 → 1; detail printers 6 → 1; idempotency keys 7 → 1; not-found 4 → 1; job waits 2 → 1; absent-value texts 3 → 1 | The client version-skew and server start repairs; SC-Q10 |
-| **S22 Connector web layer** | 3 | `tenko-connect/src/sdk/http.rs`; `tenko-connect-hass/src/lib.rs`; `tenko-connect-proxmox/src/lib.rs`, `api.rs`; `tenko-connect-unifi/src/settings.rs`, `plugin.rs`, `http.rs`, `detect.rs`; `docs/connectors.md`, `docs/connectors-unifi.md`, `docs/plugins.md` | Health paths 3 → 1, with fingerprint capture; JSON GET helpers 3 → 1; send paths with retries: one shared path for all three connectors; pinning flows in the documents 2 → 1 | SC-Q7; S7 (`tenko-connect-proxmox/src/lib.rs`); the store and connector guards repair (it owns UniFi's `plugin.rs` and Proxmox's `api.rs`) |
+| **S21 Client common** | 3 | `tenko/src/client/common.rs` (new), `mod.rs`, `dns.rs`, `dns_view.rs`, `dns_recursion.rs`, `dhcp.rs`, `prefix.rs`, `migrate.rs`, `ipam.rs`, `import.rs`, `auth.rs`, `access.rs` | Name arms 208 → 0 (path from the parsed arguments); pagination 6 → 1; usage 7 → 1; detail printers 6 → 1; idempotency keys 7 → 1; not-found 4 → 1; job waits 2 → 1; absent-value texts 3 → 1 | The client version-skew and server start repairs |
+| **S22 Connector web layer** | 3 | `tenko-connect/src/sdk/http.rs`; `tenko-connect-hass/src/lib.rs`; `tenko-connect-proxmox/src/lib.rs`, `api.rs`; `tenko-connect-unifi/src/settings.rs`, `plugin.rs`, `http.rs`, `detect.rs`; `docs/connectors.md`, `docs/connectors-unifi.md`, `docs/plugins.md` | Health paths 3 → 1, with fingerprint capture; JSON GET helpers 3 → 1; send paths with retries: one shared path for all three connectors; pinning flows in the documents 2 → 1 | S7 (`tenko-connect-proxmox/src/lib.rs`); the store and connector guards repair (it owns UniFi's `plugin.rs` and Proxmox's `api.rs`) |
 | **S23 UI list item types** | 2 | The files under `ui/src/` that call `fetchAll`, `fetchPage` or `createListSource` (63 on `6595569b`), except files an open package owns at the start; those are listed and moved by their owners | List items typed by hand 82 → 0, each read through the generated path types | S10, S11 |
+| **S25 Configuration written by the product** | 3 | `tenko/src/config/edit.rs` (new: the editor) and its `mod` line in `config.rs`; `config_init.rs`; the `config` subcommands in `tenko/src/lib.rs` (`set`, `get`, `sections` beside `init`); a fuzz target for the editor; `deploy/install.sh` (the TOML helpers and the reconfigure path) and `deploy/proxmox/test/install-sh-test.sh`; `deploy/windows/wix/Package.wxs` (a reconfigure edits the kept file instead of replacing it) and `deploy/windows/msi-smoke.ps1` | Writers of `tenko.toml` 3 → 1 (the shell template, the awk editor and `config init` → the product); awk TOML code in the installer about 150 lines → 0; the editor about 300 product lines and 250 test lines, no new dependency; every edit re-read with the `toml` parser the product already uses and refused unless the result is the old document with exactly the requested change; comments, blank lines and key order kept (golden tests); a key it cannot edit safely (a dotted key, an inline table) refused with its name, never guessed | The command-on-path repair (it owns `deploy/install.sh`), the Windows installer and mirror repair; S7 (`config.rs`); S16 (`deploy/proxmox/`) |
+| **S26 LLDP identifiers and device names** | 2 | A new `tenko-scan/src/lldp_id.rs` (one formatter per identifier subtype); `tenko-scan/src/frame/lldp.rs` and the LLDP columns of `snmp/mib.rs` onto it; `tenko-ipam/src/topology/model.rs`, `build.rs` (the naming order); one data migration in `tenko/src/upgrade/migrations/` (the lead assigns its number); `tenko-ipam/tests/topology.rs` | LLDP formatters 2 → 1, with a test that feeds one switch through frames and through SNMP and gets one name; stored devices renamed once at the upgrade, each rename in the audit log; a device whose address has a name in DNS is called by that name before its LLDP name | S1; the IPAM unattended writes repair |
+| **S27 LLDP names proposed to DNS** (security) | 2 | A new reconciler rule `tenko-ipam/src/reconcile/lldp_names.rs` and its line in `reconcile/mod.rs`; the proposal kind in `tenko-ipam/src/proposals/model.rs`; the setting in `reconcile/settings.rs`; `ui/src/discovery/ProposalsView.tsx` (the proposal text), `ui/src/settings/reconciler/model.ts`, `ReconcilerPage.tsx` (the setting); tests in the reconciler's test module | A device without a DNS name and with an LLDP name gives one proposal; the setting is off by default and refused under the Hardened profile (a test per case); each guard rule of SC-Q11 has a test that a proposal breaking it is never made and never applied, also when accepted automatically; records written this way carry an origin a manual record never has; no new writer to DNS (the IPAM DNS actuator's existing path) | S26; S13 (the one function for the profile in force); S17 (`reconcile/names.rs` beside it) and S15 (`reconcile/rules.rs`) merged |
 | **S24 Copy lint at zero** | 1 | The copy lint's baseline and rules; the index | Baseline entries → 0; every home in the index | All of the above, and the repair packages that hold copies |
 
-Total: 60 builder-days in 24 packages.
+Total: 67 builder-days in 27 packages. S25, S26 and S27 came with the owner's answers of
+2026-11-12 (SC-Q8, SC-Q3, SC-Q11); S24 stays the last.
 
 ### 4.3 What runs in parallel
 
@@ -441,10 +447,10 @@ disjoint files.
 |---|---|---|
 | A | S1, S2, S8 | Disjoint files: S1 scripts, `tenko-net` and the index; S2 `tenko-core`; S8 store files (3 days of calendar, 9 builder-days) |
 | B | S3, S4, S5, S6, S7 | All after S1 or S2; disjoint files (`tenko-net` modules and fuzz targets are appended, section 2.1) |
-| C | S9, S10, S11, S12, S13, S14, S17, then S15 | Each waits for its repair packages; S12 and S17 after S5, S14 after S6, S15 after S17 |
-| D | S16, S18, S19, S20, S21, S22, S23, then S24 | The rest; S24 last |
+| C | S9, S10, S11, S12, S13, S14, S17, S26, then S15 | Each waits for its repair packages; S12 and S17 after S5, S14 after S6, S15 after S17 |
+| D | S16, S18, S19, S20, S21, S22, S23, S25, S27, then S24 | The rest; S25 after S7 and S16; S27 after S13, S15, S17 and S26; S24 last |
 
-At three builders, about 20 working days of calendar if the repair packages they wait for
+At three builders, about 23 working days of calendar if the repair packages they wait for
 merge in time; the repair packages share the same builder slots, so the lead interleaves the
 two lists by the owner's order (security first).
 
@@ -487,6 +493,10 @@ release notes can hold.
 Each question changes something a user or an operator notices. The options are ranked by the
 owner's order: security, performance, usability, features.
 
+The owner answered SC-Q1 to SC-Q10 on 2026-11-12: the recommended option each time, with two
+particulars (SC-Q3 and SC-Q8). Each answer stands in one line under its question. SC-Q11 came
+out of the answer to SC-Q3 and was answered the same day.
+
 **SC-Q1. A form whose object another operator changes while it is open.** Today one form
 keeps the values it loaded and one follows the live object; neither should send a revision
 other than the one its values came from (that is fixed in either case).
@@ -500,6 +510,8 @@ other than the one its values came from (that is fixed in either case).
 Recommended: **(a)**. It never undoes another operator's change (security of the data), and it
 keeps the user's work (usability). (c) loses changes silently.
 
+**Answer, 2026-11-12:** (a), as recommended (S10).
+
 **SC-Q2. An IPv4 address written as an IPv6 address (`::ffff:192.0.2.1`).** Today the scanner
 treats it as IPv4 and IPAM as IPv6, so its reverse name lands in two different zones.
 - (a) It is the IPv4 address: every input (API, import, scan, connectors) converts it, and it
@@ -510,6 +522,8 @@ treats it as IPv4 and IPAM as IPv6, so its reverse name lands in two different z
 Recommended: **(a)**. One spelling per address, so every rule, filter and reverse zone sees the
 same address (security); dual-stack listeners report addresses in this form, so refusing it
 (c) would drop real observations.
+
+**Answer, 2026-11-12:** (a), as recommended (S6).
 
 **SC-Q3. The format of LLDP identifiers** (how switches name themselves and their ports).
 Today a switch read from its frames and the same switch read over SNMP get differently
@@ -523,6 +537,8 @@ formatted names and do not join in the topology.
 Recommended: **(a)**: one device, one name (usability); the rename happens once and is
 recorded.
 
+**Answer, 2026-11-12:** (a), as recommended, with a rule for what a device is called: a name in DNS for the device's address goes before its LLDP name, and the LLDP name is used when DNS has none (S26). How the LLDP name then reaches DNS is SC-Q11.
+
 **SC-Q4. Two prefixes with the same address range in two VRFs** (routing tables). When the
 topology joins an observed address to a prefix, today the first entry wins.
 - (a) Join only when the address falls in exactly one VRF, or when the observation's source
@@ -532,6 +548,8 @@ topology joins an observed address to a prefix, today the first entry wins.
 
 Recommended: **(a)**. A wrong join attributes devices to the wrong network; no join with a
 finding is honest and fixable.
+
+**Answer, 2026-11-12:** (a), as recommended.
 
 **SC-Q5. Conflicts in IPAM for unmanaged hosts and abandoned leases.** The reconciler does not
 count an address as a conflict when its MAC belongs to a host the operator marked unmanaged, or
@@ -546,6 +564,8 @@ operator chose "unmanaged" explicitly, and the address history and the observati
 show the second device. A conflict also has to come with an action (usability). So (a) wins,
 and the help text of the unmanaged mark says that such hosts are not checked for conflicts.
 
+**Answer, 2026-11-12:** (a), as recommended (S15).
+
 **SC-Q6. DHCP drop counters.** Today the counter of dropped packets has no label for the
 address family, and one reason covers two causes.
 - (a) One list of reasons with a `family` label (`v4`, `v6`) and a separate reason for replies
@@ -554,6 +574,8 @@ address family, and one reason covers two causes.
 - (b) Fix only the code; keep the labels.
 
 Recommended: **(a)**: an operator can tell which family drops and why.
+
+**Answer, 2026-11-12:** (a), as recommended (S18).
 
 **SC-Q7. Certificate pinning for connectors.** The two connector documents teach opposite
 steps, and one connector's health check answers a TLS failure differently from the others.
@@ -570,6 +592,8 @@ is what makes it safe. With that step, (a) and (b) are equally strong on securit
 it, (b) is stronger, because the operator must read the console. (a) wins on usability: the
 operator compares two strings instead of copying one by hand.
 
+**Answer, 2026-11-12:** (a), as recommended (S22).
+
 **SC-Q8. How the Linux installer writes `tenko.toml`.** Today a shell template writes it and
 an awk script edits it on reinstall; on Windows the product writes it (`tenko config init`).
 - (a) The installer uses the product on both platforms: `tenko config init` and a new
@@ -584,6 +608,8 @@ Recommended: **(a)** with `toml_edit` if you approve it: one writer of the confi
 format, the same on both platforms, and a parser instead of text patterns. Without the
 dependency, (b) until a small editor of our own exists.
 
+**Answer, 2026-11-12:** (a): the product writes and edits `tenko.toml` on both platforms, with a small editor of our own that keeps comments (S25). The owner did not approve `toml_edit` as a dependency; the product does not use it.
+
 **SC-Q9. Which DHCPv4 clients have a MAC address.** Classes require the Ethernet hardware type;
 filters take any six-octet hardware address.
 - (a) Any six-octet hardware address counts as the MAC, for classes and filters alike.
@@ -592,6 +618,8 @@ filters take any six-octet hardware address.
 Recommended: **(a)**. A client cannot avoid a deny filter by announcing another hardware type
 (security); a class then matches the clients its filter matches.
 
+**Answer, 2026-11-12:** (a), as recommended (S18).
+
 **SC-Q10. How the CLI prints an absent value.** Today some commands print nothing and some
 print `-`.
 - (a) `-` in tables and plain text; the field is left out of JSON output.
@@ -599,3 +627,19 @@ print `-`.
 
 Recommended: **(a)**: a column with a dash reads as "no value", an empty column as a broken
 table. A cosmetic change, so it is yours to decide.
+
+**Answer, 2026-11-12:** (a), as recommended (S21).
+
+**SC-Q11. How a device's LLDP name reaches DNS.** The answer to SC-Q3 calls a device by its
+name in DNS and falls back to its LLDP name; the owner also asked that the LLDP name then be
+written into DNS. LLDP is not authenticated: a device plugged into a switch port can announce
+any name, so a name written from it unchecked would let anything on a port create DNS names.
+The options were a proposal the operator accepts, with an opt-in to accept such proposals
+automatically; a dynamic record always written, within guard rules; and display only.
+
+**Answer, 2026-11-12:** a proposal. The LLDP name of a device that has no name in DNS is offered
+as a proposal in the reconciliation, which the operator accepts. A setting may accept such
+proposals automatically; it is off by default and refused under the Hardened profile. In both
+cases the guard rules hold: never over an existing record; never a reserved name or a service
+label; only for addresses in managed prefixes; only in zones this installation is primary for;
+and the record's origin marked so it can be told from a manual one (S27).
