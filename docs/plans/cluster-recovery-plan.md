@@ -1,0 +1,449 @@
+# Cluster recovery plan: one controller takes over when the quorum is gone for good
+
+- Status: Proposed on 2026-11-12, waiting for the owner's decisions CR-Q1 to CR-Q9 of section 9. It adds a second way out of a permanent loss of quorum beside the backup route of [backup.md](../backup.md) section 7 (decision S3-Q11), which stays
+- Date: 2026-11-12
+- Scope: OPS-03 (the controller cluster), OPS-26 (partitions: the premise "the control plane never diverges" gets an exception that this plan bounds), OPS-07 (backup and restore), IAM-18 (the audit export). Written against `main` at `6595569b`, with the controller removal package in flight (revocation first, a revoked voter gets no Raft traffic when the others are a majority) taken as merged. Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md). Exit criteria, measurements and risks continue the project's series after the cluster update plan (which ends at E131, M89 and R207 on its branch): E132, M90 and R208 onward. The slice number is the lead's; this plan calls it Slice 20 with packages WP20.0 to WP20.8, provisionally
+
+The owner's request, in short: a panic button for a cluster that has lost its quorum for good. On one controller an operator declares "my copy is the authority, nobody else may write"; the other controllers, when they come up and see it, accept the situation and follow, until the cluster has its quorum again. The lead agreed with the shape and named two things that cannot be simplified away: the declaration must be a number that only grows, not a flag (two nodes can each set a flag), and a returning controller cannot keep what it wrote after the split. The owner then asked that the design be taken from the systems that have solved this for years, not invented beside them. Section 1 is that prior art, section 2 what Tenko has, section 3 the design, with each choice tied to the system it follows.
+
+Terms used below, explained once. A **controller** runs the replicated store; the controllers agree on one ordered **log** of writes with **Raft**, an agreement protocol in which one **leader** orders the writes and a write is **committed** once a **quorum**, a majority of the **voters**, has stored it. A **learner** receives the log without voting. Raft numbers its leaders' periods with a **term**; every log entry has a **log id**, its term and its position (**index**), and log ids are ordered by term first, then index. A **snapshot** is a copy of the whole state at one log position. **Quorum loss** is the state in which fewer than a majority of the voters are reachable, so nothing can be written; it is **permanent** when the missing voters will never come back with their data. A **split brain** is two parts of a cluster each accepting writes as if it were the whole. **Fencing** is what stops a node that has been replaced from acting: a check that refuses its messages, or the node stopping itself. A **generation** (section 3.1) is the number this plan introduces: it rises by one with every forced step and every restore, and a controller of a lower generation is fenced. The **fork point** is the log position at which a forced step started a new history. An **enrolled node** is a process enrolled with a certificate of the installation that serves a role (`probe` today, `dns` and `dhcp` from Slice 12) without holding the store. The **revision** is the store's own counter of applied writes; the **audit chain** is the hash-linked list of audit records. A **sink** is a receiver the audit export sends to. **SST** (state snapshot transfer) and **IST** (incremental state transfer) are Galera's full and partial copies to a returning node. **WAL** (write-ahead log) is PostgreSQL's log. The **DCS** (distributed configuration store) is the etcd, Consul or ZooKeeper that Patroni keeps its leader key in, with a **TTL** (time to live) after which the key expires. **MCLT** (maximum client lead time) is the DHCP failover bound on how far a lease may run beyond what the partner knows.
+
+Smaller terms, in the order they appear. Raft's **"up to date" rule** compares two logs by their last log ids, term first, then index; a candidate whose log is behind gets no vote. A **leader lease** is the short time after a leader's last heartbeat during which followers refuse to vote for anyone else. **BSON** is MongoDB's binary document format and `bsondump` its reader. An **engine checkpoint** is a consistent copy of a storage engine's files. **gRPC** is the remote call protocol of the cluster port; `FAILED_PRECONDITION` is one of its status codes. **CBOR** is the compact binary encoding Tenko stores and sends; a **golden test** compares encoded bytes with bytes saved in the repository. **RFC 5424 structured data** and **CEF** (Common Event Format) are two syslog message layouts the audit export writes. An **idempotency key** makes a repeated request return the first one's result instead of acting twice. **musl** is the C library of the static Linux binary the project ships. A **vault envelope** is a secret encrypted under a **key generation**, one of the installation's key-encryption keys. **ACK** is the DHCP server's message that confirms a lease, **DHCPDECLINE** the client's message that an offered address is already in use, and an **ICMP echo** is a ping.
+
+Contents:
+
+1. [Prior art](#1-prior-art)
+2. [What Tenko has](#2-what-tenko-has)
+3. [The design](#3-the-design)
+4. [Exit checks](#4-exit-checks)
+5. [Measurements](#5-measurements)
+6. [Work packages](#6-work-packages)
+7. [Requirements and documents](#7-requirements-and-documents)
+8. [Risks](#8-risks)
+9. [Questions for the owner](#9-questions-for-the-owner)
+10. [Sources](#10-sources)
+
+## 1. Prior art
+
+Each entry gives the mechanism, what tells an old member that it has been superseded, what becomes of an old member's divergent data, what is manual on purpose, and the known ways it goes wrong. Every claim names its source in section 10 by a short key and the version the source describes. Where a claim rests on reading source code through a summary, on a search result rather than the page, or on reasoning, it says so. Pages fetched on 2026-11-12.
+
+### 1.1 etcd (3.5 and 3.6)
+
+**Mechanism.** Two routes. `--force-new-cluster` starts one surviving member with its own data and rewrites the membership: the start reads the existing log, cuts the log after the committed position, then appends configuration entries that remove every other member and commits them at once, keeping the old cluster identifier and the member's own identifier [ETCD-RAFT, 3.5, read through a summary of the source]. The documented route for disaster recovery is a snapshot restore: `etcdutl snapshot restore` builds a fresh data directory per member from one snapshot, with a new member identifier and a new cluster identifier derived from the members and `--initial-cluster-token`, and a brand-new log that starts at term 1 [ETCD-REC 3.5, 3.6; ETCD-SNAP, 3.5, source through a summary]. The restore refuses a data directory that is not empty [ETCD-SNAP, 3.5].
+
+**What tells an old member.** Every message between members carries the sender's cluster identifier in a header; a receiver whose identifier differs refuses with HTTP 412 [ETCD-HTTP, 3.5, source through a summary]. A member whose identifier is on the removed list is refused with 410 or 403, and a member that applies its own removal stops itself and logs that its data directory must be removed [ETCD-HTTP, ETCD-SERVER, 3.5]. After a restore, old and new members refuse each other at the identifier check; after `--force-new-cluster` the identifier is the same, so the only fence is the removal entries, which an old member learns only if it receives them [ETCD-REC 3.6; reasoning from the code].
+
+**Divergent data.** Never merged and never rejoined automatically. A member joins only in two steps, `member add` on the cluster and then a start with an empty data directory; the design notes say the two steps are deliberate, so that a removed member restarted by its service manager cannot rejoin by itself [ETCD-RECONF, 3.6]. Old data directories must not be reused against the restored cluster [ETCD-REC 3.5].
+
+**Manual on purpose.** Forcibly removing dead members through the running cluster was deliberately left out, because a member wrongly assumed dead could then diverge under the same cluster identifier [ETCD-RECONF, 3.6].
+
+**How it goes wrong.** The documentation calls `--force-new-cluster` strongly discouraged and warns that etcd panics if members of the previous cluster are still alive [ETCD-REC 3.5, 3.6]. Forcing a minority while a majority lives gives two logs under one cluster identifier (reasoning from the code and the design note). The flag left in a service unit is applied again at every start (a downstream bug report seen as a search result only; the re-application follows from the code path). The documents give no rule for choosing the freshest survivor; `etcdctl endpoint status` shows the Raft term, the Raft index and the revision of a running member [ETCD-MAINT, 3.5]. Not verified: an official sentence on choosing the survivor.
+
+### 1.2 Consul and Nomad (HashiCorp Raft)
+
+**Mechanism.** The operator stops every surviving server, writes `raft/peers.json` with the surviving servers' identifiers and addresses on each, and starts them; the server ingests the file, rebuilds its configuration and deletes the file, so a later restart cannot apply it again [CONSUL-OUT, Consul 1.18.1+; NOMAD-OUT, Nomad, current page]. Underneath, the library's `RecoverCluster` replays the log into the state machine, writes a new snapshot at the last replayed position with the given configuration and deletes the whole log; it raises no term and no index, and its documentation says it implicitly commits every entry, uncommitted ones included, and calls that unsafe [HC-RAFT api.go, main branch]. The file must be the same on every server [HC-RAFT api.go; NOMAD-OUT]; a single survivor lists only itself [CONSUL-OUT; NOMAD-OUT].
+
+**What tells an old member.** Nothing: the library has no cluster identifier and no epoch; a server outside the configuration is only refused votes ("not in configuration"), and the append path checks no membership [HC-RAFT raft.go, main branch]. The advice for a removed server is to bring it back with an empty data directory, or to remove it with `consul operator raft remove-peer` [CONSUL-OUT; CONSUL-RAFTCMD, version not stated].
+
+**Divergent data.** A follower that receives entries that conflict with its own deletes its tail and takes the leader's; nothing is kept aside [HC-RAFT raft.go].
+
+**Manual on purpose.** Data not on the survivors is lost, and outstanding entries are committed by the recovery; Nomad's page says not to automate placing the file [CONSUL-OUT; NOMAD-OUT]. A library maintainer called quorum loss outside what Raft handles automatically [HC-RAFT-535, 2023, Consul 1.14.3 era].
+
+**How it goes wrong.** A file that names a lost server makes the start fail; differing files on different servers are not described by any source found (could not verify). Neither tutorial says how to choose the freshest server; `consul operator raft list-peers` shows the commit index and each follower's lag, and the gauges `consul.raft.last_index` and `applied_index` exist [CONSUL-RAFTCMD; CONSUL-TELEM, versions not stated].
+
+### 1.3 MongoDB replica sets (4.4 to 8.x)
+
+**Mechanism.** On any surviving member the operator copies the configuration, cuts the member list to the survivors and runs `rs.reconfig(cfg, {force: true})`; the configuration installs at once without the checks a normal reconfiguration makes, and the other survivors take it and elect a primary [MONGO-UNAVAIL, MONGO-RECONF, current manual 8.x]. A forced configuration's `version` jumps by a large random amount, so that two forced reconfigurations on two sides of a partition are unlikely to collide, and its `term` is cleared so that only versions are compared [MONGO-UNAVAIL; MONGO-README, master]; since 4.4 a normal configuration carries the term of the primary that made it, and a larger term wins, otherwise the larger version [MONGO-CONF, current manual].
+
+**What tells an old member.** Heartbeats carry each side's configuration version and term; a member that sees a newer configuration fetches it, and a member that is not in the configuration it installs enters the state REMOVED [MONGO-README; MONGO-STATES, current manual; SERVER-46897].
+
+**Divergent data.** A former primary that accepted writes the others never received rolls back to the common point when it rejoins, and writes the rolled-back documents as BSON files under `<dbpath>/rollback/<collection UUID>/` for an operator to read with `bsondump` and reapply by hand; deletions and collection drops are not saved, and the rollback stops after `rollbackTimeLimitSecs` (24 hours by default) [MONGO-ROLLBACK, current manual]. This is the one system found that keeps the discarded writes in files.
+
+**Manual on purpose.** A forced reconfiguration can roll back writes a majority had acknowledged, because it skips the commitment checks; the manual says to use it only after a catastrophic loss, never in scripts and never while a primary exists [MONGO-RECONF; MONGO-UNAVAIL].
+
+**How it goes wrong.** Mixing a forced and a normal reconfiguration can give two primaries in one term until the higher configuration spreads [SERVER-47331, search result only]. Forcing on a stale member makes the other survivors roll back their newer writes (reasoning from the rollback mechanism). The manual gives no rule for the survivor; `replSetGetStatus` shows each member's operation time, which is what an operator compares [MONGO-STATUS]. Not verified: forcing on a minority while a majority lives, beyond the general warning; per-version differences (the pages are the current manual).
+
+### 1.4 Galera Cluster (Galera 3 and 4, MariaDB, Percona XtraDB Cluster)
+
+**Mechanism.** A partition without a majority becomes non-primary and refuses writes ("WSREP has not yet prepared node for application use") [PXC-CRASH, 5.7]. To recover, the operator compares the recovered position of every node (`mysqld --wsrep-recover` prints the state identifier and sequence number; `grastate.dat` holds `seqno -1` after a crash) and bootstraps a new primary component on the most advanced one: `pc.bootstrap` on a running node or `galera_new_cluster` on a stopped one [PXC-CRASH; MARIADB-PC, current]. Since Galera 3.19 `grastate.dat` carries `safe_to_bootstrap`: 1 only on the last node that left cleanly, 0 everywhere after a crash, and a bootstrap from a node marked 0 is refused until the operator edits the file [CODERSHIP-STB, Galera 3.19, search result only; PXC-CRASH]. This is the closest to the owner's flag, and its limit is the lead's point: a flag says "this node may start alone", not "this history wins", and after a crash nobody holds it.
+
+**What tells an old member.** Its state identifier and sequence number against the group's. A node whose sequence number is above the group's aborts with "states diverged" [GALERA-1195071, 2013 to 2016]; a node bootstrapped alone and later reunited refused to rejoin because it had applied more events than the primary component [PERCONA-FORCE, PXC 8.0.31]. The sequence number check is a heuristic: a Galera developer found that it fires falsely after a flapping incremental transfer and can miss real divergence with equal numbers [GALERA-1195071; PERCONA-FORCE]. Whether a bootstrap keeps the state identifier could not be verified from a primary source.
+
+**Divergent data.** A diverged node needs a full SST, which replaces its data; what only it held is lost; no mechanism keeps it aside [PXC-CRASH; PERCONA-FORCE].
+
+**Manual on purpose.** A bootstrap is a last resort after confirming that every other node is down, and only from the most advanced node [MARIADB-PC; PERCONA-FORCE].
+
+**How it goes wrong.** Two components bootstrapped at once each become primary and diverge; on reunion the nodes with extra events abort [PERCONA-FORCE, a worked demonstration]. Bootstrapping a stale node loses the later commits of the others [PXC-CRASH]. `pc.recovery` restores the last primary component automatically after a full power loss once all its saved members see each other again [MARIADB-PC; PXC-CRASH].
+
+### 1.5 CockroachDB (22.x to 24.x)
+
+**Mechanism.** `cockroach debug recover`: the operator collects replica information from every surviving store, names the dead stores, and the planner picks for each range the surviving replica with the highest committed Raft index (ties to the highest store id) and rewrites its descriptor to make it the only voter; the plan is applied store by store after an engine checkpoint as a safety copy, then the ranges replicate up again [CRDB-RFC, design of 2021-11; shipped later]. A half-online mode collects and distributes over the network and applies at a rolling restart (v23.1 according to a search result only).
+
+**What tells an old member.** Decommissioning, which is permanent: a decommissioned node is kept from talking to the cluster and cannot be brought back; a new node must be started [CRDB-SHUTDOWN, stable]. The recovery itself decommissions nothing (reasoning; the design does not say).
+
+**Divergent data.** Lost; the design says the recovered data may violate almost any internal invariant and names restoring a backup into a new cluster as the official fallback [CRDB-RFC; CRDB-DR, 24.1]. Only the engine checkpoint is kept.
+
+**Manual on purpose.** The operator declares which stores are dead, because the software cannot tell a partition from a death (reasoning, consistent with the design's assumption that every surviving replica is live).
+
+**How it goes wrong.** Running it while "dead" nodes are alive or return makes the cluster inconsistent [CRDB-RFC]. The design notes that the highest last index (rather than committed index) could pick a divergent tail [CRDB-RFC]. The official reference pages for `debug recover` returned 404 and could not be read.
+
+### 1.6 PostgreSQL with Patroni (Patroni 3.x and 4.x, PostgreSQL 15 to 17)
+
+**Mechanism.** The primary holds a leader key in the DCS with a TTL; when it cannot renew it, the key expires and a replica that is not too far behind (`maximum_lag_on_failover`) is promoted [PATRONI-DYN, PATRONI-FAQ, latest]. The old primary, when it returns, is turned into a replica of the new one, with `pg_rewind` first when `use_pg_rewind` is on [PATRONI-YAML; PATRONI-FAQ].
+
+**What tells an old member.** Two layers: it no longer holds the leader key, and the new primary is on a higher timeline, a number that every promotion raises, whose history file records the fork point [PATRONI-FAQ; PG-REWIND, PG-ARCHIVE, PostgreSQL 17]. Patroni also refuses to mix two clusters whose system identifiers differ [PATRONI-FAQ].
+
+**Divergent data.** `pg_rewind` finds the fork point from the timeline histories and copies from the new primary every block the old one changed after it; the divergent transactions are discarded and nothing keeps them aside [PG-REWIND]. Wiping and recloning a diverged data directory is off by default (`remove_data_directory_on_diverged_timelines`, `remove_data_directory_on_rewind_failure`), so the old data stays for an operator unless configured otherwise [PATRONI-YAML].
+
+**Fencing.** A primary that cannot reach the DCS demotes itself to read-only, because it cannot tell a DCS outage from a partition; `failsafe_mode` keeps it primary only while it reaches every member [PATRONI-FAILSAFE]. A service manager that restarts PostgreSQL behind Patroni's back can cause a split brain [PATRONI-FAQ].
+
+**How it goes wrong.** With asynchronous replication the promoted replica can lack committed transactions, which are then lost at the rewind; only `synchronous_mode` prevents it [PATRONI-DYN]. Patroni recovers only from the loss of a primary while the DCS has its own quorum; a DCS that lost its quorum is that system's recovery (sections 1.1 and 1.2).
+
+### 1.7 openraft 0.9.25 (the version pinned in `Cargo.lock`)
+
+- **No forced membership change.** `change_membership` commits through the leader and needs a quorum; there is no unsafe variant (`src/raft/impl_raft_blocking_write.rs:49`, search of the crate). `initialize` is refused once any log entry or vote exists (`src/engine/engine_impl.rs:684-700`, `src/raft_state/mod.rs:221-234`). The maintainers' answer to a request for a forced recovery: out of scope; copy data from a survivor, edit the membership, restart, at the application's level [OPENRAFT-1698, 2026-03].
+- **What an application may do offline.** At start the membership comes from the state machine's last applied membership plus at most two membership entries in the log after it (`src/storage/helper.rs:244-270`), so a snapshot installed with a one-voter membership starts as a single voter. This is exactly what Tenko's restore does (section 2.1), and therefore a route that is proven in Tenko already, not only in the crate's code.
+- **No cluster identity, no epoch, no PreVote.** The Raft messages carry the vote, the log ids and the entries, nothing else (`src/raft/message/append_entries.rs:14-26`, `vote.rs:13-51`); `cluster_name` appears only in tracing spans. No check that the sender is a member was found (search level), and PreVote (the extra round that keeps a node that was cut off from raising everyone's term) does not exist. The only guard is the leader lease in vote handling (`src/engine/engine_impl.rs:282-318`). A returning old voter that campaigned while cut off arrives with a higher term, and a higher-term append is accepted.
+- **Snapshots and log reversion.** A snapshot at or below a node's committed index is ignored by it (`src/engine/handler/following_handler/mod.rs:278-290`), so an old node with a longer history never takes a new history's snapshot: it must be wiped. A follower whose log went backwards is caught only by a `debug_assert!` on the leader unless the feature `loosen-follower-log-revert` is on (`src/progress/entry/mod.rs:118-170`, the assertion at :165); Tenko does not turn the feature on (`Cargo.toml:80`), and a release build compiles the assertion out, so the leader silently keeps a matching position the follower no longer has and replication to it stalls. A wiped node must therefore come back under a Raft id that the leader does not track, which the forced step guarantees by removing the old ids from the membership; a learner that is wiped again while the leader tracks it must be removed from the group first.
+
+### 1.8 The comparison
+
+| System | The forced step | What tells an old member | An old member's divergent writes | Manual on purpose | Typical failure |
+|---|---|---|---|---|---|
+| etcd | `--force-new-cluster` on one member; or a snapshot restore into a new cluster | Cluster identifier in every message (412); removed-member list (410, 403) | Never merged; wipe and `member add` | Force removal of dead members; the two-step add | Forcing while others live; the flag left set |
+| Consul, Nomad | `peers.json` on every survivor, offline | Nothing: no identifier or epoch; only vote refusal | Truncated when it follows; nothing kept | Placing the file; "do not automate" | Differing files; a server listed that is gone |
+| MongoDB | `rs.reconfig(..., {force: true})` on one survivor | Configuration version (random large jump) and term in heartbeats; REMOVED | Rolled back, kept as BSON files under `rollback/` | Force only after catastrophic loss, never scripted | Rolls back majority-acknowledged writes; mixed forced and normal reconfigurations |
+| Galera | `pc.bootstrap` or `galera_new_cluster` on the most advanced node; `safe_to_bootstrap` | State identifier and sequence number (a heuristic) | Full SST; lost | Bootstrap; editing `safe_to_bootstrap` | Two components bootstrapped; a stale node bootstrapped |
+| CockroachDB | `debug recover`: per range, the replica with the highest committed index becomes the only voter | Decommissioning (permanent) | Lost; engine checkpoint only | Naming the dead stores | Run while the "dead" are alive |
+| Patroni | Automatic promotion while the DCS has a quorum | Leader key lost; higher timeline with a fork point | `pg_rewind` discards; nothing kept | Wipe options off by default | Asynchronous loss; a restart outside Patroni |
+| openraft 0.9 | None in the library; an application may install a one-voter snapshot | None | Wipe (no reversion support) | Everything | A higher-term node disrupts |
+
+### 1.9 The pattern they share
+
+1. The decision that the others are gone is a person's, made on one survivor, never taken by the software, because no node can tell a dead peer from one it cannot reach (etcd, Consul, MongoDB, Galera, CockroachDB all say so in their own words).
+2. The step keeps one survivor's committed data and rewrites the membership around it; the survivor to choose is the one furthest along the log, and the systems that compare do it by log position (Galera's sequence number, CockroachDB's committed index, Raft's term then index).
+3. Old members are told apart by something every message carries that the step changes: a new cluster identifier (etcd's restore), a number that only grows (MongoDB's configuration version, PostgreSQL's timeline), or a removal record; where nothing is carried (Consul, plain openraft), only wiping protects.
+4. A returning old member never merges: it discards and copies from the authority; one system (MongoDB) keeps the discarded writes in files an operator can read.
+5. The failure modes are the same everywhere: forcing while a majority lives, forcing two nodes at once, forcing a stale copy; the defenses are warnings, a rule for choosing by log position, and fencing, and none of them is automatic.
+
+## 2. What Tenko has
+
+### 2.1 The backup route (decision S3-Q11)
+
+`tenko backup restore` creates a new data directory from a backup, never writing into one that holds a store ([backup.md](../backup.md) section 6). The restore opens a store as a learner that was never initialized, installs the snapshot with a membership of one voter, this host, and a vote at the term of the snapshot's last log id held by a node that is not this one; then opens it again as a single voter, which verifies the whole audit chain and elects itself, so the restored store starts the next term (`crates/tenko/src/backup/restore.rs:646-719`, `install` and `install_snapshot`; `crates/tenko-store/src/raft/mod.rs:1545-1596`, `bootstrap`). It compares the store digest, opens every vault envelope, seals the key generations with this host's key provider and leaves a notice that the first start records as `sys.backup.restore`. The restore keeps the users, secrets, audit chain, the internal CA with its key, the node registry and the enrolled nodes' certificates; it gives the restored controller a new certificate and drops the Raft log, the old host's key files and its cluster identity under `node/`. Section 7 of backup.md: a backup of any controller restores to a single controller; the others join it with empty data directories; "never start an old member with its old data directory against the restored cluster" is a sentence in a document, not a check, and the old controllers' records stay in the store until an administrator removes them. Their certificates come from the same CA and are not revoked, so an old controller that was only cut off and returns still authenticates.
+
+### 2.2 Membership and identity
+
+The Raft membership lives in openraft's log entries and snapshot metadata; beside it the table `cluster.members` holds each member's record (cluster port, version, data formats), and the node registry holds each controller's node record with its certificates ([cluster.md](../cluster.md) sections 12.1 to 12.3; `crates/tenko-cluster/src/peers/mod.rs:19-36`). A store directory remembers its node id in the file `node-id` and refuses to open under another, and a directory a join prepared is never initialized alone (`crates/tenko-store/src/raft/mod.rs:73-81`). There is no cluster identifier and no epoch that members compare: the installation is told apart only by its CA (a controller of another CA fails the handshake, `cluster.tls.foreign_ca`), and the leader epoch `sys.leader_epoch` fences a deposed leader's services inside one history, not one history against another (cluster.md section 12.8).
+
+### 2.3 Who may call a controller
+
+Every caller on the cluster port presents a certificate of the installation's CA with the role `controller`; the TLS verifier refuses revoked serials. The `Cluster` service then needs the caller's node record holding the certificate; the `Raft` service also accepts a controller whose record this member has not replicated yet (a learner catching up from an empty store knows nobody), unless the revocation table names it; a Raft message must name its sender as the leader or candidate it speaks for (`crates/tenko-cluster/src/service/raft.rs:32-47`, `cluster.peer.impersonation`). Nothing compares histories: a returning old voter with a valid certificate is accepted, and with openraft's lack of PreVote its higher term is accepted too (section 1.7).
+
+### 2.4 Quorum states, isolation and the queue
+
+A controller is `single`, `healthy`, `electing` or `isolated` (cluster.md section 12.4). An isolated controller serves reads from its copy with a staleness header and refuses writes with 503 `cluster.no_quorum`; a person can keep an IPAM change in the controller's local queue (one file per item under `<data_dir>/queue/`, not replicated), which is re-planned and applied or shown with its conflict after the heal ([partitions.md](../partitions.md) sections 1 to 5; `crates/tenko-ipam/src/queue/mod.rs`). OPS-26 rests on "the control plane never diverges, so there is nothing to merge": true for Raft as long as nobody forces anything.
+
+### 2.5 Enrolled nodes
+
+Today the only enrolled role is `probe`; `dns` and `dhcp` run inside the controllers and read the store, and standalone `dns` and `dhcp` nodes with the DHCP failover pair are Slice 12 ([ha-plan.md](ha-plan.md)). A node keeps its configuration with the store revision it reflects and ignores a message with a lower revision; a controller whose copy is behind the node's revision refuses with 503 `node.config.behind`, and the node tries the next endpoint; the list of endpoints comes from enrollment and is refreshed at every handshake from `HelloResponse.endpoints` ([node-sync.md](../node-sync.md) sections 2.2, 4.1 and 10). Revisions of two histories are compared as if they were one: after a forced step on a copy at a lower revision than a node holds, every controller of the new history would look "behind" to that node for good. That is a defect the design must fix, not a detail.
+
+### 2.6 Certificates, revocation and the removal contract
+
+All identities come from the internal CA; a revocation puts the serials on `cluster.revocations`, the TLS verifier of every member refuses them, and open streams end ([cluster.md](../cluster.md) sections 2, 3 and 12.6). The removal package in flight makes revocation the first step of a controller's removal: removed means no other controller accepts it and it is not a member; a revoked voter gets no Raft message when the non-revoked voters are a majority; the leader's loop finishes a removal that was interrupted; a member out of contact during the removal still accepts the removed controller until it applies the removal. Its own analysis of a two-voter cluster ends where this plan begins: a leader that will not step down, with two voters, leaves only the backup route.
+
+### 2.7 The audit chain and its export
+
+Every change writes an audit record in the same atomic write; records have a gap-free sequence number, the hash of the previous one and their own hash; the export runs on the leader, resumes at a cursor stored in the store and fenced by the leader epoch, and a receiver drops a duplicate by sequence number and verifies the chain; `tenko audit verify --file` refuses a record at a known sequence number with another hash ([audit-export.md](../audit-export.md) sections 1, 4 and 5). Two histories after a fork would hand a receiver two different records under one sequence number, which today reads as tampering.
+
+### 2.8 DHCP and DNS writes
+
+A lease is a row of `dhcp.leases` committed before the ACK; while the store refuses writes the role renews bound leases and refuses new clients ([dhcp.md](../dhcp.md) sections 8 and 8.6). Dynamic DNS updates are change sets through the zone service, answered SERVFAIL when the store refuses ([dns.md](../dns.md), the update path). So a history that is later superseded can hold leases the authority never saw: the one place where discarded writes can cause harm on the network (two clients on one address), not only in the data.
+
+### 2.9 What is missing, in one list
+
+No way out of a permanent quorum loss but a backup restored on a stopped node; no number that tells two histories apart; no fence that keeps an old controller from rejoining with its old copy, a restored cluster included; nodes that compare revisions across histories; an audit export that cannot express a fork; nothing that keeps the writes of a superseded history.
+
+## 3. The design
+
+### 3.0 The invariant
+
+**Two histories never merge: once a controller has seen, by any path, a valid record of a history that supersedes its own or competes with it, it stops writing until it has rejoined or an operator has chosen, and what a superseded history wrote after the point the two histories share is kept aside on its own host, never applied to the authority and never deleted without an operator.**
+
+The prior art cannot promise that only one history accepts writes while a partition hides one side from the other (section 1.9, point 5), and neither does this plan; it promises that the moment the two sides meet, both know it: a history that a forced step superseded gives way by itself, two competing forced histories both stop until an operator chooses, nothing is merged and nothing is lost unseen.
+
+### 3.1 The generation
+
+**What it is.** A number per history, 0 for every installation today. Every forced step and every restore of a cluster backup (section 3.12) creates a new generation numbered one above the highest generation the copy has seen. It is held in a **generation record**: the number; the **parent**, the hash of the record of the history whose data the copy holds (none for generation 0), which is not always the highest record the copy has seen, since a fenced copy has seen a newer record than its own data; the node id of the forced controller; the **fork point**, the forced copy's last log id together with its revision and audit head (sequence and hash), which is the position the new history starts from because the step applies the copy's whole log (section 3.4); the voters of the parent history it supersedes; the time; and a random 128-bit value. The record is signed with the forced controller's key and carries its certificate, so anybody holding the installation's CA can verify it without trusting whoever passes it on. *Follows* MongoDB's configuration version (a number that only grows and travels in every heartbeat) and PostgreSQL's timeline with its history file (the number, the parent timeline and the fork point). *Differs:* signed, because in Tenko enrolled nodes and every controller carry the record to others (section 3.6), and a record anybody could forge would be a way to stop or take over a healthy cluster; MongoDB's random jump is replaced by the rules below.
+
+**Log ids belong to one history.** Two histories can hold the same log id with different contents: the forced history starts an election of its own, and the old majority's next election can use the same term. So a log id is only ever compared with another of the same history, which the parent hash decides; the forced step also saves its first vote at the highest term the copy has seen, so the new history's terms start above everything the copy knew, which narrows the collision but is not what the safety rests on.
+
+**Who may sign.** A record counts only when its signer was a voter of the parent history and, in the receiver's own store, is neither revoked nor `superseded`. A superseded controller's key therefore cannot produce a record that the authority or its nodes accept, whatever number it writes.
+
+**Where it lives.** In the replicated store (one row, written in the same batch as the forced step's audit record, so every member of the new history has it), and on a fenced controller in a file under `<data_dir>/node/` that it writes the moment it learns of a newer record and reads before its Raft core starts, so a restart never brings it back unfenced. *Follows* etcd, where a removed member stops and stays stopped, and Galera's `grastate.dat`.
+
+**Descendants and siblings.** A record whose parent is the receiver's own history, from a signer in good standing, is a **descendant**: the receiver's history has been superseded, and it fences by itself (section 3.7). Any other valid record with a higher or equal number is a **sibling**: two forced steps from the same parent (two operators at once, E135), or a second forced step on the side that the first one superseded (E134 (b)). Siblings never fence each other automatically: both stop writing, both show both records and the suggested winner, and an operator chooses (CR-Q3). The suggested winner is the higher number; at equal numbers the fresher fork point if both have the same parent (term, then index); then the lower node id; then the lower record hash, so the order is total. Galera has no such rule and leaves both components primary; MongoDB relies on a random jump being large and lets one side win silently.
+
+### 3.2 The command
+
+`tenko cluster recover` runs on the controller's host, on a stopped controller, as the account that owns the data directory (the service account `tenko`, as `tenko backup restore` does: run as root over another account's files it prints the `runuser` form and exits with `exec.unsafe_owner`). It has no API endpoint, no UI and no network listener: a forced step that a stolen administrator session could trigger from a browser is the attack this keeps out. It refuses while a server holds the store (`backup.in_use`'s rule). Three forms:
+
+- `tenko cluster recover --inspect` prints what this copy is, reading only: the generation and its record's hash; the last log id, and the committed and applied ones beside it with the count of entries between them (entries this copy holds without knowing that they were committed; a follower learns the commit one round after the leader, so they are often writes a client was told succeeded); the revision; the audit head; the time of the newest write it applied; the voters and learners it knows with their versions; whether each of those binaries knows generations (section 8, R209); the space a forced step needs; and one line, the **fingerprint**, `tkfp1:<generation>:<record hash prefix>:<last log term>:<last log index>:<revision>:<node>`, short enough to read over the phone. *Follows* Galera's `--wsrep-recover` and the comparisons the other systems leave to the operator.
+- `tenko cluster recover --inspect --compare <fingerprint>...` takes the fingerprints of the other survivors and orders those of the same history by their last log id, which is Raft's own vote rule (the survivor an election would choose), naming the freshest; a fingerprint of another history is shown apart, since log ids of two histories do not compare. No system found does this for the operator; all of them say "pick the most advanced node".
+- `tenko cluster recover --force` does the step of section 3.4 after the confirmation of section 3.3. Given `--compare`, it refuses to force a copy that is behind one of the given fingerprints (`cluster.recover.not_freshest`) unless `--accept-older`; *follows* Galera's refusal on `safe_to_bootstrap: 0`, with a reason that is about freshness rather than shutdown order. For each other controller the operator says what it may do when it returns (section 3.9): `--rejoin <id>` lets it rejoin by itself when it holds nothing of its own after the fork, `--revoke <id>` revokes it in the same write, and a controller named in neither waits on its host for an operator (both options repeatable). The step is refused while a member the copy knows runs a binary without generations (`cluster.recover.mixed`, R209) unless `--accept-mixed`. `--undo`, before the first start after a forced step, puts the copy kept aside back (section 3.4) and changes nothing else.
+
+The command writes nothing to the network. The first start after it does (section 3.5).
+
+### 3.3 The confirmation
+
+The command prints, then asks:
+
+```text
+This controller (node 1002, ctl-b) becomes the only voter of the cluster, generation 4.
+Its copy ends at log position 7:88530 (revision 88412, written 2026-11-12 08:14:03 UTC); 3 of its entries
+were not yet known as committed and are kept. The fingerprints you gave show no fresher copy.
+
+Controllers 1001 (ctl-a) and 1003 (ctl-c) stop being members. When either comes back, it stops writing at
+once and keeps its copy aside on its own host. 1001 may then rejoin by itself as a learner (--rejoin);
+1003 waits until you run `tenko cluster rejoin` on its host. Whatever either of them wrote after this
+position does not come into this cluster; it stays in that copy for you to read.
+
+Do this only if 1001 and 1003 are stopped or gone and cannot reach each other. If they are running and reach
+each other, they are still a cluster, and this makes a second one.
+
+The copy this controller has now is kept in <data_dir>/recover-gen4/ until you remove it; `--undo` restores it
+until the first start.
+
+Type the node id of this controller to continue:
+```
+
+The answer must be the node id; anything else ends the command with nothing changed. On a host without a terminal, `--confirm 1002:4` (the node id and the generation the step will create, which the inspection prints) is the only non-interactive form; there is no `--yes` (CR-Q8). *Follows* MongoDB and Nomad, which say the forced step must not be scripted, and GitHub's typed-name confirmation; the generation in the non-interactive form makes a line copied from an old runbook fail instead of acting.
+
+### 3.4 What the forced step does to the store
+
+1. Renames the store directory to `<data_dir>/recover-gen<n>/` (a rename, not a copy, so it costs no time; the inspection shows the space the new store needs beside it) and works from that copy.
+2. Applies the copy's whole log: entries after the committed position that the copy holds, the **uncommitted tail**, are applied as an election of this controller would apply them (Raft's new leader commits its whole log), into the new state (the kept copy itself is not changed), and they are also written, decoded, as a readable file beside the copy (CR-Q5). *Follows* HashiCorp's recovery, which commits the tail, and Raft's election; *differs* from etcd, which cuts the log at the commit, because a follower's tail routinely holds writes that the leader had already confirmed to a client when it died, and the owner's order puts those first. Every tail entry is consistent with the log before it, so applying it cannot break the state; what it can add is a write whose client saw a timeout, which the idempotency key of a retried request already covers.
+3. Builds a snapshot of the state at the last log id and installs it into a new store with a membership of one voter, this controller, through the restore's own `install` path (section 2.1). This is the route openraft's maintainers name for recovery (section 1.7) and the route Tenko's restore already takes and tests; no change to the Raft library and no hand-written log entries.
+4. Writes one batch: the generation record, the member records of the superseded controllers marked `superseded` with the generation (they stay in the store, as section 3.9 says), the revocations of `--revoke`, a halt of any update run in progress (section 3.11), and the audit record `cluster.recover.force` (section 3.10). One batch, so the record, its audit and its effects are never apart.
+5. Leaves a notice in the data directory, as a restore does, that the first start reads (section 3.5).
+
+A failure before step 4 removes the new store and renames the old one back. Step 4 is the point after which `--undo` is the only way back, and only until the first start.
+
+### 3.5 The first start: looking for a live majority
+
+Before the forced controller takes office, it dials every controller of the superseded history at its cluster port for `[cluster] recover_probe_secs` (default 30 s) and asks each for its quorum state and position. The probe speaks as the controller it was: its calls carry the parent generation, not the new record (the one exception to section 3.6), so that a live majority is not fenced by a step the operator may still undo. Three outcomes:
+
+- **Nobody answers**, or every controller that answers reports that it is not in contact with a majority of the old voters (`isolated`, or `electing` without a majority): the controller takes office, writes are accepted, and those who answered learn the record at once (section 3.7).
+- **A controller answers that reports a majority of the old voters in contact** (`healthy`, or `electing` with a majority), whatever its position: the old cluster is alive, even when it has written nothing since the split. The forced controller does not take office: it refuses writes with 503 `cluster.recover.majority_alive`, names the controllers and their states in its status, keeps the record unsent, and waits for the operator, who stops it and runs `--undo` (it then rejoins the live cluster as it was) or confirms again with `--despite-majority` (CR-Q4).
+- **The probe cannot decide** (a controller answers but its state cannot be read): it refuses office as in the second case, unless `--despite-majority` was given.
+
+*Follows* Patroni's failsafe mode, where a primary without its DCS stays primary only while it reaches every member, and CockroachDB's half-online mode, which looks at the live cluster before it acts; etcd and Consul leave this entirely to the operator. *Differs:* it only refuses, never acts on the other side's behalf, and it cannot help when a partition hides the live majority, which is why section 3.7 must still hold.
+
+### 3.6 The generation on the wire
+
+Every `Raft` and `Cluster` call and every answer carries the sender's generation in a metadata entry (`tenko-generation`, the number and the record's hash), except the first start's probe (section 3.5). When the two differ, the side whose record is newer refuses the call with `cluster.superseded` (gRPC `FAILED_PRECONDITION`) and the full record in a second metadata entry, and when the numbers are equal and the hashes differ both sides send their full records. A receiver verifies a record it is offered (signature, signer in good standing, section 3.1) and then acts on it: a descendant fences it before it answers (section 3.7), a sibling stops its writes and raises the conflict for an operator (CR-Q3), and anything else is ignored and logged.
+
+**The authority pushes the record.** A first contact cannot be left to chance: after a restore on a new host the old controllers dial an address where nobody answers, and two of them that return together still form a quorum. The authority's leader therefore dials every superseded controller at the cluster port of its member record (and the address `peer_address_map` gives) every 10 s, offering the record, until that controller has rejoined, has been removed, or has been revoked; the status names every controller not reached yet, with the warning `cluster.recover.superseded_unreached`. *Follows* MongoDB, where heartbeats carry a newer configuration to every member in the configuration; *differs* in that the authority keeps calling members it no longer counts, because those are the ones that must hear it. A controller of the current history refuses every call from a controller whose member record is `superseded`, whatever generation it claims, except the join of section 3.7, so the store, not the message, is what decides on the authority's side. A missing entry counts as generation 0, which is what an older binary sends. *Follows* etcd's cluster identifier in every peer message and its 412 refusal, and MongoDB's configuration version in every heartbeat. *Differs:* the refusal carries the signed record, so the refused side learns why and can prove it to others; etcd's refused member only logs a mismatch. The check runs in Tenko's own services before a message reaches openraft, because openraft compares nothing but terms (section 1.7).
+
+### 3.7 A superseded controller
+
+When a controller learns of a descendant record (section 3.1) by any path (a refusal, the authority's push, a node's handshake, an operator's file), it does the following without waiting for anyone:
+
+1. **Fences.** It writes the record to `<data_dir>/node/`, stops its Raft core from electing or replicating, refuses every write with 503 `cluster.superseded`, answers `GET /health/ready` with 503 so that a load balancer takes it out, shows the state `superseded` with the record in `GET /system/status` and `GET /cluster/members`, raises the alarm `cluster.superseded` (OPS-29), and ends the sessions of its enrolled nodes with a directive that carries the record (section 3.8). Reads go on from its copy with the staleness header of the isolated mode, so an operator can look. *Follows* every system of section 1: Patroni's demotion, MongoDB's REMOVED, etcd's stop.
+2. **Decides whether it holds writes of its own after the fork.** None only when both hold: the record's parent is this controller's own history (its record hash equals the parent hash; otherwise its log ids belong to another history and cannot be compared, section 3.1), and its **last log id**, every entry it holds whether applied or not, is not after the fork point in Raft's order. Then every entry it holds is in the forced copy: within one history, Raft's log matching property makes two logs with the same entry at an index identical up to it, and an entry of an earlier term that a controller holds as committed is present in every log that holds an entry of a later term from a leader (leader completeness), and the forced copy applied its whole log. In every other case it holds, or may hold, writes of its own. *Follows* PostgreSQL's timeline history (the parent and the fork point); the comparison is Raft's own "up to date" rule, used only inside one history.
+3. **Without writes of its own**, a controller the operator named with `--rejoin` rejoins by itself (CR-Q1): it renames its store aside to `<data_dir>/superseded-gen<n>/`, opens an empty store, asks the authority to join as a learner under its existing identity, and catches up by snapshot; the leader promotes it by the usual rules. A controller not named waits for `tenko cluster rejoin` on its host, which does the same. *Follows* Galera's state transfer and Patroni's rejoin of an old primary, both automatic; *differs* in that the operator names who may come back alone, because a rejoin hands the whole store and, through the sealed transfer, the key generations to that host, and a host whose state nobody knows should not receive them without a person.
+4. **With writes of its own** it stays fenced and waits for an operator, whatever the forced step said. It writes, beside its store, the audit records after the last position it shares with the new history (the record's fork point when the record's parent is its own history, else the fork point of its own history's record) as a JSON lines file (`audit-after-fork.jsonl`, the export format, verifiable with `tenko audit verify --file ... --from <seq>:<hash>`) and a summary of the change sets after that position from its journal (counts per table, the first and last revision and time). The operator chooses: `tenko cluster rejoin` on that host, which keeps the copy aside and rejoins as in point 3; or, when this side is the right one (the forced controller was stale or forced while this side lived), `tenko cluster recover --force` here, which creates a newer generation; the forced side meets it as a sibling, stops writing and waits for its own operator's `tenko cluster rejoin` (section 3.1, CR-Q3). *Follows* MongoDB's rollback files for "keep what is discarded where an operator can read it"; *differs* in that the writes are not dropped automatically, because the owner's order puts the loss of acknowledged data above the convenience of an automatic rollback, and because a superseded controller with writes of its own is exactly the case of a wrong forced step (section 4, E134 and E136).
+
+The copy kept aside is a whole store, still sealed by this host's key generations; it never leaves the host and is never sent anywhere. `tenko cluster recover --inspect --data-dir <aside>` reads it, and `tenko backup create --data-dir <aside>` turns it into an encrypted backup that can be restored on a scratch host to read its data with the product's own tools. It stays until the operator removes it (CR-Q6); the status names every kept copy with its size.
+
+### 3.8 Enrolled nodes
+
+- **The handshake carries the generation.** `HelloResponse` gains the controller's generation and, on request, its record (additive fields within protocol major 1, cluster.md section 4.2). The node keeps the highest valid record it has seen in a file beside its configuration.
+- **A controller behind the node** (a lower generation than the node's record): the node refuses its configuration with `node.config.superseded`, moves to the next endpoint after 200 ms as for `node.config.behind`, and passes the record to that controller in its next `Hello`, which fences it (section 3.7). So a node that has seen the new history carries the fence to every old controller it reaches, as MongoDB members carry a newer configuration in heartbeats.
+- **A controller ahead of the node:** the node accepts its record only as a descendant of the record it holds (the parent is the node's current history, and the signer is a controller that history has announced to the node in its handshakes); it then keeps it and asks for its configuration from revision 0, so the first answer is a snapshot that replaces what it holds. Revisions of two histories are never compared (the defect of section 2.5). A sibling record does not move the node: it stays with its history, reports the conflict in its status and its next heartbeat, and moves only when its own history has been superseded.
+- **Which controller it follows:** the newest descendant of its history that it can reach. A node connected to a controller that reports itself `isolated` or `electing` tries its other endpoints every 30 seconds for a higher generation; a node connected to a `healthy` controller stays. How quickly the superseded side loses its nodes: at once once that side knows (its sessions end with the record); otherwise when a node reaches a controller of the new history, within 30 seconds of the old side losing its quorum when that controller is reachable. While a partition hides the new history, nodes on the old side stay with it, which is right in the case where the forced step was the mistake.
+- A probe's observation buffer and a node's ingest cursor are history-free (epoch and sequence per buffer, node-sync.md section 7), so batches sent to the superseded side and not ingested there are sent again to the authority; batches ingested on the superseded side after the fork are in its kept copy only.
+
+### 3.9 Certificates and identities
+
+The forced step does not revoke the other controllers by default: their member records become `superseded`, their certificates stay valid, and a superseded controller can do two things with its certificate on the authority: receive the record, and join as a learner after it has emptied its store (by itself only when named with `--rejoin`). It cannot sign a record the authority accepts (section 3.1). The operator revokes, in the same write, every controller named with `--revoke`: a host known to be destroyed, stolen or compromised (CR-Q2). A rejoin under the id of a current member of the authority's history is refused. A superseded controller that never returns is removed later by the removal contract (revocation first, then the member record), which the status suggests after `[cluster] superseded_remove_after_days` (default 7). *Follows* etcd's and CockroachDB's rule that the old identity of a dead member must not count as a member (here: `superseded` is not a member, and the authority's checks of section 3.6 rest on that mark); *differs* from etcd's new identifiers for everyone, because the owner's sketch asks that returning controllers follow by themselves, and an identity that must be re-enrolled cannot.
+
+### 3.10 The audit record and the chain
+
+The forced step's batch writes `cluster.recover.force` with the generation, the record's hash, the fork point (log id, revision, audit sequence and hash), the voters it supersedes, the controllers revoked, the length of the uncommitted tail it applied, the operating system account that ran the command and the host's name; the chain continues from the forced copy's head, so the forced history's chain is unbroken. A superseded controller's records after the fork are not in that chain; they are in its kept copy and in `audit-after-fork.jsonl` (section 3.7), and the authority records the outcome of each superseded controller once: `cluster.recover.rejoin` (with the count of change sets kept aside, 0 for a lossless rejoin) or, at its removal, the removal's own record.
+
+**The export.** A sink may already hold records of the superseded history above the fork's sequence number. When the authority's export reaches the forced step's record, it first sends a **fork marker** (a checkpoint message, not part of the chain, carrying the generation, the record's hash and the fork's sequence and hash) and from then on puts the generation into each message's envelope (outside the hashed record, so no record's hash changes). `tenko audit verify --file` accepts, after a fork marker, a second record under a sequence number above the fork point and reports the records of the older generation as a superseded branch instead of failing; a receiver without that knowledge sees a duplicate with another hash, as today, and the marker tells a person why. *Follows* PostgreSQL's timeline history file: the fork point recorded where the histories part.
+
+### 3.11 The removal contract and the update run
+
+A superseded controller is not a member: the removal contract applies to it unchanged, without its leave step (it is not in the Raft group), and the removal's pre-checks count it as out of contact. A forced step while an update run is active halts the run in the same batch (the run's halt reason `cluster.recover`); the run's preflight refuses while any controller is superseded and not removed or rejoined, and a join, a promotion and a removal stay allowed. A superseded controller that rejoins goes through the join's format check (`cluster.join.format_newer`) and, once the update plan's installation level exists, its level check, so a controller of an older binary cannot rejoin a history a newer one created.
+
+### 3.12 What stays of the backup route
+
+The backup route stays the way to rebuild on a new host, the way back from a lost or damaged copy, and the only way when no survivor has a usable store. It changes in one point: `tenko backup restore` of a backup whose manifest names more than one voter creates the next generation with a record signed by the restored controller, exactly as a forced step does, and records the old voters as superseded, the restored controller's own id excepted. When the restored host takes the id of an old voter (rebuilding controller 1001 on new hardware is the common case), the restore's batch revokes every certificate of that id that the restored controller does not hold, so the old host of the same id is refused at the handshake instead of passing as the authority itself. The sentence "never start an old member with its old data directory against the restored cluster" then becomes a check that holds: such a member is fenced at its first contact. A restore of a single controller's backup keeps generation 0 unless the store already had a higher one.
+
+### 3.13 DHCP and DNS writes of the superseded side
+
+Leases granted on the superseded side after the fork are not in the authority's store, so the authority could offer one of those addresses to another client. For one maximum lease time after a forced step, the `dhcp` role of the authority (in the controllers today, the standalone nodes and the failover pair later) allocates an address that was free at the fork point only after a conflict probe (an ICMP echo, as ISC dhcpd and Kea do before an offer), and treats a DHCPDECLINE as it does today; and when a superseded controller rejoins, its kept copy's lease rows written after the fork are offered to the authority as **holds**, not leases: the address is not offered to another client until the hold's lease would have ended, and the hold is visible in the scope's view (CR-Q7). *Follows* the recover state of the DHCP failover draft (draft-ietf-dhc-failover-12, which [ha-plan.md](ha-plan.md) adopted): a server that may not know every binding holds new allocations of the addresses at risk until the bound has passed. Dynamic DNS updates of the superseded side are lost; DHCP clients and Windows hosts register again at their next renewal or refresh, which the documents state.
+
+### 3.14 What an operator sees
+
+The status of every controller shows its generation and, on the authority, `recover` with the record, the fork point and every superseded controller with its state (`waiting`, `fenced with writes of its own`, `rejoined`, `removed`) and the copies kept aside with their size; the warning `cluster.recover.superseded_pending` stays while any superseded controller is neither rejoined nor removed. `tenko cluster members` and the UI's cluster page show `superseded` in the member's role column. The alarms `cluster.recover.force` (on the authority, at the first start) and `cluster.superseded` (on a fenced controller) go through the notification channels of OPS-29. A new section of [cluster.md](../cluster.md) is the runbook: inspect every survivor, compare, force the freshest, start it, and what each outcome of sections 3.5 and 3.7 asks of the operator.
+
+### 3.15 What is deliberately not built
+
+No automatic forced step after any timeout, however long (section 1.9, point 1). No merge of two histories, of data or of audit chains. No network-reachable trigger. No second recovery tool for enrolled nodes: they follow the record. No change to the Raft library or to its stored formats: the step uses the restore's snapshot install.
+
+## 4. Exit checks
+
+Every check runs on the shipped binary: the compose lab (`deploy/compose/lab-cluster/`) with the musl release build of `deploy/Dockerfile`, and the in-process harness of `crates/tenko/tests/cluster_support/` with the binary `TENKO_LAB_BIN` names. A write in these checks goes through the lab's HAProxy with an idempotency key and counts as acknowledged when it got a 2xx answer.
+
+| # | Exit check | Requirements |
+|---|---|---|
+| E132 | (WP20.1, WP20.7) **All others truly dead.** Three controllers under 100 writes a second; the leader and one follower are destroyed with their volumes; on the remaining follower, `--inspect` prints its fingerprint with its uncommitted tail, `--force` with the typed node id creates generation 1; the first start's probe finds nobody and the controller takes office; writes resume; every acknowledged write that reached the survivor's log is present, its tail included, and the check reports the count of acknowledged writes that did not (writes the two destroyed controllers alone held, which no system of section 1 can keep); the probes reconnect, receive a snapshot and report the new revision; `cluster.recover.force` is in the chain with the fork point; two new controllers join with tokens and the cluster is three voters again with equal digests | OPS-03, OPS-26 |
+| E133 | (WP20.3, WP20.7) **One other returns after the forced step, with writes of its own.** A is cut off; B and C commit acknowledged writes W1; C is destroyed and B stopped; A is forced. When B returns, B fences within 2 s of the authority's push, keeps its copy aside, writes `audit-after-fork.jsonl` holding the audit records of W1, and waits, although it was named with `--rejoin`; `tenko cluster rejoin` on B brings it back as a learner, promoted later; no write of W1 is in the cluster, every one is in B's kept copy, and the authority's status lists them by count. Variants: C, named with `--rejoin` and holding nothing after the fork, rejoins by itself and is promoted without an operator; C not named waits for `tenko cluster rejoin`; a controller whose last entries are replicated but not yet applied counts as holding writes of its own when they lie after the fork | OPS-03, OPS-26 |
+| E134 | (WP20.1, WP20.3, WP20.7) **Two others were a healthy majority the whole time.** A is partitioned from B and C, who keep writing; A is forced. A was the leader in term 5 when it was cut off; B and C elect a leader in term 6. (a) The partition heals before A's first start: the probe finds B and C `healthy`, also in a variant where they wrote nothing since the split; A refuses office with `cluster.recover.majority_alive`; `--undo` brings A back into the live cluster, which lost nothing. (b) The partition lasts through A's first start and heals later: B and C fence at the authority's push, both keep their writes after the fork aside, and every status names the conflict; the operator forces B (generation 2, parent generation 0); A, whose history is generation 1, meets B's record as a sibling, stops writing and keeps its own writes after its fork aside even where its log ids equal B's (the term collision of section 3.1), and does not rejoin until `tenko cluster rejoin` on A; C rejoins B's history; the cluster ends as B's history with A and C back. In both, no write is merged and every acknowledged write of either side is either in the cluster or in a kept copy, by count | OPS-03, OPS-26 |
+| E135 | (WP20.1, WP20.4) **Two nodes forced at once.** A and B, partitioned from each other with C gone, are both forced to generation 1; each takes office. After the heal both meet the other's record as a sibling, both stop writing, and both statuses name the same suggested winner by the order of section 3.1; `tenko cluster rejoin` on the other keeps its writes after its fork aside and brings it back; the probes that followed the loser stay with it while both are stopped and move to the winner within 30 s of the loser's rejoin, receiving a snapshot | OPS-26 |
+| E136 | (WP20.1, WP20.3) **The forced node was stale.** `--force --compare` with B's fresher fingerprint is refused on A with `cluster.recover.not_freshest`; with `--accept-older` it proceeds, and when B returns it fences with its newer writes aside, as in E133; the operator then forces B, and A meets B's record as a sibling and waits, as in E134 (b) | OPS-26 |
+| E137 | (WP20.2) A cluster backup restored on a new host creates generation 1; an old controller started with its old data directory at its old address is fenced by the restored controller's push and waits; `tenko cluster rejoin` on its host brings it back as a learner when it holds nothing after the backup's position, and keeps its copy aside either way | OPS-07, OPS-03 |
+| E138 | (WP20.0, WP20.1, in-process) A record with a bad signature, one signed by a certificate that is not a controller's, one signed by a revoked controller and one signed by a controller that is `superseded` in the receiver's store are refused and fence nothing, on a controller and on a probe; two records that differ only in their hash order the same way on every member; a call without the metadata entry counts as generation 0; a superseded controller restarted stays fenced; `--undo` after the first start is refused | OPS-03 |
+| E139 | (WP20.5) Through a file sink, the export of E133's authority holds a fork marker before the forced step's record, `tenko audit verify --file` passes and reports the superseded branch, and a file without the marker fails as today | IAM-18 |
+| E140 | (WP20.6) After a forced step, a lease granted on the superseded side after the fork is not offered to a second client: the conflict probe catches a live address, and after the superseded controller rejoins, its lease rows after the fork are holds in the scope's view | OPS-26 |
+| E142 | (WP20.1, WP20.2, WP20.7) **Old controllers return together.** After E132's forced step, and after a restore of a cluster backup on a new host at a new address, two old controllers are started with their old data at the same moment and reach each other before anything else: they form a quorum again for at most the authority's push interval plus the fence time, then both fence; no write they accept in that window reaches the authority, and the window and its writes are counted | OPS-03, OPS-07 |
+| E141 | (WP20.8) The documents describe what was built; `node scripts/spelling.mjs` and the requirement trace pass | OPS-03 |
+
+## 5. Measurements
+
+| # | Measurement | Gate |
+|---|---|---|
+| M90 | The time from the start of `--force` to the first accepted write on the forced controller, the probe included, for a store of 1,000,000 records | Reported; the probe's 30 s plus at most the store's open time of M6 |
+| M91 | The time from the authority's first push that reaches a superseded controller to its fence (writes refused, health 503) | Under 2 s |
+| M92 | The bytes the generation adds to a Raft call, and the latency of M12 (forwarded writes) with and without it | Under 64 bytes; no change of M12 beyond its noise |
+
+## 6. Work packages
+
+The order makes the first package useful alone: with WP20.0 and WP20.1 merged, an operator can force a survivor and every old controller is fenced; the rejoin is then by hand, through the route that exists (move the data directory aside, `tenko cluster join` with a token). The packages wait for the removal package in flight (its revocation path and its leader loop).
+
+#### WP20.0 The contracts (1.5 builder-days)
+
+The generation record (CBOR, the signature over its canonical bytes with the controller's key, the certificate chain), its order, the store row and the superseded controller's file, the metadata entries, the error codes (`cluster.superseded`, `cluster.recover.*`, `node.config.superseded`), the member state `superseded`, golden tests of every byte layout. A new stored row is a data format change: the lead decides the format number before the build.
+
+#### WP20.1 The local command and the fencing (8 builder-days)
+
+`tenko cluster recover` with `--inspect`, `--compare`, `--force`, `--rejoin`, `--revoke`, `--undo`, `--confirm`, `--accept-older`, `--accept-mixed`, `--despite-majority`; the offline step of section 3.4 on the restore's `install` path; the first start's probe; the generation on every `Raft` and `Cluster` call and answer, the refusal with the record, the signer and lineage checks of section 3.1, the sibling conflict state, the authority's refusal of superseded controllers and its push of the record; the fence of section 3.7 point 1, persisted; status, health and the two alarms. Tests in `crates/tenko/tests/` with the cluster harness for E134 (a), E135, E136, E138 and E142.
+
+#### WP20.2 The restore joins the generation (1 builder-day)
+
+`tenko backup restore` of a cluster backup creates the next generation and marks the old voters superseded; the restore's report says so. E137.
+
+#### WP20.3 The rejoin (4 builder-days)
+
+The decision of section 3.7 point 2 (the parent check and the last log id), the copy kept aside, `audit-after-fork.jsonl` and the summary, the automatic rejoin under the existing identity, `tenko cluster rejoin`, `cluster.recover.rejoin`, the status of each superseded controller, the removal of a superseded controller through the removal contract. E133, E134 (b).
+
+#### WP20.4 Enrolled nodes (3 builder-days)
+
+The handshake fields, the record file on the node, the refusal and the hand-over of the record to an old controller, the snapshot on a newer generation, the endpoint probing while isolated. E135's probe, and the probe parts of E132.
+
+#### WP20.5 The audit export across a fork (2.5 builder-days)
+
+The fork marker, the generation in the envelope of each format (RFC 5424 structured data, CEF extension, JSON field), `tenko audit verify --file` with branches. E139.
+
+#### WP20.6 DHCP and DNS after a forced step (3 builder-days)
+
+The conflict probe for addresses free at the fork for one maximum lease time, the holds from a kept copy's lease rows, their view; the DNS note. E140.
+
+#### WP20.7 The lab (4 builder-days)
+
+The compose lab's scenarios of E132 to E136 and E142 on the shipped binary, with the counts of acknowledged writes in the cluster and in kept copies; the in-process versions where the harness reaches.
+
+#### WP20.8 UI and documents (3 builder-days)
+
+The cluster page's `superseded` state and the recovery panel (read only: the UI never triggers a forced step), the warnings in the status bar, the texts in English and Swedish; [cluster.md](../cluster.md) (a new section: the runbook and the reference), [backup.md](../backup.md) section 7, [partitions.md](../partitions.md) section 1 (the exception to "nothing to merge"), [node-sync.md](../node-sync.md), [audit-export.md](../audit-export.md), [dhcp.md](../dhcp.md); ADR 0014 amended by a new ADR for the generation. E141.
+
+Total: 30 builder-days, of which WP20.0 and WP20.1 (9.5) are the part that stands alone.
+
+## 7. Requirements and documents
+
+| Requirement | What changes | Phase |
+|---|---|---|
+| OPS-03 | The cluster survives the permanent loss of its quorum through a forced step on a survivor, with the old members fenced | 1 |
+| OPS-26 | "Nothing to merge" gains its one exception, a forced step, and the rule for it: nothing is merged, what the superseded side wrote is kept aside | 1 (Slice 3) |
+| OPS-07 | A restore of a cluster backup fences the old members | 1 |
+| IAM-18 | The export expresses a fork | 4 |
+
+No requirement is added; the wording changes of OPS-26 and OPS-03 are the lead's, at acceptance.
+
+## 8. Risks
+
+| # | Risk | Answer |
+|---|---|---|
+| R208 | An operator forces a controller while a healthy majority lives behind a partition, and both sides take writes until they meet | The confirmation says it in plain words; the first start's probe refuses office when it can see the live majority; when it cannot, the invariant holds at the meeting: both sides fence, nothing merges, every write is kept on its side, and a second forced step chooses (E134). This is the failure every system of section 1 names; none prevents it fully |
+| R209 | An older binary among the superseded controllers does not know generations, so two old controllers that return together form a quorum again and do not fence | The authority refuses them (its store decides, section 3.6), so they cannot reach the new history; a node that reaches them cannot pass them the record. The inspection names every member whose binary does not know generations (from the member records' versions), and the forced step is refused while one does, unless `--accept-mixed`; once the update plan's installation level exists, the level says it directly |
+| R210 | A controller key is stolen and used to sign a high generation that stops or takes over the real cluster | A record counts only when its signer was a voter of the parent history and is neither revoked nor superseded in the receiver's store, so a superseded host's key signs nothing the authority or its nodes accept; a sibling never moves anything by itself (CR-Q3); a stolen key of a member in good standing can already do as much harm as a member, and revoking it removes this power too |
+| R211 | Kept copies fill the disk | Each forced step and each fence keeps one copy, the inspection shows the space first, the status names every copy with its size, and the warning after 30 days asks for a decision (CR-Q6) |
+| R212 | The freshest survivor is chosen wrongly, because the operator compares only some survivors | `--compare` refuses a copy behind a given fingerprint; a fresher survivor that returns later fences with its writes aside and can win by a second forced step (E136) |
+| R213 | A superseded controller's copy is read by someone who should not, on the host it never left | It stays sealed under that host's key generations, under the service account with the data directory's modes; nothing about it is exported unless the operator makes a backup of it |
+| R214 | Leases granted on the superseded side give a duplicate address | The conflict probe and the holds of section 3.13 (E140); after the failover pair of Slice 12, the pair's own MCLT rules |
+| R216 | Two old controllers that return together form a quorum and take writes before the authority's push reaches them | The window lasts at most the push interval plus the fence time when the authority can reach them (E142); when it cannot, they are a partition the authority cannot see, the case of R208; the writes are kept aside at the fence |
+| R215 | A future openraft version changes the snapshot install that the forced step relies on | The step uses the same path as the restore, whose tests run at every change of the crate; a change of the path breaks the restore first |
+
+## 9. Questions for the owner
+
+Each question gives the options, where they stand in the owner's order (security, performance, usability, features) and one recommendation.
+
+**CR-Q1. The rejoin of a superseded controller.** (a) Automatic only for the controllers the operator names with `--rejoin` at the forced step and only when they hold nothing of their own after the fork; every other one waits for `tenko cluster rejoin` on its host (section 3.7); (b) always an operator's decision on the host, as etcd; (c) automatic for every controller not revoked, its writes kept in files, as MongoDB. Security: a rejoin hands the whole store and, through the sealed transfer, the key generations to that host, so (b) is the strictest; (a) gives them without a person only to hosts the operator vouched for at the forced step and never discards a write; (c) does both for any host that was not revoked. Performance: equal. Usability: (a) brings the vouched-for controllers back without a visit to each host, which is the owner's "they come up and follow"; (b) needs a command on every host. **Recommendation: (a)**, which keeps the security of (b) for every host the operator did not name.
+
+**CR-Q2. The other controllers' identities at the forced step.** (a) Kept and marked `superseded`, with `--revoke` for the ones the operator names (section 3.9); (b) every other controller revoked, each rejoins with a new token, as etcd's new identifiers; (c) kept, no revocation at the step. Security: (b) is the strictest and makes the automatic rejoin impossible; (a) lets the operator revoke what is known lost or compromised and keeps the others' power limited to receiving the record and rejoining empty; (c) leaves a stolen host's identity valid until a removal. Performance: equal. Usability: (a) and (c) allow the owner's "they come up and follow"; (b) needs a token per controller. **Recommendation: (a).**
+
+**CR-Q3. When two histories meet.** A history that a forced step superseded (a descendant record, section 3.1) fences by itself in every option below, a healthy majority included, because its own voter signed the record (E134 (b)); the question is two competing forced histories, the siblings. (a) Both stop writing and an operator chooses, each status naming the suggested winner by the order of section 3.1; (b) the order decides by itself and the loser fences, as MongoDB's larger configuration wins; (c) each ignores the other and raises an alarm, as two Galera components go on. Security: (a) never lets a record signed outside a history move that history, so a stolen key of a superseded host can at most stop writes until the operator acts and revokes it; (b) lets such a key, or a wrong second forced step, take a history over by itself; (c) keeps two writable histories with no end. Performance: equal. Usability: (b) needs nobody; (a) needs one `tenko cluster rejoin` on the loser, after alarms on both sides. **Recommendation: (a).**
+
+**CR-Q4. The first start's probe for a live majority.** (a) On, 30 s, refusing office when a controller in contact with a majority answers with a position after the fork (section 3.5); (b) off: the operator's judgment alone, as etcd and Consul. Security: (a) catches the commonest wrong forced step when the network allows; (b) catches nothing. Performance: (a) delays the first write by up to 30 s after a forced step. Usability: (a) adds `--despite-majority` for the case the operator knows better. **Recommendation: (a).**
+
+**CR-Q5. The forced copy's uncommitted tail.** (a) Applied, as an election of this controller would and as HashiCorp's recovery does, and also kept as a readable file (section 3.4); (b) not applied, kept aside, as etcd and CockroachDB. Security, here the integrity of acknowledged data: a follower learns the commit one round after the leader, so the tail routinely holds writes a client was told succeeded; (b) loses them, (a) keeps them, and every tail entry is consistent with the log before it. Performance: equal. Usability: (a) may also keep a write whose client saw a timeout, which a retried request's idempotency key already covers. **Recommendation: (a).**
+
+**CR-Q6. How long kept copies stay.** (a) Until an operator removes them, with a warning after 30 days and the size in the status; (b) deleted after `[cluster] keep_superseded_days`. Security: (a) never deletes evidence or data without a person; (b) frees space without one. Performance: equal. Usability: (b) needs no action. **Recommendation: (a).**
+
+**CR-Q7. DHCP after a forced step.** (a) The conflict probe for addresses free at the fork for one maximum lease time, and the kept copies' leases as holds when a superseded controller rejoins (section 3.13); (b) the conflict probe only; (c) nothing beyond DHCPDECLINE. Security: not a security question but an integrity one on the network: (a) closes both windows, (b) the first, (c) neither. Performance: (a) and (b) add one ICMP echo with a short wait to new allocations for one lease time after a rare event. Usability: (a) shows the holds. **Recommendation: (a).**
+
+**CR-Q8. The confirmation.** (a) The typed node id interactively, and `--confirm <node>:<generation>` as the only non-interactive form (section 3.3); (b) a `--yes` flag as the other destructive commands have. Security: (a) makes a scripted or copied line fail instead of acting, which MongoDB and Nomad ask for; (b) does not. Performance: equal. Usability: (b) is shorter for containers without a terminal, which (a) covers with `--confirm`. **Recommendation: (a).**
+
+**CR-Q9. When to build it.** (a) WP20.0 and WP20.1 next after the removal package, the rest after the cluster update plan's level work (R209); (b) the whole slice at once after the update plan; (c) after Slice 12, so that the nodes' part is built once for probes and `dns` and `dhcp` nodes. Security: (a) closes the hole of section 2.1 (a returning old controller after a restore) soonest. Performance: equal. Usability: (a) gives the panic button first. **Recommendation: (a).**
+
+## 10. Sources
+
+Fetched on 2026-11-12. Where a page was read through a summarizing fetch or only as a search result, section 1 says so at the claim.
+
+| Key | Source | Version described |
+|---|---|---|
+| ETCD-REC | https://etcd.io/docs/v3.5/op-guide/recovery/ and https://etcd.io/docs/v3.6/op-guide/recovery/ | 3.5, 3.6 |
+| ETCD-RECONF | https://etcd.io/docs/v3.6/op-guide/runtime-reconf-design/ | 3.6 |
+| ETCD-MAINT | https://etcd.io/docs/v3.5/op-guide/maintenance/ | 3.5 |
+| ETCD-RAFT, ETCD-SERVER, ETCD-HTTP, ETCD-SNAP | github.com/etcd-io/etcd, branch release-3.5: `server/etcdserver/raft.go`, `server/etcdserver/server.go`, `server/etcdserver/api/rafthttp/http.go`, `etcdutl/snapshot/v3_snapshot.go` | 3.5 |
+| CONSUL-OUT | https://developer.hashicorp.com/consul/tutorials/operate-consul/recovery-outage | Consul 1.18.1 and later |
+| CONSUL-RAFTCMD | https://developer.hashicorp.com/consul/commands/operator/raft | not stated |
+| CONSUL-TELEM | https://developer.hashicorp.com/consul/docs/reference/agent/telemetry | not stated |
+| NOMAD-OUT | https://developer.hashicorp.com/nomad/tutorials/manage-clusters/outage-recovery | current page |
+| HC-RAFT | https://github.com/hashicorp/raft, `api.go` (`RecoverCluster`) and `raft.go` | main branch at fetch time |
+| HC-RAFT-535 | https://github.com/hashicorp/raft/issues/535 | 2023, Consul 1.14.3 era |
+| MONGO-UNAVAIL | https://www.mongodb.com/docs/manual/tutorial/reconfigure-replica-set-with-unavailable-members/ | current manual (8.x) |
+| MONGO-RECONF | https://www.mongodb.com/docs/manual/reference/method/rs.reconfig/ | current manual |
+| MONGO-CONF | https://www.mongodb.com/docs/manual/reference/replica-configuration/ | current manual |
+| MONGO-ROLLBACK | https://www.mongodb.com/docs/manual/core/replica-set-rollbacks/ | current manual |
+| MONGO-STATES, MONGO-STATUS | https://www.mongodb.com/docs/manual/reference/replica-states/ and https://www.mongodb.com/docs/manual/reference/command/replSetGetStatus/ | current manual |
+| MONGO-README | https://github.com/mongodb/mongo/blob/master/src/mongo/db/repl/README.md | master (8.x) |
+| SERVER-46897, SERVER-47331 | https://jira.mongodb.org/browse/SERVER-46897 and https://jira.mongodb.org/browse/SERVER-47331 | not stated; the second seen as a search result only |
+| PXC-CRASH | https://docs.percona.com/percona-xtradb-cluster/5.7/howtos/crash-recovery.html | Percona XtraDB Cluster 5.7 |
+| MARIADB-PC | https://mariadb.com/docs/galera-cluster/high-availability/recovering-a-primary-component | current MariaDB documentation |
+| CODERSHIP-STB | https://galeracluster.com/?p=2226 (the original Codership pages now redirect to MariaDB's) | Galera 3.19; search result only |
+| PERCONA-FORCE | https://www.percona.com/blog/consequences-of-forcing-bootstrap-on-percona-xtradb-cluster/ | Percona XtraDB Cluster 8.0.31 |
+| GALERA-1195071 | https://bugs.launchpad.net/galera/+bug/1195071 | reports of 2013 and 2016, PXC 5.6.30 |
+| CRDB-RFC | https://github.com/cockroachdb/cockroach/blob/master/docs/RFCS/20211103_loss_of_quorum_recovery.md | design of 2021-11 |
+| CRDB-SHUTDOWN | https://docs.cockroachlabs.com/docs/stable/node-shutdown | stable at fetch time |
+| CRDB-DR | https://docs.cockroachlabs.com/docs/v24.1/disaster-recovery-planning | 24.1 |
+| PATRONI-FAQ, PATRONI-DYN, PATRONI-YAML, PATRONI-FAILSAFE | https://patroni.readthedocs.io/en/latest/faq.html, `dynamic_configuration.html`, `yaml_configuration.html`, `dcs_failsafe_mode.html` | latest (4.x) |
+| PG-REWIND, PG-ARCHIVE | https://www.postgresql.org/docs/17/app-pgrewind.html and https://www.postgresql.org/docs/17/continuous-archiving.html | PostgreSQL 17 |
+| OPENRAFT | The crate source `openraft-0.9.25` as `Cargo.lock` pins it (paths in section 1.7) and https://docs.rs/openraft/0.9.25/ | 0.9.25 |
+| OPENRAFT-1698 | https://github.com/databendlabs/openraft/issues/1698 | 2026-03, no version named |
+| DHCP-FAILOVER | draft-ietf-dhc-failover-12, as [ha-plan.md](ha-plan.md) summarizes it; not read again for this plan | 2003 |
+
+Not verified, beyond what section 1 marks: an official rule for choosing the survivor in etcd, Consul, Nomad or MongoDB (none found; the rule of section 3.2 is this plan's); what Consul does with differing `peers.json` files; whether a Galera bootstrap keeps the state identifier; the official `cockroach debug recover` reference pages (404); MongoDB's behavior past `rollbackTimeLimitSecs`; Patroni's watchdog semantics.
