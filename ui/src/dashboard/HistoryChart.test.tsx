@@ -78,7 +78,7 @@ describe("the frame loop", () => {
     unmount();
   });
 
-  it("stops while no chart is on screen and starts again when one comes into view", () => {
+  it("stops while no chart is on screen and starts again when one comes into view; the text alternative is there off screen", () => {
     let report: ((entries: { target: Element; isIntersecting: boolean }[]) => void) | undefined;
     vi.stubGlobal(
       "IntersectionObserver",
@@ -91,9 +91,10 @@ describe("the frame loop", () => {
         disconnect() {}
       },
     );
-    const { unmount, getByRole } = mountChart();
+    const { unmount, getByRole, getByTestId } = mountChart();
     nextFrame(1000);
     expect(frameLoopRunning()).toBe(false);
+    expect(getByTestId("metrics-history-alt").textContent).toMatch(/^DNS queries/);
     report!([{ target: getByRole("slider"), isIntersecting: true }]);
     expect(frameLoopRunning()).toBe(true);
     unmount();

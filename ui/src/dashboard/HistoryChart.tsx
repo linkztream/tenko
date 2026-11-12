@@ -108,15 +108,18 @@ function wake(): void {
   if (raf === 0 && pause === undefined && gliding() && !hidden() && charts.size > 0 && typeof requestAnimationFrame === "function") raf = requestAnimationFrame(frame);
 }
 
-/** Once a second: the text alternatives every 5 s, and the drawing of charts that do not glide. */
+/**
+ * Once a second: the text alternatives every 5 s, off screen too (a reader browses to a chart
+ * without scrolling it into view, and the words draw nothing), and the drawing of charts on screen
+ * that do not glide.
+ */
 function tick(): void {
   if (hidden()) return;
   ticks += 1;
   const glide = gliding();
   for (const chart of charts.values()) {
-    if (!chart.visible) continue;
     if (ticks % 5 === 0) chart.refreshAlt();
-    if (glide || chart.held) continue;
+    if (!chart.visible || glide || chart.held) continue;
     if (motionPaused() ? !chart.drawnFigure : !reduced() || ticks % 10 === 0 || !chart.drawnFigure) chart.draw();
   }
   wake();
@@ -165,6 +168,7 @@ function register(chart: Chart, plot: HTMLElement): () => void {
   if (observer) observer.observe(plot);
   else chart.visible = true;
   resizer?.observe(plot);
+  chart.refreshAlt();
   wake();
   return () => {
     charts.delete(plot);
@@ -517,7 +521,6 @@ export function HistoryChart(props: { name: TileName; title: string; unit: strin
       paint(ctx, { buckets, top: top(), scale, at, width, height, sel: sel(), restarts, controllers: ctrl.length });
       drawnAt = at;
       chart.drawnFigure = figure() !== undefined;
-      if (!alt()) chart.refreshAlt();
     },
     refreshAlt() {
       // Its own buckets: those drawn keep their places for the pointer.

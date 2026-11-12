@@ -13,7 +13,10 @@
 //   bounded by crates/tenko-api/tests/metrics_stream.rs, and how soon the first one comes is
 //   timed by no test.
 // - A viewer does not see the tiles.
-// - The tiles hold nothing to focus (the keyboard passes them by) and axe finds nothing.
+// - The keyboard reaches "Pause motion" and then each tile's history chart, one tab stop each in
+//   the tiles' order (dashboard-history-plan.md, "Keyboard and screen readers"), and leaves the
+//   tiles after the last; each chart is a slider named for its tile, its canvas hidden from the
+//   accessibility tree and its text alternative present; axe finds nothing.
 // - Swedish.
 // - WP3.8a, a cluster of several controllers: the e2e server is one controller, so these scenarios
 //   FAKE THE METRICS STREAM. The request for the `metrics` topic is answered in the browser with
@@ -129,29 +132,39 @@ test("a viewer does not see the live metrics", async ({ page, api, signedIn }) =
   await expect(page.getByTestId("metrics-tiles")).toHaveCount(0);
 });
 
-test("the tiles hold nothing to focus and pass axe", async ({ page, signedIn }) => {
+test("the keyboard reaches Pause motion and each tile's chart in order, then leaves the tiles, and axe passes", async ({ page, signedIn }) => {
   void signedIn;
   await openWithSample(page);
   expect(await axeViolations(page, "[data-testid='metrics-tiles']")).toEqual([]);
-  expect(await page.getByTestId("metrics-tiles").locator("svg[aria-hidden='true']").count()).toBe(TILES.length + HOST_TILES.length);
-  // Tab on from the Hidden line's toggle, the last control before the tiles (U3): the focus never
-  // lands inside the tiles, and it reaches what comes after them.
-  await page.getByTestId("hidden-line-toggle").focus();
-  let reachedBelow = false;
-  for (let i = 0; i < 60 && !reachedBelow; i += 1) {
-    await page.keyboard.press("Tab");
-    const where = await page.evaluate(() => {
-      const tiles = document.querySelector("[data-testid='metrics-tiles']");
-      const active = document.activeElement;
-      return {
-        inTiles: !!active?.closest("[data-testid='metrics-tiles']"),
-        below: !!tiles && !!active && active !== document.body && (tiles.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
-      };
-    });
-    expect(where.inTiles).toBe(false);
-    reachedBelow = where.below;
+  const names = [...TILES, ...HOST_TILES];
+  // What a reader of the accessibility tree gets per tile: the chart as a slider named for its
+  // tile, the canvas hidden from it, the text alternative present.
+  for (const name of names) {
+    const tile = page.getByTestId(`metrics-tile-${name}`);
+    const chart = page.getByTestId(`metrics-history-${name}`);
+    const title = (await tile.locator("h4").textContent()) ?? "";
+    await expect(chart).toHaveAttribute("role", "slider");
+    await expect(chart).toHaveAccessibleName(new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} history\\.`));
+    await expect(chart.locator("canvas")).toHaveAttribute("aria-hidden", "true");
+    await expect(tile.getByTestId("metrics-history-alt")).not.toBeEmpty();
   }
-  expect(reachedBelow).toBe(true);
+  // Tab on from the Hidden line's toggle, the last control before the tiles: "Pause motion", then
+  // one stop per chart in the tiles' order, then the first control after the tiles.
+  await page.getByTestId("hidden-line-toggle").focus();
+  const stops: string[] = [];
+  for (let i = 0; i < names.length + 2; i += 1) {
+    await page.keyboard.press("Tab");
+    stops.push(
+      await page.evaluate(() => {
+        const active = document.activeElement;
+        const tiles = document.querySelector("[data-testid='metrics-tiles']");
+        if (!active || active === document.body || !tiles) return "none";
+        if (tiles.contains(active)) return active.getAttribute("data-testid") ?? active.tagName;
+        return tiles.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING ? "after the tiles" : "before the tiles";
+      }),
+    );
+  }
+  expect(stops).toEqual(["metrics-pause-motion", ...names.map((name) => `metrics-history-${name}`), "after the tiles"]);
 });
 
 /**
