@@ -1,0 +1,65 @@
+# The -max_len of every fuzz target: the largest input the parser can meet in production, plus
+# the control octets the target reads in front of it. The weekly smoke (.github/workflows/ci.yml,
+# job fuzz-smoke) and the security round (deploy/security/fuzz.sh) read this file and pass the
+# number with -rss_limit_mb=2048 -malloc_limit_mb=1024; a target without a line here fails both.
+#
+# Rule: where production accepts more than 64 KiB (an HTTP body of megabytes, a 32 MiB gRPC
+# message), the line says so and the target gets 65,536 octets plus its control octets, which is
+# enough to reach the parser's own limits; a target that needs more for a branch of its own gets
+# that and says why. Format: the target, the number, then where the number comes from (free text
+# to the end of the line). Keep the targets in the order of `cargo fuzz list` (sorted).
+#
+# target                 max_len  where the number comes from
+api_multipart            65536    POST /imports takes max_upload (20 MiB) plus MULTIPART_OVERHEAD (crates/tenko-api/src/routes/import.rs); 64 KiB reaches MAX_BOUNDARY, MAX_PART_HEADER_BYTES (16 KiB) and MAX_PARTS (512 minimal parts are about 30 KiB)
+audit_export_cef         65536    MAX_LINE is 4 MiB (crates/tenko-auth/src/audit_export/format/cef.rs); a line's escaping and fields are reached in 64 KiB
+audit_export_jsonl       65536    MAX_LINE is 4 MiB per line (crates/tenko-auth/src/audit_export/format/json.rs); 64 KiB holds several records
+audit_export_syslog      65536    the target's own MAX_FRAME is 64 KiB; the sinks send datagrams of at most 65,000 octets (audit_export/sink/mod.rs MAX_DATAGRAM) and TCP frames without a cap
+auth_device_cookie       65536    a cookie is bounded only by the HTTP header limit of the API server (hundreds of KiB); the parser keeps five marks of 43 octets
+backup_archive           131073   1 control octet; a restore reads a local file whose parts may reach 64 GiB (MAX_PART, crates/tenko/src/backup/archive.rs). Twice 64 KiB: the sealed stream is cut into chunks of MIN_CHUNK (65,536 octets), so only a plain stream above 64 KiB has a second chunk, and the key generation part's limit MAX_KEKS_PART is 64 KiB
+cluster_messages         65537    1 control octet; the cluster port decodes up to 64 KiB (Hello), 1 MiB or MAX_MESSAGE_BYTES (32 MiB) per service (crates/tenko-cluster/src/server.rs, max_decoding_message_size)
+cluster_token            65536    the enrollment request carries the token in a message of up to 64 KiB (Hello) or 1 MiB; a token is 125 or 81 characters (TOKEN_TEXT_LEN, crates/tenko-cluster/src/token.rs)
+connect_hass_inventory   65536    each Home Assistant answer may reach BODY_LIMIT or MAX_MESSAGE (64 MiB, crates/tenko-connect-hass/src/api.rs, ws.rs); the mapping works record by record
+connect_hass_ws_frame    65536    MAX_MESSAGE is 64 MiB (crates/tenko-connect-hass/src/ws.rs), the target's own limit 1 MiB; the size checks read the declared length, not the payload
+connect_proxmox_inventory 65536   each Proxmox VE answer may reach BODY_LIMIT (64 MiB, crates/tenko-connect-proxmox/src/api.rs); the mapping works record by record
+connect_unifi_answers    65536    each controller answer may reach MAX_BODY (32 MiB, crates/tenko-connect-unifi/src/http.rs); the input holds several answers split by 0xff
+dhcp4_options            4049     1 control octet, 192 octets of sname and file, and the options area of a 4,096-octet datagram after its 240-octet header (receive buffer, crates/tenko-dhcp/src/server/mod.rs)
+dhcp4_relay_info         4096     the option 82 value travels in a datagram of at most 4,096 octets (receive buffer, crates/tenko-dhcp/src/server/mod.rs)
+dhcp6_relay              33003    1 control octet, 7 layers of at most 33 octets and 3 octets of transaction id, then the SOLICIT options, which the target cuts at 32 KiB; production reads 65,536 (crates/tenko-dhcp/src/v6/server.rs)
+dhcp6_wire               65536    the DHCPv6 receive buffer (crates/tenko-dhcp/src/v6/server.rs)
+dhcp_v4                  4096     the DHCPv4 receive buffer (crates/tenko-dhcp/src/server/mod.rs); a longer datagram is cut by the socket
+dns_codec                65535    MAX_MESSAGE_LEN (crates/tenko-dns/src/wire.rs): the TCP frame and the UDP receive buffer
+dns_cookie_client        65535    MAX_MESSAGE_LEN: an authority's answer over UDP or TCP (crates/tenko-dns/src/recurse/net.rs)
+dns_dnskey_ds            65791    1 length octet, a DNSKEY of at most 255 octets (the target's layout), and DS data of at most 65,535 octets (MAX_RDATA_LEN, crates/tenko-core/src/dns/rdata.rs)
+dns_edns                 65537    2 control octets and a query of at most MAX_MESSAGE_LEN
+dns_lists                65536    an upload may reach max_upload (64 MiB, crates/tenko-api/src/routes/dns/lists.rs); line and name limits (253 and 254 octets) are reached in 64 KiB
+dns_nsec3_proof          65536    1 octet of type and an answer of at most MAX_MESSAGE_LEN
+dns_referral             65536    1 octet that picks the zone and an answer of at most MAX_MESSAGE_LEN
+dns_rrsig                65535    an answer of at most MAX_MESSAGE_LEN
+dns_tkey                 65535    a TKEY message of at most MAX_MESSAGE_LEN; its key data MAX_KEY_DATA is 16 KiB (crates/tenko-dns/src/tkey/wire.rs)
+dns_tls_wire             65536    a PROXY header is at most MAX_LEN (4,096, crates/tenko-dns/src/tls/proxy.rs); the DoH dns parameter carries up to 65,535 octets in base64url (87,380 characters) and X-Forwarded-For is bounded by the HTTP header limit; 64 KiB reaches every check of the four parsers
+dns_trust_anchor_text    65536    the key arrives in the JSON body of POST /dns/trust-anchors (axum's default limit, 2 MiB); a DS or DNSKEY is at most a few KiB of text
+dns_trust_anchor_xml     65536    the parser refuses a file above 1 MiB (crates/tenko-dns/src/anchors/xml.rs); MAX_DIGESTS (64) is reached in about 10 KiB
+dns_tsig                 65536    1 control octet and a message of at most MAX_MESSAGE_LEN
+dns_zonefile             65536    an import body may reach 512 MiB (MAX_ZONE_FILE_REQUEST, crates/tenko-api/src/routes/dns.rs); 64 KiB holds hundreds of records, $GENERATE, $ORIGIN and multi-line entries, while the token cap of 262,140 octets stays out of reach
+gss_mic                  65563    a 28-octet MIC token (TOKEN_LEN, crates/tenko-krb/src/mic.rs) over a DNS message of at most MAX_MESSAGE_LEN
+import_files             65537    1 octet that picks the file name; uploads may reach max_upload (20 MiB, crates/tenko-ipam/src/import/service.rs); compressed workbooks reach the cell and text limits from small inputs
+kek_transfer             6280     MAX_SEALED_LEN (6,279, crates/tenko-vault/src/transfer.rs) and one octet more, so the refusal above it is reached
+krb_ap_req               16387    1 mode octet, 2 octets of split and a token of at most MAX_KEY_DATA (16 KiB): the acceptor reads tokens from TKEY only
+krb_der                  65537    1 octet that picks the structure; tokens are at most 16 KiB (MAX_KEY_DATA), KDC replies up to MAX_REPLY_LEN (1 MiB, crates/tenko-krb/src/client/transport.rs)
+krb_keytab               65536    MAX_KEYTAB_LEN is 1 MiB (crates/tenko-krb/src/keytab.rs); 64 KiB holds the 1,024 records of MAX_KEYTAB_RECORDS when they are small
+krb_pac                  16384    the PAC travels inside a ticket of a token of at most MAX_KEY_DATA (16 KiB)
+krb_spnego               65542    up to four legs of at most MAX_KEY_DATA (16 KiB) each and three 2-octet separators
+node_config_payloads     65537    1 control octet; config payloads may reach MAX_PAYLOAD_BYTES (32 MiB, crates/tenko-cluster/src/node_sync/payload.rs); the frames of a watch stream carry a 2-octet length
+raft_payloads            65537    1 control octet; Raft messages may reach MAX_MESSAGE_BYTES (32 MiB, crates/tenko-cluster/src/server.rs)
+scan_arp                 4096     the read buffer of the raw link (pnet's default, 4,096 octets; crates/tenko-scan/src/methods/raw/link.rs)
+scan_dhcp_snoop          4096     the read buffer of the raw link (pnet's default, 4,096 octets)
+scan_dns_message         9000     MAX_MESSAGE_LEN of the scanner and its receive buffer MAX_DATAGRAM (crates/tenko-scan/src/dns/message.rs, methods/names.rs)
+scan_lldp_cdp            4096     the read buffer of the raw link (pnet's default, 4,096 octets)
+scan_neighbor_tables     65536    command output is cut at MAX_OUTPUT (16 MiB, crates/tenko-scan/src/sys.rs); the parsers work line by line
+scan_ra                  1500     the receive buffer of the router advertisement check (crates/tenko-scan/src/ra.rs)
+scan_snmp_message        65507    MAX_MESSAGE_LEN of the SNMP codec, the largest UDP payload (crates/tenko-scan/src/snmp/ber.rs)
+upgrade_manifest         65536    MAX_MANIFEST_BYTES is 1 MiB (crates/tenko-api/src/dto/release.rs); 64 KiB reaches the URL, action, name and version limits
+webauthn_attestation     65568    a 32-octet client data hash and an attestation object from a JSON body (axum's default limit, 2 MiB); a chain of eight certificates is about 12 KiB
+webauthn_authdata        65536    authenticator data from a JSON body (axum's default limit, 2 MiB); credential ids are at most 1,023 octets (crates/tenko-auth/src/webauthn/authdata.rs)
+webauthn_certificate     65536    up to eight certificates of an attestation object from a JSON body (axum's default limit, 2 MiB)
+xliff_pack               65536    MAX_PACK_BYTES is 8 MiB (crates/tenko-api/src/i18n/mod.rs); 64 KiB reaches the depth, ICU and per-message limits, not MAX_UNITS (20,000 units)

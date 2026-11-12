@@ -707,7 +707,9 @@ jobs:
   # 55 (the fifth shard came at 51 targets). A directory fuzz/seeds/<target>/ is used as an
   # extra corpus when it exists. All targets of a shard run even after one crashes, then the
   # shard fails and keeps fuzz/artifacts/. Each shard writes its own table (target, result,
-  # seconds, crash files) to the job summary.
+  # seconds, crash files) to the job summary. Every run carries the memory limits and the
+  # target's -max_len from fuzz/limits.txt (the production bound of its input, with the source
+  # of the number); a target without a line there fails, so no target runs without one.
   fuzz-smoke:
     name: Fuzz smoke (Linux, weekly schedule, shard ${{ matrix.shard }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -768,6 +770,14 @@ jobs:
           while IFS= read -r target; do
             [ -n "$target" ] || continue
             echo "::group::fuzz $target"
+            max_len="$(awk -v t="$target" '$1 == t { print $2 }' fuzz/limits.txt)"
+            if ! [[ "$max_len" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Fuzz target $target has no -max_len in fuzz/limits.txt."
+              echo "| \`$target\` | no line in fuzz/limits.txt | 0 | 0 |" >> "$summary"
+              failed+=("$target")
+              echo "::endgroup::"
+              continue
+            fi
             corpus=()
             if [ -d "fuzz/seeds/$target" ]; then
               mkdir -p "fuzz/corpus/$target"
@@ -776,7 +786,10 @@ jobs:
             # The prebuilt cargo-fuzz is a static musl binary and would pick the musl target by
             # default, which has no sanitizer runtime; the host target is named explicitly.
             started="$(date +%s)"
-            if cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${corpus[@]}" -- -max_total_time=60; then
+            # The memory limits: 2 GiB resident, and 1 GiB for one allocation, so that an
+            # allocation sized by the input rather than by a parser's own limit is a crash.
+            if cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${corpus[@]}" -- \
+              -max_total_time=60 -rss_limit_mb=2048 -malloc_limit_mb=1024 -max_len="$max_len"; then
               result="ok"
             else
               result="FAILED"

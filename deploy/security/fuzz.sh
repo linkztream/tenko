@@ -6,9 +6,10 @@
 # round.sh so they share the row helper, the bundle and the node under test:
 #
 #   fuzz.targets   every in-process target of `cargo fuzz list` for the release budget
-#                  (FUZZ_RELEASE_SECS, default 120 s), four at a time, from fuzz/seeds/ and
-#                  the corpus the workflow caches; a crash fails the row and its input goes
-#                  into the bundle. The targets, seeds, corpus and artifacts are those of
+#                  (FUZZ_RELEASE_SECS, default 120 s), four at a time, from fuzz/seeds/, with
+#                  the memory limits and the -max_len of fuzz/limits.txt that the weekly
+#                  smoke passes too; a crash fails the row and its input goes into the
+#                  bundle, and a target without a line in fuzz/limits.txt fails the row. The targets, seeds, corpus and artifacts are those of
 #                  the tree in SOURCE (default: this checkout). The build and the fuzzers
 #                  run as the account that started the round through sudo, not as root.
 #   fuzz.dns_wire  deploy/security/dnswire.py sends malformed DNS over UDP and TCP to the
@@ -31,7 +32,7 @@ run_fuzz_rows() {
 # fuzz_builder <command...>: runs a step of the fuzz build as the account that started the
 # round through sudo (SUDO_USER), with that account's home and Rust toolchain, so the build
 # scripts and the fuzzers of the source tree never run as root and the corpus stays the
-# account's (the workflow caches it); as root only when the round was not started through
+# account's; as root only when the round was not started through
 # sudo. CARGO_HOME and RUSTUP_HOME are kept when set (the workflow passes the runner's).
 fuzz_builder() {
   if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]]; then
@@ -63,17 +64,28 @@ row_fuzz_targets() {
     return 1
   fi
   mkdir -p "$EVIDENCE/fuzz"
-  local failed=() target running=0
+  local failed=() target running=0 max_len
+  # Every target needs its -max_len (fuzz/limits.txt: the production bound of its input).
+  for target in $targets; do
+    max_len="$(awk -v t="$target" '$1 == t { print $2 }' "$fuzz_dir/limits.txt" 2>/dev/null || true)"
+    [[ "$max_len" =~ ^[1-9][0-9]*$ ]] || failed+=("$target")
+  done
+  if ((${#failed[@]} > 0)); then
+    row_reason="fuzz targets without a line in fuzz/limits.txt: ${failed[*]}"
+    return 1
+  fi
   # Four at a time, run from the root of the source tree as the weekly smoke does (cargo-fuzz finds
   # the fuzz workspace); the corpus and seed directories are relative to it.
   for target in $targets; do
     (
       cd "$src" || exit 97
-      local corpus=("fuzz/corpus/$target")
+      local corpus=("fuzz/corpus/$target") max_len
+      max_len="$(awk -v t="$target" '$1 == t { print $2 }' fuzz/limits.txt)"
       fuzz_builder mkdir -p "fuzz/corpus/$target"
       [[ -d "fuzz/seeds/$target" ]] && corpus+=("fuzz/seeds/$target")
       fuzz_builder cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" \
         "${corpus[@]}" -- -max_total_time="$budget" \
+        -rss_limit_mb=2048 -malloc_limit_mb=1024 -max_len="$max_len" \
         >"$EVIDENCE/fuzz/$target.log" 2>&1
     ) &
     running=$((running + 1))
