@@ -11,7 +11,7 @@ import { renderRoute } from "../../app/testing/render";
 import { signInAlex } from "../../auth/account/testkit";
 import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
-import { cell, dhcpNotBuilt, dhcpSwitchedOff, rows } from "../testkit";
+import { cell, dhcpNotBuilt, dhcpSwitchedOff, loaded, rows } from "../testkit";
 import HistoryPage from "./HistoryPage";
 
 beforeEach(async () => {
@@ -26,7 +26,6 @@ afterEach(async () => {
 
 const GRID = "dhcp-history";
 const open = (url = "/dhcp/history") => renderRoute(HistoryPage, { url, path: "/dhcp/history" });
-const loaded = () => waitFor(() => expect(rows(GRID).length).toBeGreaterThan(0));
 
 function historyReads(spy: { mock: { calls: unknown[][] } }): URL[] {
   return spy.mock.calls.map(([url]) => new URL(String(url), "http://localhost")).filter((url) => url.pathname === "/api/v1/dhcp/history");
@@ -35,7 +34,7 @@ function historyReads(spy: { mock: { calls: unknown[][] } }): URL[] {
 describe("the lease history", () => {
   it("lists the events newest first with kind, address, client, state after, end, name and node", async () => {
     const view = open();
-    await loaded();
+    await loaded(GRID);
     const first = rows(GRID)[0]!;
     // The four renewals are the newest events; of equal time the later one comes first.
     expect(first.dataset.key).toBe("192.0.2.103 renewed");
@@ -55,7 +54,7 @@ describe("the lease history", () => {
 
   it("links an address to its leases", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     expect(within(rows(GRID)[0]!).getByTestId("event-lease-link").getAttribute("href")).toBe("/dhcp/leases?addr=192.0.2.103");
   });
 
@@ -68,7 +67,7 @@ describe("the lease history", () => {
   it("sends the filters as query parameters", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     open();
-    await loaded();
+    await loaded(GRID);
     const last = () => historyReads(spy).at(-1)!.searchParams;
 
     fireEvent.change(screen.getByTestId("filter-addr"), { target: { value: "192.0.2.101" } });
@@ -106,14 +105,14 @@ describe("the lease history", () => {
     await waitFor(() => expect(last().get("from")).toBeNull());
     expect(last().get("to")).toBeNull();
     expect(last().get("scope")).toBeNull();
-    await loaded();
+    await loaded(GRID);
   });
 
   it("reads the next page with the cursor", async () => {
     for (let i = 0; i < 90; i += 1) grantMockLease({ mac: docMac(0x40 + i), hostname: `bulk-${i}` });
     const spy = vi.spyOn(globalThis, "fetch");
     open();
-    await loaded();
+    await loaded(GRID);
     const more = await screen.findByTestId("history-more");
     expect(historyReads(spy).at(-1)!.searchParams.get("cursor")).toBeNull();
     fireEvent.click(more);
@@ -137,7 +136,7 @@ describe("the lease history", () => {
     it("shows a new event without a reload and pauses with the toggle", async () => {
       const subscribe = vi.spyOn(events, "subscribe");
       open();
-      await loaded();
+      await loaded(GRID);
       grantMockLease({ mac: docMac(0x50), hostname: "client-live" });
       feed(subscribe, 1);
       await waitFor(() => expect(rows(GRID)[0]!.dataset.key).toBe("192.0.2.112 granted"));
@@ -156,7 +155,7 @@ describe("the lease history", () => {
       const subscribe = vi.spyOn(events, "subscribe");
       const spy = vi.spyOn(globalThis, "fetch");
       open();
-      await loaded();
+      await loaded(GRID);
       const before = historyReads(spy).length;
       feed(subscribe, 1, ["dhcp.leases"]);
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -179,7 +178,7 @@ describe("the lease history", () => {
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    await loaded();
+    await loaded(GRID);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Lånehistorik");
     expect(within(rows(GRID)[0]!).getByTestId("event-kind").textContent).toBe("Förnyat");
     expect(screen.getByLabelText("Händelse", { selector: "select" })).toBeTruthy();

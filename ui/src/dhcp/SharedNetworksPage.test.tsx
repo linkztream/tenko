@@ -12,7 +12,7 @@ import { signInWithRoles } from "../auth/scope-testkit";
 import { setSessionForTest } from "../auth/session";
 import { setLocale } from "../i18n";
 import SharedNetworksPage from "./SharedNetworksPage";
-import { cell, dhcpSwitchedOff, recordIfMatch, row, rowAction, rowActions, rows } from "./testkit";
+import { cell, dhcpSwitchedOff, recordIfMatch, row, rowAction, rowActions, loaded, rows } from "./testkit";
 
 beforeEach(async () => {
   await signInAlex();
@@ -24,12 +24,11 @@ afterEach(async () => {
 });
 
 const open = () => renderRoute(SharedNetworksPage, { url: "/dhcp/shared-networks", path: "/dhcp/shared-networks" });
-const loaded = () => waitFor(() => expect(rows("dhcp-networks").length).toBeGreaterThan(0));
 
 describe("the shared networks", () => {
   it("lists the shared network with its description", async () => {
     const view = open();
-    await loaded();
+    await loaded("dhcp-networks");
     const network = row("dhcp-networks", "home-links");
     expect(cell(network, "description").textContent).toBe("The links of the house");
     expect(within(network).queryAllByTestId("network-scope")).toHaveLength(0);
@@ -39,7 +38,7 @@ describe("the shared networks", () => {
   it("links the scopes that belong to it", async () => {
     dhcpState().scopes[0]!.shared_network = DHCP_IDS.sharedNetwork;
     open();
-    await loaded();
+    await loaded("dhcp-networks");
     const link = await waitFor(() => within(row("dhcp-networks", "home-links")).getByTestId("network-scope"));
     await waitFor(() => expect(link.dataset.key).toBe("192.0.2.0/24"));
     expect(link.getAttribute("href")).toBe(`/dhcp/scopes/${DHCP_IDS.lan}`);
@@ -48,7 +47,7 @@ describe("the shared networks", () => {
   it("creates one after the local check of the name and shows the refusal of the server under the field", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-networks");
     fireEvent.click(screen.getByTestId("dhcp-network-create"));
     const dialog = await screen.findByTestId("dialog-network-form");
     fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "Bad Name" } });
@@ -71,7 +70,7 @@ describe("the shared networks", () => {
     dhcpState().sharedNetworks[0]!.interface = "eth0";
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-networks");
     const revision = dhcpState().sharedNetworks[0]!.revision;
     await rowAction(row("dhcp-networks", "home-links"), "edit");
     const dialog = await screen.findByTestId("dialog-network-form");
@@ -88,7 +87,7 @@ describe("the shared networks", () => {
 
   it("deletes one that no scope belongs to", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-networks");
     await rowAction(row("dhcp-networks", "home-links"), "delete");
     fireEvent.click(within(await screen.findByTestId("dialog-network-delete")).getByTestId("confirm-ok"));
     await waitFor(() => expect(rows("dhcp-networks")).toHaveLength(0));
@@ -98,7 +97,7 @@ describe("the shared networks", () => {
   it("shows the message of the server when a scope still belongs to it", async () => {
     dhcpState().scopes[0]!.shared_network = DHCP_IDS.sharedNetwork;
     open();
-    await loaded();
+    await loaded("dhcp-networks");
     await rowAction(row("dhcp-networks", "home-links"), "delete");
     const dialog = await screen.findByTestId("dialog-network-delete");
     fireEvent.click(within(dialog).getByTestId("confirm-ok"));
@@ -111,7 +110,7 @@ describe("the shared networks", () => {
   it("offers a viewer nothing to change", async () => {
     await signInWithRoles(["viewer"]);
     open();
-    await loaded();
+    await loaded("dhcp-networks");
     expect(screen.queryByTestId("dhcp-network-create")).toBeNull();
     expect(await rowActions(row("dhcp-networks", "home-links"))).toEqual([]);
   });
@@ -126,7 +125,7 @@ describe("the shared networks", () => {
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    await loaded();
+    await loaded("dhcp-networks");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Delade nätverk");
     expect(screen.getByTestId("dhcp-network-create").textContent).toBe("Nytt delat nätverk");
   });

@@ -13,7 +13,7 @@ import { signInAlex } from "../../auth/account/testkit";
 import { signInWithRoles } from "../../auth/scope-testkit";
 import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
-import { dhcpSwitchedOff, recordIfMatch, row, rowAction, rowActions, rows } from "../testkit";
+import { dhcpSwitchedOff, recordIfMatch, row, rowAction, rowActions, loaded, rows } from "../testkit";
 import PoliciesPage from "./PoliciesPage";
 
 beforeEach(async () => {
@@ -26,7 +26,6 @@ afterEach(async () => {
 });
 
 const open = () => renderRoute(PoliciesPage, { url: "/dhcp/policies", path: "/dhcp/policies" });
-const loaded = () => waitFor(() => expect(rows("dhcp-policies").length).toBeGreaterThan(0));
 const termRows = (dialog: HTMLElement) => within(dialog).getAllByTestId("term-row");
 const chooseScope = async (dialog: HTMLElement, value: string) => {
   const select = within(dialog).getByTestId("field-scope") as HTMLSelectElement;
@@ -37,7 +36,7 @@ const chooseScope = async (dialog: HTMLElement, value: string) => {
 describe("the policies", () => {
   it("lists the policy with its scope, the condition and the action in words, and says matching comes later", async () => {
     const view = open();
-    await loaded();
+    await loaded("dhcp-policies");
     expect(screen.getByTestId("policies-note").textContent).toContain("first matching policy sets");
     const pxe = row("dhcp-policies", "pxe-boot");
     await waitFor(() => expect(within(pxe).getByTestId("policy-scope").dataset.key).toBe("192.0.2.0/24"));
@@ -59,7 +58,7 @@ describe("the policies", () => {
     });
     dhcpState().policies.push({ ...dhcpState().policies[0]!, id: "0190d1c2-0000-7000-8000-00000000e1f2", name: "second", order: 2 });
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     await waitFor(() => expect(rows("dhcp-policies")).toHaveLength(3));
     expect(rows("dhcp-policies").map((r) => r.dataset.key)).toEqual(["pxe-boot", "second", "everywhere"]);
     expect(within(row("dhcp-policies", "everywhere")).getByTestId("policy-scope").dataset.key).toBe("server");
@@ -68,7 +67,7 @@ describe("the policies", () => {
   it("creates a policy with a condition over a class and a match, and an action", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     fireEvent.click(screen.getByTestId("dhcp-policy-create"));
     const dialog = await screen.findByTestId("dialog-policy-form");
     fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "printers" } });
@@ -110,7 +109,7 @@ describe("the policies", () => {
   it("checks the name, the terms, the range and the lease times before it sends", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     fireEvent.click(screen.getByTestId("dhcp-policy-create"));
     const dialog = await screen.findByTestId("dialog-policy-form");
     await chooseScope(dialog, DHCP_IDS.lan);
@@ -127,7 +126,7 @@ describe("the policies", () => {
 
   it("shows the refusal of the server when the name exists in the scope", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     fireEvent.click(screen.getByTestId("dhcp-policy-create"));
     const dialog = await screen.findByTestId("dialog-policy-form");
     await chooseScope(dialog, DHCP_IDS.lan);
@@ -142,7 +141,7 @@ describe("the policies", () => {
   it("edits a policy with the revision read, without changing its scope", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     const revision = dhcpState().policies[0]!.revision;
     await rowAction(row("dhcp-policies", "pxe-boot"), "edit");
     const dialog = await screen.findByTestId("dialog-policy-form");
@@ -162,7 +161,7 @@ describe("the policies", () => {
 
   it("deletes a policy after the confirmation", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     await rowAction(row("dhcp-policies", "pxe-boot"), "delete");
     fireEvent.click(within(await screen.findByTestId("dialog-policy-delete")).getByTestId("confirm-ok"));
     await waitFor(() => expect(rows("dhcp-policies")).toHaveLength(0));
@@ -172,7 +171,7 @@ describe("the policies", () => {
   it("creates a policy for an architecture with a DDNS action, then continues with its options", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     fireEvent.click(screen.getByTestId("dhcp-policy-create"));
     const dialog = await screen.findByTestId("dialog-policy-form");
     fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "uefi-boot" } });
@@ -230,7 +229,7 @@ describe("the policies", () => {
     dhcpState().policies[0]!.action = { ddns: { enabled: true, ttl: 600, conflict: "replace" } };
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     await waitFor(() => expect(within(row("dhcp-policies", "pxe-boot")).getByTestId("policy-action-words").textContent).toBe("DDNS on"));
     await rowAction(row("dhcp-policies", "pxe-boot"), "edit");
     const dialog = await screen.findByTestId("dialog-policy-form");
@@ -249,7 +248,7 @@ describe("the policies", () => {
   it("checks the TTL of the DDNS action and shows the refusal of the server under it", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     await rowAction(row("dhcp-policies", "pxe-boot"), "edit");
     const dialog = await screen.findByTestId("dialog-policy-form");
     fireEvent.click(within(dialog).getByTestId("field-policy-ddns-on"));
@@ -269,7 +268,7 @@ describe("the policies", () => {
   it("offers a viewer nothing to change", async () => {
     await signInWithRoles(["viewer"]);
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     expect(screen.queryByTestId("dhcp-policy-create")).toBeNull();
     expect(await rowActions(row("dhcp-policies", "pxe-boot"))).toEqual([]);
   });
@@ -284,7 +283,7 @@ describe("the policies", () => {
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    await loaded();
+    await loaded("dhcp-policies");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("DHCP-principer");
     await waitFor(() => expect(within(row("dhcp-policies", "pxe-boot")).getByTestId("policy-condition-words").textContent).toBe("i klassen pxe-clients"));
     expect(screen.getByTestId("policies-note").textContent).toContain("första matchande principen");

@@ -14,7 +14,7 @@ import { signInWithRoles } from "../auth/scope-testkit";
 import { setSessionForTest } from "../auth/session";
 import { setLocale } from "../i18n";
 import ScopesPage from "./ScopesPage";
-import { cell, dhcpNoService, dhcpNotBuilt, dhcpSwitchedOff, recordWrites, row, rowAction, rowActions, rows } from "./testkit";
+import { cell, dhcpNoService, dhcpNotBuilt, dhcpSwitchedOff, recordWrites, row, rowAction, rowActions, loaded, rows } from "./testkit";
 
 beforeEach(async () => {
   await signInAlex();
@@ -29,12 +29,11 @@ afterEach(async () => {
 const IOT_V6 = "0190d1c2-0000-7000-8000-0000000a0009";
 
 const open = () => renderRoute(ScopesPage, { url: "/dhcp", path: "/dhcp" });
-const loaded = () => waitFor(() => expect(rows("dhcp-scopes").length).toBeGreaterThan(0));
 
 describe("the scope list", () => {
   it("shows the scope with its state, pools, active leases and utilization", async () => {
     const view = open();
-    await loaded();
+    await loaded("dhcp-scopes");
     const lan = row("dhcp-scopes", "192.0.2.0/24");
     expect(within(cell(lan, "network")).getByTestId("scope-link").getAttribute("href")).toBe(`/dhcp/scopes/${DHCP_IDS.lan}`);
     expect(within(cell(lan, "enabled")).getByTestId("scope-enabled").dataset.key).toBe("on");
@@ -54,7 +53,7 @@ describe("creating a scope", () => {
   it("lists the networks without a scope, checks the form, and creates the scope", async () => {
     const writes = recordWrites();
     open();
-    await loaded();
+    await loaded("dhcp-scopes");
     fireEvent.click(screen.getByTestId("dhcp-scope-create"));
     const dialog = await screen.findByTestId("dialog-scope-form");
     const prefix = within(dialog).getByTestId("field-prefix") as HTMLSelectElement;
@@ -111,7 +110,7 @@ describe("creating a scope", () => {
   it("creates a scope for an IPv6 network, without a server identifier", async () => {
     const writes = recordWrites();
     open();
-    await loaded();
+    await loaded("dhcp-scopes");
     fireEvent.click(screen.getByTestId("dhcp-scope-create"));
     const dialog = await screen.findByTestId("dialog-scope-form");
     const prefix = within(dialog).getByTestId("field-prefix") as HTMLSelectElement;
@@ -132,7 +131,7 @@ describe("creating a scope", () => {
 
   it("shows the refusal of the server when the network got a scope meanwhile", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-scopes");
     fireEvent.click(screen.getByTestId("dhcp-scope-create"));
     const dialog = await screen.findByTestId("dialog-scope-form");
     const prefix = within(dialog).getByTestId("field-prefix") as HTMLSelectElement;
@@ -153,7 +152,7 @@ describe("deleting a scope", () => {
     // The DHCPv6 scopes of the seed would stay in the list; the empty list is what this checks.
     dhcpState().scopes = dhcpState().scopes.filter((s) => s.prefix !== DHCP_IDS.lanV6 && s.prefix !== DHCP_IDS.pdV6);
     open();
-    await loaded();
+    await loaded("dhcp-scopes");
     await rowAction(row("dhcp-scopes", "192.0.2.0/24"), "delete");
     const dialog = await screen.findByTestId("dialog-scope-delete");
     expect(dialog.textContent).toContain("The network and its ranges stay in IPAM.");
@@ -169,7 +168,7 @@ describe("who sees what", () => {
   it("offers a viewer no create and no delete", async () => {
     await signInWithRoles(["viewer"]);
     open();
-    await loaded();
+    await loaded("dhcp-scopes");
     expect(screen.queryByTestId("dhcp-scope-create")).toBeNull();
     expect(await rowActions(row("dhcp-scopes", "192.0.2.0/24"))).toEqual(["open"]);
   });
@@ -177,7 +176,7 @@ describe("who sees what", () => {
   it("offers an operator both", async () => {
     await signInWithRoles(["operator"]);
     open();
-    await loaded();
+    await loaded("dhcp-scopes");
     expect(screen.getByTestId("dhcp-scope-create")).toBeTruthy();
     expect(await rowActions(row("dhcp-scopes", "192.0.2.0/24"))).toEqual(["open", "delete"]);
   });
@@ -185,7 +184,7 @@ describe("who sees what", () => {
   // WP9.4: the family of every scope, and the utilization of a DHCPv6 scope.
   it("tags every scope DHCPv4 or DHCPv6", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-scopes");
     const lan = row("dhcp-scopes", "192.0.2.0/24");
     const lan6 = row("dhcp-scopes", "2001:db8:0:10::/64");
     expect(within(cell(lan, "family")).getByTestId("scope-family").dataset.key).toBe("v4");
@@ -227,7 +226,7 @@ describe("language", () => {
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    await loaded();
+    await loaded("dhcp-scopes");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("DHCP-omfång");
     expect(screen.getByTestId("dhcp-scope-create").textContent).toBe("Nytt omfång");
     expect(within(row("dhcp-scopes", "192.0.2.0/24")).getByTestId("scope-enabled").textContent).toBe("Aktivt");

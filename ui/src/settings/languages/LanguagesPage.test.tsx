@@ -1,14 +1,13 @@
-import { createMemoryHistory, MemoryRouter } from "@solidjs/router";
-import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
+import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ApiError } from "../../api/problem";
 import { seedPack } from "../../api/mock/i18n-store";
 import { resetMockDb } from "../../api/mock/db";
+import { renderApp } from "../../app/testing/app";
 import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
-import { buildRoutes, Root } from "../../App";
 import { alex } from "../../auth/account/testkit";
-import { loadSession, setSessionForTest } from "../../auth/session";
+import { setSessionForTest } from "../../auth/session";
 import { isAvailable, loadPacks, locale, setLocale } from "../../i18n";
 import { currentPreview, resetLanguagesForTest } from "../../i18n/remote";
 import { SETTINGS_PATH, signInAs } from "../testkit";
@@ -313,24 +312,9 @@ describe("the languages page", () => {
 });
 
 describe("the languages page for other roles", () => {
-  async function renderApp(url: string, roles: string[]) {
-    resetMockDb("signed-in");
-    alex().roles = roles as never;
-    setSessionForTest(null, "loading");
-    const history = createMemoryHistory();
-    history.set({ value: url });
-    const result = render(() => (
-      <MemoryRouter history={history} root={Root}>
-        {buildRoutes()}
-      </MemoryRouter>
-    ));
-    await loadSession();
-    return result;
-  }
-
   for (const role of ["operator", "viewer", "auditor"]) {
     it(`is forbidden to ${role}`, async () => {
-      await renderApp("/settings/languages", [role]);
+      await renderApp("/settings/languages", { roles: [role] });
       expect(await screen.findByText("Administrators only", {}, { timeout: 5000 })).toBeTruthy();
       expect(screen.queryByTestId("page-languages")).toBeNull();
       expect(screen.queryByTestId("settings-nav")).toBeNull();

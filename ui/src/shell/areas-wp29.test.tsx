@@ -1,25 +1,13 @@
 // The areas of discovery, connectors and nodes in the whole application: their routes resolve
 // to the right page (a static path wins over the proposal id of /discovery/:id), the G chords
 // reach them, and the discovery area follows the discovery module.
-import { createMemoryHistory, MemoryRouter } from "@solidjs/router";
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { resetMockDb } from "../api/mock/db";
 import { RECONCILE_IDS } from "../api/mock/reconcile-store";
-import { buildRoutes, Root } from "../App";
-import { loadSession, setSessionForTest } from "../auth/session";
+import { renderApp } from "../app/testing/app";
+import { setSessionForTest } from "../auth/session";
 import { setModulesForTest } from "../updates/modules";
 import { AREAS } from "./areas";
-
-async function renderApp(url: string) {
-  resetMockDb("signed-in");
-  setSessionForTest(null, "loading");
-  const history = createMemoryHistory();
-  history.set({ value: url });
-  const result = render(() => <MemoryRouter history={history} root={Root}>{buildRoutes()}</MemoryRouter>);
-  await loadSession();
-  return { ...result, location: () => history.get() };
-}
 
 afterEach(() => {
   setModulesForTest(null);

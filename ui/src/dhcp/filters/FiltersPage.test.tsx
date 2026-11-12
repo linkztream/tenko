@@ -10,7 +10,7 @@ import { signInAlex } from "../../auth/account/testkit";
 import { signInWithRoles } from "../../auth/scope-testkit";
 import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
-import { cell, dhcpSwitchedOff, recordIfMatch, row, rowAction, rowActions, rows } from "../testkit";
+import { cell, dhcpSwitchedOff, recordIfMatch, row, rowAction, rowActions, loaded, rows } from "../testkit";
 import FiltersPage from "./FiltersPage";
 
 beforeEach(async () => {
@@ -23,12 +23,11 @@ afterEach(async () => {
 });
 
 const open = () => renderRoute(FiltersPage, { url: "/dhcp/filters", path: "/dhcp/filters" });
-const loaded = () => waitFor(() => expect(rows("dhcp-filters").length).toBeGreaterThan(0));
 
 describe("the MAC filters", () => {
   it("lists the entries with allow or deny and the note", async () => {
     const view = open();
-    await loaded();
+    await loaded("dhcp-filters");
     const lab = row("dhcp-filters", "00:00:5e:00:53:*");
     expect(within(lab).getByTestId("filter-kind").dataset.key).toBe("allow");
     expect(within(lab).getByTestId("filter-kind").textContent).toBe("Allow");
@@ -40,7 +39,7 @@ describe("the MAC filters", () => {
   it("checks the pattern before it sends and stores it the way the server does", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-filters");
     fireEvent.click(screen.getByTestId("dhcp-filter-create"));
     const dialog = await screen.findByTestId("dialog-filter-form");
     for (const bad of ["00:00:5e", "00:00:5g:00:53:01", "", "00:00:5e:00:53:01:02"]) {
@@ -60,7 +59,7 @@ describe("the MAC filters", () => {
 
   it("shows the refusal of the server for a pattern that has an entry", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-filters");
     fireEvent.click(screen.getByTestId("dhcp-filter-create"));
     const dialog = await screen.findByTestId("dialog-filter-form");
     fireEvent.input(within(dialog).getByTestId("field-mac"), { target: { value: "00:00:5E:00:53:*" } });
@@ -72,7 +71,7 @@ describe("the MAC filters", () => {
   it("edits an entry with the revision read and clears the note with an empty text", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-filters");
     const revision = dhcpState().filters[0]!.revision;
     await rowAction(row("dhcp-filters", "00:00:5e:00:53:*"), "edit");
     const dialog = await screen.findByTestId("dialog-filter-form");
@@ -89,7 +88,7 @@ describe("the MAC filters", () => {
 
   it("deletes an entry after the confirmation", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-filters");
     await rowAction(row("dhcp-filters", "00:00:5e:00:53:*"), "delete");
     fireEvent.click(within(await screen.findByTestId("dialog-filter-delete")).getByTestId("confirm-ok"));
     await waitFor(() => expect(rows("dhcp-filters")).toHaveLength(0));
@@ -99,7 +98,7 @@ describe("the MAC filters", () => {
   it("offers a viewer nothing to change", async () => {
     await signInWithRoles(["viewer"]);
     open();
-    await loaded();
+    await loaded("dhcp-filters");
     expect(screen.queryByTestId("dhcp-filter-create")).toBeNull();
     expect(await rowActions(row("dhcp-filters", "00:00:5e:00:53:*"))).toEqual([]);
   });
@@ -113,7 +112,7 @@ describe("the MAC filters", () => {
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    await loaded();
+    await loaded("dhcp-filters");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("MAC-filter");
     expect(within(row("dhcp-filters", "00:00:5e:00:53:*")).getByTestId("filter-kind").textContent).toBe("Tillåt");
   });

@@ -180,7 +180,9 @@ export default defineConfig(({ command, mode }) => {
       // Solid and its libraries go through Vite (with the browser condition, the DOM build);
       // everything else loads in Node with Node's own conditions.
       server: { deps: { inline: [/solid-js/, /@solidjs\//] } },
-      testTimeout: 15000,
+      // Twice the wait limit (WAIT_LIMIT_MS in app/testing/setup.ts): a failed wait reports its last
+      // state before the test's own limit ends the test.
+      testTimeout: 60_000,
     },
   };
 });

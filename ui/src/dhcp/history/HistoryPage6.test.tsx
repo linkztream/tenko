@@ -10,7 +10,7 @@ import { renderRoute } from "../../app/testing/render";
 import { signInAlex } from "../../auth/account/testkit";
 import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
-import { cell, rows } from "../testkit";
+import { cell, loaded, rows } from "../testkit";
 import HistoryPage from "./HistoryPage";
 
 beforeEach(async () => {
@@ -29,7 +29,6 @@ const V6_101 = "2001:db8:0:10::101";
 /** The delegated prefix 2001:db8:1:110::/60 of the client of ::100. */
 const PD = "2001:db8:1:110::";
 const open = (url = "/dhcp/history") => renderRoute(HistoryPage, { url, path: "/dhcp/history" });
-const loaded = () => waitFor(() => expect(rows(GRID).length).toBeGreaterThan(0));
 const keys = () => rows(GRID).map((r) => r.dataset.key ?? "");
 const rowOf = (key: string) => {
   const found = rows(GRID).find((r) => r.dataset.key === key);
@@ -44,7 +43,7 @@ function historyReads(spy: { mock: { calls: unknown[][] } }): URL[] {
 describe("the history of both families", () => {
   it("merges the events newest first, each with its family", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const families = rows(GRID).map((r) => within(r).getByTestId("event-family").dataset.key);
     expect(families).toContain("v4");
     expect(families).toContain("v6");
@@ -58,7 +57,7 @@ describe("the history of both families", () => {
 
   it("shows the MAC address and the DUID of a DHCPv6 event, and no name", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const r = rowOf(`${V6_100} granted`);
     expect(cell(r, "mac").textContent).toBe("00:00:5e:00:53:10");
     const duid = within(r).getByTestId("event-duid");
@@ -70,7 +69,7 @@ describe("the history of both families", () => {
 
   it("shows a DHCPv6 event of a DUID without a MAC address with the DUID alone", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const r = rowOf(`${V6_101} granted`);
     expect(cell(r, "mac").textContent).toBe("");
     expect(within(r).getByTestId("event-duid").textContent).toBe("00:02:00:00:00:09:0c:0c:0c:0c:01");
@@ -78,7 +77,7 @@ describe("the history of both families", () => {
 
   it("shows the MAC address a DHCPv4 event carries and no DUID", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const r = rowOf("192.0.2.103 renewed");
     expect(cell(r, "mac").textContent).toBe("00:00:5e:00:53:13");
     expect(within(r).queryByTestId("event-duid")).toBeNull();
@@ -87,7 +86,7 @@ describe("the history of both families", () => {
 
   it("links an IPv6 address to the leases", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const href = within(rowOf(`${V6_100} granted`)).getByTestId("event-lease-link").getAttribute("href")!;
     expect(new URL(href, "http://localhost").searchParams.get("addr")).toBe(V6_100);
   });
@@ -97,7 +96,7 @@ describe("the family filter", () => {
   it("sends the family and keeps it in the URL", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     const view = open();
-    await loaded();
+    await loaded(GRID);
     expect(historyReads(spy).at(-1)!.searchParams.get("family")).toBeNull();
 
     fireEvent.change(screen.getByTestId("filter-family"), { target: { value: "v6" } });
@@ -129,7 +128,7 @@ describe("the DUID filter", () => {
   it("sends the DUID as typed and shows the events of that client only", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     const view = open();
-    await loaded();
+    await loaded(GRID);
     fireEvent.change(screen.getByTestId("filter-duid"), { target: { value: "00:02:00:00:00:09:0c:0c:0c:0c:01" } });
     await waitFor(() => expect(historyReads(spy).at(-1)!.searchParams.get("duid")).toBe("00:02:00:00:00:09:0c:0c:0c:0c:01"));
     await waitFor(() => expect(keys()).toEqual([`${V6_101} granted`]));
@@ -155,7 +154,7 @@ describe("the address filter with an IPv6 address", () => {
 describe("a delegated prefix", () => {
   it("shows the prefix with its length where an address shows only the address", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const r = rowOf(`${PD} granted`);
     expect(within(r).getByTestId("event-lease-link").textContent).toBe("2001:db8:1:110::/60");
     expect(within(r).getByTestId("event-family").dataset.key).toBe("v6");
@@ -166,7 +165,7 @@ describe("a delegated prefix", () => {
 
   it("links to the leases by the first address, which the lease list reads as the prefix too", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const href = within(rowOf(`${PD} granted`)).getByTestId("event-lease-link").getAttribute("href")!;
     expect(new URL(href, "http://localhost").searchParams.get("addr")).toBe(PD);
   });
@@ -200,7 +199,7 @@ describe("the MAC address of a DHCPv6 client behind a relay", () => {
     });
     const spy = vi.spyOn(globalThis, "fetch");
     open();
-    await loaded();
+    await loaded(GRID);
     fireEvent.change(screen.getByTestId("filter-mac"), { target: { value: "00:00:5e:00:53:77" } });
     await waitFor(() => expect(historyReads(spy).at(-1)!.searchParams.get("mac")).toBe("00:00:5e:00:53:77"));
     await waitFor(() => expect(keys()).toEqual([`${V6_101} renewed`]));
@@ -212,7 +211,7 @@ describe("the words", () => {
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    await loaded();
+    await loaded(GRID);
     expect(screen.getByLabelText("Adressfamilj", { selector: "select" })).toBeTruthy();
     expect(screen.getByLabelText("DUID", { selector: "input" })).toBeTruthy();
     expect(within(rowOf(`${V6_100} granted`)).getByTestId("event-family").textContent).toBe("DHCPv6");

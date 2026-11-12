@@ -18,7 +18,7 @@ import { signInAlex } from "../../auth/account/testkit";
 import { signInWithRoles } from "../../auth/scope-testkit";
 import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
-import { cell, dhcpNotBuilt, dhcpSwitchedOff, recordWrites, row, rowAction, rowActions, rows } from "../testkit";
+import { cell, dhcpNotBuilt, dhcpSwitchedOff, recordWrites, row, rowAction, rowActions, loaded, rows } from "../testkit";
 import LeasesPage from "./LeasesPage";
 
 beforeEach(async () => {
@@ -34,7 +34,6 @@ afterEach(async () => {
 const GRID = "dhcp-leases";
 const LAN = "192.0.2.0/24";
 const open = (url = "/dhcp/leases") => renderRoute(LeasesPage, { url, path: "/dhcp/leases" });
-const loaded = () => waitFor(() => expect(rows(GRID).length).toBeGreaterThan(0));
 
 /** The URLs of the reads of the lease list so far. */
 function leaseReads(spy: { mock: { calls: unknown[][] } }): URL[] {
@@ -66,7 +65,7 @@ function problem(status: number, code: string): Response {
 describe("the leases", () => {
   it("lists every lease with its state, client, name, network, end and relay", async () => {
     const view = open();
-    await loaded();
+    await loaded(GRID);
     const first = row(GRID, "192.0.2.100");
     expect(within(first).getByTestId("lease-state").dataset.key).toBe("active");
     expect(cell(first, "mac").textContent).toBe("00:00:5e:00:53:10");
@@ -85,14 +84,14 @@ describe("the leases", () => {
 
   it("links an address to its history", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     expect(within(row(GRID, "192.0.2.101")).getByTestId("lease-history-link").getAttribute("href")).toBe("/dhcp/history?addr=192.0.2.101");
   });
 
   it("sends the filters as query parameters", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     open();
-    await loaded();
+    await loaded(GRID);
     const last = () => leaseReads(spy).at(-1)!.searchParams;
 
     fireEvent.change(screen.getByTestId("filter-addr"), { target: { value: "192.0.2.10" } });
@@ -144,7 +143,7 @@ describe("the leases", () => {
     for (let i = 0; i < 100; i += 1) grantMockLease({ mac: docMac(0x40 + (i % 100)), hostname: `bulk-${i}` });
     const spy = vi.spyOn(globalThis, "fetch");
     open();
-    await loaded();
+    await loaded(GRID);
     const more = await screen.findByTestId("leases-more");
     expect(leaseReads(spy).at(-1)!.searchParams.get("limit")).toBe("100");
     expect(leaseReads(spy).at(-1)!.searchParams.get("cursor")).toBeNull();
@@ -157,7 +156,7 @@ describe("the leases", () => {
     it("asks for confirmation with a reason, sends the VRF and the reason, and shows the new state", async () => {
       const writes = recordWrites();
       open();
-      await loaded();
+      await loaded(GRID);
       await rowAction(row(GRID, "192.0.2.100"), "release");
       const dialog = await screen.findByTestId("dialog-lease-release");
       expect(dialog.textContent).toContain("192.0.2.100");
@@ -175,7 +174,7 @@ describe("the leases", () => {
     it("sends no reason when none is typed", async () => {
       const writes = recordWrites();
       open();
-      await loaded();
+      await loaded(GRID);
       await rowAction(row(GRID, "192.0.2.101"), "release");
       fireEvent.click(within(await screen.findByTestId("dialog-lease-release")).getByTestId("confirm-ok"));
       await waitFor(() => expect(within(row(GRID, "192.0.2.101")).getByTestId("lease-state").dataset.key).toBe("released"));
@@ -184,7 +183,7 @@ describe("the leases", () => {
 
     it("keeps the dialog open with the refusal of the server and reads the list again", async () => {
       open();
-      await loaded();
+      await loaded(GRID);
       // Another operator released it meanwhile: the page still shows it as active.
       dhcpLeaseState().leases[3]!.state = "released";
       await rowAction(row(GRID, "192.0.2.103"), "release");
@@ -200,7 +199,7 @@ describe("the leases", () => {
 
     it("cannot release a lease that is not active", async () => {
       open();
-      await loaded();
+      await loaded(GRID);
       fireEvent.click(within(row(GRID, "192.0.2.109")).getByRole("button", { name: /^Actions for/ }));
       const menu = await screen.findByTestId("row-menu");
       const item = within(menu)
@@ -212,7 +211,7 @@ describe("the leases", () => {
     it("offers a viewer no release", async () => {
       await signInWithRoles(["viewer"]);
       open();
-      await loaded();
+      await loaded(GRID);
       expect(await rowActions(row(GRID, "192.0.2.100"))).toEqual(["history"]);
     });
   });
@@ -221,7 +220,7 @@ describe("the leases", () => {
     it("shows a lease that appears without a reload", async () => {
       const { feed } = stream();
       open();
-      await loaded();
+      await loaded(GRID);
       grantMockLease({ mac: docMac(0x41), hostname: "client-new" });
       feed(1);
       await waitFor(() => expect(row(GRID, "192.0.2.112")).toBeTruthy());
@@ -232,7 +231,7 @@ describe("the leases", () => {
       const { feed } = stream();
       const spy = vi.spyOn(globalThis, "fetch");
       open();
-      await loaded();
+      await loaded(GRID);
       const before = leaseReads(spy).length;
       for (let i = 0; i < 1000; i += 1) feed(i);
       await waitFor(() => expect(leaseReads(spy).length).toBe(before + 1));
@@ -250,7 +249,7 @@ describe("the leases", () => {
       const { feed } = stream();
       const spy = vi.spyOn(globalThis, "fetch");
       open();
-      await loaded();
+      await loaded(GRID);
       const before = leaseReads(spy).length;
       feed(1, ["dhcp.config"]);
       feed(2, ["dhcp.scopes"]);
@@ -262,7 +261,7 @@ describe("the leases", () => {
       const { feed } = stream();
       const spy = vi.spyOn(globalThis, "fetch");
       open();
-      await loaded();
+      await loaded(GRID);
       const toggle = screen.getByTestId("leases-live") as HTMLInputElement;
       expect(toggle.checked).toBe(true);
       fireEvent.click(toggle);
@@ -301,14 +300,14 @@ describe("the leases", () => {
       open();
       expect(await screen.findByTestId("dhcp-strip-not-dhcp")).toBeTruthy();
       expect(screen.queryByTestId("dhcp-strip")).toBeNull();
-      await loaded();
+      await loaded(GRID);
     });
 
     it("hides the strip when the node is unknown, and the list still works", async () => {
       server.use(http.get("/api/v1/nodes/:id/dhcp", () => problem(404, "cluster.node.not_found")));
       const spy = vi.spyOn(globalThis, "fetch");
       open();
-      await loaded();
+      await loaded(GRID);
       await waitFor(() => expect(spy.mock.calls.some(([url]) => String(url).includes("/api/v1/nodes/1/dhcp"))).toBe(true));
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(screen.queryByTestId("dhcp-strip")).toBeNull();
@@ -355,7 +354,7 @@ describe("the leases", () => {
     describe("the scope", () => {
       it("names no scope and offers a bar for each scope that sets the filter", async () => {
         open();
-        await loaded();
+        await loaded(GRID);
         const strip = screen.getByTestId("leases-live-strip");
         expect(strip.dataset.scope).toBe("");
         expect(within(strip).getByTestId("leases-scope-name").textContent).toBe("All scopes");
@@ -378,7 +377,7 @@ describe("the leases", () => {
 
       it("shows the bar of the chosen scope with its figures and the time it was read", async () => {
         const view = open(`/dhcp/leases?scope=${LAN_ID}`);
-        await loaded();
+        await loaded(GRID);
         const bar = await screen.findByTestId("leases-utilization");
         await waitFor(() => expect(bar.dataset.value).toBe("13"));
         const facts = Object.fromEntries(within(bar).getAllByTestId("util-fact").map((el) => [el.dataset.key, el.querySelector("b")?.textContent]));
@@ -393,7 +392,7 @@ describe("the leases", () => {
         manyScopes();
         const spy = vi.spyOn(globalThis, "fetch");
         open();
-        await loaded();
+        await loaded(GRID);
         const bars = await screen.findByTestId("leases-scope-bars");
         await waitFor(() => expect(within(bars).getAllByTestId("scope-util")).toHaveLength(6));
         // The first six by network hold 10, 80, 30, 95, 50 and 20 percent.
@@ -409,7 +408,7 @@ describe("the leases", () => {
       it("takes the scope of a bar as the filter of the list", async () => {
         const spy = vi.spyOn(globalThis, "fetch");
         open();
-        await loaded();
+        await loaded(GRID);
         const bars = await screen.findAllByTestId("leases-scope-bar");
         fireEvent.click(bars.find((b) => b.dataset.key === LAN)!);
         await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("scope")).toBe(LAN_ID));
@@ -424,7 +423,7 @@ describe("the leases", () => {
         const { feed } = stream();
         const spy = vi.spyOn(globalThis, "fetch");
         open(`/dhcp/leases?scope=${LAN_ID}`);
-        await loaded();
+        await loaded(GRID);
         await waitFor(() => expect((screen.getByTestId("leases-utilization") as HTMLElement).dataset.value).toBe("13"));
         const before = utilReads(spy).length;
         const listBefore = leaseReads(spy).length;
@@ -439,7 +438,7 @@ describe("the leases", () => {
       it("shows a changed figure after the refresh", async () => {
         const { feed } = stream();
         open(`/dhcp/leases?scope=${LAN_ID}`);
-        await loaded();
+        await loaded(GRID);
         await waitFor(() => expect(screen.getByTestId("leases-utilization").dataset.value).toBe("13"));
         server.use(
           http.get("/api/v1/dhcp/scopes/:prefix/utilization", ({ params }) =>
@@ -456,7 +455,7 @@ describe("the leases", () => {
         const { feed } = stream();
         const spy = vi.spyOn(globalThis, "fetch");
         open();
-        await loaded();
+        await loaded(GRID);
         const bars = await screen.findByTestId("leases-scope-bars");
         await waitFor(() => expect(within(bars).getAllByTestId("scope-util")).toHaveLength(6));
         const before = utilReads(spy).length;
@@ -471,7 +470,7 @@ describe("the leases", () => {
         const { feed } = stream();
         const spy = vi.spyOn(globalThis, "fetch");
         open(`/dhcp/leases?scope=${LAN_ID}`);
-        await loaded();
+        await loaded(GRID);
         await waitFor(() => expect(utilReads(spy).length).toBe(1));
         fireEvent.click(screen.getByTestId("leases-live"));
         feed(1);
@@ -488,7 +487,7 @@ describe("the leases", () => {
         const spy = vi.spyOn(globalThis, "fetch");
         const before = Date.now();
         open();
-        await loaded();
+        await loaded(GRID);
         await ready();
         // The seed holds twelve grants, all of them hours old.
         expect(count()).toBe("0");
@@ -518,7 +517,7 @@ describe("the leases", () => {
       it("links to the history of the same grants", async () => {
         const spy = vi.spyOn(globalThis, "fetch");
         open();
-        await loaded();
+        await loaded(GRID);
         await ready();
         const from = grantReads(spy).at(-1)!.searchParams.get("from")!;
         const link = screen.getByTestId("leases-new-link");
@@ -534,7 +533,7 @@ describe("the leases", () => {
         const { feed } = stream();
         const spy = vi.spyOn(globalThis, "fetch");
         open();
-        await loaded();
+        await loaded(GRID);
         await ready();
         const from = grantReads(spy).at(-1)!.searchParams.get("from")!;
         grantMockLease({ mac: docMac(0x52), hostname: "lan-1" });
@@ -560,7 +559,7 @@ describe("the leases", () => {
       it("says 1,000+ when there are more grants than one page holds", async () => {
         const { feed } = stream();
         open();
-        await loaded();
+        await loaded(GRID);
         await ready();
         grantElsewhere(1000);
         feed(1);
@@ -577,7 +576,7 @@ describe("the leases", () => {
         const { feed } = stream();
         const spy = vi.spyOn(globalThis, "fetch");
         open();
-        await loaded();
+        await loaded(GRID);
         await ready();
         const first = grantReads(spy).at(-1)!.searchParams.get("from")!;
         grantMockLease({ mac: docMac(0x53), hostname: "before-reset" });
@@ -599,7 +598,7 @@ describe("the leases", () => {
         const { feed } = stream();
         const spy = vi.spyOn(globalThis, "fetch");
         open();
-        await loaded();
+        await loaded(GRID);
         await ready();
         fireEvent.click(screen.getByTestId("leases-live"));
         expect(screen.getByTestId("leases-new").dataset.state).toBe("paused");
@@ -625,7 +624,7 @@ describe("the leases", () => {
         const { feed } = stream();
         const spy = vi.spyOn(globalThis, "fetch");
         open();
-        await loaded();
+        await loaded(GRID);
         await ready();
         const before = grantReads(spy).length;
         for (let i = 0; i < 300; i += 1) feed(i);
@@ -637,7 +636,7 @@ describe("the leases", () => {
       it.each([403, 501, 409])("is hidden when the history answers %i, and the rest of the strip stays", async (status) => {
         server.use(http.get("/api/v1/dhcp/history", () => problem(status, "dhcp.history.x")));
         open(`/dhcp/leases?scope=${LAN_ID}`);
-        await loaded();
+        await loaded(GRID);
         await screen.findByTestId("leases-utilization");
         await waitFor(() => expect(screen.queryByTestId("leases-new")).toBeNull());
         expect(screen.queryByTestId("leases-new-link")).toBeNull();
@@ -648,7 +647,7 @@ describe("the leases", () => {
       it("keeps the count and the page working when a read fails for another reason", async () => {
         const { feed } = stream();
         open();
-        await loaded();
+        await loaded(GRID);
         await ready();
         server.use(http.get("/api/v1/dhcp/history", () => problem(503, "dhcp.store_refused")));
         grantMockLease({ mac: docMac(0x57), hostname: "unseen" });
@@ -666,7 +665,7 @@ describe("the leases", () => {
         try {
           const { feed } = stream();
           open();
-          await loaded();
+          await loaded(GRID);
           await ready();
           grantMockLease({ mac: docMac(0x59), hostname: "empty-1" });
           feed(1);
@@ -686,7 +685,7 @@ describe("the leases", () => {
       await setLocale("sv");
       const { feed } = stream();
       open(`/dhcp/leases?scope=${LAN_ID}`);
-      await loaded();
+      await loaded(GRID);
       await screen.findByTestId("leases-utilization");
       await waitFor(() => expect(screen.getByTestId("leases-new").textContent).toBe("0 nya lån sedan du öppnade sidan"));
       grantMockLease({ mac: docMac(0x58), hostname: "sv-1" });
@@ -715,7 +714,7 @@ describe("the leases", () => {
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    await loaded();
+    await loaded(GRID);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Lån");
     expect(within(row(GRID, "192.0.2.100")).getByTestId("lease-state").textContent).toBe("Aktivt");
     expect(within(row(GRID, "192.0.2.109")).getByTestId("lease-state").textContent).toBe("Utgånget");

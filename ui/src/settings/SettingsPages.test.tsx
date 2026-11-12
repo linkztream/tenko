@@ -2,31 +2,13 @@
 // languages): each has a route of its own that ranks above the generic /settings/:section?/:id?
 // route, is for administrators and shows the settings navigation. The generic route keeps
 // serving security and users.
-import { createMemoryHistory, MemoryRouter } from "@solidjs/router";
-import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
+import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { resetMockDb } from "../api/mock/db";
+import { renderApp } from "../app/testing/app";
 import { axeViolations } from "../app/testing/axe";
 import { preloadPages } from "../app/testing/preload";
-import { buildRoutes, Root } from "../App";
-import { alex } from "../auth/account/testkit";
-import { loadSession, setSessionForTest } from "../auth/session";
+import { setSessionForTest } from "../auth/session";
 import { collectRoutes } from "../app/router";
-
-async function renderApp(url: string, roles?: string[]) {
-  resetMockDb("signed-in");
-  if (roles) alex().roles = roles as never;
-  setSessionForTest(null, "loading");
-  const history = createMemoryHistory();
-  history.set({ value: url });
-  const result = render(() => (
-    <MemoryRouter history={history} root={Root}>
-      {buildRoutes()}
-    </MemoryRouter>
-  ));
-  await loadSession();
-  return { ...result, location: () => history.get() };
-}
 
 afterEach(() => setSessionForTest(null, "loading"));
 
@@ -122,7 +104,7 @@ describe("the settings sub-pages", () => {
 
   for (const role of ["operator", "viewer", "auditor"]) {
     it(`keeps the pages closed to ${role}`, async () => {
-      await renderApp("/settings/backup", [role]);
+      await renderApp("/settings/backup", { roles: [role] });
       expect(await screen.findByText("Administrators only", {}, { timeout: 5000 })).toBeTruthy();
       expect(screen.queryByTestId("page-backup")).toBeNull();
       expect(screen.queryByTestId("settings-nav")).toBeNull();

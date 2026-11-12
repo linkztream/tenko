@@ -11,6 +11,11 @@ export function rows(grid: string): HTMLElement[] {
   return within(screen.getByTestId(`grid-${grid}`)).queryAllByTestId("row");
 }
 
+/** Waits until grid `grid` shows at least one row. */
+export function loaded(grid: string): Promise<void> {
+  return waitFor(() => expect(rows(grid).length).toBeGreaterThan(0));
+}
+
 /** The row of grid `grid` whose `data-key` is `key`. */
 export function row(grid: string, key: string): HTMLElement {
   const found = rows(grid).find((r) => r.dataset.key === key);

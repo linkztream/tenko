@@ -14,7 +14,7 @@ import { renderRoute } from "../../app/testing/render";
 import { signInAlex } from "../../auth/account/testkit";
 import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
-import { cell, recordWrites, row, rowAction, rowActions, rows } from "../testkit";
+import { cell, recordWrites, row, rowAction, rowActions, loaded, rows } from "../testkit";
 import LeasesPage from "./LeasesPage";
 
 beforeEach(async () => {
@@ -33,7 +33,6 @@ const V6 = ["2001:db8:0:10::100", "2001:db8:0:10::101", "2001:db8:0:10::102", "2
 const PD = "2001:db8:1:110::";
 const V6_ALL = [...V6, PD];
 const open = (url = "/dhcp/leases") => renderRoute(LeasesPage, { url, path: "/dhcp/leases" });
-const loaded = () => waitFor(() => expect(rows(GRID).length).toBeGreaterThan(0));
 const keys = () => rows(GRID).map((r) => r.dataset.key ?? "");
 
 function leaseReads(spy: { mock: { calls: unknown[][] } }): URL[] {
@@ -50,7 +49,7 @@ function held(addr: string) {
 describe("the family filter", () => {
   it("lists both families, DHCPv4 first, each row with its family", async () => {
     const view = open();
-    await loaded();
+    await loaded(GRID);
     expect(keys().slice(12)).toEqual(V6_ALL);
     expect(within(row(GRID, "192.0.2.100")).getByTestId("lease-family").textContent).toBe("DHCPv4");
     expect(within(row(GRID, V6[0]!)).getByTestId("lease-family").textContent).toBe("DHCPv6");
@@ -62,7 +61,7 @@ describe("the family filter", () => {
   it("sends the family as a query parameter and keeps it in the URL", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     const view = open();
-    await loaded();
+    await loaded(GRID);
     expect(leaseReads(spy).at(-1)!.searchParams.get("family")).toBeNull();
 
     fireEvent.change(screen.getByTestId("filter-family"), { target: { value: "v6" } });
@@ -92,7 +91,7 @@ describe("the family filter", () => {
   it("ignores a family that is none", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     open("/dhcp/leases?family=v5");
-    await loaded();
+    await loaded(GRID);
     expect(leaseReads(spy).at(-1)!.searchParams.get("family")).toBeNull();
     expect(rows(GRID)).toHaveLength(17);
   });
@@ -110,7 +109,7 @@ describe("the kind filter", () => {
   it("lists the kinds and sends the choice as a query parameter and keeps it in the URL", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     const view = open();
-    await loaded();
+    await loaded(GRID);
     const menu = screen.getByTestId("filter-kind") as HTMLSelectElement;
     expect(screen.getByLabelText("Holds", { selector: "select" })).toBe(menu);
     expect([...menu.options].map((o) => [o.value, o.textContent])).toEqual([
@@ -150,7 +149,7 @@ describe("the kind filter", () => {
   it("ignores a kind that is none", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     open("/dhcp/leases?kind=prefix");
-    await loaded();
+    await loaded(GRID);
     expect(leaseReads(spy).at(-1)!.searchParams.get("kind")).toBeNull();
     expect(rows(GRID)).toHaveLength(17);
   });
@@ -168,7 +167,7 @@ describe("the address filter with an IPv6 prefix", () => {
   it("tells that a prefix also finds the delegated prefixes that hold it and sends the text as typed", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     const view = open();
-    await loaded();
+    await loaded(GRID);
     const input = screen.getByTestId("filter-addr") as HTMLInputElement;
     const help = screen.getByTestId("field-help");
     expect(help.dataset.field).toBe("addr");
@@ -191,7 +190,7 @@ describe("the DUID filter", () => {
   it("sends the DUID as typed and shows the leases of that client", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     const view = open();
-    await loaded();
+    await loaded(GRID);
     fireEvent.change(screen.getByTestId("filter-duid"), { target: { value: "00:03:00:01:00:00:5e:00:53:10" } });
     await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("duid")).toBe("00:03:00:01:00:00:5e:00:53:10"));
     // The delegated prefix of the client has the same DUID.
@@ -215,7 +214,7 @@ describe("the DUID filter", () => {
 describe("a DHCPv6 row", () => {
   it("shows the MAC address of its DUID, the DUID, the IAID, the kind, the FQDN and the relay link address", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const r = row(GRID, V6[0]!);
     expect(cell(r, "mac").textContent).toBe("00:00:5e:00:53:10");
     const duid = within(r).getByTestId("lease-duid");
@@ -237,7 +236,7 @@ describe("a DHCPv6 row", () => {
   it("cuts a long DUID in the middle and keeps the whole of it in the title", async () => {
     held(V6[1]!).duid = "0004" + "00112233445566778899aabbccddeeff";
     open();
-    await loaded();
+    await loaded(GRID);
     const duid = within(row(GRID, V6[1]!)).getByTestId("lease-duid");
     expect(duid.textContent).toBe("00:04:00:11:22:33…cc:dd:ee:ff");
     expect(duid.getAttribute("title")).toBe("00:04:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff");
@@ -245,7 +244,7 @@ describe("a DHCPv6 row", () => {
 
   it("shows no MAC address for a DUID that holds none, and no peer", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const r = row(GRID, V6[1]!);
     expect(cell(r, "mac").textContent).toBe("");
     expect(within(r).getByTestId("lease-duid").textContent).toBe("00:02:00:00:00:09:0c:0c:0c:0c:01");
@@ -258,7 +257,7 @@ describe("a DHCPv6 row", () => {
     lease.addr = "2001:db8:1::";
     lease.prefix_len = 56;
     open();
-    await loaded();
+    await loaded(GRID);
     const r = row(GRID, "2001:db8:1::");
     expect(within(r).getByTestId("lease-kind").textContent).toBe("Prefix");
     expect(within(r).getByTestId("lease-kind").dataset.key).toBe("prefix");
@@ -269,7 +268,7 @@ describe("a DHCPv6 row", () => {
 
   it("shows a delegated prefix from the mock with its length, the word Prefix and the DUID of its client", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const r = row(GRID, PD);
     expect(within(r).getByTestId("lease-history-link").textContent).toBe("2001:db8:1:110::/60");
     expect(within(r).getByTestId("lease-kind").textContent).toBe("Prefix");
@@ -287,7 +286,7 @@ describe("a DHCPv6 row", () => {
 
   it("links an address to its history", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const href = within(row(GRID, V6[0]!)).getByTestId("lease-history-link").getAttribute("href")!;
     expect(new URL(href, "http://localhost").searchParams.get("addr")).toBe(V6[0]);
   });
@@ -298,7 +297,7 @@ describe("the lease of the same client in the other family", () => {
 
   it("links a DHCPv6 lease to the DHCPv4 lease of the client", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const r = row(GRID, V6[0]!);
     const peer = within(r).getByTestId("lease-peer");
     expect(peer.dataset.family).toBe("v4");
@@ -310,7 +309,7 @@ describe("the lease of the same client in the other family", () => {
 
   it("links a DHCPv4 lease to the DHCPv6 lease of the client", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const r = row(GRID, "192.0.2.100");
     expect(within(r).getByTestId("lease-peer").textContent).toBe("Also DHCPv6: 2001:db8:0:10::100");
     expect(peerHrefOf(r).searchParams.get("addr")).toBe(V6[0]);
@@ -321,7 +320,7 @@ describe("the lease of the same client in the other family", () => {
 
   it("follows the link to the list narrowed to the address", async () => {
     const view = open();
-    await loaded();
+    await loaded(GRID);
     fireEvent.click(within(row(GRID, V6[0]!)).getByTestId("lease-peer-link"));
     await waitFor(() => expect(keys()).toEqual(["192.0.2.100"]));
     expect(new URL(view.location(), "http://localhost").searchParams.get("addr")).toBe("192.0.2.100");
@@ -333,7 +332,7 @@ describe("the lease of the same client in the other family", () => {
     lease.state = "expired";
     lease.ends = new Date(Date.now() - 3_600_000).toISOString();
     open();
-    await loaded();
+    await loaded(GRID);
     const peer = within(row(GRID, "192.0.2.100")).getByTestId("lease-peer");
     expect(peer.dataset.state).toBe("expired");
     expect(peer.textContent).toBe("Also DHCPv6: 2001:db8:0:10::100 (Expired)");
@@ -344,13 +343,13 @@ describe("the lease of the same client in the other family", () => {
     const copy = { ...held(V6[0]!), addr: "2001:db8:0:10::1ff", state: "expired" as const, ends: new Date(Date.now() + 86_400_000).toISOString() };
     dhcpLeaseState().leases.push(copy);
     open();
-    await loaded();
+    await loaded(GRID);
     expect(within(row(GRID, "192.0.2.100")).getByTestId("lease-peer-link").textContent).toBe(V6[0]);
   });
 
   it("is a column that can be read as text", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     expect(cell(row(GRID, "192.0.2.102"), "peer").textContent).toBe("Also DHCPv6: 2001:db8:0:10::102");
   });
 });
@@ -360,7 +359,7 @@ describe("the address lease of a delegated prefix", () => {
 
   it("links a delegated prefix to the address lease of the same client", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     const r = row(GRID, PD);
     const found = within(r).getByTestId("lease-address-lease");
     expect(found.dataset.state).toBe("active");
@@ -375,13 +374,13 @@ describe("the address lease of a delegated prefix", () => {
 
   it("has the link on a delegated prefix only", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     for (const key of [V6[0]!, V6[1]!, "192.0.2.100"]) expect(within(row(GRID, key)).queryByTestId("lease-address-lease")).toBeNull();
   });
 
   it("follows the link to the list narrowed to the address lease", async () => {
     const view = open();
-    await loaded();
+    await loaded(GRID);
     fireEvent.click(within(row(GRID, PD)).getByTestId("lease-address-lease-link"));
     await waitFor(() => expect(keys()).toEqual([V6[0]]));
     expect(new URL(view.location(), "http://localhost").searchParams.get("addr")).toBe(V6[0]);
@@ -393,7 +392,7 @@ describe("the address lease of a delegated prefix", () => {
     lease.state = "expired";
     lease.ends = new Date(Date.now() - 3_600_000).toISOString();
     open();
-    await loaded();
+    await loaded(GRID);
     const found = within(row(GRID, PD)).getByTestId("lease-address-lease");
     expect(found.dataset.state).toBe("expired");
     expect(found.textContent).toBe(`${V6[0]} (Expired)`);
@@ -402,7 +401,7 @@ describe("the address lease of a delegated prefix", () => {
   it("shows no link when the client has no address lease", async () => {
     dhcpLeaseState().leases = dhcpLeaseState().leases.filter((l) => l.kind === "pd" || l.duid !== held(V6[0]!).duid);
     open();
-    await loaded();
+    await loaded(GRID);
     expect(within(row(GRID, PD)).queryByTestId("lease-address-lease")).toBeNull();
   });
 });
@@ -410,20 +409,20 @@ describe("the address lease of a delegated prefix", () => {
 describe("the row menu of a delegated prefix", () => {
   it("offers the history and the release, and no reservation", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     expect(await rowActions(row(GRID, PD))).toEqual(["history", "release"]);
   });
 
   it("links to the history of the first address", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     expect(new URL(within(row(GRID, PD)).getByTestId("lease-history-link").getAttribute("href")!, "http://localhost").searchParams.get("addr")).toBe(PD);
   });
 
   it("releases the prefix by its first address and names it with its length", async () => {
     const writes = recordWrites();
     open();
-    await loaded();
+    await loaded(GRID);
     await rowAction(row(GRID, PD), "release");
     const dialog = await screen.findByTestId("dialog-lease-release");
     expect(dialog.textContent).toContain("2001:db8:1:110::/60");
@@ -441,7 +440,7 @@ describe("the row menu of a delegated prefix", () => {
 describe("the row menu of a DHCPv6 lease", () => {
   it("offers the history and the release, and no reservation", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     expect(await rowActions(row(GRID, V6[0]!))).toEqual(["history", "release"]);
     // A DHCPv4 lease that is not reserved keeps its reserve action, once the scopes are read.
     await waitFor(async () => expect(await rowActions(row(GRID, "192.0.2.100"))).toContain("reserve"));
@@ -450,7 +449,7 @@ describe("the row menu of a DHCPv6 lease", () => {
   it("releases a DHCPv6 lease with the address in the path, the VRF and the reason", async () => {
     const writes = recordWrites();
     open();
-    await loaded();
+    await loaded(GRID);
     await rowAction(row(GRID, V6[0]!), "release");
     const dialog = await screen.findByTestId("dialog-lease-release");
     expect(dialog.textContent).toContain(V6[0]);
@@ -467,7 +466,7 @@ describe("the row menu of a DHCPv6 lease", () => {
 
   it("names a client without a MAC address by its DUID in the release dialog", async () => {
     open();
-    await loaded();
+    await loaded(GRID);
     await rowAction(row(GRID, V6[1]!), "release");
     const dialog = await screen.findByTestId("dialog-lease-release");
     expect(within(dialog).getByTestId("release-body").textContent).toBe(
@@ -520,7 +519,7 @@ describe("the words", () => {
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    await loaded();
+    await loaded(GRID);
     expect(screen.getByLabelText("Adressfamilj", { selector: "select" })).toBeTruthy();
     expect(screen.getByLabelText("DUID", { selector: "input" })).toBeTruthy();
     const r = row(GRID, V6[0]!);

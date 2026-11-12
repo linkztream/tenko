@@ -1,10 +1,14 @@
-import { cleanup } from "@solidjs/testing-library";
+import { cleanup, configure } from "@solidjs/testing-library";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { resetMockDb } from "../../api/mock/db";
 import { resetLayoutStoreForTest } from "../../grid/layoutStore";
 import { server } from "../../api/mock/node";
 import { forgetHosts } from "../../ipam/resolve";
 import { lazyPartsSettled } from "../../shell/lazyParts";
+
+/** How long a wait (`waitFor`, `findBy...`) may take before it fails with its last state. */
+export const WAIT_LIMIT_MS = 30_000;
+configure({ asyncUtilTimeout: WAIT_LIMIT_MS });
 
 // Every test file talks to the mock API (src/api/mock). A request no handler answers is an
 // error, so a test never reaches a real network by accident. (msw 3 names the option

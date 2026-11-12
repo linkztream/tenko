@@ -1,32 +1,14 @@
 // The secrets page as a sub-page of Settings, in the whole application: its routes beat the
 // generic settings route, the old /secrets address redirects (with the query and fragment), and
 // operators, who have no other settings page, still reach it.
-import { createMemoryHistory, MemoryRouter } from "@solidjs/router";
-import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
+import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { resetMockDb } from "../api/mock/db";
 import { SEED_SECRET_IDS } from "../api/mock/secrets-store";
-import { buildRoutes, Root } from "../App";
-import { alex } from "../auth/account/testkit";
-import { loadSession, setSessionForTest } from "../auth/session";
+import { renderApp } from "../app/testing/app";
+import { setSessionForTest } from "../auth/session";
 import { SECRETS_PATH, migratedSecretsPath, secretsPath } from "./paths";
 
 const NAS = SEED_SECRET_IDS.nasAdmin;
-
-async function renderApp(url: string, roles?: string[]) {
-  resetMockDb("signed-in");
-  if (roles) alex().roles = roles as never;
-  setSessionForTest(null, "loading");
-  const history = createMemoryHistory();
-  history.set({ value: url });
-  const result = render(() => (
-    <MemoryRouter history={history} root={Root}>
-      {buildRoutes()}
-    </MemoryRouter>
-  ));
-  await loadSession();
-  return { ...result, location: () => history.get() };
-}
 
 afterEach(() => setSessionForTest(null, "loading"));
 
@@ -116,14 +98,14 @@ describe("the secrets page under Settings", () => {
   });
 
   it("lets an operator in, without the settings navigation, while the other settings pages stay closed", async () => {
-    await renderApp(`/settings/secrets/${NAS}`, ["operator"]);
+    await renderApp(`/settings/secrets/${NAS}`, { roles: ["operator"] });
     expect(await screen.findByTestId("secret-detail", {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByTestId("settings-nav")).toBeNull();
     expect(screen.queryByText("Administrators only")).toBeNull();
   });
 
   it("does not open the other settings pages to an operator", async () => {
-    await renderApp("/settings/security", ["operator"]);
+    await renderApp("/settings/security", { roles: ["operator"] });
     expect(await screen.findByText("Administrators only", {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByTestId("page-secrets")).toBeNull();
   });
@@ -151,22 +133,13 @@ describe("the old /secrets address", () => {
   });
 
   it("redirects for an operator too", async () => {
-    const app = await renderApp("/secrets", ["operator"]);
+    const app = await renderApp("/secrets", { roles: ["operator"] });
     await waitFor(() => expect(app.location()).toBe("/settings/secrets"));
     expect(await screen.findByTestId("page-secrets", {}, { timeout: 5000 })).toBeTruthy();
   });
 
   it("is followed after a sign-in that asked for it", async () => {
-    resetMockDb("signed-out");
-    setSessionForTest(null, "loading");
-    const history = createMemoryHistory();
-    history.set({ value: "/secrets/abc" });
-    render(() => (
-      <MemoryRouter history={history} root={Root}>
-        {buildRoutes()}
-      </MemoryRouter>
-    ));
-    await loadSession();
-    await waitFor(() => expect(history.get()).toBe("/signin?next=%2Fsecrets%2Fabc"));
+    const app = await renderApp("/secrets/abc", { scenario: "signed-out" });
+    await waitFor(() => expect(app.location()).toBe("/signin?next=%2Fsecrets%2Fabc"));
   });
 });

@@ -12,7 +12,7 @@ import { signInAlex } from "../../auth/account/testkit";
 import { signInWithRoles } from "../../auth/scope-testkit";
 import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
-import { cell, dhcpSwitchedOff, recordIfMatch, row, rowAction, rowActions, rows } from "../testkit";
+import { cell, dhcpSwitchedOff, recordIfMatch, row, rowAction, rowActions, loaded, rows } from "../testkit";
 import ClassesPage from "./ClassesPage";
 
 beforeEach(async () => {
@@ -25,13 +25,12 @@ afterEach(async () => {
 });
 
 const open = () => renderRoute(ClassesPage, { url: "/dhcp/classes", path: "/dhcp/classes" });
-const loaded = () => waitFor(() => expect(rows("dhcp-classes").length).toBeGreaterThan(0));
 const matchRows = (dialog: HTMLElement) => within(dialog).getAllByTestId("match-row");
 
 describe("the classes", () => {
   it("lists the class with its matches in words and where it is used", async () => {
     const view = open();
-    await loaded();
+    await loaded("dhcp-classes");
     const pxe = row("dhcp-classes", "pxe-clients");
     expect(within(pxe).getByTestId("class-match").textContent).toBe('vendor class starting with "PXEClient"');
     expect(within(pxe).getByTestId("class-used-by").dataset.value).toBe("1");
@@ -42,7 +41,7 @@ describe("the classes", () => {
   it("creates a class with a match of each kind and sends them in their stored form", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     fireEvent.click(screen.getByTestId("dhcp-class-create"));
     const dialog = await screen.findByTestId("dialog-class-form");
     fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "lab-gear" } });
@@ -89,7 +88,7 @@ describe("the classes", () => {
   it("picks an architecture by name, and takes any other number with the number input", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     fireEvent.click(screen.getByTestId("dhcp-class-create"));
     const dialog = await screen.findByTestId("dialog-class-form");
     fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "boot-arch" } });
@@ -120,7 +119,7 @@ describe("the classes", () => {
 
   it("checks an architecture that is not chosen", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     fireEvent.click(screen.getByTestId("dhcp-class-create"));
     const dialog = await screen.findByTestId("dialog-class-form");
     fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "none-picked" } });
@@ -131,7 +130,7 @@ describe("the classes", () => {
 
   it("keeps the focus in a row while its value is typed", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     fireEvent.click(screen.getByTestId("dhcp-class-create"));
     const dialog = await screen.findByTestId("dialog-class-form");
     const input = within(matchRows(dialog)[0]!).getByTestId("match-value");
@@ -144,7 +143,7 @@ describe("the classes", () => {
   it("checks the name and each match before it sends, naming the row", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     fireEvent.click(screen.getByTestId("dhcp-class-create"));
     const dialog = await screen.findByTestId("dialog-class-form");
     fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "Bad Name" } });
@@ -164,7 +163,7 @@ describe("the classes", () => {
 
   it("shows the refusal of the server when the name exists", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     fireEvent.click(screen.getByTestId("dhcp-class-create"));
     const dialog = await screen.findByTestId("dialog-class-form");
     fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "pxe-clients" } });
@@ -175,7 +174,7 @@ describe("the classes", () => {
 
   it("removes a match row, but never the last", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     fireEvent.click(screen.getByTestId("dhcp-class-create"));
     const dialog = await screen.findByTestId("dialog-class-form");
     expect(within(dialog).queryByTestId("match-remove")).toBeNull();
@@ -189,7 +188,7 @@ describe("the classes", () => {
   it("edits a class with the revision read", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     const revision = dhcpState().classes[0]!.revision;
     await rowAction(row("dhcp-classes", "pxe-clients"), "edit");
     const dialog = await screen.findByTestId("dialog-class-form");
@@ -207,7 +206,7 @@ describe("the classes", () => {
   it("deletes a class nobody names", async () => {
     dhcpState().policies.length = 0;
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     await rowAction(row("dhcp-classes", "pxe-clients"), "delete");
     fireEvent.click(within(await screen.findByTestId("dialog-class-delete")).getByTestId("confirm-ok"));
     await waitFor(() => expect(rows("dhcp-classes")).toHaveLength(0));
@@ -215,7 +214,7 @@ describe("the classes", () => {
 
   it("shows the message of the server when a policy names the class", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     await rowAction(row("dhcp-classes", "pxe-clients"), "delete");
     const dialog = await screen.findByTestId("dialog-class-delete");
     fireEvent.click(within(dialog).getByTestId("confirm-ok"));
@@ -228,7 +227,7 @@ describe("the classes", () => {
   it("offers a viewer nothing to change", async () => {
     await signInWithRoles(["viewer"]);
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     expect(screen.queryByTestId("dhcp-class-create")).toBeNull();
     expect(await rowActions(row("dhcp-classes", "pxe-clients"))).toEqual([]);
   });
@@ -242,7 +241,7 @@ describe("the classes", () => {
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    await loaded();
+    await loaded("dhcp-classes");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Klientklasser");
     expect(within(row("dhcp-classes", "pxe-clients")).getByTestId("class-match").textContent).toBe('tillverkarklass som börjar med "PXEClient"');
     fireEvent.click(screen.getByTestId("dhcp-class-create"));

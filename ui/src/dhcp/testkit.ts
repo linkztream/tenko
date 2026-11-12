@@ -5,7 +5,7 @@ import { vi } from "vitest";
 import { server } from "../api/mock/node";
 import { dhcpStubs } from "../api/mock/routes-dhcp";
 
-export { cell, recordWrites, row, rowAction, rowActions, rows, type SentRequest } from "../dns/testkit";
+export { cell, loaded, recordWrites, row, rowAction, rowActions, rows, type SentRequest } from "../dns/testkit";
 
 export interface SentWrite {
   url: string;

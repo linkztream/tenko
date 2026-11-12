@@ -11,7 +11,7 @@ import { signInAlex } from "../../auth/account/testkit";
 import { signInWithRoles } from "../../auth/scope-testkit";
 import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
-import { cell, dhcpSwitchedOff, recordIfMatch, row, rowAction, rowActions, rows } from "../testkit";
+import { cell, dhcpSwitchedOff, recordIfMatch, row, rowAction, rowActions, loaded, rows } from "../testkit";
 import OptionsPage from "./OptionsPage";
 
 beforeEach(async () => {
@@ -24,12 +24,11 @@ afterEach(async () => {
 });
 
 const open = () => renderRoute(OptionsPage, { url: "/dhcp/options", path: "/dhcp/options" });
-const loaded = () => waitFor(() => expect(rows("dhcp-option-defs").length).toBeGreaterThan(0));
 
 describe("the options page", () => {
   it("shows the options of the server, the definitions and the catalog", async () => {
     const view = open();
-    await loaded();
+    await loaded("dhcp-option-defs");
     const server = await screen.findByTestId("server-optset");
     await waitFor(() => expect(within(server).getAllByTestId("optset-row")).toHaveLength(2));
     const site = row("dhcp-option-defs", "dhcp4:230");
@@ -47,7 +46,7 @@ describe("the options page", () => {
   it("lists the DHCPv6 catalog after the DHCPv4 one and offers both spaces for the options of the server", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-option-defs");
     // The grid shows the rows in view; its row count says both catalogs are in it (the header counts one).
     await waitFor(() => expect(screen.getByTestId("grid-dhcp-catalog").querySelector("[aria-rowcount]")?.getAttribute("aria-rowcount")).toBe(String(catalog().length + 1)));
     expect(catalog().some((c) => c.space === "dhcp6")).toBe(true);
@@ -79,7 +78,7 @@ describe("the options page", () => {
   it("defines an option after the local checks and shows the refusals of the server under the field", async () => {
     const writes = recordIfMatch();
     open();
-    await loaded();
+    await loaded("dhcp-option-defs");
     fireEvent.click(screen.getByTestId("dhcp-def-create"));
     const dialog = await screen.findByTestId("dialog-def-form");
     fireEvent.input(within(dialog).getByTestId("field-code"), { target: { value: "300" } });
@@ -112,7 +111,7 @@ describe("the options page", () => {
 
   it("cannot make a list of a type that does not repeat", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-option-defs");
     fireEvent.click(screen.getByTestId("dhcp-def-create"));
     const dialog = await screen.findByTestId("dialog-def-form");
     expect((within(dialog).getByTestId("field-array") as HTMLInputElement).disabled).toBe(true);
@@ -122,7 +121,7 @@ describe("the options page", () => {
 
   it("deletes a definition after the confirmation, and refuses one that an option set uses with the server's message", async () => {
     open();
-    await loaded();
+    await loaded("dhcp-option-defs");
     await rowAction(row("dhcp-option-defs", "dhcp4:230"), "delete");
     fireEvent.click(within(await screen.findByTestId("dialog-def-delete")).getByTestId("confirm-ok"));
     await waitFor(() => expect(rows("dhcp-option-defs")).toHaveLength(0));
@@ -132,7 +131,7 @@ describe("the options page", () => {
   it("refuses to delete a definition that an option set uses", async () => {
     dhcpState().optionSets.set("server", { ...dhcpState().optionSets.get("server")!, values: [{ space: "dhcp4", code: 230, data: "0004" }] });
     open();
-    await loaded();
+    await loaded("dhcp-option-defs");
     await waitFor(() => expect(cell(row("dhcp-option-defs", "dhcp4:230"), "used_by").textContent).toBe("1"));
     await rowAction(row("dhcp-option-defs", "dhcp4:230"), "delete");
     const dialog = await screen.findByTestId("dialog-def-delete");
@@ -146,7 +145,7 @@ describe("the options page", () => {
   it("gives a viewer the lists and nothing to change", async () => {
     await signInWithRoles(["viewer"]);
     open();
-    await loaded();
+    await loaded("dhcp-option-defs");
     expect(screen.queryByTestId("dhcp-def-create")).toBeNull();
     expect(await rowActions(row("dhcp-option-defs", "dhcp4:230"))).toEqual([]);
     const server = await screen.findByTestId("server-optset");
@@ -164,7 +163,7 @@ describe("the options page", () => {
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    await loaded();
+    await loaded("dhcp-option-defs");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("DHCP-alternativ");
     expect(screen.getByTestId("dhcp-def-create").textContent).toBe("Definiera alternativ");
     await waitFor(() => expect(rows("dhcp-catalog").length).toBeGreaterThan(5));
