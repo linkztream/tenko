@@ -1,3 +1,8 @@
+# A type or method that only a home of shared code may use (CONTRIBUTING.md, "Where shared
+# code lives") goes into `disallowed-types` or `disallowed-methods` here, with a `reason` that
+# names the home; the home's module carries `#[allow(clippy::disallowed_methods)]` (or
+# `_types`) with a comment that says why. An entry is added by the change that moves the last
+# copy into its home, so that the workspace passes the ban the day it lands.
 cognitive-complexity-threshold = 20
 too-many-arguments-threshold = 8
 # Domain terms that `clippy::doc_markdown` would otherwise ask to wrap in backticks.

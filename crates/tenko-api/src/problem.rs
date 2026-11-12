@@ -7,6 +7,14 @@
 //!
 //! Handlers return `Result<T, ApiError>`. Any [`Coded`] error converts into [`ApiError`] with
 //! `?`, so domain errors need no mapping code in the API.
+//!
+//! This module and the modules beside it are a home of shared code (`CONTRIBUTING.md`,
+//! "Where shared code lives") for what a request must look like and what an operation can
+//! answer: the `request` module (the typed `If-Match` header, path identifiers, JSON bodies
+//! and query parameters that refuse what they do not know, paging) and the answer groups
+//! that both a handler and its OpenAPI annotation use. A module named here that does not
+//! exist yet is created by the change that first needs it, with this charter in its header.
+//! Never: anything a crate below the API needs. Used by the route modules of this crate.
 
 use std::{collections::BTreeMap, fmt};
 

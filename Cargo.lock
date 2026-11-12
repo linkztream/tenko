@@ -3602,6 +3602,10 @@ name = "tenko-migrate"
 version = "0.0.11"
 
 [[package]]
+name = "tenko-net"
+version = "0.0.11"
+
+[[package]]
 name = "tenko-scan"
 version = "0.0.11"
 dependencies = [

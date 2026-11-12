@@ -1025,12 +1025,17 @@ jobs:
         run: node --test "scripts/*.test.mjs"
       - name: Validate CHANGELOG.md
         run: node scripts/changelog.mjs validate
-      # The baseline of the test rules only shrinks (docs/testing/rules.md): no rule may have
-      # more known findings than at the base. Here because this job has the history.
+      # The baselines of the test rules (docs/testing/rules.md) and of the copy lint
+      # (CONTRIBUTING.md, "Where shared code lives") only shrink: no rule may have more known
+      # findings than at the base. Here because this job has the history.
       - name: The test baseline did not grow
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: node scripts/test-lint.mjs --grown-since "$BASE"
+      - name: The copy baseline did not grow
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/copy-lint.mjs --grown-since "$BASE"
       - name: Entry for product changes
         if: steps.override.outputs.skip != 'true'
         env:
@@ -1063,6 +1068,11 @@ jobs:
       # not in scripts/test-lint.baseline.json and on an entry there that nothing matches.
       - name: Test rules
         run: node scripts/test-lint.mjs
+      # One place per fact (CONTRIBUTING.md, "Where shared code lives"): fails on a copy of a
+      # fact a home holds that is not in scripts/copy-lint.baseline.json, on an entry there
+      # that nothing matches, and on an exception comment without a reason.
+      - name: Copies of shared code
+        run: node scripts/copy-lint.mjs
 
   # -------------------------------------------------------------------------------------
   # PUBLICATION: the Developer Certificate of Origin check. CONTRIBUTING.md and CLA.md

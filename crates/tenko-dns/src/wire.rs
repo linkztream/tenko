@@ -2,6 +2,14 @@
 //! with compression pointers, the walk over the records of a message and the TSIG record
 //! appended to a finished response. None of them allocates once the output buffer has its
 //! capacity.
+//!
+//! This module is a home of shared code (`CONTRIBUTING.md`, "Where shared code lives") for
+//! the DNS wire format: the record data layout and name decompression for every record type,
+//! the RCODE and record type numbers, and one exchange with a remote server with an error
+//! that keeps its cause. Never: resolution policy, caches or zone data. Used by this crate;
+//! `tenko-dhcp` and `tenko-scan`, which already depend on it, may use it too. An addition
+//! inside this charter needs no permission; a change to what an existing item does goes
+//! through the maintainers.
 
 use crate::name::{MAX_NAME_LEN, NameBuf};
 

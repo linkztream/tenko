@@ -1,0 +1,16 @@
+[package]
+name = "tenko-net"
+version = "0.0.11"
+description = "Network rules a published standard defines, over std::net types: address classes, reverse names, the client address behind proxies"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# A leaf crate: no workspace crate, no serde, no utoipa (the charter in src/lib.rs). The test
+# in src/lib.rs reads this file and fails on a workspace dependency. `ipnet` is the one
+# dependency the charter names; it is added with the first function that takes its types.
+[dependencies]
+
+[lints]
+workspace = true

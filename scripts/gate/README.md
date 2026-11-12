@@ -116,7 +116,7 @@ its Unreleased section names a work package (`WP` and a digit).
 | `apply` | apply | `apply.mjs` (above), then `git log --oneline origin/main..HEAD` | The changes apply onto `origin/main` without a conflict that needs a person. |
 | `regenerate` | regenerate: openapi, ui types, i18n, traces | `tenko openapi`, `ui/scripts/api-types.mjs`, `ui/scripts/i18n.mjs`, `requirement-trace.mjs` for phases 1 to 4; commits what changed | The generated files match the merged source (a commit "chore: regenerate ..." when they did not). |
 | `spelling` | spelling | `scripts/spelling.mjs` | American English in the tracked files. |
-| `test-lint` | test lint | `scripts/test-lint.mjs`, then `--grown-since origin/main` | No test breaks the standing rules beyond the baseline, and the baseline did not grow. |
+| `test-lint` | test lint, copy lint | `scripts/test-lint.mjs` and `scripts/copy-lint.mjs`, each then with `--grown-since origin/main` | No test breaks the standing rules and no product code copies a fact a home holds beyond the baselines, and neither baseline grew. |
 | `ui` | ui typecheck, lint, tests | `npm run typecheck`, `npm run lint`, `npm run test` in `ui/` | The UI type-checks, passes the linters and the message and API type checks, and every unit test passes. |
 | `ui-build` | ui build + size | `npm run build`, `npm run size` | The UI builds and stays within its size budget. |
 | `fmt` | fmt | `cargo fmt --all -- --check` | The Rust code is formatted. |

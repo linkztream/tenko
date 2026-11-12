@@ -3,12 +3,20 @@
 //! semantics, and the conformance suite (module `testing`, feature `testing`) that every
 //! implementation must pass.
 //!
-//! # Ownership
+//! # A home of shared code
 //!
-//! WP1.0 (the lead builder) owns `lib.rs`, `api.rs`, `mem.rs` and `testing.rs`: the
-//! contract. Other packages never edit them; contract changes go through the lead as a
-//! small pull request reviewed by every package that uses the item (plan rule 2.8). WP1.1
-//! owns the rest of this crate.
+//! This crate is a home of shared code (`CONTRIBUTING.md`, "Where shared code lives") for
+//! everything that puts bytes durably on disk or follows what the store changed, in the
+//! modules `layout` (the store's file names), `fs` (the private-file writer and the atomic
+//! replace, with their guarantees stated and tested there), `follow` (follow one table's
+//! changes from a revision), `feed` (send tables to a node) and `codes` (the store's error
+//! codes as constants). A module named here that does not exist yet is created by the change
+//! that first needs it, with this charter in its header.
+//!
+//! - **Never:** a domain type, or a table of another crate.
+//! - **Who depends on it:** every crate that writes a private file or follows a table
+//!   already does. An addition inside this charter needs no permission; a change to the
+//!   [`Store`] contract or to what an existing item does goes through the maintainers.
 //!
 //! # Modules
 //!

@@ -3,6 +3,12 @@
 //! exchanges that client does not cover (the session cookie of the login ceremony and the
 //! multipart upload of an import).
 //!
+//! What every command repeats lives in one home of shared code (`CONTRIBUTING.md`, "Where
+//! shared code lives"), the module `client::common`: paging through a list, the usage text,
+//! the detail printer, the idempotency key, waiting for a job, the not-found message and the
+//! text of an absent value. Never: anything one command alone needs. The module is created
+//! by the change that first moves a helper there, with this charter in its header.
+//!
 //! # Credentials
 //!
 //! `tenko login` signs in with a password and, when the account needs one, a second factor,

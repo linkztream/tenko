@@ -18,7 +18,7 @@ TITLES=(
   "apply"
   "regenerate: openapi, ui types, i18n, traces"
   "spelling"
-  "test lint"
+  "test lint, copy lint"
   "ui typecheck, lint, tests"
   "ui build + size"
   "fmt"
@@ -103,6 +103,8 @@ step_spelling() {
 step_test_lint() {
   node scripts/test-lint.mjs || fail test-lint
   node scripts/test-lint.mjs --grown-since origin/main || fail test-lint-grown
+  node scripts/copy-lint.mjs || fail copy-lint
+  node scripts/copy-lint.mjs --grown-since origin/main || fail copy-lint-grown
 }
 
 # A UI test file that fails in the full run is run again alone: one that passes alone is named

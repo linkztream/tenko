@@ -1,12 +1,18 @@
 //! Job engine: multi-step jobs with persisted state, timeouts and rollback (ADR 0005,
 //! IPAM-17, IPAM-19, CONN-09, API-09).
 //!
-//! # Ownership
+//! # A home of shared code
 //!
-//! WP1.0 (the lead builder) owns [`model`]: the job, step and handler contract (plan
-//! section 2.6). Other packages never edit it; contract changes go through the lead as a
-//! small pull request reviewed by every package that uses the item (plan rule 2.8). WP1.6
-//! owns the rest of this crate and `routes/jobs.rs` of `tenko-api`.
+//! This crate is a home of shared code (`CONTRIBUTING.md`, "Where shared code lives") for
+//! how other crates use jobs: `read` (read functions over the job tables, so that no other
+//! crate knows their key layout), `stage_or_propose` (stage inside the step or propose),
+//! and `handoff` (the inline hand-off of work to a job). A module named here that does not
+//! exist yet is created by the change that first needs it, with this charter in its header.
+//!
+//! - **Never:** a step of another crate's domain; the steps live with their crate.
+//! - **Who depends on it:** any crate that runs or reads jobs. An addition inside this
+//!   charter needs no permission; a change to [`model`] (the job, step and handler contract)
+//!   or to what an existing item does goes through the maintainers.
 //!
 //! # How it works
 //!

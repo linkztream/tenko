@@ -70,6 +70,9 @@ tenko-ipam = { path = "crates/tenko-ipam" }
 tenko-jobs = { path = "crates/tenko-jobs" }
 tenko-krb = { path = "crates/tenko-krb" }
 tenko-migrate = { path = "crates/tenko-migrate" }
+# Network rules a published standard defines; a leaf crate that no workspace crate sits under
+# and that tenko-core never depends on (CONTRIBUTING.md, "Where shared code lives").
+tenko-net = { path = "crates/tenko-net" }
 tenko-store = { path = "crates/tenko-store" }
 tenko-vault = { path = "crates/tenko-vault" }
 

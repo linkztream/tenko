@@ -3,12 +3,19 @@
 //! audit records and the hash chain, stable error codes, order-preserving keys and CBOR
 //! values, namespaced names, secret references and the IPAM part of the migration IR.
 //!
-//! # Ownership
+//! # A home of shared code
 //!
-//! This crate is the contract between the Phase 1 work packages and is owned by the lead
-//! builder (WP1.0). Other packages never edit this crate; contract changes go through the
-//! lead as a small pull request reviewed by every package that uses the changed item
-//! (plan rule 2.8). Error codes are stable once merged (API-08).
+//! This crate is a home of shared code (`CONTRIBUTING.md`, "Where shared code lives"):
+//!
+//! - **In:** contracts between crates: identifiers, principals and authorization, the stored
+//!   models, the error trait and code lists, the codecs (CBOR, keys, byte text forms), the
+//!   metrics registry, secret references, roles, test support.
+//! - **Never:** code that only one or two crates use (it goes to the lowest crate those
+//!   callers share), input or output, policy (a default or a limit an operator can set).
+//! - **Who depends on it:** any crate. Every crate rebuilds when it changes, so an addition
+//!   inside this charter needs no permission but is announced in the first line of its pull
+//!   request and merged ahead of other open changes; a change to what an existing item does
+//!   goes through the maintainers. Error codes are stable once merged (API-08).
 //!
 //! # Map
 //!

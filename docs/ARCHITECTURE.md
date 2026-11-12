@@ -516,6 +516,7 @@ tenko/
     adr/                     # architecture decision records
   crates/
     tenko-core/              # data model (IPAM, zones, leases, policies), IR for migration
+    tenko-net/               # network rules of published standards; a leaf crate (CONTRIBUTING.md, "Where shared code lives")
     tenko-store/             # Raft + KV, snapshots, local cache
     tenko-cluster/           # gRPC/mTLS, enrollment, internal CA
     tenko-auth/              # users, passkeys, TOTP, password policy, RBAC, sessions
