@@ -372,7 +372,7 @@ validation_rows() {
   row val.keytrap "the KeyTrap zone is answered within the caps in under 50 ms (M38)" keytrap_row
   row val.keytrap.metric "the cap is counted in tenko_dns_validation_total{reason=cap}" metric_counts_cap
   row val.sentinel "the RFC 8509 sentinel names answer as the anchors say" sentinel_row
-  row val.log "the query log shows the validation state" log_shows_validation www.example.test secure
+  row val.log "the query log shows the validation state" within 10 log_shows_validation www.example.test secure
   row val.status "the status shows the anchor valid, the outcomes and the key sets" status_shows_validation
   row val.signaling "the RFC 8145 signaling query reached the lab root" within 30 signaling_seen
   # A negative trust anchor makes the bogus zone insecure until it is deleted.

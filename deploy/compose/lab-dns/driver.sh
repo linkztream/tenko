@@ -378,7 +378,9 @@ row() {
   else
     line="$(printf 'FAIL %-22s %s' "$name" "$what")"
     rows_failed=$((rows_failed + 1))
-    # The check once more with a trace, for the log.
+    # The check once more with a trace, for the log; a check under `within` runs once
+    # without it, since `within` discards the check's output.
+    [[ "$1" == within ]] && shift 2
     (set -x; "$@") >&2 2>&1 || true
   fi
   summary+=("$line")

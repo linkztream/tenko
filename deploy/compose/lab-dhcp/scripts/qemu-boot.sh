@@ -14,6 +14,10 @@ ip link add br0 type bridge
 ip link set eth0 master br0
 ip tuntap add dev tap0 mode tap
 ip link set tap0 master br0
+# The bridge learns no address on eth0: where the lab network sends a broadcast back to its
+# sender (Docker Desktop does), it would learn the machine's address there from the
+# machine's own DISCOVER and drop the unicast OFFER that comes in on eth0.
+ip link set eth0 type bridge_slave learning off
 ip link set tap0 up
 ip link set br0 up
 accel=tcg

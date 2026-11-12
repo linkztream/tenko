@@ -103,7 +103,7 @@ within() {
 }
 
 # row <name> <what> <command...>: one PASS or FAIL line; a failed check runs once more
-# with a trace for the log.
+# with a trace for the log (a check under `within` without it, which discards its output).
 row() {
   local name="$1" what="$2" line
   shift 2
@@ -112,6 +112,7 @@ row() {
   else
     line="$(printf 'FAIL %-22s %s' "$name" "$what")"
     rows_failed=$((rows_failed + 1))
+    [[ "$1" == within ]] && shift 2
     (set -x; "$@") >&2 2>&1 || true
   fi
   summary+=("$line")

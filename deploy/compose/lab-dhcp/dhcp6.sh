@@ -322,12 +322,37 @@ v6_correlation_rfc6939_ok() {
   [[ -n "$ip4" && -n "$ip6" ]] && within 15 v6_observed "$v6_mac_rfc6939" "$ip4" "$ip6"
 }
 
-# The DDNS rows: a forward zone and the reverse zone of the lan6 prefix, DDNS on for the
-# lan6 scope with the forward zone named.
+# The DDNS rows: a forward zone, the reverse zone IPAM creates for the lan6 prefix, DDNS on
+# for the lan6 scope with the forward zone named.
 v6_zone_create() {
   must "the zone $1" api POST /dns/zones \
     "{\"name\": \"$1\", \"kind\": \"primary\", \"serial\": \"counter\", \"soa\": {\"mname\": \"ns.example.test\", \"rname\": \"hostmaster.example.test\", \"refresh\": 60, \"retry\": 10, \"expire\": 3600, \"minimum\": 5, \"ttl\": 60}, \"name_servers\": [\"ns.example.test\"]}"
   field "d['id']" <"$work/api.out"
+}
+# v6_reverse_zone <name> <prefix id>: the id of the zone <name> whose reverse_of is the prefix.
+v6_reverse_zone() {
+  api GET "/dns/zones?limit=1000" >/dev/null || return 1
+  python3 - "$work/api.out" "$1" "$2" <<'PY'
+import json, sys
+name, prefix = sys.argv[2:4]
+zones = json.load(open(sys.argv[1]))["items"]
+ids = [z["id"] for z in zones if z["name"].rstrip(".") == name and z.get("reverse_of") == prefix]
+if not ids:
+    print([(z["name"], z.get("reverse_of")) for z in zones], file=sys.stderr)
+print(ids[0] if ids else "")
+sys.exit(0 if ids else 1)
+PY
+}
+# v6_reverse_zone_ok <name> <prefix id>: the first forward zone makes every prefix without a
+# dns_reverse setting managed (docs/dns.md section 7), and IPAM creates its reverse zones at
+# its next run, which comes shortly after any change; so the lab creates no reverse zone of
+# its own (it would race that run) but runs the reconciler on demand and finds the zone
+# with reverse_of the prefix in v6_zone_rev.
+v6_reverse_zone_ok() {
+  v6_zone_rev=""
+  v6_reverse_zone "$1" "$2" >/dev/null 2>&1 && printf 'the reconciler had created %s on its own\n' "$1" >&2
+  api POST /proposals/reconcile >/dev/null || return 1
+  v6_zone_rev="$(v6_reverse_zone "$1" "$2")"
 }
 # v6_zone_has <zone id> <name> <type> [<address or target>]: an RRset of origin dhcp. The
 # API shows a DHCID record as the unknown type TYPE49 with its data in hex; the DHCID type
@@ -567,7 +592,8 @@ v6_rows() {
 
   step "dhcp6: DDNS for a client with option 39"
   v6_zone_fwd="$(v6_zone_create example.test)"
-  v6_zone_rev="$(v6_zone_create 0.0.0.0.1.0.1.0.8.b.d.0.1.0.0.2.ip6.arpa)"
+  row "v6.reverse-zone" "the forward zone makes ${v6_prefix6[lan6]} managed: IPAM creates its reverse zone in ip6.arpa" \
+    v6_reverse_zone_ok 0.0.0.0.1.0.1.0.8.b.d.0.1.0.0.2.ip6.arpa "${v6_scope6[lan6]}"
   must "DDNS on the lan6 scope" api PATCH "/dhcp/scopes/${v6_scope6[lan6]}" \
     "{\"ddns\": {\"enabled\": true, \"forward_zone\": \"$v6_zone_fwd\", \"reverse\": true}}"
   row "v6.fqdn" "option 39 host6: host6.example.test AAAA, DHCID and the PTR in ip6.arpa, all of origin dhcp" \
