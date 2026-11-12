@@ -8,27 +8,24 @@
 // NO FAKES: the DHCP and IPAM routes are the real server's. Documentation values only:
 // 2001:db8:180::/48.
 
-import type { Api, Schemas } from "./support/api";
+import type { Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { cell, gridRow } from "./support/ui";
+import { arrangeScope } from "./support/dhcp";
 
 const FIRST = "2001:db8:180:100::";
 const LAST = "2001:db8:180:1ff:ffff:ffff:ffff:ffff";
 
 /** The network 2001:db8:180::/48 and a scope on it, which has no pool yet. */
-async function arrange(api: Api): Promise<{ prefix: Schemas["Prefix"] }> {
-  const prefix = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "2001:db8:180::/48", description: "Delegation, IPv6" })).item!;
-  await api.post("/dhcp/scopes", { prefix: prefix.id, description: "Delegation scope, IPv6" });
-  return { prefix };
-}
+const SETUP = { cidr: "2001:db8:180::/48", description: "Delegation, IPv6", scope: { description: "Delegation scope, IPv6" } } as const;
 
 const isRangePost = (id: string) => (response: { url(): string; request(): { method(): string } }) =>
   response.request().method() === "POST" && response.url().endsWith(`/api/v1/prefixes/${id}/ranges`);
 
 test("adds a delegation pool to a DHCPv6 scope and lists it with its prefixes", async ({ page, api, signedIn }) => {
   void signedIn;
-  const { prefix } = await arrange(api);
+  const { prefix } = await arrangeScope(api, SETUP);
 
   await page.goto(`/dhcp/scopes/${prefix.id}/pools`);
   await expect(page.getByTestId("scope-name")).toHaveText("2001:db8:180::/48");
@@ -81,7 +78,7 @@ test("adds a delegation pool to a DHCPv6 scope and lists it with its prefixes", 
 
 test("refuses a delegation pool off the boundaries of its length before anything is sent", async ({ page, api, signedIn }) => {
   void signedIn;
-  const { prefix } = await arrange(api);
+  const { prefix } = await arrangeScope(api, SETUP);
   await page.goto(`/dhcp/scopes/${prefix.id}/pools`);
   await page.getByTestId("pd-pool-add").click();
   const dialog = page.getByTestId("dialog-pd-pool-form");
@@ -99,7 +96,7 @@ test.describe("in Swedish", () => {
 
   test("renders the delegation pools in Swedish", async ({ page, api, signedIn }, testInfo) => {
     void signedIn;
-    const { prefix } = await arrange(api);
+    const { prefix } = await arrangeScope(api, SETUP);
     await api.post(`/prefixes/${prefix.id}/ranges`, { first: FIRST, last: LAST, role: "dhcp_pd_pool", delegated_len: 60 });
     await page.goto(`/dhcp/scopes/${prefix.id}/pools`);
     await expect(gridRow(page, "dhcp-pd-pools", `${FIRST}-${LAST}`)).toBeVisible();

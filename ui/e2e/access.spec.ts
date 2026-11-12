@@ -20,6 +20,7 @@ import type { Api, Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { withKey } from "./support/ui";
+import { createScopePair } from "./support/ipam";
 
 type Prefix = Schemas["Prefix"];
 type GrantView = Schemas["GrantView"];
@@ -34,8 +35,7 @@ interface Arranged {
 }
 
 async function arrange(api: Api): Promise<Arranged> {
-  const inScope = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "203.0.113.0/24", description: "Lab" })).item!;
-  const beside = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "198.51.100.0/24", description: "IoT" })).item!;
+  const { inScope, beside } = await createScopePair(api);
   const casey = await api.post<Schemas["UserInfo"]>("/users", {
     name: CASEY.name,
     display_name: CASEY.displayName,

@@ -10,11 +10,12 @@
 // are the real ones. Documentation values only: 192.0.2.0/24, MAC 00:00:5e:00:53:xx.
 
 import { test as base, expect } from "./support/fixtures";
-import type { Api, Schemas } from "./support/api";
+import type { Schemas } from "./support/api";
 import { freeDhcpPorts, RelayClient, type DhcpPorts } from "./support/dhcp-client";
 import { expectRendered } from "./support/i18n";
 import { rowMenuItem } from "./support/ipam";
 import { cell, gridRow } from "./support/ui";
+import { arrangeScope } from "./support/dhcp";
 
 /** The server runs the role on ports found for this test; a relay agent is bound to the reply port. */
 const test = base.extend<{ ports: DhcpPorts; relay: RelayClient }>({
@@ -40,12 +41,7 @@ const FIRST_MAC = "00:00:5e:00:53:01";
 const SECOND_MAC = "00:00:5e:00:53:02";
 
 /** The network 192.0.2.0/24, a pool 192.0.2.100 to 192.0.2.199 and a scope for the network. */
-async function arrange(api: Api): Promise<Schemas["Prefix"]> {
-  const prefix = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: `${NETWORK}/24`, description: "Office" })).item!;
-  await api.post(`/prefixes/${prefix.id}/ranges`, { first: "192.0.2.100", last: "192.0.2.199", role: "dhcp_pool" });
-  await api.post("/dhcp/scopes", { prefix: prefix.id, description: "Office LAN" });
-  return prefix;
-}
+const SETUP = { cidr: `${NETWORK}/24`, description: "Office", pool: { first: "192.0.2.100", last: "192.0.2.199" }, scope: { description: "Office LAN" } } as const;
 
 /** The address a client of the pool got. */
 function inPool(address: string): void {
@@ -54,7 +50,7 @@ function inPool(address: string): void {
 
 test("shows the leases of relayed clients live, releases one and keeps the history", async ({ page, api, signedIn, relay }) => {
   void signedIn;
-  await arrange(api);
+  await arrangeScope(api, SETUP);
 
   const first = await relay.dora({ mac: FIRST_MAC, hostname: "client-a", network: NETWORK });
   inPool(first);
@@ -129,7 +125,7 @@ test.describe("in Swedish", () => {
 
   test("renders the leases and the history in Swedish", async ({ page, api, signedIn, relay }, testInfo) => {
     void signedIn;
-    await arrange(api);
+    await arrangeScope(api, SETUP);
     const address = await relay.dora({ mac: FIRST_MAC, hostname: "client-a", network: NETWORK });
     inPool(address);
 

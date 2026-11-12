@@ -11,25 +11,15 @@
 // wait for a person and run (no spec here starts a job that waits), Yesterday and Earlier and the
 // edges of midnight, ten rows a day with Show the rest, the next page of the history, a second
 // starter.
-import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import type { Page } from "@playwright/test";
 import type { Api, Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { cell, gridRow } from "./support/ui";
+import { axeViolations } from "./support/axe";
 
 type Job = Schemas["JobSummary"];
 type Page_ = Schemas["Page_JobSummary"];
-
-/** Runs axe-core in the page (through the debugging protocol, since the CSP refuses injected tags). */
-async function axeViolations(page: Page, selector: string): Promise<string[]> {
-  await page.evaluate(await readFile(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8"));
-  return page.evaluate(async (scope) => {
-    const axe = (window as unknown as { axe: { run(context: string): Promise<{ violations: { id: string }[] }> } }).axe;
-    return (await axe.run(scope)).violations.map((v) => v.id);
-  }, selector);
-}
 
 const OPEN_STATES = "queued,running,waiting,rolling_back";
 const FINAL_STATES = "succeeded,failed,rolled_back,canceled";

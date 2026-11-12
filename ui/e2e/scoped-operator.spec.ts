@@ -26,6 +26,7 @@ import type { Api, Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { withKey } from "./support/ui";
+import { createScopePair } from "./support/ipam";
 
 /** The scoped operator; an invented PIN. */
 const CASEY = { name: "casey", pin: "482917", changed: "915372" } as const;
@@ -53,8 +54,7 @@ interface Arranged {
 
 /** A prefix inside the scope, a scoped operator over it and a global operator. */
 async function arrange(api: Api): Promise<Arranged> {
-  const inScope = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "203.0.113.0/24", description: "Lab" })).item!;
-  await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "198.51.100.0/24", description: "IoT" });
+  const { inScope } = await createScopePair(api);
   const casey = await api.post<Schemas["UserInfo"]>("/users", { name: CASEY.name, display_name: "Casey Example", password: CASEY.pin, roles: [] });
   await api.post("/access/grants", { subject: casey.id, role: "operator", scope: { kind: "prefix", value: { id: inScope.id, subtree: true } } });
   await api.post("/users", { name: OLIVE.name, display_name: "Olive Example", password: OLIVE.pin, roles: ["operator"] });

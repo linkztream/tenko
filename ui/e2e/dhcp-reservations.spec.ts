@@ -11,6 +11,7 @@
 
 import { test as base, expect } from "./support/fixtures";
 import type { Api, Schemas } from "./support/api";
+import { arrangeScope } from "./support/dhcp";
 import { freeDhcpPorts, RelayClient, type DhcpPorts } from "./support/dhcp-client";
 import { expectRendered } from "./support/i18n";
 import { withKey } from "./support/ui";
@@ -55,13 +56,10 @@ async function reservedHost(api: Api, name: string, ip: string, mac?: string): P
 }
 
 /** The network with a pool 192.0.2.100 to 192.0.2.199 and a scope; the printer and the camera. */
-async function arrange(api: Api): Promise<Schemas["Prefix"]> {
-  const prefix = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: `${NETWORK}/24`, description: "Office" })).item!;
-  await api.post(`/prefixes/${prefix.id}/ranges`, { first: "192.0.2.100", last: "192.0.2.199", role: "dhcp_pool" });
-  await api.post("/dhcp/scopes", { prefix: prefix.id });
+async function arrange(api: Api): Promise<void> {
+  await arrangeScope(api, { cidr: `${NETWORK}/24`, description: "Office", pool: { first: "192.0.2.100", last: "192.0.2.199" } });
   await reservedHost(api, PRINTER, PRINTER_IP, PRINTER_MAC);
   await reservedHost(api, CAMERA, "192.0.2.21");
-  return prefix;
 }
 
 test("the host page shows the reservation, its scope and its lease as the client takes it", async ({ page, api, signedIn, relay }) => {

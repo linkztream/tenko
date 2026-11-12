@@ -9,21 +9,18 @@
 // the effective view reads the compiled matcher. The network of the scope is made through the API.
 // Documentation values only: 192.0.2.0/24, MAC 00:00:5e:00:53:xx.
 
-import type { Api, Schemas } from "./support/api";
+import type { Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { gridRow, withKey } from "./support/ui";
+import { arrangeScope } from "./support/dhcp";
 
 /** The network 192.0.2.0/24 with a scope. */
-async function arrange(api: Api): Promise<Schemas["Prefix"]> {
-  const prefix = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "192.0.2.0/24", description: "Lab" })).item!;
-  await api.post("/dhcp/scopes", { prefix: prefix.id });
-  return prefix;
-}
+const SETUP = { cidr: "192.0.2.0/24", description: "Lab" } as const;
 
 test("a policy on a class sets a boot file, and the effective view says why a client gets it", async ({ page, api, signedIn }) => {
   void signedIn;
-  const prefix = await arrange(api);
+  const { prefix } = await arrangeScope(api, SETUP);
 
   // The class: architecture 7 or 9 (UEFI x64), picked from the list of known architectures.
   await page.goto("/dhcp/classes");
@@ -96,7 +93,7 @@ test.describe("in Swedish", () => {
 
   test("renders the policy editor with its four actions in Swedish", async ({ page, api, signedIn }, testInfo) => {
     void signedIn;
-    await arrange(api);
+    await arrangeScope(api, SETUP);
     await page.goto("/dhcp/policies");
     await page.getByTestId("dhcp-policy-create").click();
     const policyForm = page.getByTestId("dialog-policy-form");

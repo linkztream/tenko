@@ -21,20 +21,10 @@ import type { Api, Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { withKey } from "./support/ui";
+import { createScopePair } from "./support/ipam";
 
 type Prefix = Schemas["Prefix"];
 type TokenInfo = Schemas["TokenInfo"];
-
-interface Arranged {
-  inScope: Prefix;
-  beside: Prefix;
-}
-
-async function arrange(api: Api): Promise<Arranged> {
-  const inScope = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "203.0.113.0/24", description: "Lab" })).item!;
-  const beside = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "198.51.100.0/24", description: "IoT" })).item!;
-  return { inScope, beside };
-}
 
 /** Picks a prefix in an open scope picker. */
 async function pickPrefix(scope: Locator, prefix: Prefix): Promise<void> {
@@ -96,7 +86,7 @@ test("IAM-10: a service account name with a space is refused inline and nothing 
 
 test("IAM-10: a token cannot exceed what its service account holds, and the refusal stays in the dialog", async ({ page, api, signedIn }) => {
   void signedIn;
-  const { inScope } = await arrange(api);
+  const { inScope } = await createScopePair(api);
   const account = await createAccount(page, "ipam-reader");
   await account.getByTestId("access-sa-token-create").click();
   const dialog = page.getByTestId("dialog-token");
@@ -121,7 +111,7 @@ test("IAM-10: a service account's token is shown once, listed by its prefix, wor
   signedIn,
 }) => {
   void signedIn;
-  const { inScope } = await arrange(api);
+  const { inScope } = await createScopePair(api);
   const account = await createAccount(page, "ipam-reader");
   const id = await accountId(api, "ipam-reader");
   await api.post("/access/grants", { subject: id, role: "viewer", scope: { kind: "prefix", value: { id: inScope.id, subtree: true } } });
@@ -228,7 +218,7 @@ test("IAM-10: a personal token of the administrator is shown once, works as a be
 
 test("IAM-10: a scoped personal token reads only the prefix it was given", async ({ page, api, server, playwright, signedIn }) => {
   void signedIn;
-  const { inScope } = await arrange(api);
+  const { inScope } = await createScopePair(api);
   await page.goto("/account/tokens");
   await page.getByTestId("account-token-create").click();
   const dialog = page.getByTestId("dialog-token");
@@ -262,7 +252,7 @@ test("IAM-10: the Create button of the scoped personal-token dialog can be click
 }) => {
   void signedIn;
   await page.setViewportSize({ width: 1280, height: 720 });
-  const { inScope } = await arrange(api);
+  const { inScope } = await createScopePair(api);
   await page.goto("/account/tokens");
   await page.getByTestId("account-token-create").click();
   const dialog = page.getByTestId("dialog-token");

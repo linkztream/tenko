@@ -9,23 +9,14 @@
 // module). Documentation values only: 192.0.2.0/24, MAC 00:00:5e:00:53:xx.
 
 import type { Page } from "@playwright/test";
-import type { Api, Schemas } from "./support/api";
+import type { Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { cell, gridRow, withKey } from "./support/ui";
+import { arrangeScope } from "./support/dhcp";
 
-/** The network 192.0.2.0/24 and the pool 192.0.2.100 to 192.0.2.199 (100 addresses). */
-async function arrange(api: Api): Promise<{ prefix: Schemas["Prefix"]; pool: Schemas["Range"] }> {
-  const prefix = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "192.0.2.0/24", description: "Office" })).item!;
-  const pool = (
-    await api.post<Schemas["WriteResponse_Range"]>(`/prefixes/${prefix.id}/ranges`, {
-      first: "192.0.2.100",
-      last: "192.0.2.199",
-      role: "dhcp_pool",
-    })
-  ).item!;
-  return { prefix, pool };
-}
+/** The network 192.0.2.0/24 and the pool 192.0.2.100 to 192.0.2.199 (100 addresses), without a scope. */
+const SETUP = { cidr: "192.0.2.0/24", description: "Office", pool: { first: "192.0.2.100", last: "192.0.2.199" }, scope: false } as const;
 
 const POOL_KEY = "192.0.2.100-192.0.2.199";
 
@@ -35,7 +26,7 @@ async function openTab(page: Page, tab: string): Promise<void> {
 
 test("creates a scope for an IPAM network and sets its pool, an exclusion and an option", async ({ page, api, signedIn }) => {
   void signedIn;
-  const { prefix, pool } = await arrange(api);
+  const { prefix, pool } = await arrangeScope(api, SETUP);
 
   await page.goto("/dhcp");
   await expect(page.getByTestId("page-dhcp-scopes")).toBeVisible();
@@ -139,7 +130,7 @@ test.describe("in Swedish", () => {
 
   test("renders the scope pages and the settings in Swedish", async ({ page, api, signedIn }, testInfo) => {
     void signedIn;
-    const { prefix } = await arrange(api);
+    const { prefix } = await arrangeScope(api, SETUP);
     await api.post("/dhcp/scopes", { prefix: prefix.id, description: "Kontoret" });
     await page.goto("/dhcp");
     await expect(gridRow(page, "dhcp-scopes", "192.0.2.0/24")).toBeVisible();

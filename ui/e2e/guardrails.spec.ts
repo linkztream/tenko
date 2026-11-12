@@ -10,12 +10,11 @@
 //   and in the dialog.
 // - Swedish.
 
-import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import type { Page } from "@playwright/test";
 import type { Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
+import { axeViolations } from "./support/axe";
 
 type Guardrails = Schemas["Guardrails"];
 
@@ -103,18 +102,6 @@ test("refuses max_parallel 0 inline and sends nothing", async ({ page, api, sign
   expect(writes).toEqual([]);
   expect((await api.get<Guardrails>("/settings/guardrails")).max_parallel).toBe(10);
 });
-
-/**
- * Runs axe-core in the page and answers the ids of the rules a part of it violates. The script is
- * evaluated through the browser's debugging protocol, since the page's CSP refuses injected tags.
- */
-async function axeViolations(page: Page, selector: string): Promise<string[]> {
-  await page.evaluate(await readFile(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8"));
-  return page.evaluate(async (scope) => {
-    const axe = (window as unknown as { axe: { run(context: string): Promise<{ violations: { id: string }[] }> } }).axe;
-    return (await axe.run(scope)).violations.map((v) => v.id);
-  }, selector);
-}
 
 test("the add dialog works with the keyboard, keeps focus inside and passes axe", async ({ page, signedIn }) => {
   void signedIn;

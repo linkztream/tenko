@@ -47,6 +47,13 @@ export async function openRowMenu(page: Page, row: Locator, plainCol: string): P
   await expect(page.getByTestId("row-menu")).toBeVisible();
 }
 
+/** Two networks for the scoped scenarios: `inScope` (Lab) is the one a scope covers, `beside` (IoT) is not. */
+export async function createScopePair(api: Api): Promise<{ inScope: Prefix; beside: Prefix }> {
+  const inScope = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "203.0.113.0/24", description: "Lab" })).item!;
+  const beside = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "198.51.100.0/24", description: "IoT" })).item!;
+  return { inScope, beside };
+}
+
 /** The live prefixes of the default VRF, by CIDR. */
 export async function prefixByCidr(api: Api, cidr: string): Promise<Prefix | undefined> {
   const page = await api.get<Schemas["Page_Prefix"]>("/prefixes", { within: cidr, limit: 200 });

@@ -8,16 +8,13 @@
 // 00:00:5e:00:53:xx.
 
 import type { Locator, Page } from "@playwright/test";
-import type { Api, Schemas } from "./support/api";
+import type { Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { gridRow, withKey } from "./support/ui";
+import { arrangeScope } from "./support/dhcp";
 
 /** The network 192.0.2.0/24 with a scope. */
-async function arrange(api: Api): Promise<Schemas["Prefix"]> {
-  const prefix = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "192.0.2.0/24", description: "Office" })).item!;
-  await api.post("/dhcp/scopes", { prefix: prefix.id });
-  return prefix;
-}
+const SETUP = { cidr: "192.0.2.0/24", description: "Office" } as const;
 
 async function rowAction(page: Page, row: Locator, action: string): Promise<void> {
   await row.getByRole("button", { name: /Actions for/ }).click();
@@ -26,7 +23,7 @@ async function rowAction(page: Page, row: Locator, action: string): Promise<void
 
 test("creates a class, a policy on it and a MAC filter, and deletes them", async ({ page, api, signedIn }) => {
   void signedIn;
-  const prefix = await arrange(api);
+  const { prefix } = await arrangeScope(api, SETUP);
 
   // The class: a vendor class prefix match.
   await page.goto("/dhcp/classes");
@@ -126,7 +123,7 @@ test("creates a class, a policy on it and a MAC filter, and deletes them", async
 
 test("shows the shared networks and the options with a custom definition", async ({ page, api, signedIn }) => {
   void signedIn;
-  const prefix = await arrange(api);
+  const { prefix } = await arrangeScope(api, SETUP);
 
   // A shared network the scope joins; it is not deleted while the scope belongs to it.
   await page.goto("/dhcp/shared-networks");

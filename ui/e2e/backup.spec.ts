@@ -26,13 +26,13 @@
 //   installation started from a restore answer `GET /system/backups` in the browser with a
 //   made-up history over the real settings (`fakeHistory`). Swedish: the stale and failed states.
 
-import { readFile, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { ApiError, type Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
+import { axeViolations } from "./support/axe";
 
 type Status = Schemas["BackupStatusView"];
 type Run = Schemas["BackupRunView"];
@@ -152,18 +152,6 @@ test("enabling the schedule without a recipient is hinted and refused", async ({
   expect(error).toBeInstanceOf(ApiError);
   expect((error as ApiError).code).toBe("backup.key.missing");
 });
-
-/**
- * Runs axe-core in the page and answers the ids of the rules a part of it violates. The script is
- * evaluated through the browser's debugging protocol, since the page's CSP refuses injected tags.
- */
-async function axeViolations(page: Page, selector: string): Promise<string[]> {
-  await page.evaluate(await readFile(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8"));
-  return page.evaluate(async (scope) => {
-    const axe = (window as unknown as { axe: { run(context: string): Promise<{ violations: { id: string }[] }> } }).axe;
-    return (await axe.run(scope)).violations.map((v) => v.id);
-  }, selector);
-}
 
 test("the backup dialog works with the keyboard, keeps focus inside and passes axe", async ({ page, signedIn }) => {
   void signedIn;

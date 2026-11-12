@@ -26,7 +26,6 @@
 
 import { createSocket } from "node:dgram";
 import { readdir, readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
@@ -34,6 +33,7 @@ import { ApiError, type Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { freePort } from "./support/server";
+import { axeViolations } from "./support/axe";
 
 type View = Schemas["AuditExportView"];
 
@@ -263,18 +263,6 @@ test("a stale revision is refused and the page shows the settings written elsewh
     ["Second", true],
   ]);
 });
-
-/**
- * Runs axe-core in the page and answers the ids of the rules a part of it violates. The script is
- * evaluated through the browser's debugging protocol, since the page's CSP refuses injected tags.
- */
-async function axeViolations(page: Page, selector: string): Promise<string[]> {
-  await page.evaluate(await readFile(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8"));
-  return page.evaluate(async (scope) => {
-    const axe = (window as unknown as { axe: { run(context: string): Promise<{ violations: { id: string }[] }> } }).axe;
-    return (await axe.run(scope)).violations.map((v) => v.id);
-  }, selector);
-}
 
 test("the sink dialog works with the keyboard, keeps focus inside and passes axe", async ({ page, signedIn }) => {
   void signedIn;

@@ -10,25 +10,22 @@
 // 2001:db8:10::/64.
 
 import type { Page } from "@playwright/test";
-import type { Api, Schemas } from "./support/api";
+import type { Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { cell, gridRow, withKey } from "./support/ui";
+import { arrangeScope } from "./support/dhcp";
 
 /** The valid lifetime of the scope: its own default lease time, 2 hours. */
 const VALID_SECS = 7200;
 
 /** The network 2001:db8:10::/64, its pool 2001:db8:10::100 to 2001:db8:10::1ff and a scope with lease times of its own. */
-async function arrange(api: Api): Promise<{ prefix: Schemas["Prefix"] }> {
-  const prefix = (await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "2001:db8:10::/64", description: "Office, IPv6" })).item!;
-  await api.post(`/prefixes/${prefix.id}/ranges`, { first: "2001:db8:10::100", last: "2001:db8:10::1ff", role: "dhcp_pool" });
-  await api.post("/dhcp/scopes", {
-    prefix: prefix.id,
-    description: "Office LAN, IPv6",
-    lease: { default_secs: VALID_SECS, min_secs: 600, max_secs: 86_400 },
-  });
-  return { prefix };
-}
+const SETUP = {
+  cidr: "2001:db8:10::/64",
+  description: "Office, IPv6",
+  pool: { first: "2001:db8:10::100", last: "2001:db8:10::1ff" },
+  scope: { description: "Office LAN, IPv6", lease: { default_secs: VALID_SECS, min_secs: 600, max_secs: 86_400 } },
+} as const;
 
 const isScopePatch = (id: string) => (response: { url(): string; request(): { method(): string } }) =>
   response.request().method() === "PATCH" && response.url().endsWith(`/api/v1/dhcp/scopes/${id}`);
@@ -42,7 +39,7 @@ async function openV6Tab(page: Page, id: string): Promise<void> {
 
 test("shows the family, explains the defaults and saves the DHCPv6 settings of a scope", async ({ page, api, signedIn }) => {
   void signedIn;
-  const { prefix } = await arrange(api);
+  const { prefix } = await arrangeScope(api, SETUP);
 
   // The scope list tags the scope.
   await page.goto("/dhcp");
@@ -105,7 +102,7 @@ test("shows the family, explains the defaults and saves the DHCPv6 settings of a
 
 test("says on the network boot tab of a DHCPv6 scope that it is DHCPv4 only", async ({ page, api, signedIn }) => {
   void signedIn;
-  const { prefix } = await arrange(api);
+  const { prefix } = await arrangeScope(api, SETUP);
   // The old link to the tab does not lead to a dead tab.
   await page.goto(`/dhcp/scopes/${prefix.id}/boot`);
   await expect(page.getByTestId("scope-name")).toHaveText("2001:db8:10::/64");
@@ -115,7 +112,7 @@ test("says on the network boot tab of a DHCPv6 scope that it is DHCPv4 only", as
 
 test("edits the DHCPv6 options of the scope with the DHCPv6 catalog", async ({ page, api, signedIn }) => {
   void signedIn;
-  const { prefix } = await arrange(api);
+  const { prefix } = await arrangeScope(api, SETUP);
   await page.goto(`/dhcp/scopes/${prefix.id}`);
   await page.getByTestId("scope-tab-options").click();
   const editor = page.getByTestId("scope-optset");
@@ -143,7 +140,7 @@ test.describe("in Swedish", () => {
 
   test("renders the DHCPv6 tab in Swedish", async ({ page, api, signedIn }, testInfo) => {
     void signedIn;
-    const { prefix } = await arrange(api);
+    const { prefix } = await arrangeScope(api, SETUP);
     await openV6Tab(page, prefix.id);
     await expectRendered(page, page.getByTestId("page-dhcp-scope"), "sv", testInfo, "dhcp6-scope");
   });

@@ -17,21 +17,11 @@
 // The findings of the strip come from the real index: discovery.spec.ts seeds proposals and
 // checks the review line against the counts; the units of the page cover the rows to act on.
 
-import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import type { Page } from "@playwright/test";
 import type { Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
-
-/** Runs axe-core in the page (through the debugging protocol, since the CSP refuses injected tags). */
-async function axeViolations(page: Page, selector: string): Promise<string[]> {
-  await page.evaluate(await readFile(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8"));
-  return page.evaluate(async (scope) => {
-    const axe = (window as unknown as { axe: { run(context: string): Promise<{ violations: { id: string }[] }> } }).axe;
-    return (await axe.run(scope)).violations.map((v) => v.id);
-  }, selector);
-}
+import { axeViolations } from "./support/axe";
 
 /** The page's blocks that are drawn, in document order. */
 async function blockOrder(page: Page): Promise<string[]> {
