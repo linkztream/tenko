@@ -414,7 +414,9 @@ fn a_signer_without_standing_fences_nothing() {
     let zero = Lineage::default();
     let admit = |standing: &Standing| zero.admit(std::slice::from_ref(&r1), &ca.root, standing);
 
-    refused(admit(&Standing::default()), "not a voter");
+    let mut not_voter = standing(&[(2, &two.serial)]);
+    not_voter.voters.clear();
+    refused(admit(&not_voter), "not a voter");
     let mut superseded = standing(&[(2, &two.serial)]);
     superseded.superseded.insert(NodeId(2));
     refused(admit(&superseded), "superseded");
@@ -424,12 +426,9 @@ fn a_signer_without_standing_fences_nothing() {
     let mut revoked_node = standing(&[(2, &two.serial)]);
     revoked_node.revoked_nodes.insert(NodeId(2));
     refused(admit(&revoked_node), "revoked");
-    // A voter whose certificate the store does not know: stop and show, never act on it.
+    // A voter whose certificate the store does not know: refused, never acted on.
     let unknown = standing(&[(2, "00ff")]);
-    assert_eq!(
-        admit(&unknown).expect("unknown").relation,
-        Relation::Unplaced
-    );
+    unheld(admit(&unknown));
     // From the future.
     let mut early = standing(&[(2, &two.serial)]);
     early.now = Timestamp::from_unix_nanos(AT - 3_600_000_000_000).expect("time");
@@ -445,6 +444,69 @@ fn a_signer_without_standing_fences_nothing() {
         ),
         "not a voter of the parent history",
     );
+}
+
+#[track_caller]
+fn unheld<T: std::fmt::Debug>(result: Result<T, ClusterError>) {
+    let error = result.expect_err("an unheld signer");
+    assert_eq!(error.code(), codes::RECORD_UNHELD, "{}", error.detail());
+}
+
+/// A certificate minted with the CA's key, which every controller and every copy of a data
+/// directory or backup holds, signs records that place nothing: for an unused node id, for a
+/// voter of the receiver's history, and for a voter of its parent history; as a descendant,
+/// as a sibling and as a record the receiver cannot place.
+#[test]
+fn a_record_signed_with_a_minted_certificate_places_nothing() {
+    let ca = ca();
+    let (one, two, three) = (
+        leaf(&ca, 1, "controller"),
+        leaf(&ca, 2, "controller"),
+        leaf(&ca, 3, "controller"),
+    );
+    let standing = standing(&[(1, &one.serial), (2, &two.serial), (3, &three.serial)]);
+    let own = sign(&one, &body(1, None, 1));
+    let at_one = Lineage::kept(std::slice::from_ref(&own)).expect("lineage");
+    for node in [99, 1, 2, 3] {
+        // The same node id, another certificate: the store's record does not hold it.
+        let minted = leaf(&ca, node, "controller");
+        let records = [
+            // A descendant of the receiver's own history.
+            sign(&minted, &body(2, Some(own.hash()), node)),
+            // A sibling from the receiver's parent (another nonce: the receiver's own body
+            // would be its own record, already known).
+            sign(
+                &minted,
+                &GenerationBody {
+                    nonce: HexBytes(vec![9; 16]),
+                    ..body(1, None, node)
+                },
+            ),
+            // A newer history the receiver cannot place.
+            sign(&minted, &body(7, Some(Digest([7; 32])), node)),
+        ];
+        for record in records {
+            unheld(at_one.admit(std::slice::from_ref(&record), &ca.root, &standing));
+        }
+        // A minted record never rides on a valid one: the offer ends before it.
+        let valid = sign(&two, &body(2, Some(own.hash()), 2));
+        let mut tail = body(u64::MAX, Some(valid.hash()), node);
+        tail.at = Timestamp::from_unix_nanos(AT + 1).expect("time");
+        let admission = at_one
+            .admit(&[valid.clone(), sign(&minted, &tail)], &ca.root, &standing)
+            .expect("the valid record");
+        assert_eq!(admission.relation, Relation::Descendant);
+        assert_eq!(
+            admission.new.iter().map(Signed::number).collect::<Vec<_>>(),
+            vec![2]
+        );
+        // At generation 0 a minted descendant is refused too.
+        unheld(Lineage::default().admit(
+            &[sign(&minted, &body(1, None, node))],
+            &ca.root,
+            &standing,
+        ));
+    }
 }
 
 /// A record that `kept` reads without a signature, for the order's property test.

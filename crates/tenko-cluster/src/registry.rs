@@ -903,54 +903,42 @@ impl NodeRegistry {
             false,
         )?;
         let mut revoked = Vec::new();
-        for (node, record, revision) in rows {
+        for (node, _, _) in rows {
             let node = NodeId(node);
             if !(if node == local { own } else { others }) {
                 continue;
             }
-            let info = leaf_of(&record)?;
             let mut batch = WriteBatch::for_request(ctx);
-            batch.expect_typed(&tables::CONTROLLER_CERTS, &node.0, Some(revision));
-            batch.delete_typed(&tables::CONTROLLER_CERTS, &node.0);
-            vault.stage_delete(&mut batch, ctx, record.key);
-            batch.put_typed(
-                &tables::REVOCATIONS,
-                &info.serial,
-                &Revocation {
-                    node,
-                    revoked_at: ctx.now,
-                    not_after: info.not_after,
-                    controller: true,
-                },
-            )?;
+            let Some(serial) = stage_vault_retirement(view.as_ref(), &mut batch, vault, ctx, node)?
+            else {
+                continue;
+            };
             if let Some((mut held, at)) = view.get_typed(&tables::NODES, &node.0)?
-                && held.serials.iter().any(|cert| cert.serial == info.serial)
+                && held.serials.iter().any(|cert| cert.serial == serial)
             {
-                held.serials.retain(|cert| cert.serial != info.serial);
+                held.serials.retain(|cert| cert.serial != serial);
                 batch.expect_typed(&tables::NODES, &node.0, Some(at));
                 batch.put_typed(&tables::NODES, &node.0, &held)?;
             }
-            batch.audit(
-                AuditDraft::success(actions::CONTROLLER_CERT, vec![ObjectRef::node(node)])
-                    .with_context("serial", info.serial.clone())
-                    .with_context(
-                        "retired",
-                        "the key left the vault; the certificate is revoked",
-                    ),
-            );
             match self.store.propose(batch).await {
-                Ok(_) => {
-                    tracing::info!(node = %node, serial = %info.serial, "a cluster-port key left the replicated vault; its certificate is revoked");
-                    revoked.push(info.serial);
-                }
+                Ok(_) => revoked.push(serial),
                 Err(StoreError::PreconditionFailed(_)) => {}
                 Err(error) => return Err(error.into()),
             }
         }
-        if !revoked.is_empty() {
-            self.revoked.insert(revoked.iter().cloned());
-        }
+        self.note_retired(&revoked);
         Ok(revoked)
+    }
+
+    /// Takes note of serials a committed retirement revoked: the TLS verifier refuses them
+    /// at once, before the revocation watcher catches up.
+    pub fn note_retired(&self, serials: &[String]) {
+        for serial in serials {
+            tracing::info!(serial = %serial, "a cluster-port key left the replicated vault; its certificate is revoked");
+        }
+        if !serials.is_empty() {
+            self.revoked.insert(serials.iter().cloned());
+        }
     }
 
     async fn reusable(
@@ -2009,7 +1997,11 @@ impl NodeRegistry {
             .record_for_edit(node, 1)
             .await?
             .ok_or_else(|| not_found(node))?;
-        self.check_renewal(&record, serial, now)?;
+        // A controller whose certificate is still the one the vault holds rotates it at
+        // once, due or not: the key must leave the vault, where every controller and every
+        // copy of a data directory can read it (`retire_vault_keys`).
+        let rotating = self.vault_serial(node).await?.as_deref() == Some(serial);
+        self.check_renewal(&record, serial, now, rotating)?;
         let issued = self
             .ca
             .issue_node_cert_for(node, record.role_set(), csr_der, now)?;
@@ -2059,7 +2051,7 @@ impl NodeRegistry {
                         .await?
                         .ok_or_else(|| not_found(node))?;
                     // A renewal through another controller that won the race counts.
-                    self.check_renewal(&record, serial, now)?;
+                    self.check_renewal(&record, serial, now, rotating)?;
                 }
                 Err(error) => return Err(error),
             }
@@ -2074,6 +2066,7 @@ impl NodeRegistry {
         record: &NodeRecord,
         serial: &str,
         now: Timestamp,
+        rotating: bool,
     ) -> Result<(), ClusterError> {
         let Some(cert) = record
             .serials
@@ -2082,6 +2075,9 @@ impl NodeRegistry {
         else {
             return Err(unknown_certificate());
         };
+        if rotating {
+            return Ok(());
+        }
         if let Some(at) = record.renewed_at
             && now.saturating_since(at) < RENEW_INTERVAL
         {
@@ -2768,6 +2764,50 @@ pub fn revoked_nodes(view: &dyn ReadView) -> Result<HashSet<NodeId>, ClusterErro
         }
     }
     Ok(nodes)
+}
+
+/// Stages the retirement of `node`'s cluster-port key in the vault into `batch`: the row and
+/// its vault secret go and the certificate is revoked (a controller's revocation is kept for
+/// good), with its audit record. The node record is not touched: the caller writes it in
+/// the same batch, so no state has the revocation without the record that says the node is
+/// still enrolled. Returns the revoked serial, or `None` without a row.
+///
+/// # Errors
+///
+/// A store or codec error.
+pub fn stage_vault_retirement(
+    view: &dyn ReadView,
+    batch: &mut WriteBatch,
+    vault: &dyn Vault,
+    ctx: &RequestCtx,
+    node: NodeId,
+) -> Result<Option<String>, ClusterError> {
+    let Some((record, revision)) = view.get_typed(&tables::CONTROLLER_CERTS, &node.0)? else {
+        return Ok(None);
+    };
+    let info = leaf_of(&record)?;
+    batch.expect_typed(&tables::CONTROLLER_CERTS, &node.0, Some(revision));
+    batch.delete_typed(&tables::CONTROLLER_CERTS, &node.0);
+    vault.stage_delete(batch, ctx, record.key);
+    batch.put_typed(
+        &tables::REVOCATIONS,
+        &info.serial,
+        &Revocation {
+            node,
+            revoked_at: ctx.now,
+            not_after: info.not_after,
+            controller: true,
+        },
+    )?;
+    batch.audit(
+        AuditDraft::success(actions::CONTROLLER_CERT, vec![ObjectRef::node(node)])
+            .with_context("serial", info.serial.clone())
+            .with_context(
+                "retired",
+                "the key left the vault; the certificate is revoked",
+            ),
+    );
+    Ok(Some(info.serial))
 }
 
 /// What the leaf of a stored cluster-port chain says.

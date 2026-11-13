@@ -13,7 +13,10 @@
 //!   only; with `--compare <fingerprint>...` it orders the copies of the same history by
 //!   their last log id, Raft's own vote rule.
 //! - `--force` makes this copy the only voter of a new generation after a typed
-//!   confirmation (the node id; without a terminal `--confirm <node>:<generation>`, CR-Q8).
+//!   confirmation (the node id; without a terminal `--confirm <node>:<generation>`, with the
+//!   generation `--inspect` names, CR-Q8). On a controller that a competing forced history
+//!   stopped (a fence of its own), it is also how an operator chooses this side: the new
+//!   generation is above both, and `--revoke` takes the other side's signer out.
 //! - `--undo` puts the copy kept aside back, until the first start took office.
 //!
 //! # The offline step and its crash points
@@ -31,7 +34,9 @@
 //! 6. The work directory goes, and the notice turns `committed`.
 //!
 //! A failure before step 5 undoes the steps before it. After a crash at any point the notice
-//! keeps the server from starting, and `--undo` puts the kept copy back.
+//! keeps the server from starting, and `--undo` puts the kept copy back. Every rename and
+//! removal in the data directory is followed by a sync of the directory, so a power loss
+//! after a step never brings an earlier state of the notice or the store back.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -98,11 +103,9 @@ pub struct RecoverArgs {
     /// Make this controller the only voter of a new generation of the cluster.
     #[arg(long, conflicts_with = "undo")]
     pub force: bool,
-    /// A controller that may rejoin by itself when it holds nothing of its own after the
-    /// fork (repeatable).
-    #[arg(long, value_name = "NODE")]
-    pub rejoin: Vec<u64>,
-    /// A controller whose certificates the step revokes (repeatable).
+    /// A controller whose certificates the step revokes (repeatable): a member of this
+    /// copy's cluster, or one an earlier forced step superseded. A revoked controller never
+    /// learns of the new generation.
     #[arg(long, value_name = "NODE")]
     pub revoke: Vec<u64>,
     /// Put the copy kept aside back, before the first start took office.
@@ -194,6 +197,34 @@ impl Notice {
         // notice, or the next start would make an empty installation.
         write_private(&data_dir.join(NOTICE_FILE), &text).map_err(|error| error.detail().to_owned())
     }
+
+    /// Writes the first notice of a step: only when there is none, so of two steps run at
+    /// once the second finds the first one's notice and changes nothing (and never removes
+    /// it). Durable, with the directory synced.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the file; [`std::io::ErrorKind::AlreadyExists`] when a notice is
+    /// there.
+    fn create(&self, data_dir: &Path) -> Result<(), std::io::Error> {
+        let text = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
+        // The notice holds node ids and addresses, no secret: the account's default mode.
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(data_dir.join(NOTICE_FILE))?;
+        file.write_all(&text)?;
+        file.sync_all()?;
+        tenko_store::sync_dir(data_dir);
+        Ok(())
+    }
+}
+
+/// Removes the notice, durably: a power loss after the removal must not bring it back.
+fn remove_notice(data_dir: &Path) -> Result<(), std::io::Error> {
+    fs::remove_file(data_dir.join(NOTICE_FILE))?;
+    tenko_store::sync_dir(data_dir);
+    Ok(())
 }
 
 /// Refuses the start while a forced step is under way or was interrupted; the store step
@@ -202,10 +233,27 @@ impl Notice {
 /// # Errors
 ///
 /// [`StartError`] `cluster.recover.interrupted` naming the commands that finish or undo it.
-pub fn check_start(data_dir: &Path) -> Result<(), StartError> {
+pub fn check_start(data_dir: &Path, store: &Path) -> Result<(), StartError> {
     match Notice::load(data_dir) {
         Ok(None) => Ok(()),
-        Ok(Some(notice)) if notice.phase == Phase::Committed => Ok(()),
+        // A finished step has a store; without one the server would make an empty
+        // installation beside the kept copy.
+        Ok(Some(notice))
+            if notice.phase == Phase::Committed && tenko_store::format::store_exists(store) =>
+        {
+            Ok(())
+        }
+        Ok(Some(notice)) if notice.phase == Phase::Committed => Err(StartError::new(
+            "store",
+            codes::INTERRUPTED,
+            format!(
+                "a forced step of the cluster recovery (generation {}) finished, but its store \
+                 is missing at {}; run `tenko cluster recover --undo` to put the copy kept \
+                 aside back",
+                notice.generation,
+                store.display()
+            ),
+        )),
         Ok(Some(notice)) => Err(StartError::new(
             "store",
             codes::INTERRUPTED,
@@ -217,6 +265,29 @@ pub fn check_start(data_dir: &Path) -> Result<(), StartError> {
             ),
         )),
         Err(error) => Err(StartError::new("store", codes::INTERRUPTED, error)),
+    }
+}
+
+/// Refuses an offline command that writes the store (`tenko user unlock`, `tenko kek
+/// rotate`) while a forced step is under way or was interrupted, or while another history
+/// stopped this controller: a write there goes into a history that takes no writes.
+///
+/// # Errors
+///
+/// The exit status and the reason.
+pub fn check_offline_write(resolved: &Resolved) -> Result<(), (u8, String)> {
+    check_start(&resolved.data_dir, &resolved.layout().store())
+        .map_err(|error| (exit::START, error.to_string()))?;
+    match FenceFile::load(&resolved.data_dir) {
+        Ok(None) => Ok(()),
+        Ok(Some(fence)) => Err((
+            exit::USAGE,
+            format!(
+                "this controller stopped writing ({}): another history of the cluster superseded or met it; nothing is written here until an operator acts on it (docs/cluster.md section 12.11)",
+                fence.kind.code()
+            ),
+        )),
+        Err(error) => Err((exit::START, error.detail().to_owned())),
     }
 }
 
@@ -241,7 +312,12 @@ impl Dirs {
             (&self.fence, &self.kept_fence)
         };
         match fs::rename(from, to) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                for dir in [from.parent(), to.parent()].into_iter().flatten() {
+                    tenko_store::sync_dir(dir);
+                }
+                Ok(())
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(Failure::other(format!("{}: {error}", from.display()))),
         }
@@ -348,9 +424,14 @@ struct Facts {
     own: Option<generation::Signed>,
     /// The highest generation this copy has seen: its own or its fence's.
     seen: u64,
+    /// What stopped this controller, when a fence of another history is kept here.
+    fence: Option<tenko_store::FenceReason>,
     members: BTreeMap<NodeId, MemberRecord>,
     /// The nodes with a record in the registry: the ones `--revoke` can revoke.
     enrolled: BTreeSet<NodeId>,
+    /// The controllers an earlier forced step superseded: the new history offers its record
+    /// to them too.
+    marked: BTreeSet<NodeId>,
 }
 
 impl Facts {
@@ -380,8 +461,16 @@ impl Facts {
             .into_iter()
             .map(|(node, _, _)| NodeId(node))
             .collect();
+        let marked = view
+            .scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)
+            .map_err(store_failure)?
+            .into_iter()
+            .map(|(node, _, _)| NodeId(node))
+            .collect();
         Ok(Self {
             enrolled,
+            marked,
+            fence: fence.as_ref().map(|fence| fence.kind),
             seen: own
                 .as_ref()
                 .map_or(0, generation::Signed::number)
@@ -395,6 +484,17 @@ impl Facts {
 
     fn generation(&self) -> u64 {
         self.own.as_ref().map_or(0, generation::Signed::number)
+    }
+
+    /// The generation a forced step here creates: above every one this copy has seen.
+    fn next(&self) -> Result<u64, Failure> {
+        self.seen.checked_add(1).ok_or_else(|| {
+            failure(
+                codes::RECORD_INVALID,
+                exit::FAILURE,
+                "the generations seen here leave no next number",
+            )
+        })
     }
 
     /// `tkfp1:<generation>:<record>:<last term>:<last index>:<revision>:<node>`.
@@ -424,10 +524,7 @@ impl Facts {
 
     fn describe(&self) -> String {
         let log = |id: Option<tenko_store::raft::types::LogId>| {
-            id.map_or_else(
-                || "none".to_owned(),
-                |id| format!("{}:{}", id.leader_id.term, id.index),
-            )
+            id.map_or_else(|| "none".to_owned(), log_id)
         };
         let mut text = String::new();
         let _ = writeln!(
@@ -478,6 +575,22 @@ impl Facts {
             self.copy.bytes
         );
         let _ = writeln!(text, "fingerprint      {}", self.fingerprint());
+        if let Some(fence) = self.fence {
+            let _ = writeln!(
+                text,
+                "stopped          {} (generation {} of another history)",
+                fence.code(),
+                self.seen
+            );
+        }
+        if let Ok(next) = self.next() {
+            let _ = writeln!(
+                text,
+                "a forced step    creates generation {next} here; without a terminal its \
+                 confirmation names this node and that generation (--confirm \
+                 <node>:<generation>) after `--force` printed what it does"
+            );
+        }
         text
     }
 }
@@ -526,7 +639,7 @@ fn compare(facts: &Facts, given: &[String], out: &mut String) -> Result<Vec<Stri
     for text in given {
         let theirs = Fingerprint::parse(text).ok_or_else(|| {
             failure(
-                "cluster.recover.fingerprint",
+                codes::FINGERPRINT,
                 exit::USAGE,
                 format!("`{text}` is not a fingerprint of `tenko cluster recover --inspect`"),
             )
@@ -569,9 +682,13 @@ fn confirmed(args: &RecoverArgs, node: NodeId, generation: u64, text: &str) -> R
         failure(
             codes::CONFIRM,
             exit::USAGE,
-            "the confirmation did not match; nothing was changed",
+            "the confirmation did not match; nothing was changed (`--inspect` names the \
+             generation a forced step here creates)",
         )
     };
+    // What the step does is printed before every confirmation, the one of a script too.
+    let mut err = std::io::stderr();
+    let _ = writeln!(err, "{text}");
     if let Some(given) = &args.confirm {
         return if given.trim() == format!("{node}:{generation}") {
             Ok(())
@@ -580,20 +697,17 @@ fn confirmed(args: &RecoverArgs, node: NodeId, generation: u64, text: &str) -> R
         };
     }
     if !std::io::stdin().is_terminal() {
+        // The answer is never printed here: a script that reads it from the refusal would
+        // pass a confirmation nobody read.
         return Err(failure(
             codes::CONFIRM,
             exit::USAGE,
-            format!(
-                "no terminal to confirm on: pass `--confirm {node}:{generation}` after reading \
-                 what the step does (`--inspect`)"
-            ),
+            "no terminal to confirm on: read what the step does above, then pass \
+             `--confirm <node>:<generation>` with this controller's node id and the \
+             generation `--inspect` names",
         ));
     }
-    let mut err = std::io::stderr();
-    let _ = write!(
-        err,
-        "{text}\nType the node id of this controller to continue: "
-    );
+    let _ = write!(err, "Type the node id of this controller to continue: ");
     let _ = err.flush();
     let mut line = String::new();
     std::io::stdin()
@@ -607,28 +721,68 @@ fn confirmed(args: &RecoverArgs, node: NodeId, generation: u64, text: &str) -> R
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the forced step reads best as one sequence with its undo"
+/// A point of the forced step: after it, a test stops the step as a crash would, or fails
+/// it as an error would ([`force_with`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    /// The notice `prepared` is written; nothing moved.
+    Noticed,
+    /// The store is renamed aside and the old fence moved beside it.
+    Moved,
+    /// The copy's log is applied in the work directory and the tail written.
+    Replayed,
+    /// The new store is installed.
+    Installed,
+    /// The step's batch is written to the new store.
+    Written,
+}
+
+/// How a test interrupts the forced step at a [`Step`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "only the tests interrupt the step")
 )]
+enum Interrupt {
+    /// An error: the step undoes what it did before.
+    Fail,
+    /// The process ends: nothing is undone.
+    Crash,
+}
+
+/// The outcome of an interrupted step: a failure, or a crash that undoes nothing.
+enum Stopped {
+    Failed(Failure),
+    Crashed,
+}
+
+impl From<Failure> for Stopped {
+    fn from(failure: Failure) -> Self {
+        Self::Failed(failure)
+    }
+}
+
 async fn force(
     resolved: &Resolved,
     args: &RecoverArgs,
     facts: &Facts,
     fresher: Vec<String>,
-    mut stdout: String,
+    stdout: String,
 ) -> Result<Output, Failure> {
-    if let Some(notice) = Notice::load(&resolved.data_dir).map_err(Failure::other)? {
-        return Err(failure(
-            codes::INTERRUPTED,
-            exit::USAGE,
-            format!(
-                "a forced step to generation {} is already here; run `tenko cluster recover \
-                 --undo` first",
-                notice.generation
-            ),
-        ));
+    match force_with(resolved, args, facts, fresher, stdout, &|_| None).await {
+        Ok(output) => Ok(output),
+        Err(Stopped::Failed(failure)) => Err(failure),
+        Err(Stopped::Crashed) => Err(Failure::other("the forced step was stopped")),
     }
+}
+
+/// The checks of `--force` before anything is written: returns the nodes the step
+/// supersedes (every other voter and learner of the copy).
+fn force_checks(
+    args: &RecoverArgs,
+    facts: &Facts,
+    fresher: &[String],
+) -> Result<(BTreeSet<NodeId>, Vec<String>), Failure> {
     let node = facts.node;
     if !facts.copy.voters.contains(&node) {
         return Err(failure(
@@ -637,7 +791,9 @@ async fn force(
             format!("controller {node} is not a voter of its cluster; force a voter's copy"),
         ));
     }
-    if facts.copy.voters.len() == 1 {
+    // A controller alone needs no step, unless another history stopped it: then a step
+    // is how an operator chooses this side (CR-Q3).
+    if facts.copy.voters.len() == 1 && facts.fence.is_none() {
         return Err(failure(
             codes::NOT_NEEDED,
             exit::USAGE,
@@ -679,53 +835,80 @@ async fn force(
             ),
         ));
     }
-    for named in args.rejoin.iter().chain(&args.revoke) {
-        if !others.contains(&NodeId(*named)) {
-            return Err(failure(
-                "cluster.recover.unknown_node",
-                exit::USAGE,
-                format!("controller {named} is not a member of this copy's cluster"),
-            ));
-        }
-    }
     if let Some(named) = args
         .revoke
         .iter()
-        .find(|named| !facts.enrolled.contains(&NodeId(**named)))
+        .find(|named| NodeId(**named) == node || !facts.enrolled.contains(&NodeId(**named)))
     {
         return Err(failure(
-            "cluster.recover.unknown_node",
+            codes::UNKNOWN_NODE,
             exit::USAGE,
             format!(
-                "controller {named} has no record in the node registry of this copy, so there \
-                 are no certificates to revoke; remove it later with `tenko cluster remove`"
+                "controller {named} is not another controller with a record in the node \
+                 registry of this copy, so there are no certificates to revoke; remove it \
+                 later with `tenko cluster remove`"
             ),
         ));
     }
+    Ok((others, mixed))
+}
+
+/// The forced step, with `interrupt` asked at every [`Step`] (never in production).
+#[allow(
+    clippy::too_many_lines,
+    reason = "the forced step reads best as one sequence with its undo"
+)]
+async fn force_with(
+    resolved: &Resolved,
+    args: &RecoverArgs,
+    facts: &Facts,
+    fresher: Vec<String>,
+    mut stdout: String,
+    interrupt: &(dyn Fn(Step) -> Option<Interrupt> + Sync),
+) -> Result<Output, Stopped> {
+    let at = |step: Step| match interrupt(step) {
+        None => Ok(()),
+        Some(Interrupt::Fail) => Err(Stopped::Failed(Failure::other(format!(
+            "the step failed after {step:?}"
+        )))),
+        Some(Interrupt::Crash) => Err(Stopped::Crashed),
+    };
+    if let Some(notice) = Notice::load(&resolved.data_dir).map_err(Failure::other)? {
+        return Err(failure(
+            codes::INTERRUPTED,
+            exit::USAGE,
+            format!(
+                "a forced step to generation {} is already here; run `tenko cluster recover \
+                 --undo` first",
+                notice.generation
+            ),
+        )
+        .into());
+    }
+    let node = facts.node;
+    let (others, mixed) = force_checks(args, facts, &fresher)?;
     let credentials = Credentials::load(&NodePaths::new(&resolved.data_dir))
         .map_err(|error| failure(error.code(), exit::USAGE, error.detail()))?;
-    let generation = facts.seen + 1;
+    let generation = facts.next()?;
     let text = confirmation(facts, generation, &others, args);
     confirmed(args, node, generation, &text)?;
 
+    let data = &resolved.data_dir;
     let dirs = Dirs::new(resolved, generation);
-    let old: Vec<OldVoter> = others
-        .iter()
-        .map(|other| OldVoter {
-            node: *other,
-            address: facts
-                .members
-                .get(other)
-                .map(|member| member.address.clone())
-                .unwrap_or_default(),
-        })
-        .collect();
+    let old_voter = |other: &NodeId| OldVoter {
+        node: *other,
+        address: facts
+            .members
+            .get(other)
+            .map(|member| member.address.clone())
+            .unwrap_or_default(),
+    };
     let mut notice = Notice {
         phase: Phase::Prepared,
         generation,
         node,
         parent: facts.own.as_ref().and_then(|own| own.claim().render()),
-        old,
+        old: others.iter().map(old_voter).collect(),
         despite_majority: args.despite_majority,
         at: Timestamp::now(),
     };
@@ -738,9 +921,25 @@ async fn force(
                 dirs.kept.display(),
                 dirs.work.display()
             ),
-        ));
+        )
+        .into());
     }
-    notice.save(&resolved.data_dir).map_err(Failure::other)?;
+    notice.create(data).map_err(|error| {
+        failure(
+            codes::INTERRUPTED,
+            exit::USAGE,
+            format!(
+                "the notice of a forced step could not be written ({error}); another step may \
+                 be under way here"
+            ),
+        )
+    })?;
+    if let Err(stopped) = at(Step::Noticed) {
+        if let Stopped::Failed(_) = stopped {
+            let _ = remove_notice(data);
+        }
+        return Err(stopped);
+    }
     // Again now that the notice keeps a server from starting: one started since the
     // inspection would write into the copy that is to be kept.
     let moved = tenko_store::format::ensure_closed(&dirs.store)
@@ -750,15 +949,28 @@ async fn force(
                 .map_err(|error| Failure::other(format!("renaming the store aside: {error}")))
         });
     if let Err(error) = moved {
-        let _ = fs::remove_file(resolved.data_dir.join(NOTICE_FILE));
-        return Err(error);
+        let _ = remove_notice(data);
+        return Err(error.into());
     }
+    tenko_store::sync_dir(data);
     let committed = async {
         dirs.move_fence(false)?;
+        at(Step::Moved)?;
         let replayed = replay(&dirs.kept, &dirs.work)
             .await
             .map_err(|error| Failure::other(format!("applying the copy's log: {error}")))?;
         write_tail(&dirs.tail, &replayed)?;
+        at(Step::Replayed)?;
+        // A controller the tail added is superseded and probed like the others.
+        let replayed_members: BTreeSet<NodeId> = replayed
+            .copy
+            .facts
+            .voters
+            .iter()
+            .chain(&replayed.copy.facts.learners)
+            .copied()
+            .filter(|other| *other != node)
+            .collect();
         let fork = fork_point(&replayed)?;
         let position = SnapshotRecord {
             last_log_term: fork.term,
@@ -777,6 +989,12 @@ async fn force(
         )
         .await
         .map_err(|error| Failure::other(format!("installing the new store: {error}")))?;
+        tenko_store::sync_dir(data);
+        if let Err(stopped) = at(Step::Installed) {
+            let _ = store.shutdown().await;
+            return Err(stopped);
+        }
+        let superseded: BTreeSet<NodeId> = others.union(&replayed_members).copied().collect();
         let body = GenerationBody {
             layout: LAYOUT,
             number: generation,
@@ -787,6 +1005,7 @@ async fn force(
                 .copy
                 .voters
                 .iter()
+                .chain(&replayed.copy.facts.voters)
                 .copied()
                 .filter(|voter| *voter != node)
                 .collect(),
@@ -795,29 +1014,45 @@ async fn force(
         };
         let record = GenerationRecord::sign(&body, &credentials.chain, &credentials.key)
             .map_err(|error| failure(error.code(), exit::FAILURE, error.detail()))?;
-        let written = write_batch(&store, &record, &body, &others, args, replayed.tail.len()).await;
+        let written = write_batch(
+            &store,
+            &record,
+            &body,
+            &superseded,
+            args,
+            replayed.tail.len(),
+            data,
+        )
+        .await;
         let _ = store.shutdown().await;
         drop(replayed);
-        written.map(|()| record)
+        written?;
+        at(Step::Written)?;
+        Ok::<_, Stopped>((record, superseded))
     }
     .await;
-    let record = match committed {
-        Ok(record) => record,
-        Err(error) => {
+    let (record, superseded) = match committed {
+        Ok(done) => done,
+        Err(Stopped::Crashed) => return Err(Stopped::Crashed),
+        Err(Stopped::Failed(error)) => {
             let _ = fs::remove_dir_all(&dirs.store);
             let _ = fs::remove_dir_all(&dirs.work);
             let _ = fs::remove_file(&dirs.tail);
+            tenko_store::sync_dir(data);
             // The notice goes only when the old store and its fence are both back; else it
             // keeps the server from starting until `--undo`.
             if dirs.move_fence(true).is_ok() && fs::rename(&dirs.kept, &dirs.store).is_ok() {
-                let _ = fs::remove_file(resolved.data_dir.join(NOTICE_FILE));
+                tenko_store::sync_dir(data);
+                let _ = remove_notice(data);
             }
-            return Err(error);
+            return Err(error.into());
         }
     };
     let _ = fs::remove_dir_all(&dirs.work);
+    tenko_store::sync_dir(data);
+    notice.old = superseded.iter().map(old_voter).collect();
     notice.phase = Phase::Committed;
-    notice.save(&resolved.data_dir).map_err(Failure::other)?;
+    notice.save(data).map_err(Failure::other)?;
     let _ = writeln!(
         stdout,
         "\ngeneration {generation} created (record {}); the copy before it is kept in {}.\n\
@@ -846,38 +1081,74 @@ fn confirmation(
     args: &RecoverArgs,
 ) -> String {
     let list = |nodes: &mut dyn Iterator<Item = String>| nodes.collect::<Vec<_>>().join(", ");
-    let position = facts.copy.last_log.map_or_else(
-        || "the start".to_owned(),
-        |id| format!("{}:{}", id.leader_id.term, id.index),
-    );
+    let position = facts
+        .copy
+        .last_log
+        .map_or_else(|| "the start".to_owned(), log_id);
     let mut text = format!(
         "This controller (node {}) becomes the only voter of the cluster, generation {generation}.\n\
          Its copy ends at log position {position} (revision {}); {} of its entries were not yet \
-         known as committed and are kept.\n\n\
-         Controllers {} stop being members. When one comes back, it stops writing at once and \
-         keeps its copy aside on its own host.",
+         known as committed and are kept.\n",
         facts.node,
         facts.copy.revision.0,
         facts.copy.unknown_commit(),
-        list(&mut others.iter().map(ToString::to_string)),
     );
-    if !args.rejoin.is_empty() {
-        let _ = write!(
-            text,
-            " {} may then rejoin by itself as a learner when it holds nothing of its own after \
-             this position;",
-            list(&mut args.rejoin.iter().map(ToString::to_string))
-        );
+    match facts.fence {
+        Some(tenko_store::FenceReason::Conflict) => {
+            let _ = writeln!(
+                text,
+                "It was stopped by a competing forced history (generation {}): this step \
+                 chooses this side. The other side stays stopped until an operator acts on its \
+                 hosts.",
+                facts.seen
+            );
+        }
+        Some(fence) => {
+            let _ = writeln!(
+                text,
+                "It was superseded by generation {} of the cluster ({}): this step makes this \
+                 copy the newer history, and the controller that took office there stops \
+                 writing when it meets this one and waits for an operator. Whatever that side \
+                 wrote since it took office does not come here. Do this only when this side is \
+                 the right one (its forced controller was stale, or forced while this side \
+                 lived).",
+                facts.seen,
+                fence.code()
+            );
+        }
+        None => {}
     }
-    let _ = writeln!(
-        text,
-        " the others wait until you act on their host. Whatever they wrote after this position \
-         does not come into this cluster."
-    );
+    let earlier: Vec<&NodeId> = facts
+        .marked
+        .iter()
+        .filter(|node| !others.contains(node))
+        .collect();
+    if !earlier.is_empty() {
+        let _ = writeln!(
+            text,
+            "\nThis controller will also offer the new record to the controllers an earlier \
+             step superseded:"
+        );
+        addresses(&mut text, facts, earlier.into_iter());
+    }
+    if !others.is_empty() {
+        let _ = writeln!(
+            text,
+            "\nControllers {} stop being members. When one comes back, it stops writing at once \
+             and keeps its copy aside on its own host; it waits until you act on that host. \
+             Whatever they wrote after this position does not come into this cluster.\n\
+             This controller will call them at:",
+            list(&mut others.iter().map(ToString::to_string)),
+        );
+        addresses(&mut text, facts, others.iter());
+    }
     if !args.revoke.is_empty() {
         let _ = writeln!(
             text,
-            "The certificates of {} are revoked in the same write.",
+            "\nThe certificates of {} are revoked in the same write. A revoked controller is \
+             never told of the new generation: revoke only a host that is destroyed or that \
+             you will wipe. Two revoked controllers that come back and reach each other keep \
+             writing as a cluster of their own.",
             list(&mut args.revoke.iter().map(ToString::to_string))
         );
     }
@@ -885,10 +1156,28 @@ fn confirmation(
         text,
         "\nDo this only if those controllers are stopped or gone and cannot reach each other. If \
          they are running and reach each other, they are still a cluster, and this makes a \
-         second one.\n\nThe copy this controller has now is kept in recover-gen{generation}/ \
-         until you remove it; `--undo` restores it until the first start.\n"
+         second one.\n\
+         If this host is a clone or a restored copy of a controller (a virtual machine clone, \
+         a snapshot, a lab restore), stop here: the addresses above are the ones the step \
+         reaches, and a clone that reaches them stops the real cluster.\n\n\
+         The copy this controller has now is kept in recover-gen{generation}/ until you remove \
+         it; `--undo` restores it until the first start.\n"
     );
     text
+}
+
+/// One line per controller: its node id and the cluster port its member record names.
+fn addresses<'a>(text: &mut String, facts: &Facts, nodes: impl Iterator<Item = &'a NodeId>) {
+    for node in nodes {
+        let _ = writeln!(
+            text,
+            "  node {node}  {}",
+            facts
+                .members
+                .get(node)
+                .map_or("(no address known)", |member| member.address.as_str())
+        );
+    }
 }
 
 fn nonce() -> Result<Vec<u8>, Failure> {
@@ -916,7 +1205,7 @@ fn write_tail(path: &Path, replayed: &Replayed) -> Result<(), Failure> {
     let mut text = String::new();
     for entry in &replayed.tail {
         let line = serde_json::json!({
-            "log_id": format!("{}:{}", entry.log_id.leader_id.term, entry.log_id.index),
+            "log_id": log_id(entry.log_id),
             "entry": describe(&entry.payload),
         });
         let _ = writeln!(text, "{line}");
@@ -953,6 +1242,7 @@ async fn write_batch(
     others: &BTreeSet<NodeId>,
     args: &RecoverArgs,
     tail: usize,
+    data: &Path,
 ) -> Result<(), Failure> {
     let cx = RequestCtx::system(SystemComponent::Cluster);
     let view = store
@@ -972,7 +1262,7 @@ async fn write_batch(
                 &SupersededMark {
                     generation: body.number,
                     record: hash,
-                    rejoin: args.rejoin.contains(&other.0),
+                    rejoin: false,
                 },
             )
             .map_err(Failure::other)?;
@@ -1009,26 +1299,28 @@ async fn write_batch(
         )
         .with_context("revoked", revoked.join(","))
         .with_context("tail_entries", tail.to_string())
-        .with_context("account", whoami())
-        .with_context("host", host_name()),
+        .with_context("account", account(data))
+        .with_context("host", crate::node::enroll::host_name().unwrap_or_default()),
     );
     drop(view);
     store.propose(batch).await.map_err(Failure::other)?;
     Ok(())
 }
 
-fn whoami() -> String {
-    ["USER", "USERNAME"]
-        .iter()
-        .find_map(|name| std::env::var(name).ok())
-        .unwrap_or_default()
+/// The account that ran the step: the owner of the data directory, which the command
+/// runs as (`exec` refuses another account), not what the environment claims.
+fn account(data: &Path) -> String {
+    use crate::exec::Facts as _;
+    crate::exec::Host
+        .owner(data)
+        .ok()
+        .flatten()
+        .map_or_else(String::new, |owner| owner.to_string())
 }
 
-fn host_name() -> String {
-    ["HOSTNAME", "COMPUTERNAME"]
-        .iter()
-        .find_map(|name| std::env::var(name).ok())
-        .unwrap_or_default()
+/// A log id as `term:index`.
+fn log_id(id: tenko_store::raft::types::LogId) -> String {
+    format!("{}:{}", id.leader_id.term, id.index)
 }
 
 /// `--undo`: before the first start took office, the copy kept aside goes back.
@@ -1050,7 +1342,7 @@ fn undo_at(data: &Path, store: &Path) -> Result<Output, Failure> {
     if !dirs.kept.exists() {
         if notice.phase == Phase::Prepared {
             // The step stopped before it renamed the store: nothing moved.
-            fs::remove_file(data.join(NOTICE_FILE)).map_err(Failure::other)?;
+            remove_notice(data).map_err(Failure::other)?;
             return Ok(Output {
                 stdout: "the interrupted forced step changed nothing; its notice is gone\n"
                     .to_owned(),
@@ -1063,6 +1355,22 @@ fn undo_at(data: &Path, store: &Path) -> Result<Output, Failure> {
             format!("the copy kept aside is missing: {}", dirs.kept.display()),
         ));
     }
+    // The copy kept aside must be this controller's before anything is removed: a planted
+    // notice must not make `--undo` replace the store with another one.
+    let kept_node = fs::read_to_string(dirs.kept.join(tenko_store::raft::NODE_ID_FILE))
+        .ok()
+        .and_then(|text| text.trim().parse::<u64>().ok());
+    if kept_node != Some(notice.node.0) {
+        return Err(failure(
+            codes::UNDO_REFUSED,
+            exit::USAGE,
+            format!(
+                "{} is not the copy of controller {} that the notice names; nothing was changed",
+                dirs.kept.display(),
+                notice.node
+            ),
+        ));
+    }
     if tenko_store::format::store_exists(&dirs.store) {
         tenko_store::format::ensure_closed(&dirs.store).map_err(store_failure)?;
         fs::remove_dir_all(&dirs.store).map_err(Failure::other)?;
@@ -1072,6 +1380,7 @@ fn undo_at(data: &Path, store: &Path) -> Result<Output, Failure> {
     let _ = fs::remove_dir_all(&dirs.work);
     let _ = fs::remove_file(&dirs.tail);
     fs::rename(&dirs.kept, &dirs.store).map_err(Failure::other)?;
+    tenko_store::sync_dir(data);
     if notice.phase == Phase::Committed && !dirs.kept_fence.exists() {
         // The old store had no fence; one written since belongs to the history undone.
         match fs::remove_file(&dirs.fence) {
@@ -1083,7 +1392,7 @@ fn undo_at(data: &Path, store: &Path) -> Result<Output, Failure> {
         }
     }
     dirs.move_fence(true)?;
-    fs::remove_file(data.join(NOTICE_FILE)).map_err(Failure::other)?;
+    remove_notice(data).map_err(Failure::other)?;
     Ok(Output {
         stdout: format!(
             "the forced step to generation {} is undone: the copy from before it is the store \
@@ -1144,7 +1453,9 @@ pub fn parent_claim(notice: &Notice) -> Claim {
 ///
 /// A message naming the file.
 pub fn took_office(data_dir: &Path) -> Result<(), String> {
-    fs::remove_file(data_dir.join(NOTICE_FILE))
+    // Synced: a notice that came back after a power loss would allow `--undo` after the
+    // record reached the old voters.
+    remove_notice(data_dir)
         .map_err(|error| format!("{}: {error}", data_dir.join(NOTICE_FILE).display()))
 }
 
@@ -1173,6 +1484,12 @@ mod tests {
         let store = dir.path().join("store");
         fs::create_dir_all(&store).expect("store");
         fs::write(store.join("log.redb"), content).expect("log");
+        fs::write(
+            store.join(tenko_store::raft::NODE_ID_FILE),
+            "2
+",
+        )
+        .expect("node id");
         (dir, store)
     }
 
@@ -1190,11 +1507,11 @@ mod tests {
     fn a_crash_before_the_store_moved_is_undone_without_a_trace() {
         let (dir, store) = data_dir("old");
         notice(Phase::Prepared).save(dir.path()).expect("notice");
-        let refusal = check_start(dir.path()).expect_err("an unfinished step");
+        let refusal = check_start(dir.path(), &store).expect_err("an unfinished step");
         assert_eq!(refusal.code, codes::INTERRUPTED);
         undo_at(dir.path(), &store).expect("undo");
         assert_eq!(log_of(&store), "old");
-        assert!(check_start(dir.path()).is_ok());
+        assert!(check_start(dir.path(), &store).is_ok());
         refused(undo_at(dir.path(), &store), codes::UNDO_REFUSED);
     }
 
@@ -1205,7 +1522,7 @@ mod tests {
         let dirs = Dirs::at(dir.path(), &store, 1);
         fs::rename(&store, &dirs.kept).expect("aside");
         assert_eq!(
-            check_start(dir.path())
+            check_start(dir.path(), &store)
                 .expect_err("an unfinished step")
                 .code,
             codes::INTERRUPTED
@@ -1213,7 +1530,7 @@ mod tests {
         undo_at(dir.path(), &store).expect("undo");
         assert_eq!(log_of(&store), "old");
         assert!(!dirs.kept.exists());
-        assert!(check_start(dir.path()).is_ok());
+        assert!(check_start(dir.path(), &store).is_ok());
     }
 
     #[test]
@@ -1230,7 +1547,7 @@ mod tests {
         fs::write(store.join("log.redb"), "new").expect("new log");
         fs::write(&dirs.tail, "{}").expect("tail");
         assert_eq!(
-            check_start(dir.path())
+            check_start(dir.path(), &store)
                 .expect_err("an unfinished step")
                 .code,
             codes::INTERRUPTED
@@ -1242,7 +1559,7 @@ mod tests {
             "the old fence"
         );
         assert!(!dirs.work.exists() && !dirs.tail.exists() && !dirs.kept_fence.exists());
-        assert!(check_start(dir.path()).is_ok());
+        assert!(check_start(dir.path(), &store).is_ok());
     }
 
     #[test]
@@ -1253,7 +1570,10 @@ mod tests {
         fs::create_dir_all(&store).expect("new store");
         fs::write(store.join("log.redb"), "new").expect("new log");
         notice(Phase::Committed).save(dir.path()).expect("notice");
-        assert!(check_start(dir.path()).is_ok(), "a finished step starts");
+        assert!(
+            check_start(dir.path(), &store).is_ok(),
+            "a finished step starts"
+        );
         fs::create_dir_all(dirs.fence.parent().expect("node dir")).expect("node dir");
         fs::write(&dirs.fence, "written by the new history").expect("fence");
         undo_at(dir.path(), &store).expect("undo");
@@ -1279,6 +1599,8 @@ mod tests {
             node: NodeId(node),
             own: None,
             seen: 0,
+            fence: None,
+            marked: BTreeSet::new(),
             members: BTreeMap::new(),
             enrolled: BTreeSet::new(),
         }
@@ -1302,5 +1624,388 @@ mod tests {
             format!("{:?}", bad.expect_err("not a fingerprint"))
                 .contains("cluster.recover.fingerprint")
         );
+    }
+
+    // -----------------------------------------------------------------------------------
+    // The forced step on a real store, stopped at each of its points.
+
+    /// Rows the copies hold, so that a copy put back can be told from a new one.
+    const ROWS: tenko_core::TableName =
+        tenko_core::TableName::from_static("ipam.recover_test_rows");
+
+    /// A data directory under `root` whose store is node 1's copy of a cluster of three
+    /// voters (closed), with a configuration, an identity under `node/` and a fence of an
+    /// earlier history; returns the configuration.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the copy, its identity and its fence, in order"
+    )]
+    async fn three_voter_copy(root: &Path) -> Resolved {
+        use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
+        use tenko_store::raft::{RaftStore, RaftStoreConfig, network::InProcessNetwork};
+
+        let data = root.join("data");
+        fs::create_dir_all(&data).expect("data");
+        let file = root.join("tenko.toml");
+        fs::write(
+            &file,
+            format!(
+                "data_dir = '{}'\n[node]\nid = 1\naddress = \"in-process-1\"\n",
+                data.display()
+            ),
+        )
+        .expect("config");
+        let resolved = config::load(
+            &config::Sources {
+                file: Some(file),
+                data_dir: None,
+                roles: None,
+            },
+            std::iter::empty(),
+        )
+        .and_then(|loaded| loaded.config.resolve())
+        .expect("configuration");
+
+        let network = InProcessNetwork::new();
+        let mut stores = Vec::new();
+        for node in 1..=3_u64 {
+            let dir = if node == 1 {
+                resolved.layout().store()
+            } else {
+                root.join(format!("peer-{node}"))
+            };
+            let mut config = RaftStoreConfig::new(&dir);
+            config.node_id = NodeId(node);
+            config.address = format!("in-process-{node}");
+            config.bootstrap = node == 1;
+            config.fsync_probe_samples = 0;
+            let store = RaftStore::open_with(config, std::sync::Arc::new(network.clone()))
+                .await
+                .expect("open");
+            network.register(&store);
+            stores.push(store);
+        }
+        let first = stores[0].clone();
+        for node in 2..=3 {
+            first
+                .add_learner(NodeId(node), format!("in-process-{node}"), true)
+                .await
+                .expect("learner");
+        }
+        first
+            .change_membership([NodeId(1), NodeId(2), NodeId(3)].into())
+            .await
+            .expect("three voters");
+        let mut batch = WriteBatch::for_request(&RequestCtx::system(SystemComponent::Cluster));
+        for index in 0..50_u32 {
+            batch.put(
+                ROWS,
+                format!("row-{index:04}").into_bytes(),
+                b"before the step".to_vec(),
+            );
+        }
+        first.propose(batch).await.expect("rows");
+        for store in stores {
+            store.shutdown().await.expect("shutdown");
+        }
+
+        // The identity the step signs with.
+        let ca_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let mut ca_params = CertificateParams::new(Vec::new()).expect("params");
+        ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let ca_root = ca_params.self_signed(&ca_key).expect("root").der().clone();
+        let issuer = rcgen::Issuer::new(ca_params, ca_key);
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let mut params = CertificateParams::new(Vec::new()).expect("params");
+        params.subject_alt_names = vec![
+            rcgen::SanType::URI("urn:tenko:node:1".try_into().expect("uri")),
+            rcgen::SanType::URI("urn:tenko:role:controller".try_into().expect("uri")),
+        ];
+        let leaf = params.signed_by(&key, &issuer).expect("leaf").der().clone();
+        Credentials {
+            identity: tenko_cluster::identity::NodeIdentity {
+                node: NodeId(1),
+                name: "controller-1".to_owned(),
+                roles: vec![tenko_core::Role::Controller],
+                controller: String::new(),
+                endpoints: Vec::new(),
+                cluster_port: None,
+                heartbeat_secs: 30,
+                enrolled_at: Timestamp::now(),
+                ca_sha256: String::new(),
+            },
+            info: tenko_cluster::ca::CertInfo::from_der(&leaf).expect("info"),
+            chain: vec![leaf],
+            key: tenko_vault::SecretBytes::from_slice(&key.serialize_der()),
+            ca_root,
+        }
+        .save(&NodePaths::new(&data))
+        .expect("identity");
+        // A fence of an earlier history: the step moves it aside and puts it back.
+        FenceFile {
+            kind: tenko_store::FenceReason::Superseded,
+            records: Vec::new(),
+            at: Timestamp::now(),
+        }
+        .save(&data)
+        .expect("fence");
+        resolved
+    }
+
+    fn args() -> RecoverArgs {
+        RecoverArgs {
+            config: None,
+            data_dir: None,
+            inspect: false,
+            compare: Vec::new(),
+            force: true,
+            revoke: Vec::new(),
+            undo: false,
+            confirm: Some("1:1".to_owned()),
+            accept_older: false,
+            accept_mixed: true,
+            despite_majority: false,
+        }
+    }
+
+    /// What a copy holds, to tell the copy from before the step from another one.
+    type CopyState = (
+        Option<tenko_store::raft::types::LogId>,
+        Revision,
+        Vec<NodeId>,
+    );
+
+    async fn state(store: &Path) -> CopyState {
+        let copy = inspect(store).await.expect("a store");
+        (
+            copy.facts.last_log,
+            copy.facts.revision,
+            copy.facts.voters.iter().copied().collect(),
+        )
+    }
+
+    /// Runs the step on a fresh copy, interrupted after `step` as `how`.
+    async fn interrupted(
+        root: &TempDir,
+        step: Option<(Step, Interrupt)>,
+    ) -> (Resolved, CopyState, Result<Output, Stopped>) {
+        let resolved = three_voter_copy(root.path()).await;
+        let before = state(&resolved.layout().store()).await;
+        let copy = inspect(&resolved.layout().store()).await.expect("copy");
+        let facts = Facts::read(&resolved, &copy).expect("facts");
+        drop(copy);
+        let outcome = force_with(
+            &resolved,
+            &args(),
+            &facts,
+            Vec::new(),
+            String::new(),
+            &move |at| step.filter(|(when, _)| *when == at).map(|(_, how)| how),
+        )
+        .await;
+        (resolved, before, outcome)
+    }
+
+    const STEPS: [Step; 5] = [
+        Step::Noticed,
+        Step::Moved,
+        Step::Replayed,
+        Step::Installed,
+        Step::Written,
+    ];
+
+    /// A failure at every point of the step puts everything back as it was: the store (the
+    /// same last log id, revision and voters), the fence, and no notice, kept copy, work
+    /// directory or tail; the server starts as the member it was.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_failure_at_every_point_of_the_step_leaves_the_copy_as_it_was() {
+        for step in STEPS {
+            let root = TempDir::new("recover-fail");
+            let (resolved, before, outcome) =
+                interrupted(&root, Some((step, Interrupt::Fail))).await;
+            assert!(
+                matches!(outcome, Err(Stopped::Failed(_))),
+                "a failure after {step:?}"
+            );
+            let data = &resolved.data_dir;
+            let store = resolved.layout().store();
+            let dirs = Dirs::new(&resolved, 1);
+            assert_eq!(state(&store).await, before, "the copy after {step:?}");
+            assert!(Notice::load(data).expect("notice").is_none(), "{step:?}");
+            assert!(
+                !dirs.kept.exists() && !dirs.work.exists() && !dirs.tail.exists(),
+                "{step:?}"
+            );
+            assert!(dirs.fence.exists() && !dirs.kept_fence.exists(), "{step:?}");
+            check_start(data, &store).expect("starts as it was");
+        }
+    }
+
+    /// A crash at every point of the step (nothing undone) keeps the server from starting,
+    /// so the controller never runs on a half-made step; `--undo` puts the copy from before
+    /// the step back, with its fence, and the server starts as the member it was.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_crash_at_every_point_of_the_step_is_refused_at_start_and_undone() {
+        for step in STEPS {
+            let root = TempDir::new("recover-crash");
+            let (resolved, before, outcome) =
+                interrupted(&root, Some((step, Interrupt::Crash))).await;
+            assert!(matches!(outcome, Err(Stopped::Crashed)), "{step:?}");
+            let data = &resolved.data_dir;
+            let store = resolved.layout().store();
+            let dirs = Dirs::new(&resolved, 1);
+            let refusal = check_start(data, &store).expect_err("no start after a crash");
+            assert_eq!(refusal.code, codes::INTERRUPTED, "{step:?}");
+            undo_at(data, &store).expect("undo");
+            assert_eq!(state(&store).await, before, "the copy after {step:?}");
+            assert!(dirs.fence.exists() && !dirs.kept_fence.exists(), "{step:?}");
+            assert!(
+                !dirs.kept.exists() && !dirs.work.exists() && !dirs.tail.exists(),
+                "{step:?}"
+            );
+            check_start(data, &store).expect("starts as it was");
+            refused(undo_at(data, &store), codes::UNDO_REFUSED);
+        }
+    }
+
+    /// The whole step: a store with this controller as the only voter and the record, the
+    /// notice `committed` (the server starts and probes), and once the first start took
+    /// office no `--undo`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_whole_step_commits_and_office_ends_the_undo() {
+        let root = TempDir::new("recover-whole");
+        let (resolved, _, outcome) = interrupted(&root, None).await;
+        assert!(outcome.is_ok(), "the step");
+        let data = &resolved.data_dir;
+        let store = resolved.layout().store();
+        assert_eq!(state(&store).await.2, vec![NodeId(1)]);
+        let notice = Notice::load(data).expect("notice").expect("a notice");
+        assert_eq!(notice.phase, Phase::Committed);
+        assert_eq!(
+            notice.old.iter().map(|old| old.node).collect::<Vec<_>>(),
+            vec![NodeId(2), NodeId(3)]
+        );
+        check_start(data, &store).expect("a finished step starts");
+        let dirs = Dirs::new(&resolved, 1);
+        assert!(!dirs.fence.exists(), "the new history starts unfenced");
+        // A committed notice without its store is refused, not a fresh installation.
+        fs::rename(&store, root.path().join("moved")).expect("move");
+        assert_eq!(
+            check_start(data, &store).expect_err("no store").code,
+            codes::INTERRUPTED
+        );
+        fs::rename(root.path().join("moved"), &store).expect("back");
+        took_office(data).expect("office");
+        refused(undo_at(data, &store), codes::UNDO_REFUSED);
+    }
+
+    /// A second step while one is under way changes nothing and leaves the first one's
+    /// notice in place.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_second_step_beside_a_running_one_changes_nothing() {
+        let root = TempDir::new("recover-twice");
+        let (resolved, _, outcome) =
+            interrupted(&root, Some((Step::Moved, Interrupt::Crash))).await;
+        assert!(matches!(outcome, Err(Stopped::Crashed)));
+        let data = &resolved.data_dir;
+        let first = fs::read(data.join(NOTICE_FILE)).expect("the first notice");
+        let second = notice(Phase::Prepared);
+        let error = second.create(data).expect_err("a notice is there");
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(data.join(NOTICE_FILE)).expect("notice"), first);
+    }
+
+    /// A controller alone needs no forced step, unless another history stopped it: then the
+    /// step is how an operator chooses its side, and it may revoke the other side's
+    /// controller (enrolled, not a member of this copy). It never revokes itself or a node
+    /// without a record.
+    #[test]
+    fn a_controller_another_history_stopped_is_forced_to_choose_its_side() {
+        let mut alone = facts(1, 5, 100);
+        alone.copy.voters = [NodeId(1)].into_iter().collect();
+        alone.enrolled = [1, 2].into_iter().map(NodeId).collect();
+        let checks = |facts: &Facts, revoke: &[u64]| {
+            let args = RecoverArgs {
+                revoke: revoke.to_vec(),
+                ..args()
+            };
+            force_checks(&args, facts, &[]).map(|(others, _)| others)
+        };
+        let refused = checks(&alone, &[]).expect_err("alone and not stopped");
+        assert!(format!("{refused:?}").contains(codes::NOT_NEEDED));
+        alone.fence = Some(tenko_store::FenceReason::Conflict);
+        assert_eq!(checks(&alone, &[]).expect("stopped"), BTreeSet::new());
+        checks(&alone, &[2]).expect("the other side's controller");
+        for named in [1, 9] {
+            let refused = checks(&alone, &[named]).expect_err("not another enrolled controller");
+            assert!(format!("{refused:?}").contains(codes::UNKNOWN_NODE));
+        }
+    }
+
+    /// `--inspect` names the generation a forced step creates; a refused confirmation and
+    /// the refusal without a terminal never print the value to pass.
+    #[test]
+    fn the_confirmation_is_read_never_handed_over() {
+        let mut copy = facts(1, 5, 100);
+        copy.seen = 3;
+        copy.fence = Some(tenko_store::FenceReason::Superseded);
+        let text = copy.describe();
+        assert!(text.contains("creates generation 4"), "{text}");
+        assert!(!text.contains("1:4"), "{text}");
+        let wrong = RecoverArgs {
+            confirm: Some("1:3".to_owned()),
+            ..args()
+        };
+        let refused = confirmed(&wrong, NodeId(1), 4, "what the step does");
+        assert!(!format!("{refused:?}").contains("1:4"));
+        // The tests run without a terminal.
+        let none = RecoverArgs {
+            confirm: None,
+            ..args()
+        };
+        let refused = confirmed(&none, NodeId(1), 4, "what the step does");
+        assert!(format!("{refused:?}").contains(codes::CONFIRM));
+        assert!(!format!("{refused:?}").contains("1:4"));
+        confirmed(&args(), NodeId(1), 1, "what the step does").expect("the right value");
+    }
+
+    /// `--undo` puts back only the copy of the controller the notice names: a planted
+    /// notice beside another copy changes nothing.
+    #[test]
+    fn an_undo_needs_the_copy_of_the_noticed_controller() {
+        let (dir, store) = data_dir("current");
+        let dirs = Dirs::at(dir.path(), &store, 1);
+        fs::create_dir_all(&dirs.kept).expect("kept");
+        fs::write(dirs.kept.join("log.redb"), "another").expect("log");
+        fs::write(dirs.kept.join(tenko_store::raft::NODE_ID_FILE), "7\n").expect("node id");
+        notice(Phase::Committed).save(dir.path()).expect("notice");
+        refused(undo_at(dir.path(), &store), codes::UNDO_REFUSED);
+        assert_eq!(log_of(&store), "current");
+        assert!(dirs.kept.exists());
+    }
+
+    /// The notice is a stored file a later binary reads after a crash: these bytes keep
+    /// reading, a phase this build does not know reads as strict as `prepared`, and fields
+    /// it does not know are ignored.
+    #[test]
+    fn the_kept_notice_still_reads() {
+        let kept = r#"{
+  "phase": "committed",
+  "generation": 2,
+  "node": 3,
+  "parent": "1:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+  "old": [{ "node": 1, "address": "192.0.2.1:8444" }],
+  "despite_majority": false,
+  "at": "2026-11-13T10:00:00Z"
+}"#;
+        let notice: Notice = serde_json::from_str(kept).expect("the kept notice");
+        assert_eq!(notice.phase, Phase::Committed);
+        assert_eq!((notice.generation, notice.node), (2, NodeId(3)));
+        assert_eq!(notice.old[0].address, "192.0.2.1:8444");
+        let later = kept
+            .replace("\"committed\"", "\"resumed\"")
+            .replace("\"node\": 3,", "\"node\": 3, \"extra\": true,");
+        let notice: Notice = serde_json::from_str(&later).expect("a later notice");
+        assert_eq!(notice.phase, Phase::Unknown);
     }
 }

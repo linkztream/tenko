@@ -92,7 +92,7 @@ use tonic::Status;
 use uuid::Uuid;
 
 pub use self::{
-    generations::{GenerationState, PUSH_INTERVAL},
+    generations::{GenerationState, PUSH_INTERVAL, RefusedRecords},
     identity::{ControllerIdentity, NodeDirIdentity, Switch, VaultIdentity, certificate_ref},
     network::{MAX_APPEND_BYTES, PeerNetwork, PeerTimings},
 };
@@ -227,6 +227,11 @@ struct Inner {
     removing: Mutex<HashSet<NodeId>>,
     /// The generation of this controller's history and its fence.
     generations: generations::Generations,
+    /// While this controller is being seeded (a joining learner with an empty store): the
+    /// voters it takes its first copy from, with the serials their records hold (`None`:
+    /// any certificate of that node id, from a leader of an earlier version), as the join
+    /// answer named them.
+    seeds: Mutex<Option<BTreeMap<NodeId, Option<BTreeSet<String>>>>>,
 }
 
 impl std::fmt::Debug for Peers {
@@ -321,6 +326,7 @@ impl Peers {
                 changes: tokio::sync::Mutex::new(()),
                 removing: Mutex::new(HashSet::new()),
                 generations: generations::Generations::default(),
+                seeds: Mutex::new(None),
             }),
         };
         peers
@@ -408,6 +414,46 @@ impl Peers {
                 .upgrade()
                 .is_some_and(|inner| Peers { inner }.refuses(node))
         });
+    }
+
+    /// The voters a joining learner takes its first copy from: those its join answer names,
+    /// each with the serials its record holds. Without them an empty store takes no copy.
+    pub fn seed_from(&self, answer: &v1::JoinResponse) {
+        let mut seeds: BTreeMap<NodeId, Option<BTreeSet<String>>> = BTreeMap::new();
+        for voter in &answer.voter_serials {
+            seeds
+                .entry(NodeId(voter.node_id))
+                .or_insert_with(|| Some(BTreeSet::new()))
+                .get_or_insert_with(BTreeSet::new)
+                .insert(voter.serial.clone());
+        }
+        if seeds.is_empty() && answer.leader_id != 0 {
+            tracing::warn!(
+                leader = answer.leader_id,
+                "the cluster's leader runs an earlier version that names no certificates: the \
+                 first copy is taken from that controller by its node id"
+            );
+            seeds.insert(NodeId(answer.leader_id), None);
+        }
+        *self
+            .inner
+            .seeds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(seeds);
+    }
+
+    /// Whether the pinned voters include `node` with `serial`; `None` without a pin.
+    fn seeds_from(&self, node: NodeId, serial: &str) -> Option<bool> {
+        self.inner
+            .seeds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|seeds| {
+                seeds.get(&node).is_some_and(|serials| {
+                    serials.as_ref().is_none_or(|held| held.contains(serial))
+                })
+            })
     }
 
     /// Hands over this controller's identity (the first controller's key moves at the
@@ -521,12 +567,20 @@ impl Peers {
                         format!("controller {node} was revoked"),
                     )));
                 }
-                let membership = self.store().membership();
-                let seeding = self.store().applied_index().is_none();
-                if seeding
-                    || membership.voters.contains(&node)
-                    || membership.learners.contains(&node)
-                {
+                // A joining learner (the join command pinned the voters its answer named)
+                // takes Raft without a record only from those, by their serials, for the
+                // whole copy: from an empty store and while it catches up from the log.
+                // Otherwise a member of this controller's own Raft membership whose record
+                // a later entry brings; an empty store takes nobody.
+                let accepted = if let Some(pinned) = self.seeds_from(node, &peer.identity.serial) {
+                    pinned
+                } else {
+                    let membership = self.store().membership();
+                    self.store().applied_index().is_some()
+                        && (membership.voters.contains(&node)
+                            || membership.learners.contains(&node))
+                };
+                if accepted {
                     return Ok(None);
                 }
                 Err(status_of(&ClusterError::new(
@@ -647,10 +701,22 @@ impl Peers {
             tracing::info!(node = %node, address = %request.address, "a controller joined as a learner");
         }
         let view = self.view_local(None).await?;
+        let voters = self.store().membership().voters;
+        let records = self.store().read(ReadConsistency::Local).await?;
+        let mut voter_serials = Vec::new();
+        for voter in voters {
+            if let Some((record, _)) = records.get_typed(&tables::NODES, &voter.0)? {
+                voter_serials.extend(record.serials.into_iter().map(|cert| v1::VoterSerial {
+                    node_id: voter.0,
+                    serial: cert.serial,
+                }));
+            }
+        }
         Ok(v1::JoinResponse {
             leader_id: self.local().0,
             term: view.term,
             members: view.members.iter().map(member_proto).collect(),
+            voter_serials,
         })
     }
 
@@ -775,93 +841,123 @@ impl Peers {
         Ok(tenko_store::format::read_stored(view.as_ref())?.map(|(stored, _)| stored.version))
     }
 
-    /// Records this controller as a member (node record and member record) and moves its
-    /// identity out of the vault, once: at the first join.
+    /// Records this controller as a member (node record and member record) at a join, and
+    /// settles its identity ([`Peers::settle_identity`]).
     async fn register_self(
         &self,
         registry: &Arc<NodeRegistry>,
         local_addr: Option<SocketAddr>,
     ) -> Result<(), ClusterError> {
+        self.settle(registry, local_addr, true).await
+    }
+
+    /// Makes this controller's node record hold the certificate it presents, from
+    /// `<data_dir>/node/`, and takes a key of it that the vault still holds out, in one write
+    /// (the table in [`identity`](self::identity)). A start of a controller that has a node
+    /// record and no identity under `node/` (a restore on a new host) calls it; a join calls
+    /// it with the member record. Safe to repeat: nothing is written once the record holds
+    /// the certificate and the vault holds no key.
+    ///
+    /// # Errors
+    ///
+    /// `cluster.peer.starting` before the identity is attached; a CA, file or store error.
+    pub async fn settle_identity(&self, registry: &Arc<NodeRegistry>) -> Result<(), ClusterError> {
+        self.settle(registry, registry.listening().first().copied(), false)
+            .await
+    }
+
+    async fn settle(
+        &self,
+        registry: &Arc<NodeRegistry>,
+        local_addr: Option<SocketAddr>,
+        member: bool,
+    ) -> Result<(), ClusterError> {
         let me = self.local();
-        let view = self.store().read(ReadConsistency::Local).await?;
-        let node = view.get_typed(&tables::NODES, &me.0)?;
-        let member = view.get_typed(&tables::MEMBERS, &me.0)?;
-        drop(view);
-        if node.is_some() && member.is_some() {
-            return Ok(());
-        }
         let identity = self.inner.identity.get().ok_or_else(starting)?;
-        let address = if self.inner.config.address.is_empty() {
-            local_addr.map(|addr| addr.to_string()).ok_or_else(|| {
-                ClusterError::new(
-                    "cluster.member.no_address",
-                    409,
-                    "this controller does not know the address of its cluster port; set \
-                         [node] address or [cluster] advertise",
-                )
-            })?
-        } else {
-            self.inner.config.address.clone()
-        };
         let certificate = identity.portable().await?;
+        let address = || {
+            if self.inner.config.address.is_empty() {
+                local_addr.map(|addr| addr.to_string()).ok_or_else(|| {
+                    ClusterError::new(
+                        "cluster.member.no_address",
+                        409,
+                        "this controller does not know the address of its cluster port; set \
+                         [node] address or [cluster] advertise",
+                    )
+                })
+            } else {
+                Ok(self.inner.config.address.clone())
+            }
+        };
         let now = Timestamp::now();
         let ctx = system();
+        let view = self.store().read(ReadConsistency::Local).await?;
         let mut batch = WriteBatch::for_request(&ctx);
-        if node.is_none() {
-            let mut name = identity.name();
-            if check_name(&name).is_err() {
-                name = format!("controller-{}", me.0);
+        let retired = identity.stage_retirement(view.as_ref(), &mut batch)?;
+        let mut first = false;
+        match view.get_typed(&tables::NODES, &me.0)? {
+            None => {
+                let name = registry_name(view.as_ref(), &identity.name(), me)?;
+                let record = NodeRecord {
+                    id: me,
+                    name: name.clone(),
+                    roles: vec![Role::Controller],
+                    address: Some(address()?),
+                    vrf: None,
+                    certificate: certificate.clone(),
+                    serials: vec![certificate],
+                    enrolled_at: now,
+                    enrollment: Uuid::nil(),
+                    enrolled_by: None,
+                    renewed_at: None,
+                    last_seen: None,
+                    version: Some(self.inner.config.version.clone()),
+                    protocol: ProtocolState::default(),
+                };
+                batch.expect_typed(&tables::NODES, &me.0, None);
+                batch.put_typed(&tables::NODES, &me.0, &record)?;
+                batch.expect_typed(&tables::NODE_NAMES, &name.to_lowercase(), None);
+                batch.put_typed(&tables::NODE_NAMES, &name.to_lowercase(), &me.0)?;
             }
-            let view = self.store().read(ReadConsistency::Local).await?;
-            if view
-                .get_typed(&tables::NODE_NAMES, &name.to_lowercase())?
-                .is_some()
-            {
-                name = format!("{name}-{}", me.0);
+            Some((record, revision)) => {
+                if let Some(record) = presenting(record, certificate, retired.as_deref(), !member) {
+                    batch.expect_typed(&tables::NODES, &me.0, Some(revision));
+                    batch.put_typed(&tables::NODES, &me.0, &record)?;
+                }
             }
-            drop(view);
-            let record = NodeRecord {
-                id: me,
-                name: name.clone(),
-                roles: vec![Role::Controller],
-                address: Some(address.clone()),
-                vrf: None,
-                certificate: certificate.clone(),
-                serials: vec![certificate],
-                enrolled_at: now,
-                enrollment: Uuid::nil(),
-                enrolled_by: None,
-                renewed_at: None,
-                last_seen: None,
-                version: Some(self.inner.config.version.clone()),
-                protocol: ProtocolState::default(),
-            };
-            batch.expect_typed(&tables::NODES, &me.0, None);
-            batch.put_typed(&tables::NODES, &me.0, &record)?;
-            batch.expect_typed(&tables::NODE_NAMES, &name.to_lowercase(), None);
-            batch.put_typed(&tables::NODE_NAMES, &name.to_lowercase(), &me.0)?;
         }
-        if member.is_none() {
+        if member && view.get_typed(&tables::MEMBERS, &me.0)?.is_none() {
+            let address = address()?;
             batch.expect_typed(&tables::MEMBERS, &me.0, None);
             batch.put_typed(
                 &tables::MEMBERS,
                 &me.0,
                 &self.own_record(address.clone(), now),
             )?;
+            batch.audit(
+                AuditDraft::success(actions::MEMBER_JOIN, vec![ObjectRef::node(me)])
+                    .with_context("address", address)
+                    .with_context("first", "true".to_owned()),
+            );
+            first = true;
         }
-        batch.audit(
-            AuditDraft::success(actions::MEMBER_JOIN, vec![ObjectRef::node(me)])
-                .with_context("address", address)
-                .with_context("first", "true".to_owned()),
-        );
+        drop(view);
+        if batch.mutations.is_empty() {
+            return Ok(());
+        }
         registry
             .commit(
                 &ctx,
-                format!("controller {me} records itself as the first member"),
+                if first {
+                    format!("controller {me} records itself as the first member")
+                } else {
+                    format!("controller {me} records the certificate it presents")
+                },
                 vec![ObjectRef::node(me)],
                 batch,
             )
             .await?;
+        identity.retired(&retired.into_iter().collect::<Vec<_>>());
         Ok(())
     }
 
@@ -1039,7 +1135,7 @@ impl Peers {
                 .filter(|member| member.role != MemberRole::Superseded)
                 .map(member_proto)
                 .collect(),
-            quorum: quorum_name(&status.quorum).to_owned(),
+            quorum: status.quorum.name().to_owned(),
             in_contact: u32::try_from(in_contact).unwrap_or(u32::MAX),
             voters: u32::try_from(voters.len()).unwrap_or(u32::MAX),
         })
@@ -1831,16 +1927,50 @@ impl Peers {
     }
 }
 
-/// The name of a quorum state in `Cluster.Members`.
-fn quorum_name(quorum: &tenko_store::QuorumState) -> &'static str {
-    use tenko_store::QuorumState;
-    match quorum {
-        QuorumState::Single => "single",
-        QuorumState::Healthy => "healthy",
-        QuorumState::Electing { .. } => "electing",
-        QuorumState::Isolated { .. } => "isolated",
-        QuorumState::Fenced { .. } => "fenced",
+/// `record` changed to hold the certificate its controller presents and not the serial a
+/// retirement revoked; `None` when it holds that already. At a start (`replace`), a record
+/// the presented identity is not in (a restore) keeps only that identity: the serials it
+/// held belong to an earlier host or key. At a join the certificate is only added.
+fn presenting(
+    mut record: NodeRecord,
+    certificate: crate::model::CertificateRef,
+    retired: Option<&str>,
+    replace: bool,
+) -> Option<NodeRecord> {
+    let holds = record
+        .serials
+        .iter()
+        .any(|held| held.serial == certificate.serial);
+    if holds && retired.is_none() {
+        return None;
     }
+    record
+        .serials
+        .retain(|held| Some(held.serial.as_str()) != retired);
+    if !holds {
+        if replace {
+            record.serials.clear();
+        }
+        record.serials.push(certificate.clone());
+        record.certificate = certificate;
+    }
+    Some(record)
+}
+
+/// The registry name a controller records itself under: its own when valid and free, else
+/// one made from its node id.
+fn registry_name(view: &dyn ReadView, own: &str, me: NodeId) -> Result<String, ClusterError> {
+    let mut name = own.to_owned();
+    if check_name(&name).is_err() {
+        name = format!("controller-{}", me.0);
+    }
+    if view
+        .get_typed(&tables::NODE_NAMES, &name.to_lowercase())?
+        .is_some()
+    {
+        name = format!("{name}-{}", me.0);
+    }
+    Ok(name)
 }
 
 /// The number of learners to promote so that the voters stay odd: as many as possible.
@@ -2205,6 +2335,66 @@ fn revoked_node(view: &dyn ReadView, node: NodeId) -> Result<bool, ClusterError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cert(serial: &str) -> crate::model::CertificateRef {
+        crate::model::CertificateRef {
+            serial: serial.to_owned(),
+            sha256: String::new(),
+            not_before: Timestamp::from_unix_nanos(0).expect("time"),
+            not_after: Timestamp::from_unix_nanos(i128::from(i64::MAX)).expect("time"),
+        }
+    }
+
+    fn holding(serials: &[&str]) -> NodeRecord {
+        NodeRecord {
+            id: NodeId(1),
+            name: "controller-1".to_owned(),
+            roles: vec![Role::Controller],
+            address: None,
+            vrf: None,
+            certificate: cert(serials[0]),
+            serials: serials.iter().map(|serial| cert(serial)).collect(),
+            enrolled_at: Timestamp::from_unix_nanos(0).expect("time"),
+            enrollment: Uuid::nil(),
+            enrolled_by: None,
+            renewed_at: None,
+            last_seen: None,
+            version: None,
+            protocol: ProtocolState::default(),
+        }
+    }
+
+    fn serials(record: Option<NodeRecord>) -> Option<Vec<String>> {
+        record.map(|record| record.serials.into_iter().map(|cert| cert.serial).collect())
+    }
+
+    /// A join only adds the certificate a controller presents to its record, so a leader
+    /// that renewed since its start never loses the renewed serial; only a start replaces
+    /// serials (a restore); a retired vault serial always goes.
+    #[test]
+    fn a_join_only_adds_and_a_start_replaces() {
+        assert_eq!(
+            serials(presenting(holding(&["a", "b"]), cert("b"), None, false)),
+            None
+        );
+        assert_eq!(
+            serials(presenting(holding(&["b"]), cert("c"), None, false)),
+            Some(vec!["b".to_owned(), "c".to_owned()])
+        );
+        assert_eq!(
+            serials(presenting(holding(&["old"]), cert("new"), None, true)),
+            Some(vec!["new".to_owned()])
+        );
+        assert_eq!(
+            serials(presenting(
+                holding(&["v", "n"]),
+                cert("n"),
+                Some("v"),
+                false
+            )),
+            Some(vec!["n".to_owned()])
+        );
+    }
 
     #[tokio::test]
     async fn a_revoked_controller_is_known_from_the_store_alone() {

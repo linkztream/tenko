@@ -468,6 +468,8 @@ pub async fn run(args: &JoinArgs) -> Result<Output, Failure> {
     let outcome = match joined {
         Ok(answer) => {
             let answer = answer.into_inner();
+            // The empty store takes its first copy only from a voter the answer names.
+            peers.seed_from(&answer);
             // Until the member records arrive with the data, the answer names the ports.
             for member in &answer.members {
                 if !member.address.is_empty() && member.node_id != node.0 {

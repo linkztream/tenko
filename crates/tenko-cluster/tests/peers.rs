@@ -183,6 +183,8 @@ struct Member {
     /// What its registry and job engine write through, with the revocation table under
     /// the test's control.
     writes: Arc<Interposed<RaftStore>>,
+    /// Its data directory: where a fence is kept.
+    data: tenko_core::testing::TempDir,
 }
 
 impl Member {
@@ -243,8 +245,10 @@ async fn start_member(
         tenko_cluster::mtls::client_config(ca.root_der(), chain.clone(), key)
             .expect("client config"),
     );
+    let data = tenko_core::testing::TempDir::new("member");
     let mut config = PeerConfig::new(node, 2);
     config.address = addr.to_string();
+    config.data_dir = Some(data.path().to_path_buf());
     config.promote_after = Duration::from_millis(300);
     let peers = Peers::new(store.clone(), network, config);
     if bookkeeping {
@@ -289,6 +293,7 @@ async fn start_member(
         engine,
         identity: (chain, SecretBytes::from_slice(key.expose())),
         writes,
+        data,
     }
 }
 
@@ -415,7 +420,7 @@ impl Lab {
             .cluster_client(NodeId(1))
             .await
             .expect("a channel to the first controller");
-        client
+        let answer = client
             .join(v1::JoinRequest {
                 node_id: node.0,
                 address: member.addr.to_string(),
@@ -424,7 +429,11 @@ impl Lab {
                 data_format: 2,
             })
             .await
-            .expect("join");
+            .expect("join")
+            .into_inner();
+        // As `tenko cluster join` does: the empty store takes its first copy only from a
+        // voter the answer names.
+        member.peers.seed_from(&answer);
         self.members
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -516,6 +525,10 @@ impl Lab {
     /// lives outside the replicated store, the node and member records are written without
     /// audit records and the voters are set directly, so the store holds nothing but the
     /// conformance cases' own writes (and one setup revision).
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the fixture reads best as one sequence"
+    )]
     async fn bare_three(config: &ConformanceConfig) -> Self {
         let ca_store = Arc::new(tenko_store::mem::MemStore::default());
         let ca_vault = tenko_vault::MemVault::with_store(Arc::clone(&ca_store));
@@ -598,6 +611,19 @@ impl Lab {
                 .expect("member record");
         }
         first.store.propose(batch).await.expect("records");
+        // What a join answer gives a learner: the voter it takes its first copy from.
+        let seeds = v1::JoinResponse {
+            leader_id: 1,
+            term: 0,
+            members: Vec::new(),
+            voter_serials: vec![v1::VoterSerial {
+                node_id: 1,
+                serial: records[0].1.serial.clone(),
+            }],
+        };
+        for member in &members[1..] {
+            member.peers.seed_from(&seeds);
+        }
         for (node, _, addr) in &records[1..] {
             first
                 .store
@@ -2310,4 +2336,957 @@ async fn a_certificate_its_record_does_not_hold_is_refused_on_every_call() {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// Generations on the cluster port.
+
+/// Every call of both controller services that `identity` makes to `member`, each with the
+/// metadata `stamp` puts on it: the name of the call and its refusal's code, `None` when it
+/// was taken (or failed in the service after the checks, with no code of a refusal).
+#[allow(clippy::too_many_lines, reason = "one call of each method, in order")]
+async fn every_call(
+    lab: &Lab,
+    node: NodeId,
+    identity: &Identity,
+    member: &Member,
+    stamp: &(dyn Fn(&mut tonic::metadata::MetadataMap) + Sync),
+) -> Vec<(&'static str, Option<String>)> {
+    let network = PeerNetwork::new(node, PeerTimings::default());
+    network.set_tls(
+        tenko_cluster::mtls::client_config(lab.ca.root_der(), identity.0.clone(), &identity.1)
+            .expect("config"),
+    );
+    let channel = network
+        .channel(&member.addr.to_string())
+        .await
+        .expect("the handshake passes");
+    macro_rules! request {
+        ($message:expr) => {{
+            let mut request = tonic::Request::new($message);
+            stamp(request.metadata_mut());
+            request
+        }};
+    }
+    let code = |result: Result<(), tonic::Status>| {
+        result
+            .err()
+            .and_then(|status| code_of(&status).map(str::to_owned))
+    };
+    let mut raft = v1::raft_client::RaftClient::new(channel.clone());
+    let mut cluster = v1::cluster_client::ClusterClient::new(channel);
+    vec![
+        (
+            "Raft.Vote",
+            code(
+                raft.vote(request!(v1::RaftRequest::default()))
+                    .await
+                    .map(drop),
+            ),
+        ),
+        (
+            "Raft.AppendEntries",
+            code(
+                raft.append_entries(request!(v1::RaftRequest::default()))
+                    .await
+                    .map(drop),
+            ),
+        ),
+        (
+            "Raft.InstallSnapshot",
+            code(
+                raft.install_snapshot(request!(futures::stream::iter([
+                    v1::SnapshotChunk::default(),
+                ])))
+                .await
+                .map(drop),
+            ),
+        ),
+        (
+            "Cluster.Propose",
+            code(
+                cluster
+                    .propose(request!(v1::ProposeRequest {
+                        wire: tenko_cluster::wire::BATCH_WIRE.to_owned(),
+                        batch: Vec::new(),
+                    }))
+                    .await
+                    .map(drop),
+            ),
+        ),
+        (
+            "Cluster.ReadIndex",
+            code(
+                cluster
+                    .read_index(request!(v1::ReadIndexRequest {}))
+                    .await
+                    .map(drop),
+            ),
+        ),
+        (
+            "Cluster.Members",
+            code(
+                cluster
+                    .members(request!(v1::MembersRequest {}))
+                    .await
+                    .map(drop),
+            ),
+        ),
+        (
+            "Cluster.Digest",
+            code(
+                cluster
+                    .digest(request!(v1::DigestRequest { revision: 0 }))
+                    .await
+                    .map(drop),
+            ),
+        ),
+        (
+            "Cluster.TransferKek",
+            code(
+                cluster
+                    .transfer_kek(request!(v1::TransferKekRequest {
+                        ephemeral_public_key: vec![4; 65],
+                        join_token_id: uuid::Uuid::now_v7().to_string(),
+                    }))
+                    .await
+                    .map(drop),
+            ),
+        ),
+        (
+            "Cluster.Campaign",
+            code(
+                cluster
+                    .campaign(request!(v1::CampaignRequest {}))
+                    .await
+                    .map(drop),
+            ),
+        ),
+        (
+            "Cluster.Change",
+            code(
+                cluster
+                    .change(request!(v1::ChangeRequest {
+                        wire: String::new(),
+                        change: Vec::new(),
+                    }))
+                    .await
+                    .map(drop),
+            ),
+        ),
+    ]
+}
+
+/// The code of `member`'s refusal of a `Cluster.Members` call with `stamp`; `None` when it
+/// was taken.
+async fn members_with(
+    lab: &Lab,
+    identity: &Identity,
+    node: NodeId,
+    member: &Member,
+    stamp: &(dyn Fn(&mut tonic::metadata::MetadataMap) + Sync),
+) -> Option<String> {
+    let network = PeerNetwork::new(node, PeerTimings::default());
+    network.set_tls(
+        tenko_cluster::mtls::client_config(lab.ca.root_der(), identity.0.clone(), &identity.1)
+            .expect("config"),
+    );
+    let channel = network
+        .channel(&member.addr.to_string())
+        .await
+        .expect("the handshake passes");
+    let mut request = tonic::Request::new(v1::MembersRequest {});
+    stamp(request.metadata_mut());
+    v1::cluster_client::ClusterClient::new(channel)
+        .members(request)
+        .await
+        .err()
+        .and_then(|status| code_of(&status).map(str::to_owned))
+}
+
+/// A generation record of `number` after `parent`, forced on `forced`, signed with
+/// `identity`.
+fn record(
+    number: u64,
+    parent: Option<tenko_core::audit::Digest>,
+    forced: NodeId,
+    superseded: &[NodeId],
+    identity: &Identity,
+) -> tenko_cluster::generation::GenerationRecord {
+    use tenko_cluster::generation::{ForkPoint, GenerationBody, GenerationRecord, LAYOUT};
+    let mut nonce = vec![0; 16];
+    nonce[..8].copy_from_slice(&number.to_be_bytes());
+    nonce[8..].copy_from_slice(&forced.0.to_be_bytes());
+    GenerationRecord::sign(
+        &GenerationBody {
+            layout: LAYOUT,
+            number,
+            parent,
+            forced,
+            fork: ForkPoint {
+                term: 1,
+                leader: forced.0,
+                index: 1,
+                revision: tenko_core::Revision(1),
+                audit: tenko_core::audit::ChainHead::default(),
+            },
+            superseded: superseded.to_vec(),
+            at: tenko_core::Timestamp::now(),
+            nonce: tenko_core::serde_util::HexBytes(nonce),
+        },
+        &identity.0,
+        &identity.1,
+    )
+    .expect("sign")
+}
+
+/// Puts the claim of `records`' newest record and the records themselves on a call.
+fn offering(
+    records: &[tenko_cluster::generation::GenerationRecord],
+) -> impl Fn(&mut tonic::metadata::MetadataMap) + Sync + use<> {
+    use tenko_cluster::generation::{Claim, GENERATION_METADATA, RECORD_METADATA, encode_lineage};
+    let newest = records.last().expect("a record");
+    let number = newest.header().expect("header").number;
+    let claim = Claim::of(number, &newest.hash()).render().expect("a claim");
+    let lineage = encode_lineage(records).expect("lineage");
+    move |metadata| {
+        metadata.insert(GENERATION_METADATA, claim.parse().expect("ascii"));
+        metadata.insert_bin(
+            RECORD_METADATA,
+            tonic::metadata::MetadataValue::from_bytes(&lineage),
+        );
+    }
+}
+
+/// Whether `member` still writes: not fenced, and a write through it commits.
+async fn still_writes(member: &Member) -> bool {
+    member.peers.generation().fence.is_none() && {
+        let mut batch = WriteBatch::for_request(&system());
+        batch.put(
+            TableName::from_static("ipam.generation_test"),
+            uuid::Uuid::now_v7().as_bytes().to_vec(),
+            b"after the offer".to_vec(),
+        );
+        member.store.propose(batch).await.is_ok()
+    }
+}
+
+/// A record signed with a certificate minted from the CA's key places nothing and fences
+/// nothing, whether it comes as an offer (the push's answer takes this path) or on a call
+/// of a member with its own valid certificate: for an unused node id, for the leader (a
+/// voter of the receiver's history) and for a superseded controller. Each is counted and
+/// shown, and every member keeps writing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_record_with_a_minted_signer_fences_nothing_by_either_path() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let members = lab.members();
+    let followers: Vec<_> = members
+        .iter()
+        .filter(|member| member.node() != leader.node())
+        .cloned()
+        .collect();
+    let (superseded, receiver) = (&followers[0], &followers[1]);
+    let mut batch = WriteBatch::for_request(&system());
+    batch
+        .put_typed(
+            &tenko_cluster::generation::SUPERSEDED,
+            &superseded.node().0,
+            &tenko_cluster::generation::SupersededMark {
+                generation: 1,
+                record: tenko_core::audit::Digest([1; 32]),
+                rejoin: false,
+            },
+        )
+        .expect("mark");
+    leader.store.propose(batch).await.expect("write");
+    let mut offers = 0;
+    for signer in [NodeId(4242), leader.node(), superseded.node()] {
+        let minted = stray_certificate(&lab, signer);
+        let forged = record(1, None, signer, &[], &minted);
+        // The offer (what a push answer or a caller's metadata leads to).
+        let refused = receiver
+            .peers
+            .offer(std::slice::from_ref(&forged), Some(signer))
+            .await
+            .expect_err("a minted signer is refused");
+        assert_eq!(
+            refused.code(),
+            tenko_cluster::generation::codes::RECORD_UNHELD,
+            "{}",
+            refused.detail()
+        );
+        // On a call of a member with its own certificate.
+        let calls = every_call(
+            &lab,
+            leader.node(),
+            &leader.identity,
+            receiver,
+            &offering(std::slice::from_ref(&forged)),
+        )
+        .await;
+        assert!(
+            calls
+                .iter()
+                .all(|(_, code)| code.as_deref() == Some("cluster.superseded")),
+            "a claim of another generation is refused on every call: {calls:?}"
+        );
+        offers += 1 + calls.len();
+        for member in &members {
+            assert!(
+                still_writes(member).await,
+                "member {} after a record minted for {signer}",
+                member.node()
+            );
+        }
+    }
+    let refused = receiver.peers.refused_records();
+    assert_eq!(refused.count, u64::try_from(offers).expect("count"));
+    assert_eq!(
+        refused.last.map(|(code, _, _)| code).as_deref(),
+        Some(tenko_cluster::generation::codes::RECORD_UNHELD)
+    );
+    lab.stop().await;
+}
+
+/// A member of generation 1 refuses every call of a caller that speaks for generation 0
+/// (no generation entry at all counts as 0) except a join, which the joining command makes
+/// without one; it refuses a caller that its history superseded even when the caller
+/// speaks for generation 1; and once a descendant record fenced it, the fence is on disk
+/// before the refusal of the call that carried the record returns, and every call is
+/// refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the generations of one cluster, in order"
+)]
+async fn every_call_is_refused_across_generations_and_by_a_fenced_member() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let members = lab.members();
+    let followers: Vec<_> = members
+        .iter()
+        .filter(|member| member.node() != leader.node())
+        .cloned()
+        .collect();
+    let (caller, target) = (&followers[0], &followers[1]);
+    // Generation 1 of this history, signed by the leader's own certificate.
+    let first = record(1, None, leader.node(), &[], &leader.identity);
+    let mut batch = WriteBatch::for_request(&system());
+    batch
+        .put_typed(&tenko_cluster::generation::GENERATION, &1_u64, &first)
+        .expect("record");
+    leader.store.propose(batch).await.expect("write");
+    // As after a forced step's start: every member speaks for the history it holds.
+    for member in &members {
+        wait_until_async("generation 1 applied", async || {
+            member
+                .store
+                .read(ReadConsistency::Local)
+                .await
+                .ok()
+                .and_then(|view| {
+                    view.get_typed(&tenko_cluster::generation::GENERATION, &1_u64)
+                        .ok()
+                        .flatten()
+                })
+                .is_some()
+        })
+        .await;
+    }
+    // Each member loads it only once every member holds it: a member that spoke for
+    // generation 1 to one that had not applied it yet would fence that one as superseded.
+    for member in &members {
+        member.peers.load_generation().await.expect("generation");
+    }
+    let gen1 = offering(std::slice::from_ref(&first));
+    assert_eq!(
+        members_with(&lab, &caller.identity, caller.node(), target, &gen1).await,
+        None,
+        "a caller of generation 1 is taken"
+    );
+
+    // Generation 0: no generation entry. The key transfer is part of a join, which the
+    // joining command makes without one: it reaches the service (its token check).
+    let calls = every_call(&lab, caller.node(), &caller.identity, target, &|_| {}).await;
+    for (call, code) in &calls {
+        let expected = if *call == "Cluster.TransferKek" {
+            "vault.kek.transfer.token"
+        } else {
+            "cluster.superseded"
+        };
+        assert_eq!(code.as_deref(), Some(expected), "{call}: {calls:?}");
+    }
+
+    // A caller this history superseded, speaking for generation 1.
+    let mut batch = WriteBatch::for_request(&system());
+    batch
+        .put_typed(
+            &tenko_cluster::generation::SUPERSEDED,
+            &caller.node().0,
+            &tenko_cluster::generation::SupersededMark {
+                generation: 1,
+                record: first.hash(),
+                rejoin: false,
+            },
+        )
+        .expect("mark");
+    leader.store.propose(batch).await.expect("write");
+    wait_until_async("the mark on the target", async || {
+        members_with(&lab, &caller.identity, caller.node(), target, &gen1).await
+            == Some("cluster.superseded".to_owned())
+    })
+    .await;
+    let calls = every_call(&lab, caller.node(), &caller.identity, target, &gen1).await;
+    assert!(
+        calls
+            .iter()
+            .all(|(_, code)| code.as_deref() == Some("cluster.superseded")),
+        "a superseded caller is refused on every call: {calls:?}"
+    );
+
+    // A descendant: the target fences, and the fence is on disk when the refusal returns.
+    let second = record(2, Some(first.hash()), leader.node(), &[], &leader.identity);
+    let fence = tenko_cluster::identity::NodePaths::new(target.data.path())
+        .root()
+        .join(tenko_cluster::generation::FENCE_FILE);
+    assert!(!fence.exists());
+    let calls = every_call(
+        &lab,
+        leader.node(),
+        &leader.identity,
+        target,
+        &offering(&[first.clone(), second]),
+    )
+    .await;
+    assert_eq!(
+        calls[0].1.as_deref(),
+        Some("cluster.superseded"),
+        "{calls:?}"
+    );
+    assert!(
+        fence.exists(),
+        "the fence is kept before the refusal returns"
+    );
+    assert!(target.peers.generation().fence.is_some());
+    let calls = every_call(&lab, leader.node(), &leader.identity, target, &gen1).await;
+    assert!(
+        calls
+            .iter()
+            .all(|(_, code)| code.as_deref() == Some("cluster.superseded")),
+        "a fenced member refuses every call: {calls:?}"
+    );
+    lab.stop().await;
+}
+
+/// A joining learner's empty store takes its first copy only from a voter that its join
+/// answer names, by a certificate the answer names: before the answer nobody, after it the
+/// leader with its own certificate, and never a certificate minted for the leader's id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_joining_learner_is_seeded_only_by_a_voter_its_answer_names() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let (node, chain, key, _) = lab.enroll_controller("controller-seeded").await;
+    let store = RaftStore::open_temp(store_config(node.0, &no_change))
+        .await
+        .expect("store");
+    let info = tenko_cluster::ca::CertInfo::from_der(&chain[0]).expect("info");
+    let joiner = start_member(
+        store,
+        &lab.ca,
+        chain,
+        &key,
+        Arc::new(FixedIdentity(certificate_ref(&info))),
+        true,
+    )
+    .await;
+    let vote = async |identity: &Identity| {
+        raft_vote_refusal(
+            &lab,
+            leader.node(),
+            identity.0.clone(),
+            &identity.1,
+            joiner.addr,
+            "a seed",
+        )
+        .await
+    };
+    let unknown = Some("cluster.node.unknown".to_owned());
+    assert_eq!(vote(&leader.identity).await, unknown, "before the answer");
+    let serial = tenko_cluster::ca::CertInfo::from_der(&leader.identity.0[0])
+        .expect("info")
+        .serial;
+    joiner.peers.seed_from(&v1::JoinResponse {
+        leader_id: leader.node().0,
+        term: 1,
+        members: Vec::new(),
+        voter_serials: vec![v1::VoterSerial {
+            node_id: leader.node().0,
+            serial,
+        }],
+    });
+    assert_ne!(
+        vote(&leader.identity).await,
+        unknown,
+        "the leader the answer names"
+    );
+    assert_eq!(
+        vote(&stray_certificate(&lab, leader.node())).await,
+        unknown,
+        "a certificate minted for the leader's id"
+    );
+    let other = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node())
+        .expect("a follower");
+    assert_eq!(
+        raft_vote_refusal(
+            &lab,
+            other.node(),
+            other.identity.0.clone(),
+            &other.identity.1,
+            joiner.addr,
+            "a seed",
+        )
+        .await,
+        unknown,
+        "a voter the answer does not name"
+    );
+    let _ = joiner.stop.send(true);
+    lab.stop().await;
+}
+
+// ---------------------------------------------------------------------------------------
+// The identity states of a controller (`tenko_cluster::peers::identity`).
+
+/// A single controller with its key in the vault: its store, vault, registry and peer
+/// layer, and the directory its identity moves to.
+struct Single {
+    store: RaftStore,
+    vault: Arc<StoreVault>,
+    registry: Arc<NodeRegistry>,
+    peers: Peers,
+    data: tenko_core::testing::TempDir,
+    /// The serials it presented, in the order the switch saw them.
+    presented: Arc<Mutex<Vec<String>>>,
+}
+
+impl Single {
+    async fn start() -> Self {
+        Self::start_with(CaPolicy::default()).await
+    }
+
+    /// With a CA that issues by `policy`.
+    async fn start_with(policy: CaPolicy) -> Self {
+        let store = RaftStore::open_temp(store_config(1, &no_change))
+            .await
+            .expect("store");
+        let store_dyn: Arc<dyn Store> = Arc::new(store.clone());
+        let ring = KekRing::new(Arc::new(MemKek::generate("kek-test-1")));
+        let vault = Arc::new(
+            StoreVault::open(Arc::clone(&store_dyn), ring)
+                .await
+                .expect("vault"),
+        );
+        let ca = Arc::new(
+            InternalCa::load_or_init(store_dyn.as_ref(), vault.as_ref(), &system(), policy)
+                .await
+                .expect("CA"),
+        );
+        let registry = NodeRegistry::new(store_dyn, ca, RegistryConfig::new(NodeId(1)));
+        registry
+            .controller_identity(vault.as_ref(), &system())
+            .await
+            .expect("the vault's certificate");
+        let data = tenko_core::testing::TempDir::new("identity");
+        let mut config = PeerConfig::new(NodeId(1), 2);
+        "127.0.0.1:9".clone_into(&mut config.address);
+        let peers = Peers::new(
+            store.clone(),
+            PeerNetwork::new(NodeId(1), PeerTimings::default()),
+            config,
+        );
+        peers.attach_registry(Arc::clone(&registry));
+        let single = Self {
+            store,
+            vault,
+            registry,
+            peers,
+            data,
+            presented: Arc::new(Mutex::new(Vec::new())),
+        };
+        single.peers.attach_identity(single.identity());
+        single
+    }
+
+    /// The identity of this controller's start: a new one after a restart.
+    fn identity(&self) -> Arc<dyn ControllerIdentity> {
+        let presented = Arc::clone(&self.presented);
+        Arc::new(
+            tenko_cluster::peers::VaultIdentity::new(
+                Arc::clone(&self.registry),
+                Arc::clone(&self.vault) as Arc<dyn tenko_vault::Vault>,
+                tenko_cluster::identity::NodePaths::new(self.data.path()),
+                "controller-1",
+            )
+            .on_switch(Box::new(move |credentials| {
+                presented
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(credentials.info.serial.clone());
+            })),
+        )
+    }
+
+    /// A restart: the same store, vault and data directory, a new peer layer.
+    fn restart(&mut self) {
+        let mut config = PeerConfig::new(NodeId(1), 2);
+        "127.0.0.1:9".clone_into(&mut config.address);
+        self.peers = Peers::new(
+            self.store.clone(),
+            PeerNetwork::new(NodeId(1), PeerTimings::default()),
+            config,
+        );
+        self.peers.attach_registry(Arc::clone(&self.registry));
+        self.peers.attach_identity(self.identity());
+    }
+
+    /// The serials the node record holds, the vault's serial, whether the node counts as
+    /// revoked, and the store's revision.
+    async fn state(&self) -> (Vec<String>, Option<String>, bool, tenko_core::Revision) {
+        let view = self.store.read(ReadConsistency::Local).await.expect("view");
+        let held = view
+            .get_typed(&tenko_cluster::model::tables::NODES, &1_u64)
+            .expect("record")
+            .map(|(record, _)| record.serials.into_iter().map(|cert| cert.serial).collect())
+            .unwrap_or_default();
+        let revoked = tenko_cluster::registry::revoked_nodes(view.as_ref())
+            .expect("revoked")
+            .contains(&NodeId(1));
+        let revision = view.revision();
+        drop(view);
+        (
+            held,
+            self.registry.vault_serial(NodeId(1)).await.expect("vault"),
+            revoked,
+            revision,
+        )
+    }
+
+    fn node_local_serial(&self) -> String {
+        tenko_cluster::identity::Credentials::load(&tenko_cluster::identity::NodePaths::new(
+            self.data.path(),
+        ))
+        .expect("identity under node/")
+        .info
+        .serial
+    }
+}
+
+/// The first join records the controller and retires its vault key in one write: no state
+/// has the vault key revoked while the record is missing (the controller would count as a
+/// revoked node). An interruption after the identity under `node/` was written and before
+/// that write is finished by the next settle with the same identity, no new key. A repeat
+/// writes nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_first_join_records_and_retires_in_one_write_and_resumes_after_a_stop() {
+    let mut single = Single::start().await;
+    let (held, vault, revoked, _) = single.state().await;
+    assert!(held.is_empty(), "never joined: no record");
+    let old = vault.expect("never joined: the vault's key");
+    assert!(!revoked);
+
+    // The identity under node/ is written and presented; the process stops before the write.
+    let identity = single.identity();
+    let written = identity.portable().await.expect("the identity").serial;
+    assert_eq!(single.state().await.0, Vec::<String>::new());
+    single.restart();
+
+    let (_, _, _, before) = single.state().await;
+    single
+        .peers
+        .settle_identity(&single.registry)
+        .await
+        .expect("settle");
+    let (held, vault, revoked, after) = single.state().await;
+    assert_eq!(
+        held,
+        vec![written.clone()],
+        "the record holds the identity under node/"
+    );
+    assert_eq!(
+        single.node_local_serial(),
+        written,
+        "no new key after the stop"
+    );
+    assert_eq!(vault, None, "the vault key is gone");
+    assert!(!revoked, "the controller never counts as revoked");
+    assert_eq!(after.0, before.0 + 1, "one write");
+    let view = single
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    assert!(
+        view.get_typed(&tenko_cluster::model::tables::REVOCATIONS, &old)
+            .expect("revocation")
+            .is_some(),
+        "the vault's certificate is revoked"
+    );
+    drop(view);
+    assert_eq!(
+        single
+            .presented
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .last(),
+        Some(&written),
+        "the controller presents what its record holds"
+    );
+
+    single
+        .peers
+        .settle_identity(&single.registry)
+        .await
+        .expect("again");
+    assert_eq!(single.state().await.3, after, "a repeat writes nothing");
+}
+
+/// A restore of a joined controller on a host without its identity under `node/` (the
+/// backup's record holds the old host's serial, its vault the backup's key): the settle at
+/// the start gives it a new identity, the record holds only that one, and the backup's
+/// vault key is retired, in one write.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_restore_on_a_new_host_settles_to_a_new_identity_alone() {
+    let mut single = Single::start().await;
+    single
+        .peers
+        .settle_identity(&single.registry)
+        .await
+        .expect("joined");
+    let old_host = single.node_local_serial();
+    // The backup also carried a vault key (taken before its rotation).
+    single
+        .registry
+        .controller_identity(single.vault.as_ref(), &system())
+        .await
+        .expect("a vault key");
+    std::fs::remove_dir_all(tenko_cluster::identity::NodePaths::new(single.data.path()).root())
+        .expect("a new host");
+    single.restart();
+    single
+        .peers
+        .settle_identity(&single.registry)
+        .await
+        .expect("settle");
+    let (held, vault, revoked, _) = single.state().await;
+    let new_host = single.node_local_serial();
+    assert_ne!(new_host, old_host);
+    assert_eq!(held, vec![new_host], "only the new identity");
+    assert_eq!(vault, None);
+    assert!(!revoked);
+}
+
+/// A first controller whose identity under `node/` is still the vault's key (moved before
+/// keys left the vault) renews at once with the default certificate lifetime, months
+/// before the renewal window; then the vault key is retired and the record holds only the
+/// renewed certificate.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_vault_key_still_in_use_is_rotated_at_once() {
+    let single = Single::start().await;
+    let serial = single
+        .registry
+        .vault_serial(NodeId(1))
+        .await
+        .expect("vault")
+        .expect("a vault key");
+    let (chain, _) = single
+        .registry
+        .controller_identity(single.vault.as_ref(), &system())
+        .await
+        .expect("the vault's certificate");
+    let info = tenko_cluster::ca::CertInfo::from_der(&chain[0]).expect("info");
+    // The record as such an installation wrote it: the vault's serial.
+    single
+        .peers
+        .attach_identity(Arc::new(FixedIdentity(certificate_ref(&info))));
+    let fixed = Peers::new(
+        single.store.clone(),
+        PeerNetwork::new(NodeId(1), PeerTimings::default()),
+        {
+            let mut config = PeerConfig::new(NodeId(1), 2);
+            "127.0.0.1:9".clone_into(&mut config.address);
+            config
+        },
+    );
+    fixed.attach_registry(Arc::clone(&single.registry));
+    fixed.attach_identity(Arc::new(FixedIdentity(certificate_ref(&info))));
+    fixed
+        .settle_identity(&single.registry)
+        .await
+        .expect("recorded");
+    let (key, csr) = generate_csr().expect("csr");
+    drop(key);
+    let renewed = single
+        .registry
+        .renew(NodeId(1), &serial, &csr, tenko_core::Timestamp::now())
+        .await
+        .expect("a rotation is never early");
+    let renewed = tenko_cluster::ca::CertInfo::from_der(&renewed.chain[0])
+        .expect("info")
+        .serial;
+    single
+        .registry
+        .retire_vault_keys(single.vault.as_ref(), &system(), true, false)
+        .await
+        .expect("retire");
+    let (held, vault, revoked, _) = single.state().await;
+    assert_eq!(held, vec![renewed]);
+    assert_eq!(vault, None);
+    assert!(!revoked);
+    // A certificate the vault never held is not rotated early.
+    let (_, csr) = generate_csr().expect("csr");
+    let early = single
+        .registry
+        .renew(NodeId(1), &held[0], &csr, tenko_core::Timestamp::now())
+        .await
+        .expect_err("not due");
+    assert!(
+        ["cluster.node.renew_not_due", "cluster.node.renew_too_soon"].contains(&early.code()),
+        "{}",
+        early.code()
+    );
+}
+
+/// The first start's probe reads a refusal that carries another forced history as a live
+/// cluster: a sibling signed by a controller this history holds is competing; this
+/// history's own records, and a sibling signed with a minted certificate, are not.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refusal_with_a_competing_history_is_read_as_one() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let other = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node())
+        .expect("a follower");
+    let voters: Vec<NodeId> = lab
+        .members()
+        .iter()
+        .map(|member| member.node())
+        .filter(|node| *node != leader.node())
+        .collect();
+    let own = record(1, None, leader.node(), &voters, &leader.identity);
+    let mut batch = WriteBatch::for_request(&system());
+    batch
+        .put_typed(&tenko_cluster::generation::GENERATION, &1_u64, &own)
+        .expect("record");
+    leader.store.propose(batch).await.expect("write");
+    leader.peers.load_generation().await.expect("generation");
+    let refusal = |records: &[tenko_cluster::generation::GenerationRecord]| {
+        let mut status = tonic::Status::failed_precondition("superseded");
+        offering(records)(status.metadata_mut());
+        status
+    };
+    let sibling = record(1, None, other.node(), &[], &other.identity);
+    assert!(
+        leader
+            .peers
+            .competing(&refusal(std::slice::from_ref(&sibling)))
+            .await
+            .is_some_and(|rival| rival.contains(&other.node().to_string())),
+        "a sibling of a controller this history holds"
+    );
+    assert_eq!(
+        leader
+            .peers
+            .competing(&refusal(std::slice::from_ref(&own)))
+            .await,
+        None,
+        "this history's own record"
+    );
+    let minted = record(
+        1,
+        None,
+        other.node(),
+        &[],
+        &stray_certificate(&lab, other.node()),
+    );
+    assert_eq!(
+        leader
+            .peers
+            .competing(&refusal(std::slice::from_ref(&minted)))
+            .await,
+        None,
+        "a minted signer"
+    );
+    lab.stop().await;
+}
+
+/// A member's identity is read from `<data_dir>/node/` at every call: after a renewal its
+/// record keeps the renewed certificate through a settle, even once the serial it started
+/// with left the record.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_member_names_the_identity_a_renewal_put_under_node() {
+    // Twenty-day certificates are due for renewal at once.
+    let mut single = Single::start_with(CaPolicy {
+        node_validity_days: 20,
+        ..CaPolicy::default()
+    })
+    .await;
+    single
+        .peers
+        .settle_identity(&single.registry)
+        .await
+        .expect("joined");
+    let paths = tenko_cluster::identity::NodePaths::new(single.data.path());
+    let started = tenko_cluster::identity::Credentials::load(&paths).expect("identity");
+    let identity =
+        Arc::new(tenko_cluster::peers::NodeDirIdentity::new(&started).reloading(paths.clone()));
+    let (key, csr) = generate_csr().expect("csr");
+    let issued = single
+        .registry
+        .renew(
+            NodeId(1),
+            &started.info.serial,
+            &csr,
+            tenko_core::Timestamp::now(),
+        )
+        .await
+        .expect("a renewal");
+    let renewed = started.renewed(&paths, issued.chain, key).expect("renewed");
+    assert_eq!(
+        identity.portable().await.expect("identity").serial,
+        renewed.info.serial
+    );
+    // The serial it started with leaves the record (as it does once it expires).
+    let (mut record, revision) = single
+        .registry
+        .record(NodeId(1))
+        .await
+        .expect("record")
+        .expect("a record");
+    record
+        .serials
+        .retain(|held| held.serial != started.info.serial);
+    let mut batch = WriteBatch::for_request(&system());
+    batch.expect_typed(&tenko_cluster::model::tables::NODES, &1_u64, Some(revision));
+    batch
+        .put_typed(&tenko_cluster::model::tables::NODES, &1_u64, &record)
+        .expect("record");
+    single.store.propose(batch).await.expect("write");
+    single.restart();
+    let member = Peers::new(
+        single.store.clone(),
+        PeerNetwork::new(NodeId(1), PeerTimings::default()),
+        PeerConfig::new(NodeId(1), 2),
+    );
+    member.attach_registry(Arc::clone(&single.registry));
+    member.attach_identity(identity);
+    member
+        .settle_identity(&single.registry)
+        .await
+        .expect("settle");
+    assert_eq!(single.state().await.0, vec![renewed.info.serial]);
 }

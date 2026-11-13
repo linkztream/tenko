@@ -989,7 +989,7 @@ async fn start(
     create_data_dir(&resolved.data_dir)?;
     // A forced step of the cluster recovery that did not finish: the store may be renamed
     // aside, and a start now would make a new installation out of nothing.
-    crate::cluster::recover::check_start(&resolved.data_dir)?;
+    crate::cluster::recover::check_start(&resolved.data_dir, &resolved.layout().store())?;
     // The data-directory format (OPS-23): a newer format is refused before anything, the
     // keys included, is touched; an older one is copied aside before the store opens and
     // migrated after.
@@ -1078,6 +1078,15 @@ async fn start(
             let store = RaftStore::open(store_config(resolved))
                 .await
                 .map_err(|error| StartError::coded("store", &error))?;
+            // Again with the store open: a forced step that began after the first check may
+            // have renamed the store aside, and the one opened here would be a new, empty
+            // installation that looks healthy.
+            if let Err(error) =
+                crate::cluster::recover::check_start(&resolved.data_dir, &layout.store())
+            {
+                let _ = store.shutdown().await;
+                return Err(error);
+            }
             // A member of a controller cluster leaves the migration to the leader, which
             // runs it once every voter's binary knows the format (OPS-08).
             let membership = store.membership();

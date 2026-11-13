@@ -953,6 +953,20 @@ pub enum QuorumState {
     },
 }
 
+impl QuorumState {
+    /// The state's name on the wire and in events: `single`, `healthy`, `electing`,
+    /// `isolated` or `fenced`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Healthy => "healthy",
+            Self::Electing { .. } => "electing",
+            Self::Isolated { .. } => "isolated",
+            Self::Fenced { .. } => "fenced",
+        }
+    }
+}
+
 /// Why a member stopped writing for good ([`QuorumState::Fenced`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

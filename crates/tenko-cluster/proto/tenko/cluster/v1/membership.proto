@@ -86,6 +86,16 @@ message JoinResponse {
   uint64 term = 2;
   // The members after the joiner was added.
   repeated Member members = 3;
+  // The certificate serials the voters' node records hold: the joiner's store is empty
+  // until its first copy arrives, so it takes that copy only from a voter presenting one
+  // of these. Empty from a leader of an earlier version.
+  repeated VoterSerial voter_serials = 4;
+}
+
+// A certificate serial a voter's node record holds.
+message VoterSerial {
+  uint64 node_id = 1;
+  string serial = 2;
 }
 
 message ProposeRequest {

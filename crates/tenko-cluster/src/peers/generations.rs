@@ -83,6 +83,18 @@ pub(super) struct Generations {
     /// office (section 3.5), so an old majority that is alive is not fenced by a step the
     /// operator may still undo.
     holding: AtomicBool,
+    /// The records refused since the start.
+    refused: Mutex<RefusedRecords>,
+}
+
+/// The generation records this controller refused since it started: how many, and the
+/// last one's refusal. Bounded: a count and one message, whatever a peer sends.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RefusedRecords {
+    /// How many offers were refused.
+    pub count: u64,
+    /// The last refusal: its code and message, and the peer that offered it.
+    pub last: Option<(String, String, Option<NodeId>)>,
 }
 
 /// This controller's history and its fence.
@@ -292,7 +304,7 @@ impl Peers {
         let peers = self.clone();
         tokio::spawn(async move {
             if let Err(error) = peers.offer(&records, Some(from)).await {
-                tracing::warn!(peer = %from, code = %error.code(), "{}", error.detail());
+                log_offer_error(&error, Some(from));
             }
         });
     }
@@ -315,7 +327,7 @@ impl Peers {
         if let Some(offered) = offered_lineage(metadata) {
             let records = offered.map_err(|error| status_of(&error))?;
             if let Err(error) = self.offer(&records, Some(peer.identity.node)).await {
-                tracing::warn!(peer = %peer.identity.node, code = %error.code(), "{}", error.detail());
+                log_offer_error(&error, Some(peer.identity.node));
             }
         }
         let mut state = self.generation();
@@ -377,12 +389,14 @@ impl Peers {
         ))
     }
 
+    /// Whether this history superseded `node`; a store that cannot be read counts as yes,
+    /// so a superseded caller never passes on an error.
     async fn superseded_here(&self, node: NodeId) -> bool {
         let Ok(view) = self.store().read(ReadConsistency::Local).await else {
-            return false;
+            return true;
         };
         view.get_typed(&SUPERSEDED, &node.0)
-            .is_ok_and(|mark| mark.is_some())
+            .map_or(true, |mark| mark.is_some())
     }
 
     /// A lineage offered by any path: admitted against this controller's own and the
@@ -415,7 +429,13 @@ impl Peers {
                 Timestamp::now(),
             )?
         };
-        let admission = state.lineage.admit(records, &root, &standing)?;
+        let admission = match state.lineage.admit(records, &root, &standing) {
+            Ok(admission) => admission,
+            Err(error) => {
+                self.count_refused(&error, from);
+                return Err(error);
+            }
+        };
         let (Some(reason), Some(newest)) = (admission.relation.fence(), admission.new.last())
         else {
             return Ok(admission.relation);
@@ -462,6 +482,61 @@ impl Peers {
             .collect();
         self.apply_fence(reason, Lineage::kept(&kept)?, true).await;
         Ok(admission.relation)
+    }
+
+    /// The history a refusal carries when it competes with this controller's own: a valid
+    /// record (section 3.1) that this controller would stop for, named by its number and
+    /// the controller it was forced on. Changes nothing: the first start's probe reads it
+    /// before this controller takes office.
+    pub async fn competing(&self, status: &Status) -> Option<String> {
+        let records = offered_lineage(status.metadata())?.ok()?;
+        let root = self.ca_root()?;
+        let standing = {
+            let view = self.store().read(ReadConsistency::Local).await.ok()?;
+            Standing::read(
+                view.as_ref(),
+                self.store().membership().voters,
+                Timestamp::now(),
+            )
+            .ok()?
+        };
+        let admission = self
+            .generation()
+            .lineage
+            .admit(&records, &root, &standing)
+            .ok()?;
+        admission.relation.fence()?;
+        let newest = admission.new.last()?;
+        Some(format!(
+            "generation {} forced on controller {}",
+            newest.number(),
+            newest.forced()
+        ))
+    }
+
+    /// The generation records refused since this controller started.
+    pub fn refused_records(&self) -> RefusedRecords {
+        lock(&self.generations().refused).clone()
+    }
+
+    /// Counts a refused offer and logs it: the first, then every 64th, so a peer that
+    /// keeps offering cannot fill the log.
+    fn count_refused(&self, error: &ClusterError, from: Option<NodeId>) {
+        let count = {
+            let mut refused = lock(&self.generations().refused);
+            refused.count = refused.count.saturating_add(1);
+            refused.last = Some((error.code().to_owned(), error.detail().to_owned(), from));
+            refused.count
+        };
+        if count == 1 || count % 64 == 0 {
+            tracing::warn!(
+                code = %error.code(),
+                from = ?from,
+                refused = count,
+                "a generation record was refused and changes nothing here: {}",
+                error.detail()
+            );
+        }
     }
 
     /// The first start after a forced step found the old cluster alive: this controller
@@ -511,13 +586,10 @@ impl Peers {
         records: &std::collections::BTreeMap<NodeId, crate::model::MemberRecord>,
         names: &std::collections::HashMap<NodeId, String>,
     ) -> Result<Vec<MemberView>, ClusterError> {
-        let membership = self.store().membership();
-        let view = self.store().read(ReadConsistency::Local).await?;
-        Ok(view
-            .scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)?
+        Ok(self
+            .pending_superseded()
+            .await?
             .into_iter()
-            .map(|(node, _, _)| NodeId(node))
-            .filter(|node| !membership.voters.contains(node) && !membership.learners.contains(node))
             .map(|node| {
                 let record = records.get(&node);
                 MemberView {
@@ -618,14 +690,32 @@ impl Peers {
     }
 
     async fn push_targets(&self) -> Result<Vec<NodeId>, ClusterError> {
+        let informed = lock(&self.generations().informed).clone();
+        let mut pending = self.pending_superseded().await?;
+        pending.retain(|node| !informed.contains(node));
+        Ok(pending)
+    }
+
+    /// The controllers this history superseded that are neither members again nor removed
+    /// (revoked): the ones the push offers the record to, the cluster view shows as
+    /// superseded and the status warns about.
+    ///
+    /// # Errors
+    ///
+    /// A store error.
+    pub async fn pending_superseded(&self) -> Result<Vec<NodeId>, ClusterError> {
+        let membership = self.store().membership();
         let view = self.store().read(ReadConsistency::Local).await?;
         let revoked = crate::registry::revoked_nodes(view.as_ref())?;
-        let informed = lock(&self.generations().informed).clone();
         Ok(view
             .scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)?
             .into_iter()
             .map(|(node, _, _)| NodeId(node))
-            .filter(|node| !revoked.contains(node) && !informed.contains(node))
+            .filter(|node| {
+                !membership.voters.contains(node)
+                    && !membership.learners.contains(node)
+                    && !revoked.contains(node)
+            })
             .collect())
     }
 
@@ -650,6 +740,14 @@ impl Peers {
             }
             _ => false,
         }
+    }
+}
+
+/// Logs an offer that failed for a reason other than its records' refusal, which the offer
+/// counts and logs itself.
+fn log_offer_error(error: &ClusterError, from: Option<NodeId>) {
+    if ![codes::RECORD_INVALID, codes::RECORD_UNHELD].contains(&error.code()) {
+        tracing::warn!(peer = ?from, code = %error.code(), "an offered generation record could not be checked: {}", error.detail());
     }
 }
 

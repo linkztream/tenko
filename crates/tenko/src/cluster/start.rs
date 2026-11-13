@@ -193,6 +193,15 @@ fn check_entry_limit(store: &RaftStore) -> Result<(), StartError> {
     Ok(())
 }
 
+/// Whether a controller starts as a member, presenting its identity under
+/// `<data_dir>/node/`, rather than as a single controller with the vault's certificate (the
+/// states of `tenko_cluster::peers::identity`): a group of several nodes, or a controller
+/// alone with an identity under `node/` and a node record (the others were removed) or a
+/// forced step's record.
+fn starts_as_member(members: usize, identity: bool, forced: bool, recorded: bool) -> bool {
+    members > 1 || (identity && (forced || recorded))
+}
+
 /// Runs step 3 and returns the peer layer and the key ring for the vault.
 ///
 /// # Errors
@@ -227,25 +236,37 @@ pub async fn start_peers(
     }
     let membership = store.membership();
     // A member of a group of several nodes (a joined controller, or the first one after
-    // its first join), or a controller that a forced step of the cluster recovery made the
-    // only voter: it keeps the identity under `<data_dir>/node/`, and the superseded
-    // controllers dial it at the cluster port of that identity.
-    let forced = !{
+    // its first join), or a controller alone that has a node record and its identity under
+    // `<data_dir>/node/` (a forced step of the cluster recovery made it the only voter, or
+    // the others were removed): it presents that identity, which its record holds, and the
+    // superseded controllers dial it at the cluster port of that identity. A controller
+    // alone with no record presents the vault's certificate (`node::controller`).
+    let (forced, recorded) = {
         let view = store
             .read(ReadConsistency::Local)
             .await
             .map_err(|error| StartError::coded("cluster", &error))?;
-        view.scan_typed(
-            &tenko_cluster::generation::GENERATION,
-            KeyRange::all(),
-            1,
-            false,
-        )
-        .map_err(|error| StartError::coded("cluster", &error))?
-        .is_empty()
+        let forced = !view
+            .scan_typed(
+                &tenko_cluster::generation::GENERATION,
+                KeyRange::all(),
+                1,
+                false,
+            )
+            .map_err(|error| StartError::coded("cluster", &error))?
+            .is_empty();
+        let recorded = view
+            .get_typed(&tenko_cluster::model::tables::NODES, &resolved.node_id.0)
+            .map_err(|error| StartError::coded("cluster", &error))?
+            .is_some();
+        (forced, recorded)
     };
-    let member = membership.voters.len() + membership.learners.len() > 1
-        || (forced && credentials.is_some());
+    let member = starts_as_member(
+        membership.voters.len() + membership.learners.len(),
+        credentials.is_some(),
+        forced,
+        recorded,
+    );
     if let Some(credentials) = &credentials {
         network.set_tls(
             credentials
@@ -255,7 +276,14 @@ pub async fn start_peers(
     }
     let peers = Peers::new(store.clone(), network, peer_config(resolved));
     if let Some(credentials) = &credentials {
-        peers.attach_identity(Arc::new(NodeDirIdentity::new(credentials)));
+        // A single controller's identity is the vault's (`node::controller`), even with an
+        // identity under `node/` that its record does not name yet (a first join that
+        // stopped before its write).
+        if member {
+            peers.attach_identity(Arc::new(
+                NodeDirIdentity::new(credentials).reloading(NodePaths::new(&resolved.data_dir)),
+            ));
+        }
         peers.attach_ca_root(credentials.ca_root.clone());
     }
     let pending = recover::pending(&resolved.data_dir);
@@ -490,15 +518,17 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
                     answers.insert(old.node, answer_of(&response.into_inner()));
                 }
                 Ok(Some(Err(status))) => {
+                    // A refusal that carries another forced history is evidence of it: this
+                    // controller does not take office beside it (`--undo` lets it meet that
+                    // history as a plain member). Its records are read, never acted on here.
+                    let rival = peers.competing(&status).await;
                     if let Some(code) = tenko_cluster::server::code_of(&status) {
-                        let answer = if code == tenko_cluster::generation::codes::SUPERSEDED {
-                            tracing::info!(
-                                node = %old.node,
-                                "an old voter answered the probe as superseded by another history already; the records it sent are not taken here"
-                            );
-                            Answer::Alone("superseded already".to_owned())
-                        } else {
-                            Answer::Unreadable(format!("refused with {code}"))
+                        let answer = match rival {
+                            Some(rival) => Answer::Alive(format!("another history: {rival}")),
+                            None if code == tenko_cluster::generation::codes::SUPERSEDED => {
+                                Answer::Alone("superseded already".to_owned())
+                            }
+                            None => Answer::Unreadable(format!("refused with {code}")),
                         };
                         answers.insert(old.node, answer);
                     }
@@ -597,6 +627,29 @@ mod tests {
     use tenko_cluster::proto::v1::MembersResponse;
 
     use super::*;
+
+    /// The start paths of the identity states: a controller that never joined, or one
+    /// restored on a host without its identity, starts single with the vault's certificate;
+    /// a member, a cluster that shrank to one, a forced controller and a restore on its own
+    /// host start as members with the identity under `node/`.
+    #[test]
+    fn the_start_path_follows_the_identity_state() {
+        // (members, identity under node/, forced, own node record) -> member
+        for (members, identity, forced, recorded, member) in [
+            (1, false, false, false, false), // never joined
+            (1, true, false, false, false),  // first join written, not recorded yet
+            (1, false, false, true, false),  // restored on a new host: settles at start
+            (3, true, false, true, true),    // joined
+            (1, true, false, true, true),    // shrunk to one, or restored on its own host
+            (1, true, true, true, true),     // forced
+        ] {
+            assert_eq!(
+                starts_as_member(members, identity, forced, recorded),
+                member,
+                "{members} members, identity {identity}, forced {forced}, recorded {recorded}"
+            );
+        }
+    }
 
     fn answer(quorum: &str, leader: u64, in_contact: u32, voters: u32) -> Answer {
         answer_of(&MembersResponse {

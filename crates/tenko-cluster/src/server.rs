@@ -250,32 +250,18 @@ where
         let service = self.inner.clone();
         Box::pin(async move {
             use tower::ServiceExt as _;
-            // A record is checked only for a controller: another caller is refused before
-            // any signature is verified or any table read.
-            let peer = match request.extensions().get::<PeerInfo>().cloned() {
-                Some(peer) if peer.identity.roles.contains(tenko_core::Role::Controller) => peer,
-                Some(peer) => {
-                    return Ok(status_of(&ClusterError::new(
-                        "cluster.peer.not_controller",
-                        403,
-                        format!(
-                            "node {} is not a controller; the controller services refuse it",
-                            peer.identity.node
-                        ),
-                    ))
-                    .into_http());
-                }
-                None => {
-                    return Ok(status_of(&ClusterError::new(
-                        "cluster.tls.no_peer",
-                        401,
-                        "the call did not arrive over the mutual TLS of the cluster port",
-                    ))
-                    .into_http());
-                }
+            let Some(peer) = request.extensions().get::<PeerInfo>().cloned() else {
+                return Ok(status_of(&ClusterError::new(
+                    "cluster.tls.no_peer",
+                    401,
+                    "the call did not arrive over the mutual TLS of the cluster port",
+                ))
+                .into_http());
             };
-            // The certificate must be one the caller's node record holds, on every call of
-            // both services; the services read the outcome and cannot skip it.
+            // The role first (another caller is refused before any table is read or any
+            // signature verified), then a certificate the caller's node record holds, on
+            // every call of both services; the services read the outcome and cannot skip
+            // it.
             let access = if request.uri().path().starts_with("/tenko.cluster.v1.Raft/") {
                 Access::Raft
             } else {

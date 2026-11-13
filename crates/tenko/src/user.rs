@@ -116,6 +116,7 @@ pub fn unlock(args: &UnlockArgs, out: &mut impl Write, err: &mut impl Write) -> 
 }
 
 async fn run(resolved: &config::Resolved, name: &str) -> Result<String, (u8, String)> {
+    crate::cluster::recover::check_offline_write(resolved)?;
     let store = RaftStore::open(serve::store_config(resolved))
         .await
         .map_err(|error| {

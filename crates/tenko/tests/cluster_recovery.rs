@@ -20,6 +20,10 @@ const PROBE_SECS: u64 = 2;
 /// How long a fence may take to arrive: the authority's push interval and a margin.
 const FENCE_LIMIT: Duration = Duration::from_secs(90);
 
+/// The most writes E142 sends to the returning old controllers while it waits for their
+/// fence.
+const STALE_WRITES: u64 = 300;
+
 fn lab(n: usize) -> ClusterLab {
     let lab = ClusterLab::start_with(
         n,
@@ -141,19 +145,24 @@ fn a_stale_survivor_is_forced_and_the_old_controllers_fence() {
     // E142: the two old controllers return together and form their old quorum, until the
     // authority's first contact fences them; the writes they took meanwhile are counted.
     lab.restart_all(&others);
-    let mut taken = 0_u64;
-    let mut n = 10;
-    lab.wait_for("both old controllers fenced", FENCE_LIMIT, || {
-        n += 1;
-        if write(&lab, others[0], n).status == 201 {
-            taken += 1;
-        }
+    let fenced = || {
         others.iter().all(|id| {
             quorum(&lab, *id).is_some_and(|(state, reason)| {
                 state == "fenced" && reason.as_deref() == Some("superseded")
             })
         })
-    });
+    };
+    // The writes they take are counted in a loop of their own, bounded by a number of
+    // writes; the wait checks the fence only.
+    let mut taken = 0_u64;
+    let mut n = 10;
+    while n < 10 + STALE_WRITES && !fenced() {
+        n += 1;
+        if write(&lab, others[0], n).status == 201 {
+            taken += 1;
+        }
+    }
+    lab.wait_for("both old controllers fenced", FENCE_LIMIT, fenced);
     println!("E142: the returning old controllers took {taken} write(s) before the fence");
     // None of them reached the authority: two histories never merge.
     let on_authority = lab.get(stale, "/addresses").expect("an answer").text;

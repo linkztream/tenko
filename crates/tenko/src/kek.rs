@@ -112,6 +112,7 @@ fn options(resolved: &config::Resolved) -> KekOptions {
 }
 
 async fn run(resolved: &config::Resolved, keep_retired: bool) -> Result<String, (u8, String)> {
+    crate::cluster::recover::check_offline_write(resolved)?;
     let kek = resolved.kek.clone();
     let options = options(resolved);
     let ring = tokio::task::spawn_blocking(move || kek.load_with(KekInit::Require, &options))

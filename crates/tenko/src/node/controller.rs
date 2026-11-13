@@ -25,7 +25,7 @@ use tenko_api::{
     state::AppState,
 };
 use tenko_cluster::{
-    admin::{ClusterAdmin, QuorumKind, QuorumView},
+    admin::{ClusterAdmin, QuorumView},
     ca::{CaPolicy, CertSource, InternalCa, TlsMaterial, TlsResolver, generate_csr},
     error::ClusterError,
     identity::{Credentials, NodePaths},
@@ -39,7 +39,7 @@ use tenko_core::cluster::LeaderService;
 use tenko_core::{NodeId, RequestCtx, SystemComponent, Timestamp, VrfId};
 use tenko_jobs::JobEngine;
 use tenko_store::QuorumState;
-use tenko_store::{ChangeStream, KeyRange, ReadConsistency, ReadViewExt as _, Store, WatchFilter};
+use tenko_store::{ChangeStream, ReadViewExt as _, Store, WatchFilter};
 use tenko_vault::StoreVault;
 use tokio::{sync::watch, task::JoinHandle};
 
@@ -281,6 +281,14 @@ pub async fn start_with(
             Arc::clone(&sink),
         ));
         registry.set_listening(port.addrs.clone());
+        // The record must hold the identity this member presents (a restore of a member on
+        // its own host holds the serials of the backup): a write only when it does not, and
+        // one that only a controller alone can make, so a failure is a warning.
+        if let Some(layer) = &layer
+            && let Err(error) = layer.settle_identity(&registry).await
+        {
+            tracing::warn!(code = %error.code(), "this controller's node record does not hold the certificate it presents and could not be written: {}", error.detail());
+        }
         let mut tasks = vec![registry.follow_revocations(stop.clone())];
         tasks.push(tokio::spawn(maintenance(
             Arc::clone(&registry),
@@ -324,46 +332,62 @@ pub async fn start_with(
             ),
         ));
     }
-    // A single controller keeps its key in the vault until its first join. Keys of other
-    // nodes, and its own when it was a member before (a restore), leave the vault first: no
+    // A single controller keeps its key in the vault until its first join (the states of
+    // `tenko_cluster::peers::identity`). Keys of other nodes leave the vault first: no
     // running controller uses them, and a copy there could be used by anyone holding one.
+    // A controller with a node record (a restore of a member on a host without its identity
+    // under `node/`) settles at once: a new identity under `node/` that its record holds,
+    // its vault key retired in the same write.
     let was_member = registry
         .record(resolved.node_id)
         .await
         .map_err(|error| start_error(&error))?
         .is_some();
     registry
-        .retire_vault_keys(vault.as_ref(), &ctx, was_member, true)
-        .await
-        .map_err(|error| start_error(&error))?;
-    let material = registry
-        .controller_material(vault.as_ref(), &ctx)
+        .retire_vault_keys(vault.as_ref(), &ctx, was_member && layer.is_none(), true)
         .await
         .map_err(|error| start_error(&error))?;
     let resolver = Arc::new(TlsResolver::default());
-    resolver.set(Some(material));
+    let paths = NodePaths::new(&resolved.data_dir);
     if let Some(layer) = &layer {
-        // The first controller: its peer transport presents the vault-held certificate,
-        // which moves to `<data_dir>/node/` when the first peer joins.
-        let (chain, key) = registry
-            .controller_identity(vault.as_ref(), &ctx)
-            .await
-            .map_err(|error| start_error(&error))?;
-        let client = tenko_cluster::mtls::client_config(registry.ca().root_der(), chain, &key)
-            .map_err(|error| start_error(&error))?;
-        layer.network().set_tls(client);
         let (port, peers) = (Arc::clone(&resolver), layer.clone());
         layer.attach_identity(Arc::new(
             VaultIdentity::new(
                 Arc::clone(&registry),
                 Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
-                NodePaths::new(&resolved.data_dir),
+                paths.clone(),
                 format!("controller-{}", resolved.node_id.0),
             )
             .on_switch(Box::new(move |credentials| {
                 switch_to(&port, &peers, credentials);
             })),
         ));
+    }
+    match &layer {
+        Some(layer) if was_member => layer
+            .settle_identity(&registry)
+            .await
+            .map_err(|error| start_error(&error))?,
+        _ => {
+            resolver.set(Some(
+                registry
+                    .controller_material(vault.as_ref(), &ctx)
+                    .await
+                    .map_err(|error| start_error(&error))?,
+            ));
+            if let Some(layer) = &layer {
+                // The first controller: its peer transport presents the vault-held
+                // certificate until the first peer joins.
+                let (chain, key) = registry
+                    .controller_identity(vault.as_ref(), &ctx)
+                    .await
+                    .map_err(|error| start_error(&error))?;
+                let client =
+                    tenko_cluster::mtls::client_config(registry.ca().root_der(), chain, &key)
+                        .map_err(|error| start_error(&error))?;
+                layer.network().set_tls(client);
+            }
+        }
     }
     let in_use = registry
         .in_use(Timestamp::now())
@@ -422,10 +446,22 @@ pub async fn start_with(
         ClusterListen::Off => "cluster port off ([cluster] listen = [])".to_owned(),
     };
     tasks.push(registry.follow_revocations(stop.clone()));
+    if let Some(layer) = &layer {
+        // Renews the identity under `node/` once there is one (after the first join, or a
+        // settle at this start); nothing before.
+        tasks.push(tokio::spawn(renew_identity(
+            Arc::clone(&registry),
+            Arc::clone(&vault),
+            layer.clone(),
+            Arc::clone(&resolver),
+            paths.clone(),
+            stop.clone(),
+        )));
+    }
     tasks.push(tokio::spawn(maintenance(
         Arc::clone(&registry),
         Arc::clone(&vault),
-        Some(resolver),
+        Some((resolver, paths)),
         stop.clone(),
     )));
     let state = Arc::new(OnceLock::new());
@@ -627,14 +663,34 @@ async fn on_demand_hold(registry: &NodeRegistry, stop: &mut watch::Receiver<bool
     }
 }
 
+/// Whether this controller's identity is the one under `<data_dir>/node/`: one of its own
+/// node id that its node record holds. Then the vault holds no key of it and none may be
+/// issued there again; until then (never joined, or a first join that stopped before its
+/// write) it presents the vault's certificate, which is renewed and never retired.
+async fn node_local(registry: &NodeRegistry, paths: &NodePaths) -> bool {
+    let local = registry.config().local_node;
+    let Ok(credentials) = Credentials::load(paths) else {
+        return false;
+    };
+    credentials.identity.node == local
+        && registry.record(local).await.is_ok_and(|record| {
+            record.is_some_and(|(record, _)| {
+                record
+                    .serials
+                    .iter()
+                    .any(|held| held.serial == credentials.info.serial)
+            })
+        })
+}
+
 /// Reads the revocation list again and renews the controller's certificate on the cluster
-/// port when it is due (a single controller: `resolver`; a member's identity under
-/// `<data_dir>/node/` is renewed elsewhere). The prune is the leader service
-/// `cluster.prune` ([`Cluster::leader_services`]).
+/// port when it is due (a single controller that presents the vault's certificate:
+/// `resolver`; an identity under `<data_dir>/node/` is renewed by [`renew_identity`]). The
+/// prune is the leader service `cluster.prune` ([`Cluster::leader_services`]).
 async fn maintenance(
     registry: Arc<NodeRegistry>,
     vault: Arc<StoreVault>,
-    resolver: Option<Arc<TlsResolver>>,
+    resolver: Option<(Arc<TlsResolver>, NodePaths)>,
     mut stop: watch::Receiver<bool>,
 ) {
     let mut revocations = tokio::time::interval(MAINTENANCE_INTERVAL);
@@ -653,13 +709,13 @@ async fn maintenance(
                 }
             }
             _ = certificate.tick() => {
-                let Some(resolver) = &resolver else {
+                let Some((resolver, paths)) = &resolver else {
                     continue;
                 };
-                // Once this controller joined a cluster its identity is node-local; a new
-                // vault key would put one back where every controller can read it.
-                let local = registry.config().local_node;
-                if registry.record(local).await.is_ok_and(|record| record.is_some()) {
+                // Once this controller's identity is node-local (its first join, or a
+                // settle at the start) a new vault key would put one back where every
+                // controller can read it.
+                if node_local(&registry, paths).await {
                     continue;
                 }
                 let ctx = RequestCtx::system(SystemComponent::Cluster);
@@ -763,17 +819,10 @@ async fn health(
 
 /// The `cluster` event of a quorum state ([`QUORUM_EVENT`]).
 fn quorum_event(quorum: QuorumState) -> EventData {
+    let state = quorum.name();
     let view = QuorumView::from(quorum);
     let mut event = EventData::new(Topic::Cluster, None);
     event.kind = Some(QUORUM_EVENT.to_owned());
-    let state = match view.state {
-        QuorumKind::Single => "single",
-        QuorumKind::Healthy => "healthy",
-        QuorumKind::Electing => "electing",
-        QuorumKind::Isolated => "isolated",
-        QuorumKind::Fenced => "fenced",
-        QuorumKind::Unknown => "unknown",
-    };
     event.params.insert("state".to_owned(), state.to_owned());
 
     if let Some(since) = view.since {
@@ -815,6 +864,10 @@ async fn renew_identity(
             () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
             _ = tick.tick() => {}
         }
+        // A controller that presents the vault's certificate has nothing here yet.
+        if !node_local(&registry, &paths).await {
+            continue;
+        }
         if let Err(error) =
             retire_vault_key(&registry, vault.as_ref(), &peers, &resolver, &paths).await
         {
@@ -835,7 +888,7 @@ async fn renew_identity(
 /// renewal written but not yet retired is retired at the next run). The keys of other nodes
 /// go too while this controller is the only voter.
 async fn retire_vault_key(
-    registry: &NodeRegistry,
+    registry: &Arc<NodeRegistry>,
     vault: &StoreVault,
     peers: &Peers,
     resolver: &TlsResolver,
@@ -845,6 +898,11 @@ async fn retire_vault_key(
     if let Some(serial) = registry.vault_serial(local).await?
         && Credentials::load(paths)?.info.serial == serial
     {
+        // A first controller recorded before it had a node record of its own gets one
+        // first: the renewal needs it.
+        if registry.record(local).await?.is_none() {
+            peers.settle_identity(registry).await?;
+        }
         renew_once(registry, peers, resolver, paths, true).await?;
     }
     let membership = peers.store().membership();
@@ -900,7 +958,7 @@ async fn renew_once(
 /// forced step (the alarm `cluster.recover.force`, while any controller it superseded is
 /// neither rejoined nor removed), and the superseded controllers its lineage did not reach.
 async fn recovery_notices(layer: &Peers, state: &AppState) {
-    use tenko_cluster::generation::{SUPERSEDED, codes};
+    use tenko_cluster::generation::codes;
     use tenko_store::FenceReason;
 
     let generation = layer.generation();
@@ -944,23 +1002,10 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
             _ => state.clear_notice(reason.code()),
         }
     }
-    let pending: Vec<NodeId> = match layer.store().read(ReadConsistency::Local).await {
-        Ok(view) if generation.fence.is_none() && generation.lineage.tip().is_some() => {
-            let membership = layer.store().membership();
-            // Neither rejoined (a member again) nor removed (revoked).
-            let revoked = tenko_cluster::registry::revoked_nodes(view.as_ref()).unwrap_or_default();
-            view.scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(node, _, _)| NodeId(node))
-                .filter(|node| {
-                    !membership.voters.contains(node)
-                        && !membership.learners.contains(node)
-                        && !revoked.contains(node)
-                })
-                .collect()
-        }
-        _ => Vec::new(),
+    let pending: Vec<NodeId> = if generation.fence.is_none() && generation.lineage.tip().is_some() {
+        layer.pending_superseded().await.unwrap_or_default()
+    } else {
+        Vec::new()
     };
     if pending.is_empty() {
         state.clear_notice(codes::SUPERSEDED_PENDING);
@@ -989,6 +1034,28 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
             "superseded controllers have not received the generation record yet".to_owned(),
             &unreached,
         ));
+    }
+    // Records that changed nothing here (a forged signer, a revoked or superseded one):
+    // an operator sees that someone offers them, and from where.
+    let refused = layer.refused_records();
+    match refused.last {
+        Some((code, detail, from)) => state.set_notice(StatusWarning {
+            code: codes::RECORDS_REFUSED.to_owned(),
+            detail: format!(
+                "{} generation record offer(s) were refused since this controller started and changed nothing; the last: {detail}",
+                refused.count
+            ),
+            params: [
+                ("count".to_owned(), refused.count.to_string()),
+                ("code".to_owned(), code),
+                (
+                    "from".to_owned(),
+                    from.map(|node| node.to_string()).unwrap_or_default(),
+                ),
+            ]
+            .into(),
+        }),
+        None => state.clear_notice(codes::RECORDS_REFUSED),
     }
 }
 
