@@ -190,6 +190,66 @@ describe("EventStream", () => {
     s.stop();
   });
 
+  it("reopens from a list revision that is older than the open stream's start", () => {
+    // A page subscribes and reads its list at once: the server may take the subscription after
+    // the read, and a change committed in between is not on a stream opened without a position.
+    const s = stream();
+    s.subscribe("dhcp", () => undefined);
+    s.start();
+    const unpositioned = FakeSource.last();
+    expect(unpositioned.query.get("from")).toBeNull();
+    s.resumeFrom(120);
+    expect(unpositioned.closed).toBe(true);
+    expect(FakeSource.last().query.get("from")).toBe("120");
+    // A second list read older than the new start reopens from that one, so both are covered.
+    s.resumeFrom(110);
+    expect(FakeSource.last().query.get("from")).toBe("110");
+    // A read at or after the start changes nothing.
+    const sources = FakeSource.all.length;
+    s.resumeFrom(110);
+    s.resumeFrom(130);
+    s.resumeFrom(Number.NaN);
+    expect(FakeSource.all).toHaveLength(sources);
+    s.stop();
+  });
+
+  it("reopens from the last id seen when a list read is newer than it", () => {
+    // The frames after the last id may still be on their way to other views.
+    const s = stream();
+    s.subscribe("dhcp", () => undefined);
+    s.start();
+    FakeSource.last().emit("dhcp", { topic: "dhcp", revision: 90 }, "90");
+    s.resumeFrom(120);
+    expect(FakeSource.last().query.get("from")).toBe("90");
+    s.stop();
+  });
+
+  it("starts from the oldest list revision read before it starts, and forgets them when it stops", () => {
+    const s = stream();
+    s.resumeFrom(500);
+    s.resumeFrom(450);
+    s.start();
+    expect(FakeSource.last().query.get("from")).toBe("450");
+    s.stop();
+    s.start();
+    expect(FakeSource.last().query.get("from")).toBeNull();
+    s.stop();
+  });
+
+  it("delivers a topic added later only from the position it was added at", () => {
+    const s = stream();
+    s.resumeFrom(100);
+    s.start();
+    FakeSource.last().emit("system", { topic: "system", revision: 140 }, "140");
+    s.subscribe("dhcp", () => undefined);
+    vi.advanceTimersByTime(0);
+    expect(FakeSource.last().query.get("from")).toBe("140");
+    // A list of the new topic read before that position reopens the stream from it.
+    s.resumeFrom(130);
+    expect(FakeSource.last().query.get("from")).toBe("130");
+    s.stop();
+  });
+
   it("asks every subscriber to reload on reset", () => {
     const s = stream();
     const ipam = vi.fn();

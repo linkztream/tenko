@@ -11,6 +11,12 @@
 // the stream is closed on error and reopened with `from=<id>` in the query (EventSource
 // cannot set the Last-Event-ID header on a new connection; the server treats both alike).
 //
+// A view reads its list at a revision R and follows the stream (see `resumeFrom`): it is told
+// of every change after R. A page subscribes and reads at once, and the server may take the
+// subscription after the read; a connection opened without a position, or at a later one than R,
+// is therefore opened again from R (or from the last id seen, if older), and the server replays
+// what came after it or sends `reset` when it no longer can.
+//
 // A stream lasts as long as the session that opened it. The server ends it with an `end`
 // event: `access_changed` (what the session may read changed) reopens it after the first
 // backoff step; `access_ended` also asks the server whether the session still acts, as a
@@ -141,6 +147,12 @@ export class EventStream {
   /** Counts the stops, so that an answer that arrives after one is not taken for this run. */
   private run = 0;
   private lastId: string | null = null;
+  /**
+   * The revision after which the connections of this run have delivered every change: the
+   * position the first of them opened at, kept while each reconnect resumes from the last id.
+   * `null` after a connection opened without a position.
+   */
+  private complete: number | null = null;
   private readonly handlers = new Map<Topic, Set<Handler>>();
   private readonly resetHandlers = new Map<Topic, Set<() => void>>();
   private readonly onOnline = () => this.reconnectNow();
@@ -170,10 +182,20 @@ export class EventStream {
     return this.lastId;
   }
 
-  /** Resume from a revision obtained from a list, unless the stream is already past it. */
+  /**
+   * Makes the stream tell of every change after `revision`, the revision a list was read at.
+   * A stream whose connections have delivered every change since a revision at or before this
+   * one keeps them. Otherwise (not started yet, opened without a position, or after this
+   * revision) it starts or opens again from the oldest of this revision and the last id seen:
+   * the frames after that id may still be on their way to other views.
+   */
   resumeFrom(revision: number): void {
-    const current = this.lastId === null ? Number.NaN : Number(this.lastId);
-    if (Number.isNaN(current) || revision > current) this.lastId = String(revision);
+    if (!Number.isFinite(revision)) return;
+    if (this.complete !== null && revision >= this.complete) return;
+    const last = this.lastId === null ? Number.NaN : Number(this.lastId);
+    this.lastId = String(Number.isNaN(last) ? revision : Math.min(revision, last));
+    // A connection that is waiting to reconnect takes the new position when it does.
+    if (this.running && this.source !== undefined) this.reconnectNow();
   }
 
   /** Calls `handler` for every event of `topic`. Returns the unsubscribe function. */
@@ -200,6 +222,10 @@ export class EventStream {
   stop(): void {
     this.running = false;
     this.run += 1;
+    // The views of the next run read their lists again and position it.
+    this.complete = null;
+    this.lastId = null;
+    this.connectedTopics = "";
     clearTimeout(this.timer);
     clearTimeout(this.topicTimer);
     this.timer = undefined;
@@ -253,9 +279,14 @@ export class EventStream {
       return;
     }
     const topics = this.topics();
+    const before = this.connectedTopics.split(",");
     this.connectedTopics = topics.join(",");
     const params = new URLSearchParams({ topics: this.connectedTopics });
     if (this.lastId !== null) params.set("from", this.lastId);
+    // A topic this connection adds is delivered from its position only.
+    const from = this.lastId === null ? Number.NaN : Number(this.lastId);
+    const added = topics.some((topic) => !before.includes(topic));
+    this.complete = Number.isNaN(from) ? null : added ? from : Math.min(this.complete ?? from, from);
     this.setState(this.attempt === 0 ? "connecting" : "reconnecting");
     const es = this.create(`${this.url}?${params.toString()}`);
     this.source = es;
