@@ -729,3 +729,108 @@ fn edns(dnssec_ok: bool) -> ClientEdns {
         cookie: None,
     }
 }
+
+#[test]
+fn a_flush_takes_the_answers_whose_alias_chain_passes_under_its_suffix() {
+    use crate::recurse::message::{Composed, Rr, compose};
+    let record = |owner: &str, rtype: u16, data: Vec<u8>| Rr {
+        owner: wire_name(owner),
+        rtype,
+        class: 1,
+        ttl: 300,
+        data,
+    };
+    let chained = compose(&Composed {
+        qname: &wire_name("www.example.test"),
+        qtype: A,
+        qclass: 1,
+        rcode: 0,
+        answer: &[
+            record("www.example.test", 5, wire_name("Host.Corp.test")),
+            record("host.corp.test", A, vec![192, 0, 2, 1]),
+        ],
+        ..Composed::default()
+    });
+    let plain = upstream("other.example.test", A, 0, &[a(1, 300)], &[], false);
+    let cache = small(100);
+    let fill = || {
+        let now = Instant::now();
+        assert!(cache.insert(&key("www.example.test", A), &chained, now, None));
+        assert!(cache.insert(&key("other.example.test", A), &plain, now, None));
+    };
+    fill();
+    // The alias's target, in any case, is under the suffix: the entry goes.
+    assert_eq!(cache.flush(Some(&wire_name("corp.test"))).entries, 1);
+    let message = query("www.example.test", A, None);
+    let mut out = Vec::new();
+    let now = Instant::now();
+    assert_eq!(
+        cache.answer(
+            &key("www.example.test", A),
+            now,
+            &client(&message, None, 512),
+            &mut out
+        ),
+        Hit::Miss
+    );
+    let message = query("other.example.test", A, None);
+    assert!(matches!(
+        cache.answer(
+            &key("other.example.test", A),
+            now,
+            &client(&message, None, 512),
+            &mut out
+        ),
+        Hit::Fresh { .. }
+    ));
+    // Several suffixes in one pass.
+    fill();
+    let suffixes = [wire_name("corp.test"), wire_name("other.example.test")];
+    let suffixes: Vec<&[u8]> = suffixes.iter().map(Vec::as_slice).collect();
+    assert_eq!(cache.flush_within(&suffixes).entries, 2);
+    assert!(cache.is_empty());
+}
+
+#[test]
+fn an_answer_with_more_alias_names_than_kept_is_not_cached() {
+    use crate::recurse::message::{Composed, Rr, compose};
+    let name = |n: usize| wire_name(&format!("n{n}.example.test"));
+    let chain: Vec<Rr> = (0..40)
+        .map(|n| Rr {
+            owner: name(n),
+            rtype: 5,
+            class: 1,
+            ttl: 300,
+            data: name(n + 1),
+        })
+        .collect();
+    let message = compose(&Composed {
+        qname: &name(0),
+        qtype: A,
+        qclass: 1,
+        rcode: 0,
+        answer: &chain,
+        ..Composed::default()
+    });
+    // Forty links name forty-one names besides none: within the bound, cached.
+    let cache = small(100);
+    assert!(cache.insert(&key("n0.example.test", A), &message, Instant::now(), None));
+    let long: Vec<Rr> = (0..70)
+        .map(|n| Rr {
+            owner: name(n),
+            rtype: 5,
+            class: 1,
+            ttl: 300,
+            data: name(n + 1),
+        })
+        .collect();
+    let message = compose(&Composed {
+        qname: &name(0),
+        qtype: A,
+        qclass: 1,
+        rcode: 0,
+        answer: &long,
+        ..Composed::default()
+    });
+    assert!(!cache.insert(&key("n0.example.test", A), &message, Instant::now(), None));
+}

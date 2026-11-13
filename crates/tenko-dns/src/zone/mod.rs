@@ -374,6 +374,11 @@ pub(crate) fn journal_records(rrset: &RrSet) -> impl Iterator<Item = JournalReco
     })
 }
 
+/// The name a change of `zone` flushes on every DNS node: a stub zone's apex.
+fn stub_suffix(zone: &Zone) -> Option<&DnsName> {
+    (zone.kind == ZoneKind::Stub).then_some(&zone.name)
+}
+
 /// Whether a zone of this kind holds RRsets.
 pub fn holds_data(kind: ZoneKind) -> bool {
     matches!(kind, ZoneKind::Primary | ZoneKind::Rpz)
@@ -739,12 +744,14 @@ impl ZoneService {
                 for rrset in &apex_sets {
                     stage_put(&mut batch, None, rrset)?;
                 }
-                batch.audit(
-                    AuditDraft::success(audit::ZONE_CREATE, vec![ObjectRef::from(zone.id)])
-                        .with_source_ip(cx.source_ip)
-                        .with_context("name", zone.name.as_str())
-                        .with_context("kind", kind_name(zone.kind)),
-                );
+                let draft = AuditDraft::success(audit::ZONE_CREATE, vec![ObjectRef::from(zone.id)])
+                    .with_source_ip(cx.source_ip)
+                    .with_context("name", zone.name.as_str())
+                    .with_context("kind", kind_name(zone.kind));
+                batch.audit(crate::forwarders::flushing(
+                    draft,
+                    stub_suffix(&zone).as_slice(),
+                ));
                 Ok(Planned::write(
                     (),
                     batch,
@@ -850,7 +857,8 @@ impl ZoneService {
                         new: None,
                     });
                 }
-                batch.audit(draft);
+                let flushed = stub_suffix(&zone).filter(|_| zone.source != before.source);
+                batch.audit(crate::forwarders::flushing(draft, flushed.as_slice()));
                 Ok(Planned::write(
                     zone.clone(),
                     batch,
@@ -993,11 +1001,13 @@ impl ZoneService {
                 for scope in &zone.scopes {
                     journal::stage_reset(&mut batch, view, id, &scope.name)?;
                 }
-                batch.audit(
-                    AuditDraft::success(audit::ZONE_DELETE, vec![ObjectRef::from(id)])
-                        .with_source_ip(cx.source_ip)
-                        .with_context("name", zone.name.as_str()),
-                );
+                let draft = AuditDraft::success(audit::ZONE_DELETE, vec![ObjectRef::from(id)])
+                    .with_source_ip(cx.source_ip)
+                    .with_context("name", zone.name.as_str());
+                batch.audit(crate::forwarders::flushing(
+                    draft,
+                    stub_suffix(&zone).as_slice(),
+                ));
                 Ok(Planned::write(
                     !complete,
                     batch,

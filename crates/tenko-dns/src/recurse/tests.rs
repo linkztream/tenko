@@ -942,7 +942,7 @@ async fn a_negative_answer_of_a_quirk_zone_carries_its_delegation_when_asked_to(
     assert!(!resolved.carried);
     let qname = wire_name("other.case.quirk.example.test");
     let resolved = engine
-        .resolve_carrying(question(&qname, types::A), true, None)
+        .resolve_carrying(question(&qname, types::A), true, None, None)
         .await;
     assert_eq!(resolved.rcode, 3, "NXDOMAIN");
     assert!(resolved.carried);

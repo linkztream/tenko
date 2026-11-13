@@ -190,6 +190,18 @@ fn audited(draft: AuditDraft, rule: &ForwardRule) -> AuditDraft {
     }
 }
 
+/// The audit record's note of the consequence on every DNS node: the caches there drop
+/// what they hold at and below these names when they take the change into use (each node
+/// audits its flush as `dns.cache.flush`, naming the rule or the stub zone).
+pub(crate) fn flushing(draft: AuditDraft, suffixes: &[&DnsName]) -> AuditDraft {
+    let mut names: Vec<&str> = suffixes.iter().map(|suffix| suffix.as_str()).collect();
+    names.dedup();
+    if names.is_empty() {
+        return draft;
+    }
+    draft.with_context("flush", names.join(" "))
+}
+
 fn nothing_written() -> ZoneError {
     ZoneError::new(
         tenko_core::error::codes::INTERNAL,
@@ -264,10 +276,16 @@ impl ZoneService {
                 let mut batch = WriteBatch::for_request(cx);
                 batch.expect_typed(&FORWARDERS, &rule.id, None);
                 batch.put_typed(&FORWARDERS, &rule.id, &rule)?;
-                batch.audit(audited(
-                    AuditDraft::success(audit::FORWARDER_CREATE, vec![ObjectRef::from(rule.id)])
+                batch.audit(flushing(
+                    audited(
+                        AuditDraft::success(
+                            audit::FORWARDER_CREATE,
+                            vec![ObjectRef::from(rule.id)],
+                        )
                         .with_source_ip(cx.source_ip),
-                    &rule,
+                        &rule,
+                    ),
+                    &[&rule.suffix],
                 ));
                 Ok(Planned::write(
                     rule.clone(),
@@ -337,11 +355,17 @@ impl ZoneService {
             let mut batch = WriteBatch::for_request(cx);
             batch.expect_typed(&FORWARDERS, &id, Some(revision));
             batch.put_typed(&FORWARDERS, &id, &rule)?;
-            batch.audit(audited(
+            let draft = audited(
                 AuditDraft::success(audit::FORWARDER_UPDATE, vec![ObjectRef::from(id)])
                     .with_source_ip(cx.source_ip),
                 &rule,
-            ));
+            );
+            let flushed: &[&DnsName] = if crate::catalog::same_route(&before, &rule) {
+                &[]
+            } else {
+                &[&before.suffix, &rule.suffix]
+            };
+            batch.audit(flushing(draft, flushed));
             Ok(Planned::write(
                 rule.clone(),
                 batch,
@@ -370,11 +394,12 @@ impl ZoneService {
                 let mut batch = WriteBatch::for_request(cx);
                 batch.expect_typed(&FORWARDERS, &id, Some(row.revision));
                 batch.delete_typed(&FORWARDERS, &id);
-                batch.audit(
+                batch.audit(flushing(
                     AuditDraft::success(audit::FORWARDER_DELETE, vec![ObjectRef::from(id)])
                         .with_source_ip(cx.source_ip)
                         .with_context("suffix", row.rule.suffix.to_string()),
-                );
+                    &[&row.rule.suffix],
+                ));
                 Ok(Planned::write(
                     (),
                     batch,

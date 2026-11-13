@@ -37,7 +37,12 @@
 //! - **Prefetch**: a hit on an entry that has been asked before and has less than a tenth
 //!   of its lifetime left queues its key once ([`Cache::take_prefetch`]); the forwarder
 //!   asks the upstream again before the entry expires.
-//! - **Flush** ([`Cache::flush`]): everything, or the names at or below a suffix.
+//! - **Flush** ([`Cache::flush`], [`Cache::flush_within`]): everything, or the entries at or
+//!   below one of a set of suffixes. An entry counts as below a suffix when its name is, or
+//!   when a name its alias chain passes through is: the owners and targets of its CNAME and
+//!   DNAME records, at most 64 kept with the entry (nothing for an answer without an alias;
+//!   an answer with more is not cached). An answer whose chain led into a forwarding rule's
+//!   suffix therefore goes when that suffix is flushed.
 
 use std::{
     collections::HashMap,
@@ -333,6 +338,9 @@ struct Entry {
     rrsig_offsets: Box<[Skip]>,
     /// The DNSSEC records can be left out without breaking a name.
     strip_safe: bool,
+    /// The other names of the alias chain, lowercase wire form one after another
+    /// ([`chain_names`]); empty for an answer without an alias.
+    names: Box<[u8]>,
 }
 
 impl Entry {
@@ -362,11 +370,19 @@ impl Entry {
         self.age(now) < self.ttl
     }
 
+    /// Whether the entry of the name `qname` is at or below `suffix`, by its name or by a
+    /// name of its alias chain.
+    fn within(&self, qname: &[u8], suffix: &[u8]) -> bool {
+        name::is_within(qname, suffix)
+            || wire_names(&self.names).any(|name| name::is_within(name, suffix))
+    }
+
     fn cost(&self, key_len: usize) -> usize {
         key_len * 2
             + self.wire.len()
             + self.ttls.len() * 2
             + self.rrsig_offsets.len() * std::mem::size_of::<Skip>()
+            + self.names.len()
             + std::mem::size_of::<Slot>()
             + std::mem::size_of::<(Box<[u8]>, u32)>()
             + 8
@@ -801,6 +817,7 @@ impl Cache {
             stored[10..12].copy_from_slice(&arcount.to_be_bytes());
         }
         stored[HEADER_LEN..question_end - 4].make_ascii_lowercase();
+        let names = chain_names(message, header.ancount, question_end)?;
         Some(Entry {
             wire: stored.into_boxed_slice(),
             ttls: layout.ttls.into_boxed_slice(),
@@ -815,6 +832,7 @@ impl Cache {
             signature_expiry,
             rrsig_offsets: layout.skips.into_boxed_slice(),
             strip_safe: layout.strip_safe,
+            names,
         })
     }
 
@@ -853,9 +871,17 @@ impl Cache {
         }
     }
 
-    /// Removes every entry, or those whose name is at or below `suffix` (lowercase wire
-    /// form).
+    /// Removes every entry, or those at or below `suffix` (lowercase wire form).
     pub fn flush(&self, suffix: Option<&[u8]>) -> Flushed {
+        match suffix {
+            None => self.flush_within(&[&[0]]),
+            Some(suffix) => self.flush_within(&[suffix]),
+        }
+    }
+
+    /// Removes the entries at or below any of `suffixes` (lowercase wire form), by their
+    /// name or a name of their alias chain, in one pass over the shards.
+    pub fn flush_within(&self, suffixes: &[&[u8]]) -> Flushed {
         let mut removed = 0usize;
         let mut freed = 0usize;
         for shard in &*self.shards {
@@ -863,10 +889,14 @@ impl Cache {
             let doomed: Vec<u32> = shard
                 .map
                 .iter()
-                .filter(|(key, _)| {
-                    suffix.is_none_or(|suffix| {
-                        name::is_within(CacheKey::from_bytes(key).qname(), suffix)
-                    })
+                .filter(|(key, index)| {
+                    let qname = CacheKey::qname_of(key);
+                    shard.slots[**index as usize]
+                        .entry
+                        .as_ref()
+                        .is_none_or(|entry| {
+                            suffixes.iter().any(|suffix| entry.within(qname, suffix))
+                        })
                 })
                 .map(|(_, index)| *index)
                 .collect();
@@ -1055,6 +1085,61 @@ impl Layout {
         }
         true
     }
+}
+
+/// The most names [`chain_names`] keeps for one answer; an answer with more is not cached.
+const CHAIN_NAMES: usize = 64;
+
+/// The names an answer's alias chain passes through besides the question's: the owners and
+/// targets of the CNAME and DNAME records of its answer section, lowercase wire form one
+/// after another, each once. Empty, and not allocated, for an answer without an alias;
+/// `None` when a record does not read or there are more than [`CHAIN_NAMES`].
+fn chain_names(message: &[u8], answers: u16, question_end: usize) -> Option<Box<[u8]>> {
+    const TYPE_CNAME: u16 = 5;
+    const TYPE_DNAME: u16 = 39;
+    let qname = &message[HEADER_LEN..question_end - 4];
+    let mut names: Vec<u8> = Vec::new();
+    let mut count = 0;
+    let mut name = name::NameBuf::root();
+    let mut pos = question_end;
+    for _ in 0..answers {
+        let record = wire::read_record(message, pos)?;
+        pos = record.end();
+        if !matches!(record.rtype, TYPE_CNAME | TYPE_DNAME) {
+            continue;
+        }
+        for at in [record.start, record.rdata] {
+            wire::read_name(message, at, &mut name)?;
+            let found = name.as_wire();
+            if !found.eq_ignore_ascii_case(qname) && !wire_names(&names).any(|known| known == found)
+            {
+                count += 1;
+                if count > CHAIN_NAMES {
+                    return None;
+                }
+                names.extend_from_slice(found);
+            }
+        }
+    }
+    Some(names.into_boxed_slice())
+}
+
+/// The wire names of a [`chain_names`] list.
+fn wire_names(names: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut rest = names;
+    std::iter::from_fn(move || {
+        let mut at = 0;
+        loop {
+            let len = usize::from(*rest.get(at)?);
+            at += 1 + len;
+            if len == 0 {
+                break;
+            }
+        }
+        let (name, tail) = rest.split_at(at.min(rest.len()));
+        rest = tail;
+        Some(name)
+    })
 }
 
 /// Whether the name at `pos` ends in a pointer into one of `skips`.

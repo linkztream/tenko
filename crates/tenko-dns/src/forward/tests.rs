@@ -925,3 +925,6 @@ async fn an_answer_to_a_full_connection_channel_is_dropped_and_counted() {
 
 // The RPZ triggers NSDNAME and NSIP on the resolver's answers.
 mod carry;
+
+// Route changes and alias chains across routes.
+mod routes;

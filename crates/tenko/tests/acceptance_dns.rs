@@ -400,6 +400,20 @@ fn ask_until(
     })
 }
 
+/// Waits until the node's report lists the forwarding rule for `suffix` (`present`) or no
+/// longer does: the node has taken the store's rules into use, which it does after the write
+/// that changed them answered.
+fn wait_for_rule(api: &Api, node: u64, suffix: &str, present: bool) {
+    let what = if present { "take" } else { "drop" };
+    wait_until(&format!("the node to {what} the rule for {suffix}"), || {
+        let report = api.get(&format!("/nodes/{node}/dns")).expect(200);
+        report["upstreams"]
+            .as_array()
+            .is_some_and(|groups| groups.iter().any(|group| group["label"] == suffix))
+            == present
+    });
+}
+
 #[test]
 #[allow(clippy::too_many_lines, reason = "one scenario, read top to bottom")]
 fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
@@ -443,11 +457,11 @@ fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
     assert_eq!(rule["transport"], "plain", "{rule}");
     let rules = api.get("/dns/forwarders").expect(200);
     assert_eq!(rules["items"].as_array().map_or(0, Vec::len), 1, "{rules}");
-    let first = ask_until(
-        "the rule's upstream to answer",
-        || udp(dns, "www.example.net", TYPE_A),
-        |answer| holds(answer, [203, 0, 113, 20]),
-    );
+    let node_id = api.get("/system/status").expect(200)["node"]["id"]
+        .as_u64()
+        .expect("a node id");
+    wait_for_rule(&api, node_id, "example.net", true);
+    let first = udp(dns, "www.example.net", TYPE_A);
     assert!(
         holds(&first, [203, 0, 113, 20]),
         "the rule's upstream answers"
@@ -466,9 +480,6 @@ fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
         before,
         "answered from the cache"
     );
-    let node_id = api.get("/system/status").expect(200)["node"]["id"]
-        .as_u64()
-        .expect("a node id");
     let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
     assert!(report["cache_hits"].as_u64().unwrap_or(0) >= 1, "{report}");
     assert!(
@@ -498,21 +509,13 @@ fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
         "asked again after the flush"
     );
 
-    // The rule's deletion sends example.net to the default upstream.
+    // The rule's deletion sends example.net to the default upstream as soon as the node has
+    // taken it into use: the answer the rule's upstream gave is flushed with the rule.
     let id = rule["id"].as_str().expect("a rule id");
     api.delete(&format!("/dns/forwarders/{id}"), None)
         .expect(204);
-    // Every ask uses a name of its own: an ask that still went through the rule would
-    // otherwise leave its answer in the cache for 30 seconds, as long as the wait itself.
-    let mut asks = 0_u32;
-    let fresh = ask_until(
-        "the default forwarder to answer",
-        || {
-            asks += 1;
-            udp(dns, &format!("new{asks}.example.net"), TYPE_A)
-        },
-        |answer| holds(answer, [203, 0, 113, 9]),
-    );
+    wait_for_rule(&api, node_id, "example.net", false);
+    let fresh = udp(dns, "www.example.net", TYPE_A);
     assert!(holds(&fresh, [203, 0, 113, 9]), "the default forwarder");
 
     // A client that is not on loopback may recurse once IPAM knows its prefix (Home profile).

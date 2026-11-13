@@ -16,11 +16,17 @@
 //! The policy (WP5.2) is compiled here too ([`PolicyData`]): the RPZ zones from their
 //! RRsets and the matcher of the newest version of every list, so that the query path reads
 //! the zones, the views and the policy of one revision through one swap.
+//!
+//! A swap that changes how names leave the authoritative path (a forwarding rule or a stub
+//! zone added, changed or removed: [`RouteChanges`]) goes through the [`RouteWatch`] the
+//! forwarder registers, which flushes what the old routes taught before the new catalog
+//! answers. The writer does it whatever brought the change, so a node that was offline
+//! flushes when it catches up.
 
 use std::{
     collections::{BTreeMap, HashMap},
     net::IpAddr,
-    sync::Arc,
+    sync::{Arc, PoisonError, RwLock, Weak},
 };
 
 use arc_swap::{ArcSwap, Guard};
@@ -502,10 +508,132 @@ impl Catalog {
     }
 }
 
+/// What changed between two catalogs in how names leave the authoritative path: the
+/// forwarding rules and stub zones added, removed or changed in what routes a name (a rule's
+/// suffix, upstreams, transport, TLS name, view, mode or validation; a stub zone's apex or
+/// source servers; a description routes nothing).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RouteChanges {
+    /// The names whose answers the old routes may have taught: the suffix of each rule and
+    /// the apex of each stub zone before and after, none below another one of the list.
+    pub suffixes: Vec<DnsName>,
+    /// The rules added, changed or removed.
+    pub rules: Vec<ForwardRuleId>,
+    /// The stub zones added, changed or removed.
+    pub stubs: Vec<ZoneId>,
+}
+
+impl RouteChanges {
+    /// The changes from `old` to `new`.
+    pub fn between(old: &Catalog, new: &Catalog) -> Self {
+        let mut changes = Self::default();
+        changes.rules = changed(
+            &old.forward_rows,
+            &new.forward_rows,
+            same_route,
+            |rule| &rule.suffix,
+            &mut changes.suffixes,
+        );
+        changes.stubs = changed(
+            &old.stub_rows,
+            &new.stub_rows,
+            |before, after| (&before.name, &before.source) == (&after.name, &after.source),
+            |zone| &zone.name,
+            &mut changes.suffixes,
+        );
+        changes.suffixes = outermost(std::mem::take(&mut changes.suffixes));
+        changes
+    }
+
+    /// Whether nothing changed.
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty() && self.stubs.is_empty()
+    }
+}
+
+/// The ids of the rows of `old` and `new` that were added, removed or changed (`alike`
+/// false), with the names (`name`) of each before and after added to `names`.
+fn changed<Id: Ord + Copy, Row>(
+    old: &BTreeMap<Id, Row>,
+    new: &BTreeMap<Id, Row>,
+    alike: impl Fn(&Row, &Row) -> bool,
+    name: impl Fn(&Row) -> &DnsName,
+    names: &mut Vec<DnsName>,
+) -> Vec<Id> {
+    let mut ids: Vec<Id> = old.keys().chain(new.keys()).copied().collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.retain(|id| {
+        let (before, after) = (old.get(id), new.get(id));
+        let differs = before
+            .zip(after)
+            .is_none_or(|(before, after)| !alike(before, after));
+        if differs {
+            names.extend(before.into_iter().chain(after).map(|row| name(row).clone()));
+        }
+        differs
+    });
+    ids
+}
+
+/// `suffixes` without repeats and without any that is below another one of them, the widest
+/// first: a flush of the list passes over each entry once, whatever the list holds.
+pub(crate) fn outermost(mut suffixes: Vec<DnsName>) -> Vec<DnsName> {
+    suffixes.sort_by_key(DnsName::label_count);
+    let mut kept: Vec<(DnsName, Vec<u8>)> = Vec::with_capacity(suffixes.len());
+    for suffix in suffixes {
+        let wire = suffix.to_wire();
+        if !kept.iter().any(|(_, above)| name::is_within(&wire, above)) {
+            kept.push((suffix, wire));
+        }
+    }
+    kept.into_iter().map(|(suffix, _)| suffix).collect()
+}
+
+/// Whether two versions of a forwarding rule route names alike: the same suffix, upstreams,
+/// transport, TLS name, view, mode and validation (a description routes nothing).
+pub(crate) fn same_route(a: &ForwardRule, b: &ForwardRule) -> bool {
+    (
+        &a.suffix,
+        &a.upstreams,
+        &a.transport,
+        &a.tls_name,
+        &a.view,
+        &a.mode,
+        a.validate,
+    ) == (
+        &b.suffix,
+        &b.upstreams,
+        &b.transport,
+        &b.tls_name,
+        &b.view,
+        &b.mode,
+        b.validate,
+    )
+}
+
+/// Who takes a change of the routes into use: the forwarder, whose caches hold what the
+/// old routes taught.
+pub trait RouteWatch: Send + Sync {
+    /// Makes the catalog of `revision`, whose routes differ from the current one's by
+    /// `changes`, current by calling `swap` once, with what the old routes taught gone
+    /// before it answers.
+    fn swap(&self, changes: &RouteChanges, revision: Revision, swap: &mut dyn FnMut());
+}
+
 /// The swap the workers read the catalog through and the writer stores into.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CatalogHandle {
     current: Arc<ArcSwap<Catalog>>,
+    watch: Arc<RwLock<Option<Weak<dyn RouteWatch>>>>,
+}
+
+impl std::fmt::Debug for CatalogHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CatalogHandle")
+            .field("revision", &self.revision())
+            .finish_non_exhaustive()
+    }
 }
 
 impl CatalogHandle {
@@ -513,6 +641,7 @@ impl CatalogHandle {
     pub fn new(catalog: Catalog) -> Self {
         Self {
             current: Arc::new(ArcSwap::from_pointee(catalog)),
+            watch: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -527,9 +656,36 @@ impl CatalogHandle {
         self.current.load_full()
     }
 
-    /// Makes `catalog` the current one.
+    /// Makes `catalog` the current one; through the [`RouteWatch`] when its routes differ.
     pub fn store(&self, catalog: Catalog) {
-        self.current.store(Arc::new(catalog));
+        let watch = self
+            .watch
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .and_then(Weak::upgrade);
+        let mut next = Some(catalog);
+        if let Some(watch) = watch
+            && let Some(catalog) = &next
+        {
+            let changes = RouteChanges::between(&self.current.load(), catalog);
+            if !changes.is_empty() {
+                let revision = catalog.revision();
+                watch.swap(&changes, revision, &mut || {
+                    if let Some(catalog) = next.take() {
+                        self.current.store(Arc::new(catalog));
+                    }
+                });
+            }
+        }
+        if let Some(catalog) = next {
+            self.current.store(Arc::new(catalog));
+        }
+    }
+
+    /// Registers who takes route changes into use (the forwarder); the last one counts.
+    pub fn watch_routes(&self, watch: Weak<dyn RouteWatch>) {
+        *self.watch.write().unwrap_or_else(PoisonError::into_inner) = Some(watch);
     }
 
     /// The revision served.
@@ -589,7 +745,12 @@ pub async fn follow<F: ZoneFeed>(
             Err(FeedError::Closed) => return Ok(()),
             Err(error) => return Err(error),
         };
-        handle.store(next);
+        // A change of the routes flushes the caches, a pass over each: not on a runtime
+        // thread.
+        let handle = handle.clone();
+        tokio::task::spawn_blocking(move || handle.store(next))
+            .await
+            .map_err(|error| FeedError::Source(error.to_string()))?;
     }
 }
 
@@ -667,6 +828,83 @@ mod tests {
             to: Revision(from + 1),
             changes,
         }
+    }
+
+    fn rule(id: ForwardRuleId, suffix: &str, upstream: &str) -> ForwardRule {
+        ForwardRule {
+            id,
+            suffix: DnsName::new(suffix).expect("suffix"),
+            upstreams: vec![tenko_core::dns::Upstream {
+                address: upstream.parse().expect("address"),
+                port: None,
+                path: None,
+            }],
+            transport: tenko_core::dns::ForwardTransport::Plain,
+            tls_name: None,
+            view: None,
+            mode: tenko_core::dns::RuleMode::Forward,
+            validate: true,
+            description: None,
+        }
+    }
+
+    fn routes(rules: &[&ForwardRule], stubs: &[&Zone]) -> Catalog {
+        let mut data = DnsData::at(Revision(1));
+        for rule in rules {
+            data.forwarders.insert(rule.id, (*rule).clone());
+        }
+        for zone in stubs {
+            data.zones.insert(zone.id, (*zone).clone());
+        }
+        Catalog::build(&data)
+    }
+
+    fn suffixes(changes: &RouteChanges) -> Vec<&str> {
+        changes.suffixes.iter().map(DnsName::as_str).collect()
+    }
+
+    #[test]
+    fn route_changes_name_what_a_rule_or_stub_zone_change_concerns() {
+        let id = ForwardRuleId::generate();
+        let corp = rule(id, "corp.example.test", "192.0.2.53");
+        let stub = zone("stub.example.net", ZoneKind::Stub);
+        let before = routes(&[&corp], &[&stub]);
+        // A description routes nothing; a rebuilt catalog of the same rows changes nothing.
+        let described = ForwardRule {
+            description: Some("branch".to_owned()),
+            ..corp.clone()
+        };
+        assert!(RouteChanges::between(&before, &routes(&[&described], &[&stub])).is_empty());
+        // New upstreams: the rule's suffix.
+        let moved = rule(id, "corp.example.test", "192.0.2.54");
+        let changes = RouteChanges::between(&before, &routes(&[&moved], &[&stub]));
+        assert_eq!(
+            (changes.rules.clone(), suffixes(&changes)),
+            (vec![id], vec!["corp.example.test"])
+        );
+        // A new suffix: both, the old one's answers and the new one's.
+        let renamed = rule(id, "lab.example.test", "192.0.2.53");
+        let changes = RouteChanges::between(&before, &routes(&[&renamed], &[&stub]));
+        assert_eq!(
+            suffixes(&changes),
+            vec!["corp.example.test", "lab.example.test"]
+        );
+        // A stub zone's servers change, and a rule above it appears: one wide suffix covers
+        // both.
+        let mut learned = stub.clone();
+        learned.source = None;
+        let wide = rule(ForwardRuleId::generate(), "example.net", "192.0.2.53");
+        let changes = RouteChanges::between(&before, &routes(&[&corp, &wide], &[&learned]));
+        assert_eq!(suffixes(&changes), vec!["example.net"]);
+        assert_eq!(
+            (changes.rules.len(), changes.stubs.clone()),
+            (1, vec![stub.id])
+        );
+        // The root rule covers every name.
+        let root = rule(ForwardRuleId::generate(), ".", "192.0.2.53");
+        let changes = RouteChanges::between(&before, &routes(&[&moved, &root], &[]));
+        assert_eq!(changes.suffixes, vec![DnsName::root()]);
+        assert_eq!((changes.rules.len(), changes.stubs.len()), (2, 1));
     }
 
     #[test]

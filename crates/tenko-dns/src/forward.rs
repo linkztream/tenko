@@ -45,6 +45,24 @@
 //! minute the entries past their stale window are purged and the upstream sets of rules
 //! and stub zones that are gone are dropped.
 //!
+//! **A route change** (a forwarding rule or a stub zone added, changed or removed) reaches
+//! the forwarder from the catalog's writer ([`RouteWatch`]): the answers, denials and
+//! failures cached at and below each suffix concerned (an answer whose alias chain passes
+//! through one included) are flushed before the new catalog answers, a changed stub zone
+//! learns its servers again, and a resolution that started before the flush puts nothing
+//! into the caches after it (the flush generation, [`Shared::admit`]). The flush is audited
+//! as `dns.cache.flush` with the cause `route_change`, one record per run of changes (a node
+//! that catches up over many writes one).
+//!
+//! **An alias across routes** ([`alias`]): when the CNAME chain of an answer leads to a name
+//! another route governs (a rule, a stub zone, or the view's default resolution for a name
+//! outside every rule), the answer is cut at that link, the target is resolved through its
+//! own route with that route's servers and validation, and the client gets both parts in
+//! one answer, cached under the question. The resolver stops its own chain at the border
+//! ([`Border`]), so no query for a governed name leaves on another route. The chain's links
+//! and the engine's quota bound the whole chain across routes; a loop between routes ends in
+//! SERVFAIL.
+//!
 //! **Recursion** (WP10.1, recursion plan section 2.7): with `recursion` in the settings the
 //! forwarder starts the iterative engine ([`crate::recurse`]) and its infrastructure cache.
 //! A rule of mode `recurse` is resolved by the engine, and so is a name no rule and no stub
@@ -65,7 +83,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     net::IpAddr,
     sync::{
-        Arc, Mutex, PoisonError,
+        Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, Weak,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -73,8 +91,11 @@ use std::{
 
 use arc_swap::ArcSwap;
 use ipnet::IpNet;
-use tenko_core::dns::{
-    DnsName, ForwardRule, ForwardRuleId, ForwardTransport, QueryTransport, ViewId, Zone, ZoneId,
+use tenko_core::{
+    ObjectRef, Revision,
+    dns::{
+        DnsName, ForwardRule, ForwardRuleId, ForwardTransport, QueryTransport, ViewId, Zone, ZoneId,
+    },
 };
 use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -96,8 +117,8 @@ use crate::{
 use crate::{
     cache::{Denials, Failures, Verdict, denial::DenialSettings},
     recursion::{
-        DenialCache, DenialRoute, DenialScope, FailureCache, FailureCause, Origin,
-        denial::DenialKind,
+        BudgetBound, DenialCache, DenialRoute, DenialScope, FailureCache, FailureCause, Origin,
+        WorkBudget, denial::DenialKind,
     },
 };
 // WP10.3: end.
@@ -106,7 +127,7 @@ use crate::{
     // WP10.1: end.
     authoritative::{EDE_NOT_AUTHORITATIVE, EDE_PROHIBITED, rcode},
     cache::{self, Cache, CacheKey, CacheSettings, Client, ClientEdns, Flushed, Hit},
-    catalog::{Catalog, CatalogHandle},
+    catalog::{Catalog, CatalogHandle, RouteChanges, RouteWatch},
     codec::{Codec, DomainCodec, Request},
     // WP10.1: the engine and its caches.
     infra::{Infra, ServerTable},
@@ -115,7 +136,10 @@ use crate::{
     name::{self, NameBuf},
     outbound::Question,
     pool::{Budget, MemberHealth, PoolKey, Pools, UpstreamSet, UpstreamSpec},
-    recurse::{Engine, EngineSettings, Resolved, hints::Hints, net::NetAuthority},
+    recurse::{
+        Border, Engine, EngineSettings, Quota, Resolved, hints::Hints, message::types,
+        net::NetAuthority,
+    },
     respond::{ForwardQuery, ForwardSink, Intake, IntakeQuery, ReplyPath},
     upstream::UpstreamError,
     wire::{self, HEADER_LEN, MAX_MESSAGE_LEN, SERVER_UDP_PAYLOAD},
@@ -149,6 +173,21 @@ const HOUSEKEEPING: Duration = Duration::from_millis(200);
 
 /// The purge period.
 const PURGE: Duration = Duration::from_secs(60);
+
+/// The audit context `cause` of a flush that a change of the forwarding rules or stub zones
+/// made, beside the manual flush (which has none).
+pub const FLUSH_CAUSE_ROUTES: &str = "route_change";
+
+/// The most suffixes the audit record of a route flush names; the rest are counted.
+const AUDITED_SUFFIXES: usize = 32;
+
+/// How long no route change must come before the flushes are audited: a node that takes a
+/// run of changes into use, one after another, writes one record for the run.
+const AUDIT_QUIET: Duration = Duration::from_secs(1);
+
+/// The most suffixes a flush passes over the caches with; a longer list flushes everything,
+/// so that a flush costs one pass over each cache however many routes changed.
+const FLUSH_SUFFIXES: usize = 32;
 
 const TYPE_A: u16 = 1;
 const TYPE_NS: u16 = 2;
@@ -460,6 +499,48 @@ struct Shared {
     // reads and the engine fills.
     denials: Option<Arc<Denials>>,
     failures: Option<Arc<Failures>>,
+    /// Held for writing by a flush, for reading while an answer goes into the caches
+    /// ([`Shared::admit`]).
+    gate: RwLock<()>,
+    /// The flush generation, raised under the gate after each flush.
+    generation: AtomicU64,
+    /// The route flushes not audited yet: one record for a run of them.
+    route_flushes: Mutex<Option<RouteFlush>>,
+}
+
+/// The route flushes since the last audit record.
+#[derive(Debug)]
+struct RouteFlush {
+    suffixes: BTreeSet<DnsName>,
+    rules: BTreeSet<ForwardRuleId>,
+    stubs: BTreeSet<ZoneId>,
+    revision: Revision,
+    entries: usize,
+    last: Instant,
+}
+
+/// One client question's way through the routes: the flush generation it started under,
+/// and its alias chain across routes, which the per-query budgets bound as a whole.
+#[derive(Debug, Clone)]
+struct Chain {
+    /// The flush generation when the question was taken up.
+    ticket: u64,
+    /// The names the chain reached, the question's first.
+    seen: Vec<Vec<u8>>,
+    /// The CNAME and DNAME links followed across routes.
+    links: usize,
+    /// The engine's quota of the client query, shared by every part it resolves.
+    quota: Option<Arc<Quota>>,
+    /// No part of the chain starts after this (the work budget's wall clock).
+    deadline: Instant,
+}
+
+/// How the rest of a chain that left its route was resolved.
+enum Followed {
+    /// The answer to the client's question, and its verdict.
+    Answer(Vec<u8>, Option<Validation>),
+    /// No answer: SERVFAIL with this cause.
+    Failed(FailureCause),
 }
 
 /// The engine of `settings` and its infrastructure cache, with the hints of the file or
@@ -600,14 +681,18 @@ fn route(catalog: &Catalog, qname: &[u8], rule: Option<ForwardRuleId>) -> Route 
 }
 
 impl Route {
-    /// The path the denial cache scopes this route's denials by, in `view`.
-    fn denial_scope(&self, view: Option<ViewId>) -> DenialScope {
+    /// What routes the name, as the query path reads it.
+    fn routed(&self) -> Routed<'_> {
         match self {
             Route::Default => Routed::Default,
             Route::Rule(rule) | Route::Recurse(rule) => Routed::Rule(rule),
             Route::Stub(zone) => Routed::Stub(zone),
         }
-        .denial_scope(view)
+    }
+
+    /// The path the denial cache scopes this route's denials by, in `view`.
+    fn denial_scope(&self, view: Option<ViewId>) -> DenialScope {
+        self.routed().denial_scope(view)
     }
 }
 
@@ -694,7 +779,12 @@ impl Forwarder {
             signaled: Mutex::new(None),
             denials,
             failures,
+            gate: RwLock::new(()),
+            generation: AtomicU64::new(0),
+            route_flushes: Mutex::new(None),
         });
+        let watch: Weak<dyn RouteWatch> = Arc::downgrade(&shared) as Weak<Shared>;
+        shared.catalog.watch_routes(watch);
         let forwarder = Arc::new(Self {
             queue: sender,
             shared: Arc::clone(&shared),
@@ -723,21 +813,11 @@ impl Forwarder {
         self.shared.cache.as_ref()
     }
 
-    /// Empties the cache, or the entries at or below `suffix`; `None` without a cache.
+    /// Empties the cache, or the entries at or below `suffix` (by name or alias chain), with
+    /// the denials and the resolver's failures there; `None` without a cache.
     pub fn flush(&self, suffix: Option<&DnsName>) -> Option<Flushed> {
-        let suffix = suffix.map(DnsName::to_wire);
-        // WP10.1: the failures of the recursive resolver go with the cache (RFC 9520).
-        if let Some(engine) = &self.shared.engine {
-            engine.flush_failures(suffix.as_deref());
-        }
-        // WP10.3: and the denial records of the zones under the suffix.
-        if let Some(denials) = &self.shared.denials {
-            denials.flush(suffix.as_deref());
-        }
         self.shared
-            .cache
-            .as_ref()
-            .map(|cache| cache.flush(suffix.as_deref()))
+            .flush_gated(suffix.map(std::slice::from_ref), None)
     }
 
     // WP10.3: the denial and failure caches.
@@ -901,6 +981,221 @@ impl Forwarder {
 }
 
 impl Shared {
+    /// Empties the answer, denial and failure caches, or what they hold at or below any of
+    /// `suffixes` (the root, or more than [`FLUSH_SUFFIXES`] of them, count as everything);
+    /// `None` without an answer cache. The caller holds the gate for writing.
+    fn flush_caches(&self, suffixes: Option<&[DnsName]>) -> Option<Flushed> {
+        let wires: Option<Vec<Vec<u8>>> =
+            wide(suffixes).map(|suffixes| suffixes.iter().map(DnsName::to_wire).collect());
+        let each = |flush: &dyn Fn(Option<&[u8]>)| match &wires {
+            None => flush(None),
+            Some(wires) => wires.iter().for_each(|wire| flush(Some(wire))),
+        };
+        // The failures of the recursive resolver go with the cache (RFC 9520), and the
+        // denial records of the zones under the suffixes.
+        if let Some(engine) = &self.engine {
+            each(&|suffix| {
+                engine.flush_failures(suffix);
+            });
+        }
+        if let Some(denials) = &self.denials {
+            each(&|suffix| {
+                denials.flush(suffix);
+            });
+        }
+        self.cache.as_ref().map(|cache| match &wires {
+            None => cache.flush(None),
+            Some(wires) => cache.flush_within(&wires.iter().map(Vec::as_slice).collect::<Vec<_>>()),
+        })
+    }
+
+    /// Flushes the caches under the gate, with `swap` (a new catalog taken into use) between
+    /// the flush and the raise of the generation: a resolution that started before puts
+    /// nothing in after, and one that sees the new generation reads what `swap` stored.
+    fn flush_gated(
+        &self,
+        suffixes: Option<&[DnsName]>,
+        swap: Option<&mut dyn FnMut()>,
+    ) -> Option<Flushed> {
+        let _gate = self.gate.write().unwrap_or_else(PoisonError::into_inner);
+        let flushed = self.flush_caches(suffixes);
+        if let Some(swap) = swap {
+            swap();
+        }
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        flushed
+    }
+
+    /// The gate for an answer of a resolution that started under the flush generation
+    /// `ticket`, held while the answer goes into the caches; `None` when a flush came since.
+    fn admit(&self, ticket: u64) -> Option<RwLockReadGuard<'_, ()>> {
+        let gate = self.gate.read().unwrap_or_else(PoisonError::into_inner);
+        (self.generation.load(Ordering::SeqCst) == ticket).then_some(gate)
+    }
+
+    /// The way of a client question for `qname` taken up now. Taken before the catalog is
+    /// read: a question that sees the generation a route change raised reads the catalog
+    /// that brought it.
+    fn chain(&self, qname: &[u8]) -> Chain {
+        let now = Instant::now();
+        let budget = self
+            .engine
+            .as_ref()
+            .map_or(WorkBudget::DEFAULT, |engine| engine.settings().budget);
+        Chain {
+            ticket: self.generation.load(Ordering::SeqCst),
+            seen: vec![qname.to_vec()],
+            links: 0,
+            quota: self
+                .engine
+                .as_ref()
+                .map(|_| Quota::for_client(&budget, now)),
+            deadline: now + budget.wall,
+        }
+    }
+
+    /// Where `scope`'s route ends for a resolution under the flush generation `ticket`:
+    /// whether another route governs a name, in `scope`'s view.
+    fn border(&self, scope: DenialScope, ticket: u64) -> Border {
+        let catalog = self.catalog.load_full();
+        Border {
+            epoch: ticket,
+            leaves: Arc::new(move |name: &[u8]| {
+                routed(&catalog, name, catalog.forwarders().find(name, scope.view))
+                    .denial_scope(scope.view)
+                    .route
+                    != scope.route
+            }),
+        }
+    }
+
+    /// Validates `message`, the answer to `question` through one route; when its chain
+    /// leaves the route, only the links up to the border, as an answer of type CNAME: their
+    /// signatures, and no proof for the target, which the other route answers.
+    async fn validate_part(
+        &self,
+        validator: &DnssecValidator,
+        message: &[u8],
+        question: &OwnedQuestion,
+        crossing: Option<&alias::Crossing>,
+        fetch: &dyn KeyFetch,
+    ) -> Validation {
+        let Some(crossing) = crossing else {
+            return self.validate(validator, message, question, fetch).await;
+        };
+        let links = alias::links(&question.qname, types::CNAME, question.qclass, crossing);
+        let as_alias = OwnedQuestion {
+            qtype: types::CNAME,
+            ..question.clone()
+        };
+        self.validate(validator, &links, &as_alias, fetch).await
+    }
+
+    /// Resolves the rest of a chain that left its route at `crossing.target` through the
+    /// route that governs the target, and combines the answer: the links before the border
+    /// (`first` their verdict), then the target's answer, which is cached under its own
+    /// question as well.
+    fn follow<'a>(
+        self: &'a Arc<Self>,
+        crossing: alias::Crossing,
+        first: Option<Validation>,
+        question: &'a OwnedQuestion,
+        view: Option<ViewId>,
+        mut chain: Chain,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Followed> + Send + 'a>> {
+        Box::pin(async move {
+            chain.links += crossing.links;
+            let budget = usize::from(
+                self.engine
+                    .as_ref()
+                    .map_or(WorkBudget::DEFAULT.restarts, |engine| {
+                        engine.settings().budget.restarts
+                    }),
+            );
+            if chain.links > budget || chain.seen.contains(&crossing.target) {
+                // A chain longer than the budget, or a loop between routes.
+                return Followed::Failed(FailureCause::Budget(BudgetBound::Restarts));
+            }
+            if Instant::now() >= chain.deadline {
+                return Followed::Failed(FailureCause::Budget(BudgetBound::Time));
+            }
+            chain.seen.push(crossing.target.clone());
+            let links = chain.links;
+            let catalog = self.catalog.load_full();
+            let rule = catalog.forwarders().find(&crossing.target, view);
+            let route = route(&catalog, &crossing.target, rule);
+            let target = OwnedQuestion {
+                qname: crossing.target.clone(),
+                ..question.clone()
+            };
+            let key = self
+                .cache
+                .as_ref()
+                .map(|_| CacheKey::new(view, &target.qname, target.qtype, target.qclass));
+            let scope = route.denial_scope(view);
+            let part = if let Some(engine) = self
+                .engine
+                .clone()
+                .filter(|_| self.recurses(&catalog, &route, view))
+            {
+                let (resolved, validation) = self
+                    .recurse(&engine, &target, key.as_ref(), scope, chain)
+                    .await;
+                match resolved.outcome {
+                    crate::recurse::Outcome::Failed { cause, .. } => Err(cause),
+                    crate::recurse::Outcome::Refused => Err(FailureCause::NoReachableAuthority),
+                    _ => Ok((resolved.message.clone(), validation)),
+                }
+            } else if matches!(route, Route::Default)
+                && self.default_resolution(&catalog, view) == ResolutionMode::Refuse
+            {
+                // The view resolves no name outside its rules: the chain up to the border,
+                // which nothing proves complete.
+                let links =
+                    alias::links(&question.qname, question.qtype, question.qclass, &crossing);
+                return Followed::Answer(links, alias::merge(first, None));
+            } else {
+                match self.set_for(&route).await {
+                    Err(_) => Err(FailureCause::NoReachableAuthority),
+                    Ok(set) => {
+                        let rule = match &route {
+                            Route::Rule(rule) => Some(rule.id),
+                            _ => None,
+                        };
+                        Arc::clone(self)
+                            .fetch(set, target, key, rule, scope, chain)
+                            .await
+                            .map_err(|_| FailureCause::NoReachableAuthority)
+                    }
+                }
+            };
+            // The links of the rest count against the budget of the whole chain.
+            let part = part.and_then(|(last, validation)| {
+                if links + alias::link_count(&last) > budget {
+                    Err(FailureCause::Budget(BudgetBound::Restarts))
+                } else {
+                    Ok((last, validation))
+                }
+            });
+            match part.map(|(last, validation)| {
+                alias::combine(
+                    &question.qname,
+                    question.qtype,
+                    question.qclass,
+                    &crossing,
+                    &last,
+                )
+                .map(|answer| (answer, validation))
+            }) {
+                Ok(Some((answer, validation))) => {
+                    Followed::Answer(answer, alias::merge(first, validation))
+                }
+                Ok(None) => Followed::Failed(FailureCause::NoReachableAuthority),
+                Err(cause) => Followed::Failed(cause),
+            }
+        })
+    }
+
     // WP10.1: the view's resolution for a name no rule and no stub zone covers.
     /// How a name no rule and no stub zone covers is resolved for `view`: the view's
     /// `resolution`, else recursion when the engine runs (REC-Q2), else the default
@@ -916,32 +1211,50 @@ impl Shared {
         }
     }
 
-    /// Whether `route` is resolved by the engine for `view`.
-    fn recurses(&self, catalog: &Catalog, route: &Route, view: Option<ViewId>) -> bool {
+    /// Whether the engine resolves what `routed` routes for `view`: only its failures
+    /// answer a name, never for one a forwarding rule or a stub zone sends elsewhere.
+    fn resolves(&self, catalog: &Catalog, routed: &Routed<'_>, view: Option<ViewId>) -> bool {
         self.engine.is_some()
-            && match route {
-                Route::Recurse(_) => true,
-                Route::Default => self.default_resolution(catalog, view) == ResolutionMode::Recurse,
-                Route::Rule(_) | Route::Stub(_) => false,
+            && match routed {
+                Routed::Rule(rule) => rule.mode == tenko_core::dns::RuleMode::Recurse,
+                Routed::Default => {
+                    self.default_resolution(catalog, view) == ResolutionMode::Recurse
+                }
+                Routed::Stub(_) => false,
             }
     }
 
-    /// Resolves `question` with the engine, validates the answer (WP10.2) and puts it into
-    /// the cache under `key`.
+    /// Whether `route` is resolved by the engine for `view`.
+    fn recurses(&self, catalog: &Catalog, route: &Route, view: Option<ViewId>) -> bool {
+        self.resolves(catalog, &route.routed(), view)
+    }
+
+    /// Resolves `question` with the engine up to the border of `scope`'s route, the rest
+    /// of a chain past it through its own route, validates the answer (WP10.2) and puts it
+    /// into the cache under `key`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one resolution from the engine to the cache"
+    )]
     async fn recurse(
-        &self,
+        self: &Arc<Self>,
         engine: &Arc<Engine<NetAuthority>>,
         question: &OwnedQuestion,
         key: Option<&CacheKey>,
         scope: DenialScope,
+        chain: Chain,
     ) -> (Arc<Resolved>, Option<Validation>) {
         let view = scope.view;
         // The catalog the policy reads decides whether the answer carries its delegation,
         // so that a new NSDNAME or NSIP trigger applies to the next resolution, not only
         // after the housekeeping noted it.
         let carry = self.catalog.load().policy().has_ns_triggers();
-        // One quota for the client query: its resolution and its validation's sub-queries.
-        let quota = crate::recurse::Quota::for_client(&engine.settings().budget, Instant::now());
+        // One quota for the client query: its resolution, every part of its chain and its
+        // validation's sub-queries.
+        let quota = chain.quota.clone().unwrap_or_else(|| {
+            crate::recurse::Quota::for_client(&engine.settings().budget, Instant::now())
+        });
+        let border = self.border(scope, chain.ticket);
         let resolved = engine
             .resolve_carrying(
                 crate::recurse::Question {
@@ -952,8 +1265,17 @@ impl Shared {
                 },
                 carry,
                 Some(Arc::clone(&quota)),
+                Some(border.clone()),
             )
             .await;
+        // The engine composed the message: it always reads.
+        let crossing = match resolved.outcome {
+            crate::recurse::Outcome::Answered => {
+                alias::crossing(&resolved.message, question.qtype, &*border.leaves).ok()
+            }
+            _ => None,
+        }
+        .flatten();
         // WP10.2: the validator's verdict decides the entry's state; a query with CD never
         // waits for a sub-query, and its answer is cached only when the walk could judge
         // it from what it holds.
@@ -962,11 +1284,55 @@ impl Shared {
                 let fetch = EngineFetch::new(Arc::clone(engine)).with_quota(quota);
                 let fetch: &dyn KeyFetch = if question.cd { &NoFetch } else { &fetch };
                 Some(
-                    self.validate(validator, &resolved.message, question, fetch)
-                        .await,
+                    self.validate_part(
+                        validator,
+                        &resolved.message,
+                        question,
+                        crossing.as_ref(),
+                        fetch,
+                    )
+                    .await,
                 )
             }
             _ => None,
+        };
+        let ticket = chain.ticket;
+        // A chain that left the route: the rest through its own route, one answer of both.
+        let (resolved, validation, combined) = match crossing {
+            None => (resolved, validation, false),
+            Some(crossing) => {
+                let (message, rcode, outcome, validation) = match self
+                    .follow(crossing, validation, question, view, chain)
+                    .await
+                {
+                    Followed::Answer(message, validation) => {
+                        let rcode = message.get(3).map_or(2, |flags| flags & 0x0f);
+                        (
+                            message,
+                            rcode,
+                            crate::recurse::Outcome::Answered,
+                            validation,
+                        )
+                    }
+                    Followed::Failed(cause) => (
+                        alias::servfail(&question.qname, question.qtype, question.qclass),
+                        2,
+                        crate::recurse::Outcome::Failed {
+                            cause,
+                            cached: false,
+                        },
+                        None,
+                    ),
+                };
+                let resolved = Arc::new(Resolved {
+                    message,
+                    rcode,
+                    outcome,
+                    stopped_by_quota: false,
+                    ..(*resolved).clone()
+                });
+                (resolved, validation, true)
+            }
         };
         // An answer composed without its delegation while the carry is on (joined with a
         // question asked before the trigger came) is answered but not kept: the cache would
@@ -974,13 +1340,16 @@ impl Shared {
         let keep = resolved.carried || !(carry || engine.carries());
         if resolved.cacheable()
             && let (Some(cache), Some(key)) = (&self.cache, key)
+            && let Some(_admitted) = self.admit(ticket)
         {
-            match validation {
+            let verdict = match validation {
                 Some(validation) if validation.state != SecurityState::Unvalidated => {
                     // WP10.3: a bogus answer is a failure of RFC 9520: held 5 s, doubling
-                    // on each repeat.
+                    // on each repeat. A combined answer's failure is its parts': the
+                    // entry alone holds it, and goes with a flush of either route.
                     let mut verdict = validation.verdict(self.failure_ttl());
                     if validation.state == SecurityState::Bogus
+                        && !combined
                         && let Some(failures) = &self.failures
                     {
                         let cause = FailureCause::Bogus(
@@ -990,28 +1359,23 @@ impl Shared {
                         verdict.max_ttl =
                             Some(u32::try_from(hold.as_secs()).unwrap_or(u32::MAX).max(1));
                     }
-                    if keep {
-                        cache.insert_with(key, &resolved.message, Instant::now(), None, &verdict);
-                        self.keep_denials(
-                            scope,
-                            &resolved.message,
-                            &verdict,
-                            Origin::Recursion,
-                            resolved.carried,
-                        );
-                    }
+                    Some(verdict)
                 }
-                _ if !question.cd && keep => {
-                    cache.insert(key, &resolved.message, Instant::now(), None);
+                _ if !question.cd => Some(Verdict::UNVALIDATED),
+                _ => None,
+            };
+            if let Some(verdict) = verdict.filter(|_| keep) {
+                cache.insert_with(key, &resolved.message, Instant::now(), None, &verdict);
+                // A combined answer's denials are its target's, kept on its route.
+                if !combined {
                     self.keep_denials(
                         scope,
                         &resolved.message,
-                        &Verdict::UNVALIDATED,
+                        &verdict,
                         Origin::Recursion,
                         resolved.carried,
                     );
                 }
-                _ => {}
             }
             // The carry turned on, and the cache was flushed, between the composition and the
             // insert: the answer kept without its delegation goes again.
@@ -1423,7 +1787,9 @@ impl Shared {
         found
     }
 
-    /// Asks `set` for `question`, puts the answer into the cache under `key` and returns it.
+    /// Asks `set` for `question`, resolves the rest of a chain that leaves the route of
+    /// `scope` through its own route, puts the answer into the cache under `key` and
+    /// returns it.
     async fn fetch(
         self: Arc<Self>,
         set: Arc<UpstreamSet>,
@@ -1431,10 +1797,20 @@ impl Shared {
         key: Option<CacheKey>,
         rule: Option<ForwardRuleId>,
         scope: DenialScope,
+        chain: Chain,
     ) -> Result<(Vec<u8>, Option<Validation>), UpstreamError> {
         let mut answer = Vec::new();
         set.query(&question.as_question(), self.budget(), &mut answer)
             .await?;
+        // The upstream followed the chain through its own servers: what lies past the
+        // route's border is asked again through the route that governs it. An answer whose
+        // chain cannot be read is not relayed: what it says past the border is unknown.
+        let crossing = alias::crossing(
+            &answer,
+            question.qtype,
+            &*self.border(scope, chain.ticket).leaves,
+        )
+        .map_err(|()| UpstreamError::Malformed("the answer's alias chain does not read"))?;
         // WP10.2: the answer is validated as a validating forwarder does, the chain's
         // sub-queries asked of the same upstream, unless the rule says `validate = false`.
         let validates = rule
@@ -1449,33 +1825,47 @@ impl Shared {
             Some(validator) if validates => {
                 let upstream = UpstreamFetch::new(Arc::clone(&set), self.budget());
                 let fetch: &dyn KeyFetch = if question.cd { &NoFetch } else { &upstream };
-                Some(self.validate(validator, &answer, &question, fetch).await)
+                Some(
+                    self.validate_part(validator, &answer, &question, crossing.as_ref(), fetch)
+                        .await,
+                )
             }
             _ => None,
         };
         self.note_strips(rule, validation);
+        let ticket = chain.ticket;
+        let (answer, validation, combined) = match crossing {
+            None => (answer, validation, false),
+            Some(crossing) => match self
+                .follow(crossing, validation, &question, scope.view, chain)
+                .await
+            {
+                Followed::Answer(answer, validation) => (answer, validation, true),
+                Followed::Failed(_) => {
+                    return Err(UpstreamError::Malformed(
+                        "the alias chain could not be followed through its routes",
+                    ));
+                }
+            },
+        };
         // WP10.0: an answer asked with CD may be data the upstream would not vouch for; it
         // goes to its client and not into the entry other clients share, unless the
-        // validator could judge it (WP10.2).
-        if let (Some(cache), Some(key)) = (&self.cache, &key) {
-            match validation {
-                Some(validation) if validation.state != SecurityState::Unvalidated => {
-                    let verdict = validation.verdict(self.failure_ttl());
-                    cache.insert_with(key, &answer, Instant::now(), rule, &verdict);
-                    // WP10.3: forwarded answers feed the denial cache too.
-                    self.keep_denials(scope, &answer, &verdict, Origin::Forwarder, false);
-                }
-                _ if !question.cd => {
-                    cache.insert(key, &answer, Instant::now(), rule);
-                    self.keep_denials(
-                        scope,
-                        &answer,
-                        &Verdict::UNVALIDATED,
-                        Origin::Forwarder,
-                        false,
-                    );
-                }
-                _ => {}
+        // validator could judge it (WP10.2). A combined answer's denials are its target's,
+        // kept on its route.
+        let verdict = match validation {
+            Some(validation) if validation.state != SecurityState::Unvalidated => {
+                Some(validation.verdict(self.failure_ttl()))
+            }
+            _ if !question.cd => Some(Verdict::UNVALIDATED),
+            _ => None,
+        };
+        if let (Some(cache), Some(key), Some(verdict)) = (&self.cache, &key, verdict)
+            && let Some(_admitted) = self.admit(ticket)
+        {
+            cache.insert_with(key, &answer, Instant::now(), rule, &verdict);
+            // WP10.3: forwarded answers feed the denial cache too.
+            if !combined {
+                self.keep_denials(scope, &answer, &verdict, Origin::Forwarder, false);
             }
         }
         Ok((answer, validation))
@@ -1484,6 +1874,139 @@ impl Shared {
     fn count(&self, counter: fn(&ForwardCounters) -> &AtomicU64) {
         counter(&self.counters).fetch_add(1, Ordering::Relaxed);
     }
+}
+
+impl RouteWatch for Shared {
+    fn swap(&self, changes: &RouteChanges, revision: Revision, swap: &mut dyn FnMut()) {
+        // The zone states and keys learned through the old routes judge no answer of the
+        // new ones.
+        let suffixes = wide(Some(&changes.suffixes));
+        if let Some(validator) = &self.validator {
+            match suffixes {
+                None => drop(validator.flush(None)),
+                Some(suffixes) => suffixes.iter().for_each(|suffix| {
+                    validator.flush(Some(&suffix.to_wire()));
+                }),
+            }
+        }
+        for infra in self
+            .infra
+            .as_deref()
+            .into_iter()
+            .chain(std::iter::once(&self.forward_infra))
+        {
+            match suffixes {
+                None => drop(infra.flush(None)),
+                Some(suffixes) => suffixes.iter().for_each(|suffix| {
+                    infra.flush(Some(suffix));
+                }),
+            }
+        }
+        // The old catalog answers until the swap, from caches without what it taught, and
+        // nothing goes in while the gate is held; a changed stub zone learns its servers
+        // again, before any resolution of the new generation reads them.
+        let flushed = self
+            .flush_gated(
+                Some(&changes.suffixes),
+                Some(&mut || {
+                    swap();
+                    let mut stubs = self.stubs.lock().unwrap_or_else(PoisonError::into_inner);
+                    let mut reports = self
+                        .stub_reports
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner);
+                    for id in &changes.stubs {
+                        stubs.remove(id);
+                        reports.remove(id);
+                    }
+                }),
+            )
+            .map_or(0, |flushed| flushed.entries);
+        tracing::info!(
+            suffixes = %audited_suffixes(&changes.suffixes),
+            entries = flushed,
+            %revision,
+            "forwarding rules or stub zones changed: what the old routes taught is flushed"
+        );
+        let mut pending = self
+            .route_flushes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let pending = pending.get_or_insert_with(|| RouteFlush {
+            suffixes: BTreeSet::new(),
+            rules: BTreeSet::new(),
+            stubs: BTreeSet::new(),
+            revision,
+            entries: 0,
+            last: Instant::now(),
+        });
+        pending.suffixes.extend(changes.suffixes.iter().cloned());
+        pending.rules.extend(&changes.rules);
+        pending.stubs.extend(&changes.stubs);
+        pending.revision = revision;
+        pending.entries += flushed;
+        pending.last = Instant::now();
+    }
+}
+
+/// `suffixes` as a flush passes over them: `None` (everything) for the root or more than
+/// [`FLUSH_SUFFIXES`] of them.
+fn wide(suffixes: Option<&[DnsName]>) -> Option<&[DnsName]> {
+    suffixes.filter(|suffixes| {
+        suffixes.len() <= FLUSH_SUFFIXES && !suffixes.iter().any(DnsName::is_root)
+    })
+}
+
+/// The suffixes of a route flush as the audit record and the log name them: at most
+/// [`AUDITED_SUFFIXES`], then how many more.
+fn audited_suffixes(suffixes: &[DnsName]) -> String {
+    use std::fmt::Write as _;
+    let mut text = suffixes
+        .iter()
+        .take(AUDITED_SUFFIXES)
+        .map(DnsName::as_str)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if suffixes.len() > AUDITED_SUFFIXES {
+        let _ = write!(text, " and {} more", suffixes.len() - AUDITED_SUFFIXES);
+    }
+    text
+}
+
+/// Writes the audit record of the route flushes once no change came for [`AUDIT_QUIET`]: a
+/// node that takes a run of changes into use (catching up after being offline)
+/// writes one record, with the union of the suffixes and the revision it reached.
+fn audit_route_flushes(shared: &Shared, now: Instant) {
+    let flush = {
+        let mut pending = shared
+            .route_flushes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if pending
+            .as_ref()
+            .is_none_or(|flush| now.saturating_duration_since(flush.last) < AUDIT_QUIET)
+        {
+            return;
+        }
+        pending.take()
+    };
+    let (Some(flush), Some(audit)) = (flush, shared.audit.get()) else {
+        return;
+    };
+    let objects = flush
+        .rules
+        .iter()
+        .map(|id| ObjectRef::from(*id))
+        .chain(flush.stubs.iter().map(|id| ObjectRef::from(*id)))
+        .collect();
+    let suffixes = crate::catalog::outermost(flush.suffixes.into_iter().collect());
+    audit.record(
+        tenko_core::audit::AuditDraft::success(tenko_core::dns::audit::CACHE_FLUSH, objects)
+            .with_context("cause", FLUSH_CAUSE_ROUTES)
+            .with_context("suffixes", audited_suffixes(&suffixes))
+            .with_context("entries", flush.entries.to_string())
+            .with_context("revision", flush.revision.to_string()),
+    );
 }
 
 /// A question the forwarder owns, for the tasks that outlive a client's query.
@@ -1674,6 +2197,7 @@ impl ForwardSink for Forwarder {
                 // WP10.3: a failure still held (RFC 9520), then what the denial cache
                 // proves (RFC 8198, RFC 8020), answered here without allocating.
                 if hit == Hit::Miss
+                    && shared.resolves(&catalog, &routed, query.view)
                     && let Some(failures) = &shared.failures
                     && let Some(cause) = failures.lookup(&key, query.now)
                     && !(request.cd && matches!(cause, FailureCause::Bogus(_)))
@@ -1783,6 +2307,8 @@ async fn housekeeping(shared: Arc<Shared>, stop: CancellationToken) {
                 if let Some(priming) = priming.take() {
                     priming.abort();
                 }
+                // A run of route flushes is audited when the node stops before it ended.
+                audit_route_flushes(&shared, Instant::now() + AUDIT_QUIET);
                 return;
             }
             _ = tick.tick() => {}
@@ -1820,11 +2346,12 @@ async fn housekeeping(shared: Arc<Shared>, stop: CancellationToken) {
             metrics::VALIDATION_KEY_SET_GAUGE.set(validator.report().key_sets as f64);
         }
         if let Some(cache) = &shared.cache {
-            for (key, rule) in cache.take_prefetch() {
-                tokio::spawn(prefetch(Arc::clone(&shared), key, rule));
+            for (key, _) in cache.take_prefetch() {
+                tokio::spawn(prefetch(Arc::clone(&shared), key));
             }
         }
         let now = Instant::now();
+        audit_route_flushes(&shared, now);
         if now >= purge_at {
             purge_at = now + PURGE;
             if let Some(cache) = &shared.cache {
@@ -1940,14 +2467,20 @@ fn unwanted_threshold(shared: &Arc<Shared>, engine: &Arc<Engine<NetAuthority>>) 
 // WP10.1: end.
 
 /// Asks the upstream again for an entry the cache queued before it expires.
-async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId>) {
+async fn prefetch(shared: Arc<Shared>, key: CacheKey) {
     let Some(cache) = &shared.cache else {
         return;
     };
-    let catalog = shared.catalog.load_full();
     let qname = key.qname().to_vec();
-    let rule = catalog.forwarders().find(&qname, key.view()).or(rule);
-    let route = route(&catalog, &qname, rule);
+    let chain = shared.chain(&qname);
+    let catalog = shared.catalog.load_full();
+    // The rule of the catalog read now: the one the entry came through may be gone or
+    // changed.
+    let route = route(
+        &catalog,
+        &qname,
+        catalog.forwarders().find(&qname, key.view()),
+    );
     // WP10.1: an entry the engine made is fetched again by the engine.
     if let Some(engine) = shared.engine.clone()
         && shared.recurses(&catalog, &route, key.view())
@@ -1961,7 +2494,9 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
             dnssec_ok: true,
         };
         let scope = route.denial_scope(key.view());
-        let (resolved, _) = shared.recurse(&engine, &question, Some(&key), scope).await;
+        let (resolved, _) = shared
+            .recurse(&engine, &question, Some(&key), scope, chain)
+            .await;
         if resolved.cacheable() {
             shared.count(|counters| &counters.prefetched);
         } else {
@@ -1993,6 +2528,7 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
             Some(key.clone()),
             rule_id,
             route.denial_scope(key.view()),
+            chain,
         )
         .await
     {
@@ -2022,9 +2558,15 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
     let Some(question_end) = wire::questions_end(&query.message, 1) else {
         return;
     };
-    let catalog = shared.catalog.load_full();
     let qname = request.qname.as_wire().to_vec();
-    let route = route(&catalog, &qname, query.rule);
+    let chain = shared.chain(&qname);
+    // The rule of the catalog read now: one the query path chose may be gone or changed.
+    let catalog = shared.catalog.load_full();
+    let route = route(
+        &catalog,
+        &qname,
+        catalog.forwarders().find(&qname, query.view),
+    );
     let key = shared
         .cache
         .as_ref()
@@ -2056,7 +2598,7 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
     let outcome = if let Some(engine) = engine {
         let scope = route.denial_scope(query.view);
         let (resolved, validation) = shared
-            .recurse(&engine, &question, key.as_ref(), scope)
+            .recurse(&engine, &question, key.as_ref(), scope, chain)
             .await;
         if u16::from(resolved.rcode) == rcode::SERVFAIL && has_stale(Instant::now()) {
             Outcome::Stale
@@ -2085,6 +2627,7 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
                         key.clone(),
                         rule_id,
                         route.denial_scope(query.view),
+                        chain,
                     ));
                     tokio::select! {
                         joined = &mut task => match joined {
@@ -2101,6 +2644,7 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
                         key.clone(),
                         rule_id,
                         route.denial_scope(query.view),
+                        chain,
                     )
                     .await
                 {
@@ -2292,6 +2836,8 @@ fn short_answer(message: &[u8], code: u16) -> Option<Vec<u8>> {
     out.extend_from_slice(&message[HEADER_LEN..end]);
     Some(out)
 }
+
+mod alias;
 
 #[cfg(test)]
 mod tests;

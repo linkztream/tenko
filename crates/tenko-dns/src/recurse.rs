@@ -433,6 +433,22 @@ pub struct Question<'a> {
     pub view: Option<ViewId>,
 }
 
+/// Where a resolution's route ends: whether another route (a forwarding rule or a stub
+/// zone) governs a name. The engine does not follow a CNAME or DNAME of the client's chain
+/// past it: the answer ends with the link to that name, and the forwarder resolves the
+/// rest through the route that governs it.
+#[derive(Clone)]
+pub struct Border {
+    /// The routes it was drawn from (the forwarder's flush generation): a question joins
+    /// only a resolution of the same routes, whose answer ends where its own would.
+    pub epoch: u64,
+    /// Whether another route governs a name.
+    pub leaves: Arc<Leaves>,
+}
+
+/// The test of a [`Border`]: whether another route governs a name.
+pub type Leaves = dyn Fn(&[u8]) -> bool + Send + Sync;
+
 /// The state of one client query's resolution.
 #[derive(Debug)]
 struct Work {
@@ -980,19 +996,21 @@ impl<A: Authority> Engine<A> {
 
     /// Resolves a client's question; identical questions in flight share one resolution.
     pub async fn resolve(&self, question: Question<'_>) -> Arc<Resolved> {
-        self.resolve_carrying(question, false, None).await
+        self.resolve_carrying(question, false, None, None).await
     }
 
     /// Resolves a client's question as [`Engine::resolve`] does; with `carry` the answer
     /// carries its delegation whatever the housekeeping noted last. The forwarder passes
     /// whether the catalog it reads has NSDNAME or NSIP triggers, so that an answer resolved
     /// after a new trigger arrived carries it before the next tick. With `quota` its queries
-    /// count against the client query's [`Quota`] as well.
+    /// count against the client query's [`Quota`] as well; with `border` the chain stops
+    /// where the route of the question ends ([`Border`]).
     pub async fn resolve_carrying(
         &self,
         question: Question<'_>,
         carry: bool,
         quota: Option<Arc<Quota>>,
+        border: Option<Border>,
     ) -> Arc<Resolved> {
         let key = CacheKey::new(
             question.view,
@@ -1004,9 +1022,14 @@ impl<A: Authority> Engine<A> {
         // one would not show the RPZ triggers NSDNAME and NSIP the delegation the other needs.
         let mut join = key.as_bytes().to_vec();
         join.push(u8::from(carry));
+        if let Some(border) = &border {
+            join.extend_from_slice(&border.epoch.to_be_bytes());
+        }
         let (resolved, joined) = self
             .joins
-            .run(&join, || self.resolve_now(question, &key, carry, quota))
+            .run(&join, || {
+                self.resolve_now(question, &key, carry, quota, border)
+            })
             .await;
         if joined {
             self.count(|c| &c.joined);
@@ -1021,6 +1044,7 @@ impl<A: Authority> Engine<A> {
         key: &CacheKey,
         carry: bool,
         quota: Option<Arc<Quota>>,
+        border: Option<Border>,
     ) -> Resolved {
         let started = Instant::now();
         // Read when the answer is composed, after the walk: a carry that turned on during
@@ -1066,7 +1090,15 @@ impl<A: Authority> Engine<A> {
             };
         }
         let mut work = Work::new(self.settings.budget, started, quota);
-        let result = self.iterate(qname, question.qtype, 0, &mut work).await;
+        let result = self
+            .iterate(
+                qname,
+                question.qtype,
+                0,
+                &mut work,
+                border.as_ref().map(|border| &*border.leaves),
+            )
+            .await;
         let subqueries = work.sent;
         self.counters
             .subqueries
@@ -1218,13 +1250,14 @@ impl<A: Authority> Engine<A> {
     // The walk
 
     /// Resolves `qname`/`qtype` at `depth` (0 the client's question), following CNAME and
-    /// DNAME records.
+    /// DNAME records up to `border`.
     fn iterate<'a>(
         &'a self,
         qname: &'a [u8],
         qtype: u16,
         depth: u8,
         work: &'a mut Work,
+        border: Option<&'a Leaves>,
     ) -> Boxed<'a, Result<Found, Failed>> {
         Box::pin(async move {
             let mut chain: Vec<Rr> = Vec::new();
@@ -1282,7 +1315,7 @@ impl<A: Authority> Engine<A> {
                             cut: Some(cut),
                         });
                     }
-                    Ok((Step::Alias { records, target }, _)) => {
+                    Ok((Step::Alias { records, target }, cut)) => {
                         chain.extend(records);
                         work.links = u8::try_from(links(&chain)).unwrap_or(u8::MAX);
                         if seen.contains(&target) || work.links > work.budget.restarts {
@@ -1290,6 +1323,16 @@ impl<A: Authority> Engine<A> {
                             return Err(Failed {
                                 cause: FailureCause::Budget(BudgetBound::Restarts),
                                 chain,
+                            });
+                        }
+                        // Another route governs the target: the chain so far is the answer,
+                        // and no query for the target leaves on this route.
+                        if border.is_some_and(|leaves| leaves(&target)) {
+                            return Ok(Found {
+                                rcode: 0,
+                                answer: chain,
+                                authority: Vec::new(),
+                                cut: Some(cut),
                             });
                         }
                         seen.push(target.clone());
@@ -1656,7 +1699,7 @@ impl<A: Authority> Engine<A> {
                 if *qtype == types::AAAA && !found.is_empty() {
                     break;
                 }
-                match self.iterate(&wire, *qtype, depth + 1, work).await {
+                match self.iterate(&wire, *qtype, depth + 1, work, None).await {
                     Ok(answer) => found.extend(
                         answer
                             .answer
