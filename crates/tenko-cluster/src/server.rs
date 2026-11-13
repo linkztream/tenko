@@ -52,7 +52,7 @@ use tonic::{
 use crate::{
     error::ClusterError,
     mtls::{KillSwitch, NodeStream, PeerIdentity, PeerInfo, RevocationSet},
-    peers::{PeerService, Peers},
+    peers::{Access, PeerService, Peers},
     probe::ProbeSink,
     proto::v1,
     registry::NodeRegistry,
@@ -274,11 +274,24 @@ where
                     .into_http());
                 }
             };
+            // The certificate must be one the caller's node record holds, on every call of
+            // both services; the services read the outcome and cannot skip it.
+            let access = if request.uri().path().starts_with("/tenko.cluster.v1.Raft/") {
+                Access::Raft
+            } else {
+                Access::Member
+            };
+            let record = match peers.authenticate(&peer, access).await {
+                Ok(record) => record,
+                Err(status) => return Ok(status.into_http()),
+            };
             let metadata = tonic::metadata::MetadataMap::from_headers(request.headers().clone());
             let joining = joins(request.uri().path());
             if let Err(status) = peers.admit(&peer, joining, &metadata).await {
                 return Ok(status.into_http());
             }
+            let mut request = request;
+            request.extensions_mut().insert(Authenticated(record));
             let mut response = service.oneshot(request).await?;
             if let Some(value) = peers
                 .generation()
@@ -293,6 +306,30 @@ where
             Ok(response)
         })
     }
+}
+
+/// The outcome of [`Peers::authenticate`] for a call of the controller services: the
+/// caller's node record, when this member has one. Put on the request by
+/// [`Generational`] before the service runs.
+#[derive(Clone, Debug)]
+pub(crate) struct Authenticated(pub(crate) Option<crate::model::NodeRecord>);
+
+/// The authenticated caller of a controller service; refused when the call did not pass
+/// [`Generational`].
+pub(crate) fn authenticated<T>(
+    request: &Request<T>,
+) -> Result<Option<crate::model::NodeRecord>, Status> {
+    request
+        .extensions()
+        .get::<Authenticated>()
+        .map(|authenticated| authenticated.0.clone())
+        .ok_or_else(|| {
+            status_of(&ClusterError::new(
+                "cluster.peer.unchecked",
+                401,
+                "the call did not pass the check of the controller services",
+            ))
+        })
 }
 
 /// Whether a call of the `Cluster` service is part of a join: `Join` and the key transfer

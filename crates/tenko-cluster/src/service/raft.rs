@@ -10,9 +10,9 @@ use tonic::{Request, Response, Status, Streaming};
 use crate::{
     error::ClusterError,
     mtls::PeerInfo,
-    peers::{Access, PeerService},
+    peers::PeerService,
     proto::v1,
-    server::{peer_of, status_of},
+    server::{authenticated, peer_of, status_of},
     wire::{self, RAFT_WIRE},
 };
 
@@ -61,7 +61,7 @@ impl v1::raft_server::Raft for PeerService {
         request: Request<v1::RaftRequest>,
     ) -> Result<Response<v1::RaftResponse>, Status> {
         let peer = peer_of(&request)?;
-        self.peers.authenticate(&peer, Access::Raft).await?;
+        authenticated(&request)?;
         let body = request.into_inner();
         wire::check(&body.wire, RAFT_WIRE).map_err(|error| status_of(&error))?;
         let rpc: wire::AppendRequest =
@@ -81,7 +81,7 @@ impl v1::raft_server::Raft for PeerService {
         request: Request<v1::RaftRequest>,
     ) -> Result<Response<v1::RaftResponse>, Status> {
         let peer = peer_of(&request)?;
-        self.peers.authenticate(&peer, Access::Raft).await?;
+        authenticated(&request)?;
         let body = request.into_inner();
         wire::check(&body.wire, RAFT_WIRE).map_err(|error| status_of(&error))?;
         let rpc: wire::VoteRequestOf =
@@ -101,7 +101,7 @@ impl v1::raft_server::Raft for PeerService {
         request: Request<Streaming<v1::SnapshotChunk>>,
     ) -> Result<Response<v1::RaftResponse>, Status> {
         let peer = peer_of(&request)?;
-        self.peers.authenticate(&peer, Access::Raft).await?;
+        authenticated(&request)?;
         let mut stream = request.into_inner();
         let mut chunk = stream
             .message()

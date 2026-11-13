@@ -1690,15 +1690,54 @@ async fn assert_cut_off(lab: &Lab, node: NodeId, running: &Identity, member: &Me
     let unknown = Some("cluster.node.unknown".to_owned());
     assert_eq!(
         calls_refused(lab, node, &stray_certificate(lab, node), member).await,
-        [
-            unknown.clone(),
-            unknown.clone(),
-            unknown,
-            Some("cluster.join.not_controller".to_owned())
-        ],
+        [unknown.clone(), unknown.clone(), unknown.clone(), unknown],
         "a certificate outside its record, on member {}",
         member.node()
     );
+}
+
+/// The `Cluster` calls a caller with `identity` makes to `member`, beside the join of
+/// [`calls_refused`]: the members, a key transfer with a join token, a forwarded write.
+/// Each refusal's code, or `Ok` when a call was taken.
+async fn cluster_calls(
+    lab: &Lab,
+    node: NodeId,
+    identity: &Identity,
+    member: &Member,
+) -> [Result<(), Option<String>>; 3] {
+    let network = PeerNetwork::new(node, PeerTimings::default());
+    network.set_tls(
+        tenko_cluster::mtls::client_config(lab.ca.root_der(), identity.0.clone(), &identity.1)
+            .expect("config"),
+    );
+    let channel = network
+        .channel(&member.addr.to_string())
+        .await
+        .expect("the handshake passes");
+    let code = |result: Result<(), tonic::Status>| {
+        result.map_err(|status| code_of(&status).map(str::to_owned))
+    };
+    let mut client = v1::cluster_client::ClusterClient::new(channel);
+    let members = code(client.members(v1::MembersRequest {}).await.map(drop));
+    let kek = code(
+        client
+            .transfer_kek(v1::TransferKekRequest {
+                ephemeral_public_key: vec![4; 65],
+                join_token_id: uuid::Uuid::now_v7().to_string(),
+            })
+            .await
+            .map(drop),
+    );
+    let propose = code(
+        client
+            .propose(v1::ProposeRequest {
+                wire: tenko_cluster::wire::BATCH_WIRE.to_owned(),
+                batch: Vec::new(),
+            })
+            .await
+            .map(drop),
+    );
+    [members, kek, propose]
 }
 
 /// A certificate of `node` that its record never held: it passes the handshake, so the
@@ -2162,4 +2201,113 @@ async fn a_prune_that_loses_a_row_race_is_not_a_lost_office() {
             .expect("the next pass"),
         0
     );
+}
+
+/// A certificate of the installation's CA that the caller's node record does not hold (one
+/// minted with the CA's key) is refused on every call of the controller services, for an
+/// unused node id, for an enrolled controller and for a superseded one; a renewal in
+/// progress, whose record holds both certificates, is accepted with either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_certificate_its_record_does_not_hold_is_refused_on_every_call() {
+    // Twenty-day certificates are due for renewal at once.
+    let lab = Lab::three_with(
+        &no_change,
+        CaPolicy {
+            node_validity_days: 20,
+            ..CaPolicy::default()
+        },
+    )
+    .await;
+    let leader = lab.leader().await;
+    let member = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node())
+        .expect("a follower");
+    // A superseded controller keeps its record and its identity.
+    let mut batch = WriteBatch::for_request(&system());
+    batch
+        .put_typed(
+            &tenko_cluster::generation::SUPERSEDED,
+            &member.node().0,
+            &tenko_cluster::generation::SupersededMark {
+                generation: 1,
+                record: tenko_core::audit::Digest([1; 32]),
+                rejoin: false,
+            },
+        )
+        .expect("mark");
+    leader.store.propose(batch).await.expect("write");
+    let unknown = "cluster.node.unknown";
+    let not_held = "cluster.node.certificate_unknown";
+    for (case, node, code) in [
+        ("an unused node id", NodeId(4242), unknown),
+        (
+            "an enrolled, superseded controller",
+            member.node(),
+            not_held,
+        ),
+        ("the leader", leader.node(), not_held),
+    ] {
+        let minted = stray_certificate(&lab, node);
+        for target in lab.members() {
+            let expected = Some(code.to_owned());
+            assert_eq!(
+                calls_refused(&lab, node, &minted, &target).await,
+                [
+                    expected.clone(),
+                    expected.clone(),
+                    expected.clone(),
+                    expected.clone()
+                ],
+                "Raft and Join with a minted certificate of {case}, on member {}",
+                target.node()
+            );
+            assert_eq!(
+                cluster_calls(&lab, node, &minted, &target).await,
+                [Err(expected.clone()), Err(expected.clone()), Err(expected)],
+                "Cluster calls with a minted certificate of {case}, on member {}",
+                target.node()
+            );
+        }
+    }
+
+    // A renewal in progress: the record holds the running certificate and the renewed one.
+    let running = tenko_cluster::ca::CertInfo::from_der(&member.identity.0[0]).expect("info");
+    let (renewed_key, csr) = generate_csr().expect("csr");
+    let renewed = leader
+        .registry
+        .renew(
+            member.node(),
+            &running.serial,
+            &csr,
+            tenko_core::Timestamp::now(),
+        )
+        .await
+        .expect("a renewal");
+    let renewed: Identity = (renewed.chain, renewed_key);
+    for target in lab.members() {
+        if target.node() == member.node() {
+            continue;
+        }
+        wait_until_async("the renewal on every member", async || {
+            target
+                .registry
+                .record(member.node())
+                .await
+                .ok()
+                .flatten()
+                .is_some_and(|(record, _)| record.serials.len() == 2)
+        })
+        .await;
+        for identity in [&member.identity, &renewed] {
+            let [members, _, _] = cluster_calls(&lab, member.node(), identity, &target).await;
+            assert_eq!(
+                members,
+                Ok(()),
+                "a certificate the record holds, on {}",
+                target.node()
+            );
+        }
+    }
 }

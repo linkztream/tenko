@@ -452,7 +452,18 @@ impl Peers {
     // Authentication.
 
     /// Checks a caller of the `Raft` or `Cluster` service; returns its node record when
-    /// this member knows it.
+    /// this member knows it. The cluster port runs it once for every call of both services,
+    /// before the service (`server::Generational`); a service reads the outcome
+    /// (`server::authenticated`) and cannot skip it.
+    ///
+    /// A caller's certificate must be one its node record holds. A certificate of the
+    /// installation's CA that no record holds (one minted with the CA's key, or one of a
+    /// removed controller) is refused on every call, with one narrow exception for `Raft`:
+    /// a caller this member has no record of yet, when this member is being seeded (its
+    /// store has applied nothing: a joining learner, which knows nobody until the leader's
+    /// first snapshot or entries arrive) or when the caller is in this member's own Raft
+    /// membership (a learner that has applied the membership but not yet the record of a
+    /// member, which a later entry of the same log brings).
     pub(crate) async fn authenticate(
         &self,
         peer: &PeerInfo,
@@ -490,12 +501,11 @@ impl Peers {
                 }
                 Ok(Some(record))
             }
-            // The first controller of a cluster never enrolled and has no record; a revoked
-            // controller has none either. Its certificates are on the revocation list, but
-            // one its record no longer held is not, so the node id decides. The store's
-            // revocation table decides, not the registry's sets: those are empty until the
-            // registry is attached at start, and lag a revocation until its watcher
-            // catches up. Only a caller without a record pays the scan.
+            // A revoked controller has no record. Its certificates are on the revocation
+            // list, but one its record no longer held is not, so the node id decides. The
+            // store's revocation table decides, not the registry's sets: those are empty
+            // until the registry is attached at start, and lag a revocation until its
+            // watcher catches up. Only a caller without a record pays the scan.
             None if access == Access::Raft => {
                 let view = self
                     .store()
@@ -511,7 +521,22 @@ impl Peers {
                         format!("controller {node} was revoked"),
                     )));
                 }
-                Ok(None)
+                let membership = self.store().membership();
+                let seeding = self.store().applied_index().is_none();
+                if seeding
+                    || membership.voters.contains(&node)
+                    || membership.learners.contains(&node)
+                {
+                    return Ok(None);
+                }
+                Err(status_of(&ClusterError::new(
+                    "cluster.node.unknown",
+                    403,
+                    format!(
+                        "controller {node} has no record and is no member of this controller's \
+                         cluster"
+                    ),
+                )))
             }
             None => Err(status_of(&ClusterError::new(
                 "cluster.node.unknown",

@@ -3,15 +3,15 @@
 //! controllers (WP3.1a). The work is done by [`crate::peers::Peers`]; this file maps the
 //! calls and their refusals.
 
-use tenko_core::{NodeId, RequestCtx, Revision, Role};
+use tenko_core::{NodeId, RequestCtx, Revision};
 use tenko_store::raft::network::ForwardError;
 use tonic::{Request, Response, Status};
 
 use crate::{
     error::ClusterError,
-    peers::{Access, PeerService},
+    peers::PeerService,
     proto::v1,
-    server::{peer_of, status_of},
+    server::{authenticated, peer_of, status_of},
     trace,
     wire::{self, BATCH_WIRE, CLUSTER_WIRE, ChangeEnvelope},
 };
@@ -33,17 +33,10 @@ impl v1::cluster_server::Cluster for PeerService {
         let span = trace::span_for(&request, trace::CLUSTER, "Join");
         trace::serve(span, async move {
             let peer = peer_of(&request)?;
+            // The joiner itself or a member that forwards its request: either way with a
+            // certificate its own node record holds, checked before the service runs.
+            authenticated(&request)?;
             let body = request.into_inner();
-            // The joiner itself, or a member that forwards the joiner's request.
-            if peer.identity.node.0 != body.node_id {
-                self.peers.authenticate(&peer, Access::Member).await?;
-            } else if !peer.identity.roles.contains(Role::Controller) {
-                return Err(status_of(&ClusterError::new(
-                    "cluster.peer.not_controller",
-                    403,
-                    "only a controller certificate may join the controller cluster",
-                )));
-            }
             let answer = self
                 .peers
                 .join(body, peer.local)
@@ -60,8 +53,7 @@ impl v1::cluster_server::Cluster for PeerService {
     ) -> Result<Response<v1::ProposeResponse>, Status> {
         let span = trace::span_for(&request, trace::CLUSTER, "Propose");
         trace::serve(span, async move {
-            let peer = peer_of(&request)?;
-            self.peers.authenticate(&peer, Access::Member).await?;
+            authenticated(&request)?;
             let body = request.into_inner();
             wire::check(&body.wire, BATCH_WIRE).map_err(|error| status_of(&error))?;
             match self.peers.store().accept_forwarded(body.batch.into()).await {
@@ -85,8 +77,7 @@ impl v1::cluster_server::Cluster for PeerService {
     ) -> Result<Response<v1::ReadIndexResponse>, Status> {
         let span = trace::span_for(&request, trace::CLUSTER, "ReadIndex");
         trace::serve(span, async move {
-            let peer = peer_of(&request)?;
-            self.peers.authenticate(&peer, Access::Member).await?;
+            authenticated(&request)?;
             match self.peers.store().read_index().await {
                 Ok(index) => Ok(Response::new(v1::ReadIndexResponse {
                     log_index: index.log_index,
@@ -109,8 +100,7 @@ impl v1::cluster_server::Cluster for PeerService {
     ) -> Result<Response<v1::MembersResponse>, Status> {
         let span = trace::span_for(&request, trace::CLUSTER, "Members");
         trace::serve(span, async move {
-            let peer = peer_of(&request)?;
-            self.peers.authenticate(&peer, Access::Member).await?;
+            authenticated(&request)?;
             let answer = self
                 .peers
                 .members_proto()
@@ -127,8 +117,7 @@ impl v1::cluster_server::Cluster for PeerService {
     ) -> Result<Response<v1::DigestResponse>, Status> {
         let span = trace::span_for(&request, trace::CLUSTER, "Digest");
         trace::serve(span, async move {
-            let peer = peer_of(&request)?;
-            self.peers.authenticate(&peer, Access::Member).await?;
+            authenticated(&request)?;
             let revision = request.into_inner().revision;
             let at_least = (revision > 0).then_some(Revision(revision));
             let digest = self
@@ -151,18 +140,13 @@ impl v1::cluster_server::Cluster for PeerService {
         &self,
         request: Request<v1::TransferKekRequest>,
     ) -> Result<Response<v1::TransferKekResponse>, Status> {
-        let peer = peer_of(&request)?;
-        let record = self
-            .peers
-            .authenticate(&peer, Access::Member)
-            .await?
-            .ok_or_else(|| {
-                status_of(&ClusterError::new(
-                    "cluster.node.unknown",
-                    403,
-                    "the caller is not enrolled",
-                ))
-            })?;
+        let record = authenticated(&request)?.ok_or_else(|| {
+            status_of(&ClusterError::new(
+                "cluster.node.unknown",
+                403,
+                "the caller is not enrolled",
+            ))
+        })?;
         let answer = self
             .peers
             .transfer_kek(&record, request.into_inner())
@@ -178,7 +162,7 @@ impl v1::cluster_server::Cluster for PeerService {
         let span = trace::span_for(&request, trace::CLUSTER, "Campaign");
         trace::serve(span, async move {
             let peer = peer_of(&request)?;
-            self.peers.authenticate(&peer, Access::Member).await?;
+            authenticated(&request)?;
             let answer = self
                 .peers
                 .campaign(peer.identity.node)
@@ -195,8 +179,7 @@ impl v1::cluster_server::Cluster for PeerService {
     ) -> Result<Response<v1::ChangeResponse>, Status> {
         let span = trace::span_for(&request, trace::CLUSTER, "Change");
         trace::serve(span, async move {
-            let peer = peer_of(&request)?;
-            self.peers.authenticate(&peer, Access::Member).await?;
+            authenticated(&request)?;
             let body = request.into_inner();
             wire::check(&body.wire, CLUSTER_WIRE).map_err(|error| status_of(&error))?;
             let envelope: ChangeEnvelope = wire::decode("membership change", &body.change)
