@@ -65,7 +65,7 @@ use super::{
     BackupError,
     archive::{
         Manifest, PART_CONFIG, PART_KEKS, PART_SNAPSHOT, PART_TLS_CERT, PART_TLS_KEY, PartEntry,
-        Reader, Unlock, printable,
+        Reader, SnapshotRecord, Unlock, printable,
     },
     create::{
         Secret, TlsPair, ca_fingerprint, create_private_dir, create_private_file,
@@ -680,13 +680,28 @@ pub(crate) async fn install(
     manifest: &Manifest,
     snapshot: &Path,
 ) -> Result<RaftStore, BackupError> {
+    let term = manifest.snapshot.last_log_term;
+    install_at(store_dir, node, address, &manifest.snapshot, term, snapshot).await
+}
+
+/// [`install`] from a snapshot at `position`, with the vote of the install at `vote_term`
+/// (at least the snapshot's term): the store's own election then starts the term after it.
+/// A forced step of the cluster recovery passes the highest term its copy has seen.
+pub(crate) async fn install_at(
+    store_dir: &Path,
+    node: NodeId,
+    address: &str,
+    position: &SnapshotRecord,
+    vote_term: u64,
+    snapshot: &Path,
+) -> Result<RaftStore, BackupError> {
     if format::store_exists(store_dir) {
         return Err(BackupError::TargetNotEmpty(store_dir.to_path_buf()));
     }
     let mut learner_config = scratch_config(store_dir, node, false);
     learner_config.address = address.to_owned();
     let learner = RaftStore::open(learner_config.clone()).await?;
-    let installed = install_snapshot(&learner, node, address, manifest, snapshot).await;
+    let installed = install_snapshot(&learner, node, address, position, vote_term, snapshot).await;
     let _ = learner.shutdown().await;
     drop(learner);
     installed?;
@@ -703,10 +718,10 @@ async fn install_snapshot(
     learner: &RaftStore,
     node: NodeId,
     address: &str,
-    manifest: &Manifest,
+    position: &SnapshotRecord,
+    vote_term: u64,
     snapshot: &Path,
 ) -> Result<(), BackupError> {
-    let position = &manifest.snapshot;
     let log_id = LogId::new(
         LeaderId::new(position.last_log_term, position.last_log_node),
         position.last_log_index,
@@ -721,7 +736,7 @@ async fn install_snapshot(
     // The vote of a leader that is not this node: the learner accepts the snapshot as from
     // the leader of that term, and its own election later starts the next term.
     let other = if node.0 == u64::MAX { 0 } else { u64::MAX };
-    let vote = Vote::new_committed(position.last_log_term, other);
+    let vote = Vote::new_committed(vote_term.max(position.last_log_term), other);
     let mut receiver = learner
         .receive_snapshot()
         .map_err(|error| BackupError::io(snapshot, error))?;
