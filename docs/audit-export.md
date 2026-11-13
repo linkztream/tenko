@@ -164,7 +164,7 @@ The status shows the warning `audit.export.required` in two cases, told apart by
 
 ## 9. Command line
 
-- `tenko audit export [--from <seq>] [--format json|rfc5424|cef] [--output <file>]` writes the log from `--from` (default 1) through the API: a leading checkpoint that anchors the file, the records, a checkpoint after every 100 records and a final one. Without `--output` it writes to standard output.
+- `tenko audit export [--from <seq>] [--format json|rfc5424|cef] [--output <file>] [--force]` writes the log from `--from` (default 1) through the API: a leading checkpoint that anchors the file, the records, a checkpoint after every 100 records and a final one. An existing `--output` file is refused unless `--force` replaces it. Without `--output` it writes to standard output.
 - `tenko audit verify --file <file> [--from <seq>:<hash>]` verifies a JSON export offline, without a server ([4](#4-checkpoints-and-verification)); exit status 0 when intact, 9 when not. Without `--file`, `tenko audit verify` asks the server to check the live chain as before.
 
 ## 10. Configuration, tables, audit actions and error codes

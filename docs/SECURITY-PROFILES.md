@@ -7,7 +7,7 @@ This document owns the toggle IDs TGL-01 to TGL-41 and the never-off IDs NEVER-0
 ## Principles
 
 - **Bundles of toggles, not code paths.** Every profile runs the same code. A profile only sets toggle values; no engine contains a profile-specific branch.
-- **Proposed defaults.** The matrix values are proposed defaults, to be validated during Phase 1. After first run, any toggle can be changed individually except the never-off items. The UI shows every deviation from the selected profile.
+- **Defaults.** The matrix values are the defaults each profile ships with. After first run, any toggle can be changed individually except the never-off items. The UI shows every deviation from the selected profile.
 - **Insecure state is loud.** While the Lab profile is active, or while any toggle is set weaker than the Home value, the UI shows a persistent warning banner. Every toggle change is written to the audit log.
 - **Lab may switch off everything except the never-off items.** The never-off list (NEVER-01 to NEVER-03) holds in every profile.
 - **Toggles follow features.** A toggle appears when its feature ships. The Phase column of the matrix lists that phase.
@@ -23,7 +23,7 @@ This document owns the toggle IDs TGL-01 to TGL-41 and the never-off IDs NEVER-0
 
 ## Toggle matrix
 
-Values are proposed defaults (see Principles). The Phase column is the phase in which the toggle first appears. The Home value is the baseline against which the UI judges a toggle as weaker.
+Values are the defaults each profile ships with (see Principles); a row whose Phase column says Planned describes a toggle of a feature not built yet. The Phase column is the phase in which the toggle first appears. The Home value is the baseline against which the UI judges a toggle as weaker.
 
 Reading the matrix:
 
@@ -40,7 +40,7 @@ Reading the matrix:
 | TGL-05 | API token maximum lifetime (mirror tokens included; the finding `migrate.mirror.token_expiring` is raised 14 days ahead) | 365 days | 90 days | 30 days | No maximum (non-expiring tokens allowed) | 1 | IAM-10 |
 | TGL-06 | Breached-password check (HIBP) | On, online k-anonymity | On, online k-anonymity | On, offline corpus preferred | Off | 1 | IAM-04 |
 | TGL-07 | Lockout | On: 3 attempts per account and network, then waits of 10 s, 30 s, 3 min, 5 min and 10 min (the last repeats) | On: as Home, then a lock of 30 minutes that ends by itself | On: as Standard, with an alarm per lock, an earlier unlock by an administrator, and the lock holds for a passkey too | Off | 1 | IAM-05 |
-| TGL-08 | TLS on API and UI | On, certificate from the internal CA | On, internal CA or imported certificate | On, TLS 1.3 only, HSTS | Optional, plain HTTP allowed; a node enrolls over plain HTTP, or through a reverse proxy that does not state the scheme, only here | 1 | API-01, OPS-04 (internal CA) |
+| TGL-08 | TLS on API and UI | On; a certificate from the internal CA by default, an imported one or a reverse proxy allowed ([certificates.md](certificates.md)) | On, as Home | On, TLS 1.3 only, HSTS; the same modes | Optional, plain HTTP allowed; a node enrolls over plain HTTP, or through a reverse proxy that does not state the scheme, only here | 1 | API-01, OPS-04 (internal CA) |
 | TGL-09 | DNS dynamic updates from external clients | None by default; any mode per zone | TSIG; secure only for the zones the Kerberos wizard enables, nonsecure and secure allowed per zone as a deviation | TSIG or GSS-TSIG only, secure only with ownership on every zone with Kerberos, unsigned rejected | Unsigned allowed | 2 (GSS-TSIG in 4) | DNS-11, DNS-28 |
 | TGL-10 | Zone transfer ACL | Deny all | Listed secondaries with TSIG | Listed secondaries, TSIG required, XoT for transfers that leave the site | Allow any | 2 | DNS-09, DNS-19 |
 | TGL-11 | Response Rate Limiting | On | On | On, stricter limits | Off | 2 | DNS-17 |
@@ -63,12 +63,12 @@ Reading the matrix:
 | TGL-28 | Negative trust anchor lifetime | At most 7 days | At most 7 days | Expiry required, at most 7 days | At most 7 days | 3 (Slice 10) | DNS-13 |
 | TGL-29 | DDNS from DHCP (`UpdatePolicy.dhcp` unset; the internal path, not TGL-09) | Writes into the scope's zones | Only zones with `dhcp: true` | Only zones with `dhcp: true`; name protection forced | Writes | 3 | DHCP-13 |
 | TGL-30 | Bug report link from the web UI to GitHub ("Report a bug": the new-issue page prefilled with the redacted diagnostics, filed under the person's own account) | On | On | Off: the dialog copies the diagnostics to the clipboard only, no outbound link from the interface | On | 3 | OPS-05 |
-| TGL-31 | Automatic partner-down in a DHCP failover pair | Automatic with evidence after 600 s | Automatic with evidence after 600 s | Automatic on the controllers' witness only, else by hand | Automatic with evidence after 60 s | 3 (Slice 12) | DHCP-12 |
+| TGL-31 | Automatic partner-down in a DHCP failover pair | Automatic with evidence after 600 s | Automatic with evidence after 600 s | Automatic on the controllers' witness only, else by hand | Automatic with evidence after 60 s | Planned, 3 (Slice 12) | DHCP-12 |
 | TGL-32 | Kerberos account password rotation | 30 days | 30 days | 30 days, a failed rotation alarms | Off allowed (30 days by default) | 4 (Slice 13) | DNS-28 |
-| TGL-33 | Local person accounts beside a verified directory provider | Allowed | Allowed | Break-glass only | Allowed | 4 (Slice 13) | IAM-09, IAM-12 |
-| TGL-34 | Directory transport for LDAP | LDAPS or StartTLS, verified | LDAPS or StartTLS, verified | LDAPS only, verified | Plain allowed, with the clear-text warning | 4 (Slice 13) | IAM-12 |
-| TGL-35 | Directory check interval and grace | 15 minutes, 15 minutes grace | 15 minutes, 15 minutes grace | 5 minutes, no grace | 15 minutes, 15 minutes grace | 4 (Slice 13) | IAM-12 |
-| TGL-36 | Personal tokens of directory users | Allowed within TGL-05 | Allowed within TGL-05 | Not allowed (service accounts only) | Allowed | 4 (Slice 13) | IAM-10 |
+| TGL-33 | Local person accounts beside a verified directory provider | Allowed | Allowed | Break-glass only | Allowed | Planned, 4 (Slice 13) | IAM-09, IAM-12 |
+| TGL-34 | Directory transport for LDAP | LDAPS or StartTLS, verified | LDAPS or StartTLS, verified | LDAPS only, verified | Plain allowed, with the clear-text warning | Planned, 4 (Slice 13) | IAM-12 |
+| TGL-35 | Directory check interval and grace | 15 minutes, 15 minutes grace | 15 minutes, 15 minutes grace | 5 minutes, no grace | 15 minutes, 15 minutes grace | Planned, 4 (Slice 13) | IAM-12 |
+| TGL-36 | Personal tokens of directory users | Allowed within TGL-05 | Allowed within TGL-05 | Not allowed (service accounts only) | Allowed | Planned, 4 (Slice 13) | IAM-10 |
 | TGL-37 | Backup before an update (ADR 0023) | Asked, default yes; "no backup" allowed and audited | Asked, default yes; "no backup" allowed and audited | Required: `backup: "skip"` is refused | Asked, default yes; "no backup" allowed and audited | 2 | OPS-07, OPS-24 |
 | TGL-38 | A second person's approval of a change (the UI plan, UI-Q9) | Off | Off | On: a change job waits for approval by a second person before it runs; the approver is recorded in the audit entry and in the recent changes | Off | Planned, 4 (Slice 13) | IAM-02, API-09 |
 | TGL-39 | Agent writes through jobs (`tenko mcp`, [ADR 0029](adr/0029-an-agent-tool-with-guard-rails.md)) | On: an agent may create a job with a preview and a manual step that a person approves in the interface | On | Off: agent tokens are read only | On | Planned, after U6 of the UI plan | IAM-10, IAM-19, API-09, IPAM-17 |
@@ -78,7 +78,7 @@ Reading the matrix:
 Notes:
 
 - **TGL-06 and a PIN.** A PIN-like secret (digits only, under 12 characters) under a preset that admits a PIN is not checked against the corpus, because every short numeric code is in it. The PIN preset relies on the coupling rule (IAM-07) instead.
-- **TGL-12 before Slice 10.** Until the own resolver ships (Phase 3, Slice 10, [dns-recursion-plan.md](plans/dns-recursion-plan.md)), Tenko forwards and caches, so DNSSEC validation is the upstream resolver's job (DNS-03, DNS-13). From Slice 10 the toggle applies to recursed and to forwarded answers alike (REC-Q3); a forwarding rule may set `validate = false` under Home and Standard, gated as a negative trust anchor is (`dns.keys` in an interactive session, never on the root rule, audited), and never under Hardened, where the toggle is on ([dns-resolver.md](dns-resolver.md) section 2.1).
+- **TGL-12 and forwarded answers.** Tenko's own resolver validates (Slice 10, [dns-recursion-plan.md](plans/dns-recursion-plan.md)), and the toggle applies to recursed and to forwarded answers alike (REC-Q3); a forwarding rule may set `validate = false` under Home and Standard, gated as a negative trust anchor is (`dns.keys` in an interactive session, never on the root rule, audited), and never under Hardened, where the toggle is on ([dns-resolver.md](dns-resolver.md) section 2.1).
 - **TGL-09 scope.** The toggle concerns dynamic updates from external clients. The DDNS path from Tenko DHCP to Tenko DNS is internal and is not governed by it (DHCP-13).
 - **TGL-09 and ownership.** Under Hardened every zone with Kerberos settings has the ownership rules of the identity plan (section 3.6) on, whatever its `ownership` setting says (`policy::ownership_on` in `crates/tenko-dns/src/update/policy.rs`); under the other profiles a zone has them on when its Kerberos settings say `ownership = windows`.
 - **TGL-10 is a floor under Hardened.** Under Hardened every zone transfer out, and the signed SOA query of a secondary, must be signed with a TSIG key that an access list of the zone names, and a transfer to an address outside the site must come over TLS (XoT), whatever the zone's `require_tsig` and `xot` say; a NOTIFY for a secondary zone must be signed with its primary's key (`tenko_dns::xfr::access`). The site is the security setting `transfer_site`: a list of networks in CIDR notation, at most 256, whose default is the private (RFC 1918), shared (RFC 6598), unique-local (RFC 4193), loopback and link-local ranges. An administrator changes it in the security settings (`PATCH /api/v1/settings/security`, with the fresh sign-in the other security settings take, or the web UI's security settings; `tenko dns transfer site` shows the list); every change is audited with the list before and after, and a change of profile returns it to the default. An empty list is allowed and means that under Hardened every transfer needs XoT. Under the other profiles the list has no effect. Under Home, Standard and Lab the zone's settings apply as stored, as for TGL-09; a zone that transfers without TSIG there is an informational finding (`dns.transfer.weaker_than_profile`), and under Hardened a zone whose settings the profile overrides is a warning (`dns.transfer.profile_refuses`), so the change is visible before a secondary is refused ([dns.md](dns.md) sections 10.1 and 10.14). Standard does not force TSIG because Windows DNS secondaries cannot sign transfers.
@@ -168,10 +168,10 @@ Audit export (TGL-21) is a toggle; the audit log itself is not.
 
 CON-07 and IAM-07 define the rule precisely:
 
-- A PIN may be the sole authentication factor only while the vault holds no secrets (empty or disabled).
-- As soon as the vault holds a secret, every account that can reach it needs at least a passkey, or the PIN as a second factor alongside another factor.
+- A PIN may be the sole authentication factor only while the vault holds no operator secrets (empty or disabled); system secrets do not count ([secrets.md](secrets.md) section 2).
+- As soon as the vault holds an operator secret, every account that can reveal it needs at least password strength, or a passkey, or the PIN as a second factor alongside another factor.
 
-Rationale: a 4-digit PIN protecting a vault with domain-admin credentials is not defensible, even at home.
+A PIN has at least six digits, and an administrator never signs in with a PIN in any profile, so the rule binds operator accounts in practice. Rationale: a PIN protecting a vault with domain-admin credentials is not defensible, even at home.
 
 The rule applies in every profile, including Lab. It is a function of vault state, not a toggle, so it does not appear in the matrix and no profile can relax it. TGL-01 and TGL-02 are both subject to it, which is why their PIN-friendly values read "subject to IAM-07" and "IAM-07 can force it".
 

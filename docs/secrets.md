@@ -22,7 +22,7 @@ The vault knows two classes of secret.
 
 | Class | Examples | Revealable | Counts for the PIN rule |
 |---|---|---|---|
-| `system` | TOTP seeds, the keys of the internal CA and of TLS | Never | No |
+| `system` | TOTP seeds, the keys of the internal CA and of TLS, the keys of the Kerberos account of secure dynamic updates | Never | No |
 | `operator` | Credentials a person stores: host logins, API keys, SSH keys, tokens, connector credentials, imported logins | Yes, with an audit record | Yes |
 
 An operator secret is a vault secret of class `operator` plus a metadata record. The vault side follows IAM-15: every write draws a fresh 256-bit data key (DEK), encrypts the value with AES-256-GCM and wraps the DEK with the active key-encryption key (KEK). The KEK comes from the operating system's key store (DPAPI on Windows, `systemd-creds` with TPM2 where available on Linux, an explicit key file for containers and CI), and the server does not start without it. The envelope is stored in `vault.secrets`, a table that accepts nothing but envelopes, so the Raft log, snapshots and backups hold ciphertext only (NEVER-01, which no profile switches off). Replacing a value draws a new DEK. In memory the plaintext lives in buffers that are wiped when they are dropped.
@@ -120,13 +120,13 @@ Creating a secret needs the right to reveal as well as the right to create, whic
 IAM-07 and CON-07 say that a PIN may be the only factor of an account only while the vault holds no secrets that an account can reach. For operator secrets the rule works in four places. System secrets do not count (they would end PIN-only sign-in at the first TOTP enrollment).
 
 - **A PIN session never reveals.** Revealing needs a session of at least password strength in every profile, and the answer to a weaker one is 403 `auth.step_up_required` with `required` set to `password`.
-- **Once the vault holds an operator secret**, an account that may reveal (an administrator or an operator) needs at least password strength for every action, not only for secrets.
-- **`POST /secrets` is refused with 409 `vault.pin_coupling`** while an enabled account that may reveal signs in with a PIN alone, meaning a PIN-kind password and neither TOTP nor a passkey or security key. The parameter `accounts` lists their login names, comma separated. Disabled accounts and the break-glass account (hardware key only, IAM-09) are not counted. The administrator gives those accounts a stronger factor or another role first.
+- **Once the vault holds an operator secret**, an account that may reveal (an administrator or an operator) needs at least password strength for every action, not only for secrets. A token created before by a weaker sign-in is refused with 403 `auth.step_up_required` until a stronger sign-in creates a new one.
+- **`POST /secrets` is refused with 409 `vault.pin_coupling`** while an enabled account that may reveal signs in with a PIN alone (an operator: an administrator never signs in with a PIN, and a PIN has at least six digits), meaning a PIN-kind password and neither TOTP nor a passkey or security key. The parameter `accounts` lists their login names, comma separated. Disabled accounts and the break-glass account (hardware key only, IAM-09) are not counted. The administrator gives those accounts a stronger factor or another role first.
 - **`PATCH /settings/security` is refused with 409 `settings.pin_coupling`** when it would let a PIN stand alone while the vault holds an operator secret: the change touches the password policy (TGL-01) or the MFA requirement (TGL-02), and the result is a PIN-admitting password preset with MFA optional. Every other change passes, also under the Home and Lab defaults, whose settings already admit a PIN with MFA optional: a change of the reveal policy, the lockout or the session lifetime does not weaken the PIN rule.
 
 ### The reveal policy (TGL-24)
 
-On top of the role and the PIN rule, the profile decides how fresh and how strong a session must be. The setting is `secret_reveal`, shown with its profile default under `/settings/security`; a change is audited with the old and the new value.
+On top of the role and the PIN rule, the profile decides how fresh and how strong a session must be. The setting is `secret_reveal`, shown with its profile default under `/settings/security`; a change needs a sign-in within the last five minutes (403 `auth.step_up_required` with `required: fresh` otherwise) and is audited with the old and the new value.
 
 | Profile | `step_up` | `bound_host_only` | A reveal needs |
 |---|---|---|---|

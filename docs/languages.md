@@ -22,7 +22,7 @@ Contents:
 
 ## 1. Overview
 
-Every UI string is a message under a key. The key set is read from the English source document that the UI build emits (`i18n/en.xlf`); a pack is checked against the key set of the UI that the server serves (the embedded UI, or the build in `[server] ui_dir`). A build without a UI has an empty key set: it serves packs but refuses uploads and the template (503 `i18n.unavailable`).
+Every UI string is a message under a key. The key set is read from the English source document that the UI build emits (`i18n/en.xlf`); a pack is checked against the key set of the UI that the server serves (the embedded UI; a debug build can read it from `[server] ui_dir`, which a release build refuses). A build without a UI has an empty key set: it serves packs but refuses uploads and the template (503 `i18n.unavailable`).
 
 | Language kind | Source | Can be overridden | Can be removed |
 |---|---|---|---|
@@ -232,7 +232,7 @@ To translate: download the template of the new tag (for example `?language=fr`),
 
 ## 6. The data-directory import
 
-At start, `tenko serve` runs the `languages` step (step 7 of the start sequence). It takes the key set from `[server] ui_dir` when set, otherwise from the embedded UI, and imports the packs in `<data_dir>/i18n/`.
+At start, `tenko serve` runs the `languages` step (step 7 of the start sequence). It takes the key set from the embedded UI (a debug build: from `[server] ui_dir` when set), and imports the packs in `<data_dir>/i18n/`.
 
 * Only regular files with the extension `.xlf` (any case) directly in that directory are read, in the order of their paths. The file name does not matter; the tag is the `trgLang` in the file.
 * A missing directory is no error. A directory that cannot be listed is logged and the start goes on. A start never fails because of a pack.

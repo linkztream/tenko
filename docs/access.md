@@ -45,7 +45,9 @@ Global roles stay in the user record. Grants, scoped tokens and role policies ar
 | `viewer` | Reads the inventory kinds listed for the operator, jobs and imports. Reads nothing else. | Globally, or through a grant |
 | `auditor` | Reads the audit log and the system status, which carries the audit export warnings. Nothing else (section 9). | Globally only |
 
-A grant carries `operator` or `viewer`. A grant reaches only the kinds that scopes apply to: tenants, VRFs, sites, VLANs, prefixes, ranges, addresses, hosts, interfaces, custom fields, jobs, observations and proposals. The other kinds are global-only in Phase 1: imports, connectors, nodes, secrets, settings, users, sessions, tokens and the system. A person who holds only grants therefore cannot run an import, change a connector, read a secret or manage users, whatever the grant says.
+DNS and DHCP: the viewer reads both, the operator reads and writes both, and the administrator also manages TSIG and DNSSEC keys. The mirrors and takeovers of a migration are the administrator's; the operator reads them.
+
+A grant carries `operator` or `viewer`. A grant reaches only the kinds that scopes apply to: tenants, VRFs, sites, VLANs, prefixes, ranges, addresses, hosts, interfaces, custom fields, jobs, observations, proposals and DHCP scopes (which follow the grants of their prefix). The other kinds are global-only: imports, connectors, nodes, secrets, settings, users, sessions, tokens, the system, the DNS kinds, the other DHCP kinds and the migration kinds. A person who holds only grants therefore cannot run an import, change a connector, read a secret or manage users, whatever the grant says.
 
 The role order used by delegation and by token grants is: `admin` covers every role, `operator` covers `operator` and `viewer`, `viewer` covers `viewer`, `auditor` covers `auditor`.
 
@@ -81,7 +83,7 @@ A scope is an object with `kind` and `value`.
 {"kind": "prefix", "value": {"id": "0190d1c2-0000-7000-8000-000000000031", "subtree": true}}
 ```
 
-Rules for tenants and for single objects exist in the data model but cannot be granted in Phase 1 (422 `auth.grant.invalid_scope`). Zones and DHCP scopes join in Phases 2 and 3.
+Rules for tenants and for single objects exist in the data model but cannot be granted in Phase 1 (422 `auth.grant.invalid_scope`). A DHCP scope follows the grants of its prefix; zones cannot be granted.
 
 The rule must name an existing VRF, site or prefix (422 `auth.grant.invalid_scope` otherwise).
 
@@ -101,6 +103,7 @@ Each object kind has anchors that a rule is matched against.
 | Range, address | The chain of the most specific prefix that holds it, then as for a prefix |
 | Host | Its tenant, its site (and that site's ancestors), one chain per prefix of its addresses, and its VRF when all its addresses are in one VRF |
 | Interface | The anchors of its host |
+| DHCP scope | The anchors of its prefix |
 | Observation, proposal | The chain of the prefix of the subject address, merged with the objects the proposal names |
 | Job | The anchors of its targets, merged; a target that does not exist yet (the address a move will create) or that IPAM does not place (a connector) is left out |
 
@@ -155,7 +158,7 @@ The holder of a delegable grant may create grants for people and service account
 - The scope lies inside the scope of the delegating grant. A rule lies inside another when: it is the same rule, or the same VRF; it is the same site or prefix and the outer rule has `subtree` or the inner one has none; it names a site or prefix inside the subtree of an outer site or prefix rule; or it names a prefix that is in the VRF of an outer VRF rule. Where the answer depends on data that could change (a prefix and its subtree against a site), it is no.
 - The new grant records the delegating grant as `parent`. Whether the new grant is itself delegable is chosen by the delegating person; the same limits then apply to it.
 
-Revoking a grant revokes every grant issued under it, directly or through further delegation, in the same batch. The answer lists them. Deleting an account removes its grants and the grants issued under them.
+Revoking a grant revokes every grant issued under it, directly or through further delegation, in the same batch. The answer lists them. Disabling or deleting an account removes its grants and the grants issued under them; enabling it again does not restore them.
 
 Only people with a session create or revoke grants. A token never does, whatever its grants. A refused delegation is audited as a failed `auth.grant.create`. Every change is audited: `auth.grant.create` names the subject, the grant, the role, the scope, `delegable` and the parent; `auth.grant.revoke` names the subjects, the grant, the scope and every revoked grant.
 
@@ -169,6 +172,7 @@ A service account is an account for automation (IAM-10). It differs from a perso
 - An administrator creates it and is recorded as its owner. Its name shares the name space of users (409 `users.name_taken`).
 - It holds global roles (`roles` at creation) or grants, like a person. A service account can receive any grant a person can.
 - It acts only through scoped tokens (section 7). A personal token of a service account is refused.
+- Tokens never administer, so a service account with the admin role does not count as another administrator: the only person with the admin role cannot drop it, be disabled or be deleted while only service accounts would remain (409 `users.last_administrator`).
 
 ```json
 POST /api/v1/access/service-accounts
@@ -189,13 +193,13 @@ A personal token acts with all the roles and grants of its owner. A scoped token
 
 A grant without a scope applies to the whole installation, and its role must be covered by a global role of the owner. A grant with a scope needs a role that is `operator` or `viewer`, a scope that can be granted and exists, and either a global role of the owner that covers the role or one of the owner's grants that covers the role over a scope containing the token's scope. Otherwise the request is refused with 403 `auth.grant.exceeds_own`, 422 `auth.grant.invalid_role` or 422 `auth.grant.invalid_scope`.
 
-**Special scopes.** `metrics` lets the token read the metrics endpoint; `audit:read` lets it read the audit log. Both read only: the token reaches nothing else through them; its lists of the other kinds are empty and their single reads are refused with 403 `auth.forbidden` (section 1). An owner may ask for a special scope if it is a service account or holds a global role that reads the system. A token needs at least one grant or one scope.
+**Special scopes.** `metrics` lets the token read the metrics endpoint; `audit:read` lets it read the audit log. Both read only (a third, `mirror:<id>`, is declared for the push of a mirrored source, whose routes are not built yet; it cannot be requested here): the token reaches nothing else through them; its lists of the other kinds are empty and their single reads are refused with 403 `auth.forbidden` (section 1). An owner may ask for a special scope if it is a service account or holds a global role that reads the system. A token needs at least one grant or one scope.
 
-**Intersection.** The effective right of a request is the intersection of the token's grants and the owner's grants at that moment. An object must be covered by the token's rules and by the owner's rules. A token therefore loses rights when its owner loses them, is refused when the owner is disabled or deleted (the scoped tokens of a deleted account are removed), and never gains rights its owner gains later. A token cannot administer: changing users, settings, the system, tokens, sessions or secrets, revealing a secret, and every administrative action need an interactive session.
+**Intersection.** The effective right of a request is the intersection of the token's grants and the owner's grants at that moment. An object must be covered by the token's rules and by the owner's rules. A token therefore loses rights when its owner loses them, is refused when the owner is disabled or deleted (the scoped tokens of a deleted account are removed), and never gains rights its owner gains later. A token also acts only while the sign-in that created it meets its owner's requirement: when a profile, a setting, a role policy or the first operator secret in the vault raises it, the token is refused with 403 `auth.step_up_required` until a stronger sign-in creates a new one. A token cannot administer: changing users, settings, the system, tokens, sessions or secrets, revealing a secret, and every administrative action need an interactive session.
 
 **Lifetime.** `expires_in_days` defaults to the maximum of the profile (TGL-05: 365 days in Home, 90 in Standard, 30 in Hardened, no maximum in Lab) and may not exceed it (422 `auth.token.lifetime_exceeded`). The cap is checked again at every use against the creation time of the token, so tightening it shortens the tokens that exist.
 
-**Creating.** A person creates a scoped token for themselves with `POST /auth/tokens` and `grants` or `scopes` in the body; without them the call creates a personal token. An administrator creates one for a service account with `POST /access/service-accounts/{id}/tokens`. The session that creates a token must meet the strength required of its user. The secret (`tnk_...`) is shown once; the listing shows the first characters only.
+**Creating.** A person creates a scoped token for themselves with `POST /auth/tokens` and `grants` or `scopes` in the body; without them the call creates a personal token. An administrator creates one for a service account with `POST /access/service-accounts/{id}/tokens`. The session that creates a token must meet the strength required of its user and have signed in within the last five minutes (403 `auth.step_up_required` with `required: fresh` otherwise); for a service account's token it must also meet the account's requirement. A password change or an administrator's reset revokes the owner's personal and scoped tokens. The secret (`tnk_...`) is shown once; the listing shows the first characters only.
 
 ```json
 POST /api/v1/access/service-accounts/0190d1c2-0000-7000-8000-000000000002/tokens
@@ -240,7 +244,7 @@ The multi-factor requirement (IAM-06) is set per role. A policy has one of three
 
 A person who holds `viewer` over one prefix and `operator` over another needs the stricter of the two policies. A person with a global `viewer` role and a policy `passkey` on `operator` is not affected until a grant of `operator` is made.
 
-The policies are read with `GET /access/role-policies`, which lists the four roles with the requirement in force (`mfa`), the profile's (`profile_default`) and the stored policy (`stored`, absent when the role follows the profile). `PUT /access/role-policies/{role}` stores a value and `DELETE` makes the role follow the profile again. Both need the right to change settings and a strong enough session, and are audited as `auth.role_policy.update` with the old and new value.
+The policies are read with `GET /access/role-policies`, which lists the four roles with the requirement in force (`mfa`), the profile's (`profile_default`) and the stored policy (`stored`, absent when the role follows the profile). `PUT /access/role-policies/{role}` stores a value and `DELETE` makes the role follow the profile again. Both need the right to change settings and a session that signed in within the last five minutes (403 `auth.step_up_required` with `required: fresh` otherwise), as `PATCH /settings/security` does, and are audited as `auth.role_policy.update` with the old and new value.
 
 ## 9. The auditor
 
@@ -286,7 +290,7 @@ The utilization of a node leaves out the prefixes below it that the principal ma
 
 **Audit log.** A principal that may read the audit log (a global role that reads the system, the auditor, a token with `audit:read`) sees every record. A principal that does not, but whose grants reach IPAM objects, sees only the records that name at least one object and all of whose objects are of a scoped kind inside its scope. `GET /audit/verify` needs the global permission.
 
-**Events.** The event stream carries references, never bodies. For a scoped principal the server drops the references to objects outside the scope, keeps tenants, VRFs, sites and custom field definitions, and drops table-level events (an event with no reference) of topics the principal cannot read: IPAM, jobs and discovery pass for any grant that reaches them; audit, import, system, admin, connectors, secrets, cluster and metrics need a global read, or the token scope of the metrics and audit objects. A frame left with no reference is not sent.
+**Events.** The event stream carries references, never bodies. For a scoped principal the server drops the references to objects outside the scope, keeps tenants, VRFs, sites and custom field definitions, and drops table-level events (an event with no reference) of topics the principal cannot read: IPAM, jobs and discovery pass for any grant that reaches them; findings pass for any principal that reads some finding; audit, import, system, admin, connectors, secrets, cluster, metrics, `dns` and `dhcp` need a global read, or the token scope of the metrics and audit objects. A frame left with no reference is not sent.
 
 ## 11. Password change required
 
@@ -294,7 +298,7 @@ An account that must change its password (after an administrator reset it) gets 
 
 ## 12. API
 
-Paths are below `/api/v1`. Bodies are JSON. The routes need a session; the listings of grants, subjects, service accounts and role policies also accept a token. Listing a service account's tokens administers the account, so it needs a session like the other changes.
+Paths are below `/api/v1`. Bodies are JSON. The routes need a session; the listings of grants, subjects, service accounts and role policies also accept a token (a scoped token reads grants and subjects only with a grant that reads users, else 403 `auth.forbidden`). Listing a service account's tokens administers the account, so it needs a session like the other changes.
 
 | Method | Path | Operation id | Success | Notes |
 |---|---|---|---|---|
@@ -379,6 +383,7 @@ PUT /api/v1/access/role-policies/viewer
 | `auth.token.not_found` | 404 | No such token |
 | `auth.invalid_request` | 400 | A name, role or lifetime is invalid, or a scoped token has neither grants nor scopes |
 | `users.name_taken` | 409 | The service account name is taken |
+| `users.last_administrator` | 409 | The only person with the admin role cannot drop it, be disabled or be deleted while only service accounts would remain |
 | `users.not_found` | 404 | No such user or service account (on a grant) |
 | `auth.unauthenticated` | 401 | No valid session or token, or the account or token is disabled or gone |
 | `auth.preference.not_found` | 404 | The person has no preference under this key (section 15) |

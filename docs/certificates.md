@@ -10,8 +10,8 @@ Related: [SECURITY-PROFILES.md](SECURITY-PROFILES.md) (TGL-08), [QUICKSTART.md](
 
 | `mode` | Who holds the certificate | Renewal | Profiles | Keys in `[tls]` |
 |---|---|---|---|---|
-| `internal_ca` (default) | Tenko: a server certificate from its own certificate authority for the host name of setup | Automatic: checked every `renew_check_hours` (24) and renewed 30 days before it ends | Home (default), Standard, Hardened, Lab | `host_name`, `alt_names`, `addresses`, `renew_check_hours` |
-| `imported` | You: a chain (leaf first) and a key as PEM files on the node | You or your ACME client replace the files; the node loads them (section 4) | Standard, Hardened, Lab, Home | `cert_path`, `key_path`, `watch_interval_secs` (5), `accept_external_replacement` |
+| `internal_ca` (default) | Tenko: a server certificate from its own certificate authority for the host name of setup | Automatic: checked every `renew_check_hours` (24) and renewed 30 days before it ends | every profile (the default) | `host_name`, `alt_names`, `addresses`, `renew_check_hours` |
+| `imported` | You: a chain (leaf first) and a key as PEM files on the node | You or your ACME client replace the files; the node loads them (section 4) | every profile | `cert_path`, `key_path`, `watch_interval_secs` (5), `accept_external_replacement` |
 | `reverse_proxy` | A proxy in front of Tenko (HAProxy, nginx, Caddy) | In the proxy | every profile | `trusted_proxies`, `proxy_protocol`, `public_host` |
 | `plain` | Nobody: plain HTTP from every source | none | Lab only | none |
 
@@ -207,7 +207,7 @@ With `internal_ca` the node's certificate is signed by a CA that no browser know
    | Firefox | Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import (Firefox keeps its own store) |
    | `tenko` commands | `--ca-file ca-root.pem` (or the saved sign-in) |
 
-4. The root changes only when the CA is created again; the node's own certificate is renewed under it, so there is nothing to redistribute at a renewal. A clustered controller trusts the root through enrollment ([cluster.md](cluster.md)).
+4. The root changes only when the CA is created again; the node's own certificate is renewed under it, so there is nothing to redistribute at a renewal. A clustered controller or a node trusts the root through enrollment: the enrollment token carries the root's fingerprint, and `tenko node enroll` and `tenko cluster join` check the fetched root against it ([cluster.md](cluster.md)).
 
 Install the root only on computers you administer from: a computer that trusts it trusts every certificate this CA signs. The CA's key is kept encrypted in the vault like the other secrets.
 
@@ -223,7 +223,7 @@ With `reverse_proxy` the certificate is the proxy's, issued and renewed there (f
 | Scheme | `X-Forwarded-Proto: https`, or a PROXY protocol version 2 header with its SSL record | The last value counts. Set the header, do not append to it |
 | Host | `X-Forwarded-Host`, else `Host` | The last value counts |
 
-Without a stated scheme Tenko assumes HTTPS for its security headers and the CSRF origin check, since the proxy ends TLS. The enrollment of a node hands over a secret, so it needs the scheme stated: through a proxy that says nothing, `tenko node enroll` and `tenko cluster join` are refused with 403 `cluster.enrollment.scheme_unknown` under every profile but Lab, and the token stays valid for the next attempt. A proxy that also accepts plain HTTP must send `X-Forwarded-Proto: http` there, or the refusal of enrollments over plain HTTP cannot see them.
+Without a stated scheme Tenko assumes HTTPS for its security headers and the CSRF origin check, since the proxy ends TLS. The enrollment of a node hands over a secret, so it needs the scheme stated: through a proxy that says nothing, `tenko node enroll` and `tenko cluster join` are refused with 403 `cluster.enrollment.scheme_unknown` under every profile but Lab, and the token stays valid for the next attempt. A proxy that also accepts plain HTTP must send `X-Forwarded-Proto: http` there, or the refusal of enrollments over plain HTTP (403 `cluster.enrollment.plain_http` outside Lab) cannot see them.
 
 | Proxy | What to add |
 |---|---|
