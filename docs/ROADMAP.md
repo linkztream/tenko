@@ -8,35 +8,36 @@ The reference home-lab environment (three LANs plus a DMZ, Active Directory, a s
 
 Per-requirement phase assignments live in [REQUIREMENTS.md](REQUIREMENTS.md). Its Phase column is authoritative. Requirement IDs cited in this document are pointers, not a complete list per phase. Architecture is described in [ARCHITECTURE.md](ARCHITECTURE.md), migration design and runbooks in [MIGRATION.md](MIGRATION.md), and per-RFC targets in [CONFORMANCE.md](CONFORMANCE.md).
 
-## Where we are (2026-10-23)
+## Where we are (2026-11-13)
 
 | Phase | State | Where to read |
 |---|---|---|
 | 0 Foundation and spikes | Complete | `bench/`, ADR 0002 |
 | 1 Platform and IPAM | Complete | [phase-1-status.md](plans/phase-1-status.md), [phase-1-exit.md](plans/phase-1-exit.md) |
-| 2 DNS | Complete, two measurements carried over (M23 idle memory, deviations 145 and 146) | [phase-2-status.md](plans/phase-2-status.md), [phase-2-exit.md](plans/phase-2-exit.md) |
-| 3 DHCP | In progress: the DHCPv4 engine, the `dhcp` role, reservations from intent, DDNS, classes and policies, conflict detection, the UI and the Kea export (DHCPv4) are merged; DHCPv6 (WP9.1, WP9.2, WP9.4) and the exit (WP9.5) are open | [phase-3-plan.md](plans/phase-3-plan.md), [phase-3-status.md](plans/phase-3-status.md) |
-| Recursion (Slice 10, beside Phase 3) | In progress: the contracts and the iterative engine with the lab root are merged; validation (WP10.2) is being built; WP10.3 to WP10.5 are open | [dns-recursion-plan.md](plans/dns-recursion-plan.md), [dns-recursion-status.md](plans/dns-recursion-status.md) |
+| 2 DNS | Complete, one measurement carried over (M23 idle memory, deviation 145; M22 of deviation 146 passed after the exit) | [phase-2-status.md](plans/phase-2-status.md), [phase-2-exit.md](plans/phase-2-exit.md) |
+| 3 DHCP | Built: DHCPv4 and DHCPv6 with prefix delegation, reservations from intent, DDNS, classes and policies, conflict detection, the UI and the Kea export (WP7.0 to WP9.11); the exit document is a draft whose live rows in the reference network are open | [phase-3-plan.md](plans/phase-3-plan.md), [phase-3-status.md](plans/phase-3-status.md), [phase-3-exit.md](plans/phase-3-exit.md) |
+| Recursion (Slice 10, beside Phase 3) | Built: the iterative engine, validation with the trust anchors and RFC 5011, QNAME minimization and the denial cache, the API, the CLI and the UI (WP10.0 to WP10.4); WP10.5, the measurements, the Internet smoke and the exit document, is open | [dns-recursion-plan.md](plans/dns-recursion-plan.md), [dns-recursion-status.md](plans/dns-recursion-status.md) |
 | High availability of the data plane (Slice 12, after Phase 3) | Planned: the plan is accepted and ADR 0025 is Accepted (2026-10-25); WP12.0 to WP12.8 are open | [ha-plan.md](plans/ha-plan.md), [ADR 0025](adr/0025-dhcp-failover-and-data-plane-ha.md) |
-| Kerberos and directory identity (Slice 13, in Phase 4) | In progress: the plan is accepted and ADR 0026 is Accepted (2026-10-25); WP13.0 to WP13.3 done (WP13.0 and WP13.1 on 2026-11-05: the spike priced Tenko's own acceptor, and the owner decided on no Kerberos library at all; the contracts of section 4 are merged with data format 6; `tenko-krb` is merged with the DER codec, the AES ciphers over `aws-lc-rs`, the keys and keytabs, the acceptor, the MIC tokens and the KDC client, run live against MIT Kerberos and a Samba domain controller; WP13.2 and WP13.3 on 2026-11-06: secure dynamic updates with GSS-TSIG work against a Samba domain controller in the lab, and the account is adopted, imported and rotated from the UI and the CLI); WP13.4, the Windows interop lab and the runbook, is next, and the Kerberos line runs before the real Windows cutover | [identity-plan.md](plans/identity-plan.md), [ADR 0026](adr/0026-kerberos-and-directory-identity.md) |
-| User interface overhaul (U1 to U8, beside Phase 3) | Planned: the plan is accepted (2026-10-26) with its decisions UI-Q1 to UI-Q11; U1 to U8 are open | [ui-plan.md](plans/ui-plan.md) |
+| Kerberos and directory identity (Slice 13, in Phase 4) | In progress: WP13.0 to WP13.4 are merged: Tenko's own Kerberos (`tenko-krb`, no Kerberos library), secure dynamic updates with GSS-TSIG that pass the lab round against a Samba domain controller, the Kerberos account adopted, imported and rotated from the UI and the CLI, the owners of names and the Windows dialect of the zone file import. E44, the same against Windows in the owner's lab, is open. Directory sign-in (WP13.5 on) is open: its routes answer 501 `sys.not_implemented` | [identity-plan.md](plans/identity-plan.md), [ADR 0026](adr/0026-kerberos-and-directory-identity.md) |
+| User interface overhaul (U1 to U8, beside Phase 3) | Complete: the eight packages were merged by 2026-10-29 | [ui-plan.md](plans/ui-plan.md) |
+| The dashboard's history (Slice 18) | Complete: every live metrics tile shows two days of its figure (merged on 2026-11-12, in the next release) | [dashboard-history-plan.md](plans/dashboard-history-plan.md) |
 | An agent tool with guard rails (`tenko mcp`, after U5 and U6 of the UI plan) | Planned: ADR 0029 is Proposed (2026-10-29); a read-first first version of about ten tools, writes only as jobs a person approves | [ADR 0029](adr/0029-an-agent-tool-with-guard-rails.md) |
-| The Windows takeover (Slice 14, the first slice of Phase 4) | In progress: the plan is accepted (2026-11-01; WT-Q8 to WT-Q12 decided on 2026-11-05); the contracts with ADR 0033 and ADR 0034 (Proposed) and the exporter's script line are merged | [windows-takeover-plan.md](plans/windows-takeover-plan.md), [ADR 0033](adr/0033-mirrored-sources.md), [ADR 0034](adr/0034-zone-flip-and-adoption.md) |
-| 4 AD integration and migration | Started with Slice 14 | [MIGRATION.md](MIGRATION.md) |
+| The Windows takeover (Slice 14, the first slice of Phase 4) | In progress: the contracts with ADR 0033 and ADR 0034 (Proposed) and the exporter's script that mirrors a Windows DHCP server (WP14.1) are merged; the server side of the mirror, the takeover and the zone flip answer 501 `sys.not_implemented` | [windows-takeover-plan.md](plans/windows-takeover-plan.md), [ADR 0033](adr/0033-mirrored-sources.md), [ADR 0034](adr/0034-zone-flip-and-adoption.md) |
+| Shared code | In progress: the homes and their charters, the copy lint and the leaf crate `tenko-net` exist; the modules marked planned in [CONTRIBUTING.md](../CONTRIBUTING.md#the-index-you-need-use) follow | [shared-code-plan.md](plans/shared-code-plan.md) |
+| Accepted plans, nothing built yet | Public DNS providers (Slice 15, CONN-22), notifications (Slice 16, OPS-29), service discovery across segments (Slice 17, DNS-35), an update of every member of a cluster (Slice 19), the recovery of a cluster that lost its quorum (Slice 20), the UI's mock API from recorded answers | [public-dns-plan.md](plans/public-dns-plan.md), [notifications-plan.md](plans/notifications-plan.md), [discovery-plan.md](plans/discovery-plan.md), [cluster-update-plan.md](plans/cluster-update-plan.md), [cluster-recovery-plan.md](plans/cluster-recovery-plan.md), [ui-mock-plan.md](plans/ui-mock-plan.md) |
+| 4 AD integration and migration | Started with Slices 13 and 14 | [MIGRATION.md](MIGRATION.md) |
 | 5 Enterprise and ecosystem | Not started | this page, section "Phase 5" |
 
-The latest release is on the [releases page](https://github.com/linkztream/tenko/releases); [QUICKSTART.md](QUICKSTART.md) gets a node running. The status documents list every work package with its state; a package marked in progress has a builder, so ask in an issue before starting on one.
+The latest release is on the [releases page](https://github.com/linkztream/tenko/releases); [QUICKSTART.md](QUICKSTART.md) gets a node running. The status documents list every work package with its state; a package marked in progress is taken, so ask in an issue before starting on one.
 
 ### Help wanted
 
 Packages that stand on their own and are free to take, with where their specification lives:
 
-- **DHCPv6**: WP9.1 (the codec and the server: IA_NA, relay, RFC 6939, RFC 4704), then WP9.2 (IA_PD and the RA check) and WP9.4 (the UI): [phase-3-plan.md](plans/phase-3-plan.md) section 4, `docs/dhcp.md`, `docs/dhcp-contracts.md`.
-- **Recursion after WP10.2**: WP10.3 (QNAME minimization, the denial cache, RFC 8020 and RFC 9520) and WP10.4 (the API, the CLI and the UI): [dns-recursion-plan.md](plans/dns-recursion-plan.md) section 4. RFC 5011 key revocation in Tenko's own signer is a small package of its own once WP10.2 lands.
+- **RFC 5011 on the signing side**: Tenko's own signer revoking a key it rolls (the validator side is built): [CONFORMANCE.md](CONFORMANCE.md), the RFC 5011 row, and [dnssec.md](dnssec.md).
 - **Migration connectors** that need no AD: BIND (MIG-09), OPNsense (MIG-10), dnsmasq and Pi-hole (MIG-11), Kea and ISC dhcpd (MIG-12), NetBox and phpIPAM (MIG-13): [MIGRATION.md](MIGRATION.md) and the IR in `docs/dhcp-contracts.md` section 11; the Kea export in `crates/tenko-dhcp/src/export/` is the mirror image of MIG-12.
-- **Measurements that fail their threshold**: M23, idle memory of the musl binary with the home zones and a full cache, 100.05 MiB against 100 MB ([phase-2-exit.md](plans/phase-2-exit.md), deviation 145); M31, the DDNS answer latency from DHCP, p99 699 ms against 250 ms (`bench/phase3-dhcp/results/2026-10-22-m31-ddns.md`). Each needs a profile first and a measured fix second.
-- **Sign-in with OIDC** (IAM-11, Phase 4, Slice 13, self-contained): planned in [identity-plan.md](plans/identity-plan.md) with ADR 0026 Accepted; the provider flow, the group claim mapping onto the roles and the UI are WP13.5.
-- **Smaller**: the UI test suite is flaky under a loaded machine (one failure in about 4,300 tests per full gate; a worker-count or timing fix with evidence); the weekly lab workflows run on hosted runners since 2026-10-22 and their first runs need watching.
+- **Measurements that fail their threshold**: M23, idle memory of the musl binary with the home zones and a full cache, 100.05 MiB against 100 MB ([phase-2-exit.md](plans/phase-2-exit.md), deviation 145); M31, the DDNS answer latency from DHCP, p99 699 ms against 250 ms ([phase-3-exit.md](plans/phase-3-exit.md), deviation 163). Each needs a profile first and a measured fix second.
+- **Sign-in with OIDC** (IAM-11, Phase 4, Slice 13, self-contained): planned in [identity-plan.md](plans/identity-plan.md) with ADR 0026 Accepted; the provider flow, the group claim mapping onto the roles and the UI are WP13.5, behind the routes that answer `sys.not_implemented` today.
 
 To take one: open an issue with the feature-request form naming the package, and you get the package's brief there (the plan section, the files it owns, what done looks like, the checks). Then the rules of [CONTRIBUTING.md](../CONTRIBUTING.md): one branch per package, Conventional Commits in English, the checks before the pull request, a result file behind every performance claim, the Contributor License Agreement, and never a real network's names or addresses in the repository.
 
@@ -44,11 +45,11 @@ To take one: open an issue with the feature-request form naming the package, and
 
 A release is cut when one of three things happens: a milestone of the current plan closes, a week has passed with merged changes that an operator can see, or the lab needs a fix. The cost of a release is a version bump, one full gate and a tag, so a weekly cadence is cheap; the owner updates the lab node from the web UI after each one. Patch numbers carry fixes and partial packages, minor numbers closed milestones, and 1.0 waits for what the project has set aside on purpose: signed releases, measurements repeated on the released binary, and a documented support story. Every release whose changelog carries an "Action required" line is shown to the owner before the tag, and from 0.1.0 on the update flow takes the backup of ADR 0023 before it replaces the binary, so every later release has a restore point on the node.
 
+The released versions and what each carried are in [CHANGELOG.md](../CHANGELOG.md); the table lists the next ones.
+
 | Version | After | Carries |
 |---|---|---|
-| 0.0.6 | The installer's role change (prepare every role outside Hardened) | DHCPv6 IA_NA on the server side (WP9.1), reserving an address in DHCP, the reachable scan configuration, the installer change |
-| 0.0.7 | WP9.2, WP9.4 and the DHCPv6 half of WP9.3 | IA_PD and delegation pools, the RA check, the DHCPv6 UI and routes, the Kea `Dhcp6` export; E29 and E30 complete |
-| 0.0.12 | The first run of the reworked release workflow | The fixes of the security audit, data format 6 with the contracts of the Windows takeover and of Slice 13, the exporter of the Windows DHCP mirror; the rehearsal for 0.1.0 |
+| 0.0.12 | The first run of the reworked release workflow | Secure dynamic updates with GSS-TSIG and the Kerberos account, the owners of names, the dashboard's two-day history, trusted DHCP relays, the fixes of the security audit, data format 6 with the contracts of the Windows takeover and of Slice 13, the exporter of the Windows DHCP mirror; the rehearsal for 0.1.0 |
 | 0.1.0 | The Phase 3 exit (WP9.5) and the Kerberos line of Slice 13 (WP13.0 to WP13.4), with E44 run in the owner's Windows lab | DHCP complete and measured on one node; secure dynamic updates with GSS-TSIG from Windows clients and domain controllers, verified against Windows: the release line the Windows takeover runs on |
 | 0.1.x | The remaining packages of Slice 14 and the first packages of directory sign-in (WP13.5, WP13.6) | The mirror of a Windows DHCP server, the takeover of a scope and the flip of a zone; sign-in with OIDC and LDAP as they land |
 | 0.2.0 | Slice 13 complete | Directory sign-in with OIDC, LDAP and Kerberos |
@@ -56,7 +57,7 @@ A release is cut when one of three things happens: a milestone of the current pl
 | 0.3.0 | Slice 12 complete | The failover pair and its chaos test |
 | 1.0 | Signing, re-measurement and support | The first release recommended outside a lab |
 
-The versions follow the owner's order. On 2026-10-25 identity (Slice 13) was placed before high availability (Slice 12) where the two compete for builders, because it is smaller, well specified and unblocks the Active Directory take-over. On 2026-11-06 the owner tied 0.1.0 to the Kerberos line: the first minor release is the one the Windows takeover runs on, so it waits for GSS-TSIG verified against Windows in the owner's lab (E44 of [identity-plan.md](plans/identity-plan.md)) and not only for the Phase 3 exit. The real cutover of [windows-takeover-plan.md](plans/windows-takeover-plan.md) runs on the first 0.1 release that also carries Slice 14 complete. Before the 0.1.0 tag the lead checks on the release candidate that the update flow takes the backup of ADR 0023 before it replaces the binary, which the paragraph above promises from 0.1.0 on.
+The versions follow the owner's order. On 2026-10-25 identity (Slice 13) was placed before high availability (Slice 12) where the two compete, because it is smaller, well specified and unblocks the Active Directory take-over. On 2026-11-06 the owner tied 0.1.0 to the Kerberos line: the first minor release is the one the Windows takeover runs on, so it waits for GSS-TSIG verified against Windows in the owner's lab (E44 of [identity-plan.md](plans/identity-plan.md)) and not only for the Phase 3 exit. The real cutover of [windows-takeover-plan.md](plans/windows-takeover-plan.md) runs on the first 0.1 release that also carries Slice 14 complete. Before the 0.1.0 tag the release candidate is checked for whether the update flow takes the backup of ADR 0023 before it replaces the binary, which the paragraph above promises from 0.1.0 on.
 
 ## Overview
 
@@ -151,7 +152,7 @@ Replaces the existing IPAM spreadsheet.
 ### Deliverables
 
 - **Authentication**: Argon2id password hashing with policy presets (PIN, Standard, Hardened, and custom with regex, length and HIBP check), TOTP, passkeys (WebAuthn), recovery codes, lockout, sessions and a break-glass account (IAM-03 to IAM-09).
-- **Authorization, audit and secrets**: RBAC with object scope, a hash-chained audit log, and a vault with a DPAPI or keyring-held KEK (IAM-01, IAM-15, IAM-18).
+- **Authorization, audit and secrets**: RBAC with object scope, a hash-chained audit log, and a vault with a KEK held by DPAPI or by systemd credentials (IAM-01, IAM-15, IAM-18).
 - **Cluster**: Raft store in operation as a single node and as a 3-node cluster, node enrollment and mTLS (OPS-03, OPS-04).
 - **IPAM**: tenant/VRF, tree, VLAN, site, status, tags, next free, history and utilization alarms. CSV/Excel import with column mapping in the UI (IPAM-11).
 - **Scanner**: probe role; passive discovery (ARP/ND, mDNS, LLDP); active scanning (ICMP, TCP ports, OS fingerprinting); SNMPv3 switch polling; schedules and rate limits. A host view shows open ports and OS (SCAN-01 to SCAN-08).
@@ -163,7 +164,7 @@ Replaces the existing IPAM spreadsheet.
 - **VLAN objects, topology map and move job** with preview and rollback (IPAM-03, IPAM-19, IPAM-20).
 - **Releases and upgrades**: a data-directory format version with migrations and `tenko upgrade check`, release builds with checksums per tag, a compatibility test against the previous release, and in-app update notices with release notes and single-node installation from the UI (OPS-23, OPS-24).
 - **Partition behavior**: isolated controllers refuse writes visibly, serve reads with a staleness indicator, queue changes as proposals and catch up without merging (OPS-26).
-- **History of the metric tiles** (added by the owner on 2026-11-11, after the phase closed): the dashboard's metric tiles get a history of the last two days on one continuous time axis that compresses toward the past and glides in real time, within the cost budget of OPS-21 (OPS-20), planned in [dashboard-history-plan.md](plans/dashboard-history-plan.md) as Slice 18. The owner wants it in the next release, so its packages take builder slots as they free up, the contracts first.
+- **History of the metric tiles** (added by the owner on 2026-11-11, after the phase closed): the dashboard's metric tiles get a history of the last two days on one continuous time axis that compresses toward the past and glides in real time, within the cost budget of OPS-21 (OPS-20), planned in [dashboard-history-plan.md](plans/dashboard-history-plan.md) as Slice 18 and merged on 2026-11-12 for the next release.
 
 In Phase 1 the move job performs the IPAM intent change, the UniFi L2 move and the observation. The reservation and DNS steps are manual tasks until Tenko's own engines exist (Phase 2 to 3), at which point the same job becomes fully automatic.
 
@@ -223,7 +224,7 @@ From this phase the move job's DNS step is automatic.
 - **DDNS**: option 81, DHCID and name protection, PTR records, and updates on commit, expire and release (DHCP-13).
 - **IPAM reconciliation**: leases, DNS, scans and intent in one view with conflict rules (IPAM-21). Fingerprinting from options 55 and 60 feeds the OS field (DHCP-14).
 - **Tenko DHCP as actuator**: reservations are created directly from IPAM intent, and leases become observations without polling (DHCP-16).
-- **Recursive resolver** (Slice 10, the owner's decision REC-Q1 of 2026-10-22, moved here from Phase 5): Tenko's own recursive resolver from the root hints with DNSSEC validation, QNAME minimization, aggressive NSEC and RFC 5011 trust anchor maintenance (DNS-03, DNS-13, DNS-34), planned in [dns-recursion-plan.md](plans/dns-recursion-plan.md) and ADR 0021; until it ships, recursion is served by the forwarder, cache and RPZ combination from Phase 2.
+- **Recursive resolver** (Slice 10, the owner's decision REC-Q1 of 2026-10-22, moved here from Phase 5): Tenko's own recursive resolver from the root hints with DNSSEC validation, QNAME minimization, aggressive NSEC and RFC 5011 trust anchor maintenance (DNS-03, DNS-13, DNS-34), planned in [dns-recursion-plan.md](plans/dns-recursion-plan.md) and ADR 0021; WP10.0 to WP10.4 are built, and WP10.5, its measurements and exit document, is open.
 - **High availability of the data plane** (Slice 12, the owner's decisions HA-Q1 to HA-Q15 of 2026-10-25, moved here from Phase 5): `dns` and `dhcp` nodes without a controller, fed by node sync into a node store; leases held by the serving node and published to the controllers; DHCP failover pairs; the health hooks of OPS-17; split scopes beside Windows DHCP (DHCP-07, DHCP-12, DHCP-18, OPS-17, OPS-26), planned in [ha-plan.md](plans/ha-plan.md) and ADR 0025.
 
 The move job becomes fully automatic for `reserved` hosts (the DNS step was already automatic in Phase 2). This is where the IoT move becomes one click.
@@ -315,7 +316,7 @@ These are non-blocking and are resolved during Phase 0.
 
 ## Candidates, not planned
 
-Proposals that were weighed and are recorded so that they are not proposed again from nothing. None has a requirement, a phase or a builder; one becomes a requirement only by the owner's decision.
+Proposals that were weighed and are recorded so that they are not proposed again from nothing. None has a requirement, a phase or anyone working on it; one becomes a requirement only by the owner's decision.
 
 | Candidate | What it would be | Why it waits |
 |---|---|---|
