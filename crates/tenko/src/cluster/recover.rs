@@ -1204,7 +1204,12 @@ mod tests {
         notice(Phase::Prepared).save(dir.path()).expect("notice");
         let dirs = Dirs::at(dir.path(), &store, 1);
         fs::rename(&store, &dirs.kept).expect("aside");
-        assert!(check_start(dir.path()).is_err());
+        assert_eq!(
+            check_start(dir.path())
+                .expect_err("an unfinished step")
+                .code,
+            codes::INTERRUPTED
+        );
         undo_at(dir.path(), &store).expect("undo");
         assert_eq!(log_of(&store), "old");
         assert!(!dirs.kept.exists());
@@ -1224,7 +1229,12 @@ mod tests {
         fs::create_dir_all(&store).expect("new store");
         fs::write(store.join("log.redb"), "new").expect("new log");
         fs::write(&dirs.tail, "{}").expect("tail");
-        assert!(check_start(dir.path()).is_err());
+        assert_eq!(
+            check_start(dir.path())
+                .expect_err("an unfinished step")
+                .code,
+            codes::INTERRUPTED
+        );
         undo_at(dir.path(), &store).expect("undo");
         assert_eq!(log_of(&store), "old");
         assert_eq!(
