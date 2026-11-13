@@ -42,7 +42,7 @@ use tonic::{
     metadata::{MetadataMap, MetadataValue},
 };
 
-use super::{Inner, Peers, network::GenerationHook, revoked_node};
+use super::{Inner, Peers, network::GenerationHook};
 use crate::{
     admin::{GenerationView, MemberRole, MemberView, OtherHistory},
     error::ClusterError,
@@ -51,6 +51,7 @@ use crate::{
         RECORD_METADATA, Relation, SUPERSEDED, Signed, Standing, codes, decode_lineage,
         encode_lineage, suggested_winner,
     },
+    model::tables,
     mtls::PeerInfo,
     proto::v1,
     server::status_of,
@@ -73,6 +74,12 @@ pub(super) struct Generations {
     behind: Mutex<HashSet<NodeId>>,
     /// Superseded controllers the last push did not reach.
     unreached: Mutex<BTreeSet<NodeId>>,
+    /// Superseded controllers that answered with this history's newest record: they hold
+    /// it, and the push leaves them alone until the next start.
+    informed: Mutex<HashSet<NodeId>>,
+    /// One offer at a time: two offers that raced could leave the fence file and the
+    /// in-memory state with a weaker reason than the store keeps.
+    offering: tokio::sync::Mutex<()>,
     /// The lineage is kept unsent: the first start after a forced step has not taken
     /// office (section 3.5), so an old majority that is alive is not fenced by a step the
     /// operator may still undo.
@@ -112,6 +119,12 @@ impl GenerationHook for Hook {
     fn observe(&self, status: &Status, from: NodeId) {
         if let Some(inner) = self.0.upgrade() {
             Peers { inner }.observe(status, from);
+        }
+    }
+
+    fn answered(&self, from: NodeId) {
+        if let Some(inner) = self.0.upgrade() {
+            lock(&inner.generations.behind).remove(&from);
         }
     }
 }
@@ -254,10 +267,28 @@ impl Peers {
             .and_then(|record| record.header().ok())
             .map(|header| header.number);
         let state = self.generation();
-        if theirs.is_some_and(|theirs| theirs <= state.lineage.number())
-            && records.last().map(GenerationRecord::hash) != state.lineage.tip().map(Signed::hash)
-        {
+        let newest = records.last().map(GenerationRecord::hash);
+        let ours = state.lineage.tip().map(Signed::hash);
+        if newest == ours && ours.is_some() {
+            // It holds this history's newest record: nothing to offer either way.
+            lock(&self.generations().behind).remove(&from);
+            lock(&self.generations().informed).insert(from);
+            return;
+        }
+        let known = state
+            .fence
+            .as_ref()
+            .is_some_and(|(_, fence)| fence.tip().map(Signed::hash) == newest)
+            || state
+                .lineage
+                .records()
+                .iter()
+                .any(|own| Some(own.hash()) == newest);
+        if theirs.is_some_and(|theirs| theirs <= state.lineage.number()) {
             lock(&self.generations().behind).insert(from);
+        }
+        if known {
+            return;
         }
         let peers = self.clone();
         tokio::spawn(async move {
@@ -374,6 +405,7 @@ impl Peers {
                 "this controller cannot check a generation record yet: it has no CA root",
             )
         })?;
+        let _one_at_a_time = self.generations().offering.lock().await;
         self.refresh_lineage().await;
         let state = self.generation();
         let standing = {
@@ -446,6 +478,14 @@ impl Peers {
 
     /// Fences this controller: the fence file first, then the store.
     async fn apply_fence(&self, reason: FenceReason, records: Lineage, persist: bool) {
+        // A fence never weakens: a weaker reason after a stricter one changes nothing.
+        if lock(&self.generations().state)
+            .fence
+            .as_ref()
+            .is_some_and(|(current, _)| current.strictness() > reason.strictness())
+        {
+            return;
+        }
         if persist && let Some(dir) = &self.inner.config.data_dir {
             let kept = FenceFile {
                 kind: reason,
@@ -580,15 +620,18 @@ impl Peers {
 
     async fn push_targets(&self) -> Result<Vec<NodeId>, ClusterError> {
         let view = self.store().read(ReadConsistency::Local).await?;
-        let marked = view.scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)?;
-        let mut targets = Vec::with_capacity(marked.len());
-        for (node, _, _) in marked {
-            let node = NodeId(node);
-            if !revoked_node(view.as_ref(), node)? {
-                targets.push(node);
-            }
-        }
-        Ok(targets)
+        let revoked: HashSet<NodeId> = view
+            .scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
+            .into_iter()
+            .map(|(_, revocation, _)| revocation.node)
+            .collect();
+        let informed = lock(&self.generations().informed).clone();
+        Ok(view
+            .scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)?
+            .into_iter()
+            .map(|(node, _, _)| NodeId(node))
+            .filter(|node| !revoked.contains(node) && !informed.contains(node))
+            .collect())
     }
 
     /// Offers the lineage to `node`; whether it answered at all.

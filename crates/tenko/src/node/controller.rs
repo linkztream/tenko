@@ -862,7 +862,7 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
                 state.set_notice(notice(
                     reason.code(),
                     format!(
-                        "this controller stopped writing ({}): reads serve its copy until an                          operator acts on its host (docs/cluster.md section 12.11)",
+                        "this controller stopped writing ({}): reads serve its copy until an operator acts on its host (docs/cluster.md section 12.11)",
                         reason.code()
                     ),
                     &forced,
@@ -874,12 +874,26 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
     let pending: Vec<NodeId> = match layer.store().read(ReadConsistency::Local).await {
         Ok(view) if generation.fence.is_none() && generation.lineage.tip().is_some() => {
             let membership = layer.store().membership();
+            // Neither rejoined (a member again) nor removed (revoked).
+            let revoked: Vec<NodeId> = view
+                .scan_typed(
+                    &tenko_cluster::model::tables::REVOCATIONS,
+                    KeyRange::all(),
+                    usize::MAX,
+                    false,
+                )
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, revocation, _)| revocation.node)
+                .collect();
             view.scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|(node, _, _)| NodeId(node))
                 .filter(|node| {
-                    !membership.voters.contains(node) && !membership.learners.contains(node)
+                    !membership.voters.contains(node)
+                        && !membership.learners.contains(node)
+                        && !revoked.contains(node)
                 })
                 .collect()
         }

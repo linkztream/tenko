@@ -68,17 +68,6 @@ struct Clock {
     leader_since: Option<(RaftNodeId, u64, Moment)>,
 }
 
-/// How strict a fence is: a later fence never weakens an earlier one. Superseded, and a
-/// reason this build does not know, rank above a conflict, which ranks above a live old
-/// majority.
-fn strictness(reason: FenceReason) -> u8 {
-    match reason {
-        FenceReason::MajorityAlive => 0,
-        FenceReason::Conflict => 1,
-        FenceReason::Superseded | FenceReason::Unknown => 2,
-    }
-}
-
 /// What the metrics follower publishes.
 pub(super) struct LeadershipState {
     sender: watch::Sender<Option<Leadership>>,
@@ -107,13 +96,13 @@ impl LeadershipState {
 
     /// Stops this member for good: no leadership from now on, and the quorum state is
     /// [`QuorumState::Fenced`]. A second fence keeps the first one's time and the stricter
-    /// reason ([`strictness`]). The leadership is cleared under the fence's lock, which
+    /// reason ([`FenceReason::strictness`]). The leadership is cleared under the fence's lock, which
     /// [`LeadershipState::publish`] holds while it sends, so a metrics snapshot taken before
     /// the fence cannot restore it.
     pub(super) fn fence(&self, reason: FenceReason, applied: Revision) {
         let mut fence = self.fence.lock().unwrap_or_else(PoisonError::into_inner);
         let (since, current) = fence.unwrap_or((Timestamp::now(), reason));
-        let reason = if strictness(current) >= strictness(reason) {
+        let reason = if current.strictness() >= reason.strictness() {
             current
         } else {
             reason

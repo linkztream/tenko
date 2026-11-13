@@ -250,13 +250,34 @@ where
         let service = self.inner.clone();
         Box::pin(async move {
             use tower::ServiceExt as _;
-            if let Some(peer) = request.extensions().get::<PeerInfo>().cloned() {
-                let metadata =
-                    tonic::metadata::MetadataMap::from_headers(request.headers().clone());
-                let join = request.uri().path().ends_with("/Join");
-                if let Err(status) = peers.admit(&peer, join, &metadata).await {
-                    return Ok(status.into_http());
+            // A record is checked only for a controller: another caller is refused before
+            // any signature is verified or any table read.
+            let peer = match request.extensions().get::<PeerInfo>().cloned() {
+                Some(peer) if peer.identity.roles.contains(tenko_core::Role::Controller) => peer,
+                Some(peer) => {
+                    return Ok(status_of(&ClusterError::new(
+                        "cluster.peer.not_controller",
+                        403,
+                        format!(
+                            "node {} is not a controller; the controller services refuse it",
+                            peer.identity.node
+                        ),
+                    ))
+                    .into_http());
                 }
+                None => {
+                    return Ok(status_of(&ClusterError::new(
+                        "cluster.tls.no_peer",
+                        401,
+                        "the call did not arrive over the mutual TLS of the cluster port",
+                    ))
+                    .into_http());
+                }
+            };
+            let metadata = tonic::metadata::MetadataMap::from_headers(request.headers().clone());
+            let joining = joins(request.uri().path());
+            if let Err(status) = peers.admit(&peer, joining, &metadata).await {
+                return Ok(status.into_http());
             }
             let mut response = service.oneshot(request).await?;
             if let Some(value) = peers
@@ -272,6 +293,13 @@ where
             Ok(response)
         })
     }
+}
+
+/// Whether a call of the `Cluster` service is part of a join: `Join` and the key transfer
+/// with a join token. A joining controller starts with an empty store and may speak for an
+/// older generation; the handlers check its token and its record.
+fn joins(path: &str) -> bool {
+    path.ends_with("/Join") || path.ends_with("/TransferKek")
 }
 
 /// The node services of the cluster port, attached by the `nodes` start step.
@@ -915,6 +943,14 @@ mod tests {
                 .is_ok_and(|record| record.body().is_ok()),
             _ => false,
         }
+    }
+
+    #[test]
+    fn a_join_and_its_key_transfer_pass_an_older_claim() {
+        assert!(super::joins("/tenko.cluster.v1.Cluster/Join"));
+        assert!(super::joins("/tenko.cluster.v1.Cluster/TransferKek"));
+        assert!(!super::joins("/tenko.cluster.v1.Cluster/Propose"));
+        assert!(!super::joins("/tenko.cluster.v1.Raft/AppendEntries"));
     }
 
     #[test]

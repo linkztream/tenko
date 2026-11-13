@@ -155,6 +155,14 @@ fn a_stale_survivor_is_forced_and_the_old_controllers_fence() {
         })
     });
     println!("E142: the returning old controllers took {taken} write(s) before the fence");
+    // None of them reached the authority: two histories never merge.
+    let on_authority = lab.get(stale, "/addresses").expect("an answer").text;
+    for written in 11..=n {
+        assert!(
+            !on_authority.contains(&format!("\"203.0.113.{written}\"")),
+            "a write of the old controllers reached the authority: 203.0.113.{written}"
+        );
+    }
     let refused = write(&lab, others[0], 200);
     let problem = refused.expect(503);
     assert_eq!(problem["code"], "cluster.superseded", "{problem}");
@@ -209,10 +217,11 @@ fn a_live_majority_keeps_the_forced_controller_out_of_office() {
             .copied()
             .find(|id| lab.members(*id).is_some_and(|view| view["leader"] == *id))
     });
-    write(&lab, leader, 5).expect(201);
 
+    // The majority wrote nothing since the split: alive all the same.
     lab.restart(cut);
     wait_fenced(&lab, cut, "majority_alive");
+    write(&lab, leader, 5).expect(201);
     let problem = write(&lab, cut, 6).expect(503);
     assert_eq!(
         problem["code"], "cluster.recover.majority_alive",

@@ -160,6 +160,8 @@ pub(crate) trait GenerationHook: Send + Sync {
     fn stamp(&self, metadata: &mut tonic::metadata::MetadataMap, target: NodeId);
     /// Reads the record a refusal of `from` carries.
     fn observe(&self, status: &Status, from: NodeId);
+    /// `from` answered a call without a refusal: it speaks this history.
+    fn answered(&self, from: NodeId);
 }
 
 /// Whether a node gets no Raft message from this controller.
@@ -455,7 +457,12 @@ impl PeerNetwork {
         call: impl Future<Output = Result<tonic::Response<T>, Status>>,
     ) -> Result<T, Status> {
         match tokio::time::timeout(timeout, call).await {
-            Ok(Ok(response)) => Ok(response.into_inner()),
+            Ok(Ok(response)) => {
+                if let Some(hook) = self.inner.generation.get() {
+                    hook.answered(target);
+                }
+                Ok(response.into_inner())
+            }
             Ok(Err(status)) => {
                 if let Some(hook) = self.inner.generation.get()
                     && code_of(&status).is_some()

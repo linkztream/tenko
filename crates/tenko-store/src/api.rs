@@ -970,6 +970,17 @@ pub enum FenceReason {
 }
 
 impl FenceReason {
+    /// How strict the fence is: a later fence never weakens an earlier one. Superseded, and
+    /// a reason this build does not know, rank above a conflict, which ranks above a live
+    /// old majority.
+    pub const fn strictness(self) -> u8 {
+        match self {
+            Self::MajorityAlive => 0,
+            Self::Conflict => 1,
+            Self::Superseded | Self::Unknown => 2,
+        }
+    }
+
     /// The error code of a write refused for this reason.
     pub const fn code(self) -> &'static str {
         match self {

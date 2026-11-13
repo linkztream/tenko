@@ -48,7 +48,7 @@ use tenko_cluster::{
         self, Claim, FenceFile, ForkPoint, GENERATION, GenerationBody, GenerationRecord, LAYOUT,
         Lineage, SUPERSEDED, SupersededMark, codes,
     },
-    identity::{Credentials, NodePaths},
+    identity::{Credentials, NodePaths, write_private},
     model::{MemberRecord, tables},
     registry,
 };
@@ -189,12 +189,10 @@ impl Notice {
     ///
     /// A message naming the file.
     pub fn save(&self, data_dir: &Path) -> Result<(), String> {
-        let path = data_dir.join(NOTICE_FILE);
-        let part = data_dir.join(format!("{NOTICE_FILE}.part"));
         let text = serde_json::to_vec_pretty(self).map_err(|error| error.to_string())?;
-        fs::write(&part, text)
-            .and_then(|()| fs::rename(&part, &path))
-            .map_err(|error| format!("{}: {error}", path.display()))
+        // Durable before the store moves: a power loss after the rename must find the
+        // notice, or the next start would make an empty installation.
+        write_private(&data_dir.join(NOTICE_FILE), &text).map_err(|error| error.detail().to_owned())
     }
 }
 
@@ -213,8 +211,8 @@ pub fn check_start(data_dir: &Path) -> Result<(), StartError> {
             codes::INTERRUPTED,
             format!(
                 "a forced step of the cluster recovery (generation {}) did not finish; run \
-                 `tenko cluster recover --undo` to put the copy kept aside back, or \
-                 `tenko cluster recover --force` again",
+                 `tenko cluster recover --undo` to put the copy kept aside back, then force \
+                 again if you still mean to",
                 notice.generation
             ),
         )),
@@ -252,9 +250,12 @@ impl Dirs {
 
 impl Dirs {
     fn new(resolved: &Resolved, generation: u64) -> Self {
-        let data = &resolved.data_dir;
+        Self::at(&resolved.data_dir, &resolved.layout().store(), generation)
+    }
+
+    fn at(data: &Path, store: &Path, generation: u64) -> Self {
         Self {
-            store: resolved.layout().store(),
+            store: store.to_path_buf(),
             kept: data.join(format!("recover-gen{generation}")),
             work: data.join(format!("recover-gen{generation}.work")),
             tail: data.join(format!("recover-gen{generation}.tail.jsonl")),
@@ -348,6 +349,8 @@ struct Facts {
     /// The highest generation this copy has seen: its own or its fence's.
     seen: u64,
     members: BTreeMap<NodeId, MemberRecord>,
+    /// The nodes with a record in the registry: the ones `--revoke` can revoke.
+    enrolled: BTreeSet<NodeId>,
 }
 
 impl Facts {
@@ -371,7 +374,14 @@ impl Facts {
             .into_iter()
             .map(|(node, record, _)| (NodeId(node), record))
             .collect();
+        let enrolled = view
+            .scan_typed(&tables::NODES, KeyRange::all(), usize::MAX, false)
+            .map_err(store_failure)?
+            .into_iter()
+            .map(|(node, _, _)| NodeId(node))
+            .collect();
         Ok(Self {
+            enrolled,
             seen: own
                 .as_ref()
                 .map_or(0, generation::Signed::number)
@@ -678,6 +688,20 @@ async fn force(
             ));
         }
     }
+    if let Some(named) = args
+        .revoke
+        .iter()
+        .find(|named| !facts.enrolled.contains(&NodeId(**named)))
+    {
+        return Err(failure(
+            "cluster.recover.unknown_node",
+            exit::USAGE,
+            format!(
+                "controller {named} has no record in the node registry of this copy, so there \
+                 are no certificates to revoke; remove it later with `tenko cluster remove`"
+            ),
+        ));
+    }
     let credentials = Credentials::load(&NodePaths::new(&resolved.data_dir))
         .map_err(|error| failure(error.code(), exit::USAGE, error.detail()))?;
     let generation = facts.seen + 1;
@@ -705,7 +729,6 @@ async fn force(
         despite_majority: args.despite_majority,
         at: Timestamp::now(),
     };
-    notice.save(&resolved.data_dir).map_err(Failure::other)?;
     if dirs.kept.exists() || dirs.work.exists() {
         return Err(failure(
             codes::INTERRUPTED,
@@ -717,10 +740,19 @@ async fn force(
             ),
         ));
     }
-    fs::rename(&dirs.store, &dirs.kept).map_err(|error| {
+    notice.save(&resolved.data_dir).map_err(Failure::other)?;
+    // Again now that the notice keeps a server from starting: one started since the
+    // inspection would write into the copy that is to be kept.
+    let moved = tenko_store::format::ensure_closed(&dirs.store)
+        .map_err(store_failure)
+        .and_then(|()| {
+            fs::rename(&dirs.store, &dirs.kept)
+                .map_err(|error| Failure::other(format!("renaming the store aside: {error}")))
+        });
+    if let Err(error) = moved {
         let _ = fs::remove_file(resolved.data_dir.join(NOTICE_FILE));
-        Failure::other(format!("renaming the store aside: {error}"))
-    })?;
+        return Err(error);
+    }
     let committed = async {
         dirs.move_fence(false)?;
         let replayed = replay(&dirs.kept, &dirs.work)
@@ -775,8 +807,9 @@ async fn force(
             let _ = fs::remove_dir_all(&dirs.store);
             let _ = fs::remove_dir_all(&dirs.work);
             let _ = fs::remove_file(&dirs.tail);
-            let _ = dirs.move_fence(true);
-            if fs::rename(&dirs.kept, &dirs.store).is_ok() {
+            // The notice goes only when the old store and its fence are both back; else it
+            // keeps the server from starting until `--undo`.
+            if dirs.move_fence(true).is_ok() && fs::rename(&dirs.kept, &dirs.store).is_ok() {
                 let _ = fs::remove_file(resolved.data_dir.join(NOTICE_FILE));
             }
             return Err(error);
@@ -888,7 +921,7 @@ fn write_tail(path: &Path, replayed: &Replayed) -> Result<(), Failure> {
         });
         let _ = writeln!(text, "{line}");
     }
-    fs::write(path, text).map_err(|error| Failure::other(format!("{}: {error}", path.display())))
+    write_private(path, text.as_bytes()).map_err(|error| Failure::other(error.detail()))
 }
 
 /// An entry of the tail as JSON: each write batch decoded (its keys and values stay bytes).
@@ -1000,21 +1033,24 @@ fn host_name() -> String {
 
 /// `--undo`: before the first start took office, the copy kept aside goes back.
 fn undo(resolved: &Resolved) -> Result<Output, Failure> {
-    let notice = Notice::load(&resolved.data_dir)
-        .map_err(Failure::other)?
-        .ok_or_else(|| {
-            failure(
-                codes::UNDO_REFUSED,
-                exit::USAGE,
-                "there is no forced step to undo: none was made here, or the first start after \
+    undo_at(&resolved.data_dir, &resolved.layout().store())
+}
+
+/// [`undo`] for the data directory `data` and its store directory `store`.
+fn undo_at(data: &Path, store: &Path) -> Result<Output, Failure> {
+    let notice = Notice::load(data).map_err(Failure::other)?.ok_or_else(|| {
+        failure(
+            codes::UNDO_REFUSED,
+            exit::USAGE,
+            "there is no forced step to undo: none was made here, or the first start after \
                  it took office",
-            )
-        })?;
-    let dirs = Dirs::new(resolved, notice.generation);
+        )
+    })?;
+    let dirs = Dirs::at(data, store, notice.generation);
     if !dirs.kept.exists() {
         if notice.phase == Phase::Prepared {
             // The step stopped before it renamed the store: nothing moved.
-            fs::remove_file(resolved.data_dir.join(NOTICE_FILE)).map_err(Failure::other)?;
+            fs::remove_file(data.join(NOTICE_FILE)).map_err(Failure::other)?;
             return Ok(Output {
                 stdout: "the interrupted forced step changed nothing; its notice is gone\n"
                     .to_owned(),
@@ -1036,8 +1072,18 @@ fn undo(resolved: &Resolved) -> Result<Output, Failure> {
     let _ = fs::remove_dir_all(&dirs.work);
     let _ = fs::remove_file(&dirs.tail);
     fs::rename(&dirs.kept, &dirs.store).map_err(Failure::other)?;
+    if notice.phase == Phase::Committed && !dirs.kept_fence.exists() {
+        // The old store had no fence; one written since belongs to the history undone.
+        match fs::remove_file(&dirs.fence) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(Failure::other(format!("{}: {error}", dirs.fence.display())));
+            }
+        }
+    }
     dirs.move_fence(true)?;
-    fs::remove_file(resolved.data_dir.join(NOTICE_FILE)).map_err(Failure::other)?;
+    fs::remove_file(data.join(NOTICE_FILE)).map_err(Failure::other)?;
     Ok(Output {
         stdout: format!(
             "the forced step to generation {} is undone: the copy from before it is the store \
@@ -1100,4 +1146,151 @@ pub fn parent_claim(notice: &Notice) -> Claim {
 pub fn took_office(data_dir: &Path) -> Result<(), String> {
     fs::remove_file(data_dir.join(NOTICE_FILE))
         .map_err(|error| format!("{}: {error}", data_dir.join(NOTICE_FILE).display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_core::{Revision, audit::ChainHead, testing::TempDir};
+    use tenko_store::raft::{openraft::LeaderId, types::LogId};
+
+    use super::*;
+
+    fn notice(phase: Phase) -> Notice {
+        Notice {
+            phase,
+            generation: 1,
+            node: NodeId(2),
+            parent: None,
+            old: Vec::new(),
+            despite_majority: false,
+            at: Timestamp::now(),
+        }
+    }
+
+    /// A data directory with a store whose log file holds `content`.
+    fn data_dir(content: &str) -> (TempDir, PathBuf) {
+        let dir = TempDir::new("recover-undo");
+        let store = dir.path().join("store");
+        fs::create_dir_all(&store).expect("store");
+        fs::write(store.join("log.redb"), content).expect("log");
+        (dir, store)
+    }
+
+    fn log_of(store: &Path) -> String {
+        fs::read_to_string(store.join("log.redb")).expect("the log")
+    }
+
+    #[track_caller]
+    fn refused(result: Result<Output, Failure>, code: &str) {
+        let failure = result.expect_err(code);
+        assert!(format!("{failure:?}").contains(code), "{failure:?}");
+    }
+
+    #[test]
+    fn a_crash_before_the_store_moved_is_undone_without_a_trace() {
+        let (dir, store) = data_dir("old");
+        notice(Phase::Prepared).save(dir.path()).expect("notice");
+        let refusal = check_start(dir.path()).expect_err("an unfinished step");
+        assert_eq!(refusal.code, codes::INTERRUPTED);
+        undo_at(dir.path(), &store).expect("undo");
+        assert_eq!(log_of(&store), "old");
+        assert!(check_start(dir.path()).is_ok());
+        refused(undo_at(dir.path(), &store), codes::UNDO_REFUSED);
+    }
+
+    #[test]
+    fn a_crash_after_the_store_moved_aside_is_undone() {
+        let (dir, store) = data_dir("old");
+        notice(Phase::Prepared).save(dir.path()).expect("notice");
+        let dirs = Dirs::at(dir.path(), &store, 1);
+        fs::rename(&store, &dirs.kept).expect("aside");
+        assert!(check_start(dir.path()).is_err());
+        undo_at(dir.path(), &store).expect("undo");
+        assert_eq!(log_of(&store), "old");
+        assert!(!dirs.kept.exists());
+        assert!(check_start(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn a_crash_after_the_new_store_was_installed_is_undone_with_the_fence() {
+        let (dir, store) = data_dir("old");
+        let dirs = Dirs::at(dir.path(), &store, 1);
+        fs::create_dir_all(dirs.fence.parent().expect("node dir")).expect("node dir");
+        fs::write(&dirs.fence, "the old fence").expect("fence");
+        notice(Phase::Prepared).save(dir.path()).expect("notice");
+        fs::rename(&store, &dirs.kept).expect("aside");
+        dirs.move_fence(false).expect("fence aside");
+        fs::create_dir_all(&dirs.work).expect("work");
+        fs::create_dir_all(&store).expect("new store");
+        fs::write(store.join("log.redb"), "new").expect("new log");
+        fs::write(&dirs.tail, "{}").expect("tail");
+        assert!(check_start(dir.path()).is_err());
+        undo_at(dir.path(), &store).expect("undo");
+        assert_eq!(log_of(&store), "old");
+        assert_eq!(
+            fs::read_to_string(&dirs.fence).expect("fence back"),
+            "the old fence"
+        );
+        assert!(!dirs.work.exists() && !dirs.tail.exists() && !dirs.kept_fence.exists());
+        assert!(check_start(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn an_undo_before_the_first_start_drops_a_fence_of_the_new_history() {
+        let (dir, store) = data_dir("old");
+        let dirs = Dirs::at(dir.path(), &store, 1);
+        fs::rename(&store, &dirs.kept).expect("aside");
+        fs::create_dir_all(&store).expect("new store");
+        fs::write(store.join("log.redb"), "new").expect("new log");
+        notice(Phase::Committed).save(dir.path()).expect("notice");
+        assert!(check_start(dir.path()).is_ok(), "a finished step starts");
+        fs::create_dir_all(dirs.fence.parent().expect("node dir")).expect("node dir");
+        fs::write(&dirs.fence, "written by the new history").expect("fence");
+        undo_at(dir.path(), &store).expect("undo");
+        assert_eq!(log_of(&store), "old");
+        assert!(!dirs.fence.exists(), "the old store had no fence");
+    }
+
+    fn facts(node: u64, term: u64, index: u64) -> Facts {
+        let log = Some(LogId::new(LeaderId::new(term, 1), index));
+        Facts {
+            copy: CopyFacts {
+                node: Some(NodeId(node)),
+                last_log: log,
+                committed: log,
+                applied: log,
+                vote_term: term,
+                revision: Revision(index),
+                audit_head: ChainHead::default(),
+                voters: [1, 2, 3].into_iter().map(NodeId).collect(),
+                learners: BTreeSet::new(),
+                bytes: 0,
+            },
+            node: NodeId(node),
+            own: None,
+            seen: 0,
+            members: BTreeMap::new(),
+            enrolled: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn copies_of_one_history_are_ordered_by_their_last_log_id() {
+        let ours = facts(2, 5, 100);
+        assert_eq!(ours.fingerprint(), "tkfp1:0:0:5:100:100:2");
+        let fresher = facts(3, 5, 120).fingerprint();
+        let older_term = facts(1, 4, 900).fingerprint();
+        let other_history = "tkfp1:1:abcd0123:2:7:7:9".to_owned();
+        let mut out = String::new();
+        let found =
+            compare(&ours, &[fresher, older_term, other_history], &mut out).expect("compare");
+        assert_eq!(found, vec!["node 3".to_owned()]);
+        assert!(out.contains("another history"), "{out}");
+        let mut out = String::new();
+        let bad = compare(&ours, &["tkfp2:0:0:1:1:1:1".to_owned()], &mut out);
+        assert!(
+            format!("{:?}", bad.expect_err("not a fingerprint"))
+                .contains("cluster.recover.fingerprint")
+        );
+    }
 }

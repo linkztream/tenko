@@ -227,10 +227,25 @@ pub async fn start_peers(
     }
     let membership = store.membership();
     // A member of a group of several nodes (a joined controller, or the first one after
-    // its first join), or a controller whose identity is under `<data_dir>/node/` and that
-    // is the only voter now (a forced step of the cluster recovery, or the last of a
-    // cluster): its peers dial it at the cluster port of that identity.
-    let member = membership.voters.len() + membership.learners.len() > 1 || credentials.is_some();
+    // its first join), or a controller that a forced step of the cluster recovery made the
+    // only voter: it keeps the identity under `<data_dir>/node/`, and the superseded
+    // controllers dial it at the cluster port of that identity.
+    let forced = !{
+        let view = store
+            .read(ReadConsistency::Local)
+            .await
+            .map_err(|error| StartError::coded("cluster", &error))?;
+        view.scan_typed(
+            &tenko_cluster::generation::GENERATION,
+            KeyRange::all(),
+            1,
+            false,
+        )
+        .map_err(|error| StartError::coded("cluster", &error))?
+        .is_empty()
+    };
+    let member = membership.voters.len() + membership.learners.len() > 1
+        || (forced && credentials.is_some());
     if let Some(credentials) = &credentials {
         network.set_tls(
             credentials
@@ -453,10 +468,10 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     loop {
         tick.tick().await;
+        // Every voter is asked again at every tick until the deadline: one that answers
+        // alone now may be part of a majority that elects a moment later (a power outage
+        // ends for everybody at once). Only a live majority ends the probe early.
         for old in &notice.old {
-            if answers.contains_key(&old.node) {
-                continue;
-            }
             let Ok(endpoint) = peers.network().endpoint(old.node, Some(&old.address)).await else {
                 continue;
             };
@@ -477,6 +492,10 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
                 Ok(Some(Err(status))) => {
                     if let Some(code) = tenko_cluster::server::code_of(&status) {
                         let answer = if code == tenko_cluster::generation::codes::SUPERSEDED {
+                            tracing::info!(
+                                node = %old.node,
+                                "an old voter answered the probe as superseded by another history already; the records it sent are not taken here"
+                            );
                             Answer::Alone("superseded already".to_owned())
                         } else {
                             Answer::Unreadable(format!("refused with {code}"))
@@ -487,7 +506,10 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
                 _ => {}
             }
         }
-        if answers.len() == notice.old.len() || Instant::now() >= deadline {
+        let alive = answers
+            .values()
+            .any(|answer| matches!(answer, Answer::Alive(_)));
+        if alive || Instant::now() >= deadline {
             break;
         }
     }
@@ -513,7 +535,13 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
         return;
     }
     if let Err(error) = recover::took_office(&resolved.data_dir) {
-        tracing::warn!("{error}");
+        // With the notice still there `--undo` would bring the old store back after the
+        // old voters met this history: office is not taken.
+        tracing::error!(
+            "the notice of the forced step could not be removed ({error}); this controller does not take office"
+        );
+        peers.refuse_office().await;
+        return;
     }
     peers.hold_record(false);
     tracing::error!(
@@ -561,5 +589,37 @@ pub async fn catch_up(store: &RaftStore, timeout: Duration) -> bool {
             return false;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_cluster::proto::v1::MembersResponse;
+
+    use super::*;
+
+    fn answer(quorum: &str, leader: u64, in_contact: u32, voters: u32) -> Answer {
+        answer_of(&MembersResponse {
+            leader_id: leader,
+            term: 3,
+            members: Vec::new(),
+            quorum: quorum.to_owned(),
+            in_contact,
+            voters,
+        })
+    }
+
+    #[test]
+    fn an_old_voter_with_a_majority_counts_as_alive() {
+        assert!(matches!(answer("healthy", 1, 3, 3), Answer::Alive(_)));
+        assert!(matches!(answer("single", 1, 0, 1), Answer::Alive(_)));
+        assert!(matches!(answer("electing", 0, 2, 3), Answer::Alive(_)));
+        assert!(matches!(answer("electing", 0, 1, 3), Answer::Alone(_)));
+        assert!(matches!(answer("isolated", 0, 0, 3), Answer::Alone(_)));
+        assert!(matches!(answer("fenced", 0, 0, 3), Answer::Alone(_)));
+        // A binary that reports no state: a known leader is a live cluster.
+        assert!(matches!(answer("", 4, 0, 0), Answer::Alive(_)));
+        assert!(matches!(answer("", 0, 0, 0), Answer::Unreadable(_)));
+        assert!(matches!(answer("later", 0, 0, 3), Answer::Unreadable(_)));
     }
 }

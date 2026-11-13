@@ -1806,7 +1806,6 @@ impl Peers {
     }
 }
 
-/// The number of learners to promote so that the voters stay odd: as many as possible.
 /// The name of a quorum state in `Cluster.Members`.
 fn quorum_name(quorum: &tenko_store::QuorumState) -> &'static str {
     use tenko_store::QuorumState;
@@ -1819,6 +1818,7 @@ fn quorum_name(quorum: &tenko_store::QuorumState) -> &'static str {
     }
 }
 
+/// The number of learners to promote so that the voters stay odd: as many as possible.
 fn odd_promotions(voters: usize, eligible: usize) -> usize {
     if eligible == 0 {
         0
