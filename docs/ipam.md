@@ -75,6 +75,8 @@ The findings model ([reconciliation.md](reconciliation.md) section 12) lists the
 
 Counts are decimal strings because IPv6 sizes exceed the exact integers of JSON.
 
+A principal whose grants are limited to a scope ([access.md](access.md)) sees counts without the child prefixes it may not read: in `GET /api/v1/prefixes/{id}/addresses` an address in such a child counts as free, and the `utilization` of a tree node leaves those children out. Two principals can therefore see different figures for the same supernet.
+
 ## 7 The networks view
 
 The Networks page (`/ipam`, a prefix at `/ipam/prefixes/<network>/<length>`, so the selected prefix is in the URL) finds the level in the tree and scans the networks in the pane (U6 of [the UI plan](plans/ui-plan.md), section 5.2).

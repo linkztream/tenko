@@ -26,13 +26,13 @@ All routes are under `/api/v1` and exist only while the DNS module runs (OPS-25)
 
 ## 1. Zones and kinds
 
-| Kind | Holds data in Tenko | Phase 2 |
+| Kind | Holds data in Tenko | What it is |
 |---|---|---|
 | `primary` | yes | Tenko is the source of the zone |
-| `rpz` | yes | a response policy zone (the policy engine is WP5.2) |
+| `rpz` | yes | a response policy zone ([dns-resolver.md](dns-resolver.md) section 5) |
 | `secondary` | yes, the copy | filled by zone transfers from `source.primaries` (section 10); the records are read-only |
-| `stub` | no | the row only; it names the servers to ask (WP5.1) |
-| `forward` | no | the row only; queries go to `source.primaries` (WP5.1) |
+| `stub` | no | the row only; it names the servers to ask |
+| `forward` | no | the row only; queries go to `source.primaries` |
 
 A zone has a name (the apex, not a wildcard), its scopes, a serial policy (section 5), the SOA values (`soa`: `mname`, `rname`, `refresh`, `retry`, `expire`, `minimum`, `ttl`; the SOA TTL is also the default TTL of new RRsets), a transfer policy, an update policy (named `DnsUpdatePolicy` in the OpenAPI document), a DNSSEC policy, the source servers of a secondary, stub or forward zone, and a description. A primary or RPZ zone needs at least one name server; a zone of another kind takes none. The access lists a zone's transfer or update policy names must exist.
 
@@ -97,7 +97,7 @@ tenko dns record list example.test --name www
 GET /api/v1/dns/zones/{id}/records?name=www&type=A&limit=100
 ```
 
-Origins (plan section 2.5): API, UI and zone-file writes are `manual`. A change that would replace, shrink or delete an RRset of another origin is refused with 409 `dns.record.origin` (parameter `origin`) unless the change says `take_over`; the RRset is then `manual`, and the audit record `dns.record.change` names it (`take_over`: owner, type and former origin). The update policy's `may_replace_ipam` concerns dynamic updates (WP6.2), not the API.
+Origins (plan section 2.5): API, UI and zone-file writes are `manual`. A change that would replace, shrink or delete an RRset of another origin is refused with 409 `dns.record.origin` (parameter `origin`) unless the change says `take_over`; the RRset is then `manual`, and the audit record `dns.record.change` names it (`take_over`: owner, type and former origin). The update policy's `may_replace_ipam` concerns dynamic updates (section 13), not the API.
 
 ## 3. Batch changes and the dry run
 
@@ -272,7 +272,7 @@ Serials compare in serial number arithmetic (RFC 1982), so a serial always moves
 
 ### The journal
 
-Every serial step of a scope leaves one entry in `dns.journal`, in the same write as the change: the serial before and after, the time, and the records removed and added. `removed` starts with the old SOA record and `added` with the new one, in the order an IXFR answer carries them (RFC 1995, used by zone transfers in WP6.1). An entry's key is the zone, the scope and the store revision the change was planned against, which grows with every step of a scope.
+Every serial step of a scope leaves one entry in `dns.journal`, in the same write as the change: the serial before and after, the time, and the records removed and added. `removed` starts with the old SOA record and `added` with the new one, in the order an IXFR answer carries them (RFC 1995, read by the zone transfers of section 10). An entry's key is the zone, the scope and the store revision the change was planned against, which grows with every step of a scope.
 
 The journal is bounded per scope: 1,000 entries and 30 days. Every write drops, in the same batch, the oldest entries beyond the count and those past the age (at most 32 at a time, so a backlog shrinks over the next writes). A large import resets the journal of its scope, and removing a scope or a zone removes its journal. A secondary that asks for a serial older than the first entry gets a full transfer (AXFR).
 
@@ -286,7 +286,7 @@ The journal is bounded per scope: 1,000 entries and 30 days. Every write drops, 
 
 ### Access lists
 
-An access list has a unique name (1 to 64 characters, compared without case), at most 1,000 entries and a description. An entry is a prefix (`{"kind": "prefix", "prefix": "192.0.2.0/24"}`), a TSIG key (`{"kind": "key", "name": "transfer.example.test"}`) or `any`, each optionally `"deny": true`; the first entry that matches decides, and no match refuses. Zones name lists in their transfer policy (`transfer.allow`) and update policy (`update.allowed`), views as their recursion access list ([section 11](#11-views-scopes-and-weights)); a list a zone or a view names cannot be deleted (409 `dns.acl.in_use`, parameter `by`). A list read carries `used_by` (`zone:<name>`, `view:<name>`) and its revision as the `ETag`.
+An access list has a unique name (1 to 64 characters, compared without case), at most 1,000 entries and a description. An entry is a prefix (`{"kind": "prefix", "prefix": "192.0.2.0/24"}`), a TSIG key (`{"kind": "key", "name": "transfer.example.test"}`), a Kerberos principal of a realm, which matches GSS-TSIG updates only (`{"kind": "kerberos", "realm": "CORP.EXAMPLE.TEST"}`, section 13.10), or `any`, each optionally `"deny": true`; the first entry that matches decides, and no match refuses. Zones name lists in their transfer policy (`transfer.allow`) and update policy (`update.allowed`), views as their recursion access list ([section 11](#11-views-scopes-and-weights)); a list a zone or a view names cannot be deleted (409 `dns.acl.in_use`, parameter `by`). A list read carries `used_by` (`zone:<name>`, `view:<name>`) and its revision as the `ETag`.
 
 ```
 tenko dns acl create secondaries --entry 192.0.2.0/24 --entry key:transfer.example.test --entry any,deny
@@ -419,15 +419,14 @@ The findings carry no commands: a person resolves them in the zones or the inten
 - Reverse names ignore the VRF: two VRFs with one address give one PTR RRset with both names.
 - Every run reads the `ipam` RRsets of every zone that has any (the origin counters tell which), and the A, AAAA and PTR records of every primary zone for the observations; zones of millions of records make runs slower.
 - The actuator's writes are not fenced with the leader epoch; a deposed leader checks before it writes, and the next leader's run corrects what a late write left.
-- The switch `dns_actuator` and the orphan rule are reconciler settings without a control on the settings page yet (the modules page of WP5.5).
 
 ## 8. The dns role
 
-The `dns` role answers queries for the zones in the store. In Phase 2 it runs in the controller's own process (plan section 2.10, [ADR 0004](adr/0004-single-binary-roles.md)): `tenko serve --roles controller,dns` (or `all`) on a node whose DNS module is on. A `dns` node of its own, fed through node sync without a controller in the process, comes with Phase 5; `--roles dns` without `controller` is refused (exit status 2), and so is `dhcp`, which is reported and skipped on a controller node. A node without the role, or with the DNS module off, starts nothing of it and runs as before.
+The `dns` role answers queries for the zones in the store. It runs in the controller's own process (plan section 2.10, [ADR 0004](adr/0004-single-binary-roles.md)): `tenko serve --roles controller,dns` (or `all`) on a node whose DNS module is on, beside the `dhcp` role when that is listed. A `dns` node of its own, fed through node sync without a controller in the process, comes with Slice 12 ([ha-plan.md](plans/ha-plan.md)); `--roles dns` or `--roles dhcp` without `controller` is refused (exit status 2). A node without the role, or with the DNS module off, starts nothing of it and runs as before.
 
 ### Start and stop
 
-The role is the last start step of `tenko serve`, `dns` (step 14 of 14), after the API is up. On a node without the role the step logs why it has nothing to do (the role is not on the node, or the DNS module is off). Otherwise, in this order:
+The role is start step 14 of `tenko serve`'s 15, `dns`, after the API is up; the `dhcp` role follows as step 15. On a node without the role the step logs why it has nothing to do (the role is not on the node, or the DNS module is off). Otherwise, in this order:
 
 1. The engine's metric families join the process registry (`tenko_dns_queries_total`, `tenko_dns_query_duration_seconds`).
 2. The role's derived index joins the store (below): the store builds the first image of the `dns` tables from a local read, and the catalog (the index, the views and the forwarding rules, section 12.3) is built from it off the async threads.
@@ -464,14 +463,16 @@ The `[dns]` section of `tenko.toml` ([`deploy/tenko.example.toml`](../deploy/ten
 | `edns.udp_size` | 1232 | The server's EDNS UDP size, 512 to 4096 |
 | `forwarders`, `forward_timeout_ms`, `forward_retries`, `upstream_ca` | none, 2000, 2, none | The default forwarder and the upstreams' budget and CA ([dns-resolver.md](dns-resolver.md) section 4.5) |
 | `cache.*` | | The cache ([dns-resolver.md](dns-resolver.md) section 3) |
-| `log.enabled` | `false` | The query log of this node |
+| `log.enabled` | the profile's | The query log of this node; not set, it follows the security profile (TGL-15): off under Home, on under Standard, Hardened and Lab |
 | `log.path` | `<data_dir>/dns/querylog` | The directory of its files |
-| `log.format` | `jsonl` | JSON lines; `dnstap` is refused until it is written (WP5.4) |
-| `log.days`, `log.size_mb` | 7, 256 | Retention by age (1 to 365 days) and by size (1 to 102,400 MiB) |
+| `log.format` | `jsonl` | `jsonl` (JSON lines) or `dnstap` (Frame Streams files for dnstap tools) |
+| `log.days`, `log.size_mb` | the profile's, 256 | Retention by age (1 to 365 days; not set, 30 under Standard and Hardened and 7 under Home and Lab) and by size (1 to 102,400 MiB) |
 | `log.sample` | 1 | Log one query in N |
 | `log.pseudonymize` | `true` | Replace client addresses with a keyed hash whose key changes every day |
+| `log.client` | `logged` | `hidden` writes no client field at all |
+| `egress_allow` | none | Prefixes that this node's fetches (the URL of a block list, the primaries of a secondary zone) may reach although the egress policy refuses their class: loopback, link-local, multicast, unspecified and metadata service addresses ([dns-resolver.md](dns-resolver.md) section 5.4, section 10.6) |
 
-The settings are read at start; a change needs a restart of the node.
+The other `[dns.*]` sections are described where they act: `[dns.limits]`, `[dns.lists]`, `[dns.tls]` and `[dns.recursion]` in [dns-resolver.md](dns-resolver.md), `[dns.gss]` in section 13.10. The settings are read at start; a change needs a restart of the node.
 
 ### Status
 
@@ -499,17 +500,19 @@ The cache flush and the query log read are node commands (`docs/node-sync.md` se
 | `POST /api/v1/nodes/{id}/dns/cache/flush?suffix=` (scope `dns.write`) | `dns.cache.flush` | Answers 202 with the command id: the cache is emptied, or the names at or below `suffix`, and the detail says how many entries went; the flush is audited (`dns.cache.flush`) |
 | `GET /api/v1/nodes/{id}/dns/cache?suffix=&view=&limit=&cursor=` (scope `dns.read`) | `dns.cache.list` | A page of what the cache holds in canonical name order, with the cursor of the next page; every read is audited (`dns.cache.read`), see [dns-resolver.md](dns-resolver.md) section 3.7 |
 | `GET /api/v1/nodes/{id}/dns/log?cursor=&limit=&qname=` (scope `dns.read`) | `dns.log.read` | A page of the query log, newest first: up to `limit` lines (1 to 1,000, default 100) whose query name starts with `qname`, and the cursor of the next page. 409 `dns.node.not_dns` when the node's query log is off |
+| `POST /api/v1/nodes/{id}/dns/log/stop` and `.../log/start` | `dns.log.stop`, `dns.log.start` | Stop or start the running query log of the node, until its next start (`log.enabled` decides then) |
+| `GET /api/v1/nodes/{id}/dns/infra`, `POST .../infra/flush`, `GET /api/v1/nodes/{id}/dns/recursion`, `POST .../recursion/prime` | | The recursive resolver: its infrastructure cache, its state and priming; [dns-resolver.md](dns-resolver.md) |
 | none | `dns.stats` | The counters of the workers, the forwarder and its cache, and the query log in the command's detail, for the remote path of Phase 5 |
 
 ### The query log
 
-Per node and off by default (plan section 2.9, TGL-15), never written through the store. On the query path an entry is copied into a ring of 8,192 fixed-size slots (no allocation, a short lock); a full ring drops the entry and counts it. A writer thread empties the ring every 100 ms into JSON lines in `log.path`, one segment file `queries-<microseconds>.jsonl` at a time, flushed after each batch:
+Per node, on or off by the security profile unless `log.enabled` says (plan section 2.9, TGL-15), never written through the store. On the query path an entry is copied into a ring of 8,192 fixed-size slots (no allocation, a short lock); a full ring drops the entry and counts it. A writer thread empties the ring every 100 ms into JSON lines in `log.path`, one segment file `queries-<microseconds>.jsonl` at a time, flushed after each batch:
 
 ```json
 {"at":"2026-10-17T12:00:00.123456Z","client":"p:3f2a9c0d81b7e645","transport":"udp","qname":"www.example.test","type":"A","rcode":0,"cached":false,"duration_micros":38}
 ```
 
-`client` is the address, or with `log.pseudonymize` (the default) `p:` and 16 hexadecimal digits of an HMAC-SHA-256 of the address under a random key that is replaced at midnight UTC and never written down: one client keeps its pseudonym for a day only. `log.sample` keeps one query in N. A segment holds at most a sixteenth of `log.size_mb` (1 to 8 MiB); segments older than `log.days` go first, then the oldest while the directory holds more than `log.size_mb`; the newest segment always stays. Queries answered by the forwarder are logged when their answer is sent. Setting `log.enabled = false` and restarting the node is the kill switch. dnstap frame streams are WP5.4.
+`client` is the address, or with `log.pseudonymize` (the default) `p:` and 16 hexadecimal digits of an HMAC-SHA-256 of the address under a random key that is replaced at midnight UTC and never written down: one client keeps its pseudonym for a day only. `log.sample` keeps one query in N. A segment holds at most a sixteenth of `log.size_mb` (1 to 8 MiB); segments older than `log.days` go first, then the oldest while the directory holds more than `log.size_mb`; the newest segment always stays. Queries answered by the forwarder are logged when their answer is sent. `log.enabled = false` is the kill switch across restarts; the node commands `dns.log.stop` and `dns.log.start` (`POST /api/v1/nodes/{id}/dns/log/stop` and `.../start`) switch a running log. With `log.format = "dnstap"` the segments are Frame Streams files for dnstap tools.
 
 ### Port 53 and the platforms
 
@@ -550,7 +553,7 @@ A request for AXFR or IXFR is checked in this order, and the first failure answe
 4. The policy decides, and a failure is REFUSED (RCODE 5): the zone has no `allow` list; the transport (below); the lists do not allow the client; or the signature (below). Each list decides by its first matching entry; an entry matches by prefix, by the TSIG key of the request, or as `any`. The lists combine with "deny wins": a list whose first matching entry is a `deny` refuses the client whatever another list says, and otherwise one list that allows is enough. With `require_tsig` the request must also be signed with a key that an allowing `key` entry of the zone's lists names, so a client inside the allowed prefix but without the key is refused.
 5. A secondary zone that holds no copy yet, or whose copy has expired, answers SERVFAIL.
 
-The security profile sets a floor under the zone's own settings (TGL-10, [SECURITY-PROFILES.md](SECURITY-PROFILES.md)). Under Hardened every transfer must be signed with a key the lists name, whatever `require_tsig` says, and a client outside the site must come over TLS (XoT), whatever `xot` says; the zone's own `xot` still applies to every client. Under Home, Standard and Lab the zone's settings apply as stored. The site is the security setting `transfer_site` ([SECURITY-PROFILES.md](SECURITY-PROFILES.md), TGL-10): a list of networks in CIDR notation whose default is the private (RFC 1918), shared (RFC 6598), unique-local (RFC 4193), loopback and link-local ranges. A transfer to an address outside it leaves the site (`tenko_dns::xfr::access::Site`); an empty list makes every transfer leave it. The role follows a change of the list as it follows the profile, without a restart, and the findings of section 10.14 use the same list.
+The security profile sets a floor under the zone's own settings (TGL-10, [SECURITY-PROFILES.md](SECURITY-PROFILES.md)). Under Hardened every transfer must be signed with a key the lists name, whatever `require_tsig` says, and a client outside the site must come over TLS (XoT), whatever `xot` says; the zone's own `xot` still applies to every client. Under Home, Standard and Lab the zone's settings apply as stored. The site is the security setting `transfer_site` ([SECURITY-PROFILES.md](SECURITY-PROFILES.md), TGL-10): a list of networks in CIDR notation whose default is the private (RFC 1918), shared (RFC 6598), unique-local (RFC 4193), loopback and link-local ranges. A transfer to an address outside it leaves the site (`tenko_dns::xfr::access::Site`); an empty list makes every transfer leave it. The role follows a change of the list as it follows the profile, without a restart, and the findings of section 10.14 use the same list. `tenko dns transfer site` shows the list. Changing it needs an administrator session with a fresh sign-in, which a token does not give: the security settings of the web UI, or `PATCH /api/v1/settings/security`.
 
 | Order | Rule | Refusal code in the audit record and the log |
 |---|---|---|
@@ -882,7 +885,7 @@ The view table is compiled when the rows change and tried for every query: a vie
 
 ## 12. The engine
 
-How a query travels from a socket to its answer, how the workers use sockets on each platform, how the index is laid out and kept current, the order of the lookup, EDNS and cookies, TCP, the limits and their settings, the metrics and the allocation rule: for operators who size and tune a node and for builders of the later Phase 2 packages. The decisions behind it are [ADR 0009](adr/0009-dns-wire-format-and-udp-io.md) (wire format and UDP I/O) and [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) (data model and serving path); the contracts are in [dns-contracts.md](dns-contracts.md). The code is `crates/tenko-dns`.
+How a query travels from a socket to its answer, how the workers use sockets on each platform, how the index is laid out and kept current, the order of the lookup, EDNS and cookies, TCP, the limits and their settings, the metrics and the allocation rule: for operators who size and tune a node and for contributors to the engine. The decisions behind it are [ADR 0009](adr/0009-dns-wire-format-and-udp-io.md) (wire format and UDP I/O) and [ADR 0017](adr/0017-dns-data-model-and-serving-path.md) (data model and serving path); the contracts are in [dns-contracts.md](dns-contracts.md). The code is `crates/tenko-dns`.
 
 ### 12.1 The path of a query
 
@@ -929,14 +932,14 @@ The reference implementation `MemIndex` is the test oracle: the tests build both
 The order of one query (plan sections 2.2 and 2.3):
 
 1. **Header.** An opcode other than QUERY is NOTIMP. A signed query is NOTAUTH (the resolver verifies no TSIG; a signed SOA query of a secondary is answered by the transfer path before the resolver, section 10.3). A class other than IN is REFUSED. The meta types OPT, TKEY and TSIG are FORMERR; AXFR and IXFR go to the transfer path of section 10.3 first, and a resolver reached without it answers them REFUSED with the extended error "Prohibited"; MAILA and MAILB are NOTIMP.
-2. **Rate limiter**: the query is admitted or dropped (`RateLimiter::admit_query`; WP5.2 implements RRL).
+2. **Rate limiter**: the query is admitted or dropped (`RateLimiter::admit_query`, response rate limiting of [dns-resolver.md](dns-resolver.md)).
 3. **View** (DNS-20): the first view in `order` whose rules all match (client subnet, transport, local address, query type, time of day, query name) wins; none matching is the implicit default view, which sees the default scope of every zone. A view's weights pick one scope per zone, with a value derived from the client address so that one client keeps seeing the same scope.
 4. **Zone**: the served zone (primary or secondary) with the longest apex at or above the name. A stub, forward or RPZ zone is not answered from.
 5. **Name**: the exact name first; else its closest encloser. On the way from the apex down, a zone cut (NS below the apex) refers, except for a DS query at the cut itself, which the parent answers; a DNAME above the name redirects it. A name that does not exist is answered from the wildcard at its closest encloser (RFC 4592), with the question name as the owner.
 6. **Chains**: a CNAME is followed inside the index and a DNAME's CNAME is synthesized (owner the current name, TTL the DNAME's, RFC 6672), up to eight steps in all; a loop or a longer chain stops with what was found. A synthesized name over 255 octets is YXDOMAIN.
 7. **Sections** (minimal responses): a positive answer carries no NS in the authority section; the additional section carries the A and AAAA RRsets of the targets of MX, SRV and NS answers that the index holds, each target once. A referral carries the NS RRset (and the DS for a client with the DO bit), then the in-domain glue, which must fit (else the answer is truncated, RFC 9471), then the other glue inside the parent zone, which is left out when it does not fit. NODATA and NXDOMAIN carry the zone's SOA with the TTL of RFC 2308: the smaller of the SOA's TTL and its MINIMUM. NXDOMAIN at the end of a chain is the RCODE of the last name (RFC 6604). A query for ANY gets one RRset of the name (RFC 8482).
-8. **Bits**: AA for an answer from a zone, clear for a referral; RA when a forwarder is configured; AD never (no validation).
-9. **Outside the zones**: the policy (`PolicyEngine`: RPZ and block lists, WP5.2) may block with NXDOMAIN, NODATA or a redirect address, with the extended error "Blocked"; else, when the client asked for recursion, the forwarding rule with the longest suffix (a rule of the query's view before one of all views), or the default forwarder of the configuration, gets the query; else REFUSED with the extended error "Not Authoritative".
+8. **Bits**: AA for an answer from a zone, clear for a referral; RA when a forwarder is configured; AD only for an answer the validating resolver proved secure to a client that asked for it ([dnssec.md](dnssec.md) section 12), never for an answer from a zone Tenko serves.
+9. **Outside the zones**: the policy (`PolicyEngine`: RPZ and block lists) may block with NXDOMAIN, NODATA or a redirect address, with the extended error "Blocked"; else, when the client asked for recursion, the forwarding rule with the longest suffix (a rule of the query's view before one of all views), or the default forwarder of the configuration, gets the query; else REFUSED with the extended error "Not Authoritative".
 10. **Rate limiter** on the response (`admit_response` by response kind and zone): send it, slip it (an empty answer with TC, so a real client retries over TCP) or drop it.
 
 ### 12.5 EDNS and cookies
@@ -973,7 +976,7 @@ The fixed limits: a CNAME and DNAME chain of eight steps; 8,192 records and 192 
 
 ### 12.8 Metrics and the worker layout
 
-The engine counts `tenko_dns_queries_total{proto,view,rcode}` and observes `tenko_dns_query_duration_seconds{proto}` (50 µs to 2 s, from the arrival of a query to its answer) on the calling thread's shard of the registry (OPS-21); `metrics::register` seals and registers both at the role's start. `view` is `default` for the implicit default view and `named` for any configured view (per-view series come with view management, WP6.4); `rcode` is one of `noerror`, `formerr`, `servfail`, `nxdomain`, `notimp`, `refused`, `notauth`, `badvers`, `badcookie` or `other`. Dropped queries are not counted there; a forwarded query is counted when the forwarder answers it, with the RCODE it relayed (SERVFAIL when every upstream failed), and its latency runs from the hand-over to the answer ([section 9](#9-the-forwarder)); a cache hit is counted as any answer of the query path.
+The engine counts `tenko_dns_queries_total{proto,view,rcode}` and observes `tenko_dns_query_duration_seconds{proto}` (50 µs to 2 s, from the arrival of a query to its answer) on the calling thread's shard of the registry (OPS-21); `metrics::register` seals and registers both at the role's start. `view` is `default` for the implicit default view and `named` for any configured view (views are not told apart in the label); `rcode` is one of `noerror`, `formerr`, `servfail`, `nxdomain`, `notimp`, `refused`, `notauth`, `badvers`, `badcookie` or `other`. Dropped queries are not counted there; a forwarded query is counted when the forwarder answers it, with the RCODE it relayed (SERVFAIL when every upstream failed), and its latency runs from the hand-over to the answer ([section 9](#9-the-forwarder)); a cache hit is counted as any answer of the query path.
 
 Each UDP worker pins a shard of its own at its start (`tenko_core::metrics::pin_worker_shard`, numbered across every listen address), and the two query families have 32 shards rather than one per CPU, so no two workers of a node with up to 32 of them share a cache line of the families; every other thread takes its shard counting down from the last. A UDP worker does not touch the families per query: it counts its queries and their latency buckets in its own scratch and adds them to the families every 128 queries, a second after the first query of a batch, when its socket is idle (the 200 ms stop poll) and when it stops, so a scrape sees a UDP query a second late at most while queries arrive, and 200 ms late once they stop. TCP, DoT and DoH count on the families at once. M22 measured the cost of the metrics on the query path ([section 12.10](#1210-measurements)).
 
@@ -1004,7 +1007,6 @@ M18 (`2026-10-17-m18-zone-load.md`): the index holds 926 MiB for 7.2 M RRsets (1
 ### 12.11 Known limits
 
 - The UDP sockets do not read the destination address of a query (no `IP_PKTINFO`). On a host with more than one address, a socket bound to the wildcard address may answer from another source address than the client asked, which the client discards; such a node lists each of its addresses in `listen`. The role does not expand a wildcard into the host's addresses (the process has no interface list to read them from without a new dependency); it logs this limit at start when `listen` holds a wildcard address. For the same reason an interface rule of a view compares the address a socket is bound to.
-- When Tenko serves both a parent zone and its child, a DS query at the child's apex is answered from the child zone (the longest apex wins), where RFC 4035 (section 3.1.4.1) asks for the parent's DS; DNSSEC (WP6.3) handles this case.
 - A delta copies the overlay of each scope it touches, and folding an overlay into a new base is linear in the scope's size; very large zones with a high rate of dynamic updates (M21) may need an incremental base later. The same work slows a large zone file import into a serving node: at 7.2 M RRsets the import takes 49 percent longer on Windows and 85 percent longer with the musl allocator than without the role (M18). An incremental base, or a bulk path that builds a zone's base once when an import replaces it, would remove that.
 - The role builds its index from one image of all its rows: at start the image and the index are both in memory (3.7 GiB and 0.9 GiB at 7.2 M RRsets), and the allocator keeps part of the image after it is freed (the node's RSS after a start with 7.2 M RRsets is 1.7 GiB above an empty node on Windows, 2.3 GiB with musl). Building the index from the store's rows in pages would lower that peak.
 - `SO_REUSEPORT` spreads by flow hash: a load generator with few sockets reaches only some workers (section 12.2).
@@ -1035,6 +1037,8 @@ A zone's `update` policy (the `DnsUpdatePolicy` of the API):
 | `allowed` | none | The access lists (section 6) whose clients may update the zone. None means nobody |
 | `require_tsig` | `true` | An update must be signed with a key that an allowing `key` entry of the lists names |
 | `may_replace_ipam` | `false` | An update may change an RRset whose origin is `ipam` (section 13.4) |
+| `dhcp` | the profile's | Whether Tenko DHCP may write its clients' names into the zone ([dhcp.md](dhcp.md) section 13); not set: Home and Lab allow, Standard and Hardened do not until the operator allows it |
+| `kerberos` | none | The realms whose principals may sign updates with GSS-TSIG, the ownership rule and the privileged groups (section 13.11); none means no GSS-TSIG |
 
 An update is checked in this order, and the first failure answers:
 
@@ -1052,7 +1056,7 @@ REFUSED carries the extended error 18 (Prohibited) with the reason, and is audit
 | Hardened | No update | Always, TSIG or GSS-TSIG: an unsigned update is refused even when the zone switched `require_tsig` off, and a zone with Kerberos settings keeps the ownership rules of section 13.11 whatever its `ownership` says |
 | Lab | No update | Never required: an unsigned update from an address the lists allow passes; a list that names only keys still asks for its key |
 
-A zone overrides the default by naming access lists in `allowed` (every profile), and in Home and Standard by switching `require_tsig` off; Hardened and Lab hold their rule for the signature whatever the zone says. The settings tab of a primary zone in the web UI has the section "Dynamic updates" with the access lists, the two switches and the profile's rule beside them. TGL-09 concerns updates from external clients; the DDNS path of Tenko DHCP (Phase 3) is internal (DHCP-13).
+A zone overrides the default by naming access lists in `allowed` (every profile), and in Home and Standard by switching `require_tsig` off; Hardened and Lab hold their rule for the signature whatever the zone says. The settings tab of a primary zone in the web UI has the section "Dynamic updates" with the access lists, the two switches and the profile's rule beside them. TGL-09 concerns updates from external clients; the DDNS path of Tenko DHCP is internal and follows the `dhcp` field (DHCP-13).
 
 ```
 PATCH /api/v1/dns/zones/{id}

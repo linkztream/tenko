@@ -1,6 +1,6 @@
 # Jobs
 
-Every change that touches more than one row runs as a job (IPAM-17): a move, an import, an edit of IPAM, DNS or DHCP, a scan, an update. The API is `GET /api/v1/jobs` and `GET /api/v1/jobs/{id}`, with `POST /api/v1/jobs/{id}/cancel` and `POST /api/v1/jobs/{id}/steps/{index}/complete` for the two things a person can do to a job; the `jobs` event topic announces each change (API-09).
+Every change that touches more than one row runs as a job (IPAM-17): a move, an import, an edit of IPAM, DNS or DHCP, a scan, an update. The API is `GET /api/v1/jobs` and `GET /api/v1/jobs/{id}`, with `POST /api/v1/jobs/{id}/cancel` and `POST /api/v1/jobs/{id}/steps/{index}/complete` for the two things a person can do to a job; the `jobs` event topic announces each change (API-09). A principal whose grants are limited to a scope ([access.md](access.md)) lists and reads a job only when every existing target of the job is in its scope, since a job shows its parameters and steps.
 
 ## The jobs list
 
