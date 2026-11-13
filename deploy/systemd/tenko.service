@@ -7,25 +7,42 @@
 # Needs systemd 250 or later (LoadCredentialEncrypted= and the %d specifier): Debian 12,
 # Ubuntu 24.04, RHEL 9 and newer.
 #
-# Install (as root; the full walk-through is in deploy/README.md):
-#   1. Place the binary at /usr/local/bin/tenko.
-#   2. Create the service account first:
+# Install (as root; deploy/install.sh does all of this, and deploy/README.md walks through it):
+#   1. Create the service account and the group of the command line:
 #        useradd --system --home-dir /var/lib/tenko --no-create-home \
 #                --shell /usr/sbin/nologin tenko
-#   3. Create /etc/tenko, readable by the service account but not writable by it, and put
+#        groupadd --system tenko-cli
+#   2. Create /etc/tenko, readable by the service account but not writable by it, and put
 #      the configuration (deploy/tenko.example.toml) in it:
 #        install -d -m 0750 -o root -g tenko /etc/tenko
 #        install -m 0640 -o root -g tenko deploy/tenko.example.toml /etc/tenko/tenko.toml
-#        tenko config check --config /etc/tenko/tenko.toml
-#   4. Create the key-encryption key as an encrypted credential, once (see the section
+#   3. Lay out the version the service starts, as the account, from a copy of the release
+#      file in a directory that root owns and the account may only pass (never a file the
+#      account can write, and never root running anything in the data directory):
+#        install -d -m 0711 -o tenko -g tenko /var/lib/tenko
+#        d="$(mktemp -d)" && chmod 0711 "$d"
+#        install -m 0755 tenko-<version>-linux-x86_64 "$d/tenko"
+#        runuser -u tenko -- "$d/tenko" config check --config /etc/tenko/tenko.toml
+#        runuser -u tenko -- "$d/tenko" upgrade layout --data-dir /var/lib/tenko
+#        runuser -u tenko -g tenko -G tenko-cli -- chgrp tenko-cli /var/lib/tenko/updates
+#        runuser -u tenko -- chmod 0750 /var/lib/tenko/updates
+#      The last two lines are the gate of the command line: only members of tenko-cli pass
+#      updates/. The account changes the group of its own directory, holding tenko-cli for
+#      that one command only; the running service never holds it.
+#   4. The command line for members of tenko-cli (never on root's PATH):
+#        install -d -m 0755 /opt/tenko/cli
+#        ln -sfn /var/lib/tenko/updates/current/tenko /opt/tenko/cli/tenko
+#      and /etc/profile.d/tenko-cli.sh, which adds /opt/tenko/cli to the PATH of the members
+#      of tenko-cli, never root's (install.sh writes it).
+#   5. Create the key-encryption key as an encrypted credential, once (see the section
 #      "Key-encryption key" below; keep an offline copy of the key, see deploy/README.md):
 #        openssl rand -hex 32 | systemd-creds encrypt --name=tenko_kek - /etc/tenko/kek.cred
 #        chmod 0600 /etc/tenko/kek.cred
-#   5. Install this file as /etc/systemd/system/tenko.service, then run:
+#   6. Install this file as /etc/systemd/system/tenko.service, then run:
 #        systemctl daemon-reload && systemctl enable --now tenko
-#   6. While first-run setup is open the server keeps a one-time setup token in
+#   7. While first-run setup is open the server keeps a one-time setup token in
 #      /var/lib/tenko/setup-token (never in the journal); print it with
-#        sudo -u tenko tenko setup token --config /etc/tenko/tenko.toml
+#        bash install.sh --setup-token
 #      and complete setup in the web UI or with `tenko setup`.
 #
 # If the unit fails at once with status 243/CREDENTIALS, /etc/tenko/kek.cred is missing or
@@ -35,14 +52,13 @@
 # from the web UI, a changed module set, a switch back to the previous version) and is
 # always restarted.
 #
-# Versions (OPS-24, docs/upgrades.md): the service runs /var/lib/tenko/updates/current/tenko,
-# the version that the link `current` points at. ExecStartPre= copies /usr/local/bin/tenko
-# into /var/lib/tenko/updates/<version>/ when it is missing, and moves `current` to it when
-# it is newer than the running version (an administrator upgraded the binary by hand), so
-# that an update installed from the web UI is a switch of the link and a restart. To keep
-# the old layout without updates from the UI, use instead:
-#   ExecStart=/usr/local/bin/tenko serve --config /etc/tenko/tenko.toml
-# and delete the ExecStartPre= line; the UI then shows update notices only.
+# Versions (OPS-24, docs/upgrades.md section 9, ADR 0023): the node runs one version, the one
+# the link /var/lib/tenko/updates/current points at. ExecStart= runs it; ExecStartPre= runs
+# the same binary's `upgrade layout`, which changes no version and opens the versions current
+# and previous name to the command line; members of tenko-cli run it through
+# /opt/tenko/cli/tenko. An update installed from the web UI writes a new version into the
+# layout, moves `current` and restarts. Every command of this unit runs as User=tenko: no line
+# has the + or ! prefix that would run it with full privileges.
 
 [Unit]
 Description=Tenko DDI (DNS, DHCP and IPAM): controller
@@ -61,8 +77,10 @@ NotifyAccess=main
 # ("controller"). A controller node runs the dns, dhcp and probe roles in its process when
 # they are listed (roles = "controller,dns,dhcp"); a role list without `controller` exits
 # with status 2 when it names dns or dhcp. The binary is the version that `current` points
-# at; ExecStartPre= sets the layout up (see the top).
-ExecStartPre=/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml
+# at (see the top). The start-up step runs the same binary as the account; it reads no
+# configuration file and its leading "-" makes systemd go on whatever it exits with, so it
+# never stops a start, whatever version wrote tenko.toml.
+ExecStartPre=-/var/lib/tenko/updates/current/tenko upgrade layout --data-dir /var/lib/tenko
 ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
 # The data directory is the state directory below; the unit pins it so that a data_dir in
 # tenko.toml cannot point at a path the sandbox makes read-only.
@@ -142,11 +160,14 @@ Environment=TENKO_KEK__CREDENTIAL=tenko_kek
 
 # Filesystem
 # /var/lib/tenko holds kek/ (later key generations; the root key is the credential), store/ (redb files, fsynced
-# on every commit), tls/ca-root.pem and logs/. Mode 0700: the service account only.
+# on every commit), tls/ca-root.pem, logs/ and updates/. Mode 0711: others may pass through
+# it to updates/ (group tenko-cli, 0750, the command line's gate) and list nothing; every
+# directory with data in it is 0700 (UMask= below). systemd applies the mode when it creates
+# the directory; the installer sets it, as the account, on an existing one.
 # Put it on SSD or NVMe (OPS-19); the server logs the fsync median at start and warns
 # above 10 ms.
 StateDirectory=tenko
-StateDirectoryMode=0700
+StateDirectoryMode=0711
 # /var/log/tenko, created and owned by the service account, the only place besides the state
 # directory that the service may write. It is for `log.file = "/var/log/tenko/tenko.log"` in
 # tenko.toml (the journal gets the log either way). The server rotates that file itself by
@@ -165,8 +186,7 @@ PrivateDevices=yes
 # Execution: every path the service can write is mounted noexec for it, so a file the
 # account writes there (the store, the logs, /tmp, the rest of the data directory) never
 # runs, even when the account was taken over. Everything else is read-only for the service
-# (ProtectSystem=strict) and stays executable: /usr/local/bin/tenko of ExecStartPre= and the
-# system programs the service starts (ip and ping for the probe role, systemd-creds for the
+# (ProtectSystem=strict) and stays executable: the system programs the service starts (ip and ping for the probe role, systemd-creds for the
 # KEK providers that seal, the interpreter of an installed plugin). The writable paths are
 # the state and log directories and the private /tmp and /var/tmp; /dev/shm, /run and
 # /proc are noexec already. Two directories of the state directory stay executable:
@@ -176,7 +196,7 @@ PrivateDevices=yes
 #   /var/lib/tenko/plugins     written by an administrator (docs/plugins.md section 10):
 #                              installed plugins, which the service starts. This entry goes
 #                              when plugins run in a unit of their own (ADR 0032)
-# A leading "-": the path may not exist yet (the layout is made by ExecStartPre=). A data
+# A leading "-": the path may not exist (plugins/ until one is installed). A data
 # directory elsewhere is added to both lists by the installer's drop-in data-dir.conf.
 # NoExecPaths=/ with ExecPaths= would not do the same: the mounts systemd makes for the
 # service (StateDirectory=, LogsDirectory=, PrivateTmp=) are mounts of their own that keep

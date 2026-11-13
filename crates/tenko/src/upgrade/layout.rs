@@ -16,6 +16,11 @@
 //! from the running binary. A server that does not run from the layout shows update
 //! notices but installs nothing (`layout_missing`).
 //!
+//! On a Linux node the command an operator types is the link [`CLI_LINK`] to
+//! `current/tenko`, for the members of the group `tenko-cli`, whose gate is `updates/`
+//! itself (group `tenko-cli`, mode 0750, set once by the installer); see
+//! [`Layout::open_versions`] and ADR 0023's implementation table.
+//!
 //! The service account must be able to write the directory, so it can also replace the
 //! binary it runs: that is the price of installing from the UI, which is why the Hardened
 //! profile only takes uploaded files and every install needs an administrator (R17).
@@ -164,6 +169,7 @@ impl Layout {
                 ),
             ));
         }
+        make_executable(&resolved)?;
         Ok(resolved.join(format!("{}.part", binary_name())))
     }
 
@@ -236,8 +242,7 @@ impl Layout {
     ///
     /// As [`Layout::version_dir`]; the I/O error.
     pub fn install_binary(&self, version: &ReleaseVersion, source: &Path) -> io::Result<PathBuf> {
-        let dir = self.version_dir(version)?;
-        fs::create_dir_all(&dir)?;
+        let dir = self.create_version_dir(version)?;
         let target = dir.join(binary_name());
         let part = dir.join(format!("{}.part", binary_name()));
         fs::copy(source, &part)?;
@@ -248,6 +253,43 @@ impl Layout {
         make_executable(&part)?;
         fs::rename(&part, &target)?;
         Ok(target)
+    }
+
+    /// Creates the directory of `version` with the mode of [`Layout::open_versions`].
+    fn create_version_dir(&self, version: &ReleaseVersion) -> io::Result<PathBuf> {
+        let dir = self.version_dir(version)?;
+        fs::create_dir_all(&dir)?;
+        if fs::symlink_metadata(&dir)?.is_dir() {
+            make_executable(&dir)?;
+        }
+        Ok(dir)
+    }
+
+    /// Opens the directories that `current` and `previous` name, and their binaries, to
+    /// whoever passes `<root>` (mode 0755). The command line of the node runs the binary
+    /// `current` names through a link (ADR 0023 item 3); the gate is `<root>` itself, group
+    /// `tenko-cli` and mode 0750, which the installer sets once. Below the gate nothing
+    /// needs that group, so the service never holds it: a process outside a group cannot
+    /// give its files that group, and its `chmod` would clear a set-group-ID bit. A version
+    /// directory that an older version created (mode 0700) is opened here at the next
+    /// start. A missing directory is skipped.
+    ///
+    /// # Errors
+    ///
+    /// The I/O error of the first `chmod` that failed.
+    pub fn open_versions(&self) -> io::Result<()> {
+        for version in [self.current(), self.previous()].into_iter().flatten() {
+            let dir = self.version_dir(&version)?;
+            if !fs::symlink_metadata(&dir).is_ok_and(|metadata| metadata.is_dir()) {
+                continue;
+            }
+            make_executable(&dir)?;
+            let binary = dir.join(binary_name());
+            if binary.is_file() {
+                make_executable(&binary)?;
+            }
+        }
+        Ok(())
     }
 
     /// The versions that have a binary in the layout, oldest first.
@@ -290,6 +332,64 @@ impl Layout {
     }
 }
 
+/// The command line of a Linux node: the link the installer puts here, to
+/// `<data_dir>/updates/current/tenko` (ADR 0023 item 3).
+pub const CLI_LINK: &str = "/opt/tenko/cli/tenko";
+
+/// The binary that installers up to 0.0.11 put on `PATH` and that their unit's start-up step
+/// runs before every start. The service cannot remove it: root owns it.
+pub const OLD_BOOTSTRAP: &str = "/usr/local/bin/tenko";
+
+/// What the installer must still put in place on a Linux node so that the command line, the
+/// unit's start-up step and the server run one version, the one `current` names: one line
+/// per gap, none when the node has the shape of ADR 0023 item 3. The gate is `<root>` with
+/// mode 0750 exactly (no group write: the members must not replace what the service runs)
+/// and a group other than the data directory's. Read only; root's paths
+/// are looked at, never changed. `cli_link` and `bootstrap` are [`CLI_LINK`] and
+/// [`OLD_BOOTSTRAP`] outside tests.
+pub fn installer_gaps(data_dir: &Path, cli_link: &Path, bootstrap: &Path) -> Vec<String> {
+    let layout = Layout::new(data_dir);
+    let mut gaps = Vec::new();
+    if fs::symlink_metadata(bootstrap).is_ok_and(|metadata| metadata.is_file()) {
+        gaps.push(format!(
+            "{} is a binary of its own, the version first installed, and the unit's start-up \
+             step runs it before every start",
+            bootstrap.display()
+        ));
+    }
+    let current = layout.current_binary();
+    if fs::read_link(cli_link).ok().as_deref() != Some(current.as_path()) {
+        gaps.push(format!(
+            "{} is not the link to {}",
+            cli_link.display(),
+            current.display()
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let data = fs::metadata(data_dir).ok();
+        if data.as_ref().is_some_and(|data| data.mode() & 0o001 == 0) {
+            gaps.push(format!(
+                "{} cannot be passed by the members of tenko-cli (mode 0711)",
+                data_dir.display()
+            ));
+        }
+        let gated = fs::symlink_metadata(layout.root()).is_ok_and(|root| {
+            root.is_dir()
+                && root.mode() & 0o077 == 0o050
+                && data.as_ref().is_some_and(|data| data.gid() != root.gid())
+        });
+        if !gated {
+            gaps.push(format!(
+                "{} is not open to the group tenko-cli alone (group tenko-cli, mode 0750)",
+                layout.root().display()
+            ));
+        }
+    }
+    gaps
+}
+
 /// Removes a link (not its target); a missing link is fine.
 fn remove_link(path: &Path) -> io::Result<()> {
     match fs::symlink_metadata(path) {
@@ -320,8 +420,14 @@ fn replace_link(staged: &Path, link: &Path) -> io::Result<()> {
     fs::rename(staged, link)
 }
 
+/// Makes a version directory or a binary of the layout readable and executable for all
+/// (mode 0755); nothing on Windows, where the access list of the data directory decides.
+///
+/// # Errors
+///
+/// The I/O error.
 #[cfg(unix)]
-fn make_executable(path: &Path) -> io::Result<()> {
+pub fn make_executable(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     fs::set_permissions(path, fs::Permissions::from_mode(0o755))
 }
@@ -367,12 +473,17 @@ fn replace_link(staged: &Path, link: &Path) -> io::Result<()> {
     fs::rename(staged, link)
 }
 
+/// As the Unix version; nothing to do on Windows.
+///
+/// # Errors
+///
+/// None.
 #[cfg(windows)]
 #[allow(
     clippy::unnecessary_wraps,
     reason = "the same signature as the Unix version, which sets the mode"
 )]
-fn make_executable(_path: &Path) -> io::Result<()> {
+pub fn make_executable(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
@@ -517,6 +628,89 @@ mod tests {
             .expect_err("a link out of the root");
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert_eq!(fs::read_dir(&outside).expect("outside").count(), 0);
+        fs::remove_dir_all(&data).expect("clean up");
+    }
+
+    /// The installer's part of the shape is read from the node, and each missing piece is
+    /// one gap: the old bootstrap binary on `PATH`, the command-line link, the data
+    /// directory's traverse bit and the gate on `updates/`.
+    #[test]
+    fn the_gaps_name_what_the_installer_must_still_set_up() {
+        let data = temp_dir("gaps");
+        let layout = Layout::new(&data);
+        let source = data.join("source-binary");
+        fs::write(&source, b"binary").expect("source");
+        layout
+            .install_binary(&version("0.1.0"), &source)
+            .expect("install");
+        layout.point(CURRENT, &version("0.1.0")).expect("current");
+        let bootstrap = data.join("usr-local-bin-tenko");
+        fs::write(&bootstrap, b"old binary").expect("bootstrap");
+        let link = data.join("cli-tenko");
+
+        let gaps = installer_gaps(&data, &link, &bootstrap);
+        assert!(
+            gaps[0].starts_with(&bootstrap.display().to_string()),
+            "{gaps:?}"
+        );
+        assert!(gaps.iter().all(|gap| !gap.contains("  ")), "{gaps:?}");
+        assert!(gaps[1].contains("is not the link to"), "{gaps:?}");
+
+        fs::remove_file(&bootstrap).expect("remove");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::os::unix::fs::symlink(layout.current_binary(), &link).expect("link");
+            fs::set_permissions(&data, fs::Permissions::from_mode(0o700)).expect("0700");
+            fs::set_permissions(layout.root(), fs::Permissions::from_mode(0o750)).expect("0750");
+            let gaps = installer_gaps(&data, &link, &bootstrap);
+            assert_eq!(gaps.len(), 2, "{gaps:?}");
+            assert!(gaps[0].contains("(mode 0711)"), "{gaps:?}");
+            // `updates/` keeps the account's own group: a test cannot give it another one.
+            assert!(gaps[1].contains("group tenko-cli, mode 0750"), "{gaps:?}");
+            fs::set_permissions(&data, fs::Permissions::from_mode(0o711)).expect("0711");
+            let gaps = installer_gaps(&data, &link, &bootstrap);
+            assert_eq!(gaps.len(), 1, "only the gate is left: {gaps:?}");
+        }
+        fs::remove_dir_all(&data).expect("clean up");
+    }
+
+    /// The versions `current` and `previous` name are opened to whoever passes the gate,
+    /// also when an older version created them with mode 0700; a new version directory is
+    /// created open.
+    #[cfg(unix)]
+    #[test]
+    fn the_running_and_the_previous_version_are_open_below_the_gate() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode =
+            |path: &Path| fs::metadata(path).expect("metadata").permissions().mode() & 0o7777;
+        let data = temp_dir("open");
+        let layout = Layout::new(&data);
+        let source = data.join("source-binary");
+        fs::write(&source, b"binary").expect("source");
+        for text in ["0.1.0", "0.2.0", "0.3.0"] {
+            layout
+                .install_binary(&version(text), &source)
+                .expect("install");
+            assert_eq!(
+                mode(&layout.version_dir(&version(text)).expect("dir")),
+                0o755
+            );
+        }
+        layout.point(PREVIOUS, &version("0.1.0")).expect("previous");
+        layout.point(CURRENT, &version("0.2.0")).expect("current");
+        for text in ["0.1.0", "0.2.0", "0.3.0"] {
+            let dir = layout.version_dir(&version(text)).expect("dir");
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).expect("0700");
+            fs::set_permissions(dir.join(binary_name()), fs::Permissions::from_mode(0o700))
+                .expect("0700");
+        }
+        layout.open_versions().expect("open");
+        for (text, want) in [("0.1.0", 0o755), ("0.2.0", 0o755), ("0.3.0", 0o700)] {
+            let dir = layout.version_dir(&version(text)).expect("dir");
+            assert_eq!(mode(&dir), want, "{text}");
+            assert_eq!(mode(&dir.join(binary_name())), want, "{text}");
+        }
         fs::remove_dir_all(&data).expect("clean up");
     }
 }

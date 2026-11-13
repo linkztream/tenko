@@ -462,29 +462,13 @@ fn verify(inner: &Inner, params: &AssetParams) -> Result<(), StepError> {
         return Err(coded(error));
     }
     verify_signature(&params.asset)?;
-    make_executable(&part)?;
+    super::layout::make_executable(&part).map_err(io_failed)?;
     std::fs::rename(&part, &target).map_err(|error| failed("update.io", 500, error.to_string()))?;
     let entry = serde_json::to_vec_pretty(&params.asset)
         .map_err(|error| failed("update.io", 500, error.to_string()))?;
     let dir = layout.version_dir(&params.version).map_err(io_failed)?;
     std::fs::write(dir.join("release.json"), entry).map_err(io_failed)?;
     tracing::info!(version = %params.version, "verified the release file");
-    Ok(())
-}
-
-#[cfg(unix)]
-fn make_executable(path: &Path) -> Result<(), StepError> {
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-        .map_err(|error| failed("update.io", 500, error.to_string()))
-}
-
-#[cfg(not(unix))]
-#[allow(
-    clippy::unnecessary_wraps,
-    reason = "the same signature as the Unix version, which sets the mode"
-)]
-fn make_executable(_path: &Path) -> Result<(), StepError> {
     Ok(())
 }
 

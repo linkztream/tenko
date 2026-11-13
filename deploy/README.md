@@ -157,8 +157,13 @@ What it does, in this order:
    The Linux asset is verified by `SHA256SUMS` only until a detached signature
    exists (the SIGNING marks in the release workflow): a checksum from the same release
    shows that the file is whole, not who published it.
-3. Installs it as `/usr/local/bin/tenko`, creates the account `tenko`, `/etc/tenko` (0750
-   root:tenko), the data directory (0700 tenko) and `/var/log/tenko`.
+3. Creates the account `tenko`, the group `tenko-cli`, `/etc/tenko` (0750 root:tenko), the
+   data directory (0711 tenko) and `/var/log/tenko`. It copies the release into a root-owned
+   temporary directory that the account may pass, checks the configuration with it and has
+   the account run `tenko upgrade layout --data-dir <data_dir>` from that copy, which writes
+   `<data_dir>/updates/<version>/tenko` and the link `current` (the temporary directory goes
+   when the installer ends). It then sets up the command line ("The command line on the
+   node", below). No file `/usr/local/bin/tenko` is written.
 4. Creates the key-encryption key (below), writes `/etc/tenko/tenko.toml` from the answers
    (short, with the keys of `tenko.example.toml` it sets: `data_dir`, `roles`, `modules`,
    `[profile]`, `[server] listen` on IPv4 and IPv6 (`0.0.0.0:8443` and `[::]:8443`; IPv4
@@ -180,8 +185,8 @@ What it does, in this order:
    token or the administrator, the data directory, the key and how to back it up. Root
    opens no path under the data directory for any of it: the account reads the CA root
    out and computes its fingerprint, root keeps a copy of the certificate in its own
-   temporary directory for `tenko health` and `tenko setup` over loopback, the token is
-   read with `tenko setup token` as the account, and each value is shown through a filter
+   temporary directory for `tenko health` and `tenko setup` over loopback (run from root's
+   own copy of the release), the token is read out of its file as the account, and each value is shown through a filter
    that keeps printable characters only (the token only in the token's shape).
 7. With `--use-self` (or a yes to the question in interactive mode) and the dns role
    answering on `127.0.0.1`, once the node accepts connections there: points the host's
@@ -234,20 +239,36 @@ journalctl -u tenko -n 50 | grep 'from a systemd credential'
 shred -u /etc/tenko/kek.key          # once the offline copy of the key is safe
 ```
 
+**The command line on the node.** `/opt/tenko/cli/tenko` is a root-owned link to
+`<data_dir>/updates/current/tenko`, so it follows every update and switch back, and
+`/etc/profile.d/tenko-cli.sh` adds `/opt/tenko/cli` to `PATH` for the members of `tenko-cli`, never for root.
+The group `tenko-cli` is the gate: `<data_dir>/updates` is `tenko:tenko-cli` 0750, and the
+group has no members until you add one: `usermod -aG tenko-cli alice` (effective at the next
+login). Root never runs `tenko` on the node; the binary refuses root with exit status 2
+(`exec.unsafe_owner`). As root, run it as a member, `runuser -u alice -- /opt/tenko/cli/tenko health ...` (`runuser`
+keeps root's `PATH`, so name the link),
+or from a workstation. Add only accounts that operate Tenko and have no administrative
+rights: a member runs a program that the service account can replace
+([../docs/upgrades.md](../docs/upgrades.md) section 9.2).
+
 **Run again: the upgrade.** With a newer binary (or `--version`, or a newer `latest`) the
-script stops the service, runs `tenko upgrade check` with the new binary on the stopped
-node as the account `tenko`, in a session of its own without root's terminal, with its
-report read from a file and shown through a filter (status 0 or 10 goes on; anything else
-starts the old version again and stops with status 8, nothing changed), installs the new binary as
-`/usr/local/bin/tenko` and starts the unit, whose `ExecStartPre=` (`tenko upgrade layout`)
-switches `updates/current` to it ([../docs/upgrades.md](../docs/upgrades.md) section 7.3).
+script stops the service, copies the release into its own root-owned temporary directory and
+runs `tenko upgrade check` from that copy on the stopped node as the account `tenko`, in a
+session of its own without root's terminal, with its report read from a file and shown
+through a filter (status 0 or 10 goes on; anything else starts the old version again and
+stops with status 8, nothing changed). It then has the account run `tenko upgrade layout
+--data-dir <data_dir>` from the same copy, which switches `updates/current` (and `previous`),
+and starts the unit ([../docs/upgrades.md](../docs/upgrades.md) section 7.3). Every run also
+removes the `/usr/local/bin/tenko` that installers up to 0.0.11 left behind (`--repair`
+does this and the rest of the new shape without downloading anything).
 The data, the key and the configuration are not touched. The same version changes nothing
 and says so; a missing piece (the unit, the account) is put back. An older binary than the
 running one is kept aside: going back is a rollback (docs/upgrades.md section 7.6). Take a
 snapshot or a backup first, as for any upgrade.
 
-**Uninstall.** `bash install.sh --uninstall` stops and removes the unit, its drop-ins and
-`/usr/local/bin/tenko`, and keeps the data directory, `/etc/tenko` (the configuration and
+**Uninstall.** `bash install.sh --uninstall` stops and removes the unit, its drop-ins, the command
+line (`/opt/tenko/cli`, `/etc/profile.d/tenko-cli.sh`) and any `/usr/local/bin/tenko` of an
+earlier installer, and keeps the data directory, `/etc/tenko` (the configuration and
 the key) and the account, so the same command installs it again with its data. It removes
 `<data directory>/updates`, which holds binaries and not data (one per installed version and
 the links `current` and `previous`): the next install recreates it from the installed binary
@@ -256,7 +277,7 @@ to. That directory is the account's, so the account removes it (`rm --one-file-s
 session of its own); one that is not the account's own is left with a warning, and so is
 everything while a process of the account still runs (the script waits a few seconds for the
 stopped service to end).
-`--uninstall --purge` also deletes the data directory, `/etc/tenko` and the log directory, as
+`--uninstall --purge` also removes the group `tenko-cli` and deletes the data directory, `/etc/tenko` and the log directory, as
 root, each on its own file system and without following links, only once the unit is gone
 and no process of the account runs (otherwise everything is kept, with the reason, and the
 script exits 1); without `--yes` it asks you to type `purge`.
@@ -367,7 +388,9 @@ tenko config check --config /etc/tenko/tenko.toml
 ```
 
 The command validates the file and prints the effective configuration without secrets.
-Exit status 3 means the configuration is invalid; the message names the key.
+Exit status 3 means the configuration is invalid; the message names the key. On a Linux node
+there is no `tenko` for root: check with the release file you hold (`./tenko config check
+...`) or as the account (`runuser -u tenko -- ...`, with a copy the account may run).
 
 The order of precedence is the built-in defaults, the file, the `TENKO_*` environment
 variables, then the flags `--data-dir` and `--roles`. A variable is `TENKO_` plus the key
@@ -378,7 +401,11 @@ comma-separated string (`kek.retired` and `auth.attestation_roots` need the TOML
 `TENKO_TOKEN`, `TENKO_CREDENTIALS` and `TENKO_SETUP_TOKEN` belong to the client commands.
 On a node, a client command without `--url`, `TENKO_URL` or a sign-in reads the file of
 `TENKO_CONFIG` or `/etc/tenko/tenko.toml` for the node's own API and its CA root, so
-`tenko login -u admin` there needs no more; a sign-in to another node wins.
+`tenko login -u admin` there needs no more; a sign-in to another node wins. An account that
+cannot read that file and the data directory, as a member of `tenko-cli` cannot, gives the
+node's address and its CA root once: `tenko ca-root --url https://localhost:8443
+--fingerprint <the fingerprint the installer printed> --output ~/tenko-ca.pem`, then
+`tenko login -u admin --url https://localhost:8443 --ca-file ~/tenko-ca.pem`.
 
 ## Run
 
@@ -440,7 +467,7 @@ does exactly that with `--setup-token`:
 
 ```
 bash install.sh --setup-token                                # systemd, as root: the installer's way
-setsid -w runuser -u tenko -- tenko setup token --config /etc/tenko/tenko.toml </dev/null 2>&1 | tr -cd '\n[:print:]'
+setsid -w runuser -u tenko -- /var/lib/tenko/updates/current/tenko setup token --config /etc/tenko/tenko.toml </dev/null 2>&1 | tr -cd '\n[:print:]'
 docker exec tenko tenko setup token                          # container; docker compose exec tenko tenko setup token
 tenko setup token --data-dir C:\ProgramData\Tenko             # Windows, in an administrator shell
 ```
@@ -493,19 +520,32 @@ tenko prefix list
 `install.sh` does all of this in one command, the key-encryption key and the upgrade included
 (section "Install in one command"); this section is what it does, by hand.
 
-`systemd/tenko.service` runs `tenko serve --config /etc/tenko/tenko.toml` as the
-unprivileged user `tenko`, `Type=notify` (the server sends `READY=1` once the API listens
+`systemd/tenko.service` runs `/var/lib/tenko/updates/current/tenko serve --config
+/etc/tenko/tenko.toml` as the unprivileged user `tenko`, `Type=notify` (the server sends `READY=1` once the API listens
 and `STOPPING=1` at shutdown), with the state in `/var/lib/tenko` (`StateDirectory=`,
-mode 0700), no capabilities, and system call and address-family filters. Configuration and
+mode 0711), no capabilities, and system call and address-family filters. Configuration and
 start refusals (exit 2, 3, 4) are not restarted. It needs systemd 250 or later. The header
 of the unit lists the install steps; in short, as root:
 
 ```
 useradd --system --home-dir /var/lib/tenko --no-create-home --shell /usr/sbin/nologin tenko
-install -m 0755 target/x86_64-unknown-linux-musl/release/tenko /usr/local/bin/tenko   # from the repository root
+groupadd --system tenko-cli
 install -d -m 0750 -o root -g tenko /etc/tenko
 install -m 0640 -o root -g tenko deploy/tenko.example.toml /etc/tenko/tenko.toml   # then edit
-tenko config check --config /etc/tenko/tenko.toml
+
+# the version the service starts: laid out by the account from a copy that it cannot change
+install -d -m 0711 -o tenko -g tenko /var/lib/tenko
+d="$(mktemp -d)" && chmod 0711 "$d"
+install -m 0755 target/x86_64-unknown-linux-musl/release/tenko "$d/tenko"   # from the repository root
+runuser -u tenko -- "$d/tenko" config check --config /etc/tenko/tenko.toml
+runuser -u tenko -- "$d/tenko" upgrade layout --data-dir /var/lib/tenko
+runuser -u tenko -g tenko -G tenko-cli -- chgrp tenko-cli /var/lib/tenko/updates
+runuser -u tenko -- chmod 0750 /var/lib/tenko/updates
+
+# the command line, for members of tenko-cli (the installer also writes /etc/profile.d/tenko-cli.sh)
+install -d -m 0755 /opt/tenko/cli
+ln -sfn /var/lib/tenko/updates/current/tenko /opt/tenko/cli/tenko
+rm -rf "$d"
 
 umask 077                                  # the key-encryption key, once, see below
 openssl rand -hex 32 | tee /dev/shm/tenko-kek.hex \
@@ -520,8 +560,7 @@ systemctl daemon-reload && systemctl enable --now tenko
 (`NoExecPaths=`), so nothing the `tenko` account writes there (the store, the logs, `/tmp`,
 the rest of the data directory) can be executed by the service, even by an attacker who
 controls the account. The rest of the system is read-only for the service
-(`ProtectSystem=strict`) and stays executable: `/usr/local/bin/tenko` in `ExecStartPre=`, and
-the system programs the service starts (`ip` and `ping` for the probe role, `systemd-creds`
+(`ProtectSystem=strict`) and stays executable: the system programs the service starts (`ip` and `ping` for the probe role, `systemd-creds`
 for the key providers that seal, the interpreter of an installed plugin). Two directories of
 the data directory are the exceptions (`ExecPaths=`):
 
@@ -606,17 +645,17 @@ format, the start migrates it first. While the migration runs, tenko sends
 `EXTEND_TIMEOUT_USEC` to systemd, so a long migration does not hit the start timeout; a
 start that makes no progress still fails. See [../docs/upgrades.md](../docs/upgrades.md).
 
-**Versions.** The unit does not run `/usr/local/bin/tenko` itself. `ExecStartPre=` runs
-`tenko upgrade layout`, which on the first start copies the binary to
-`/var/lib/tenko/updates/<version>/` and points the link `current` at it, and `ExecStart=`
-runs `/var/lib/tenko/updates/current/tenko`. An update installed from the web UI is then a
-switch of that link and a restart; `RestartForceExitStatus=12` makes systemd start the
+**Versions.** A node runs one version, the one the link `/var/lib/tenko/updates/current`
+names: `ExecStart=` runs `/var/lib/tenko/updates/current/tenko serve`, and `ExecStartPre=`
+runs the same binary's `tenko upgrade layout --data-dir /var/lib/tenko`, which reads no
+configuration, changes no version and opens the versions `current` and `previous` name to the
+command line (the leading `-` of the line keeps a failure from stopping a start). The layout
+is made at install, by the account, from a copy of the release (step 3 in the header of the
+unit). An update installed from the web UI is a switch of the link and a restart; `RestartForceExitStatus=12` makes systemd start the
 server again when it stops itself with status 12, and `SuccessExitStatus=12` keeps that
-deliberate stop out of the journal as a failure of the unit. A newer binary placed at
-`/usr/local/bin/tenko` is adopted at the next start. To keep the old layout, without
-updates from the UI, put `/usr/local/bin/tenko serve --config /etc/tenko/tenko.toml` in
-`ExecStart=` and delete the `ExecStartPre=` line. An installation made before the layout
-existed gets it when the unit is installed again. The format of the data directory, the
+deliberate stop out of the journal as a failure of the unit. A unit that runs a file outside the
+layout is not supported. An installation made before the layout existed gets it when the
+installer runs again. The format of the data directory, the
 procedure for upgrades and rollbacks, and the layout are described in
 [../docs/upgrades.md](../docs/upgrades.md).
 
@@ -664,8 +703,8 @@ cargo build -p tenko
 sudo bash deploy/systemd/smoke.sh target/debug/tenko
 ```
 
-Do not run it on a production host. It replaces `/usr/local/bin/tenko`,
-`/etc/tenko/tenko.toml` and `/etc/tenko/kek.cred`, and deletes `/var/lib/tenko` and
+Do not run it on a production host. It replaces `/opt/tenko/cli/tenko` and lays the layout out again,
+replaces `/etc/tenko/tenko.toml` and `/etc/tenko/kek.cred`, and deletes `/var/lib/tenko` and
 `/var/log/tenko` at the start; it refuses to run when `/var/lib/tenko` exists and an earlier
 run of the script did not make it (`SMOKE_FORCE=1` overrides that on a throwaway VM). It
 talks to the loopback interface only. Each step prints a line that starts with `==>`. On
@@ -827,8 +866,8 @@ the key-encryption key that works there. The cluster transport needs no special
 capability. To check on a given host, from inside the container, in this order:
 
 - **API, store, cluster port.** These are ordinary TCP listeners and file I/O; they work in
-  an unprivileged container. Start the unit, run `tenko health --url https://localhost:8443
-  --ca-file /var/lib/tenko/tls/ca-root.pem`, and from another controller or node check
+  an unprivileged container. Start the unit, see `systemctl status tenko` report it active
+  (the unit is of `Type=notify`, so active means ready), and from another controller or node check
   that 8444/tcp is reachable. The cluster port must be reachable between every pair of
   controllers and from the node networks to each controller. Give the container a bridged
   `veth` with its own address on the network the others reach (Proxmox: a bridged NIC, not
@@ -1145,23 +1184,29 @@ binary migrates an older format when it starts, after copying the store aside; a
 binary refuses a newer format and changes nothing. `tenko upgrade check`, run with the new
 binary on the stopped node, dry-runs the migration on a copy and reports with an exit
 status: 0 nothing to do, 10 a migration is needed and passed, 11 refused (see the exit
-statuses above). In short, on Linux with the shipped unit, as root:
+statuses above). In short, on Linux with the shipped unit, as root (the installer does all
+of it: `bash install.sh --binary <file>` or `--version <x.y.z>`):
 
 ```
 systemctl stop tenko
 cp -a /var/lib/tenko /srv/backup/tenko-20261009                  # and keep the key apart
-sudo -u tenko /usr/local/bin/tenko-0.2.0 upgrade check \
-  --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko       # 0 or 10 means go on
-sudo -u tenko /usr/local/bin/tenko-0.2.0 upgrade layout \
-  --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko       # switch `current`
+d="$(mktemp -d)" && chmod 0711 "$d"                              # root-owned, the account may pass
+install -m 0755 tenko-0.2.0-linux-x86_64 "$d/tenko"
+setsid -w runuser -u tenko -- "$d/tenko" upgrade check \
+  --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko </dev/null   # 0 or 10 means go on
+setsid -w runuser -u tenko -- "$d/tenko" upgrade layout \
+  --data-dir /var/lib/tenko </dev/null                            # switch `current`, set `previous`
 systemctl start tenko
 journalctl -u tenko --since '10 minutes ago' | grep -E 'data format|migrat'
-tenko health --live --url https://ddi.example.org:8443 --ca-file /var/lib/tenko/tls/ca-root.pem
+setsid -w runuser -u tenko -- cat /var/lib/tenko/tls/ca-root.pem </dev/null >"$d/ca.pem"
+"$d/tenko" health --live --url https://ddi.example.org:8443 --ca-file "$d/ca.pem"
+rm -rf "$d"
 ```
 
-`/usr/local/bin/tenko-0.2.0` is the new binary, staged beside the installed one and
-verified against `SHA256SUMS` of the release. To roll back, stop the unit and move the link
-back with `sudo -u tenko ln -sfn 0.1.0 /var/lib/tenko/updates/current`. When the new
+`$d/tenko` is the new binary, verified against `SHA256SUMS` of the release, in a directory
+root owns and the account may only pass; root runs that copy, never the layout's. To roll back, stop the unit and move the link back as the account:
+`runuser -u tenko -- ln -sfn 0.1.0 /var/lib/tenko/updates/current.new` and
+`runuser -u tenko -- mv -T /var/lib/tenko/updates/current.new /var/lib/tenko/updates/current`. When the new
 version migrated the data (`store/format` names a newer format than the old binary
 writes), the old binary refuses the directory: restore the store from
 `upgrade-backups/<name>/store` or from the backup first. Containers and the Windows

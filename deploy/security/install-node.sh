@@ -33,7 +33,9 @@ plant="${PLANT:-}"
 readonly HOST_NAME=tenko.example.test
 readonly CONFIG=/etc/tenko/tenko.toml
 readonly DATA_DIR=/var/lib/tenko
-readonly BIN=/usr/local/bin/tenko
+# Root's own copy of the binary under test, for the commands root runs (health, config
+# check): root never runs the layout's binary, which refuses it.
+readonly BIN="$WORK/tenko"
 readonly API_PORT=8443
 
 die() { printf 'install-node: %s\n' "$*" >&2; exit 1; }
@@ -41,6 +43,7 @@ die() { printf 'install-node: %s\n' "$*" >&2; exit 1; }
 [[ "$(id -u)" == 0 ]] || die "run as root (the installer is root's)"
 mkdir -p "$WORK/in" "$EVIDENCE/node"
 chmod 0700 "$WORK"
+install -m 0755 "$BINARY" "$BIN"
 
 # 1. The installer, as a user runs it unattended. Its summary prints the setup token, which
 #    stays out of the bundle.
@@ -103,7 +106,7 @@ wait_ready
 # 3. First-run setup through the API, under the Standard profile.
 install -m 0644 "$DATA_DIR/tls/ca-root.pem" "$WORK/in/ca-root.pem"
 install -m 0644 "$ca_dir/ca.pem" "$WORK/in/lab-ca.pem"
-(umask 077 && runuser -u tenko -- "$BIN" setup token --config "$CONFIG" --data-dir "$DATA_DIR" >"$WORK/setup-token") ||
+(umask 077 && bash "$repo/deploy/install.sh" --setup-token >"$WORK/setup-token") ||
   die "no setup token: setup is not open on the fresh node"
 api=(python3 -I "$here/nodeapi.py" --state "$WORK/api-state.json")
 "${api[@]}" --url "https://${HOST_NAME}:${API_PORT}" --connect 127.0.0.1 --ca "$WORK/in/ca-root.pem" \

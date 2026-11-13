@@ -91,7 +91,7 @@ installations run; the differences of a controller cluster are in sections 3.7, 
 |---|---|
 | Data directory | The directory named by `data_dir` (`--data-dir`, `TENKO_DATA_DIR`). It holds `store/`, `kek/`, `tls/`, `logs/`, `upgrade-backups/` and `updates/`. |
 | Store | The replicated store of a node, in `<data_dir>/store`: the Raft log `log.redb`, the state file that `sm.current` names (`sm.redb` before the first snapshot), `snapshots/` and the format marker. |
-| Version | The release number of a binary (SemVer). `tenko --version` prints the version of the executable you ran. |
+| Version | The release number of a binary (SemVer). `tenko --version` prints the version of the executable you ran; on a Linux node, run through `/opt/tenko/cli/tenko`, that is the version the service runs. |
 | Format | The version of the on-disk layout of the data directory, a whole number. The current format of a binary is printed by `tenko upgrade format`. |
 | Marker | The file `<data_dir>/store/format`, which names the format. Read before the store is opened. |
 | Stored record | The single row of the table `sys.format` inside the store, which also names the format. Replicated with the data. |
@@ -105,7 +105,7 @@ installations run; the differences of a controller cluster are in sections 3.7, 
 | Platform | `<os>-<arch>` as Rust names them: `linux-x86_64`, `windows-x86_64`. |
 | Layout | The directory `<data_dir>/updates` with one directory per installed version and the links `current` and `previous` (section 9). |
 | `current`, `previous` | Links (symbolic links on Linux, directory junctions on Windows). The service manager starts the binary in the directory that `current` points at. |
-| Bootstrap binary | The executable installed by hand (`/usr/local/bin/tenko`, or the file that ran `tenko service install`). It copies itself into the layout. |
+| Bootstrap binary | The executable that lays the layout out the first time: the installer's copy of the release in its own temporary directory on Linux (removed when the installer ends), or the file that ran `tenko service install` on Windows. Installers up to 0.0.11 left it at `/usr/local/bin/tenko` (section 9.5). |
 | Install job | The job of kind `sys.update` that installs a version from the UI. |
 | Attempt record | `<data_dir>/updates/attempt.json`: the state of the last install. |
 | Probation | The period after an install in which the new version must become ready or be switched back. |
@@ -1215,8 +1215,11 @@ the same on every platform:
   with `### Action required` and `### Security` first. The UI shows the same notes on the
   page `/updates` while a manifest is known. The running version is in the status bar of the
   UI and is printed by `tenko health --live`; `tenko --version` prints the version of the
-  executable you run in the shell, which on a layout installation can be the bootstrap
-  binary and not the version the service runs (section 9.2).
+  executable you run in the shell, which on a Linux node is the version the service runs
+  when you start it through `/opt/tenko/cli/tenko` (section 9.2). Root does not run `tenko`
+  on a node: the commands of this chapter run the copy of the release that root stages and
+  owns, run it as the service account, or run the node's command line as a member of the
+  group `tenko-cli` (`runuser -u alice -- /opt/tenko/cli/tenko …`).
 - A binary migrates from any older format as long as every step exists. When one is
   missing the check says `upgrade.migration_missing`; upgrade through the intermediate
   release it names. The actions of the skipped releases still apply.
@@ -1255,8 +1258,10 @@ key, and the data backup, off the host that is being upgraded.
 ### 7.3 Linux with systemd
 
 The commands are for the shipped unit, the data directory `/var/lib/tenko` and the
-configuration `/etc/tenko/tenko.toml`. Run them as root. The new version is 0.2.0 and the
-running one is 0.1.0.
+configuration `/etc/tenko/tenko.toml`. Run them as root. Root runs only the copy of the new
+release that it staged in step 1 and owns; what reads or writes the data directory runs as
+the service account (steps 4 and 5). The new version is 0.2.0 and the running one is 0.1.0.
+The installer does the same work (see the end of this section).
 
 **1. Get the files and verify them.**
 
@@ -1264,11 +1269,12 @@ running one is 0.1.0.
 curl -fLO https://github.com/linkztream/tenko/releases/download/v0.2.0/tenko-0.2.0-linux-x86_64
 curl -fLO https://github.com/linkztream/tenko/releases/download/v0.2.0/SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
-install -m 0755 tenko-0.2.0-linux-x86_64 /usr/local/bin/tenko-0.2.0
+d="$(mktemp -d)" && chmod 0711 "$d" && install -m 0755 tenko-0.2.0-linux-x86_64 "$d/tenko"
 ```
 
-The staged file `/usr/local/bin/tenko-0.2.0` lies next to the installed binary and replaces
-nothing. The Linux binary is static, so it runs on any distribution that the unit supports.
+The staged file `$d/tenko` lies in a directory that only root may write and the service
+account may pass, so the account cannot change it between the check and the switch. It
+replaces nothing. The Linux binary is static, so it runs on any distribution that the unit supports.
 
 **2. Stop.**
 
@@ -1293,7 +1299,7 @@ every command run as the account from root's prompt in this document ([ADR
 0023](adr/0023-no-root-after-installation.md), I1 and I2).
 
 ```
-setsid -w runuser -u tenko -- /usr/local/bin/tenko-0.2.0 upgrade check \
+setsid -w runuser -u tenko -- "$d/tenko" upgrade check \
   --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko </dev/null >/root/upgrade-check.txt 2>&1
 echo "exit status $?"
 tr -cd '\n[:print:]' </root/upgrade-check.txt
@@ -1309,13 +1315,13 @@ To keep the downtime short on a large store, start the old version again after s
 the check against the backup copy (`--data-dir /srv/backup/tenko-20261009`, with any
 configuration that names the same `node.id`), and then repeat steps 2 and 3 for the switch.
 
-**5. Switch.** On a layout installation (the shipped unit), `tenko upgrade layout` run by
-the new binary copies it to `/var/lib/tenko/updates/0.2.0/tenko`, points `previous` at the
-version that ran and `current` at the new one:
+**5. Switch.** `tenko upgrade layout` run by the new binary copies it to
+`/var/lib/tenko/updates/0.2.0/tenko`, points `previous` at the version that ran and `current`
+at the new one. The shipped unit runs from the layout, so this is the whole switch:
 
 ```
-setsid -w runuser -u tenko -- /usr/local/bin/tenko-0.2.0 upgrade layout \
-  --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko </dev/null >/root/upgrade-layout.txt 2>&1
+setsid -w runuser -u tenko -- "$d/tenko" upgrade layout \
+  --data-dir /var/lib/tenko </dev/null >/root/upgrade-layout.txt 2>&1
 tr -cd '\n[:print:]' </root/upgrade-layout.txt
 ```
 
@@ -1324,14 +1330,9 @@ switched the layout from 0.1.0 to this binary, 0.2.0
 run: /var/lib/tenko/updates/current/tenko
 ```
 
-The bootstrap binary `/usr/local/bin/tenko` stays as it is, which keeps the rollback a
-matter of moving one link (section 7.6). On an installation without the layout (a unit
-with `ExecStart=/usr/local/bin/tenko serve`), replace the binary and keep the old one:
-
-```
-cp -p /usr/local/bin/tenko /usr/local/bin/tenko-0.1.0
-install -m 0755 /usr/local/bin/tenko-0.2.0 /usr/local/bin/tenko
-```
+The previous version stays in the layout, which keeps the rollback a matter of moving one
+link (section 7.6). A unit that does not run from the layout (an `ExecStart=` that names a
+file elsewhere) is not supported: install the unit of this release (section 9.5).
 
 **6. Start.**
 
@@ -1344,9 +1345,16 @@ systemctl start tenko
 ```
 systemctl status tenko
 journalctl -u tenko --since '10 minutes ago' | grep -E 'data format|migrat'
-tenko health --live --url https://ddi.example.org:8443 --ca-file /var/lib/tenko/tls/ca-root.pem
-tenko health --url https://ddi.example.org:8443 --ca-file /var/lib/tenko/tls/ca-root.pem
+setsid -w runuser -u tenko -- cat /var/lib/tenko/tls/ca-root.pem </dev/null >"$d/ca.pem"
+"$d/tenko" health --live --url https://ddi.example.org:8443 --ca-file "$d/ca.pem"
+"$d/tenko" health --url https://ddi.example.org:8443 --ca-file "$d/ca.pem"
+rm -rf "$d"
 ```
+
+`$d/tenko` is root's own copy of the release, so root may run it; the account copies the CA
+root out of its directory for it, and root opens nothing there. `rm -rf "$d"` deletes it afterwards. A member of `tenko-cli` sees the same
+version with `/opt/tenko/cli/tenko health --live …` and a CA root of its own (deploy/README.md,
+"Configure and check").
 
 - The service is active and has not restarted. A long migration does not make systemd give
   up the start: the server extends the start timeout while it runs (section 3.2).
@@ -1357,7 +1365,7 @@ tenko health --url https://ddi.example.org:8443 --ca-file /var/lib/tenko/tls/ca-
   upgrade shows what is new.
 
 Keep `/srv/backup/tenko-20261009` until the new version has run for as long as you need to
-trust it. The staged file `/usr/local/bin/tenko-0.2.0` can be deleted.
+trust it.
 
 **The installer does steps 1, 2, 4, 5 and 6.** On a node installed with `deploy/install.sh`
 (deploy/README.md, "Install in one command"), running the same command again with a newer
@@ -1365,88 +1373,82 @@ release, `--version 0.2.0` or `--binary tenko-0.2.0-linux-x86_64` is this proced
 verifies a download against `SHA256SUMS` (over HTTPS only), stops the unit, runs `tenko
 upgrade check` with the new binary as the account `tenko` in a session of its own, without
 root's terminal, and shows its report through a filter (0 and 10 go on; any other status
-starts the running version again, changes nothing and ends with status 8), installs the new binary as
-`/usr/local/bin/tenko` and starts the unit, whose `ExecStartPre=` switches the layout as in
-step 5, then waits for `tenko health`. It never touches the data directory, the key or
+starts the running version again, changes nothing and ends with status 8), has the account run
+`tenko upgrade layout` from the same copy, which switches the layout as in step 5, starts the
+unit and waits for `tenko health`. It never touches the data directory, the key or
 `tenko.toml`, and the same version changes nothing. Step 3, the backup, and step 7 stay
 yours. In a Proxmox container `deploy/proxmox/ct/tenko.sh --update <ctid>` runs it there.
 
 ### 7.4 Windows service
 
+On Windows nothing elevated reads, writes or runs anything under the data directory: the
+commands of the layout's binary that work on the store refuse an elevated prompt there
+(`exec.unsafe_owner`, ADR 0023 item 11). The service does the upgrade itself, as its account
+`NT SERVICE\tenko`, from the installer's file in `C:\Program Files\Tenko`, which only
+Administrators and SYSTEM can write.
+
 **With the MSI.** An installation from the MSI upgrades with the MSI of the new release:
 `msiexec /i tenko-0.3.0-windows-x86_64.msi /qn /l*v tenko-upgrade.log` in an elevated prompt,
-after the backup of step 3 below. The installer does steps 2, 4, 5 and 6 itself: it stops
-the service, replaces `C:\Program Files\Tenko\tenko.exe`, runs `tenko upgrade check` with the
-new binary and aborts the upgrade (rolling the old files back and starting the old version)
-on any answer other than 0 or 10, runs `tenko upgrade layout`, and starts the service, which
-migrates the data format at its first start (section 3.2). The configuration and the data
-directory stay, and the layout stays consistent, so updates from the UI (section 8) keep
-working after an MSI upgrade and an MSI upgrade keeps working after an update from the UI:
-the layout only moves forward. Verify with step 7. The details, and what to do when the new
-version does not start, are in `deploy/windows/README.md`, "MSI installer". The steps below
-are the path for a service installed by hand.
+after the backup of step 2 below. The installer stops the service, replaces
+`C:\Program Files\Tenko\tenko.exe` and starts the service; it does nothing in the data
+directory. At that start the running version asks the new file for its version and, when it
+is newer, runs the store check with it on a copy of the closed store (the check of
+section 5), copies it into the layout, points `previous` and `current`, and restarts into it;
+the new version runs on probation (section 8.6) and migrates the data format at its first
+start (section 3.2). A file whose version refuses the store is not adopted: the old version
+keeps running, and `tenko service start` fails with the reason. The details are in
+`deploy/windows/README.md`, "Upgrade".
 
-Run the commands in an elevated PowerShell. The service is `tenko`, the data directory is
-`C:\ProgramData\Tenko` and the configuration is `C:\ProgramData\Tenko\tenko.toml`.
+**By hand.** A service installed with `tenko service install` names its installer's file
+with `--payload` (`sc.exe qc tenko` shows it). Stage the new release there and start the
+service; it does the rest as after an MSI upgrade. In an elevated PowerShell, with the
+service `tenko`, the data directory `C:\ProgramData\Tenko` and the file
+`C:\Program Files\Tenko\tenko.exe`:
 
 **1. Get the files and verify them.** Download `tenko-0.2.0-windows-x86_64.exe` and
-`SHA256SUMS` from the release, compare the checksum (section 6.5), and put the file where
-the administrators can run it, for example `C:\Program Files\Tenko\tenko-0.2.0.exe`.
+`SHA256SUMS` from the release and compare the checksum (section 6.5).
 
-**2. Stop.**
+**2. Stop and back up.** Copy the stopped data directory with its access control lists.
+`/XJD` leaves out the junctions `current` and `previous` under `updates`. Robocopy exit
+statuses below 8 mean success.
 
 ```
 tenko service stop
-```
-
-**3. Back up.** Copy the stopped data directory with its access control lists. `/XJD`
-leaves out the junctions `current` and `previous` under `updates`, so that the copy does not
-hold the binaries twice. Robocopy exit statuses below 8 mean success.
-
-```
 robocopy C:\ProgramData\Tenko D:\Backup\Tenko-20261009 /E /SEC /XJD /R:1 /W:1
 ```
 
-**4. Check with the new binary.** The data directory is readable for Administrators.
+**3. Stage the file and start.**
 
 ```
-& "C:\Program Files\Tenko\tenko-0.2.0.exe" upgrade check --config C:\ProgramData\Tenko\tenko.toml
-$LASTEXITCODE
-```
-
-Status 0 and 10 mean go on, anything else means stop (section 5.3).
-
-**5. Switch.** The new binary copies itself to `updates\0.2.0\tenko.exe`, points the
-junction `previous` at the version that ran and `current` at the new one:
-
-```
-& "C:\Program Files\Tenko\tenko-0.2.0.exe" upgrade layout --config C:\ProgramData\Tenko\tenko.toml
-```
-
-A service that was installed with `--no-update-layout` runs the executable it was
-registered with. Rename that file to keep the old version (`tenko-0.1.0.exe`), and copy the
-new one to the registered path.
-
-**6. Start.**
-
-```
+Copy-Item .\tenko-0.2.0-windows-x86_64.exe "C:\Program Files\Tenko\tenko.exe"
 tenko service start
 ```
 
-**7. Verify.**
+`tenko service start` waits through the restart into the new version and prints `the
+service runs version 0.2.0`. When the new version refuses the store it fails with exit
+status 11 and `did not adopt this binary`; the Application log (source `tenko`) has the
+reason, and the old version keeps running.
+
+**4. Verify.**
 
 ```
-Select-String -Path C:\ProgramData\Tenko\logs\tenko.log -Pattern 'data format'
+Select-String -Path C:\ProgramData\Tenko\logs\tenko.log -Pattern 'adopted the installer|data format'
 tenko health --live --url https://ddi.example.org:8443 --ca-file C:\ProgramData\Tenko\tls\ca-root.pem
 sc.exe query tenko
 ```
 
-The log line `data format 2` (with `(migrated from format 1 in 1 step(s))` after a migration),
-the version printed by `tenko health --live`, and the service state RUNNING are the
-evidence, as on Linux (section 7.3). The file log is rotated by size (section 9.3), so on a
-node that has run for a long time the line may be in `tenko.log.1` and not in `tenko.log`.
-The Application log of Windows has the lines `tenko service starting` and
-`tenko service stopped` under the source named like the service.
+The lines `adopted the installer's file` and `data format 2` (with `(migrated from format 1
+in 1 step(s))` after a migration), the version printed by `tenko health --live`, and the
+service state RUNNING are the evidence, as on Linux (section 7.3). The file log is rotated
+by size (section 9.3), so on a node that has run for a long time the line may be in
+`tenko.log.1`. `tenko` in these commands is the installer's file in Program Files, which
+Administrators own.
+
+Running `tenko upgrade check` or `tenko upgrade layout` by hand against the data directory,
+as the service account, is not built for Windows yet ([ROADMAP.md](ROADMAP.md)); the
+service runs the check for you at its start. A service registered with `--no-update-layout`
+runs the executable it was registered with and installs nothing from the UI: install it
+again with the layout (section 9.5).
 
 ### 7.5 Containers
 
@@ -1513,9 +1515,14 @@ format, giving it the store as it was before. First find out which case this is.
 the marker with the format the previous binary writes:
 
 ```
-head -n 1 /var/lib/tenko/store/format
-/var/lib/tenko/updates/0.1.0/tenko upgrade format      # or the saved old binary
+setsid -w runuser -u tenko -- head -n 1 /var/lib/tenko/store/format </dev/null
+setsid -w runuser -u tenko -- /var/lib/tenko/updates/0.1.0/tenko upgrade format </dev/null
 ```
+
+Both run as the service account: the first reads the marker in its directory, the second
+runs the previous version, which belongs to that account, (root does not run a binary of the layout, and the binary
+refuses it). On Windows, ask the format with the previous release file you kept, which
+belongs to Administrators.
 
 The marker line is `tenko-data-format N`. The log of the new version has the line
 `migrated from format` and the directory `upgrade-backups` holds a copy named
@@ -1528,47 +1535,38 @@ The marker line is `tenko-data-format N`. The log of the new version has the lin
 | The new version never became ready and the service manager gave up | Clear the failure state of the service manager first (section 9.7), then as above. |
 
 **Linux.** The layout keeps the previous version in `updates/0.1.0`. Move the link back and,
-if the format was raised, put the store back. `ln -sfn` replaces the link. Keep the failed
+if the format was raised, put the store back. The `mv -T` replaces the link in one step. Keep the failed
 store for diagnosis.
 
 ```
 systemctl stop tenko
-sudo -u tenko ln -sfn 0.1.0 /var/lib/tenko/updates/current
+setsid -w runuser -u tenko -- ln -sfn 0.1.0 /var/lib/tenko/updates/current.new </dev/null
+setsid -w runuser -u tenko -- mv -T /var/lib/tenko/updates/current.new /var/lib/tenko/updates/current </dev/null
 
-mv /var/lib/tenko/store /var/lib/tenko/store.failed-20261009
-cp -a /var/lib/tenko/upgrade-backups/20261009T201502Z-format-1-to-2/store /var/lib/tenko/store
+setsid -w runuser -u tenko -- mv /var/lib/tenko/store /var/lib/tenko/store.failed-20261009 </dev/null
+setsid -w runuser -u tenko -- cp -a /var/lib/tenko/upgrade-backups/20261009T201502Z-format-1-to-2/store /var/lib/tenko/store </dev/null
 
 systemctl start tenko
 ```
 
+Every change inside the data directory is made by the service account, which owns it; root
+stops and starts the unit ([ADR 0023](adr/0023-no-root-after-installation.md), I2).
+
 The second block is only for the case where the format was raised. The copy in
 `upgrade-backups` was taken at the moment of the migration; the backup of step 3 holds the
-same data (`cp -a /srv/backup/tenko-20261009/store /var/lib/tenko/store`). Keep the owner
-and the mode of the directory, which `cp -a` does. Without the layout, put the old binary
-back instead of moving the link: `install -m 0755 /usr/local/bin/tenko-0.1.0
-/usr/local/bin/tenko`.
+same data; root copies it to a place the account can read first, and the account copies it
+in. A copy made by the account keeps the account as the owner. The unit's start-up step moves no
+version, so `current` stays where you put it (section 9.2).
 
-If you replaced the bootstrap binary `/usr/local/bin/tenko` with the new version, put the
-old one back first (`install -m 0755 /var/lib/tenko/updates/0.1.0/tenko
-/usr/local/bin/tenko`). Otherwise `ExecStartPre=` finds a bootstrap binary that is newer
-than `current` at the next start and moves `current` forward again (section 9.2).
-
-**Windows.** Use `cmd.exe` for the junction: `rmdir` without `/s` removes the junction and
-leaves the version directory alone.
-
-```
-tenko service stop
-cmd /c rmdir C:\ProgramData\Tenko\updates\current
-cmd /c mklink /J C:\ProgramData\Tenko\updates\current C:\ProgramData\Tenko\updates\0.1.0
-
-ren C:\ProgramData\Tenko\store store.failed-20261009
-robocopy C:\ProgramData\Tenko\upgrade-backups\20261009T201502Z-format-1-to-2\store C:\ProgramData\Tenko\store /E /SEC
-
-tenko service start
-```
-
-The second block is only for the case where the format was raised. Without the layout,
-copy the renamed old executable back to the registered path.
+**Windows.** A version that does not become ready is switched back by the service itself
+(section 8.6). A deliberate return to the previous version, and the restore of the store
+that goes with it after a migration, are actions of the service from the web UI and the API
+(ADR 0023, items 5 and 6) that are not built yet ([ROADMAP.md](ROADMAP.md)); they replace
+any step by hand inside the data directory, which an elevated prompt must not take there
+(the commands of the layout's binary refuse it, `exec.unsafe_owner`). Until they ship, the
+return after a migration is a restore of the backup of step 3 onto a new data directory, as in
+[backup.md](backup.md), and an installer's file of an older version is not adopted (the
+layout moves forward only).
 
 **Containers.** Run the previous tag. When the format was raised, restore the archive of step
 3 into a new volume and mount that one; the failed volume stays for diagnosis.
@@ -1618,8 +1616,8 @@ the leader last.
 2. Stop the member: `systemctl stop tenko`.
 3. Run `tenko upgrade check` with the new binary on that member's data directory, as in
    section 7.3, step 4. Statuses 0 and 10 mean go on.
-4. Install the binary and switch the layout (`tenko upgrade layout`), as in section 7.3,
-   step 5.
+4. Switch the layout (`tenko upgrade layout`, run by the new binary as the account), as in
+   section 7.3, step 5.
 5. Start the member: `systemctl start tenko`. When the new binary knows a newer data format,
    the member takes the copy of its store and logs that the migration waits (section 3.7).
 6. Wait until `tenko cluster members` shows the member with its new `VERSION`, a `LAG` of 0
@@ -2056,27 +2054,34 @@ resolves to. Otherwise the UI shows notices and installs nothing (`layout_missin
 `current` and `previous` are never removed when old versions are pruned (section 8.1,
 `keep_versions`).
 
-`tenko upgrade layout [--config FILE] [--data-dir PATH]` sets the layout up from the binary
-that runs it:
+`tenko upgrade layout [--config FILE] [--data-dir PATH]`, run as the service account, sets
+the layout up from the binary that runs it:
 
 | Found | What it does | Output |
 |---|---|---|
 | This binary already runs from the layout | Nothing | `this binary runs from the layout (...)` |
 | No `current` link | Copies the binary to `updates/<version>/` and creates `current` | `created the layout with version 0.1.0` |
 | `current` names an older version | Copies the binary in, points `previous` at the old version and `current` at this one | `switched the layout from 0.1.0 to this binary, 0.2.0` |
-| `current` names this version or a newer one | Copies the binary in if it is missing and leaves `current` alone | `the layout runs 0.2.0; this binary (0.1.0) is not newer and was kept aside at /usr/local/bin/tenko: identical to the layout's copy` |
+| `current` names this version or a newer one | Copies the binary in if it is missing and leaves `current` alone | `the layout runs 0.2.0; this binary (0.1.0) is not newer and was kept aside at /tmp/tmp.1a2B3c/tenko: identical to the layout's copy` |
 
-It prints the path to run, `run: <data_dir>/updates/current/tenko`, and exits with status 0;
-a failure to write exits with status 1 and an invalid configuration with status 3. It moves
-`current` forward only. Going back is a move of the link by hand (section 7.6).
+In each case it then opens the versions `current` and `previous` name to the command line of
+the node: each version directory and its binary get mode 0755 (section 9.2). It prints the
+path to run, `run: <data_dir>/updates/current/tenko`, and exits with status 0; a failure to
+write exits with status 1 and an invalid configuration with status 3 (under a supervisor,
+`TENKO_SUPERVISED=1`, a configuration that does not load is reported and the data directory
+of `--data-dir` or `TENKO_DATA_DIR` is used). It moves `current` forward only. Going back is
+a move of the link by hand (section 7.6).
 
 ### 9.2 systemd
 
-The shipped unit (`deploy/systemd/tenko.service`) runs from the layout:
+A Linux node runs one version: the server, the command an operator types and the unit's
+start-up step all run the binary that `current` names. The shipped unit
+(`deploy/systemd/tenko.service`) runs from the layout:
 
 ```
-ExecStartPre=/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml
+ExecStartPre=-/var/lib/tenko/updates/current/tenko upgrade layout --data-dir /var/lib/tenko
 ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
+StateDirectoryMode=0711
 Restart=on-failure
 SuccessExitStatus=12
 RestartForceExitStatus=12
@@ -2086,11 +2091,58 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 ```
 
-`ExecStartPre=` runs the bootstrap binary `/usr/local/bin/tenko`, as the service account,
-before every start. It creates the layout on the first start and adopts a bootstrap binary
-that an administrator, a package or a configuration tool has replaced by a newer one, so
-that restarting the unit completes a manual upgrade (section 7.3, step 5). It never moves
-`current` back.
+Both commands run as the service account (`User=tenko`); no line of the unit has the `+`
+or `!` prefix that would run a command with full privileges. The start-up step runs the
+same binary as the server. It reads no configuration file and takes the data directory from
+its command line, and its leading `-` makes systemd go on whatever it exits with, so a key in
+`tenko.toml` that its version does not know never stops a start: the server's own start
+decides about the file (section 8.6). It changes no version; it opens the versions `current`
+and `previous` name to the command line (a version that an older server installed has mode
+0700) and, when the installer's part of the shape below is missing, says so in the journal.
+`deploy/systemd/check-hardening.sh` refuses a unit that breaks any of this.
+
+**The command line.** The installer (`deploy/install.sh`) puts it in place:
+
+| Path | Owner, group, mode | What it is |
+|---|---|---|
+| `/opt/tenko/cli/tenko` | root, a link | The link to `<data_dir>/updates/current/tenko`, so it follows every update and switch back without being written again |
+| `/etc/profile.d/tenko-cli.sh` | root:root 0644 | Adds `/opt/tenko/cli` at the end of `PATH` in login shells of the members of `tenko-cli`, never root's (`id -u` not 0); `sudo`'s `secure_path` is not changed |
+| `<data_dir>` | tenko:tenko 0711 | Others may pass through it and list nothing; everything with data in it is 0700 |
+| `<data_dir>/updates` | tenko:tenko-cli 0750 | The gate: only members of the group `tenko-cli` reach the binaries below it |
+| `<data_dir>/updates/<version>/` and its `tenko` | tenko 0755 | Readable and executable for whoever passes the gate |
+
+The group `tenko-cli` has no members until an administrator adds one:
+
+```
+usermod -aG tenko-cli alice
+```
+
+The account runs `tenko` from its next login. Membership is a matter of trust: a member runs a
+program that the service account can replace, so a compromise of the service reaches the
+member the next time the member types `tenko`. Give the group to accounts that operate Tenko
+and hold nothing the service could not reach anyway. An account that also has administrative
+rights (`sudo`, membership of `wheel` or `adm`, keys to other systems) does not belong in it,
+because those rights would then be within the service account's reach. This is how the
+design works (ADR 0023, item 3), not a defect.
+
+Root never runs `tenko` on the node. `/opt/tenko/cli` is on no `PATH` of root's, and the
+binary in the layout refuses root: `tenko health` run as root through the link exits with
+status 2 and `exec.unsafe_owner` before it does anything (`tenko --version` alone is
+answered first). An administrator who works as root runs the command as an account of the
+group, `runuser -u alice -- /opt/tenko/cli/tenko health --url https://localhost:8443`
+(`runuser` keeps root's `PATH`, so name the link; the member gives the CA root of its own
+copy, deploy/README.md "Configure and check", with `--ca-file`), or from a workstation. The
+`profile.d` entry puts `/opt/tenko/cli` on the `PATH` of members only, so an administrator
+outside the group carries no such `PATH` into `su`, plain or not, and `su -` and `sudo -i`
+start root's own login environment. The refusal of the binary protects against a slip with
+the genuine binary only: a binary the service account replaced does not refuse, which is why
+root's `PATH` never holds the link and members are trusted accounts.
+
+The installer changes nothing below the data directory as root: the group and the mode of
+`updates/`, the mode of the data directory and the modes of the two running versions are set
+by the service account, which holds `tenko-cli` for the one command that gives `updates/` that
+group. The service itself never holds the group. ADR 0023 has the table of every path, who
+writes it and who runs it.
 
 Of the paths the service can write, it may execute files only under `updates/` of the data
 directory (the versions of the layout, `current`, and the new version that an update's dry
@@ -2099,7 +2151,7 @@ run starts from `updates/<version>/`) and `plugins/` (installed plugins):
 `ExecPaths=-/var/lib/tenko/updates -/var/lib/tenko/plugins`, and the installer's drop-in adds
 a data directory elsewhere to both. A file the service account writes anywhere else, in the
 store, the logs or `/tmp`, cannot be executed by the service; the read-only rest of the
-system (the bootstrap binary, the system programs it starts) stays executable.
+system (the system programs it starts) stays executable.
 `deploy/README.md`, "What the service may execute", lists who writes each path.
 
 Status 12 is a request for a restart (an installed update, a switch back, a changed
@@ -2124,11 +2176,9 @@ file by size: `[log] max_file_mb` (default 64) is the size at which `tenko.log` 
 receives the log in either case, so `journalctl -u tenko` in section 7.3 still works.
 
 `deploy/systemd/smoke.sh` tests this on a test host with systemd. Among other steps it
-installs an update through the layout and waits for the restart after exit status 12.
-
-`tenko --version` in a shell runs the bootstrap binary. After an update from the UI it can
-report an older version than the one that runs. The running version is in the status bar of
-the UI, in the start log and in the output of `tenko health --live`.
+installs two updates through the layout, waits for the restart after exit status 12, and
+after each counts the versions the node runs: the server's, the command line's of a member
+of `tenko-cli` and the start-up step's must be one.
 
 ### 9.3 The Windows service
 
@@ -2175,14 +2225,18 @@ the layout, is declared with `TENKO_SUPERVISED=1`, and the supervisor does these
    statuses;
 4. should not restart it in a loop after status 2, 3 or 4.
 
-A sketch for runit or s6, where the run script is executed again after every exit:
+A sketch for runit or s6, where the run script is executed again after every exit and runs
+as the service account:
 
 ```
 #!/bin/sh
 export TENKO_SUPERVISED=1
-/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml
+/var/lib/tenko/updates/current/tenko upgrade layout --data-dir /var/lib/tenko
 exec /var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
 ```
+
+The layout is created once, as for systemd, by the account from a copy of the release that it
+cannot change (the header of `deploy/systemd/tenko.service`, install step 3).
 
 Without `TENKO_SUPERVISED=1`, and outside the Windows service, the UI shows
 `unsupervised`: a server that stopped itself for a switch would stay stopped. The variable
@@ -2191,29 +2245,38 @@ is a promise by the administrator that something restarts the process; the syste
 
 ### 9.5 Existing installations
 
-An installation made before the layout existed runs the executable it was installed with and
-shows notices only. It gets the layout when its unit or service is installed again. The data
-is not touched.
-
-On Linux, install the unit of this release and restart. The first start creates the layout
-from `/usr/local/bin/tenko`:
-
-```
-install -m 0644 deploy/systemd/tenko.service /etc/systemd/system/tenko.service
-systemctl daemon-reload
-systemctl restart tenko
-```
-
-A unit with local changes keeps them in a drop-in (`systemctl edit tenko`). Add the three
-lines that matter; the empty `ExecStart=` clears the old command first:
+**Installed by an installer up to 0.0.11.** These installers put a binary of their own at
+`/usr/local/bin/tenko` and wrote a unit whose start-up step runs it before every start. An
+update from the UI never replaces that file, so it stays at the version first installed: the
+command on `PATH` is older than the server, and the start-up step, an old binary that reads
+`tenko.toml` strictly, stops every start once the file holds a key that version does not
+know. The service cannot change root's unit or root's file, so a server of this release says
+so instead: the start page shows the health finding `sys.update.installer_repair`, which
+names what is missing and the command, `tenko system diagnostics` lists its code, and the
+journal has the same line at each start. Root runs one command once, with the `install.sh` of
+this release:
 
 ```
-[Service]
-ExecStartPre=/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml
-ExecStart=
-ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
-RestartForceExitStatus=12
+sudo bash install.sh --repair
 ```
+
+It downloads nothing and changes neither the configuration nor the data. It writes the unit
+of this release, creates the group `tenko-cli` and the command line (section 9.2), has the
+service account set the modes and the group of the layout, removes `/usr/local/bin/tenko` (only
+a regular file owned by root that reports itself as `tenko` and that the old unit's start-up
+step names; a drop-in of yours that runs it too stops the repair with its name, so that the
+start does not fail once the file is gone), and restarts the service when it changed
+anything (`--no-start` leaves the restart to you). It prints each change; on a node that has the new shape it changes nothing. Every
+other run of the installer of this release, an upgrade or a rerun, does the same on the way.
+`--dry-run` shows the steps first. A data directory that the operator moved is given with
+`--data-dir`, as at installation; the installer writes the unit's drop-in, the link and the
+gate for that place.
+
+**Installed before the layout existed.** Such an installation runs the executable it was
+installed with and shows notices only. On Linux, run the installer of this release, which
+lays the layout out as the account and writes the unit (`--repair` needs a layout and refuses
+without one). A unit with local changes keeps them in a drop-in (`systemctl edit tenko`); the
+installer's unit replaces the file itself. The data is not touched.
 
 On Windows, uninstall the service and install it again with the options it had (`--name`,
 `--account`, `--manual`). Uninstalling leaves the data directory, its permissions and the
@@ -2259,21 +2322,19 @@ setsid -w runuser -u tenko -- rm -f /var/lib/tenko/updates/attempt.json </dev/nu
 systemctl start tenko
 ```
 
-On Windows, in an elevated prompt:
+On Windows the failure actions of the service stop restarting it after the third failure
+(section 9.3). Moving the junction back takes a write inside the data directory, which an
+elevated prompt must not make, and running maintenance as the service account by hand is
+not built yet ([ROADMAP.md](ROADMAP.md)). What works today: install a newer release that
+starts (the MSI, or the file staged as in section 7.4), which the service adopts as its own
+account, or restore the backup taken before the upgrade onto a new data directory
+([backup.md](backup.md)).
 
-```
-tenko service stop
-cmd /c rmdir C:\ProgramData\Tenko\updates\current
-cmd /c mklink /J C:\ProgramData\Tenko\updates\current C:\ProgramData\Tenko\updates\0.1.0
-del C:\ProgramData\Tenko\updates\attempt.json
-tenko service start
-```
-
-Two details decide whether this is enough.
+On Linux, two details decide whether this is enough.
 
 - **The attempt record.** An attempt in state `restarting` blocks further installs
   (`in_progress`) for good. Delete the file, as above, or edit `"state"` to `"rolled_back"`
-  to keep the record. The previous version ignores a record about another version.
+  to keep the record, as the account (`setsid -w runuser -u tenko -- sed -i …`). The previous version ignores a record about another version.
 - **The data format.** If the new version had already migrated the store, the previous
   version refuses the directory (`upgrade.format_newer`, exit status 3) and the store must
   be restored as in section 7.6. The record names the copy in its field `backup`. When it does,

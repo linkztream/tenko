@@ -306,6 +306,105 @@ fn ops_24_the_layout_is_created_and_a_second_run_changes_nothing() {
     );
 }
 
+/// The `[Service]` settings of the shipped systemd unit, as `(key, value)` in file order.
+fn unit_settings() -> Vec<(String, String)> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/systemd/tenko.service");
+    let text = fs::read_to_string(&path).expect("deploy/systemd/tenko.service");
+    text.lines()
+        .map(str::trim)
+        .skip_while(|line| *line != "[Service]")
+        .take_while(|line| *line != "[Install]")
+        .filter(|line| !line.starts_with('#'))
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect()
+}
+
+/// OPS-24 (ADR 0023 item 3): the node runs one version. The unit starts the server from
+/// `current` and runs nothing else before it but the same binary's `upgrade layout`, with
+/// the `-` prefix (systemd goes on whatever it exits with), as the unit's `User=` (no `+` or
+/// `!` on any command), with the data directory on its command line and given no
+/// configuration file. Run as the unit runs it, with the unit's environment plus a
+/// configuration file in `TENKO_CONFIG` and a variable of a known section that only a later
+/// version knows (this binary stands for any version older than the operator's file), the
+/// step exits 0 and changes no version.
+#[test]
+fn ops_24_the_start_up_step_goes_on_with_a_configuration_it_cannot_read() {
+    const UNIT_DATA_DIR: &str = "/var/lib/tenko";
+    let settings = unit_settings();
+    let commands: Vec<&(String, String)> = settings
+        .iter()
+        .filter(|(key, _)| key.starts_with("Exec"))
+        .collect();
+    for (key, value) in &commands {
+        assert!(
+            !value.starts_with(['+', '!']) && !value.starts_with("-+") && !value.starts_with("-!"),
+            "{key}={value} would run with full privileges"
+        );
+        assert!(
+            !value.contains("/usr/local/bin/tenko"),
+            "{key}={value} runs a binary of another version"
+        );
+    }
+    let current = format!("{UNIT_DATA_DIR}/updates/current/tenko");
+    let start = commands
+        .iter()
+        .find(|(key, _)| key == "ExecStart")
+        .expect("ExecStart=");
+    assert!(
+        start.1.starts_with(&format!("{current} serve")),
+        "{}",
+        start.1
+    );
+    let steps: Vec<&str> = commands
+        .iter()
+        .filter(|(key, _)| key == "ExecStartPre")
+        .map(|(_, value)| value.as_str())
+        .collect();
+    assert_eq!(steps.len(), 1, "one start-up step: {steps:?}");
+    let step = steps[0]
+        .strip_prefix('-')
+        .unwrap_or_else(|| panic!("the start-up step lacks the `-` prefix: {}", steps[0]));
+    let words: Vec<&str> = step.split_whitespace().collect();
+    assert_eq!(words[0], current, "the step runs the layout's own binary");
+    assert!(
+        !words.contains(&"--config"),
+        "the step reads no configuration file: {step}"
+    );
+
+    let node = Node::new();
+    let data_dir = node.data_dir();
+    layout(&data_dir).assert_code(0);
+    let before = snapshot(&updates(&data_dir));
+    let future = node.root().join("tenko.toml");
+    fs::write(
+        &future,
+        "roles = \"controller\"
+key_of_a_later_version = true
+
+[section_of_a_later_version]
+key = 1
+",
+    )
+    .expect("a configuration of a later version");
+    let mut command = tenko_at(&current_binary(&data_dir));
+    for word in &words[1..] {
+        command.arg(word.replace(UNIT_DATA_DIR, path_text(&data_dir)));
+    }
+    for (_, value) in settings.iter().filter(|(key, _)| key == "Environment") {
+        let (name, value) = value.split_once('=').expect("NAME=value");
+        command.env(name, value.replace(UNIT_DATA_DIR, path_text(&data_dir)));
+    }
+    command
+        .env("TENKO_CONFIG", &future)
+        .env("TENKO_SERVER__KEY_OF_A_LATER_VERSION", "1");
+    let outcome = run(command, None);
+    outcome
+        .assert_code(0)
+        .assert_stdout_contains("this binary runs from the layout (");
+    assert_eq!(snapshot(&updates(&data_dir)), before, "no version changed");
+}
+
 /// OPS-24 (E10): a server started from `current/tenko`, as systemd and the Windows service
 /// start it, runs from the layout: the update status does not block an install for want of
 /// the layout. The same server started from outside the layout says `layout_missing`. Both

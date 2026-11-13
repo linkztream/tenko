@@ -51,13 +51,15 @@ rc=0
 out="$(printf '\n\n' | docker exec -i "$name" env "${envs[@]}" bash /root/tenko-install.sh 2>&1)" || rc=$?
 printf '%s\n' "$out" | sed 's/^/      /'
 ((rc == 0)) && pass "exit 0" || fail "exit ${rc}"
-check "the binary" '/usr/local/bin/tenko --version'
+check "the version layout" 'readlink /var/lib/tenko/updates/current'
+check "the command line" 'readlink /opt/tenko/cli/tenko'
+check "no binary on root's PATH" '! test -e /usr/local/bin/tenko'
 check "roles and modules" 'grep -E "^(roles|modules) = " /etc/tenko/tenko.toml'
 check "the profile" 'grep -A2 "^\[profile\]" /etc/tenko/tenko.toml | grep -x "name = \"standard\""'
 check "the host name on the certificate" 'grep -x "host_name = \"tenko.example.test\"" /etc/tenko/tenko.toml'
 check "the forwarders" 'grep -x "forwarders = \[\"192.0.2.1\", \"192.0.2.2\"\]" /etc/tenko/tenko.toml'
 check "the key file (no systemd here)" 'stat -c "%a %U:%G %n" /etc/tenko/kek.key'
-check "tenko config check" '/usr/local/bin/tenko config check --config /etc/tenko/tenko.toml >/dev/null && echo valid'
+check "tenko config check" 'install -m 0755 /root/tenko-binary /root/tenko-root && /root/tenko-root config check --config /etc/tenko/tenko.toml >/dev/null && echo valid'
 check "no curl was installed (a binary was given)" '! command -v curl'
 
 echo "== again: nothing changes"

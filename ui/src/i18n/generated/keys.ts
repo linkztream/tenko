@@ -1528,6 +1528,7 @@ export type MessageKey =
   | "dashboard.finding.evidence.job_step"
   | "dashboard.finding.evidence.utilization"
   | "dashboard.finding.evidence.utilization_bare"
+  | "dashboard.finding.health.sys.update.installer_repair"
   | "dashboard.finding.kind.conflict"
   | "dashboard.finding.kind.dns"
   | "dashboard.finding.kind.ghost"
@@ -8593,6 +8594,7 @@ export interface MessageArgs {
   "dashboard.finding.evidence.job_step": { step: string | number };
   "dashboard.finding.evidence.utilization": { percent: string | number; threshold: string | number };
   "dashboard.finding.evidence.utilization_bare": { percent: string | number };
+  "dashboard.finding.health.sys.update.installer_repair": { command: string | number; version: string | number };
   "dashboard.health.alarms_critical": { count: string | number };
   "dashboard.health.connectors_more": { count: string | number; names: string | number };
   "dashboard.health.findings_context": { info: string | number; review: string | number };
@@ -11520,6 +11522,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.evidence.job_step",
   "dashboard.finding.evidence.utilization",
   "dashboard.finding.evidence.utilization_bare",
+  "dashboard.finding.health.sys.update.installer_repair",
   "dashboard.finding.kind.conflict",
   "dashboard.finding.kind.dns",
   "dashboard.finding.kind.ghost",

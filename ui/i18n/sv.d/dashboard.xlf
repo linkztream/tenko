@@ -109,6 +109,10 @@
         <notes><note category="description">Evidence of a low disk: the free space of the data directory's file system and its size, with units.</note></notes>
         <segment><source>The data directory has {free} of {total} free</source><target>Datakatalogen har {free} av {total} ledigt</target></segment>
       </unit>
+      <unit id="dashboard.finding.health.sys.update.installer_repair">
+        <notes><note category="description">A node set up by an older installer: the version the server runs and the one root command that brings the node to one version (docs/upgrades.md section 9.5).</note></notes>
+        <segment><source>The server runs {version}, but this node is not yet set up to run one version. Run {command} once as root.</source><target>Servern kör {version}, men noden är ännu inte inrättad för att köra en enda version. Kör {command} en gång som root.</target></segment>
+      </unit>
       <unit id="dashboard.finding.action.resolve">
         <segment><source>Resolve conflict</source><target>Lös konflikten</target></segment>
       </unit>

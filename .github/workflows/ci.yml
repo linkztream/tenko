@@ -591,14 +591,13 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build tenko
         run: cargo build -p tenko --locked
-      - name: Install the binary, the service account and the unit
-        # Install steps 1 to 3 and 5 of the header of deploy/systemd/tenko.service. The
-        # key-encryption key (step 4) and everything after it belong to smoke.sh, which
-        # must therefore accept that the user tenko, /etc/tenko/tenko.toml and the unit
-        # already exist.
+      - name: Install the service account, the configuration and the unit
+        # The account (step 1 without the group), step 2 and step 6 of the header of
+        # deploy/systemd/tenko.service. The group tenko-cli, the version layout, the command
+        # line, the key-encryption key and everything after them belong to smoke.sh, which must therefore accept that the user tenko, /etc/tenko/tenko.toml
+        # and the unit already exist.
         run: |
           set -euo pipefail
-          sudo install -m 0755 target/debug/tenko /usr/local/bin/tenko
           if ! id -u tenko > /dev/null 2>&1; then
             sudo useradd --system --home-dir /var/lib/tenko --no-create-home \
               --shell /usr/sbin/nologin tenko
@@ -606,12 +605,12 @@ jobs:
           sudo install -d -m 0750 -o root -g tenko /etc/tenko
           sudo install -m 0640 -o root -g tenko deploy/tenko.example.toml /etc/tenko/tenko.toml
           sudo install -m 0644 deploy/systemd/tenko.service /etc/systemd/system/tenko.service
-          # ExecStart= runs /var/lib/tenko/updates/current/tenko, which ExecStartPre=
-          # (`tenko upgrade layout`) creates at the first start. systemd-analyze verify
+          # ExecStart= and ExecStartPre= run /var/lib/tenko/updates/current/tenko, which the
+          # account lays out before the first start (smoke.sh step 1). systemd-analyze verify
           # refuses a unit whose ExecStart= file does not exist, so stand in for it with a
-          # link until the checks below are done; a later step removes it again.
+          # copy until the checks below are done; a later step removes it again.
           sudo install -d /var/lib/tenko/updates/current
-          sudo ln -sf /usr/local/bin/tenko /var/lib/tenko/updates/current/tenko
+          sudo install -m 0755 target/debug/tenko /var/lib/tenko/updates/current/tenko
       - name: systemd-analyze verify
         # Strict: any finding fails the job, and the output goes to the run summary
         # either way.
@@ -651,7 +650,7 @@ jobs:
         # smoke.sh starts from the state a real install has: no /var/lib/tenko yet.
         run: sudo rm -rf /var/lib/tenko
       - name: Service smoke script
-        # Argument 1 is the freshly built binary; /usr/local/bin/tenko is a copy of it.
+        # Argument 1 is the freshly built binary; smoke.sh lays it out as the account.
         run: sudo --preserve-env=GITHUB_STEP_SUMMARY bash deploy/systemd/smoke.sh "$GITHUB_WORKSPACE/target/debug/tenko"
       - name: Smoke test of the macvlan compose example
         # Builds the image from deploy/Dockerfile and runs the controller and a probe on a
@@ -693,7 +692,7 @@ jobs:
           sudo systemctl stop tenko.service 2> /dev/null || true
           sudo systemctl disable tenko.service 2> /dev/null || true
           sudo rm -rf /etc/systemd/system/tenko.service /etc/systemd/system/tenko.service.d \
-            /etc/tenko /var/lib/tenko /usr/local/bin/tenko
+            /etc/tenko /var/lib/tenko /opt/tenko /etc/profile.d/tenko-cli.sh
           sudo systemctl daemon-reload
 
   # Weekly fuzz smoke (API-14): 60 seconds for every target that `cargo fuzz list` prints,

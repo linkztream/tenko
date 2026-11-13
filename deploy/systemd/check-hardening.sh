@@ -42,7 +42,9 @@
 # then its drop-ins in order, an empty assignment resetting a list) and must hold exactly:
 #   User=tenko and Group=tenko, no DynamicUser= and no PermissionsStartOnly=;
 #   no Exec*= command with a "+" or "!" prefix (one that would run with root's privileges or
-#   without the sandbox);
+#   without the sandbox); ExecStart= and ExecStartPre= run <data dir>/updates/current/tenko,
+#   and ExecStartPre= has the "-" prefix and no --config (ADR 0023 item 3: one version, a
+#   start-up step that cannot stop a start);
 #   NoNewPrivileges=yes, PrivateIPC=yes, PrivateTmp=yes, ProtectSystem=strict, and the state
 #   and log directories named tenko (the writable paths the noexec list is made for);
 #   NoExecPaths= and ExecPaths= exactly the lists below, plus the data directory's entries
@@ -107,6 +109,8 @@ installer_dropin() {
       echo "ReadWritePaths=/srv/tenko"
       echo "NoExecPaths=/srv/tenko"
       echo "ExecPaths=-/srv/tenko/updates -/srv/tenko/plugins"
+      echo "ExecStartPre="
+      echo "ExecStartPre=-/srv/tenko/updates/current/tenko upgrade layout --data-dir /srv/tenko"
       echo "ExecStart="
       echo "ExecStart=/srv/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml"
       ;;
@@ -216,6 +220,25 @@ settings_problems() {
     prefix="${command%%[!-@:+!|]*}"
     [[ "$prefix" == *[+!]* ]] && echo "a command runs with a '+' or '!' prefix: $line"
   done < <(grep -E '^Exec(Start|StartPre|StartPost|Condition|Reload|Stop|StopPost)=' <<< "$lines")
+  # The node runs one version (ADR 0023 item 3): every command runs the binary that
+  # `current` names, and the start-up step has the "-" prefix (systemd goes on whatever it
+  # exits with) and is given no configuration file, so it cannot stop a start over a
+  # configuration its version does not read. An empty assignment resets the list.
+  local steps=()
+  while IFS= read -r line; do
+    command="${line#*=}"
+    if [[ -z "$command" ]]; then steps=(); else steps+=("$command"); fi
+  done < <(grep -E '^ExecStartPre=' <<< "$lines")
+  for command in "${steps[@]}"; do
+    [[ "$command" == -/* ]] || echo "the start-up step lacks the '-' prefix: ExecStartPre=$command"
+    [[ " $command " == *" --config "* ]] && echo "the start-up step reads the configuration file: ExecStartPre=$command"
+  done
+  while IFS= read -r line; do
+    command="${line#*=}"
+    command="${command#"${command%%[!-@:+!|]*}"}"
+    [[ -z "$command" || "${command%% *}" == */updates/current/tenko ]] ||
+      echo "a command runs another binary than the one current names: $line"
+  done < <(grep -E '^Exec(Start|StartPre)=' <<< "$lines")
   [[ "$(last_value "$lines" NoNewPrivileges)" == yes ]] || echo "NoNewPrivileges= is not yes"
   [[ "$(last_value "$lines" PrivateIPC)" == yes ]] || echo "PrivateIPC= is not yes"
   # The writable paths the noexec list is made for: the state and log directories named
@@ -263,7 +286,10 @@ check_settings() {
 self_test() {
   local root case probe ok=1
   local -a cases=(
-    's|^ExecStartPre=/|ExecStartPre=+/|'
+    's|^ExecStartPre=-/|ExecStartPre=-+/|'
+    's|^ExecStartPre=-/|ExecStartPre=/|'
+    's|^ExecStartPre=-/var/lib/tenko/updates/current/tenko|ExecStartPre=-/usr/local/bin/tenko|'
+    's|^ExecStartPre=.*|& --config /etc/tenko/tenko.toml|'
     's|^ExecStart=/|ExecStart=!/|'
     's|^ExecStart=/|ExecStart=-!!/|'
     's|^User=tenko|User=root|'

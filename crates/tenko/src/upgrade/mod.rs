@@ -95,7 +95,10 @@ pub enum UpgradeCommand {
     Format,
     /// Set up the `current` link layout that installation from the UI needs, from this
     /// binary: copy it to `<data_dir>/updates/<version>/` and point `current` at it (also
-    /// when it is newer than the current one). The systemd unit runs it before every start.
+    /// when it is newer than the current one), and open the versions `current` and
+    /// `previous` name to the command line of the node. Run it as the service account. The
+    /// systemd unit runs the layout's own binary with it before every start, which changes
+    /// no version.
     Layout(LayoutArgs),
     /// Print the version this binary installs and runs as.
     #[command(hide = true)]
@@ -179,6 +182,13 @@ fn layout_command(args: &LayoutArgs, out: &mut impl Write, err: &mut impl Write)
             let layout = layout::Layout::new(&data_dir);
             let _ = writeln!(out, "{note}");
             let _ = writeln!(out, "run: {}", layout.current_binary().display());
+            // The unit's start-up step says in the journal what keeps this node from running
+            // one version; the server's status says it too ([`installer_notice`]).
+            if restart::supervised()
+                && let Some(notice) = installer_notice(&data_dir)
+            {
+                let _ = writeln!(err, "tenko upgrade layout: {}", notice.detail);
+            }
             exit::OK
         }
         Err(error) => {
@@ -189,8 +199,10 @@ fn layout_command(args: &LayoutArgs, out: &mut impl Write, err: &mut impl Write)
 }
 
 /// Sets up the layout from the binary `exe` of version `own`: copies it in when missing,
-/// creates `current`, or moves `current` to it when it is newer (an administrator replaced
-/// the installed binary by hand). Returns what it did.
+/// creates `current`, or moves `current` to it when it is newer (an administrator staged a
+/// newer binary and ran it as the account), then opens the versions `current` and
+/// `previous` name to the command line ([`layout::Layout::open_versions`]). Returns what it
+/// did.
 ///
 /// # Errors
 ///
@@ -201,6 +213,20 @@ pub fn ensure_layout(
     own: &ReleaseVersion,
 ) -> std::io::Result<String> {
     let layout = layout::Layout::new(data_dir);
+    let note = ensure_versions(&layout, exe, own)?;
+    // Best effort: the switch above stands, and the next start opens the versions again.
+    Ok(match layout.open_versions() {
+        Ok(()) => note,
+        Err(error) => format!("{note}; the versions are not open to the command line: {error}"),
+    })
+}
+
+/// [`ensure_layout`] without the modes.
+fn ensure_versions(
+    layout: &layout::Layout,
+    exe: &std::path::Path,
+    own: &ReleaseVersion,
+) -> std::io::Result<String> {
     if layout.runs(exe) {
         return Ok(format!(
             "this binary runs from the layout ({})",
@@ -223,6 +249,60 @@ pub fn ensure_layout(
             ))
         }
         Some(current) => Ok(kept_aside_note(&current, own, exe, &layout.binary(own))),
+    }
+}
+
+/// The code of the status notice for a Linux node that the installer must bring to the
+/// shape of ADR 0023 item 3 once.
+pub const INSTALLER_REPAIR: &str = "sys.update.installer_repair";
+
+/// The root command that brings an installation to that shape.
+pub const REPAIR_COMMAND: &str = "sudo bash install.sh --repair";
+
+/// The unit the installer writes; a node without it (another supervisor, a unit of the
+/// operator's) is not the installer's to repair.
+const INSTALLER_UNIT: &str = "/etc/systemd/system/tenko.service";
+
+/// The status notice of a Linux server that runs from the layout under the installer's
+/// systemd unit while the installer's part of the shape is missing ([`layout::installer_gaps`]): an
+/// installation by an installer up to 0.0.11 keeps a binary of its own on `PATH`, which the
+/// unit's start-up step runs, and the service cannot change root's files. Nothing for a
+/// container, a server outside the layout and other systems. Reads metadata and one link;
+/// opens and runs nothing.
+pub fn installer_notice(data_dir: &Path) -> Option<tenko_api::dto::system::StatusWarning> {
+    if !cfg!(target_os = "linux")
+        || !restart::supervised()
+        || !Path::new(INSTALLER_UNIT).is_file()
+        || !layout::Layout::new(data_dir).runs_self()
+    {
+        return None;
+    }
+    let gaps = layout::installer_gaps(
+        data_dir,
+        Path::new(layout::CLI_LINK),
+        Path::new(layout::OLD_BOOTSTRAP),
+    );
+    (!gaps.is_empty()).then(|| repair_notice(&running_version(), &gaps))
+}
+
+/// The notice for `gaps` on a node that runs `version`.
+fn repair_notice(
+    version: &ReleaseVersion,
+    gaps: &[String],
+) -> tenko_api::dto::system::StatusWarning {
+    tenko_api::dto::system::StatusWarning {
+        code: INSTALLER_REPAIR.to_owned(),
+        detail: format!(
+            "the server runs {version}, but the installer has not set this node up for one \
+             version: {}; run `{REPAIR_COMMAND}` once as root (docs/upgrades.md, section 9.5)",
+            gaps.join("; ")
+        ),
+        params: [
+            ("version".to_owned(), version.to_string()),
+            ("command".to_owned(), REPAIR_COMMAND.to_owned()),
+        ]
+        .into_iter()
+        .collect(),
     }
 }
 
@@ -507,6 +587,23 @@ fn same_content(a: &std::path::Path, b: &std::path::Path) -> std::io::Result<boo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_repair_notice_names_the_version_the_gaps_and_the_command() {
+        let version: ReleaseVersion = "0.2.0".parse().expect("version");
+        let notice = repair_notice(&version, &["gap one".to_owned(), "gap two".to_owned()]);
+        assert_eq!(notice.code, INSTALLER_REPAIR);
+        assert!(notice.detail.contains("runs 0.2.0"), "{}", notice.detail);
+        assert!(
+            notice.detail.contains("gap one; gap two"),
+            "{}",
+            notice.detail
+        );
+        assert!(notice.detail.contains(REPAIR_COMMAND), "{}", notice.detail);
+        assert!(!notice.detail.contains("  "), "{}", notice.detail);
+        assert_eq!(notice.params["version"], "0.2.0");
+        assert_eq!(notice.params["command"], REPAIR_COMMAND);
+    }
 
     #[test]
     fn the_layout_adopts_a_newer_binary_and_keeps_a_newer_current() {

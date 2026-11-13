@@ -11,18 +11,22 @@
 #   bash install.sh --check                           # what the roles need: report only
 #   bash install.sh --prepare                         # set up what the roles miss, nothing else
 #   bash install.sh --setup-token                     # print the setup token of this node
+#   bash install.sh --repair                          # bring an older installer's node to one version
 #   bash install.sh --uninstall [--purge]
 # Download it first and run the file (`curl -fsSLO <url>/install.sh && bash install.sh`);
 # piped into bash it cannot ask questions. `bash install.sh --help` lists every option.
 #
 # Root and the service account (docs/adr/0023-no-root-after-installation.md): root runs
-# nothing the account can write and never opens a path inside the data directory. What must
-# happen there (tenko upgrade check, tenko setup token, the copy of the CA root, the removal
-# of the updates layout) is run as the account in a session of its own, without root's
-# terminal and with /dev/null as standard input (as_tenko); what root prints of such output
+# nothing the account can write, never opens a path inside the data directory and follows no
+# link there (it reads the metadata of a path there with stat, which does not follow links,
+# and the name `current` points at with readlink). What must happen there (tenko upgrade
+# check and tenko upgrade layout from root's copy of the release, the setup token, the copy of
+# the CA root, the modes and the group of the command line's gate, the removal of the updates
+# layout) is run as the account in a session of its own, without root's terminal and with
+# /dev/null as standard input (as_tenko); what root prints of such output
 # passes through `clean`, which keeps printable ASCII only, and a setup token is kept only
 # in the token's own shape. An existing --data-dir is taken only when it is empty or already
-# the account's own (owner tenko, mode 0700). Release files travel over HTTPS only (plain
+# the account's own (owner tenko, mode 0711 or the 0700 of older installers). Release files travel over HTTPS only (plain
 # http is accepted for a loopback address, a test server); every curl call restricts the
 # protocol of the request and of every redirect. A GitHub token comes from
 # TENKO_INSTALL_TOKEN, GITHUB_TOKEN or --token-stdin, never from an argument.
@@ -30,13 +34,18 @@
 # What it does: checks the host (root, x86_64, systemd and its version, the tools, free
 # ports 8443, 53 and, with the dhcp role, UDP 67), gets the binary (the GitHub release asset
 # tenko-<version>-linux-x86_64, verified against the release's SHA256SUMS, or --binary),
-# installs it as /usr/local/bin/tenko, creates the service account `tenko`, writes
+# creates the service account `tenko`, has the account put the binary into its version layout
+# (<data_dir>/updates/<version>, the link `current`), writes
 # /etc/tenko/tenko.toml from the answers and checks it with `tenko config check`, creates
 # the key-encryption key (sealed with
 # systemd-creds where that works, a plain file /etc/tenko/kek.key with a warning where it
 # does not), installs the unit of deploy/systemd/tenko.service (embedded below) with its
-# drop-ins, starts it, waits for `tenko health`, optionally completes first-run setup, and
-# prints the URL, the setup token, and where the data and the key are.
+# drop-ins, puts the command line in place (the group tenko-cli, the link
+# /opt/tenko/cli/tenko to the version `current` names, /etc/profile.d/tenko-cli.sh, which adds
+# it to the PATH of the members of tenko-cli, never root's), starts the unit, waits for `tenko health`,
+# optionally completes first-run setup, and prints the URL, the setup token, and where the
+# data and the key are. The node runs one version: the server, the command line and the
+# unit's start-up step all run the binary `current` names.
 #
 # Roles and the security profile: the profile is asked first. Roles are a runtime decision
 # (the Nodes page of the web UI, docs/cluster.md section 13), but what a role needs from root
@@ -54,9 +63,12 @@
 # and reports per role on the Nodes page.
 #
 # Run again: a newer version is an upgrade (`tenko upgrade check` with the new binary on the
-# stopped node, then the new binary as /usr/local/bin/tenko and a start, which switches the
-# updates layout; docs/upgrades.md section 7.3). The data directory and the key are never
-# touched. The same version changes nothing and says so; missing pieces are put back.
+# stopped node, then `tenko upgrade layout`, both as the account, which switches `current`,
+# and a start; docs/upgrades.md section 7.3). The data directory and the key are never
+# touched. The same version changes nothing and says so; missing pieces are put back. A node
+# that an installer up to 0.0.11 set up (a bootstrap binary /usr/local/bin/tenko that the
+# unit's start-up step runs) is brought to one version by any run; --repair does only that,
+# without a download.
 # --reconfigure changes /etc/tenko/tenko.toml by the answers given as flags or at the
 # questions and carries every other value over (a hand-set [dns] listen, [tls], [kek], ...),
 # saying so per section. A node that has started before keeps its roles in the store, so
@@ -77,6 +89,7 @@
 #   9  first-run setup failed (the node runs; complete setup in the browser)
 #  10  canceled at a question
 #  11  --check: something the prepared roles need is missing
+# --repair exits 0, 1, 2, 3 or 7 with these meanings.
 #
 # License: Business Source License 1.1; see LICENSE.md at the repository root.
 
@@ -89,7 +102,15 @@ readonly E_FAIL=1 E_USAGE=2 E_HOST=3 E_PORT=4 E_DOWNLOAD=5 E_CONFIG=6 E_START=7 
 readonly E_SETUP=9 E_CANCEL=10 E_MISSING=11
 
 # ── Fixed paths (the unit names them) ───────────────────────────────────────────────────────
-readonly BIN=/usr/local/bin/tenko
+# The binary that installers up to 0.0.11 put on PATH and ran from the unit's start-up step;
+# --repair and an upgrade remove it (is_old_bootstrap), nothing writes it any more.
+readonly OLD_BIN=/usr/local/bin/tenko
+# The command line of the node (ADR 0023 item 3): a link to the layout's current binary, for
+# the members of the group tenko-cli, on the PATH of the members only, never root's.
+readonly CLI_GROUP=tenko-cli
+readonly CLI_DIR=/opt/tenko/cli
+readonly CLI_LINK=/opt/tenko/cli/tenko
+readonly PROFILE_D=/etc/profile.d/tenko-cli.sh
 readonly ETC=/etc/tenko
 readonly CONFIG=/etc/tenko/tenko.toml
 readonly KEK_CRED=/etc/tenko/kek.cred
@@ -123,7 +144,7 @@ OPT_YES=0 OPT_DRY=0 OPT_NO_START=0 OPT_RECONFIGURE=0 OPT_UNINSTALL=0 OPT_PURGE=0
 OPT_ROLES="" OPT_MODULES="" OPT_PROFILE="" OPT_HOST="" OPT_DNS_ADDRESS="" OPT_FORWARDERS=""
 OPT_DATA_DIR="" OPT_VERSION="" OPT_LANGUAGE="" OPT_ADMIN="" OPT_PASSWORD_STDIN=0
 OPT_BINARY="" OPT_TOKEN="" OPT_REPO="" OPT_RELEASE_URL="" OPT_KEK="" OPT_KEEP_STUB=0 OPT_USE_SELF=0
-OPT_CHECK=0 OPT_PREPARE=0 OPT_TOKEN_STDIN=0 OPT_SETUP_TOKEN=0 TOKEN_FLAG=0
+OPT_CHECK=0 OPT_PREPARE=0 OPT_TOKEN_STDIN=0 OPT_SETUP_TOKEN=0 OPT_REPAIR=0 TOKEN_FLAG=0
 SET_ROLES=0 SET_MODULES=0 SET_FORWARDERS=0 SET_DNS_ADDRESS=0 SET_ADMIN=0
 
 usage() {
@@ -160,7 +181,7 @@ Answers (asked when --yes is not given; the default is in brackets):
                                       none [the host's resolvers, loopback excluded]
   --data-dir <path>                   the data directory, on SSD or NVMe [/var/lib/tenko]. An
                                       existing directory is taken only when it is empty or
-                                      already the account's own (owner tenko, mode 0700)
+                                      already the account's own (owner tenko)
   --version latest|<x.y.z>            the release to install [latest]
   --language en|sv                    default UI language, for --admin [en]
   --admin <name>                      complete first-run setup with this administrator; the
@@ -205,15 +226,23 @@ Behavior:
                                       else (read as the service account, in a session of its
                                       own); exit 1 when there is none (setup is complete, or
                                       the server has not started)
+  --repair                            bring a node that an installer up to 0.0.11 set up to one
+                                      version: the unit without the bootstrap binary, the
+                                      command line (/opt/tenko/cli/tenko for the group
+                                      tenko-cli) and the removal of /usr/local/bin/tenko.
+                                      Downloads nothing and changes no configuration or data;
+                                      restarts the service when its unit changed; a node in
+                                      that shape already is left as it is
   --reconfigure                       change /etc/tenko/tenko.toml by the answers you give: every
                                       other value of the file (listen addresses, [tls], [kek],
                                       [dns.recursion], ...) is carried over; the old file is
                                       kept as tenko.toml.<time>.bak
   --no-start                          everything except enabling and starting the service
   --dry-run                           print every step, change nothing
-  --uninstall                         remove the service and the binary; keep data, key, config
-  --purge                             with --uninstall: also the data, the key, the configuration
-                                      and the service account
+  --uninstall                         remove the service, the command line and the version
+                                      layout; keep data, key, config
+  --purge                             with --uninstall: also the data, the key, the configuration,
+                                      the service account and the group tenko-cli
   -h, --help                          this text
 
 Exit statuses: 0 done, 1 failure, 2 usage, 3 unsupported host, 4 port taken, 5 download or
@@ -291,15 +320,22 @@ put() {
 # caller sends them to a file of TMP or reads them into a variable, and prints what it needs
 # through `clean`.
 
-# as_tenko <command>...: runs the command as the service account, in a session of its own.
+# as_tenko [--cli-group] <command>...: runs the command as the service account, in a session
+# of its own. With --cli-group the process also holds the group tenko-cli, which the account
+# is not a member of: only the command that gives updates/ that group needs it.
 as_tenko() {
+  local runuser_opts=() setpriv_groups=(--init-groups) su_opts=()
+  if [[ "$1" == --cli-group ]]; then
+    runuser_opts=(-g tenko -G "$CLI_GROUP") setpriv_groups=(--groups "$CLI_GROUP") su_opts=(-g tenko -G "$CLI_GROUP")
+    shift
+  fi
   have setsid || die "$E_HOST" "setsid is missing (the util-linux package)"
   if have runuser; then
-    setsid -w runuser -u tenko -- "$@" </dev/null
+    setsid -w runuser -u tenko "${runuser_opts[@]}" -- "$@" </dev/null
   elif have setpriv; then
-    setsid -w setpriv --reuid=tenko --regid=tenko --init-groups -- "$@" </dev/null
+    setsid -w setpriv --reuid=tenko --regid=tenko "${setpriv_groups[@]}" -- "$@" </dev/null
   else
-    setsid -w su -s /bin/sh tenko -c "$(printf '%q ' "$@")" </dev/null
+    setsid -w su "${su_opts[@]}" -s /bin/sh tenko -c "$(printf '%q ' "$@")" </dev/null
   fi
 }
 
@@ -326,12 +362,12 @@ admin_secret_problem() {
 valid_setup_token() { [[ "$1" =~ ^[A-Z2-7]{5}(-[A-Z2-7]{5}){3}$ ]]; }
 valid_fingerprint() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
 
-# read_setup_token: the setup token the running server wrote, read by the account with
-# `tenko setup token` and kept only in a token's shape; nothing when setup is complete or the
-# server has not started on the data directory yet.
+# read_setup_token: the setup token the running server wrote, read out of its file by the
+# account (no binary runs) and kept only in a token's shape; nothing when setup is complete
+# or the server has not started on the data directory yet.
 read_setup_token() {
   local token
-  token="$(as_tenko "$BIN" setup token --config "$CONFIG" --data-dir "$DATA_DIR" 2>/dev/null | clean 1 || true)"
+  token="$(as_tenko cat "${DATA_DIR}/setup-token" 2>/dev/null | clean 1 || true)"
   valid_setup_token "$token" && printf '%s' "$token"
   return 0
 }
@@ -548,7 +584,7 @@ valid_url() {
 url_proto() { if [[ "$1" == http://* ]]; then printf '=http,https'; else printf '=https'; fi; }
 
 # check_data_dir: an existing data directory is taken only when it is empty (it becomes the
-# account's, 0700) or already the account's own (owner tenko, mode 0700, kept as it is).
+# account's, 0711) or already the account's own (owner tenko, mode 0711 or 0700, kept).
 # Anything else is refused with the reason: root changes the owner of nothing that holds
 # files, and follows no link into a directory the account can write.
 check_data_dir() {
@@ -557,9 +593,9 @@ check_data_dir() {
   [[ -e "$DATA_DIR" ]] || return 0
   [[ -d "$DATA_DIR" ]] || die "$E_USAGE" "--data-dir ${DATA_DIR} exists and is not a directory"
   owner="$(stat -c %U "$DATA_DIR")" mode="$(stat -c %a "$DATA_DIR")"
-  [[ "$owner" == tenko && "$mode" == 700 ]] && return 0
+  [[ "$owner" == tenko && ("$mode" == 711 || "$mode" == 700) ]] && return 0
   [[ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]] && return 0
-  die "$E_USAGE" "--data-dir ${DATA_DIR} exists, is not empty, and is not the account's data directory (owner ${owner}, mode ${mode}; a data directory is owned by tenko with mode 0700). Give an empty directory or another path. A data directory of an earlier Tenko installation is taken as it is once its owner and mode are set, as root, before this script runs: chown tenko:tenko ${DATA_DIR} && chmod 0700 ${DATA_DIR}"
+  die "$E_USAGE" "--data-dir ${DATA_DIR} exists, is not empty, and is not the account's data directory (owner ${owner}, mode ${mode}; a data directory is owned by tenko with mode 0711, 0700 before this installer). Give an empty directory or another path. A data directory of an earlier Tenko installation is taken as it is once its owner and mode are set, as root, before this script runs: chown tenko:tenko ${DATA_DIR} && chmod 0711 ${DATA_DIR}"
 }
 
 # dns_listen <answer>: the [dns] listen entries as TOML strings, comma separated, or fails.
@@ -1000,19 +1036,41 @@ detect_host() {
   fi
 }
 
+# is_old_bootstrap: OLD_BIN is the bootstrap binary an installer up to 0.0.11 put there for
+# this node, which --repair and an upgrade remove: a regular file (not a link) that root
+# owns, that reports itself as tenko, and that the start-up step of this node's unit runs. A
+# file an operator put there for another reason stays. A drop-in of the operator's that runs
+# it too (a `systemctl edit` of an older procedure) stops the run with its name instead: the
+# start would fail once the file is gone.
+is_old_bootstrap() {
+  local dropin strict="${1:-}"
+  [[ -f "$OLD_BIN" && ! -L "$OLD_BIN" && "$(stat -c %U "$OLD_BIN")" == root ]] || return 1
+  "$OLD_BIN" --version 2>/dev/null | head -n 1 | grep -qE '^tenko [0-9]+\.[0-9]+\.[0-9]+' || return 1
+  [[ -f "$UNIT" ]] && grep -qF "ExecStartPre=${OLD_BIN} upgrade layout" "$UNIT" || return 1
+  [[ -n "$strict" ]] || return 0
+  for dropin in "$DROPIN_DIR"/*.conf; do
+    [[ -f "$dropin" ]] && grep -qF "$OLD_BIN" "$dropin" &&
+      die "$E_FAIL" "${dropin} runs ${OLD_BIN}, which this installer removes: delete that line from the drop-in (systemctl edit tenko) and run this script again"
+  done
+  return 0
+}
+
 # Installed state, read before anything changes.
-OLD_VERSION="" OLD_RUNNING="" HAVE_CONFIG=0 KEK_MODE="" ACTIVE=0
+OLD_VERSION="" OLD_RUNNING="" HAVE_CONFIG=0 KEK_MODE="" ACTIVE=0 OLD_BOOTSTRAP=0
 detect_installed() {
   local current
-  [[ -x "$BIN" ]] && OLD_VERSION="$(version_of "$BIN" || true)"
+  if is_old_bootstrap strict; then
+    OLD_BOOTSTRAP=1
+    OLD_VERSION="$(version_of "$OLD_BIN" || true)"
+  fi
   [[ -f "$CONFIG" ]] && HAVE_CONFIG=1
   if [[ -L "${DATA_DIR}/updates/current" ]]; then
     current="$(readlink "${DATA_DIR}/updates/current")"
     current="${current##*/}"
     valid_version "$current" && OLD_RUNNING="$current"
   fi
-  # The running version is the newer of the bootstrap binary and the layout's `current`
-  # (an update installed from the web UI moves only `current`).
+  # The running version is the newer of an old installer's bootstrap binary and the layout's
+  # `current` (an update installed from the web UI moves only `current`).
   if [[ -n "$OLD_RUNNING" && -n "$OLD_VERSION" && "$(version_cmp "$OLD_RUNNING" "$OLD_VERSION")" == 1 ]]; then
     OLD_VERSION="$OLD_RUNNING"
   elif [[ -z "$OLD_VERSION" ]]; then
@@ -1620,32 +1678,53 @@ step_dirs() {
     run install -d -m 0750 -o root -g tenko "$ETC"
   fi
   # check_data_dir admitted the directory: absent, empty, or the account's own already.
+  # Mode 0711: the members of tenko-cli pass through it to updates/ (step_cli).
   if [[ ! -d "$DATA_DIR" ]]; then
-    run install -d -m 0700 -o tenko -g tenko "$DATA_DIR"
+    run install -d -m 0711 -o tenko -g tenko "$DATA_DIR"
     ok "Created the data directory ${DATA_DIR}"
-  elif [[ "$(stat -c '%U %a' "$DATA_DIR")" != "tenko 700" ]]; then
+  elif [[ "$(stat -c %U "$DATA_DIR")" != tenko ]]; then
     run chown tenko:tenko "$DATA_DIR"
-    run chmod 0700 "$DATA_DIR"
-    ok "Took the empty directory ${DATA_DIR} as the data directory (owner tenko, mode 0700)"
+    run chmod 0711 "$DATA_DIR"
+    ok "Took the empty directory ${DATA_DIR} as the data directory (owner tenko, mode 0711)"
   fi
   [[ -d "$LOG_DIR" ]] || run install -d -m 0750 -o tenko -g tenko "$LOG_DIR"
 }
 
+# stage_for_account: the account runs NEW_BIN itself, root's verified copy in TMP, which root
+# owns and the account may pass but not list (0711): the account runs a file it cannot
+# change, and root runs nothing the account can write.
+stage_for_account() { chmod 0711 "$TMP"; }
+
+# step_layout: the account copies NEW_BIN into its layout, <data_dir>/updates/<version>/, and
+# points `current` at it when it is newer (tenko upgrade layout from NEW_BIN). The unit
+# starts what `current` names; root writes nothing under the data directory.
+step_layout() {
+  local rc=0
+  CHANGED=$((CHANGED + 1))
+  if ((OPT_DRY)); then
+    printf '  [dry-run] %s upgrade layout --data-dir %s (as tenko)\n' "$NEW_BIN" "$DATA_DIR"
+    return 0
+  fi
+  stage_for_account
+  as_tenko "$NEW_BIN" upgrade layout --data-dir "$DATA_DIR" >"${TMP}/layout.out" 2>&1 || rc=$?
+  if ((rc != 0)); then
+    clean 20 <"${TMP}/layout.out" | sed 's/^/      /' >&2
+    die "$E_FAIL" "tenko upgrade layout failed as the account (exit ${rc})"
+  fi
+  ok "Tenko ${NEW_VERSION} is in the version layout: $(clean 1 <"${TMP}/layout.out")"
+}
+
 step_binary() {
   if [[ -z "$OLD_VERSION" ]]; then
-    run install -m 0755 -o root -g root "$NEW_BIN" "$BIN"
-    ok "Installed ${BIN} (${NEW_VERSION})"
+    step_layout
     return 0
   fi
   case "$(version_cmp "$NEW_VERSION" "$OLD_VERSION")" in
   0)
-    if [[ -x "$BIN" ]] && same_file "$NEW_BIN" "$BIN"; then
+    if [[ "$OLD_RUNNING" == "$NEW_VERSION" ]]; then
       ok "Tenko ${NEW_VERSION} is installed already"
-    elif [[ -x "$BIN" && "$(version_of "$BIN")" == "$NEW_VERSION" ]]; then
-      ok "Tenko ${NEW_VERSION} is installed already (another build of the same version; kept)"
     else
-      run install -m 0755 -o root -g root "$NEW_BIN" "$BIN"
-      ok "Installed ${BIN} (${NEW_VERSION}) again"
+      step_layout
     fi
     ;;
   1) step_upgrade ;;
@@ -1667,10 +1746,9 @@ step_upgrade() {
     if ((OPT_DRY)); then
       printf '  [dry-run] %s upgrade check --config %s --data-dir %s (as tenko)\n' "$NEW_BIN" "$CONFIG" "$DATA_DIR"
     else
-      install -m 0755 "$NEW_BIN" "${TMP}/tenko-check"
-      chmod 0711 "$TMP"
+      stage_for_account
       # The account's report lands in a file of root's and is shown through the filter.
-      as_tenko "${TMP}/tenko-check" upgrade check --config "$CONFIG" --data-dir "$DATA_DIR" \
+      as_tenko "$NEW_BIN" upgrade check --config "$CONFIG" --data-dir "$DATA_DIR" \
         >"${TMP}/check.out" 2>&1 || rc=$?
       clean 60 <"${TMP}/check.out" | sed 's/^/      /'
       if ((rc != 0 && rc != 10)); then
@@ -1684,9 +1762,93 @@ step_upgrade() {
       fi
     fi
   fi
-  run install -m 0755 -o root -g root "$NEW_BIN" "$BIN"
+  step_layout
   UPGRADED=1
-  ok "Installed ${BIN} (${NEW_VERSION}); the next start switches the updates layout to it"
+}
+
+# ── The command line of the node (ADR 0023 item 3) ──────────────────────────────────────────
+# profile_text: /etc/profile.d/tenko-cli.sh, which puts the command line on the PATH of the
+# login shells of the members of tenko-cli, never root's: an account outside the group, an
+# administrator included, carries no PATH into a plain `su` that leads to the layout.
+profile_text() {
+  cat <<PROFILE_END
+# Written by the Tenko installer: the command line of Tenko on this node, for the members of
+# the group ${CLI_GROUP} (docs/upgrades.md, section 9.2). Never on root's PATH (ADR 0023).
+if [ "\$(id -u)" -ne 0 ] && id -Gn | tr ' ' '\n' | grep -qx ${CLI_GROUP}; then
+  case ":\${PATH}:" in
+  *":${CLI_DIR}:"*) ;;
+  *) PATH="\${PATH}:${CLI_DIR}" && export PATH ;;
+  esac
+fi
+PROFILE_END
+}
+
+# step_cli: one version on the node. The group tenko-cli; the data directory passable (0711);
+# its updates/ open to that group alone (group tenko-cli, 0750: the gate); the versions that
+# `current` and `previous` name open below the gate (0755, for a running version older than
+# this installer, which does not open them itself); the link /opt/tenko/cli/tenko to
+# `current`; the profile.d entry; and the old installers' bootstrap binary removed. Every
+# change under the data directory is made by the account (as_tenko); root reads only the
+# metadata of paths there, with stat, which follows no link, and the account follows the
+# links `current` and `previous` itself.
+step_cli() {
+  local updates="${DATA_DIR}/updates" link modes old_version
+  if ! getent group "$CLI_GROUP" >/dev/null 2>&1; then
+    have groupadd || die "$E_HOST" "groupadd is missing (the passwd or shadow-utils package)"
+    run groupadd --system "$CLI_GROUP"
+    ok "Created the group ${CLI_GROUP}, without members"
+  fi
+  if [[ -d "$DATA_DIR" && ! -L "$DATA_DIR" && "$(stat -c %a "$DATA_DIR")" != 711 ]]; then
+    run as_tenko chmod 0711 "$DATA_DIR"
+    ok "${DATA_DIR} is passable for the members of ${CLI_GROUP} (mode 0711, set by the account)"
+  fi
+  if [[ -L "$updates" ]]; then
+    warn "${updates} is a link, not the account's directory; left as it is, and the command line stays closed"
+  elif [[ -d "$updates" ]]; then
+    if [[ "$(stat -c '%G %a' "$updates")" != "${CLI_GROUP} 750" ]]; then
+      run as_tenko --cli-group chgrp "$CLI_GROUP" "$updates"
+      run as_tenko chmod 0750 "$updates"
+      ok "${updates} is open to the group ${CLI_GROUP} alone (mode 0750, set by the account)"
+    fi
+    for link in current previous; do
+      [[ -L "${updates}/${link}" ]] || continue
+      modes="$(as_tenko stat -Lc %a "${updates}/${link}/" "${updates}/${link}/tenko" 2>/dev/null | clean 2 | paste -sd ' ' -)" || true
+      if [[ "$modes" != "755 755" ]]; then
+        run as_tenko chmod 0755 "${updates}/${link}/" "${updates}/${link}/tenko" ||
+          warn "The version that ${link} names could not be opened below the gate; the next start opens it"
+        ok "The version that ${link} names is open below the gate (mode 0755, set by the account)"
+      fi
+    done
+  elif ((OPT_DRY)); then
+    printf '  [dry-run] chgrp %s %s; chmod 0750 %s (as tenko)\n' "$CLI_GROUP" "$updates" "$updates"
+  fi
+  # Root's directories: an existing one that another account owns or may write is refused,
+  # since the members of tenko-cli run what its link names.
+  local dir
+  for dir in /opt/tenko "$CLI_DIR"; do
+    if [[ -L "$dir" ]] || { [[ -e "$dir" ]] && [[ "$(stat -c %U "$dir")" != root || $((8#$(stat -c %a "$dir") & 8#022)) != 0 ]]; }; then
+      die "$E_FAIL" "${dir} exists and is not root's own directory without group or other write; fix or remove it and run this script again"
+    fi
+    [[ -d "$dir" ]] || run install -d -m 0755 -o root -g root "$dir"
+  done
+  if [[ -d "$CLI_LINK" && ! -L "$CLI_LINK" ]]; then
+    die "$E_FAIL" "${CLI_LINK} is a directory; remove it and run this script again"
+  fi
+  if [[ "$(readlink "$CLI_LINK" 2>/dev/null || true)" != "${updates}/current/tenko" ]]; then
+    run ln -sfn "${updates}/current/tenko" "$CLI_LINK"
+    ok "${CLI_LINK} runs the version that current names, for the members of ${CLI_GROUP}"
+  fi
+  if profile_text | put "$PROFILE_D" 0644 root:root; then
+    ok "Wrote ${PROFILE_D} (${CLI_DIR} on the PATH of the members of ${CLI_GROUP}, never root's)"
+  fi
+  if ((OLD_BOOTSTRAP)); then
+    old_version="$(version_of "$OLD_BIN" || true)"
+    # The unit systemd has loaded may still name the old binary in its start-up step.
+    if ((UNIT_CHANGED && SYSTEMD)); then run systemctl daemon-reload; fi
+    run rm -f "$OLD_BIN"
+    OLD_BOOTSTRAP=0
+    ok "Removed ${OLD_BIN} (${old_version:-a Tenko binary}, the bootstrap of an older installer): the node runs one version"
+  fi
 }
 
 kek_file_section() {
@@ -1916,13 +2078,19 @@ ${kek_section}"
 
 step_config_check() {
   local out rc=0
+  # A release older than the running one (kept, not installed) does not judge a file the
+  # running version may have keys for; a file this run wrote is checked always.
+  if ((!WROTE_CONFIG)) && [[ -n "$OLD_VERSION" && "$(version_cmp "$NEW_VERSION" "$OLD_VERSION")" == -1 ]]; then
+    ok "tenko config check skipped: ${NEW_VERSION} is older than the installed ${OLD_VERSION}"
+    return 0
+  fi
   if ((OPT_DRY)); then
-    printf '  [dry-run] %s config check --config %s\n' "$BIN" "$CONFIG"
+    printf '  [dry-run] %s config check --config %s\n' "$NEW_BIN" "$CONFIG"
     return 0
   fi
   # A clean environment: TENKO_* variables of this shell would be checked too, and the
   # service does not see them.
-  out="$(env -i PATH="$PATH" "$BIN" config check --config "$CONFIG" 2>&1 >/dev/null)" || rc=$?
+  out="$(env -i PATH="$PATH" "$NEW_BIN" config check --config "$CONFIG" 2>&1 >/dev/null)" || rc=$?
   if ((rc != 0)); then
     printf '%s\n' "$out" | sed 's/^/      /' >&2
     die "$E_CONFIG" "tenko config check refused ${CONFIG} (exit ${rc})"
@@ -2064,25 +2232,42 @@ unit_text() {
 # Needs systemd 250 or later (LoadCredentialEncrypted= and the %d specifier): Debian 12,
 # Ubuntu 24.04, RHEL 9 and newer.
 #
-# Install (as root; the full walk-through is in deploy/README.md):
-#   1. Place the binary at /usr/local/bin/tenko.
-#   2. Create the service account first:
+# Install (as root; deploy/install.sh does all of this, and deploy/README.md walks through it):
+#   1. Create the service account and the group of the command line:
 #        useradd --system --home-dir /var/lib/tenko --no-create-home \
 #                --shell /usr/sbin/nologin tenko
-#   3. Create /etc/tenko, readable by the service account but not writable by it, and put
+#        groupadd --system tenko-cli
+#   2. Create /etc/tenko, readable by the service account but not writable by it, and put
 #      the configuration (deploy/tenko.example.toml) in it:
 #        install -d -m 0750 -o root -g tenko /etc/tenko
 #        install -m 0640 -o root -g tenko deploy/tenko.example.toml /etc/tenko/tenko.toml
-#        tenko config check --config /etc/tenko/tenko.toml
-#   4. Create the key-encryption key as an encrypted credential, once (see the section
+#   3. Lay out the version the service starts, as the account, from a copy of the release
+#      file in a directory that root owns and the account may only pass (never a file the
+#      account can write, and never root running anything in the data directory):
+#        install -d -m 0711 -o tenko -g tenko /var/lib/tenko
+#        d="$(mktemp -d)" && chmod 0711 "$d"
+#        install -m 0755 tenko-<version>-linux-x86_64 "$d/tenko"
+#        runuser -u tenko -- "$d/tenko" config check --config /etc/tenko/tenko.toml
+#        runuser -u tenko -- "$d/tenko" upgrade layout --data-dir /var/lib/tenko
+#        runuser -u tenko -g tenko -G tenko-cli -- chgrp tenko-cli /var/lib/tenko/updates
+#        runuser -u tenko -- chmod 0750 /var/lib/tenko/updates
+#      The last two lines are the gate of the command line: only members of tenko-cli pass
+#      updates/. The account changes the group of its own directory, holding tenko-cli for
+#      that one command only; the running service never holds it.
+#   4. The command line for members of tenko-cli (never on root's PATH):
+#        install -d -m 0755 /opt/tenko/cli
+#        ln -sfn /var/lib/tenko/updates/current/tenko /opt/tenko/cli/tenko
+#      and /etc/profile.d/tenko-cli.sh, which adds /opt/tenko/cli to the PATH of the members
+#      of tenko-cli, never root's (install.sh writes it).
+#   5. Create the key-encryption key as an encrypted credential, once (see the section
 #      "Key-encryption key" below; keep an offline copy of the key, see deploy/README.md):
 #        openssl rand -hex 32 | systemd-creds encrypt --name=tenko_kek - /etc/tenko/kek.cred
 #        chmod 0600 /etc/tenko/kek.cred
-#   5. Install this file as /etc/systemd/system/tenko.service, then run:
+#   6. Install this file as /etc/systemd/system/tenko.service, then run:
 #        systemctl daemon-reload && systemctl enable --now tenko
-#   6. While first-run setup is open the server keeps a one-time setup token in
+#   7. While first-run setup is open the server keeps a one-time setup token in
 #      /var/lib/tenko/setup-token (never in the journal); print it with
-#        sudo -u tenko tenko setup token --config /etc/tenko/tenko.toml
+#        bash install.sh --setup-token
 #      and complete setup in the web UI or with `tenko setup`.
 #
 # If the unit fails at once with status 243/CREDENTIALS, /etc/tenko/kek.cred is missing or
@@ -2092,14 +2277,13 @@ unit_text() {
 # from the web UI, a changed module set, a switch back to the previous version) and is
 # always restarted.
 #
-# Versions (OPS-24, docs/upgrades.md): the service runs /var/lib/tenko/updates/current/tenko,
-# the version that the link `current` points at. ExecStartPre= copies /usr/local/bin/tenko
-# into /var/lib/tenko/updates/<version>/ when it is missing, and moves `current` to it when
-# it is newer than the running version (an administrator upgraded the binary by hand), so
-# that an update installed from the web UI is a switch of the link and a restart. To keep
-# the old layout without updates from the UI, use instead:
-#   ExecStart=/usr/local/bin/tenko serve --config /etc/tenko/tenko.toml
-# and delete the ExecStartPre= line; the UI then shows update notices only.
+# Versions (OPS-24, docs/upgrades.md section 9, ADR 0023): the node runs one version, the one
+# the link /var/lib/tenko/updates/current points at. ExecStart= runs it; ExecStartPre= runs
+# the same binary's `upgrade layout`, which changes no version and opens the versions current
+# and previous name to the command line; members of tenko-cli run it through
+# /opt/tenko/cli/tenko. An update installed from the web UI writes a new version into the
+# layout, moves `current` and restarts. Every command of this unit runs as User=tenko: no line
+# has the + or ! prefix that would run it with full privileges.
 
 [Unit]
 Description=Tenko DDI (DNS, DHCP and IPAM): controller
@@ -2118,8 +2302,10 @@ NotifyAccess=main
 # ("controller"). A controller node runs the dns, dhcp and probe roles in its process when
 # they are listed (roles = "controller,dns,dhcp"); a role list without `controller` exits
 # with status 2 when it names dns or dhcp. The binary is the version that `current` points
-# at; ExecStartPre= sets the layout up (see the top).
-ExecStartPre=/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml
+# at (see the top). The start-up step runs the same binary as the account; it reads no
+# configuration file and its leading "-" makes systemd go on whatever it exits with, so it
+# never stops a start, whatever version wrote tenko.toml.
+ExecStartPre=-/var/lib/tenko/updates/current/tenko upgrade layout --data-dir /var/lib/tenko
 ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
 # The data directory is the state directory below; the unit pins it so that a data_dir in
 # tenko.toml cannot point at a path the sandbox makes read-only.
@@ -2199,11 +2385,14 @@ Environment=TENKO_KEK__CREDENTIAL=tenko_kek
 
 # Filesystem
 # /var/lib/tenko holds kek/ (later key generations; the root key is the credential), store/ (redb files, fsynced
-# on every commit), tls/ca-root.pem and logs/. Mode 0700: the service account only.
+# on every commit), tls/ca-root.pem, logs/ and updates/. Mode 0711: others may pass through
+# it to updates/ (group tenko-cli, 0750, the command line's gate) and list nothing; every
+# directory with data in it is 0700 (UMask= below). systemd applies the mode when it creates
+# the directory; the installer sets it, as the account, on an existing one.
 # Put it on SSD or NVMe (OPS-19); the server logs the fsync median at start and warns
 # above 10 ms.
 StateDirectory=tenko
-StateDirectoryMode=0700
+StateDirectoryMode=0711
 # /var/log/tenko, created and owned by the service account, the only place besides the state
 # directory that the service may write. It is for `log.file = "/var/log/tenko/tenko.log"` in
 # tenko.toml (the journal gets the log either way). The server rotates that file itself by
@@ -2222,8 +2411,7 @@ PrivateDevices=yes
 # Execution: every path the service can write is mounted noexec for it, so a file the
 # account writes there (the store, the logs, /tmp, the rest of the data directory) never
 # runs, even when the account was taken over. Everything else is read-only for the service
-# (ProtectSystem=strict) and stays executable: /usr/local/bin/tenko of ExecStartPre= and the
-# system programs the service starts (ip and ping for the probe role, systemd-creds for the
+# (ProtectSystem=strict) and stays executable: the system programs the service starts (ip and ping for the probe role, systemd-creds for the
 # KEK providers that seal, the interpreter of an installed plugin). The writable paths are
 # the state and log directories and the private /tmp and /var/tmp; /dev/shm, /run and
 # /proc are noexec already. Two directories of the state directory stay executable:
@@ -2233,7 +2421,7 @@ PrivateDevices=yes
 #   /var/lib/tenko/plugins     written by an administrator (docs/plugins.md section 10):
 #                              installed plugins, which the service starts. This entry goes
 #                              when plugins run in a unit of their own (ADR 0032)
-# A leading "-": the path may not exist yet (the layout is made by ExecStartPre=). A data
+# A leading "-": the path may not exist (plugins/ until one is installed). A data
 # directory elsewhere is added to both lists by the installer's drop-in data-dir.conf.
 # NoExecPaths=/ with ExecPaths= would not do the same: the mounts systemd makes for the
 # service (StateDirectory=, LogsDirectory=, PrivateTmp=) are mounts of their own that keep
@@ -2500,6 +2688,8 @@ step_unit() {
       echo "ReadWritePaths=${DATA_DIR}"
       echo "NoExecPaths=${DATA_DIR}"
       echo "ExecPaths=-${DATA_DIR}/updates -${DATA_DIR}/plugins"
+      echo "ExecStartPre="
+      echo "ExecStartPre=-${DATA_DIR}/updates/current/tenko upgrade layout --data-dir ${DATA_DIR}"
       echo "ExecStart="
       echo "ExecStart=${DATA_DIR}/updates/current/tenko serve --config ${CONFIG}"
     } | put "$DROPIN_DATA" 0644 root:root && changed=1
@@ -2832,8 +3022,8 @@ wait_ready() {
       return 0
     fi
     if [[ "$state" == active ]] && ca_copy &&
-      "$BIN" health --url "https://localhost:${API_PORT}" --ca-file "$CA_COPY" >/dev/null 2>&1; then
-      ok "The node is ready: $("$BIN" health --live --url "https://localhost:${API_PORT}" --ca-file "$CA_COPY" 2>/dev/null | clean 1)"
+      "$NEW_BIN" health --url "https://localhost:${API_PORT}" --ca-file "$CA_COPY" >/dev/null 2>&1; then
+      ok "The node is ready: $("$NEW_BIN" health --live --url "https://localhost:${API_PORT}" --ca-file "$CA_COPY" 2>/dev/null | clean 1)"
       return 0
     fi
     sleep 2
@@ -2885,7 +3075,8 @@ start_failed() {
 }
 
 # step_setup: the setup token, read as the account (read_setup_token: nothing when setup is
-# complete already), and with --admin first-run setup by root's binary over loopback, with
+# complete already), and with --admin first-run setup by root's copy of the release over
+# loopback (NEW_BIN in TMP, never the layout's binary), with
 # the CA root's copy; the command's output is shown through the filter.
 SETUP_TOKEN="" SETUP_DONE=0
 step_setup() {
@@ -2895,7 +3086,7 @@ step_setup() {
   info "Completing first-run setup with the administrator ${ADMIN}"
   local rc=0
   if ca_copy; then
-    printf '%s\n' "$PASSWORD" | TENKO_SETUP_TOKEN="$SETUP_TOKEN" "$BIN" setup \
+    printf '%s\n' "$PASSWORD" | TENKO_SETUP_TOKEN="$SETUP_TOKEN" "$NEW_BIN" setup \
       --url "https://localhost:${API_PORT}" --ca-file "$CA_COPY" \
       --admin "$ADMIN" --host-name "$HOST_NAME" --profile "$PROFILE" --language "$LANGUAGE" \
       --password-stdin >"${TMP}/setup.log" 2>&1 || rc=$?
@@ -2920,7 +3111,7 @@ step_setup() {
 print_setup_token() {
   local token
   [[ "$(id -u)" == 0 ]] || die "$E_HOST" "Run as root (sudo bash install.sh --setup-token)"
-  [[ -x "$BIN" && -f "$CONFIG" ]] || die "$E_USAGE" "Tenko is not installed here (${BIN}, ${CONFIG})"
+  [[ -f "$UNIT" && -f "$CONFIG" ]] || die "$E_USAGE" "Tenko is not installed here (${UNIT}, ${CONFIG})"
   TMP="$(mktemp -d)"
   data_dir_from_dropin
   token="$(read_setup_token)"
@@ -2945,7 +3136,7 @@ token_command() {
   printf 'bash install.sh --setup-token'
 }
 token_command_by_hand() {
-  printf "setsid -w runuser -u tenko -- tenko setup token --config %s </dev/null 2>&1 | tr -cd '\\\\n[:print:]'" "$CONFIG"
+  printf "setsid -w runuser -u tenko -- cat %s/setup-token </dev/null 2>&1 | tr -cd '\\\\n[:print:]'" "$DATA_DIR"
 }
 
 summary() {
@@ -2981,6 +3172,8 @@ summary() {
   fi
   printf '    %-14s %s\n' "Next:" "docs/QUICKSTART.md in the repository: the roles, a first network, the firewall ports."
   printf '    %-14s %s\n' "Data:" "$DATA_DIR" "Configuration:" "$CONFIG"
+  printf '    %-14s %s\n' "Command line:" "${CLI_LINK}, the version that runs, for the members of ${CLI_GROUP}:" \
+    "" "usermod -aG ${CLI_GROUP} <account> (an account that operates Tenko; never root)"
   ((USE_SELF_DONE)) && printf '    %-14s %s\n' "Host resolver:" "127.0.0.1 (Tenko; --uninstall restores the previous one)"
   # WP7.5: the dhcp role needs an address to listen on, and direct mode a drop-in.
   # The roles: what the machine is prepared for, and what the node starts with.
@@ -3049,7 +3242,8 @@ close_firewall_ports() {
 
 uninstall() {
   local link
-  [[ -f "$UNIT" || -x "$BIN" ]] || ((OPT_PURGE)) || {
+  is_old_bootstrap && OLD_BOOTSTRAP=1
+  [[ -f "$UNIT" || -L "$CLI_LINK" || "$OLD_BOOTSTRAP" == 1 ]] || ((OPT_PURGE)) || {
     ok "Tenko is not installed; nothing to remove"
     return 0
   }
@@ -3074,8 +3268,12 @@ uninstall() {
   [[ -d "$DROPIN_DIR" ]] && [[ -z "$(ls -A "$DROPIN_DIR")" ]] && run rmdir "$DROPIN_DIR"
   [[ -f "$UNIT" ]] && run rm -f "$UNIT"
   ((SYSTEMD)) && run systemctl daemon-reload
-  [[ -e "$BIN" ]] && run rm -f "$BIN"
-  ok "Removed the service and ${BIN}"
+  ((OLD_BOOTSTRAP)) && run rm -f "$OLD_BIN"
+  [[ -L "$CLI_LINK" ]] && run rm -f "$CLI_LINK"
+  [[ -d "$CLI_DIR" && -z "$(ls -A "$CLI_DIR")" ]] && run rmdir "$CLI_DIR"
+  [[ -d /opt/tenko && -z "$(ls -A /opt/tenko)" ]] && run rmdir /opt/tenko
+  [[ -f "$PROFILE_D" ]] && run rm -f "$PROFILE_D"
+  ok "Removed the service and the command line (${CLI_LINK}, ${PROFILE_D})"
   close_firewall_ports
   # The record describes the drop-ins and the ports, which are gone now.
   [[ -f "$PREPARED_FILE" ]] && run rm -f "$PREPARED_FILE"
@@ -3104,7 +3302,8 @@ uninstall() {
     [[ -d "$ETC" ]] && run rm -rf --one-file-system "$ETC"
     [[ -d "$LOG_DIR" ]] && run rm -rf --one-file-system "$LOG_DIR"
     id -u tenko >/dev/null 2>&1 && run userdel tenko
-    ok "Purged ${DATA_DIR}, ${ETC}, ${LOG_DIR} and the account tenko"
+    getent group "$CLI_GROUP" >/dev/null 2>&1 && run groupdel "$CLI_GROUP"
+    ok "Purged ${DATA_DIR}, ${ETC}, ${LOG_DIR}, the account tenko and the group ${CLI_GROUP}"
   else
     [[ -f "$STATE_FILE" ]] && run rm -f "$STATE_FILE"
     ok "Kept ${DATA_DIR}, ${ETC} (configuration and key) and the account tenko; --purge removes them"
@@ -3138,6 +3337,48 @@ remove_updates() {
   else
     warn "Could not remove ${dir} as the account: $(clean 3 <"${TMP}/rm.out" | tr '\n' ' ')"
   fi
+}
+
+# ── Repair ──────────────────────────────────────────────────────────────────────────────────
+# repair: --repair, the one root step for a node that an installer up to 0.0.11 set up
+# (docs/upgrades.md, section 9.5): the unit without the bootstrap binary in its start-up step,
+# the command line and its gate (step_cli), and the bootstrap binary removed. It downloads
+# nothing and runs no Tenko binary but the old bootstrap's --version (a file of root's); it
+# changes no configuration and no data, says what it changed, and on a node in that shape
+# already changes nothing.
+repair() {
+  [[ -f "$UNIT" && -f "$CONFIG" ]] ||
+    die "$E_USAGE" "Tenko is not installed here (${UNIT}, ${CONFIG}); run bash install.sh without --repair"
+  detect_installed
+  [[ -n "$OLD_RUNNING" ]] ||
+    die "$E_USAGE" "${DATA_DIR}/updates/current names no version: the service has not started from the version layout yet; run bash install.sh without --repair"
+  if ((ACTIVE)); then info "Installed: Tenko ${OLD_RUNNING}, running"; else info "Installed: Tenko ${OLD_RUNNING}, not running"; fi
+  UNIT_CHANGED=0
+  step_unit
+  step_cli
+  ((SYSTEMD && UNIT_CHANGED)) && run systemctl daemon-reload
+  if ((SYSTEMD && CHANGED > 0 && ACTIVE)); then
+    if ((OPT_NO_START)); then
+      ok "Not restarted (--no-start): systemctl restart tenko applies the repair"
+    else
+      info "Restarting tenko with the repaired shape"
+      # Type=notify: systemctl returns once the server reports ready, or fails.
+      if ! run systemctl restart tenko; then
+        show_journal
+        die "$E_START" "tenko failed to start with the repaired unit; see journalctl -u tenko"
+      fi
+    fi
+  fi
+  echo
+  if ((CHANGED == 0)); then
+    bold "  This node runs one version, ${OLD_RUNNING}; nothing was changed"
+  elif ((OPT_DRY)); then
+    bold "  Dry run: the steps above were printed, nothing was changed"
+  else
+    bold "  This node runs one version, ${OLD_RUNNING}: the server, the unit's start-up step and ${CLI_LINK}"
+    printf '    %-14s %s\n' "Command line:" "for the members of ${CLI_GROUP}: usermod -aG ${CLI_GROUP} <account> (never root)"
+  fi
+  exit 0
 }
 
 # ── Arguments ───────────────────────────────────────────────────────────────────────────────
@@ -3178,6 +3419,7 @@ parse_args() {
     --token) need "$@"; OPT_TOKEN="$2" TOKEN_FLAG=1; shift ;;
     --token-stdin) OPT_TOKEN_STDIN=1 ;;
     --setup-token) OPT_SETUP_TOKEN=1 ;;
+    --repair) OPT_REPAIR=1 ;;
     --repo) need "$@"; OPT_REPO="$2"; shift ;;
     --release-url) need "$@"; OPT_RELEASE_URL="$2"; shift ;;
     --kek) need "$@"; OPT_KEK="$2"; shift ;;
@@ -3190,8 +3432,12 @@ parse_args() {
   ((OPT_CHECK && OPT_PREPARE)) && die "$E_USAGE" "--check reports and --prepare sets up; give one of them"
   ((OPT_UNINSTALL && (OPT_CHECK || OPT_PREPARE))) && die "$E_USAGE" "--check and --prepare do not go with --uninstall"
   ((OPT_RECONFIGURE && (OPT_CHECK || OPT_PREPARE))) && die "$E_USAGE" "--check and --prepare change no configuration; --reconfigure goes without them"
-  ((OPT_SETUP_TOKEN && (OPT_UNINSTALL || OPT_CHECK || OPT_PREPARE || OPT_RECONFIGURE || OPT_DRY))) &&
+  ((OPT_SETUP_TOKEN && (OPT_UNINSTALL || OPT_CHECK || OPT_PREPARE || OPT_RECONFIGURE || OPT_DRY || OPT_REPAIR))) &&
     die "$E_USAGE" "--setup-token prints the token and does nothing else; give it alone"
+  ((OPT_REPAIR && (OPT_UNINSTALL || OPT_CHECK || OPT_PREPARE || OPT_RECONFIGURE))) &&
+    die "$E_USAGE" "--repair changes only the shape of the installation; give it alone (--dry-run and --data-dir go with it)"
+  ((OPT_REPAIR)) && [[ -n "$OPT_BINARY" || "${OPT_VERSION:-latest}" != latest ]] &&
+    die "$E_USAGE" "--repair downloads and installs nothing; run bash install.sh --binary or --version without --repair to install a release"
   OPT_VERSION="${OPT_VERSION:-latest}"
   OPT_REPO="${OPT_REPO:-${TENKO_REPO:-linkztream/tenko}}"
   # The token, in this order: --token (deprecated), the first line of standard input with
@@ -3237,8 +3483,8 @@ parse_args() {
 main() {
   parse_args "$@"
   ((OPT_SETUP_TOKEN)) && print_setup_token
-  # --check asks nothing.
-  if ((!OPT_YES && !OPT_CHECK)); then
+  # --check and --repair ask nothing.
+  if ((!OPT_YES && !OPT_CHECK && !OPT_REPAIR)); then
     if { : >/dev/tty; } 2>/dev/null; then
       TTY=/dev/tty
     else
@@ -3263,6 +3509,7 @@ main() {
     ((PURGE_LEFT)) && exit "$E_FAIL"
     exit 0
   fi
+  ((OPT_REPAIR)) && repair
   detect_installed
   if [[ -n "$OLD_VERSION" ]]; then
     if ((ACTIVE)); then
@@ -3291,6 +3538,7 @@ main() {
   step_config
   step_config_check
   step_unit
+  step_cli
   step_prepare
   step_memory
   step_start
@@ -3307,8 +3555,8 @@ main() {
 # the configuration. --prepare sets up what is missing and restarts the service when its unit
 # changed; --check only reports and exits 11 when something is missing.
 prepare_only() {
-  [[ -x "$BIN" && -f "$CONFIG" ]] ||
-    die "$E_USAGE" "Tenko is not installed here (${BIN}, ${CONFIG}); run bash install.sh without --check and --prepare first"
+  [[ -f "$UNIT" && -f "$CONFIG" ]] ||
+    die "$E_USAGE" "Tenko is not installed here (${UNIT}, ${CONFIG}); run bash install.sh without --check and --prepare first"
   HAVE_CONFIG=1
   read_record
   read_config_values

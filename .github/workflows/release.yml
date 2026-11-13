@@ -503,8 +503,10 @@ jobs:
             -e SMOKE_PORT=18443 \
             "$SMOKE_IMAGE" sh /smoke/smoke.sh
       # WP6.6: the installer with this binary, unattended and with --no-start (the container
-      # has no systemd): the account, /etc/tenko, the key file and the unit, tenko config
-      # check on the written file, a rerun that changes nothing, and --uninstall --purge.
+      # has no systemd): the account, /etc/tenko, the key file and the unit, the version layout
+      # and the command line (one version: no binary on root's PATH), tenko config check on
+      # the written file with root's own copy, a rerun that changes nothing, and --uninstall
+      # --purge. The release files are mounted at /dist: the installer creates /opt/tenko.
       # The minimal RHEL image lacks useradd, which a RHEL host has (shadow-utils).
       - name: Install with deploy/install.sh in ${{ matrix.name }}
         run: |
@@ -512,18 +514,22 @@ jobs:
           cat > "$RUNNER_TEMP/install-smoke.sh" <<'INSTALL_END'
           set -euo pipefail
           if ! command -v useradd > /dev/null 2>&1; then microdnf install -y shadow-utils > /dev/null; fi
-          bin="/opt/tenko/tenko-${TENKO_VERSION}-linux-x86_64"
+          bin="/dist/tenko-${TENKO_VERSION}-linux-x86_64"
           bash /opt/install.sh --yes --no-start --binary "$bin" --host-name tenko.example.test
-          /usr/local/bin/tenko config check --config /etc/tenko/tenko.toml > /dev/null
+          install -m 0755 "$bin" /root/tenko
+          /root/tenko config check --config /etc/tenko/tenko.toml > /dev/null
           test -f /etc/tenko/kek.key && test -f /etc/systemd/system/tenko.service && id tenko
+          test "$(readlink /var/lib/tenko/updates/current)" = "$TENKO_VERSION"
+          test "$(readlink /opt/tenko/cli/tenko)" = /var/lib/tenko/updates/current/tenko
+          test ! -e /usr/local/bin/tenko
           bash /opt/install.sh --yes --no-start --binary "$bin" > /tmp/rerun.log 2>&1
           grep -q 'nothing was changed' /tmp/rerun.log || { cat /tmp/rerun.log; exit 1; }
           bash /opt/install.sh --yes --uninstall --purge
-          test ! -e /usr/local/bin/tenko && test ! -e /etc/tenko
+          test ! -e /opt/tenko/cli/tenko && test ! -e /etc/tenko
           echo "== install.sh ok"
           INSTALL_END
           docker run --rm \
-            -v "$PWD/dist:/opt/tenko:ro" \
+            -v "$PWD/dist:/dist:ro" \
             -v "$PWD/deploy/install.sh:/opt/install.sh:ro" \
             -v "$RUNNER_TEMP/install-smoke.sh:/opt/install-smoke.sh:ro" \
             -e "TENKO_VERSION=${VERSION}" \

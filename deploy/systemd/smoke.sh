@@ -4,29 +4,36 @@
 #   sudo bash deploy/systemd/smoke.sh /path/to/tenko
 #
 # Run it as root on a TEST host with systemd as PID 1 (a VM, or the hosted Linux runner of CI),
-# never on a production host: it replaces /usr/local/bin/tenko, /etc/tenko/tenko.toml and
-# /etc/tenko/kek.cred, and it deletes /var/lib/tenko and /var/log/tenko at the start. A host
+# never on a production host: it replaces /etc/tenko/tenko.toml, /etc/tenko/kek.cred and
+# /opt/tenko/cli/tenko, and it deletes /var/lib/tenko and /var/log/tenko at the start. A host
 # that has /var/lib/tenko from something other than this script is refused (set
 # SMOKE_FORCE=1 to override that on a throwaway VM).
 #
 # Argument 1 is a debug build of tenko (only debug builds honor the test variable that lets
 # the update install this same binary as the next version). What it does, in order:
-#   1. installs the binary, the service account, a smoke tenko.toml, the unit from this
-#      repository and a drop-in with TENKO_TEST_VERSION_FROM_LAYOUT=1;
+#   1. installs as the header of deploy/systemd/tenko.service says: the service account, the
+#      group tenko-cli, a smoke tenko.toml, the version layout laid out by the account from a
+#      root-owned copy of the binary, the gate on updates/, the command line
+#      /opt/tenko/cli/tenko, the unit from this repository and a drop-in with
+#      TENKO_TEST_VERSION_FROM_LAYOUT=1; and an account in tenko-cli that runs the command
+#      line;
 #   2. creates the key-encryption key with `systemd-creds encrypt` (the root path);
 #   3. starts the unit and waits until `tenko health` succeeds;
 #   4. checks that the key was loaded from the systemd credential, without a plain-file warning;
 #   5. checks LogsDirectory= (/var/log/tenko, owned by tenko, tenko.log written);
 #   6. stops the unit (clean exit) and starts it again;
 #   7. completes first-run setup through the API, puts a backup recipient into the backup
-#      settings, installs this binary as the next version from a release source on the
-#      loopback interface with the answer `backup: "run"`, and waits for systemd to restart
+#      settings, and twice installs this binary as the next version from a release source on
+#      the loopback interface with the answer `backup: "run"`: waits for systemd to restart
 #      the service after exit status 12, for the new version to run and for its probation to
-#      end; then proves the backup of ADR 0023: a good backup with the reason
-#      `before_update` for the new version exists in its target directory, opens with the
-#      backup key, was the first step of the install job, and was finished before the switch
-#      step replaced the binary (the job's step times, and the file's time against the
-#      `current` link's);
+#      end; proves the backup of ADR 0023 (a good backup with the reason `before_update` for
+#      the new version exists in its target directory, opens with the backup key, was the
+#      first step of the install job, and was finished before the switch step replaced the
+#      binary: the job's step times, and the file's time against the `current` link's); and
+#      counts the versions the node runs (ADR 0023 item 3): the server's, the command line's
+#      of a member of tenko-cli, and the start-up step's must be one. This binary is
+#      installed under two version names, so each binary is asked `upgrade version` (the
+#      version it runs as) rather than `--version` (the version it was built as);
 #   8. installs deploy/systemd/probe.conf and runs the roles controller,probe;
 #   9. runs deploy/install.sh unattended with --roles controller,dns,dhcp,probe (the installer
 #      puts the probe drop-in in place, identical to deploy/systemd/probe.conf, the process
@@ -59,7 +66,13 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UNIT_NAME="${UNIT_NAME:-tenko}"
-INSTALLED_BIN="${INSTALLED_BIN:-/usr/local/bin/tenko}"
+# Root's own copy of the binary under test, in a root-owned directory the account may pass:
+# root runs it (health, keygen) and the account lays the layout out from it, so that root
+# never runs the layout's binary, which the binary refuses anyway.
+INSTALLED_BIN=""
+CLI_LINK=/opt/tenko/cli/tenko
+# An account in tenko-cli that runs the command line, as an operator does.
+MEMBER="${MEMBER:-tenko-smoke-member}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/tenko}"
 CONFIG_FILE="${CONFIG_FILE:-$CONFIG_DIR/tenko.toml}"
 KEK_CRED="${KEK_CRED:-$CONFIG_DIR/kek.cred}"
@@ -79,6 +92,7 @@ MAX_EXPOSURE="${MAX_EXPOSURE:-2.5}"
 KEK_FILE="${KEK_FILE:-$CONFIG_DIR/kek.key}"
 SMOKE_KEK_FILE="${SMOKE_KEK_FILE:-}"
 WORK_DIR=""
+STAGE_DIR=""
 VERIFY_DIR=""
 COOKIE_JAR=""
 RELEASE_PORT=""
@@ -500,6 +514,8 @@ cleanup() {
     [[ -n "$WORK_DIR" ]] && rm -rf "$WORK_DIR"
   fi
   [[ -n "$VERIFY_DIR" ]] && runuser -u tenko -- rm -rf "$VERIFY_DIR" < /dev/null
+  id -u "$MEMBER" > /dev/null 2>&1 && userdel "$MEMBER"
+  [[ -n "$STAGE_DIR" ]] && rm -rf "$STAGE_DIR"
   exit "$status"
 }
 
@@ -550,22 +566,36 @@ EOF
 }
 
 step_install() {
-  step "1. install the binary, the service account, the configuration and the unit"
+  step "1. install: the account, the configuration, the version layout, the command line and the unit"
   [[ -x "$TENKO_BUILD" ]] || die "$TENKO_BUILD is not an executable file"
   if [[ -e "$DATA_DIR" && ! -e "$CONFIG_DIR/.smoke-marker" && "${SMOKE_FORCE:-}" != 1 ]]; then
     die "$DATA_DIR exists and was not made by this script; refusing to delete it (SMOKE_FORCE=1 overrides)"
   fi
   systemctl stop "$UNIT_NAME" 2> /dev/null || true
   rm -rf "$DATA_DIR" "$LOG_DIR"
+  STAGE_DIR="$(mktemp -d /tmp/tenko-smoke-stage.XXXXXX)"
+  chmod 0711 "$STAGE_DIR"
+  INSTALLED_BIN="$STAGE_DIR/tenko"
   install -m 0755 "$TENKO_BUILD" "$INSTALLED_BIN"
   if ! id -u tenko > /dev/null 2>&1; then
     useradd --system --home-dir "$DATA_DIR" --no-create-home --shell /usr/sbin/nologin tenko
   fi
+  getent group tenko-cli > /dev/null || groupadd --system tenko-cli
   install -d -m 0750 -o root -g tenko "$CONFIG_DIR"
   : > "$CONFIG_DIR/.smoke-marker"
   RELEASE_PORT="$(free_port)"
   write_smoke_config
   "$INSTALLED_BIN" config check --config "$CONFIG_FILE"
+  # The version layout, laid out by the account from root's copy; the gate on updates/, set by
+  # the account holding tenko-cli for that one command; the command line.
+  install -d -m 0711 -o tenko -g tenko "$DATA_DIR"
+  runuser -u tenko -- "$INSTALLED_BIN" upgrade layout --data-dir "$DATA_DIR" < /dev/null
+  runuser -u tenko -g tenko -G tenko-cli -- chgrp tenko-cli "$DATA_DIR/updates" < /dev/null
+  runuser -u tenko -- chmod 0750 "$DATA_DIR/updates" < /dev/null
+  install -d -m 0755 /opt/tenko /opt/tenko/cli
+  ln -sfn "$DATA_DIR/updates/current/tenko" "$CLI_LINK"
+  id -u "$MEMBER" > /dev/null 2>&1 ||
+    useradd --system --no-create-home --shell /usr/sbin/nologin -G tenko-cli "$MEMBER"
   install -m 0644 "$REPO_DIR/deploy/systemd/tenko.service" "/etc/systemd/system/$UNIT_NAME.service"
   install -d -m 0755 "$DROPIN_DIR"
   # Debug builds only: the version comes from the layout directory, so this binary can be
@@ -574,7 +604,7 @@ step_install() {
 [Service]
 Environment=TENKO_TEST_VERSION_FROM_LAYOUT=1
 EOF
-  info "installed $INSTALLED_BIN, $CONFIG_FILE, the unit and $DROPIN_DIR/smoke.conf"
+  info "installed $CONFIG_FILE, $DATA_DIR/updates/current -> $(readlink "$DATA_DIR/updates/current"), $CLI_LINK, the unit and $DROPIN_DIR/smoke.conf"
 }
 
 step_credential() {
@@ -651,27 +681,46 @@ step_stop_start() {
   wait_ready 120
 }
 
-step_upgrade() {
-  step "7. first-run setup, then an update through the layout with exit status 12"
-  local before_version restarts_before job
-  COOKIE_JAR="$WORK_DIR/cookies.txt"
-  : > "$COOKIE_JAR"
-  api_setup
+# The version a binary runs as (`upgrade version`; the smoke's builds take it from their
+# layout directory, TENKO_TEST_VERSION_FROM_LAYOUT=1, as the unit's drop-in sets it).
+runs_as() { "$@" upgrade version < /dev/null 2> /dev/null | head -n 1; }
+
+# assert_one_version VERSION: the node runs VERSION and nothing else (the measure of ADR 0023
+# item 3: the versions of Tenko binaries a node runs after an update, from 2 to 1). Each of
+# the three is asked on its own and must answer: the server (its liveness probe), the command
+# line as a member of tenko-cli runs it, and the binary of the unit's start-up step, run as
+# the unit runs it (as tenko). A binary that cannot be run answers nothing and fails.
+assert_one_version() {
+  local step_binary server cli step count
+  step_binary="$(systemctl show -p ExecStartPre --value "$UNIT_NAME" | grep -oE 'path=[^ ;]+' | head -n 1)"
+  step_binary="${step_binary#path=}"
+  [[ -n "$step_binary" ]] || die "the unit has no start-up step to ask"
+  server="$(server_version)"
+  cli="$(runs_as runuser -u "$MEMBER" -- env TENKO_TEST_VERSION_FROM_LAYOUT=1 "$CLI_LINK")"
+  step="$(runs_as runuser -u tenko -- env TENKO_TEST_VERSION_FROM_LAYOUT=1 "$step_binary")"
+  count="$(printf '%s\n' "$server" "$cli" "$step" | sort -u | grep -c .)"
+  [[ "$server" == "$1" && "$cli" == "$1" && "$step" == "$1" ]] ||
+    die "the node does not run $1 alone: server '${server}', $CLI_LINK as $MEMBER '${cli}', start-up step '${step}'"
+  info "versions of Tenko this node runs: $count ($1: the server, $CLI_LINK as $MEMBER, the start-up step)"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    echo "- after the update to $1: versions of Tenko the node runs: $count ($1)" >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+# update_once: one update from the web UI's API to the next patch version, followed to the end
+# of its probation, with the backup of ADR 0023 proved and the versions counted.
+update_once() {
+  local before_version restarts_before job key_file="$1"
   before_version="$(server_version)"
   [[ -n "$before_version" ]] || die "tenko health --live reported no version"
   NEW_VERSION="$(next_patch "$before_version")"
   info "running $before_version; the release source will offer $NEW_VERSION"
-  local provider=systemd_credential key_file
-  [[ "$SMOKE_KEK_FILE" == 1 ]] && provider="file"
-  [[ "$(api GET /system/kek | jget provider)" == "$provider" ]] \
-    || die "the KEK provider is not $provider: $(api GET /system/kek)"
-  info "GET /system/kek: provider $provider"
-  key_file="$(api_backup_recipient "$WORK_DIR")"
-
-  make_release "$WORK_DIR/release" "$NEW_VERSION" "$INSTALLED_BIN"
-  start_release_server "$WORK_DIR/release" "$RELEASE_PORT"
+  make_release "$WORK_DIR/release-$NEW_VERSION" "$NEW_VERSION" "$INSTALLED_BIN"
+  start_release_server "$WORK_DIR/release-$NEW_VERSION" "$RELEASE_PORT"
   api_update_check "$NEW_VERSION" > /dev/null
   info "the update check offers $NEW_VERSION (policy ui)"
+  # The smoke starts the unit more often than StartLimitBurst= allows in five minutes.
+  systemctl reset-failed "$UNIT_NAME" 2> /dev/null || true
   restarts_before="$(svc NRestarts)"
   job="$(api_update_install "$NEW_VERSION")"
   info "install started with backup \"run\", job $job"
@@ -695,6 +744,23 @@ step_upgrade() {
   api_wait_confirmed 180
   prove_backup_before_switch "$job" "$NEW_VERSION" "$key_file"
   stop_release_server
+  assert_one_version "$NEW_VERSION"
+}
+
+step_upgrade() {
+  step "7. first-run setup, then two updates through the layout with exit status 12, one version on the node"
+  local provider=systemd_credential key_file
+  COOKIE_JAR="$WORK_DIR/cookies.txt"
+  : > "$COOKIE_JAR"
+  api_setup
+  assert_one_version "$(server_version)"
+  [[ "$SMOKE_KEK_FILE" == 1 ]] && provider="file"
+  [[ "$(api GET /system/kek | jget provider)" == "$provider" ]] \
+    || die "the KEK provider is not $provider: $(api GET /system/kek)"
+  info "GET /system/kek: provider $provider"
+  key_file="$(api_backup_recipient "$WORK_DIR")"
+  update_once "$key_file"
+  update_once "$key_file"
 }
 
 step_probe() {

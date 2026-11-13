@@ -55,6 +55,21 @@ unit_checks() {
     trap - ERR
     expect "the embedded unit is deploy/systemd/tenko.service" "same" \
       "$(cmp -s <(unit_text) "$unit" && echo same || echo differs)"
+    # Root changes nothing under the data directory (ADR 0023, I2): a command run as root
+    # (run) that names a path below it runs as the account (run as_tenko), except the link
+    # /opt/tenko/cli/tenko, whose target text names the layout (making a link opens nothing).
+    expect "root runs nothing on a path below the data directory" "" \
+      "$(grep -nE '(^|[ ;&(])run ' "$installer" | grep -E '\$\{?DATA_DIR\}?/|\$\{?updates\}?' |
+        grep -vE 'run as_tenko |run ln -sfn "\$\{updates\}/current/tenko" "\$CLI_LINK"|(die|warn|ok|info) "|^[0-9]+:[[:space:]]*#')"
+    # Root executes no file of the layout and nothing through the command-line link (I1):
+    # the binaries root runs are its own copy of the release (NEW_BIN) and the old bootstrap.
+    expect "root executes nothing in the layout or through the link" "" \
+      "$(grep -nE '(^[[:space:]]*|\$\(|; |&& |\|\| |\| )(run )?"?\$\{?(CLI_LINK|DATA_DIR|updates)\b' "$installer" |
+        grep -vE '(die|warn|ok|info) "|>"\$TTY"$')"
+    prof="$(profile_text)"
+    has "$prof" 'if [ "$(id -u)" -ne 0 ] && id -Gn | tr' "profile.d: the command line only for members of tenko-cli, never root"
+    has "$prof" 'PATH="${PATH}:/opt/tenko/cli"' "profile.d: appended, never ahead of the system's commands"
+    lacks "$prof" "secure_path" "profile.d: sudo's secure_path is not touched"
     # The memory cap: the prepared roles' budgets, never above nine tenths of the host.
     expect "memory budget of controller" "2048" "$(memory_budget_mib controller)"
     expect "memory budget of every role" "7936" "$(memory_budget_mib controller,dns,dhcp,probe)"
@@ -545,7 +560,7 @@ CFG_END
     out="$(data_case "${work}/dd/full")"
     has "$out" "rc=2" "data dir: a directory with files that is not the account's: exit 2"
     has "$out" "exists, is not empty, and is not the account's data directory" "data dir: says why"
-    has "$out" "chown tenko:tenko ${work}/dd/full && chmod 0700 ${work}/dd/full" "data dir: says what to do"
+    has "$out" "chown tenko:tenko ${work}/dd/full && chmod 0711 ${work}/dd/full" "data dir: says what to do"
     out="$(data_case "${work}/dd/link")"
     has "$out" "rc=2" "data dir: a symbolic link: exit 2"
     has "$out" "is a symbolic link" "data dir: says so"
@@ -667,6 +682,10 @@ as_tenko() {
 }
 cd /tmp
 install_args=(--yes --no-start --binary /i/tenko --host-name tenko.example.test --forwarders 192.0.2.1)
+# Root runs its own copy of the release, never the layout's binary (the binary refuses root
+# when its file is another account's).
+install -m 0755 /i/tenko /root/tenko
+current=/var/lib/tenko/updates/current/tenko
 
 echo "-- an existing --data-dir is taken only when it is empty or the account's own"
 mkdir -p /srv/taken /srv/empty
@@ -683,11 +702,17 @@ echo "-- install"
 out="$(bash /i/install.sh "${install_args[@]}" 2>&1)"; rc=$?
 printf '%s\n' "$out" | sed 's/^/      /'
 [ "$rc" = 0 ] && pass "install exit 0" || fail "install exit ${rc}"
-[ "$(mode /usr/local/bin/tenko)" = "755 root:root" ] && pass "binary 0755 root" || fail "binary: $(mode /usr/local/bin/tenko)"
+check "no binary on root's PATH" test ! -e /usr/local/bin/tenko
+[ "$(readlink /opt/tenko/cli/tenko)" = "$current" ] && pass "/opt/tenko/cli/tenko -> ${current}" || fail "command line: $(readlink /opt/tenko/cli/tenko)"
+[ "$(mode /opt/tenko/cli)" = "755 root:root" ] && pass "/opt/tenko/cli 0755 root" || fail "/opt/tenko/cli: $(mode /opt/tenko/cli)"
+[ "$(mode /etc/profile.d/tenko-cli.sh)" = "644 root:root" ] && pass "profile.d entry 0644 root" || fail "profile.d: $(mode /etc/profile.d/tenko-cli.sh)"
+check "the group tenko-cli" getent group tenko-cli
+[ "$(mode /var/lib/tenko/updates)" = "750 tenko:tenko-cli" ] && pass "updates/ 0750 tenko:tenko-cli (the gate)" || fail "updates/: $(mode /var/lib/tenko/updates)"
+[ "$(stat -Lc '%a %U' /var/lib/tenko/updates/current)" = "755 tenko" ] && pass "the running version 0755 below the gate" || fail "version directory: $(stat -Lc '%a %U' /var/lib/tenko/updates/current)"
 [ "$(mode /etc/tenko)" = "750 root:tenko" ] && pass "/etc/tenko 0750 root:tenko" || fail "/etc/tenko: $(mode /etc/tenko)"
 [ "$(mode /etc/tenko/tenko.toml)" = "640 root:tenko" ] && pass "tenko.toml 0640 root:tenko" || fail "tenko.toml: $(mode /etc/tenko/tenko.toml)"
 [ "$(mode /etc/tenko/kek.key)" = "640 root:tenko" ] && pass "kek.key 0640 root:tenko (no systemd-creds here)" || fail "kek.key: $(mode /etc/tenko/kek.key)"
-[ "$(mode /var/lib/tenko)" = "700 tenko:tenko" ] && pass "data directory 0700 tenko" || fail "data directory: $(mode /var/lib/tenko)"
+[ "$(mode /var/lib/tenko)" = "711 tenko:tenko" ] && pass "data directory 0711 tenko" || fail "data directory: $(mode /var/lib/tenko)"
 check "the unit is deploy/systemd/tenko.service" sh -c '[ "$(sha256sum </etc/systemd/system/tenko.service)" = "$(sha256sum </i/tenko.service)" ]'
 check "the KEK drop-in resets the credential" grep -qx 'LoadCredentialEncrypted=' /etc/systemd/system/tenko.service.d/kek-file.conf
 check "tenko.toml: every role outside Hardened" grep -qx 'roles = "controller,dns,dhcp,probe"' /etc/tenko/tenko.toml
@@ -696,23 +721,23 @@ check "the probe drop-in is in place" test -f /etc/systemd/system/tenko.service.
 check "tenko.toml: the file provider" grep -qx 'provider = "file"' /etc/tenko/tenko.toml
 check "tenko.toml: forwarders" grep -qx 'forwarders = \["192.0.2.1"\]' /etc/tenko/tenko.toml
 check "tenko.toml: the API listens on IPv4 and IPv6" grep -qx 'listen = \["0.0.0.0:8443", "\[::\]:8443"\]' /etc/tenko/tenko.toml
-check "tenko config check" /usr/local/bin/tenko config check --config /etc/tenko/tenko.toml
+check "tenko config check" /root/tenko config check --config /etc/tenko/tenko.toml
 key_before="$(sha256sum </etc/tenko/kek.key)"
 
 echo "-- tenko serve by hand, as tenko"
 # Started directly, not through the as_tenko function: a function in the background runs in a
 # subshell, and the signal below would reach that shell instead of tenko.
 if command -v setpriv >/dev/null 2>&1; then
-  setpriv --reuid=tenko --regid=tenko --init-groups -- env TENKO_DATA_DIR=/var/lib/tenko /usr/local/bin/tenko serve --config /etc/tenko/tenko.toml >/tmp/serve.log 2>&1 &
+  setpriv --reuid=tenko --regid=tenko --init-groups -- env TENKO_DATA_DIR=/var/lib/tenko "$current" serve --config /etc/tenko/tenko.toml >/tmp/serve.log 2>&1 &
 else
-  su -s /bin/sh tenko -c 'exec env TENKO_DATA_DIR=/var/lib/tenko /usr/local/bin/tenko serve --config /etc/tenko/tenko.toml' >/tmp/serve.log 2>&1 &
+  su -s /bin/sh tenko -c "exec env TENKO_DATA_DIR=/var/lib/tenko $current serve --config /etc/tenko/tenko.toml" >/tmp/serve.log 2>&1 &
 fi
 pid=$!
 ready=0
 for _ in $(seq 90); do
   kill -0 "$pid" 2>/dev/null || break
   if [ -f /var/lib/tenko/tls/ca-root.pem ] &&
-    /usr/local/bin/tenko health --url https://localhost:8443 --ca-file /var/lib/tenko/tls/ca-root.pem >/dev/null 2>&1; then
+    /root/tenko health --url https://localhost:8443 --ca-file /var/lib/tenko/tls/ca-root.pem >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -722,7 +747,7 @@ if [ "$ready" = 1 ]; then pass "tenko health: ready at https://localhost:8443"; 
 for _ in $(seq 20); do grep -q 'dns role answering' /tmp/serve.log && break; sleep 1; done
 grep -q 'dns role answering' /tmp/serve.log && pass "the dns role answers on port 53 (as the tenko account)" || fail "no dns role line"
 grep -q 'THE KEY-ENCRYPTION KEY IS A PLAIN FILE' /tmp/serve.log && pass "the file provider warns, as documented" || fail "no file-provider warning"
-token="$(as_tenko /usr/local/bin/tenko setup token --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko 2>/dev/null)"
+token="$(as_tenko "$current" setup token --config /etc/tenko/tenko.toml --data-dir /var/lib/tenko 2>/dev/null)"
 [ -n "$token" ] && pass "tenko setup token prints a token" || fail "no setup token"
 printf '%s' "$token" | grep -Eq '^[A-Z2-7]{5}(-[A-Z2-7]{5}){3}$' && pass "the token has the token's shape" || fail "token shape: ${token}"
 out="$(bash /i/install.sh --setup-token 2>&1)"; rc=$?
@@ -753,6 +778,7 @@ check "the old file is kept as .bak" sh -c 'ls /etc/tenko/tenko.toml.*.bak'
 check "the key is unchanged" sh -c '[ "$(sha256sum </etc/tenko/kek.key)" = "'"$key_before"'" ]'
 
 echo "-- --uninstall leaves an updates directory that is not the account's own"
+rm -rf /var/lib/tenko/updates
 mkdir -p /var/lib/tenko/updates/0.0.1
 printf 'binary' >/var/lib/tenko/updates/0.0.1/tenko
 out="$(bash /i/install.sh --yes --uninstall 2>&1)"; rc=$?
@@ -773,7 +799,7 @@ out="$(bash /i/install.sh --yes --uninstall 2>&1)"; rc=$?
 [ "$rc" = 0 ] && pass "uninstall exit 0" || { fail "uninstall exit ${rc}"; printf '%s\n' "$out" | sed 's/^/      /'; }
 check "updates/ removed" test ! -e /var/lib/tenko/updates
 printf '%s\n' "$out" | grep -q 'Removed /var/lib/tenko/updates' && pass "the closing lines say so" || fail "no updates line in the output"
-check "binary removed" test ! -e /usr/local/bin/tenko
+check "command line removed" test ! -e /opt/tenko/cli/tenko -a ! -e /etc/profile.d/tenko-cli.sh
 check "unit removed" test ! -e /etc/systemd/system/tenko.service
 check "drop-ins removed" test ! -e /etc/systemd/system/tenko.service.d
 check "data kept" test -d /var/lib/tenko/store
@@ -807,6 +833,7 @@ out="$(bash /i/install.sh --yes --uninstall --purge 2>&1)"; rc=$?
 check "data removed" test ! -e /var/lib/tenko
 check "/etc/tenko removed" test ! -e /etc/tenko
 check "account removed" sh -c '! id tenko'
+check "group removed" sh -c '! getent group tenko-cli'
 exit "$failures"
 INSIDE_END
 
@@ -833,11 +860,12 @@ done
 echo
 echo "== (2) dry run in ubuntu:24.04"
 out="$(docker run --rm -v "${work}:/i:ro" ubuntu:24.04 bash -c \
-  'bash /i/install.sh --dry-run --yes --no-start --binary /i/tenko --host-name tenko.example.test 2>&1; echo "EXIT=$?"; for p in /etc/tenko /usr/local/bin/tenko /var/lib/tenko /etc/systemd/system/tenko.service; do [ -e "$p" ] && echo "EXISTS $p"; done; id tenko >/dev/null 2>&1 && echo "EXISTS user"; true')"
+  'bash /i/install.sh --dry-run --yes --no-start --binary /i/tenko --host-name tenko.example.test 2>&1; echo "EXIT=$?"; for p in /etc/tenko /opt/tenko /var/lib/tenko /etc/profile.d/tenko-cli.sh /etc/systemd/system/tenko.service; do [ -e "$p" ] && echo "EXISTS $p"; done; id tenko >/dev/null 2>&1 && echo "EXISTS user"; true')"
 printf '%s\n' "$out" | grep -E '\[dry-run\]|EXIT|EXISTS' | sed 's/^/      /'
 has "$out" "EXIT=0" "dry run exit 0"
 has "$out" "[dry-run] useradd --system" "dry run: the account"
-has "$out" "[dry-run] install -m 0755 -o root -g root" "dry run: the binary"
+has "$out" "upgrade layout --data-dir /var/lib/tenko (as tenko)" "dry run: the binary, laid out by the account"
+has "$out" "[dry-run] ln -sfn /var/lib/tenko/updates/current/tenko /opt/tenko/cli/tenko" "dry run: the command line"
 has "$out" "[dry-run] write /etc/tenko/tenko.toml" "dry run: the configuration"
 has "$out" "[dry-run] create the key-encryption key: /etc/tenko/kek.key" "dry run: the key"
 has "$out" "[dry-run] write /etc/systemd/system/tenko.service" "dry run: the unit"
@@ -899,12 +927,12 @@ echo "-- a wrong checksum"
 bash /i/install.sh --yes --no-start --release-url "${base}/bad" --version "$3" --host-name tenko.example.test >/tmp/bad.log 2>&1
 echo "BAD_EXIT=$?"
 grep -o 'does not match SHA256SUMS[^;]*' /tmp/bad.log
-[ -e /usr/local/bin/tenko ] && echo "BAD_INSTALLED"
+[ -e /var/lib/tenko/updates ] && echo "BAD_INSTALLED"
 echo "-- a release directory, latest from SHA256SUMS"
 bash /i/install.sh --yes --no-start --release-url "${base}/good" --host-name tenko.example.test >/tmp/good.log 2>&1
 echo "GOOD_EXIT=$?"
 grep -o 'SHA-256 verified against SHA256SUMS' /tmp/good.log
-/usr/local/bin/tenko --version
+echo "tenko $(basename "$(readlink /var/lib/tenko/updates/current)")"
 bash /i/install.sh --yes --uninstall --purge >/dev/null 2>&1
 echo "-- a release URL over plain http to another host is refused"
 bash /i/install.sh --yes --no-start --release-url http://198.51.100.7/rel --host-name tenko.example.test >/tmp/http.log 2>&1
@@ -1031,6 +1059,17 @@ EOF
   expect "the service" active "$(in_sys 'systemctl is-active tenko')"
   expect "the setup token is gone" none "$(in_sys 'test -e /var/lib/tenko/setup-token && echo present || echo none')"
   expect "the layout runs" "${version}" "$(in_sys 'readlink /var/lib/tenko/updates/current')"
+  # One version on the node (ADR 0023 item 3): the server, the command line of the members of
+  # tenko-cli and the unit's start-up step all run the binary that `current` names.
+  in_sys 'install -m 0755 /i/tenko /root/tenko-root'
+  in_sys 'useradd --create-home --shell /bin/bash alice && usermod -aG tenko-cli alice && useradd --create-home --shell /bin/bash outsider'
+  member_version() { in_sys 'runuser -l alice -c "tenko --version"' 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[^ ]*' | head -n 1; }
+  server_version() { in_sys '/root/tenko-root health --live --json --url https://localhost:8443 --ca-file /var/lib/tenko/tls/ca-root.pem' | grep -oE '"version": *"[^"]*"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[^"]*'; }
+  expect "a member of tenko-cli runs the version that runs" "$(server_version)" "$(member_version)"
+  expect "an account outside tenko-cli cannot run it" "refused" "$(in_sys 'runuser -l outsider -c "/opt/tenko/cli/tenko --version" >/dev/null 2>&1 && echo ran || echo refused')"
+  expect "root's login PATH has no tenko" "none" "$(in_sys 'bash -lc "command -v tenko || echo none"')"
+  expect "an account outside tenko-cli has no tenko on its PATH" "none" "$(in_sys 'runuser -l outsider -c "command -v tenko || echo none"')"
+  has "$(in_sys '/opt/tenko/cli/tenko health --url https://localhost:8443; echo "EXIT=$?"' 2>&1)" "EXIT=2" "the layout's binary refuses root (exec.unsafe_owner, exit 2)"
   # systemd-resolved holds 127.0.0.53:53; the dns role on every address needs the port.
   has "$out" "systemd-resolved no longer listens on port 53" "the stub listener is turned off (--yes)"
   expect "the drop-in of systemd-resolved" present "$(in_sys 'test -f /etc/systemd/resolved.conf.d/tenko.conf && echo present')"
@@ -1068,7 +1107,8 @@ EOF
   has "$out" "The data directory needs" "tenko upgrade check ran"
   expect "the layout runs" "$next" "$(in_sys 'readlink /var/lib/tenko/updates/current')"
   expect "previous" "$version" "$(in_sys 'readlink /var/lib/tenko/updates/previous')"
-  has "$(in_sys 'tenko health --live --url https://localhost:8443 --ca-file /var/lib/tenko/tls/ca-root.pem')" "$next" "health --live reports ${next}"
+  has "$(in_sys '/root/tenko-root health --live --url https://localhost:8443 --ca-file /var/lib/tenko/tls/ca-root.pem')" "$next" "health --live reports ${next}"
+  expect "a member runs ${next} after the upgrade" "$next" "$(member_version)"
   expect "setup is still complete" none "$(in_sys 'test -e /var/lib/tenko/setup-token && echo present || echo none')"
   out="$(in_sys "bash /i/install.sh --yes --binary /i/tenko 2>&1")"
   has "$out" "newer than ${version}; the binary is kept" "an older binary does not downgrade"
@@ -1108,20 +1148,55 @@ EOF
   has "$(in_sys 'journalctl -u tenko --no-pager')" "THE KEY-ENCRYPTION KEY IS A PLAIN FILE" "the server uses the key file"
   in_sys 'bash /i/install.sh --yes --uninstall --purge >/dev/null 2>&1'
 
-  echo "-- an installation made by hand without a credential (the default provider)"
+  echo "-- a node as an installer up to 0.0.11 left it, without a credential: the newer installer and --repair"
+  # The bootstrap binary on PATH, which the unit's start-up step runs, a data directory of
+  # mode 0700, no command line: the unit is the shipped one with the old start-up step.
+  in_sys 'userdel alice; userdel outsider; groupdel tenko-cli; true'
   in_sys 'install -m 0755 /i/tenko /usr/local/bin/tenko && useradd --system --home-dir /var/lib/tenko --no-create-home --shell /usr/sbin/nologin tenko &&
     install -d -m 0750 -o root -g tenko /etc/tenko && install -d -m 0700 -o tenko -g tenko /var/lib/tenko &&
     printf "data_dir = \"/var/lib/tenko\"\nroles = \"controller\"\n[tls]\nalt_names = [\"localhost\"]\n" >/etc/tenko/tenko.toml && chmod 0640 /etc/tenko/tenko.toml && chgrp tenko /etc/tenko/tenko.toml &&
-    sed -e "s/^LoadCredentialEncrypted=/# LoadCredentialEncrypted=/" -e "s/^Environment=TENKO_KEK__/# Environment=TENKO_KEK__/" /i/tenko.service >/etc/systemd/system/tenko.service &&
+    sed -e "s/^LoadCredentialEncrypted=/# LoadCredentialEncrypted=/" -e "s/^Environment=TENKO_KEK__/# Environment=TENKO_KEK__/" \
+      -e "s|^ExecStartPre=.*|ExecStartPre=/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml|" \
+      -e "s/^StateDirectoryMode=0711/StateDirectoryMode=0700/" /i/tenko.service >/etc/systemd/system/tenko.service &&
     systemctl daemon-reload && systemctl start tenko && sleep 8 && systemctl is-active tenko && test -d /var/lib/tenko/store'
+  expect "the old shape: the start-up step runs the bootstrap binary" "yes" "$(in_sys 'grep -q "^ExecStartPre=/usr/local/bin/tenko" /etc/systemd/system/tenko.service && test -f /usr/local/bin/tenko && echo yes')"
+  rc=0
+  out="$(in_sys "bash /i/install.sh --repair --dry-run 2>&1")" || rc=$?
+  expect "--repair --dry-run exit" 0 "$rc"
+  has "$out" "[dry-run] rm -f /usr/local/bin/tenko" "--repair --dry-run: names the removal"
+  expect "--repair --dry-run changed nothing" "yes" "$(in_sys 'test -f /usr/local/bin/tenko && ! test -e /opt/tenko && echo yes')"
+  rc=0
+  out="$(in_sys "bash /i/install.sh --repair 2>&1")" || rc=$?
+  printf '%s\n' "$out" | sed 's/^/      /'
+  expect "--repair exit" 0 "$rc"
+  has "$out" "Removed /usr/local/bin/tenko (${version}, the bootstrap of an older installer)" "--repair removes the bootstrap binary"
+  has "$out" "This node runs one version, ${version}" "--repair says the node runs one version"
+  expect "the bootstrap binary is gone" none "$(in_sys 'test -e /usr/local/bin/tenko && echo present || echo none')"
+  expect "the unit is the shipped one" same "$(in_sys 'cmp -s /etc/systemd/system/tenko.service /i/tenko.service && echo same || echo differs')"
+  expect "the gate" "750 tenko:tenko-cli" "$(in_sys 'stat -c "%a %U:%G" /var/lib/tenko/updates')"
+  expect "the data directory" "711" "$(in_sys 'stat -c %a /var/lib/tenko')"
+  expect "the service after --repair" active "$(in_sys 'systemctl is-active tenko')"
+  in_sys 'useradd --create-home --shell /bin/bash alice && usermod -aG tenko-cli alice'
+  expect "a member runs the version that runs" "$(server_version)" "$(member_version)"
+  out="$(in_sys "bash /i/install.sh --repair 2>&1")"
+  has "$out" "nothing was changed" "--repair again: nothing was changed"
+  out="$(in_sys "bash /i/install.sh --repair --binary /i/tenko 2>&1; echo EXIT=\$?")"
+  has "$out" "EXIT=2" "--repair with --binary is refused: it installs nothing"
+
+  echo "-- the newer installer upgrades a node of the old shape and repairs it on the way"
+  in_sys 'cp /i/tenko /usr/local/bin/tenko && chmod 0755 /usr/local/bin/tenko &&
+    sed -i "s|^ExecStartPre=.*|ExecStartPre=/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml|" /etc/systemd/system/tenko.service &&
+    systemctl daemon-reload && systemctl restart tenko'
   rc=0
   out="$(in_sys "bash /i/install.sh --yes --binary /i/tenko-next 2>&1")" || rc=$?
-  printf '%s\n' "$out" | grep -E '!!|ok  (The node|Installed)' | sed 's/^/      /'
+  printf '%s\n' "$out" | grep -E '!!|ok  (The node|Installed|Removed|Tenko)' | sed 's/^/      /'
   expect "hand-made install upgraded, exit" 0 "$rc"
   has "$out" "No key in /etc/tenko: the [kek] section" "the hand-made key is kept"
   expect "the service after the upgrade" active "$(in_sys 'systemctl is-active tenko')"
   expect "the layout runs" "$next" "$(in_sys 'readlink /var/lib/tenko/updates/current')"
   expect "no new key file" none "$(in_sys 'test -e /etc/tenko/kek.key -o -e /etc/tenko/kek.cred && echo present || echo none')"
+  expect "the bootstrap binary is gone after the upgrade" none "$(in_sys 'test -e /usr/local/bin/tenko && echo present || echo none')"
+  expect "the versions on the node: the server and the command line" "$next $next" "$(server_version) $(member_version)"
 fi
 
 echo

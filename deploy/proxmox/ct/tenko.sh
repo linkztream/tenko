@@ -318,7 +318,7 @@ final_lines() {
 # update_script: update mode inside a Tenko container: the installer again, which upgrades.
 update_script() {
   local args=(--yes) rc=0
-  if [[ ! -x /usr/local/bin/tenko ]]; then
+  if [[ ! -f /etc/systemd/system/tenko.service ]]; then
     msg_error "No ${APP} installation found in this container"
     exit 233
   fi
