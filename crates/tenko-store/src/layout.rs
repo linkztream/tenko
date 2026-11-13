@@ -71,8 +71,12 @@ pub fn sync_dir(dir: &Path) {
     }
 }
 
-/// Makes a rename in `dir` durable where the platform allows it (directories cannot be
-/// opened for syncing on Windows; NTFS journals the rename).
+/// Makes a rename in `dir` durable where the platform allows it. On Windows it does
+/// nothing: a program cannot sync a directory there, and NTFS keeps a rename whole but
+/// writes its log when it chooses, so a rename or a removal can be undone by a power loss.
+/// What must survive one is written in place and synced (the cluster recovery's notice);
+/// that a rename before such a write survives too rests on NTFS writing its log in order,
+/// which nothing here can force or test.
 #[cfg(not(unix))]
 pub fn sync_dir(_dir: &Path) {}
 

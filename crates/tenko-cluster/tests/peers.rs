@@ -2643,9 +2643,12 @@ async fn a_record_with_a_minted_signer_fences_nothing_by_either_path() {
     let refused = receiver.peers.refused_records();
     assert_eq!(refused.count, u64::try_from(offers).expect("count"));
     assert_eq!(
-        refused.last.map(|(code, _, _)| code).as_deref(),
+        refused.last.map(|last| last.code).as_deref(),
         Some(tenko_cluster::generation::codes::RECORD_UNHELD)
     );
+    // The last signer is a controller this store knows: shown apart, as it could be a
+    // renewal this copy never saw.
+    assert!(refused.unverified.is_some());
     lab.stop().await;
 }
 
@@ -3195,6 +3198,7 @@ async fn a_refusal_with_a_competing_history_is_read_as_one() {
             .peers
             .competing(&refusal(std::slice::from_ref(&sibling)))
             .await
+            .expect("checked")
             .is_some_and(|rival| rival.contains(&other.node().to_string())),
         "a sibling of a controller this history holds"
     );
@@ -3202,7 +3206,8 @@ async fn a_refusal_with_a_competing_history_is_read_as_one() {
         leader
             .peers
             .competing(&refusal(std::slice::from_ref(&own)))
-            .await,
+            .await
+            .expect("checked"),
         None,
         "this history's own record"
     );
@@ -3217,7 +3222,8 @@ async fn a_refusal_with_a_competing_history_is_read_as_one() {
         leader
             .peers
             .competing(&refusal(std::slice::from_ref(&minted)))
-            .await,
+            .await
+            .expect("checked"),
         None,
         "a minted signer"
     );
@@ -3289,4 +3295,31 @@ async fn a_member_names_the_identity_a_renewal_put_under_node() {
         .await
         .expect("settle");
     assert_eq!(single.state().await.0, vec![renewed.info.serial]);
+}
+
+/// An identity under `<data_dir>/node/` that another installation's CA issued (a host
+/// reused for a new installation) is not taken: the first join writes a new one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_foreign_identity_left_under_node_is_not_reused() {
+    let single = Single::start().await;
+    let other = Single::start().await;
+    other
+        .peers
+        .settle_identity(&other.registry)
+        .await
+        .expect("the other installation's identity");
+    let paths = tenko_cluster::identity::NodePaths::new(single.data.path());
+    let foreign = tenko_cluster::identity::Credentials::load(
+        &tenko_cluster::identity::NodePaths::new(other.data.path()),
+    )
+    .expect("identity");
+    foreign.save(&paths).expect("left behind");
+    single
+        .peers
+        .settle_identity(&single.registry)
+        .await
+        .expect("settle");
+    let used = single.node_local_serial();
+    assert_ne!(used, foreign.info.serial);
+    assert_eq!(single.state().await.0, vec![used]);
 }

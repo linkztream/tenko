@@ -458,10 +458,13 @@ pub async fn start_with(
             stop.clone(),
         )));
     }
+    // Without a peer layer nothing moves the identity under `node/`: the vault's certificate
+    // is the one presented, and it is always renewed.
+    let identity_dir = layer.as_ref().map(|_| paths);
     tasks.push(tokio::spawn(maintenance(
         Arc::clone(&registry),
         Arc::clone(&vault),
-        Some((resolver, paths)),
+        Some((resolver, identity_dir)),
         stop.clone(),
     )));
     let state = Arc::new(OnceLock::new());
@@ -518,7 +521,7 @@ impl Cluster {
     }
 
     /// Where probe batches go on this controller: a probe role on the controller node
-    /// itself (WP2.3) hands its batches here directly, under this node's id, without the
+    /// itself hands its batches here directly, under this node's id, without the
     /// cluster port.
     pub fn probe_sink(&self) -> Arc<dyn ProbeSink> {
         Arc::clone(&self.sink)
@@ -667,20 +670,32 @@ async fn on_demand_hold(registry: &NodeRegistry, stop: &mut watch::Receiver<bool
 /// node id that its node record holds. Then the vault holds no key of it and none may be
 /// issued there again; until then (never joined, or a first join that stopped before its
 /// write) it presents the vault's certificate, which is renewed and never retired.
-async fn node_local(registry: &NodeRegistry, paths: &NodePaths) -> bool {
+///
+/// `vault_key` also counts a controller that has no record yet and whose identity under
+/// `node/` is the vault's key (recorded before it had a record of its own): the renewal
+/// task records and rotates it. The vault renewal does not count it, so that a record that
+/// cannot be written never leaves the presented vault certificate unrenewed.
+async fn node_local(registry: &NodeRegistry, paths: &NodePaths, vault_key: bool) -> bool {
     let local = registry.config().local_node;
     let Ok(credentials) = Credentials::load(paths) else {
         return false;
     };
-    credentials.identity.node == local
-        && registry.record(local).await.is_ok_and(|record| {
-            record.is_some_and(|(record, _)| {
-                record
-                    .serials
-                    .iter()
-                    .any(|held| held.serial == credentials.info.serial)
-            })
-        })
+    if credentials.identity.node != local {
+        return false;
+    }
+    match registry.record(local).await {
+        Ok(Some((record, _))) => record
+            .serials
+            .iter()
+            .any(|held| held.serial == credentials.info.serial),
+        // A first controller recorded before it kept a node record of its own, still on
+        // the vault's key: the renewal task records and rotates it.
+        Ok(None) if vault_key => registry
+            .vault_serial(local)
+            .await
+            .is_ok_and(|vault| vault.as_deref() == Some(credentials.info.serial.as_str())),
+        Ok(None) | Err(_) => false,
+    }
 }
 
 /// Reads the revocation list again and renews the controller's certificate on the cluster
@@ -690,7 +705,7 @@ async fn node_local(registry: &NodeRegistry, paths: &NodePaths) -> bool {
 async fn maintenance(
     registry: Arc<NodeRegistry>,
     vault: Arc<StoreVault>,
-    resolver: Option<(Arc<TlsResolver>, NodePaths)>,
+    resolver: Option<(Arc<TlsResolver>, Option<NodePaths>)>,
     mut stop: watch::Receiver<bool>,
 ) {
     let mut revocations = tokio::time::interval(MAINTENANCE_INTERVAL);
@@ -715,7 +730,9 @@ async fn maintenance(
                 // Once this controller's identity is node-local (its first join, or a
                 // settle at the start) a new vault key would put one back where every
                 // controller can read it.
-                if node_local(&registry, paths).await {
+                if let Some(paths) = paths
+                    && node_local(&registry, paths, false).await
+                {
                     continue;
                 }
                 let ctx = RequestCtx::system(SystemComponent::Cluster);
@@ -865,7 +882,7 @@ async fn renew_identity(
             _ = tick.tick() => {}
         }
         // A controller that presents the vault's certificate has nothing here yet.
-        if !node_local(&registry, &paths).await {
+        if !node_local(&registry, &paths, true).await {
             continue;
         }
         if let Err(error) =
@@ -930,6 +947,43 @@ fn switch_to(resolver: &TlsResolver, peers: &Peers, credentials: &Credentials) {
     }
 }
 
+/// How long a renewing leader waits for its members to replicate the renewal.
+const REPLICATION_WAIT: Duration = Duration::from_secs(10);
+
+/// Waits until every other member replicated what this leader applied (the renewal just
+/// committed), for at most [`REPLICATION_WAIT`]: the members check a leader's certificate
+/// against their copy of its record, and one that has not applied the new serial would
+/// refuse the appends that bring it. A follower does not wait.
+async fn replicated(store: &tenko_store::raft::RaftStore) {
+    let Some(target) = store.applied_index() else {
+        return;
+    };
+    let started = tokio::time::Instant::now();
+    loop {
+        let status = store.status();
+        let caught_up = status.role != tenko_store::StoreRole::Leader
+            || status
+                .members
+                .iter()
+                .filter(|member| Some(member.node) != status.node)
+                .all(|member| member.matched.is_some_and(|matched| matched >= target));
+        if caught_up {
+            // A follower learns that the renewal committed from the next message of this
+            // leader: give it two heartbeats before the certificate changes.
+            tokio::time::sleep(Duration::from_millis(store.config().timings.heartbeat_ms) * 2)
+                .await;
+            return;
+        }
+        if started.elapsed() >= REPLICATION_WAIT {
+            tracing::warn!(
+                "not every member replicated the renewed certificate in time; it is presented anyway, and a member that lags refuses this leader until an election"
+            );
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 async fn renew_once(
     registry: &NodeRegistry,
     peers: &Peers,
@@ -946,6 +1000,7 @@ async fn renew_once(
     let issued = registry
         .renew(current.identity.node, &current.info.serial, &csr, now)
         .await?;
+    replicated(peers.store()).await;
     let renewed = current.renewed(paths, issued.chain, key)?;
     switch_to(resolver, peers, &renewed);
     tracing::info!(not_after = %renewed.info.not_after, "renewed the cluster certificate of this controller");
@@ -1037,25 +1092,85 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
     }
     // Records that changed nothing here (a forged signer, a revoked or superseded one):
     // an operator sees that someone offers them, and from where.
+    offer_notices(layer, state);
+}
+
+/// The notices of generation records this controller refused or did not act on.
+fn offer_notices(layer: &Peers, state: &AppState) {
+    use tenko_cluster::generation::codes;
+
     let refused = layer.refused_records();
-    match refused.last {
-        Some((code, detail, from)) => state.set_notice(StatusWarning {
-            code: codes::RECORDS_REFUSED.to_owned(),
-            detail: format!(
-                "{} generation record offer(s) were refused since this controller started and changed nothing; the last: {detail}",
-                refused.count
-            ),
+    let entry =
+        |code: &str, detail: String, refusal: &tenko_cluster::peers::Refusal| StatusWarning {
+            code: code.to_owned(),
+            detail,
             params: [
-                ("count".to_owned(), refused.count.to_string()),
-                ("code".to_owned(), code),
+                // The refusals counted (all kinds), or the older history met.
+                if code == codes::OLDER_HISTORY {
+                    ("history".to_owned(), refusal.code.clone())
+                } else {
+                    ("count".to_owned(), refused.count.to_string())
+                },
+                if code == codes::OLDER_HISTORY {
+                    ("record".to_owned(), refusal.detail.clone())
+                } else {
+                    ("code".to_owned(), refusal.code.clone())
+                },
                 (
                     "from".to_owned(),
-                    from.map(|node| node.to_string()).unwrap_or_default(),
+                    refusal
+                        .from
+                        .map(|node| node.to_string())
+                        .unwrap_or_default(),
                 ),
+                ("at".to_owned(), refusal.at.to_rfc3339()),
             ]
             .into(),
-        }),
-        None => state.clear_notice(codes::RECORDS_REFUSED),
+        };
+    for (code, refusal, detail) in [
+        (
+            codes::RECORDS_REFUSED,
+            refused.last.as_ref(),
+            refused.last.as_ref().map(|last| {
+                format!(
+                    "{} generation record offer(s) were refused since this controller started \
+                     and changed nothing; the last, at {}: {}",
+                    refused.count,
+                    last.at.to_rfc3339(),
+                    last.detail
+                )
+            }),
+        ),
+        (
+            codes::UNVERIFIED_HISTORY,
+            refused.unverified.as_ref(),
+            refused.unverified.as_ref().map(|last| {
+                format!(
+                    "a generation record signed with a certificate this controller's records do \
+                     not hold for a controller they know was refused: a renewal this copy never \
+                     saw, or a forgery; if that controller may be the authority of another \
+                     history, look at its host ({})",
+                    last.detail
+                )
+            }),
+        ),
+        (
+            codes::OLDER_HISTORY,
+            refused.older.as_ref(),
+            refused.older.as_ref().map(|older| {
+                format!(
+                    "an older history of the cluster met this one ({}); it stops writing when it \
+                     receives this one's record and can check its signer, else it shows this one as \
+                     unverified",
+                    older.code
+                )
+            }),
+        ),
+    ] {
+        match (refusal, detail) {
+            (Some(refusal), Some(detail)) => state.set_notice(entry(code, detail, refusal)),
+            _ => state.clear_notice(code),
+        }
     }
 }
 
@@ -1127,6 +1242,113 @@ mod tests {
     use tenko_core::{Revision, testing::wait_until_async};
 
     use super::*;
+
+    /// An installation whose first controller moved its vault-held key under
+    /// `<data_dir>/node/` before keys left the vault (its record holds that serial): the
+    /// renewal check (`retire_vault_key`, the first thing each run of the renewal task does)
+    /// rotates it with the default certificate lifetime, months
+    /// before the renewal window, presents the new certificate, and takes the vault key
+    /// out; the record holds only the new certificate.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_first_controller_still_on_its_vault_key_rotates_at_the_first_run() {
+        use tenko_cluster::{
+            ca::{CaPolicy, InternalCa},
+            peers::{NodeDirIdentity, PeerConfig, PeerNetwork, PeerTimings},
+            registry::RegistryConfig,
+        };
+        use tenko_store::raft::{RaftStore, RaftStoreConfig};
+
+        let mut config = RaftStoreConfig::new(std::env::temp_dir());
+        config.node_id = NodeId(1);
+        config.bootstrap = true;
+        config.fsync_probe_samples = 0;
+        let store = RaftStore::open_temp(config).await.expect("store");
+        let store_dyn: Arc<dyn Store> = Arc::new(store.clone());
+        let ring = tenko_vault::KekRing::new(Arc::new(tenko_vault::MemKek::generate("kek-test-1")));
+        let vault = StoreVault::open(Arc::clone(&store_dyn), ring)
+            .await
+            .expect("vault");
+        let ctx = RequestCtx::system(SystemComponent::Cluster);
+        let ca = InternalCa::load_or_init(store_dyn.as_ref(), &vault, &ctx, CaPolicy::default())
+            .await
+            .expect("CA");
+        let registry = Arc::new(NodeRegistry::new(
+            store_dyn,
+            Arc::new(ca),
+            RegistryConfig::new(NodeId(1)),
+        ));
+        let (chain, key) = registry
+            .controller_identity(&vault, &ctx)
+            .await
+            .expect("the vault's certificate");
+        let data = tenko_core::testing::TempDir::new("rotation");
+        let paths = NodePaths::new(data.path());
+        let moved = Credentials {
+            identity: tenko_cluster::identity::NodeIdentity {
+                node: NodeId(1),
+                name: "controller-1".to_owned(),
+                roles: vec![tenko_core::Role::Controller],
+                controller: String::new(),
+                endpoints: Vec::new(),
+                cluster_port: None,
+                heartbeat_secs: 30,
+                enrolled_at: Timestamp::now(),
+                ca_sha256: registry.ca().root_info().sha256.clone(),
+            },
+            info: tenko_cluster::ca::CertInfo::from_der(&chain[0]).expect("info"),
+            chain,
+            key,
+            ca_root: registry.ca().root_der().clone(),
+        };
+        moved.save(&paths).expect("moved");
+        let old = moved.info.serial.clone();
+        let mut peer_config = PeerConfig::new(NodeId(1), 2);
+        "127.0.0.1:9".clone_into(&mut peer_config.address);
+        let peers = Peers::new(
+            store.clone(),
+            PeerNetwork::new(NodeId(1), PeerTimings::default()),
+            peer_config,
+        );
+        peers.attach_registry(Arc::clone(&registry));
+        peers.attach_identity(Arc::new(
+            NodeDirIdentity::new(&moved).reloading(paths.clone()),
+        ));
+        peers
+            .settle_identity(&registry)
+            .await
+            .expect("recorded with the vault's serial");
+        assert_eq!(
+            registry.vault_serial(NodeId(1)).await.expect("vault"),
+            Some(old.clone())
+        );
+        assert!(node_local(&registry, &paths, false).await);
+
+        let resolver = TlsResolver::default();
+        retire_vault_key(&registry, &vault, &peers, &resolver, &paths)
+            .await
+            .expect("the rotation");
+        let now = Credentials::load(&paths).expect("identity").info.serial;
+        assert_ne!(now, old, "a new key under node/");
+        assert!(
+            resolver.current().is_some(),
+            "the new certificate is presented"
+        );
+        assert_eq!(registry.vault_serial(NodeId(1)).await.expect("vault"), None);
+        let (record, _) = registry
+            .record(NodeId(1))
+            .await
+            .expect("record")
+            .expect("a record");
+        assert_eq!(
+            record
+                .serials
+                .iter()
+                .map(|cert| cert.serial.clone())
+                .collect::<Vec<_>>(),
+            vec![now]
+        );
+        let _ = store.shutdown().await;
+    }
 
     fn at(text: &str) -> Timestamp {
         text.parse().expect("time")

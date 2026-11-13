@@ -41,9 +41,16 @@
 //!   cannot place may be one that superseded it.
 //!
 //! A record signed by a revoked certificate, by a certificate the receiver's record of its
-//! signer does not hold, by a controller superseded in the receiver's store (except as a
-//! sibling), or by a node that was not a voter, is refused and fences nothing; the
-//! receiver counts and reports it.
+//! signer does not hold, by a controller superseded in the receiver's store as a
+//! descendant, or by a node that was not a voter, is refused and fences nothing; the
+//! receiver counts and reports it. A controller superseded here can still sign a sibling or
+//! a newer history that stops this one (two forced histories always stop each other) until
+//! it is revoked or removed. An offer whose verified part is older than the receiver's
+//! history but goes on with an unverified record that is not is refused too, never taken
+//! for an older history: the receiver shows it as unverified. A receiver further behind than an offer carries
+//! ([`MAX_LINEAGE`], [`MAX_LINEAGE_BYTES`]) may hold no certificate of the first record's
+//! signer and refuses it: that takes more forced steps than an offer carries while the old
+//! history lives.
 //!
 //! # Byte layouts
 //!
@@ -113,7 +120,8 @@ pub const SIGNING_CONTEXT: &[u8] = b"tenko generation record v1\0";
 pub const MAX_RECORD_BYTES: usize = 8 * 1024;
 
 /// The most records an offered lineage carries; a receiver further behind cannot link the
-/// newest and stops writing ([`Relation::Unplaced`]).
+/// newest: it stops writing ([`Relation::Unplaced`]) when it holds the first record's
+/// signer, and refuses the offer otherwise.
 pub const MAX_LINEAGE: usize = 8;
 
 /// The largest encoded lineage (a binary metadata entry of about 22 KiB in base64).
@@ -184,6 +192,13 @@ pub mod codes {
     /// Warning: generation records were refused since this controller started; the last
     /// one is named.
     pub const RECORDS_REFUSED: &str = "cluster.recover.records_refused";
+    /// Warning: a record was refused whose signer is a controller this store knows, by a
+    /// certificate it does not hold (a renewal it never saw, or a forgery).
+    pub const UNVERIFIED_HISTORY: &str = "cluster.recover.unverified_history";
+    /// Warning: an older history of the cluster met this one.
+    pub const OLDER_HISTORY: &str = "cluster.recover.older_history";
+    /// The forced step would sign with a certificate this copy's record does not hold.
+    pub const SIGNER_UNHELD: &str = "cluster.recover.signer_unheld";
     /// Warning: a superseded controller has not received the record yet.
     pub const SUPERSEDED_UNREACHED: &str = "cluster.recover.superseded_unreached";
     /// Warning: a superseded controller is neither rejoined nor removed.
@@ -616,6 +631,35 @@ pub struct Admission {
     pub new: Vec<Signed>,
 }
 
+/// The fence a controller raises for an admitted offer, given the fence it holds already:
+/// `None` when nothing changes. A fence never weakens; the same newest record again
+/// changes nothing; a competing record newer than the one a conflict holds replaces it, so
+/// the stopped side always shows the other side's latest history and its suggested winner.
+pub fn next_fence(
+    current: Option<&(FenceReason, Lineage)>,
+    admission: &Admission,
+) -> Option<(FenceReason, Vec<GenerationRecord>)> {
+    let reason = admission.relation.fence()?;
+    let newest = admission.new.last()?;
+    if let Some((held, fenced)) = current {
+        let tip = fenced.tip();
+        if tip.map(Signed::hash) == Some(newest.hash()) || held.strictness() > reason.strictness() {
+            return None;
+        }
+        if *held == reason && tip.is_some_and(|tip| tip.number() >= newest.number()) {
+            return None;
+        }
+    }
+    Some((
+        reason,
+        admission
+            .new
+            .iter()
+            .map(|signed| signed.record().clone())
+            .collect(),
+    ))
+}
+
 /// What the receiver's store says about the signers: the voters of its history, the
 /// controllers it marks superseded, the revoked certificates and nodes, and the
 /// certificates each node record holds.
@@ -690,14 +734,15 @@ impl Standing {
     /// not hold: a record signed with a minted certificate never rides on a valid one into
     /// the fence, its number or its suggested winner. The first record is checked by
     /// [`Lineage::admit`] itself.
-    fn held_prefix(&self, new: &mut Vec<Signed>) {
-        if let Some(cut) = new
+    /// Returns the newest record cut off, if any.
+    fn held_prefix(&self, new: &mut Vec<Signed>) -> Option<Signed> {
+        let cut = new
             .iter()
             .skip(1)
-            .position(|signed| !self.holds(&signed.signer))
-        {
-            new.truncate(cut + 1);
-        }
+            .position(|signed| !self.holds(&signed.signer))?;
+        let dropped = new.last().cloned();
+        new.truncate(cut + 1);
+        dropped
     }
 
     fn holds(&self, signer: &PeerIdentity) -> bool {
@@ -705,6 +750,31 @@ impl Standing {
             .get(&signer.node)
             .is_some_and(|serials| serials.contains(&signer.serial))
     }
+}
+
+/// The refusal of `record`, whose signer's certificate the receiver's record of it does not
+/// hold; `known` says whether the receiver knows that controller at all.
+fn unheld(record: &Signed, standing: &Standing) -> ClusterError {
+    let signer = record.signer();
+    ClusterError::new(
+        codes::RECORD_UNHELD,
+        403,
+        format!(
+            "generation {} signed by controller {} was refused: its certificate (serial {}) is \
+             not one this history's record of that controller holds",
+            record.number(),
+            signer.node,
+            signer.serial
+        ),
+    )
+    .with_param("node", signer.node.to_string())
+    .with_param("generation", record.number().to_string())
+    // A controller this store knows: a renewal of its certificate that this copy never saw
+    // looks the same as a forgery, so an operator is told apart.
+    .with_param(
+        "known",
+        standing.serials.contains_key(&signer.node).to_string(),
+    )
 }
 
 fn refused(signer: NodeId, why: &str) -> ClusterError {
@@ -837,7 +907,7 @@ impl Lineage {
             .into_iter()
             .filter(|signed| !known.contains(&signed.hash))
             .collect();
-        standing.held_prefix(&mut new);
+        let cut = standing.held_prefix(&mut new);
         let (Some(first), Some(newest)) = (new.first(), new.last()) else {
             return Ok(Admission {
                 relation: Relation::Known,
@@ -848,6 +918,13 @@ impl Lineage {
         let own_hash = own.map(|own| own.hash);
         let own_number = self.number();
         if newest.number() < own_number {
+            // What it can verify is older than this history, but the offer goes on with a
+            // record that is not, by a certificate this store does not hold: a renewal it
+            // never saw, or a forgery. It fences nothing; it is not an older history either,
+            // and an operator is shown it.
+            if let Some(cut) = cut.filter(|cut| cut.number() >= own_number) {
+                return Err(unheld(&cut, standing));
+            }
             return Ok(Admission {
                 relation: Relation::Known,
                 new,
@@ -858,15 +935,7 @@ impl Lineage {
         // here: one minted with the CA's key, which every controller and every copy of a
         // data directory or backup holds, must never stop a history.
         if !standing.holds(signer) {
-            return Err(ClusterError::new(
-                codes::RECORD_UNHELD,
-                403,
-                format!(
-                    "a generation record signed by controller {} was refused: its certificate (serial {}) is not one this history's record of that controller holds",
-                    signer.node, signer.serial
-                ),
-            )
-            .with_param("node", signer.node.to_string()));
+            return Err(unheld(first, standing));
         }
         let relation = if first.parent() == own_hash && first.number() > own_number {
             if !standing.voters.contains(&signer.node) {
@@ -895,9 +964,11 @@ impl Lineage {
             }
             Relation::Sibling
         } else {
-            if standing.superseded.contains(&signer.node) {
-                return Err(refused(signer.node, "it is superseded in this history"));
-            }
+            // Another forced history that is not older than this one, at any depth. Its
+            // signer may be one that this history's own forced step superseded (each side of
+            // two forced histories marks the other's controllers so): that must not make this
+            // side deaf to the other, or two authorities that met would both go on writing. A
+            // superseded signer never supersedes (no descendant above); it only stops both.
             Relation::Unplaced
         };
         Ok(Admission { relation, new })
@@ -1031,7 +1102,7 @@ pub struct SupersededMark {
     /// That generation's record hash.
     pub record: Digest,
     /// Whether it may rejoin by itself when it holds nothing of its own after the fork
-    /// (`--rejoin`, CR-Q1).
+    /// (`--rejoin`, not offered until the rejoin is built).
     #[serde(default)]
     pub rejoin: bool,
 }

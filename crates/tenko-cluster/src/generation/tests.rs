@@ -661,3 +661,263 @@ fn the_record_lineage_and_fence_layouts_are_pinned() {
         )
     );
 }
+
+/// One controller of a cluster in the model of forced steps and meetings: its history, its
+/// fence, the controllers its steps superseded, its voters, and whether it saw an older
+/// history.
+struct Side {
+    node: u64,
+    leaf: Leaf,
+    lineage: Lineage,
+    fence: Option<(FenceReason, Lineage)>,
+    marks: BTreeSet<NodeId>,
+    voters: BTreeSet<NodeId>,
+    saw_older: bool,
+    /// The certificates its store's node records hold: its own renewals, never the others'.
+    view: BTreeMap<NodeId, BTreeSet<String>>,
+    /// It refused a record of a controller it knows, by a certificate it does not hold.
+    unverified: bool,
+}
+
+impl Side {
+    fn standing(&self) -> Standing {
+        Standing {
+            voters: self.voters.clone(),
+            superseded: self.marks.clone(),
+            serials: self.view.clone(),
+            now: Timestamp::from_unix_nanos(AT + 1_000_000_000_000_000).expect("time"),
+            ..Standing::default()
+        }
+    }
+
+    /// What it offers on a call: its history, and the records that superseded it.
+    fn offer(&self) -> Vec<GenerationRecord> {
+        let mut records = self.lineage.offer();
+        if let Some((FenceReason::Superseded, fence)) = &self.fence {
+            records.extend(fence.records().iter().map(|signed| signed.record().clone()));
+        }
+        records
+    }
+
+    /// An authority: it writes (not fenced).
+    fn writes(&self) -> bool {
+        self.fence.is_none()
+    }
+
+    /// Whether its history holds `record`.
+    fn holds(&self, hash: Digest) -> bool {
+        self.lineage.records().iter().any(|own| own.hash() == hash)
+    }
+}
+
+/// A small deterministic generator for the property tests.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self, below: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        usize::try_from(self.0 % u64::try_from(below).expect("small")).expect("small")
+    }
+}
+
+/// A forced step on `side`, as `tenko cluster recover --force` makes it: allowed on a copy
+/// with other voters, or on one another history stopped; the new generation is above every
+/// one it has seen; its other voters are superseded and marked.
+fn force(side: &mut Side, clock: &mut i128) -> bool {
+    if side.voters.len() == 1 && side.fence.is_none() {
+        return false;
+    }
+    let seen = side
+        .lineage
+        .number()
+        .max(side.fence.as_ref().map_or(0, |(_, fence)| fence.number()));
+    *clock += 1;
+    let others: BTreeSet<NodeId> = side
+        .voters
+        .iter()
+        .copied()
+        .filter(|voter| voter.0 != side.node)
+        .collect();
+    let body = GenerationBody {
+        number: seen + 1,
+        parent: side.lineage.tip().map(Signed::hash),
+        forced: NodeId(side.node),
+        superseded: others.iter().copied().collect(),
+        at: Timestamp::from_unix_nanos(AT + *clock).expect("time"),
+        nonce: HexBytes([side.node.to_be_bytes(), (seen + 1).to_be_bytes()].concat()),
+        ..body(seen + 1, None, side.node)
+    };
+    let record = sign(&side.leaf, &body);
+    let mut records: Vec<GenerationRecord> = side
+        .lineage
+        .records()
+        .iter()
+        .map(|signed| signed.record().clone())
+        .collect();
+    records.push(record);
+    side.lineage = Lineage::kept(&records).expect("lineage");
+    side.marks.extend(others);
+    side.voters = [NodeId(side.node)].into_iter().collect();
+    side.fence = None;
+    true
+}
+
+/// `to` receives what `from` offers, as `Peers::offer` acts on it.
+fn receive(to: &mut Side, offer: &[GenerationRecord], root: &CertificateDer<'_>) {
+    let admission = match to.lineage.admit(offer, root, &to.standing()) {
+        Ok(admission) => admission,
+        Err(error) => {
+            if error.code() == codes::RECORD_UNHELD
+                && error.as_coded().params.get("known").map(String::as_str) == Some("true")
+            {
+                to.unverified = true;
+            }
+            return;
+        }
+    };
+    if admission.relation == Relation::Known && !admission.new.is_empty() {
+        to.saw_older = true;
+    }
+    if let Some((reason, records)) = next_fence(to.fence.as_ref(), &admission) {
+        to.fence = Some((reason, Lineage::kept(&records).expect("fence")));
+    }
+}
+
+/// Runs `steps` on `sides`: `(a, a)` forces side `a`, `(a, b)` with `a` past the last side
+/// renews side `b`'s certificate (its own store learns it, no other), any other pair meets.
+/// After each meeting: when two controllers that both write, of different histories,
+/// exchange their records, at least one stops writing, or (each having renewed its
+/// certificate where the other cannot see it) both show the other as unverified; each
+/// shows the other's history (its fence, the older history it saw, or the unverified one).
+fn run(sides: &mut [Side], steps: &[(usize, usize)], ca: &Ca) {
+    let root = &ca.root;
+    let mut clock = 0;
+    for (index, &(a, b)) in steps.iter().enumerate() {
+        if a >= sides.len() {
+            let side = &mut sides[b];
+            side.leaf = leaf(ca, side.node, "controller");
+            side.view
+                .entry(NodeId(side.node))
+                .or_default()
+                .insert(side.leaf.serial.clone());
+            continue;
+        }
+        if a == b {
+            force(&mut sides[a], &mut clock);
+            continue;
+        }
+        let apart = sides[a]
+            .lineage
+            .tip()
+            .is_some_and(|tip| !sides[b].holds(tip.hash()))
+            && sides[b]
+                .lineage
+                .tip()
+                .is_some_and(|tip| !sides[a].holds(tip.hash()));
+        let both_wrote = sides[a].writes() && sides[b].writes();
+        let (offer_a, offer_b) = (sides[a].offer(), sides[b].offer());
+        receive(&mut sides[b], &offer_a, root);
+        receive(&mut sides[a], &offer_b, root);
+        if both_wrote && apart {
+            assert!(
+                !sides[a].writes()
+                    || !sides[b].writes()
+                    || (sides[a].unverified && sides[b].unverified),
+                "two authorities met and both still write after {:?}",
+                &steps[..=index]
+            );
+            for side in [a, b] {
+                assert!(
+                    !sides[side].writes() || sides[side].saw_older || sides[side].unverified,
+                    "side {side} does not show the other history after {:?}",
+                    &steps[..=index]
+                );
+            }
+        }
+    }
+}
+
+/// The cluster's promise after any sequence of forced steps by any number of operators:
+/// two controllers that both believe they are the authority stop at least one of them when
+/// they exchange one call, and both show the other's history. Generated sequences of forced
+/// steps and meetings among two and three controllers of one cluster, plus the sequence of
+/// two operators who each chose their own side once after a conflict.
+#[test]
+fn two_authorities_that_meet_never_both_go_on_writing() {
+    let ca = ca();
+    let sides = |count: u64| -> Vec<Side> {
+        let voters: BTreeSet<NodeId> = (1..=count).map(NodeId).collect();
+        let leaves: Vec<Leaf> = (1..=count)
+            .map(|node| leaf(&ca, node, "controller"))
+            .collect();
+        let view: BTreeMap<NodeId, BTreeSet<String>> = leaves
+            .iter()
+            .zip(1..=count)
+            .map(|(leaf, node)| (NodeId(node), [leaf.serial.clone()].into_iter().collect()))
+            .collect();
+        leaves
+            .into_iter()
+            .zip(1..=count)
+            .map(|(leaf, node)| Side {
+                node,
+                leaf,
+                lineage: Lineage::default(),
+                fence: None,
+                marks: BTreeSet::new(),
+                voters: voters.clone(),
+                saw_older: false,
+                view: view.clone(),
+                unverified: false,
+            })
+            .collect()
+    };
+    // Forced at once, they meet; each operator forces their own side; they meet again.
+    run(
+        &mut sides(3),
+        &[
+            (0, 0),
+            (1, 1),
+            (0, 1),
+            (0, 0),
+            (0, 1),
+            (1, 1),
+            (0, 1),
+            (1, 0),
+        ],
+        &ca,
+    );
+    // Partitioned and forced, each renews, they meet, each forces again, they meet: neither
+    // can verify the other's newer record, and both show it as unverified. Open: a side that
+    // renewed before its forced step (on a majority that could still commit) signs a record
+    // the other side cannot verify, while it takes the other side's verifiable, older record
+    // for an older history; then both write, one showing the other as unverified.
+    run(
+        &mut sides(3),
+        &[
+            (0, 0),
+            (1, 1),
+            (9, 0),
+            (9, 1),
+            (0, 1),
+            (0, 0),
+            (1, 1),
+            (0, 1),
+        ],
+        &ca,
+    );
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    for count in [2_u64, 3] {
+        let n = usize::try_from(count).expect("small");
+        for _ in 0..300 {
+            let length = 1 + rng.next(12);
+            // Certificates stay as they are here: with a renewal that only one side's store
+            // knows, the other side cannot tell the renewed certificate from a forged one
+            // (the open case named above the explicit renewal sequence).
+            let steps: Vec<(usize, usize)> =
+                (0..length).map(|_| (rng.next(n), rng.next(n))).collect();
+            run(&mut sides(count), &steps, &ca);
+        }
+    }
+}

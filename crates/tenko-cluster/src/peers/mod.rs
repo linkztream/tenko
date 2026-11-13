@@ -1,4 +1,4 @@
-//! The controller cluster on the cluster port (OPS-03, WP3.1a): the peers of a controller,
+//! The controller cluster on the cluster port (OPS-03): the peers of a controller,
 //! its membership in the Raft group, and the work the leader does for the group.
 //!
 //! [`Peers`] holds this controller's [`RaftStore`] and the [`PeerNetwork`] it replicates
@@ -92,7 +92,7 @@ use tonic::Status;
 use uuid::Uuid;
 
 pub use self::{
-    generations::{GenerationState, PUSH_INTERVAL, RefusedRecords},
+    generations::{GenerationState, PUSH_INTERVAL, Refusal, RefusedRecords},
     identity::{ControllerIdentity, NodeDirIdentity, Switch, VaultIdentity, certificate_ref},
     network::{MAX_APPEND_BYTES, PeerNetwork, PeerTimings},
 };

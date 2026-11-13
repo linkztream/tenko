@@ -1846,6 +1846,11 @@ impl NodeRegistry {
         Ok(())
     }
 
+    /// Whether the revocation list holds `serial`.
+    pub fn is_revoked_serial(&self, serial: &str) -> bool {
+        self.revoked.is_revoked(serial)
+    }
+
     /// Whether `node` was revoked: a row of `cluster.revocations` names it and it has no
     /// node record ([`revoked_nodes`]). A controller
     /// that is not enrolled through a token has no node record, so the Raft service checks

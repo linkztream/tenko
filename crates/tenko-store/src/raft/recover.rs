@@ -10,7 +10,7 @@
 //! [`replay`] copies a closed store into a work directory and applies every entry of the
 //! copy's log after its applied position, the entries not yet known as committed (the
 //! uncommitted tail) included, as an election of that controller would apply them (Raft's
-//! new leader commits its whole log, CR-Q5). It then builds a snapshot at the last log id.
+//! new leader commits its whole log, so these entries may have been acknowledged). It then builds a snapshot at the last log id.
 //! The original directory is only read; every write goes to the copy.
 
 use std::{collections::BTreeSet, path::Path, sync::Arc};

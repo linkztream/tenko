@@ -1,7 +1,7 @@
 //! The cluster recovery in the cluster lab (OPS-03, OPS-26; `docs/plans/cluster-recovery-plan.md`
-//! sections 3.2 to 3.7, exit checks E134 (a), E135, E136, E138 and E142): `tenko cluster
-//! recover` on a stopped survivor, the first start's probe for a live majority, the fence of
-//! a superseded controller, two competing forced histories.
+//! sections 3.2 to 3.7): `tenko cluster recover` on a stopped survivor, the first start's
+//! probe for a live majority, the fence of a superseded controller, two competing forced
+//! histories.
 //!
 //! Every wait is a condition with the lab's limit; nothing here bounds a measured time.
 
@@ -20,7 +20,7 @@ const PROBE_SECS: u64 = 2;
 /// How long a fence may take to arrive: the authority's push interval and a margin.
 const FENCE_LIMIT: Duration = Duration::from_secs(90);
 
-/// The most writes E142 sends to the returning old controllers while it waits for their
+/// The most writes the scenario of the returning old controllers sends to them while it waits for their
 /// fence.
 const STALE_WRITES: u64 = 300;
 
@@ -91,7 +91,7 @@ fn refused_with(outcome: &Outcome, code: &str) {
     );
 }
 
-/// E136, E138 and E142: a stale survivor is forced only with `--accept-older`; it takes
+/// A stale survivor is forced only with `--accept-older`; it takes
 /// office when nobody answers its probe; two old controllers that return together fence at
 /// the authority's first contact, and stay fenced across a restart; `--undo` after the
 /// first start is refused; the fresher old controller forced in turn meets the first
@@ -136,13 +136,13 @@ fn a_stale_survivor_is_forced_and_the_old_controllers_fence() {
     write(&lab, stale, 3).expect(201);
     let view = lab.members(stale).expect("the members view");
     assert_eq!(view["generation"]["number"], 1, "{view}");
-    // E138: the step cannot be undone once the controller took office.
+    // The step cannot be undone once the controller took office.
     refused_with(
         &lab.recover(stale, &["--undo"]),
         "cluster.recover.undo_refused",
     );
 
-    // E142: the two old controllers return together and form their old quorum, until the
+    // The two old controllers return together and form their old quorum, until the
     // authority's first contact fences them; the writes they took meanwhile are counted.
     lab.restart_all(&others);
     let fenced = || {
@@ -163,7 +163,7 @@ fn a_stale_survivor_is_forced_and_the_old_controllers_fence() {
         }
     }
     lab.wait_for("both old controllers fenced", FENCE_LIMIT, fenced);
-    println!("E142: the returning old controllers took {taken} write(s) before the fence");
+    println!("the returning old controllers took {taken} write(s) before the fence");
     // None of them reached the authority: two histories never merge.
     let on_authority = lab.get(stale, "/addresses").expect("an answer").text;
     for written in 11..=n {
@@ -181,12 +181,12 @@ fn a_stale_survivor_is_forced_and_the_old_controllers_fence() {
     );
     let ready = lab.get(others[0], "/health/ready").expect("an answer");
     assert_eq!(ready.status, 503, "{}", ready.text);
-    // E138: a superseded controller restarted stays fenced.
+    // A superseded controller restarted stays fenced.
     lab.stop(others[0]).assert_code(0);
     lab.restart(others[0]);
     wait_fenced(&lab, others[0], "superseded");
 
-    // E136: the fresher old controller is forced in turn (generation 2, parent generation
+    // The fresher old controller is forced in turn (generation 2, parent generation
     // 0); the first forced history meets it as a sibling and stops writing.
     lab.stop(others[0]).assert_code(0);
     let confirm = format!("{}:2", others[0]);
@@ -205,7 +205,7 @@ fn a_stale_survivor_is_forced_and_the_old_controllers_fence() {
     assert_eq!(second["quorum"]["state"], "single", "{second}");
 }
 
-/// E134 (a): the partition heals before the forced controller's first start; the probe
+/// The partition heals before the forced controller's first start; the probe
 /// finds the old majority alive, the forced controller refuses office, and `--undo` brings
 /// it back into the live cluster, which lost nothing.
 #[test]
@@ -259,7 +259,7 @@ fn a_live_majority_keeps_the_forced_controller_out_of_office() {
     assert_eq!(address.status, 200);
 }
 
-/// E135: two controllers forced at once on the two sides of a partition both take office;
+/// Two controllers forced at once on the two sides of a partition both take office;
 /// after the heal each meets the other's record as a sibling, both stop writing, and both
 /// name the same suggested winner.
 #[test]

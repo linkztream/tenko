@@ -16,7 +16,8 @@
 //!   controller's own lineage and the standing its store gives the signers
 //!   ([`Standing::read`]): a descendant fences this controller ([`FenceReason::Superseded`]);
 //!   a sibling, or a newer history it cannot place, stops its writes until an operator
-//!   chooses ([`FenceReason::Conflict`], CR-Q3); a refused offer changes nothing.
+//!   chooses ([`FenceReason::Conflict`]): neither history may move the other alone; a refused
+//!   offer changes nothing.
 //! - **The fence** is written to `<data_dir>/node/` first, then the store stops
 //!   ([`tenko_store::raft::RaftStore::fence`]), so a crash between the two leaves the fence
 //!   to the next start ([`Peers::load_generation`]).
@@ -49,7 +50,7 @@ use crate::{
     generation::{
         Claim, FenceFile, GENERATION_METADATA, GenerationRecord, Lineage, MAX_LINEAGE,
         RECORD_METADATA, Relation, SUPERSEDED, Signed, Standing, codes, decode_lineage,
-        encode_lineage, suggested_winner,
+        encode_lineage, next_fence, suggested_winner,
     },
     mtls::PeerInfo,
     proto::v1,
@@ -87,14 +88,33 @@ pub(super) struct Generations {
     refused: Mutex<RefusedRecords>,
 }
 
-/// The generation records this controller refused since it started: how many, and the
-/// last one's refusal. Bounded: a count and one message, whatever a peer sends.
+/// The generation records this controller refused or did not act on since it started.
+/// Bounded: a count and one entry of each kind, whatever a peer sends.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RefusedRecords {
     /// How many offers were refused.
     pub count: u64,
-    /// The last refusal: its code and message, and the peer that offered it.
-    pub last: Option<(String, String, Option<NodeId>)>,
+    /// The last refusal.
+    pub last: Option<Refusal>,
+    /// The last refusal of a record signed by a certificate this store does not hold for a
+    /// controller it knows: a renewal it never saw, or a forgery; an operator looks.
+    pub unverified: Option<Refusal>,
+    /// The newest history older than this one that met it: it stops when it meets this
+    /// one's records.
+    pub older: Option<Refusal>,
+}
+
+/// One refused or older offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    /// Its code (`cluster.recover.*`), or for an older history `generation <n>`.
+    pub code: String,
+    /// What it was.
+    pub detail: String,
+    /// The peer that offered it.
+    pub from: Option<NodeId>,
+    /// When.
+    pub at: Timestamp,
 }
 
 /// This controller's history and its fence.
@@ -411,24 +431,11 @@ impl Peers {
         records: &[GenerationRecord],
         from: Option<NodeId>,
     ) -> Result<Relation, ClusterError> {
-        let root = self.ca_root().ok_or_else(|| {
-            ClusterError::new(
-                codes::RECORD_INVALID,
-                503,
-                "this controller cannot check a generation record yet: it has no CA root",
-            )
-        })?;
+        let root = self.ca_root().ok_or_else(no_root)?;
         let _one_at_a_time = self.generations().offering.lock().await;
         self.refresh_lineage().await;
         let state = self.generation();
-        let standing = {
-            let view = self.store().read(ReadConsistency::Local).await?;
-            Standing::read(
-                view.as_ref(),
-                self.store().membership().voters,
-                Timestamp::now(),
-            )?
-        };
+        let standing = self.standing().await?;
         let admission = match state.lineage.admit(records, &root, &standing) {
             Ok(admission) => admission,
             Err(error) => {
@@ -436,18 +443,20 @@ impl Peers {
                 return Err(error);
             }
         };
-        let (Some(reason), Some(newest)) = (admission.relation.fence(), admission.new.last())
-        else {
-            return Ok(admission.relation);
-        };
-        // Already stopped: the same records again, or a reason no stricter than the one
-        // that holds, change nothing.
-        if let Some((current, fenced)) = &state.fence
-            && (fenced.tip().map(Signed::hash) == Some(newest.hash())
-                || (reason == FenceReason::Conflict && *current != FenceReason::MajorityAlive))
-        {
+        if admission.relation == Relation::Known {
+            // A history older than this one that this one does not hold: it stops when it
+            // meets this one's records; this side shows that it exists.
+            if let Some(newest) = admission.new.last() {
+                self.note_other(newest, from);
+            }
             return Ok(admission.relation);
         }
+        let (Some((reason, kept)), Some(newest)) = (
+            next_fence(state.fence.as_ref(), &admission),
+            admission.new.last(),
+        ) else {
+            return Ok(admission.relation);
+        };
         let suggested = state.lineage.tip().map_or(newest.forced(), |own| {
             if suggested_winner(own, newest).is_lt() {
                 own.forced()
@@ -475,11 +484,6 @@ impl Peers {
                 _ => "cannot be placed beside this controller's history; an operator decides",
             }
         );
-        let kept: Vec<GenerationRecord> = admission
-            .new
-            .iter()
-            .map(|signed| signed.record().clone())
-            .collect();
         self.apply_fence(reason, Lineage::kept(&kept)?, true).await;
         Ok(admission.relation)
     }
@@ -488,30 +492,75 @@ impl Peers {
     /// record (section 3.1) that this controller would stop for, named by its number and
     /// the controller it was forced on. Changes nothing: the first start's probe reads it
     /// before this controller takes office.
-    pub async fn competing(&self, status: &Status) -> Option<String> {
-        let records = offered_lineage(status.metadata())?.ok()?;
-        let root = self.ca_root()?;
-        let standing = {
-            let view = self.store().read(ReadConsistency::Local).await.ok()?;
-            Standing::read(
-                view.as_ref(),
-                self.store().membership().voters,
-                Timestamp::now(),
-            )
-            .ok()?
+    ///
+    /// # Errors
+    ///
+    /// When this controller cannot check records (no CA root, a store error): the probe
+    /// reads the answer as undecided, never as an answer without a majority.
+    pub async fn competing(&self, status: &Status) -> Result<Option<String>, ClusterError> {
+        let Some(records) = offered_lineage(status.metadata()) else {
+            return Ok(None);
         };
-        let admission = self
-            .generation()
-            .lineage
-            .admit(&records, &root, &standing)
-            .ok()?;
-        admission.relation.fence()?;
-        let newest = admission.new.last()?;
-        Some(format!(
-            "generation {} forced on controller {}",
-            newest.number(),
-            newest.forced()
-        ))
+        let Ok(records) = records else {
+            return Ok(None);
+        };
+        let root = self.ca_root().ok_or_else(no_root)?;
+        let standing = self.standing().await?;
+        let Ok(admission) = self.generation().lineage.admit(&records, &root, &standing) else {
+            return Ok(None);
+        };
+        Ok(admission
+            .relation
+            .fence()
+            .and(admission.new.last())
+            .map(|newest| {
+                format!(
+                    "generation {} forced on controller {}",
+                    newest.number(),
+                    newest.forced()
+                )
+            }))
+    }
+
+    /// The standing this controller's store gives the signers of offered records.
+    async fn standing(&self) -> Result<Standing, ClusterError> {
+        let view = self.store().read(ReadConsistency::Local).await?;
+        Standing::read(
+            view.as_ref(),
+            self.store().membership().voters,
+            Timestamp::now(),
+        )
+    }
+
+    /// Notes an older history that met this one.
+    fn note_other(&self, newest: &Signed, from: Option<NodeId>) {
+        let mut seen = lock(&self.generations().refused);
+        if seen
+            .older
+            .as_ref()
+            .is_none_or(|older| older.detail != newest.hash().to_string())
+        {
+            tracing::warn!(
+                generation = newest.number(),
+                forced = %newest.forced(),
+                from = ?from,
+                "an older history of the cluster (generation {}, forced on controller {}) met \
+                 this one; it stops writing when it receives this one's record and can check its \
+                 signer",
+                newest.number(),
+                newest.forced()
+            );
+        }
+        seen.older = Some(Refusal {
+            code: format!(
+                "generation {} forced on controller {}",
+                newest.number(),
+                newest.forced()
+            ),
+            detail: newest.hash().to_string(),
+            from,
+            at: Timestamp::now(),
+        });
     }
 
     /// The generation records refused since this controller started.
@@ -525,7 +574,18 @@ impl Peers {
         let count = {
             let mut refused = lock(&self.generations().refused);
             refused.count = refused.count.saturating_add(1);
-            refused.last = Some((error.code().to_owned(), error.detail().to_owned(), from));
+            let refusal = Refusal {
+                code: error.code().to_owned(),
+                detail: error.detail().to_owned(),
+                from,
+                at: Timestamp::now(),
+            };
+            if error.code() == codes::RECORD_UNHELD
+                && error.as_coded().params.get("known").map(String::as_str) == Some("true")
+            {
+                refused.unverified = Some(refusal.clone());
+            }
+            refused.last = Some(refusal);
             refused.count
         };
         if count == 1 || count % 64 == 0 {
@@ -741,6 +801,14 @@ impl Peers {
             _ => false,
         }
     }
+}
+
+fn no_root() -> ClusterError {
+    ClusterError::new(
+        codes::RECORD_INVALID,
+        503,
+        "this controller cannot check a generation record yet: it has no CA root",
+    )
 }
 
 /// Logs an offer that failed for a reason other than its records' refusal, which the offer

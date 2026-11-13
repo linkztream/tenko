@@ -524,11 +524,15 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
                     let rival = peers.competing(&status).await;
                     if let Some(code) = tenko_cluster::server::code_of(&status) {
                         let answer = match rival {
-                            Some(rival) => Answer::Alive(format!("another history: {rival}")),
-                            None if code == tenko_cluster::generation::codes::SUPERSEDED => {
+                            Ok(Some(rival)) => Answer::Alive(format!("another history: {rival}")),
+                            Ok(None) if code == tenko_cluster::generation::codes::SUPERSEDED => {
                                 Answer::Alone("superseded already".to_owned())
                             }
-                            None => Answer::Unreadable(format!("refused with {code}")),
+                            Ok(None) => Answer::Unreadable(format!("refused with {code}")),
+                            Err(error) => Answer::Unreadable(format!(
+                                "its records could not be checked here: {}",
+                                error.code()
+                            )),
                         };
                         answers.insert(old.node, answer);
                     }
@@ -568,7 +572,7 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
         // With the notice still there `--undo` would bring the old store back after the
         // old voters met this history: office is not taken.
         tracing::error!(
-            "the notice of the forced step could not be removed ({error}); this controller does not take office"
+            "that the forced step took office could not be recorded ({error}); this controller does not take office"
         );
         peers.refuse_office().await;
         return;

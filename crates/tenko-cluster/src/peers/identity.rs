@@ -38,10 +38,7 @@
 //! A join only adds the certificate a controller presents to its record; only a settle at a
 //! start replaces the record's serials (a restore, whose serials belong to an earlier host).
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::Arc;
 
 use tenko_core::{NodeId, RequestCtx, Role, SystemComponent, Timestamp};
 use tenko_store::{ReadView, WriteBatch};
@@ -158,8 +155,6 @@ pub struct VaultIdentity {
     paths: NodePaths,
     name: String,
     switch: Option<Switch>,
-    /// The running controller presents the identity under `node/` already.
-    switched: AtomicBool,
 }
 
 impl std::fmt::Debug for VaultIdentity {
@@ -185,7 +180,6 @@ impl VaultIdentity {
             paths,
             name: name.into(),
             switch: None,
-            switched: AtomicBool::new(false),
         }
     }
 
@@ -201,13 +195,17 @@ impl VaultIdentity {
     }
 
     /// The identity under `node/`: the one there (an earlier settle that stopped before
-    /// its write, or a host that keeps it), else a new one written there.
+    /// its write), when it is this installation's, of this node, unexpired and not revoked;
+    /// else a new one written there (a host that kept one from an earlier installation).
     fn node_local(&self) -> Result<Credentials, ClusterError> {
-        if self.paths.is_enrolled() {
-            let credentials = Credentials::load(&self.paths)?;
-            if credentials.identity.node == self.local() {
-                return Ok(credentials);
-            }
+        if self.paths.is_enrolled()
+            && let Ok(credentials) = Credentials::load(&self.paths)
+            && credentials.identity.node == self.local()
+            && credentials.ca_root == *self.registry.ca().root_der()
+            && credentials.info.not_after > Timestamp::now()
+            && !self.registry.is_revoked_serial(&credentials.info.serial)
+        {
+            return Ok(credentials);
         }
         let ca = self.registry.ca();
         let issued = ca.issue_node_cert_with_key_for(
@@ -246,11 +244,9 @@ impl VaultIdentity {
 impl ControllerIdentity for VaultIdentity {
     async fn portable(&self) -> Result<CertificateRef, ClusterError> {
         let credentials = self.node_local()?;
-        // Presented before the record names it: until that write commits, only a joining
-        // learner that is being seeded talks to this controller, and it checks no record.
-        if !self.switched.swap(true, Ordering::SeqCst)
-            && let Some(switch) = &self.switch
-        {
+        // Presented before the record names it, at every call (it is idempotent): until
+        // that write commits, only a joining learner talks to this controller.
+        if let Some(switch) = &self.switch {
             switch(&credentials);
         }
         Ok(certificate_ref(&credentials.info))
